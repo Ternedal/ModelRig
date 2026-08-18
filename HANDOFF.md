@@ -724,6 +724,33 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     `#250`/`#251` (blot gamle, gik rigtigt af sig selv) — samme syv filer,
     modsat udfald. Kør tjekket; gæt det ikke.
 
+37. **En generator i et halvt miljø fejler ikke — den skriver fejlen ind i
+    dokumentet.** 17/8 under 2.0.9-bumpet kørte `activation_readiness.py`
+    uden `fastapi`/`pydantic` installeret. Den returnerede exit 0, skrev
+    "skrev ACTIVATION_READINESS.md (111 linjer)" og erstattede linjen *"Ingen
+    blokerende fund specifikke for scheduleren"* med *"kunne ikke læse
+    schedule-godkendelsen: No module named 'fastapi'"*. Havde den commit fået
+    lov at lande, stod der nu en påstand på main om at scheduleren fejler —
+    fordi en sandkasse manglede en pakke. Fanget kun fordi diffen blev læst
+    linje for linje.
+
+    Reglen: **installér workerens afhængigheder FØR generatorerne køres**
+    (`pip install --break-system-packages -r worker/requirements.txt`), og
+    læs derefter deres diff. En generator hvis output er *degraderet* ser
+    ud præcis som en generator hvis output er *opdateret* — begge giver
+    exit 0 og en ændret fil. Grep efter `No module named`, `Traceback` og
+    `kunne ikke` i de genererede filer før commit.
+
+38. **`git add -A` er ikke en beskrivelse af dit arbejde.** Samme bump fejede
+    `validation/stage-b-easy-state.json` med — en tilstandsfil som
+    testkørslerne selv havde skabt, aldrig sporet før. Den nåede en commit og
+    blev først opdaget i diffstat'en bagefter.
+
+    Reglen: **sammenlign diffstat'en med den liste filer du HAVDE til hensigt
+    at røre**, hver gang. Et bump rører ni navngivne filer; ser du ti, er den
+    tiende ikke dit arbejde. `git status --short` før `git add`, og vær
+    særligt mistroisk efter en testkørsel — suiter skriver tilstand.
+
 ## 9. Kø — hvem har bolden (16/7, opdateret 17/8)
 
 **[17/8 — status. main = `377c1370`, VERSION 2.0.8, seneste tag v2.0.8.]**
