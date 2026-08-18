@@ -45,6 +45,8 @@ import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.logic.TurnStatus
+import dk.ternedal.modelrig.net.VoiceCapability
+import dk.ternedal.modelrig.net.WorkerCapabilities
 import dk.ternedal.modelrig.net.IngestCapability
 import dk.ternedal.modelrig.net.ModelRigClient
 import dk.ternedal.modelrig.ui.theme.*
@@ -912,6 +914,40 @@ private fun ChatScreen(
     var recording by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+
+    // Rigens EGNE evner (GET /capabilities), hentet en gang pr. forbindelse.
+    // Skal ligge i tilstand frem for at blive hentet paa stedet: onOpenVoice
+    // koerer paa main-traaden, og et netvaerkskald derfra ville kaste.
+    // UNKNOWN indtil svaret er inde -- og UNKNOWN betyder ALT TILLADT, saa
+    // ingen funktion er blokeret imens.
+    var workerCaps by remember { mutableStateOf(WorkerCapabilities.UNKNOWN) }
+
+    /**
+     * ENESTE indgang til mikrofonen.
+     *
+     * Optagelsen blev tidligere startet fire uafhaengige steder — composerens
+     * mic-tap, overlayets knap, Kapaciteter-arket og permission-fortsaettelsen.
+     * En gate der kun daekkede det ene lod de tre andre staa aabne, og det var
+     * netop det den strukturelle gate fangede. Derfor er der nu eet sted, og
+     * gaten kraever at `voiceCapture.start()` KUN staar her.
+     *
+     * Returnerer true hvis optagelsen faktisk koerer.
+     */
+    fun startVoiceCaptureGuarded(): Boolean {
+        val verdict = VoiceCapability.check(workerCaps)
+        if (verdict is VoiceCapability.Verdict.Blocked) {
+            voiceError = verdict.reason
+            return false
+        }
+        return try {
+            voiceCapture.start()
+            recording = true
+            true
+        } catch (e: Exception) {
+            voiceError = "Optagelse fejlede: ${e.message}"
+            false
+        }
+    }
     // Tap-to-stop (v1.13.0). Until now a voice turn could not be interrupted
     // at all: barge-in is off by default and uncalibrated. Two mechanisms,
     // because a turn has two phases with different escape routes:
@@ -1097,8 +1133,7 @@ private fun ChatScreen(
             voiceError = "Mikrofon-adgang nægtet"
         } else if (showVoice && !recording && !voiceBusy) {
             // Fortsaettelse: overlayet blev aabnet uden permission — start nu.
-            runCatching { voiceCapture.start(); recording = true }
-                .onFailure { voiceError = "Optagelse fejlede: ${it.message}" }
+            startVoiceCaptureGuarded()
         }
     }
 
@@ -1355,6 +1390,17 @@ private fun ChatScreen(
     // Load the requested conversation (or none). Restores source/model from its
     // metadata when that source is still configured.
     // Re-read the persisted cloud model when the picker changed it.
+    // Hent rigens evner naar forbindelsen skifter. Fejler den, forbliver
+    // workerCaps UNKNOWN og alt er tilladt -- et mislykket probe maa ikke
+    // amputere en app der virker.
+    LaunchedEffect(store.baseUrl, store.token) {
+        val b = store.baseUrl
+        workerCaps = if (b.isNullOrBlank()) WorkerCapabilities.UNKNOWN
+        else withContext(Dispatchers.IO) {
+            ModelRigClient(b, store.token).workerCapabilities()
+        }
+    }
+
     LaunchedEffect(cloudModelTick) { cloudModel = store.cloudModel }
 
     LaunchedEffect(openConvId) {
@@ -2054,10 +2100,11 @@ private fun ChatScreen(
                         showCapSheet = false
                         showVoice = true
                         voiceError = null
+                        // Spoerg FOER mikrofonen aabnes. Uden det taler
+                        // brugeren faerdig, uploader, og faar saa rigens 501.
                         if (!recording && !voiceBusy) {
                             if (hasMicPermission) {
-                                try { voiceCapture.start(); recording = true }
-                                catch (e: Exception) { voiceError = "Optagelse fejlede: ${e.message}" }
+                                startVoiceCaptureGuarded()
                             } else {
                                 micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                             }
@@ -2118,8 +2165,7 @@ private fun ChatScreen(
                                 else -> {
                                     voiceTranscript = ""
                                     if (hasMicPermission) {
-                                        try { voiceCapture.start(); recording = true }
-                                        catch (e: Exception) { voiceError = "Optagelse fejlede: ${e.message}" }
+                                        startVoiceCaptureGuarded()
                                     } else {
                                         micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                     }
@@ -2709,8 +2755,7 @@ private fun ChatScreen(
                                     if (!voiceBusy && !recording) {
                                         if (hasMicPermission) {
                                             wasInterrupted = false
-                                            try { voiceCapture.start(); recording = true }
-                                            catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
+                                            startVoiceCaptureGuarded()
                                         } else {
                                             micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                         }

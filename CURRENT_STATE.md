@@ -341,6 +341,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_candidate_campaign.py`
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
+- `tests/workflow_client_capability_gates.py`
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
 - `tests/workflow_contract_adapter.py`
@@ -352,7 +353,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_desktop_agent3_termination_ui_contract.py`
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_freeze_check.py`
-- `tests/workflow_ingest_capability_gate.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
 - `tests/workflow_pairing_link_parity.py`

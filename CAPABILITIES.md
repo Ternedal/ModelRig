@@ -64,9 +64,11 @@ Indtil da: kør worker fra Python på riggen med de deps du vil bruge.
 
 Klienterne bør kalde `/capabilities` på connect og deaktivere/forklare voice- og
 dokument-funktioner der ikke er tilgængelige på den tilsluttede worker, i stedet
-for at vise en knap der fejler. **(Endpointet findes; klient-gating udestår
-fortsat — efterprøvet 17/8: intet i android/, desktop/ eller backend/ kalder
-`/capabilities`.)**
+for at vise en knap der fejler. **(Landet 17/8 for Android: `WorkerCapabilities` henter
+svaret ved forbindelsesskift, `IngestCapability` gater dokument-ingest og
+`VoiceCapability` gater mikrofonen. Kun et UDTRYKKELIGT `false` blokerer —
+ældre rig, manglende nøgle eller mislykket probe opfører sig som hidtil.
+**Desktop udestår fortsat.**)**
 
 > **Tre forskellige ting hedder "capabilities". Forveksl dem ikke:**
 > `GET /capabilities` er workerens fem dependency-booleans (dette dokument).
