@@ -25,7 +25,17 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 MANUAL_SCHEMA = "kaliv-voice-manual-observations/v1"
 STATE_SCHEMA = "kaliv-stage-a-voice-observations-state/v1"
-PHONE_STATE_SCHEMA = "kaliv-stage-a-phone-test-state/v1"
+# v2 haevede schemaet 24/7 (a8849e68) for at tilfoeje scheduler-blokken, men
+# LAESEREN HER BLEV IKKE OPDATERET. De to halvdele af telefon-testen var derfor
+# uenige i tre uger, og fejlen dukkede foerst op da nogen koerte dem sammen paa
+# rig-dagen 18/8. v2 er rent additiv -- alle felter denne fil laeser findes i
+# begge -- saa begge accepteres. v1 beholdes, saa aeldre evidens kan laeses.
+PHONE_STATE_SCHEMAS = (
+    "kaliv-stage-a-phone-test-state/v1",
+    "kaliv-stage-a-phone-test-state/v2",
+)
+#: Bevaret navn: aeldre kald og tests refererer den enkelte konstant.
+PHONE_STATE_SCHEMA = PHONE_STATE_SCHEMAS[-1]
 DEFAULT_PHONE_STATE = Path("validation/stage-a-runtime/phone-test-state.json")
 DEFAULT_RESUME = Path("validation/stage-a-voice-observations-state.json")
 DEFAULT_OUTPUT = Path("validation/voice-manual-observations.json")
@@ -146,8 +156,11 @@ def _health(url: str) -> dict[str, Any]:
 
 def _phone_state(path: Path, candidate: dict[str, str]) -> dict[str, Any]:
     value = _read_json(path)
-    if value.get("schema") != PHONE_STATE_SCHEMA:
-        raise ObservationError("telefon-teststatus har forkert schema")
+    if value.get("schema") not in PHONE_STATE_SCHEMAS:
+        raise ObservationError(
+            "telefon-teststatus har forkert schema: "
+            f"{value.get('schema')!r} er ikke en af {PHONE_STATE_SCHEMAS}"
+        )
     if value.get("production_activation") is not False:
         raise ObservationError("telefon-teststatus bevarer ikke production_activation=false")
     if value.get("version") != candidate["version"]:
