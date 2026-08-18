@@ -18,12 +18,23 @@ function Run([string]$Label, [scriptblock]$Action) {
   & $Action
   if ($LASTEXITCODE -ne 0) { throw "$Label fejlede med exitkode $LASTEXITCODE" }
 }
+# git.exe opløses EKSPLICIT som Application. PowerShell opløser funktioner FØR
+# eksterne programmer, saa "& git" inde i en funktion ved navn Git kalder sig
+# selv -> CallDepthOverflow paa foerste kald. Launcheren koerer med -NoProfile,
+# saa en brugerdefineret git-alias redder den ikke. Reproduceret 18/8.
+$script:GitExe = (Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
+                  Select-Object -First 1).Source
+if (-not $script:GitExe) { throw 'git mangler paa PATH.' }
 function Git([Parameter(ValueFromRemainingArguments=$true)][string[]]$A) {
-  $v = (& git @A 2>&1) -join "`n"; if ($LASTEXITCODE -ne 0) { throw $v }; return $v.Trim()
+  $v = (& $script:GitExe @A 2>&1) -join "`n"; if ($LASTEXITCODE -ne 0) { throw $v }; return $v.Trim()
 }
 if ($env:OS -ne 'Windows_NT') { throw 'Beviskampagnen må kun køres på Windows-riggen.' }
+# -CommandType Application: uden den finder Get-Command 'git' funktionen
+# ovenfor, og tjekket kan aldrig fyre for netop det program det skal beskytte.
 foreach ($cmd in @('git','python','powershell.exe','go','ollama')) {
-  if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { throw "$cmd mangler på PATH." }
+  if (-not (Get-Command $cmd -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw "$cmd mangler på PATH."
+  }
 }
 $dirty = Git status --porcelain
 if ($dirty) { throw "Working tree skal være helt rent:`n$dirty" }
