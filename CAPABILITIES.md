@@ -10,8 +10,10 @@ Workeren rapporterer sine evner som rene booleans, så en klient kan aktivere
 eller forklare funktioner frem for at reklamere med noget den tilsluttede worker
 ikke har:
 
-- **`GET /capabilities`** → `{ "asr", "tts", "pdf", "docx", "cuda" }` (billig —
-  kun import-checks; kald den på connect og gate UI'en på svaret).
+- **`GET /capabilities`** → `{ "asr", "tts", "pdf", "docx", "pptx", "html",
+  "cuda" }` (billig — kun import-checks; kald den på connect og gate UI'en på
+  svaret). At tilføje en nøgle er bagudkompatibelt; at fjerne eller omdøbe en er
+  det ikke, og `tests/worker_unit.py` pinner derfor det præcise sæt.
 - Samme objekt er inkluderet i **`GET /health/full`** under `capabilities`.
 
 Hver evne afhænger af en **valgfri** dependency, detekteret ved om den kan
@@ -24,25 +26,23 @@ loade en model):
 | `tts`  | piper-tts | `pip install piper-tts` |
 | `pdf`  | PyMuPDF | `pip install pymupdf` |
 | `docx` | python-docx | `pip install python-docx` |
+| `pptx` | python-pptx | `pip install python-pptx` |
+| `html` | ingen — `html.parser` følger med Python | altid `true` |
 | `cuda` | CUDA-runtime + CTranslate2 | GPU + nvidia-drivere (gælder ASR's GPU-brug; Ollamas GPU er separat) |
 
-### Hul: PPTX og HTML rapporteres ikke (17/8)
+### Lukket 17/8: PPTX og HTML rapporteres nu
 
-RAG indlæser i dag fire dokumentformater, men `/capabilities` rapporterer kun
-to af dem. `worker/app/rag_pptx.py` og `rag_html.py` har begge en
-`is_available()` skrevet til nøjagtig samme kontrakt som de fire ovenfor —
-`rag_pptx` tjekker om `python-pptx` kan importeres, `rag_html` returnerer
-altid `True` fordi `html.parser` følger med Python — men `_capabilities()` i
-`worker/app/main_impl.py` medtager dem ikke.
+Indtil 17/8 indlæste RAG fire dokumentformater, mens `/capabilities` kun
+rapporterede to. `rag_pptx.py` og `rag_html.py` havde begge en
+`is_available()` skrevet til nøjagtig samme kontrakt som de øvrige, men
+`_capabilities()` medtog dem ikke — så en klient kunne gate PDF og DOCX og
+måtte gætte om PPTX. Præcis den situation endpointet findes for at undgå.
 
-Konsekvensen er præcis den situation endpointet blev bygget for at undgå: en
-klient kan ikke spørge før den reklamerer. Den kan gate PDF og DOCX, men må
-gætte om PPTX.
-
-**Dette er en kodefejl, ikke en dokumentationsfejl.** Den er skrevet ned her i
-stedet for at blive rettet i en docs-omgang, fordi to nye felter i
-`/capabilities` er en adfærdsændring i en offentlig kontrakt og hører til i
-sin egen PR — med `worker_unit.py` udvidet tilsvarende.
+Rettet i koden, ikke blot beskrevet. Vagten mod at det sker igen er ikke en
+liste over navne: `tests/worker_unit.py` **finder** loaderne ved at gå
+`worker/app/rag_*.py` igennem og kræve, at hver med en `is_available()` også
+optræder i svaret. En ny loader falder derfor på testen i stedet for stille at
+blive urapporterbar.
 
 ## Core vs. full worker — **status: core (Kendt begrænsning)**
 
