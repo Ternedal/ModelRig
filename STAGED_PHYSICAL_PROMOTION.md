@@ -3,7 +3,8 @@
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
 `2.0.9`. Kandidaten ligger på
 `physical-proof/2.0.9-7b2fe732`; den eksakte SHA skal altid læses fra
-freeze-PR #412 og må aldrig gættes eller kopieres fra ældre evidens.
+freeze: candidate_freeze_check groen paa exact SHA, og må aldrig gættes
+eller kopieres fra ældre evidens.
 
 ## Ufravigelige grænser
 
@@ -31,7 +32,8 @@ if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.9") { throw "Forkert version" }
 ```
 
-Sammenhold `$CandidateSha` med den eksakte head i freeze-PR #412. Stop ved enhver
+Sammenhold `$CandidateSha` med den sha der bar
+freeze: candidate_freeze_check groen paa exact SHA. Stop ved enhver
 forskel.
 
 ### A1. Opret en frisk freeze-receipt

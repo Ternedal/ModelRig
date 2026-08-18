@@ -7,8 +7,8 @@ _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
     ("agent/unified-candidate-1.58.143", "physical-proof/2.0.9-7b2fe732"),
     ("1.58.143", "2.0.9"),
-    ("1.58.142", "1.58.149"),
-    ("draft-PR #150", "freeze-PR #412"),
+    ("1.58.142", "2.0.8"),
+    ("draft-PR #150", "freeze: candidate_freeze_check groen paa exact SHA"),
 ):
     _source = _source.replace(_old, _new)
 exec(compile(_source, str(_source_path), "exec"), globals(), globals())
