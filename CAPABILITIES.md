@@ -68,7 +68,11 @@ for at vise en knap der fejler. **(Landet 17/8 for Android: `WorkerCapabilities`
 svaret ved forbindelsesskift, `IngestCapability` gater dokument-ingest og
 `VoiceCapability` gater mikrofonen. Kun et UDTRYKKELIGT `false` blokerer —
 ældre rig, manglende nøgle eller mislykket probe opfører sig som hidtil.
-**Desktop udestår fortsat.**)**
+Desktop har i dag hverken dokument-ingest eller
+stemme — `RagClient` kan kun `chatStream` og `listSources` — så der er intet
+at gate der endnu. `workflow_client_capability_gates.py` scanner alligevel
+BEGGE klienttræer og opdager selv nye kaldesteder, så en fremtidig
+desktop-ingest ikke kan komme ind ugatet.)**
 
 > **Tre forskellige ting hedder "capabilities". Forveksl dem ikke:**
 > `GET /capabilities` er workerens fem dependency-booleans (dette dokument).
