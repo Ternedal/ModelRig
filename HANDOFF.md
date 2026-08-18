@@ -760,10 +760,33 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 Offline-kø (#609). Næste naturlige skridt er **2.0.9** — se §4 for hvad et
 bump rent faktisk rører.
 
-**Hos Claude:** de resterende docs efter denne omgang (§2's hardware-liste er
-fra 12/7; `ROADMAP.md`, `STATUS.md`, `CAPABILITIES.md` og `TESTGUIDE.md` er
-alle fra før 2.0-æraen). `ROADMAP.md` skrives ikke om uden en retningsbeslutning
-fra Anders — det er hans dokument at disponere.
+**Landet 17/8, efter denne blok blev skrevet:** #615 (denne fils §0/§4/§9/§10
++ READMEs 2.0-afsnit og arkitekturdiagram), #616 (bump til 2.0.9), #617 (§8
+lektie 37-38 + READMEs backend-linje), #618 (CAPABILITIES-hullet + DEVICE_TESTs
+2.0-runde K1-K7), #619 (`/capabilities` rapporterer pptx og html).
+
+**Hos Claude: intet.** Docs-arbejdet er kørt til bunds på nær tre ting, og alle
+tre venter på Anders — ikke på arbejde:
+
+- **§2's hardware-liste** (12/7) kan ikke skrives herfra. Hardware-bekræftelse
+  er en observation, ikke noget der kan udledes af repoet. Skriver en session
+  "QR-parring hardware-bekræftet" på hukommelsen, er det opdigt med en dato på.
+- **`ROADMAP.md`** skrives ikke om uden en retningsbeslutning fra Anders — det
+  er hans dokument at disponere.
+- **`v2.0.9`-tagget.** Se advarslen nedenfor.
+
+**TAGGET ER IKKE SAT, OG DET ER MED VILJE.** 2.0.9 er en TOSIDET release:
+per-kilde til/fra og svar-citater kræver også den opdaterede worker
+(`POST /rag/source/enabled` og turens `context`-felt findes ikke i en
+2.0.8-rig). Tagges den før riggen er opdateret, tilbyder in-app-updateren den
+til telefonen af sig selv, og to funktioner står og svarer ikke. Betingelsen er
+**at riggen er opdateret** — ikke at nogen har sagt god for det. En besked der
+blot lyder "kør" er ikke den betingelse.
+
+**`STATUS.md` skrives ikke om.** Den er en log der vokser, ikke et dokument der
+holdes ajour. **`TESTGUIDE.md` heller ikke** — den bærer sit eget
+HISTORISK-banner fra 9/7 og peger videre; et arkiv der opdateres holder op med
+at være evidens.
 
 **Hos Sol:** v2-analysens tre #296-fund (grant delvist request-bound,
 query-validation uden om faste fejlbodyer, write-modeller ikke strict);
@@ -1370,6 +1393,16 @@ tokenkilde · `docs/agent3/ADR-A3-001_CHAT_AGENT_SURFACE.md` = chattens
 adgang til Agent 3 · `AGENT_4_ARCHITECTURE_DECISIONS.md` = det KOMPLETTE
 ADR-indeks for Agent 4 · `ROUTE_INVENTORY.md` = genereret ruteliste (prober
 workerens OpenAPI) · `docs/devcontrol/dc-l*/` = evidens pr. DevControl-slice.
-**Advarsel:** `ROADMAP.md`, `STATUS.md`, `CAPABILITIES.md` og `TESTGUIDE.md`
-er ikke opdateret siden før redesignet — læs dem som historik, ikke som
-gældende.
+**Advarsel, præciseret 17/8** (den tidligere udgave slog fire dokumenter
+sammen og var upræcis om alle fire):
+
+- `CAPABILITIES.md` — **aktuel.** Opdateret 17/8; capability-tabellen har alle
+  syv nøgler efter #619.
+- `DEVICE_TEST.md` — **aktuel** og den levende testrunbook. 2.0-runden K1-K7
+  dækker QR, per-kilde, citater, deling, offline-kø og onboarding.
+- `TESTGUIDE.md` og `HISTORY.md` — **arkiver med eget banner.** De er
+  optegnelser, ikke gældende. Opdatér dem ikke; de mister deres værdi som
+  evidens i samme øjeblik.
+- `ROADMAP.md` (31/7) og `STATUS.md` (28/7) — **før 2.0-æraen.** ROADMAP venter
+  på en retningsbeslutning fra Anders; STATUS er en log der vokser og skal ikke
+  skrives om. Læs begge som historik.
