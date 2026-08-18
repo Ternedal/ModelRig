@@ -45,6 +45,7 @@ import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.logic.TurnStatus
+import dk.ternedal.modelrig.net.IngestCapability
 import dk.ternedal.modelrig.net.ModelRigClient
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -1307,6 +1308,25 @@ private fun ChatScreen(
                         ?: throw RuntimeException("kunne ikke læse filen")
                     if (bytes.isEmpty()) throw RuntimeException("filen er tom")
                     val client = ModelRigClient(store.baseUrl ?: "", store.token)
+
+                    // Spoerg riggen FOER filen sendes. Den udgivne core-worker
+                    // sendes uden PyMuPDF/python-docx/python-pptx, og uden det
+                    // her bruger brugeren et filvalg, en upload og en ventetid
+                    // paa at faa rigens raa fejl. Blokerer kun paa et
+                    // UDTRYKKELIGT nej -- aeldre rig eller mislykket probe
+                    // sender som hidtil.
+                    val format = when {
+                        isPdf -> IngestCapability.Format.PDF
+                        isDocx -> IngestCapability.Format.DOCX
+                        isPptx -> IngestCapability.Format.PPTX
+                        isHtml -> IngestCapability.Format.HTML
+                        else -> IngestCapability.Format.TEXT
+                    }
+                    val verdict = IngestCapability.check(format, client.workerCapabilities())
+                    if (verdict is IngestCapability.Verdict.Blocked) {
+                        throw RuntimeException(verdict.reason)
+                    }
+
                     when {
                         isPdf -> name to client.ingestPdf(name, bytes)
                         isDocx -> name to client.ingestDocx(name, bytes)
