@@ -1,14 +1,15 @@
-# Staged physical promotion — 1.58.151
+# Staged physical promotion — 2.0.9
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
-`1.58.151`. Kandidaten ligger på
-`agent/unified-candidate-1.58.151-r2`; den eksakte SHA skal altid læses fra
-freeze-PR #412 og må aldrig gættes eller kopieres fra ældre evidens.
+`2.0.9`. Kandidaten ligger på
+`physical-proof/2.0.9-7b2fe732`; den eksakte SHA skal altid læses fra
+freeze: candidate_freeze_check groen paa exact SHA, og må aldrig gættes
+eller kopieres fra ældre evidens.
 
 ## Ufravigelige grænser
 
 - Stage A kører mod én upubliceret, kvalificeret kandidat-SHA.
-- Samme SHA bruges senere til fast-forward, tag `v1.58.151` og release.
+- Samme SHA bruges senere til fast-forward, tag `v2.0.9` og release.
 - Efter fysisk evidens er begyndt, er squash, rebase, mergecommit, amend og
   enhver anden SHA-ændring forbudt.
 - Enhver bevægelse af kandidatbranch eller `origin/main` kræver ny freeze og ny
@@ -21,17 +22,18 @@ freeze-PR #412 og må aldrig gættes eller kopieres fra ældre evidens.
 ### A0. Lås checkouten
 
 ```powershell
-cd C:\Users\Anders\Desktop\ModelRig
+cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch agent/unified-candidate-1.58.151-r2
-git pull --ff-only origin agent/unified-candidate-1.58.151-r2
+git switch physical-proof/2.0.9-7b2fe732
+git pull --ff-only origin physical-proof/2.0.9-7b2fe732
 $CandidateSha = (git rev-parse HEAD).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "1.58.151") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.9") { throw "Forkert version" }
 ```
 
-Sammenhold `$CandidateSha` med den eksakte head i freeze-PR #412. Stop ved enhver
+Sammenhold `$CandidateSha` med den sha der bar
+freeze: candidate_freeze_check groen paa exact SHA. Stop ved enhver
 forskel.
 
 ### A1. Opret en frisk freeze-receipt
@@ -120,31 +122,31 @@ Stop her. Stage A udfører ingen repository- eller releaseoperationer.
 ## Beslutningspunkt
 
 Kun efter en særskilt eksplicit beslutning må `main` fast-forwardes til præcis
-Stage A-SHA'en, samme SHA tagges som `v1.58.151`, og det komplette signerede
+Stage A-SHA'en, samme SHA tagges som `v2.0.9`, og det komplette signerede
 release-sæt publiceres. Ændres SHA'en, er Stage A ugyldig.
 
-## Stage B — publiceret 1.58.151
+## Stage B — publiceret 2.0.9
 
 Følg den operative autoritet i `STAGE_B_UPDATER_EVIDENCE.md`.
 
-Kildereleasen for appliance-transitionen er `1.58.149`, og målet er
-`1.58.151`. Fordi 1.58.149-updateren er fra før self-update-support, må
-1.58.151-updateren installeres én gang manuelt som bootstrap, verificeret mod
-`v1.58.151`-releasens `SHA256SUMS.txt` og provenance. Server, supervisor og
+Kildereleasen for appliance-transitionen er `2.0.8`, og målet er
+`2.0.9`. Fordi 2.0.8-updateren er fra før self-update-support, må
+2.0.9-updateren installeres én gang manuelt som bootstrap, verificeret mod
+`v2.0.9`-releasens `SHA256SUMS.txt` og provenance. Server, supervisor og
 worker må ikke kopieres manuelt; deres transition skal ske gennem updateren.
 
 Dette bootstrap-bevis er **ikke** automatisk signed-release-to-signed-release
 self-update. Det ægte automatiske bevis er deferred i issue #401 og kræver
-signeret 1.58.151 som kilde samt en senere signeret target-version større end
-1.58.151. #401 blokerer ikke promotion af 1.58.151.
+signeret 2.0.9 som kilde samt en senere signeret target-version større end
+2.0.9. #401 blokerer ikke promotion af 2.0.9.
 
 Stage B skal dokumentere:
 
-1. normal update fra 1.58.149 til 1.58.151;
-2. reboot på 1.58.151;
+1. normal update fra 2.0.8 til 2.0.9;
+2. reboot på 2.0.9;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
-5. ugyldig update afvist før swap eller sund rollback til 1.58.151;
+5. ugyldig update afvist før swap eller sund rollback til 2.0.9;
 6. interruption/recovery uden manglende live executables;
 7. bevarede data, credentials og schedules.
 

@@ -1,4 +1,4 @@
-# RIGDAG_SIMPEL — ModelRig 1.58.151
+# RIGDAG_SIMPEL — ModelRig 2.0.9
 
 Dette er den korte operatorindgang. Den autoritative rækkefølge og alle
 fail-closed grænser står i `STAGED_PHYSICAL_PROMOTION.md`; Stage B-detaljerne
@@ -6,25 +6,25 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
 ## Kandidat
 
-- version: `1.58.151`;
-- branch: `agent/unified-candidate-1.58.151-r2`;
-- freeze-PR: #412;
-- exact SHA: læses fra PR #412 og må aldrig gættes;
+- version: `2.0.9`;
+- branch: `physical-proof/2.0.9-7b2fe732`;
+- freeze: candidate_freeze_check groen paa exact SHA;
+- exact SHA: `7b2fe732...` erstattet af den aktuelle kandidat; læses fra grenen og må aldrig gættes;
 - produktion: ikke aktiveret.
 
-Evidens fra 1.58.150 eller fra en tidligere ugyldiggjort 1.58.151-head må ikke
+Evidens fra 2.0.8 eller fra en tidligere ugyldiggjort 2.0.9-head må ikke
 genbruges.
 
 ## Blok 0 — lås checkouten
 
 ```powershell
-cd C:\Users\Anders\Desktop\ModelRig
+cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch agent/unified-candidate-1.58.151-r2
-git pull --ff-only origin agent/unified-candidate-1.58.151-r2
+git switch physical-proof/2.0.9-7b2fe732
+git pull --ff-only origin physical-proof/2.0.9-7b2fe732
 $CandidateSha = (git rev-parse HEAD).Trim()
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "1.58.151") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.9") { throw "Forkert version" }
 ```
 
 Sammenhold `$CandidateSha` med PR #412. Stop ved forskel.
@@ -62,13 +62,13 @@ Stage A merger, tagger, releaser og aktiverer intet.
 ## Beslutningspunkt
 
 Kun efter en særskilt eksplicit beslutning må præcis Stage A-SHA'en
-fast-forwardes til `main`, tagges `v1.58.151` og publiceres som et komplet
+fast-forwardes til `main`, tagges `v2.0.9` og publiceres som et komplet
 signeret release-sæt.
 
 ## Blok 2 — Stage B
 
-Kildereleasen er 1.58.149; target er 1.58.151. Fordi den gamle updater er fra
-før self-update-support, installeres 1.58.151-updateren én gang som verificeret
+Kildereleasen er 2.0.8; target er 2.0.9. Fordi den gamle updater er fra
+før self-update-support, installeres 2.0.9-updateren én gang som verificeret
 bootstrap. Server, supervisor og worker må kun flyttes gennem updateren.
 
 Dobbeltklik:
@@ -99,7 +99,7 @@ summary.total=8
 
 Det automatiske signed-release-to-signed-release self-update-bevis er deferred
 til #401 og kræver en senere signeret target-version. Det blokerer ikke
-promotion af 1.58.151.
+promotion af 2.0.9.
 
 ## Stopregler
 
