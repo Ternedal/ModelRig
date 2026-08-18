@@ -804,6 +804,23 @@ kan ikke læse alerts-API'et).
 **Aabent æstetisk valg:** paletten (#6F665C mod #5A4831) står stadig
 tosidet gated og træffes med begge apps foran sig.
 
+**MCP-adapter — bolden er hos Anders, ikke hos nogen af os.** Oplæg leveret
+18/8: serverretningen (Kaliv udstiller read-flader) først, klientretningen
+(Kaliv forbruger fremmede MCP-servere) udskudt. Sol har svaret teknisk i
+`SOL-CLAUDE-SAMARBEJDE.md` og er enig i retningen.
+
+**Stopregel i kraft — ingen containment-kode før Anders har afgjort:**
+(a) om AppContainer + Job Object må erstatte kravspec'ens krav om separat
+Windows-konto med NTFS-ACL (Sol: de er IKKE kontraktmæssigt ækvivalente, og
+Tier-A er desuden bygget til én reviewet kommando uden netværk og uden
+bidirektionel kanal — en MCP-host kræver en ny containment-kontrakt);
+(b) hvilken neutral containment-grænse der i så fald er autoritativ, så
+workeren ikke importerer `kaliv_dev_control` og bryder DevControls isolation.
+
+Sols paritetskrav er accepteret som bindende: OpenAPI-overfladen skal bevise at
+Agent 3/4-ruter og kontraktmarkører er uændrede med et MCP-mount til OG fra.
+Importgraf alene er ikke nok.
+
 
 **[30/7, aften — Android-palettens divergens PINNET. claim: Claude 30/7
 23:20 — scope: token-JSON'ens `platformOverrides`, `Theme.kt`-kommentar,
