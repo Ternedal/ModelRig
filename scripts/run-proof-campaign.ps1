@@ -25,8 +25,22 @@ function Run([string]$Label, [scriptblock]$Action) {
 $script:GitExe = (Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
                   Select-Object -First 1).Source
 if (-not $script:GitExe) { throw 'git mangler paa PATH.' }
+# git skriver normal fremdrift til STDERR ("From https://...", ogsaa med
+# --quiet). Med $ErrorActionPreference='Stop' og 2>&1 bliver de linjer til
+# ErrorRecords i Windows PowerShell og udloeser NativeCommandError -- selv naar
+# git returnerer 0. Derfor saenkes preferencen omkring selve kaldet, og
+# ErrorRecords flades til tekst. EXITKODEN er verdiktet, ikke stderr.
 function Git([Parameter(ValueFromRemainingArguments=$true)][string[]]$A) {
-  $v = (& $script:GitExe @A 2>&1) -join "`n"; if ($LASTEXITCODE -ne 0) { throw $v }; return $v.Trim()
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $raw = & $script:GitExe @A 2>&1
+    $v = ($raw | ForEach-Object {
+      if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
+    }) -join "`n"
+  } finally { $ErrorActionPreference = $prev }
+  if ($LASTEXITCODE -ne 0) { throw $v }
+  return $v.Trim()
 }
 if ($env:OS -ne 'Windows_NT') { throw 'Beviskampagnen må kun køres på Windows-riggen.' }
 # -CommandType Application: uden den finder Get-Command 'git' funktionen
