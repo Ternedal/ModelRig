@@ -751,9 +751,46 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 17/8)
+## 9. Kø — hvem har bolden (16/7, opdateret 18/8)
 
-**[17/8 — status. main = `377c1370`, VERSION 2.0.8, seneste tag v2.0.8.]**
+**[18/8 — status. main = `45d39b13`, VERSION 2.0.9, seneste tag v2.0.8.
+`v2.0.9` er IKKE sat. Se rig-dagsnoten nedenfor FØR du rører riggen.]**
+
+### Rig-dagen: kandidaten er ikke det main ville udsende
+
+`#614` er den gældende 2.0.9-kandidat (`84ee1ca2`, 16/8). **`#605` er afløst af
+den** — de ligger 50 mod 3 commits fra hinanden. Køres begge, bevises to
+forskellige ting under samme versionsnavn.
+
+Kandidaten bærer korrekt VERSION 2.0.9, har alle fem 16/8-landinger og er
+internt konsistent. Men den er 13 commits bagud, og fem af dem er produktkode
+fra 18/8: `WorkerCapabilities.kt`, `IngestCapability.kt`, `VoiceCapability.kt`,
+`ModelRigClient.workerCapabilities()`, `AppUi`-wiringen og `/capabilities`'
+pptx/html. Konkret: **kandidatens `/capabilities` returnerer fem nøgler, mains
+returnerer syv.**
+
+**Anbefaling: bevis og tag kandidaten som den står; 18/8-arbejdet går i 2.0.10.**
+Frysningen findes præcis for at evidens binder til én eksakt SHA, og intet fra
+18/8 retter noget der er i stykker — capability-gatingen fjerner knapper der
+fejler, pptx/html er additivt. Et recut ville gøre al evidens på `84ee1ca2`
+værdiløs og kræve hele kørslen om.
+
+**Rækkefølgen holder uanset valget:** klientens `supports()` blokerer kun på et
+UDTRYKKELIGT `false`, så en fem-nøgle-rig ser ud som "pptx ukendt" = tilladt.
+Worker-ændring og klient-gating kan derfor udsendes i hver sin release i
+vilkårlig rækkefølge. Det var derfor defaulten blev valgt sådan.
+
+### Flåden driver — mål den før du rydder op
+
+`scripts/pr_drift_report.py` (#628) besvarer lektie 36 for ALLE åbne PR'er, ikke
+kun den man har i hånden. Måling 18/8: **9 af 50 har revert-risiko.** De
+stablede agent4-baser er **151 commits bagud main** — det er ikke risiko i sig
+selv, men det er dér den materialiserer sig den dag stakken rebases.
+
+Anledningen var dependabot `#359`: 23 commits bagud, rørte
+`desktop/composeApp/build.gradle.kts` og bar `packageVersion = "2.0.7"`. Et
+merge ville have rullet desktop to bump tilbage i stilhed. Fanget i hånden,
+lukket uden merge; bumpet taget alene i `#627`.
 
 **Fem landinger står paa main uden at være udsendt:** per-kilde til/fra
 (#604), Del til Kaliv (#606), Svar-citater (#607), Onboarding (#608),
