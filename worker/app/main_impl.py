@@ -175,24 +175,38 @@ def _build_identity() -> dict:
 
 def _capabilities() -> dict:
     """What this worker can actually do, by whether each optional dependency is
-    installed. The published core worker ships WITHOUT ASR/TTS/PDF/DOCX, so this
-    lets a client enable or explain features rather than advertising a capability
-    the connected worker doesn't have. cuda reflects real GPU availability."""
-    from . import voice_asr, voice_tts, rag_pdf, rag_docx
+    installed. The published core worker ships WITHOUT ASR/TTS/PDF/DOCX/PPTX, so
+    this lets a client enable or explain features rather than advertising a
+    capability the connected worker doesn't have. cuda reflects real GPU
+    availability.
+
+    Every RAG loader that exists reports here. pptx and html were missing until
+    17/8 even though both had an is_available() written to this exact contract,
+    which left a client able to gate PDF and DOCX but forced to guess about
+    PPTX -- the situation this endpoint exists to prevent. html is always True
+    (html.parser ships with Python); it is reported anyway, because a client
+    that has to special-case which loaders are listed is back to guessing."""
+    from . import voice_asr, voice_tts, rag_pdf, rag_docx, rag_pptx, rag_html
     return {
         "asr": voice_asr.is_available(),
         "tts": voice_tts.is_available(),
         "pdf": rag_pdf.is_available(),
         "docx": rag_docx.is_available(),
+        "pptx": rag_pptx.is_available(),
+        "html": rag_html.is_available(),
         "cuda": voice_asr.cuda_available(),
     }
 
 
 @app.get("/capabilities")
 def capabilities() -> dict:
-    """Lightweight capability probe: {asr, tts, pdf, docx, cuda} booleans. Cheap
-    (import checks only), so a client can call it on connect and gate its UI on
-    the answer. The same object is included in /health/full."""
+    """Lightweight capability probe: {asr, tts, pdf, docx, pptx, html, cuda}
+    booleans. Cheap (import checks only), so a client can call it on connect and
+    gate its UI on the answer. The same object is included in /health/full.
+
+    Adding a key is backwards compatible -- older clients read the keys they know
+    -- but REMOVING or renaming one is not. tests/worker_unit.py pins the exact
+    set for that reason."""
     return _capabilities()
 
 
