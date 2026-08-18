@@ -53,6 +53,32 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         false
     }
 
+    /**
+     * Riggens egne evner: GET /capabilities. Kaldes ved connect, saa fladen kan
+     * gate paa hvad den TILSLUTTEDE worker kan i stedet for at vise en knap der
+     * fejler naar man trykker.
+     *
+     * Kaster ALDRIG og returnerer [WorkerCapabilities.UNKNOWN] paa enhver fejl.
+     * Et capability-probe der fejler maa ikke vaelte en forbindelse der virker,
+     * og UNKNOWN betyder "alt tilgaengeligt" -- se WorkerCapabilities.
+     * Endpointet er ugatet og billigt (kun import-checks), derfor eget korte
+     * budget frem for det fulde laesetimeout.
+     */
+    fun workerCapabilities(): WorkerCapabilities = try {
+        val quick = OkHttpClient.Builder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .build()
+        val rb = Request.Builder().url("$base/capabilities").get()
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        quick.newCall(rb.build()).execute().use { resp ->
+            if (!resp.isSuccessful) WorkerCapabilities.UNKNOWN
+            else WorkerCapabilities.parse(resp.body?.string())
+        }
+    } catch (_: Exception) {
+        WorkerCapabilities.UNKNOWN
+    }
+
     private val voiceHttp = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.MINUTES)
