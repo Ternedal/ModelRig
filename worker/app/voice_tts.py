@@ -30,8 +30,23 @@ _load_error: Optional[str] = None
 _VALID_PROVIDERS = {"auto", "piper", "voicerig"}
 
 
+def _integration_env(name: str, default: str | None = None) -> str | None:
+    """Read an integration-level env var without mangling its public name.
+
+    ModelRig's env_compat helper deliberately maps Voice-era suffixes to
+    KALIV_*/ALVA_* names. Integration knobs such as MODELRIG_VOICES_DIR and
+    VOICERIG_TTS_URL are already fully-qualified names and must be read
+    literally. For new TTS knobs we additionally accept the Kaliv/Alva aliases
+    so existing environment conventions remain usable.
+    """
+    direct = os.environ.get(name)
+    if direct is not None:
+        return direct
+    return env(name, default)
+
+
 def _provider_setting() -> str:
-    value = env("TTS_PROVIDER", "auto").strip().lower()
+    value = str(_integration_env("TTS_PROVIDER", "auto")).strip().lower()
     return value if value in _VALID_PROVIDERS else "auto"
 
 
@@ -51,7 +66,8 @@ def _voices_dir() -> str:
 
 
 def _mrvoice_dir() -> str:
-    return os.path.expanduser(env("MODELRIG_VOICES_DIR", "~/.kaliv/voices"))
+    # MODELRIG_* names belong to the engine and do not pass through env_compat.
+    return os.path.expanduser(os.environ.get("MODELRIG_VOICES_DIR", "~/.kaliv/voices"))
 
 
 def _has_mrvoice() -> bool:
@@ -63,12 +79,12 @@ def _has_mrvoice() -> bool:
 
 
 def _voicerig_base_url() -> str:
-    return env("VOICERIG_TTS_URL", "http://127.0.0.1:8765").rstrip("/")
+    return str(_integration_env("VOICERIG_TTS_URL", "http://127.0.0.1:8765")).rstrip("/")
 
 
 def _voicerig_timeout() -> float:
     try:
-        return max(1.0, float(env("VOICERIG_TTS_TIMEOUT_SECONDS", "180")))
+        return max(1.0, float(str(_integration_env("VOICERIG_TTS_TIMEOUT_SECONDS", "180"))))
     except ValueError:
         return 180.0
 
