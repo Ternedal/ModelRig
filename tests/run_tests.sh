@@ -36,6 +36,8 @@ run() {
 }
 
 run "worker unit"  python3 "$here/worker_unit.py"
+run "voice tts empty synthesis" python3 "$here/worker_voice_tts_empty_synthesis.py"
+run "voice tts VoiceRig provider" python3 "$here/worker_voice_tts_voicerig_provider.py"
 run "worker rag"   python3 "$here/worker_rag.py"
 free_ports
 run "backend core" python3 "$here/backend_smoke.py"
