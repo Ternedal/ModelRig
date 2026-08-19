@@ -35,7 +35,7 @@ This candidate includes the complete updater series, the executable Stage B auth
 - release-bound updater self-update support;
 - atomic Windows replacement and committed-update orchestration;
 - Go-compatible watcher flag parsing;
-- exact 1.58.149 → 2.0.10 source/target enforcement;
+- exact 2.0.9 → 2.0.10 source/target enforcement;
 - target-release checksum and provenance binding for the bootstrap updater;
 - new-transaction mid-swap interruption plus offline `-recover` proof;
 - strict hash-bound Stage B evidence, duplicate-key rejection, checkpoint binding and stale-receipt invalidation;
@@ -52,13 +52,13 @@ The campaign must use the final qualified exact head and record candidate-bound 
 1. **Stage A, before publication:** rig preflight, Agent 3 appliance validation, plan-only model evaluation, voice baseline including the typed Pixel matrix, RAG baselines, scheduler pilot and the interactive browser/peer proof.
 2. **Stage B, only after publication:** the verified one-time updater bootstrap and the normal appliance update, reboot, supervisor restart, invalid-update handling, rollback/interruption recovery and preservation matrix that can truthfully be exercised against the published signed 2.0.10 release.
 
-No old 1.58.150 report and no report bound to #405 or any earlier invalidated 2.0.10 head may satisfy this candidate.
+No old 2.0.9 report and no report bound to #405 or any earlier invalidated 2.0.10 head may satisfy this candidate.
 
 ## Automatic updater self-update is deferred
 
 `2.0.10` is the first signed release intended to contain self-update support. A pre-support updater cannot retroactively contain that path and requires one manual/bootstrap replacement. The verified self-update command also installs only a release newer than its compiled version.
 
-Therefore 2.0.10 cannot truthfully prove automatic signed-release-to-signed-release self-update from 1.58.150 or from 2.0.10 to itself. Issue #401 remains open for the genuine proof using signed 2.0.10 as source and a later signed release greater than 2.0.10 as target. #401 is not a promotion blocker for 2.0.10.
+Therefore 2.0.10 cannot truthfully prove automatic signed-release-to-signed-release self-update from 2.0.9 or from 2.0.10 to itself. Issue #401 remains open for the genuine proof using signed 2.0.10 as source and a later signed release greater than 2.0.10 as target. #401 is not a promotion blocker for 2.0.10.
 
 ## Sequence
 
