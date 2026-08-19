@@ -33,8 +33,21 @@ from pathlib import Path
 #: Fælles for alle: workerens og backendens kerne, fordi hvert bevis går
 #: gennem den kæde. Version-filer og scripts er UDE — de ændrer ikke hvad
 #: hardwaren gør, og det er netop dem der ellers ugyldiggør alt.
+#
+# FOERSTE UDGAVE VAR FOR GROV: den indeholdt hele "worker/app", saa EN
+# aendring hvor som helst i workeren faeldede alle syv beviser. Da Sol landede
+# en TTS-provider i voice_tts.py 19/8, invaliderede den RAG-benchmark og
+# planner-eval — som ikke har noget med tekst-til-tale at goere.
+#
+# Det er den samme grovhed som versionsbindingen, bare et niveau ned. Faelles
+# er nu KUN den kaede hvert bevis faktisk gaar igennem: HTTP-fladen, lageret,
+# konfigurationen og de binaerer der betjener dem. Modulspecifikke filer
+# hoerer til i det enkelte bevis' egen liste.
 _FAELLES = (
-    "worker/app",
+    "worker/app/main.py",
+    "worker/app/main_impl.py",
+    "worker/app/entrypoint.py",
+    "worker/app/store.py",
     "backend/internal",
     "backend/cmd",
 )
@@ -51,7 +64,13 @@ PROOF_SCOPES: dict[str, tuple[str, ...]] = {
                          "worker/app/voice_tts.py"),
     # Den MANUELLE Pixel-matrix bedømmer APPEN. Derfor android-kilden, og
     # derfor IKKE build.gradle.kts, som kun bærer versionsnavnet.
-    "voice_manual": ("android/app/src",) + _FAELLES,
+    # Den MANUELLE Pixel-matrix bedoemmer om lyden STOPPEDE og om gammel lyd
+    # ikke kom igen. Det er TTS-output, direkte -- det er den lyd mennesket
+    # lytter efter. Foerste udgave havde kun android/app/src og faeldede derfor
+    # ikke da Sol landede en ny TTS-provider 19/8. En ny stemme aendrer praecis
+    # det, matricen bedoemmer.
+    "voice_manual": ("android/app/src", "worker/app/voice_tts.py",
+                     "worker/app/voice_pipeline.py") + _FAELLES,
     "rag": _FAELLES + ("worker/app/rag_pdf.py", "worker/app/rag_docx.py",
                        "worker/app/rag_pptx.py", "worker/app/rag_html.py"),
     "scheduler_pilot": _FAELLES + ("worker/app/agent3",),
