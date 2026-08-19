@@ -130,5 +130,20 @@ check("voiceUsesCloud" not in voice_src and "cloudModel" not in voice_src,
       "stemme-afgoerelsen ser IKKE paa cloud-tilstand (ASR/TTS kan ikke flyttes)")
 check("Cloud hj" in voice_raw, "begrundelsen siger at cloud ikke redder det")
 
+# DEN TILBAGEHOLDENDE DEFAULT er hele sikkerhedsmodellen, og den var IKKE
+# bevogtet lokalt: en mutation fra "!= false" til "== true" -- som ville
+# amputere enhver aeldre rig der ikke rapporterer en noegle -- lod denne gate
+# groen 19/8. Kun Kotlin-testen fangede det, og den koerer kun i CI.
+#
+# Kildetekst-tjek, ikke adfaerdstjek: gaten kan ikke koere Kotlin. Men den kan
+# kraeve at den ene linje der baerer modellen staar som den skal.
+WC = ROOT / "android/app/src/main/java/dk/ternedal/modelrig/net/WorkerCapabilities.kt"
+check(WC.exists(), "WorkerCapabilities.kt findes")
+wc = kode(WC.read_text(encoding="utf-8")) if WC.exists() else ""
+check("reported[capability] != false" in wc,
+      "supports() blokerer KUN paa et udtrykkeligt false (ukendt = tilladt)")
+check("== true" not in wc.split("fun supports")[-1].split("\n")[0] if "fun supports" in wc else False,
+      "supports() kraever IKKE et udtrykkeligt true")
+
 print(f"\n===== CLIENT CAPABILITY GATES: {passed} passed, {failed} failed =====")
 raise SystemExit(0 if failed == 0 else 1)
