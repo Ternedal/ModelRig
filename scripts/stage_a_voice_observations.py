@@ -274,46 +274,43 @@ def _device_metadata(candidate: dict[str, str]) -> dict[str, str]:
     menneske. Derfor er fallbacket nu en fejl med instruktion frem for en
     prompt.
     """
-    if not _adb_executable():
-        raise ObservationError(
-            "adb blev ikke fundet på PATH. Enhedsoplysningerne læses fra "
-            "telefonen og må ikke tastes. Installér platform-tools eller læg "
-            "adb på PATH, og kør igen."
-        )
-    serials = [
-        linje.split("\t")[0]
-        for linje in (_adb("devices") or "").splitlines()[1:]
-        if "\tdevice" in linje
-    ]
-    if not serials:
-        raise ObservationError(
-            "adb ser ingen tilsluttet enhed. Sæt Pixel'en i USB, slå "
-            "USB-debugging til, godkend computeren på telefonen, og kør igen. "
-            "Enhedsoplysningerne læses — de tastes ikke."
-        )
+    # ADB HVIS DEN ER DER -- ELLERS SPOERG. IKKE OMVENDT.
+    #
+    # 19/8 fjernede jeg prompt-fallbacket og gjorde adb obligatorisk, med den
+    # begrundelse at kendsgerninger skal laeses frem for tastes. Det var rigtigt
+    # for en rig med telefonen i USB. Anders saetter ALDRIG telefonen i USB --
+    # hans Pixel parres over netvaerket -- saa adb kan aldrig svare, og
+    # aendringen gjorde voice-beviset UMULIGT for ham.
+    #
+    # Enheden rapporterer ikke sin appversion til backenden (Device baerer id,
+    # navn, token-hash, grants -- ikke version), saa uden adb findes
+    # oplysningen kun hos operatoeren. Derfor: laes den naar vi kan, spoerg
+    # naar vi ikke kan, og sig hvilken vej den kom.
+    har_adb = bool(_adb_executable()) and bool(
+        [l for l in (_adb("devices") or "").splitlines()[1:] if "\tdevice" in l]
+    )
 
-    model = _adb("shell", "getprop", "ro.product.model")
-    os_version = _adb("shell", "getprop", "ro.build.version.release")
-    package = _adb("shell", "dumpsys", "package", "dk.ternedal.modelrig") or ""
-    match = re.search(r"\bversionName=([^\s]+)", package)
-    app_version = match.group(1) if match else None
+    model = _adb("shell", "getprop", "ro.product.model") if har_adb else None
+    os_version = _adb("shell", "getprop", "ro.build.version.release") if har_adb else None
+    app_version = None
+    if har_adb:
+        package = _adb("shell", "dumpsys", "package", "dk.ternedal.modelrig") or ""
+        match = re.search(r"\bversionName=([^\s]+)", package)
+        app_version = match.group(1) if match else None
 
-    mangler = [navn for navn, vaerdi in (
-        ("model", model), ("Android-version", os_version), ("app-version", app_version)
-    ) if not vaerdi]
-    if mangler:
-        raise ObservationError(
-            f"adb svarede ikke på: {', '.join(mangler)}. "
-            "Er Kaliv installeret på enheden? Kør "
-            "'adb install -r android\\app\\build\\outputs\\apk\\debug\\app-debug.apk' "
-            "og prøv igen. Værdierne læses — de tastes ikke."
-        )
+    print("\nEnhedsoplysninger")
+    print("-----------------")
+    if not har_adb:
+        print("  adb ser ingen enhed — oplysningerne indtastes.")
+        print("  (Det er i orden. De efterproeves mod kandidaten nedenfor.)")
+    model = model or _prompt("Telefonens model", "Pixel 6a")
+    os_version = os_version or _prompt("Android-version, fx 17")
+    app_version = app_version or _prompt("Kaliv-appens version", candidate["version"])
+    kilde = "adb" if har_adb else "indtastet"
+    print(f"  Model:     {model} ({kilde})")
+    print(f"  Android:   {os_version} ({kilde})")
+    print(f"  Kaliv-app: {app_version} ({kilde})")
 
-    print("\nEnhedsoplysninger (læst fra enheden, ikke tastet)")
-    print("------------------------------------------------")
-    print(f"  Model:     {model}")
-    print(f"  Android:   {os_version}")
-    print(f"  Kaliv-app: {app_version}")
     if app_version != candidate["version"]:
         raise ObservationError(
             f"Kaliv-appen er {app_version}, men kandidaten er {candidate['version']}; "
