@@ -97,7 +97,7 @@ def test_conditionals_load_contract(root: Path) -> None:
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        os.environ["KALIV_VOICES_DIR"] = str(root)
+        os.environ["MODELRIG_VOICES_DIR"] = str(root)
         package = root / "anders.mrvoice"
         build_package(package)
 
