@@ -4,7 +4,13 @@ param(
   [int]$WorkflowRounds = 22,
   [double]$WorkflowThreshold = 0.95,
   [switch]$SkipT023,
-  [switch]$SkipT033
+  [switch]$SkipT033,
+  # Agent 4's fysiske kvalifikation (a4-25f). Suiten har ligget i repoet uden
+  # at vaere koblet paa noget: kampagnen kaldte ikke eet eneste agent4-script,
+  # saa de tre stderr-defekter i den var latente indtil 19/8. Den er
+  # OPT-IN, fordi den kraever A425f-appen parret paa enheden een gang.
+  [switch]$IncludeAgent4,
+  [string]$Agent4OutputRoot = "$env:USERPROFILE\modelrig-a4-25f-evidence"
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -132,8 +138,46 @@ if (-not $SkipT033) {
     }
   }
 }
+$a4pass = $null
+if ($IncludeAgent4) {
+  # RunMatrix er FULDAUTOMATISK: den driver adb, koerer mutationerne, fanger
+  # snapshot-stadierne og haevder invarianterne i kode. Det eneste manuelle er
+  # eengangs-parringen af A425f-appen mellem Prepare og DeviceInfo.
+  $a4 = 'scripts\agent4_a4_25f_physical_operator.ps1'
+  $a4args = @('-ExpectedSha', $sha, '-OutputRoot', $Agent4OutputRoot)
+  try {
+    Run 'Agent 4 (a4-25f): forbered fixture og stack' {
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 Prepare @a4args
+    }
+    Write-Host "`n  Par A425f-appen paa enheden nu, og tryk derefter Enter." -ForegroundColor Yellow
+    [void](Read-Host)
+    Run 'Agent 4: enhedsoplysninger' {
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 DeviceInfo @a4args
+    }
+    Run 'Agent 4: grant (agent4:read, pr. enhed)' {
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 Grant @a4args
+    }
+    Run 'Agent 4: koer matrix (automatisk)' {
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 RunMatrix @a4args
+    }
+    Run 'Agent 4: finalisér evidens' {
+      python scripts\agent4_a4_25f_finalize_evidence.py --output $Agent4OutputRoot
+    }
+    $a4pass = $true
+  } catch {
+    Write-Host "  Agent 4-kvalifikationen stoppede: $_" -ForegroundColor Yellow
+    $a4pass = $false
+  } finally {
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 Stop @a4args 2>$null | Out-Null
+  }
+}
+
+# Agent 4 taeller IKKE med i $passed. Suiten er ny i kampagnen, den er opt-in,
+# og dens evidens har endnu ingen validator i campaign-kontrakten. At lade den
+# loefte et samlet PASS ville vaere den slags falske groenne repoet er bygget
+# for at undgaa. Den rapporteres for sig.
 $passed = $workflowPass -and $t23pass -and $t33pass
-$summary=@{schema='modelrig-proof-day/v1';generated_at=(Get-Date).ToUniversalTime().ToString('o');candidate=@{version=$version;sha=$sha;branch=$branch};planner=$PlannerModel;stage_a=$true;forced_recovery=$true;workflow=@{passed=$workflowPass;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean=$mean};t023=$t23pass;t033=@{passed=$t33pass;pending_second_sid=$t33pending};stage_b_release_lifecycle=@{included=$false;reason='requires exact candidate to exist as a published release and rig to start on previous release; never inferred from source-only run'};passed=$passed;production_activation=$false}
+$summary=@{schema='modelrig-proof-day/v1';generated_at=(Get-Date).ToUniversalTime().ToString('o');candidate=@{version=$version;sha=$sha;branch=$branch};planner=$PlannerModel;stage_a=$true;forced_recovery=$true;workflow=@{passed=$workflowPass;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean=$mean};t023=$t23pass;t033=@{passed=$t33pass;pending_second_sid=$t33pending};agent4_a4_25f=@{included=[bool]$IncludeAgent4;passed=$a4pass;counts_toward_passed=$false;output_root=$Agent4OutputRoot};stage_b_release_lifecycle=@{included=$false;reason='requires exact candidate to exist as a published release and rig to start on previous release; never inferred from source-only run'};passed=$passed;production_activation=$false}
 $summary|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'summary.json') -Encoding UTF8
 Write-Host "`n============================================================================" -ForegroundColor Cyan
 Write-Host "  RESULTAT: $(if($passed){'PASS'}else{'IKKE FULDT BEVIST ENDNU'})" -ForegroundColor $(if($passed){'Green'}else{'Yellow'})
