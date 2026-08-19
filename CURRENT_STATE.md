@@ -296,6 +296,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_voice_stream.py`
 - `tests/worker_voice_strip.py`
 - `tests/worker_voice_tts_empty_synthesis.py`
+- `tests/worker_voice_tts_voicerig_provider.py`
 - `tests/worker_web_fetch_adapter.py`
 - `tests/worker_web_research_capability.py`
 - `tests/worker_web_research_fetch.py`
