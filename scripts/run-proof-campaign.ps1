@@ -161,7 +161,7 @@ if ($IncludeAgent4) {
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 RunMatrix @a4args
     }
     Run 'Agent 4: finalisér evidens' {
-      python scripts\agent4_a4_25f_finalize_evidence.py --output $Agent4OutputRoot
+      python scripts\agent4_a4_25f_finalize_evidence.py --output-root $Agent4OutputRoot --expected-sha $sha
     }
     $a4pass = $true
   } catch {
