@@ -2,7 +2,10 @@
 
 Portable VoiceRig `.mrvoice` profiles are preferred when one is installed in
 `~/.kaliv/voices` (or KALIV_VOICES_DIR). Existing Piper behavior remains the
-fallback, preserving old rigs and the public `synthesize_to_wav` contract.
+fallback when no portable profile is selected.
+
+A portable profile can run either through Chatterbox in-process or through the
+loopback VoiceRig sidecar. The latter keeps the prebuilt ModelRig worker small.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ from .env_compat import env
 _voice = None
 _voice_lock = threading.Lock()
 _load_error: Optional[str] = None
+_logger = logging.getLogger(__name__)
 
 
 def _voice_name() -> str:
@@ -34,13 +38,13 @@ def _voices_dir() -> str:
     return new
 
 
-def _mrvoice_selected() -> bool:
+def _mrvoice_path():
     try:
         from . import voice_profiles
-        return voice_profiles.default_profile_path() is not None
+        return voice_profiles.default_profile_path()
     except Exception as exc:  # noqa: BLE001
-        logging.getLogger(__name__).warning("mrvoice discovery failed: %r", exc)
-        return False
+        _logger.warning("mrvoice discovery failed: %r", exc)
+        return None
 
 
 def _piper_available() -> bool:
@@ -48,26 +52,42 @@ def _piper_available() -> bool:
         import piper  # noqa: F401
         return True
     except Exception as exc:  # noqa: BLE001
-        logging.getLogger(__name__).info(
-            "piper-tts er ikke tilgængelig (tale-syntese slået fra): %r", exc)
+        _logger.info("piper-tts er ikke tilgængelig (tale-syntese slået fra): %r", exc)
         return False
 
 
 def is_available() -> bool:
-    if _mrvoice_selected():
+    package = _mrvoice_path()
+    if package is not None:
         try:
-            from . import voice_profiles
-            return voice_profiles.is_available()
+            from . import voice_profiles, voice_sidecar
+            return voice_profiles.is_available() or voice_sidecar.is_configured()
         except Exception:
             return False
     return _piper_available()
 
 
 def status() -> dict:
-    if _mrvoice_selected():
+    package = _mrvoice_path()
+    if package is not None:
         try:
-            from . import voice_profiles
-            return voice_profiles.status()
+            from . import voice_profiles, voice_sidecar
+            local = voice_profiles.status()
+            if local.get("ok"):
+                return local
+            sidecar = voice_sidecar.status()
+            if sidecar.get("ok"):
+                return sidecar
+            return {
+                "ok": False,
+                "backend": "mrvoice",
+                "voice": local.get("voice") or sidecar.get("voice"),
+                "package": package.name,
+                "detail": (
+                    f"in-process: {local.get('detail') or 'unavailable'}; "
+                    f"sidecar: {sidecar.get('detail') or 'unavailable'}"
+                ),
+            }
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "backend": "mrvoice", "voice": None, "detail": str(exc)}
     available = _piper_available()
@@ -136,8 +156,21 @@ def _piper_synthesize_to_wav(text: str, out_path: str) -> dict:
 
 
 def synthesize_to_wav(text: str, out_path: str) -> dict:
-    """Synthesize using installed `.mrvoice`, otherwise legacy Piper."""
-    if _mrvoice_selected():
-        from . import voice_profiles
-        return voice_profiles.synthesize_to_wav(text, out_path)
-    return _piper_synthesize_to_wav(text, out_path)
+    """Synthesize using portable profile, otherwise legacy Piper."""
+    package = _mrvoice_path()
+    if package is None:
+        return _piper_synthesize_to_wav(text, out_path)
+
+    from . import voice_profiles, voice_sidecar
+
+    if voice_profiles.is_available():
+        try:
+            return voice_profiles.synthesize_to_wav(text, out_path)
+        except Exception as exc:
+            if not voice_sidecar.is_configured():
+                raise
+            _logger.warning("in-process mrvoice synthesis failed; trying VoiceRig sidecar: %s", exc)
+
+    if voice_sidecar.is_configured():
+        return voice_sidecar.synthesize_to_wav(text, out_path, package.name)
+    raise RuntimeError(".mrvoice is selected but no Chatterbox runtime is available")
