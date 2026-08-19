@@ -13,7 +13,7 @@ for _name in (
     # Stage B-scripterne er pinnet til den aktuelle kandidat, saa fixturerne
     # bindes samme vej. Rækkefølgen er ligegyldig her: ingen af de tre
     # strenge er delstreng af hinanden.
-    for _old, _new in (("1.58.149", "2.0.9"), ("1.58.151", "2.0.10"), ("1.58.148", "2.0.7")):
+    for _old, _new in (("1.58.149", "2.0.10"), ("1.58.151", "2.0.11"), ("1.58.148", "2.0.7")):
         _source = _source.replace(_old, _new)
     if _name == "workflow_stage_b_one_click.retained":
         _source = _source.replace(
