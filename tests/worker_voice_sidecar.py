@@ -60,11 +60,11 @@ def main() -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    old_url = os.environ.get("KALIV_VOICERIG_TTS_URL")
-    old_remote = os.environ.get("KALIV_VOICERIG_ALLOW_REMOTE")
+    old_url = os.environ.get("VOICERIG_TTS_URL")
+    old_remote = os.environ.get("VOICERIG_ALLOW_REMOTE")
     try:
-        os.environ["KALIV_VOICERIG_TTS_URL"] = f"http://127.0.0.1:{server.server_port}"
-        os.environ.pop("KALIV_VOICERIG_ALLOW_REMOTE", None)
+        os.environ["VOICERIG_TTS_URL"] = f"http://127.0.0.1:{server.server_port}"
+        os.environ.pop("VOICERIG_ALLOW_REMOTE", None)
         assert voice_sidecar.is_configured() is True
         assert voice_sidecar.status()["ok"] is True
 
@@ -77,19 +77,19 @@ def main() -> None:
             assert result["backend"] == "mrvoice-sidecar"
             assert result["device"] == "cuda"
 
-        os.environ["KALIV_VOICERIG_TTS_URL"] = "https://example.com"
+        os.environ["VOICERIG_TTS_URL"] = "https://example.com"
         assert voice_sidecar.is_configured() is False
     finally:
         server.shutdown()
         server.server_close()
         if old_url is None:
-            os.environ.pop("KALIV_VOICERIG_TTS_URL", None)
+            os.environ.pop("VOICERIG_TTS_URL", None)
         else:
-            os.environ["KALIV_VOICERIG_TTS_URL"] = old_url
+            os.environ["VOICERIG_TTS_URL"] = old_url
         if old_remote is None:
-            os.environ.pop("KALIV_VOICERIG_ALLOW_REMOTE", None)
+            os.environ.pop("VOICERIG_ALLOW_REMOTE", None)
         else:
-            os.environ["KALIV_VOICERIG_ALLOW_REMOTE"] = old_remote
+            os.environ["VOICERIG_ALLOW_REMOTE"] = old_remote
 
     print("worker voice sidecar: OK")
 
