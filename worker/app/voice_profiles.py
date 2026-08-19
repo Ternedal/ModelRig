@@ -41,7 +41,7 @@ _LAST_CUDA_USE = 0.0
 
 
 def voices_dir() -> Path:
-    value = os.getenv("KALIV_VOICES_DIR", "~/.kaliv/voices")
+    value = os.getenv("MODELRIG_VOICES_DIR", "~/.kaliv/voices")
     path = Path(value).expanduser().resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -49,7 +49,7 @@ def voices_dir() -> Path:
 
 def _max_package_bytes() -> int:
     try:
-        mb = int(os.getenv("KALIV_MRVOICE_MAX_MB", "128"))
+        mb = int(os.getenv("MRVOICE_MAX_MB", "128"))
     except ValueError:
         mb = 128
     return max(1, mb) * 1024 * 1024
@@ -173,7 +173,7 @@ def is_available() -> bool:
 
 
 def _preferred_device() -> str:
-    requested = os.getenv("KALIV_MRVOICE_DEVICE", "auto").strip().lower()
+    requested = os.getenv("MRVOICE_DEVICE", "auto").strip().lower()
     if requested not in {"auto", "cpu", "cuda"}:
         requested = "auto"
     if requested == "cpu":
@@ -182,10 +182,10 @@ def _preferred_device() -> str:
         import torch
     except Exception:
         if requested == "cuda":
-            raise RuntimeError("KALIV_MRVOICE_DEVICE=cuda but torch/CUDA is unavailable")
+            raise RuntimeError("MRVOICE_DEVICE=cuda but torch/CUDA is unavailable")
         return "cpu"
     if requested == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("KALIV_MRVOICE_DEVICE=cuda but CUDA is unavailable")
+        raise RuntimeError("MRVOICE_DEVICE=cuda but CUDA is unavailable")
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -224,7 +224,7 @@ def status() -> dict:
 
 def _idle_seconds() -> float:
     try:
-        return max(0.0, float(os.getenv("KALIV_MRVOICE_GPU_IDLE_SECONDS", "30")))
+        return max(0.0, float(os.getenv("MRVOICE_GPU_IDLE_SECONDS", "30")))
     except ValueError:
         return 30.0
 
