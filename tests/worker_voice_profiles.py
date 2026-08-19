@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import tempfile
+import types
 import zipfile
 from pathlib import Path
 
@@ -42,6 +44,56 @@ def build_package(path: Path, *, evil: bool = False) -> None:
             zf.writestr("../escape", b"no")
 
 
+def test_conditionals_load_contract(root: Path) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeLoaded:
+        def to(self, device):
+            calls["to"] = device
+            return self
+
+    class FakeConditionals:
+        @classmethod
+        def load(cls, path, map_location="cpu"):
+            calls["path"] = Path(path).name
+            calls["map_location"] = map_location
+            return FakeLoaded()
+
+    class FakeModel:
+        conds = None
+
+        def prepare_conditionals(self, *_args, **_kwargs):
+            raise AssertionError("saved conditioning unexpectedly fell back to reference audio")
+
+    package = types.ModuleType("chatterbox")
+    package.__path__ = []
+    mtl = types.ModuleType("chatterbox.mtl_tts")
+    mtl.Conditionals = FakeConditionals
+    old_package = sys.modules.get("chatterbox")
+    old_mtl = sys.modules.get("chatterbox.mtl_tts")
+    sys.modules["chatterbox"] = package
+    sys.modules["chatterbox.mtl_tts"] = mtl
+    try:
+        (root / "conditioning.pt").write_bytes(b"fake")
+        model = FakeModel()
+        voice_profiles._load_conditionals(model, root, "cuda")
+        assert calls == {
+            "path": "conditioning.pt",
+            "map_location": "cuda",
+            "to": "cuda",
+        }
+        assert model.conds is not None
+    finally:
+        if old_package is None:
+            sys.modules.pop("chatterbox", None)
+        else:
+            sys.modules["chatterbox"] = old_package
+        if old_mtl is None:
+            sys.modules.pop("chatterbox.mtl_tts", None)
+        else:
+            sys.modules["chatterbox.mtl_tts"] = old_mtl
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -72,6 +124,10 @@ def main() -> None:
             assert "invalid path" in str(exc)
         else:
             raise AssertionError("path traversal package was accepted")
+
+        conditionals_root = root / "conditionals-contract"
+        conditionals_root.mkdir()
+        test_conditionals_load_contract(conditionals_root)
 
     print("worker voice profiles: OK")
 
