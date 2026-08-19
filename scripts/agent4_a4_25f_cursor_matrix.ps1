@@ -43,7 +43,19 @@ function Resolve-Serial {
 
 function Invoke-Adb {
     param([string]$DeviceSerial, [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
-    $lines = @(& adb -s $DeviceSerial @Arguments 2>&1)
+    # adb skriver rutinemaessigt til STDERR -- daemon-start, "device unauthorized",
+    # fremdrift. Med $ErrorActionPreference='Stop' og 2>&1 bliver de linjer til
+    # ErrorRecords i Windows PowerShell og udloeser NativeCommandError SELV naar
+    # adb returnerer 0. Praecis den fejl draebte beviskampagnen 18/8 (#631).
+    # Preferencen saenkes derfor omkring kaldet, og ErrorRecords flades til tekst.
+    # EXITKODEN er verdiktet, ikke stderr.
+    $_eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $lines = @(& adb -s $DeviceSerial @Arguments 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
+        })
+    } finally { $ErrorActionPreference = $_eap }
     if ($LASTEXITCODE -ne 0) { throw "adb fejlede: $($lines -join ' ')" }
     return $lines
 }
