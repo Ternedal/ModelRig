@@ -5,7 +5,7 @@ Chatterbox runtime. When a portable `.mrvoice` profile is selected and
 Chatterbox is unavailable in-process, ModelRig can synthesize through the
 VoiceRig process on 127.0.0.1 instead.
 
-Remote destinations are refused by default. Set KALIV_VOICERIG_ALLOW_REMOTE=1
+Remote destinations are refused by default. Set VOICERIG_ALLOW_REMOTE=1
 only for an explicitly designed split-host deployment.
 """
 from __future__ import annotations
@@ -21,13 +21,13 @@ import httpx
 
 
 def _base_url() -> str | None:
-    raw = os.getenv("KALIV_VOICERIG_TTS_URL", "http://127.0.0.1:8765").strip()
+    raw = os.getenv("VOICERIG_TTS_URL", "http://127.0.0.1:8765").strip()
     if not raw:
         return None
     parsed = urlparse(raw)
     host = (parsed.hostname or "").lower()
     loopback = host in {"127.0.0.1", "localhost", "::1"}
-    if not loopback and os.getenv("KALIV_VOICERIG_ALLOW_REMOTE", "0") != "1":
+    if not loopback and os.getenv("VOICERIG_ALLOW_REMOTE", "0") != "1":
         return None
     if parsed.scheme not in {"http", "https"} or not host:
         return None
@@ -79,7 +79,7 @@ def synthesize_to_wav(text: str, out_path: str, package_name: str) -> dict:
     if base is None:
         raise RuntimeError("VoiceRig sidecar is not configured for an allowed destination")
     try:
-        timeout = max(5.0, float(os.getenv("KALIV_VOICERIG_TTS_TIMEOUT_SECONDS", "180")))
+        timeout = max(5.0, float(os.getenv("VOICERIG_TTS_TIMEOUT_SECONDS", "180")))
     except ValueError:
         timeout = 180.0
 
