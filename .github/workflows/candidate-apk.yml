@@ -1,0 +1,89 @@
+name: candidate-apk
+
+# Kandidatens APK som artefakt — uden at tagge.
+#
+# build-and-release.yml fyrer KUN paa tag-push. Det betyder at kandidatens app
+# hverken kan hentes eller bygges, med mindre man har hele Android SDK'et
+# lokalt. 19/8 blokerede det rig-dagen: riggen har ikke SDK'et, gradlew doede
+# paa "SDK location not found", og den fysiske validering kunne ikke fortsaette
+# — fordi voice-beviset kraever PRAECIS kandidatens app paa telefonen.
+#
+# Det hul maatte ikke koste en rig-dag igen. Denne workflow bygger den samme
+# debug-APK som operatoeren ellers skulle bygge selv, og lader den hente fra
+# Actions.
+#
+# DEN RELEASER INTET. Ingen tag, intet GitHub-release, ingen updater-kaede.
+# Artefakter fra Actions naar ikke telefoner af sig selv — de skal hentes og
+# installeres i haanden, og det er hele forskellen paa dette og en release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Gren eller SHA der skal bygges (default: den koerende ref)"
+        required: false
+        type: string
+  push:
+    branches:
+      - "physical-proof/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install platform + build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:assembleDebug --no-daemon --console=plain
+
+      - name: Verify the APK carries VERSION
+        working-directory: android
+        run: |
+          set -e
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK" || { echo "ingen APK paa $APK"; exit 1; }
+          BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
+          AAPT="$BT/aapt"; [ -x "$AAPT" ] || AAPT="$BT/aapt2"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          APKVER="$(printf '%s' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+          REPOVER="$(tr -d '[:space:]' < ../VERSION)"
+          echo "APK: $APKVER | VERSION: $REPOVER"
+          # Uden dette tjek kunne artefaktet baere en anden version end
+          # kandidaten, og operatoeren ville installere den forkerte app paa
+          # telefonen -- praecis den fejl gaten i voice-beviset findes for at
+          # fange, blot flyttet et skridt tidligere.
+          [ "$APKVER" = "$REPOVER" ] || { echo "APK-versionen matcher ikke VERSION"; exit 1; }
+          "$BT/apksigner" verify --print-certs "$APK" >/dev/null \
+            || { echo "APK er ikke gyldigt signeret"; exit 1; }
+
+      - name: Upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kaliv-candidate-apk-${{ github.sha }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
