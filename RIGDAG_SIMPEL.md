@@ -1,4 +1,4 @@
-# RIGDAG_SIMPEL — ModelRig 2.0.10
+# RIGDAG_SIMPEL — ModelRig 2.0.11
 
 Dette er den korte operatorindgang. Den autoritative rækkefølge og alle
 fail-closed grænser står i `STAGED_PHYSICAL_PROMOTION.md`; Stage B-detaljerne
@@ -6,13 +6,13 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
 ## Kandidat
 
-- version: `2.0.10`;
-- branch: `physical-proof/2.0.10`;
+- version: `2.0.11`;
+- branch: `physical-proof/2.0.11`;
 - freeze: candidate_freeze_check groen paa exact SHA;
 - exact SHA: `7b2fe732...` erstattet af den aktuelle kandidat; læses fra grenen og må aldrig gættes;
 - produktion: ikke aktiveret.
 
-Evidens fra 2.0.9 eller fra en tidligere ugyldiggjort 2.0.10-head må ikke
+Evidens fra 2.0.10 eller fra en tidligere ugyldiggjort 2.0.11-head må ikke
 genbruges.
 
 ## Blok 0 — lås checkouten
@@ -20,11 +20,11 @@ genbruges.
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch physical-proof/2.0.10
-git pull --ff-only origin physical-proof/2.0.10
+git switch physical-proof/2.0.11
+git pull --ff-only origin physical-proof/2.0.11
 $CandidateSha = (git rev-parse HEAD).Trim()
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "2.0.10") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.11") { throw "Forkert version" }
 ```
 
 Sammenhold `$CandidateSha` med PR #412. Stop ved forskel.
@@ -62,13 +62,13 @@ Stage A merger, tagger, releaser og aktiverer intet.
 ## Beslutningspunkt
 
 Kun efter en særskilt eksplicit beslutning må præcis Stage A-SHA'en
-fast-forwardes til `main`, tagges `v2.0.10` og publiceres som et komplet
+fast-forwardes til `main`, tagges `v2.0.11` og publiceres som et komplet
 signeret release-sæt.
 
 ## Blok 2 — Stage B
 
-Kildereleasen er 2.0.9; target er 2.0.10. Fordi den gamle updater er fra
-før self-update-support, installeres 2.0.10-updateren én gang som verificeret
+Kildereleasen er 2.0.10; target er 2.0.11. Fordi den gamle updater er fra
+før self-update-support, installeres 2.0.11-updateren én gang som verificeret
 bootstrap. Server, supervisor og worker må kun flyttes gennem updateren.
 
 Dobbeltklik:
@@ -99,7 +99,7 @@ summary.total=8
 
 Det automatiske signed-release-to-signed-release self-update-bevis er deferred
 til #401 og kræver en senere signeret target-version. Det blokerer ikke
-promotion af 2.0.10.
+promotion af 2.0.11.
 
 ## Stopregler
 

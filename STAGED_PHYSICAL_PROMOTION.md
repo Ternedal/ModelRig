@@ -1,15 +1,15 @@
-# Staged physical promotion — 2.0.10
+# Staged physical promotion — 2.0.11
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
-`2.0.10`. Kandidaten ligger på
-`physical-proof/2.0.10`; den eksakte SHA skal altid læses fra
+`2.0.11`. Kandidaten ligger på
+`physical-proof/2.0.11`; den eksakte SHA skal altid læses fra
 freeze: candidate_freeze_check groen paa exact SHA, og må aldrig gættes
 eller kopieres fra ældre evidens.
 
 ## Ufravigelige grænser
 
 - Stage A kører mod én upubliceret, kvalificeret kandidat-SHA.
-- Samme SHA bruges senere til fast-forward, tag `v2.0.10` og release.
+- Samme SHA bruges senere til fast-forward, tag `v2.0.11` og release.
 - Efter fysisk evidens er begyndt, er squash, rebase, mergecommit, amend og
   enhver anden SHA-ændring forbudt.
 - Enhver bevægelse af kandidatbranch eller `origin/main` kræver ny freeze og ny
@@ -24,12 +24,12 @@ eller kopieres fra ældre evidens.
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch physical-proof/2.0.10
-git pull --ff-only origin physical-proof/2.0.10
+git switch physical-proof/2.0.11
+git pull --ff-only origin physical-proof/2.0.11
 $CandidateSha = (git rev-parse HEAD).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "2.0.10") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.11") { throw "Forkert version" }
 ```
 
 Sammenhold `$CandidateSha` med den sha der bar
@@ -122,31 +122,31 @@ Stop her. Stage A udfører ingen repository- eller releaseoperationer.
 ## Beslutningspunkt
 
 Kun efter en særskilt eksplicit beslutning må `main` fast-forwardes til præcis
-Stage A-SHA'en, samme SHA tagges som `v2.0.10`, og det komplette signerede
+Stage A-SHA'en, samme SHA tagges som `v2.0.11`, og det komplette signerede
 release-sæt publiceres. Ændres SHA'en, er Stage A ugyldig.
 
-## Stage B — publiceret 2.0.10
+## Stage B — publiceret 2.0.11
 
 Følg den operative autoritet i `STAGE_B_UPDATER_EVIDENCE.md`.
 
-Kildereleasen for appliance-transitionen er `2.0.9`, og målet er
-`2.0.10`. Fordi 2.0.9-updateren er fra før self-update-support, må
-2.0.10-updateren installeres én gang manuelt som bootstrap, verificeret mod
-`v2.0.10`-releasens `SHA256SUMS.txt` og provenance. Server, supervisor og
+Kildereleasen for appliance-transitionen er `2.0.10`, og målet er
+`2.0.11`. Fordi 2.0.10-updateren er fra før self-update-support, må
+2.0.11-updateren installeres én gang manuelt som bootstrap, verificeret mod
+`v2.0.11`-releasens `SHA256SUMS.txt` og provenance. Server, supervisor og
 worker må ikke kopieres manuelt; deres transition skal ske gennem updateren.
 
 Dette bootstrap-bevis er **ikke** automatisk signed-release-to-signed-release
 self-update. Det ægte automatiske bevis er deferred i issue #401 og kræver
-signeret 2.0.10 som kilde samt en senere signeret target-version større end
-2.0.10. #401 blokerer ikke promotion af 2.0.10.
+signeret 2.0.11 som kilde samt en senere signeret target-version større end
+2.0.11. #401 blokerer ikke promotion af 2.0.11.
 
 Stage B skal dokumentere:
 
-1. normal update fra 2.0.9 til 2.0.10;
-2. reboot på 2.0.10;
+1. normal update fra 2.0.10 til 2.0.11;
+2. reboot på 2.0.11;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
-5. ugyldig update afvist før swap eller sund rollback til 2.0.10;
+5. ugyldig update afvist før swap eller sund rollback til 2.0.11;
 6. interruption/recovery uden manglende live executables;
 7. bevarede data, credentials og schedules.
 

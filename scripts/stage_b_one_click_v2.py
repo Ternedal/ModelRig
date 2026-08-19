@@ -32,8 +32,8 @@ import stage_b_physical_gate_v2 as final_gate
 # so the manual bootstrap of the 1.58.151 updater is required for the same
 # reason, and 1.58.149 -> 1.58.151 is a genuine transition between two signed
 # releases.
-EXPECTED_SOURCE_VERSION = "2.0.9"
-EXPECTED_TARGET_VERSION = "2.0.10"
+EXPECTED_SOURCE_VERSION = "2.0.10"
+EXPECTED_TARGET_VERSION = "2.0.11"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
 SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
 SIGNER_WORKFLOW = (

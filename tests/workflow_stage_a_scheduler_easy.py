@@ -48,7 +48,7 @@ check(not list(state_path.parent.glob("*.tmp")),
 
 check(
     'CANDIDATE_BRANCH_PREFIX = "agent/unified-candidate-"' in source
-    and 'EXPECTED_VERSION = "2.0.10"' in source
+    and 'EXPECTED_VERSION = "2.0.11"' in source
     and 'stage-a-checkpoint-ux' not in source
     and 'current.startswith(CANDIDATE_BRANCH_PREFIX)' in source
     and '"git", "switch"' not in source

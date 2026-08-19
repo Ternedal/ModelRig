@@ -25,7 +25,7 @@ PHONE_STATE = RUNTIME / "phone-test-state.json"
 PHONE_INSTRUCTIONS = RUNTIME / "PHONE_TEST.txt"
 PHONE_SCRIPT = ROOT / "scripts" / "stage-a-phone-test.ps1"
 CANDIDATE_BRANCH_PREFIX = "agent/unified-candidate-"
-EXPECTED_VERSION = "2.0.10"
+EXPECTED_VERSION = "2.0.11"
 
 STEPS = (
     ("read-plan", ROOT / "scripts" / "stage_a_scheduler_read.py"),

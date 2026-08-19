@@ -1,6 +1,6 @@
-# Physical validation campaign — 2.0.10
+# Physical validation campaign — 2.0.11
 
-Denne runbook samler de fysiske Prove-opgaver for ModelRig 2.0.10. En
+Denne runbook samler de fysiske Prove-opgaver for ModelRig 2.0.11. En
 upubliceret kandidat starter i `STAGED_PHYSICAL_PROMOTION.md`. Releasefasens
 updater- og lifecycle-operationer styres af `STAGE_B_UPDATER_EVIDENCE.md`.
 
@@ -13,15 +13,15 @@ kampagnerapport med `production_activation=false`.
 
 Alle rapporter skal binde til samme:
 
-- version `2.0.10`;
+- version `2.0.11`;
 - eksakte 40-tegns kandidat-/release-SHA;
 - worker `code_sha256`, hvor runtime-koden måles;
 - rene checkout og konsistente versionsstempler;
 - friske timezone-aware timestamps;
 - grønne gates og komplet cleanup.
 
-Evidens fra 2.0.9 eller tidligere, og evidens fra en tidligere ugyldiggjort
-2.0.10-head, må ikke genbruges. Flytter HEAD eller `origin/main` sig, skal den
+Evidens fra 2.0.10 eller tidligere, og evidens fra en tidligere ugyldiggjort
+2.0.11-head, må ikke genbruges. Flytter HEAD eller `origin/main` sig, skal den
 relevante freeze køres igen før mere evidens samles eller accepteres.
 
 ## Stage A — kandidatbeviser
@@ -61,7 +61,7 @@ skrives. Failed checks accepteres ikke.
 Følg `AGENT3_RIG_VALIDATION.md`. Kræv blandt andet:
 
 - `success=true`;
-- backend/worker-version 2.0.10;
+- backend/worker-version 2.0.11;
 - worker `code_sha256` lig kandidatens fingerprint;
 - fuld cleanup;
 - eligibility kun for den dokumenterede developer preview;
@@ -125,26 +125,26 @@ Pausens bevis skal være en konkret `released` occurrence bundet til et
 
 ## Stage B — publiceret release og T-006
 
-Stage B starter først efter exact-SHA fast-forward, tag `v2.0.10` og komplet
-signeret release. Kildereleasen er 2.0.9; målreleasen er 2.0.10.
+Stage B starter først efter exact-SHA fast-forward, tag `v2.0.11` og komplet
+signeret release. Kildereleasen er 2.0.10; målreleasen er 2.0.11.
 
-Følg `STAGE_B_UPDATER_EVIDENCE.md`. 2.0.10-updateren installeres én gang som
-verificeret bootstrap, fordi 2.0.9-updateren ikke indeholder self-update.
+Følg `STAGE_B_UPDATER_EVIDENCE.md`. 2.0.11-updateren installeres én gang som
+verificeret bootstrap, fordi 2.0.10-updateren ikke indeholder self-update.
 Server, supervisor og worker må kun flyttes gennem updateren.
 
 Gennemfør og dokumentér:
 
-1. god appliance-update 2.0.9 → 2.0.10;
-2. reboot til ready på 2.0.10;
+1. god appliance-update 2.0.10 → 2.0.11;
+2. reboot til ready på 2.0.11;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
-5. ugyldig update afvist før swap eller fuld rollback til 2.0.10;
+5. ugyldig update afvist før swap eller fuld rollback til 2.0.11;
 6. interruption/recovery omkring swap og Windows replacement;
 7. bevarede data, credentials og schedules.
 
 Det automatiske signed-release-to-signed-release self-update-bevis er deferred
-til issue #401. Det kræver signeret 2.0.10 som source og en senere signeret
-target-version større end 2.0.10 og er ikke en blocker for denne release.
+til issue #401. Det kræver signeret 2.0.11 som source og en senere signeret
+target-version større end 2.0.11 og er ikke en blocker for denne release.
 
 ### Lifecycle-observationer
 
@@ -179,10 +179,10 @@ python scripts\appliance_lifecycle_updater_chain.py `
 
 Den gode log skal bevise download af server/supervisor/worker, tre checksums,
 tre provenance-attestationer, process-stop før swap, backend og worker på
-2.0.10 samt avanceret supervisor-heartbeat.
+2.0.11 samt avanceret supervisor-heartbeat.
 
 Den ugyldige log accepteres kun som pre-swap refusal eller sund rollback til
-2.0.10.
+2.0.11.
 
 Disse bypasses blokerer altid:
 
