@@ -16,8 +16,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
-import tempfile
 import threading
 import time
 import wave
@@ -299,7 +297,10 @@ def _load_conditionals(model, cache: Path, device: str) -> None:
     """Use saved conditioning when compatible, otherwise rebuild from reference."""
     try:
         from chatterbox.mtl_tts import Conditionals
-        model.conds = Conditionals.load(cache / "conditioning.pt", device=device)
+        model.conds = Conditionals.load(
+            cache / "conditioning.pt",
+            map_location=device,
+        ).to(device)
         return
     except Exception as exc:  # noqa: BLE001 - reference fallback is intentional
         _logger.warning("mrvoice conditioning could not be loaded; rebuilding: %s", exc)
