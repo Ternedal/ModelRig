@@ -136,6 +136,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_outcome_context.py`
 - `tests/worker_agent3_outcome_context_adversarial.py`
 - `tests/worker_agent3_plan_authority_api.py`
+- `tests/worker_agent3_plan_single_use.py`
 - `tests/worker_agent3_plan_store.py`
 - `tests/worker_agent3_planner.py`
 - `tests/worker_agent3_planner_capability_binding.py`
