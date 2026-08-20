@@ -243,6 +243,17 @@ def install_desktop_vision_bridge(main_module: Any) -> bool:
         origin: str,
         sources: list,
         tools_used: list,
+        # Broen SKAL baere hele kaldesignaturen videre. Uden disse to doede
+        # ethvert /tools/chat med TypeError i det oejeblik KALIV_COMPUTER_USE=1
+        # blev sat -- 500 paa hver eneste tur, 0/14 workflows, og fejlen saa ud
+        # som om vaerktoejslaget var slukket. Fanget paa riggen 20/8.
+        #
+        # En wrapper der kun kender NOGLE af argumenterne er en tidsindstillet
+        # bombe: den holder indtil den dag et nyt argument tilfoejes. Derfor
+        # **kwargs til sidst, saa naeste tilfoejelse ikke gentager det her.
+        on_phase=None,
+        context: "list | None" = None,
+        **kwargs: Any,
     ) -> dict:
         try:
             prepared, selected_model = prepare_desktop_vision_messages(
@@ -266,6 +277,9 @@ def install_desktop_vision_bridge(main_module: Any) -> bool:
             origin,
             sources,
             tools_used,
+            on_phase=on_phase,
+            context=context,
+            **kwargs,
         )
 
     bridged_tool_loop._kaliv_desktop_vision_bridge = True  # type: ignore[attr-defined]
