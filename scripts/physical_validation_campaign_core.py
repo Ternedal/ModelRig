@@ -1138,7 +1138,17 @@ def validate_evidence(
     # STRAMMERE END FOER: den gamle regel spurgte om etiketten passede og sagde
     # intet om koden bag. Denne spoerger om koden.
     carried: dict[str, Any] | None = None
-    taken_on = _nested(report, "build", "git_sha")
+    # Hvert bevis skriver sit sha der hvor DETS format lagde det. De fleste
+    # bruger build.git_sha; scheduler-piloten lagger den under candidate.git_sha.
+    # Foerste udgave kiggede kun det ene sted, saa carry-forward blev SPRUNGET
+    # OVER for scheduler -- og det haarde mismatch-tjek slog i stedet. Paa
+    # riggen 20/8 kostede det en Pixel-godkendelse der var taget en time foer.
+    taken_on = (
+        _nested(report, "build", "git_sha")
+        or _nested(report, "candidate", "git_sha")
+        or report.get("git_sha")
+        or report.get("exact_sha")
+    )
     head_sha = candidate.get("git_sha")
     if taken_on and head_sha and taken_on != head_sha:
         try:
