@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -162,7 +163,25 @@ def main() -> int:
         return r.json()
 
     doc = json.loads(args.spec.read_text(encoding="utf-8"))
+    # STIEN SKAL VAERE DEN VAERKTOEJET FAKTISK SKRIVER TIL.
+    #
+    # Spec'en pegede paa ~/kaliv/workflow-eval-scratch.md. note_append skriver
+    # til <tools_dir>/notes.md, hvor tools_dir er KALIV_TOOLS_DIR eller
+    # ~/Documents/Kaliv. To forskellige filer -- saa scratch_note_grew kunne
+    # ALDRIG blive sandt, og W-08 og W-09 var doemt til at fejle uanset hvor
+    # godt modellen opfoerte sig. 20/8 fejlede de i alle 22 runder, og det saa
+    # ud som om modellen ikke kaldte note_append.
+    #
+    # Vi udleder stien praecis som workeren goer, saa de to ikke kan glide fra
+    # hinanden igen. Spec'ens vaerdi bruges kun hvis miljoeet ikke siger noget.
     scratch = doc.get("scratch_note_path")
+    _tools_dir = os.environ.get("KALIV_TOOLS_DIR") or os.path.join(
+        os.path.expanduser("~"), "Documents", "Kaliv")
+    _faktisk = os.path.join(_tools_dir, "notes.md")
+    if scratch and os.path.expanduser(scratch) != _faktisk:
+        print(f"scratch_note_path: bruger {_faktisk} (spec sagde {scratch})",
+              file=sys.stderr)
+    scratch = _faktisk
     # Stamp the tree the run is measuring. Gitless rigs (ZIP deploys) have no
     # git binary at all -- subprocess.run RAISES FileNotFoundError there rather
     # than returning non-zero, which is exactly the bug that broke 1.58.142 --
