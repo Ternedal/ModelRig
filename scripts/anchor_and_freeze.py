@@ -35,6 +35,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 REPO = "Ternedal/ModelRig"
 WORKFLOWS = ("agent3-diagnostics.yml", "agent3-full-diagnostics.yml")
+#: Freeze-gaten kraever OGSAA at 'ci' er faerdig paa det eksakte sha. Foerste
+#: rigtige koersel 20/8 stoppede paa netop det:
+#:   NOT FROZEN -- ci is not complete on this exact candidate SHA (in_progress)
+#: Scriptet venter derfor paa alle tre, ikke kun de to jeg foerst kom i tanke om.
+VENTER_PAA = ("agent3-diagnostics", "agent3-full-diagnostics", "ci")
 #: Begge skal vaere groenne foer freeze. Gaten kraever et run for det EKSAKTE
 #: sha, saa en koersel fra foer landingen taeller ikke.
 
@@ -106,14 +111,15 @@ def main(argv: list[str] | None = None) -> int:
         time.sleep(20)
         runs = api(f"/actions/runs?branch=main&per_page=20", token).get("workflow_runs", [])
         mine = {r["name"]: r for r in runs
-                if r["head_sha"] == sha and "agent3" in r["name"]}
-        if len(mine) >= 2 and all(r["status"] == "completed" for r in mine.values()):
+                if r["head_sha"] == sha and r["name"] in VENTER_PAA}
+        if len(mine) >= len(VENTER_PAA) and all(r["status"] == "completed" for r in mine.values()):
             fejl = [n for n, r in mine.items() if r.get("conclusion") != "success"]
             if fejl:
                 raise SystemExit(f"workflows fejlede: {fejl} -- genfryser IKKE")
-            print("workflows: begge groenne")
+            print(f"alle {len(VENTER_PAA)} groenne")
             break
-        print(f"  venter ... {len(mine)}/2 fundet")
+        faerdige = sum(1 for r in mine.values() if r["status"] == "completed")
+        print(f"  venter ... {faerdige}/{len(VENTER_PAA)} faerdige")
     else:
         raise SystemExit("workflows blev ikke faerdige i tide -- genfryser IKKE")
 
