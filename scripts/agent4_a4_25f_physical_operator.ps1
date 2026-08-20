@@ -62,8 +62,24 @@ function Assert-ExactCleanHead {
 }
 
 function Resolve-ExternalOutputRoot {
-    $full = [IO.Path]::GetFullPath((Join-Path (Get-Location) $OutputRoot))
-    if ([IO.Path]::IsPathRooted($OutputRoot)) { $full = [IO.Path]::GetFullPath($OutputRoot) }
+    # ROOTED-TJEKKET SKAL KOMME FOERST. Foer laa Join-Path-linjen UBETINGET
+    # foerst, saa en ABSOLUT -OutputRoot blev sammensat med den aktuelle mappe:
+    #   Join-Path "C:\...\ModelRig-git" "C:\Users\admin\a4-evidens"
+    #     -> "C:\...\ModelRig-git\C:\Users\admin\a4-evidens"
+    # -- en sti med kolon i midten, som GetFullPath afviser med
+    # "Den angivne stis format understoettes ikke".
+    #
+    # Jo mere korrekt en absolut sti man sendte, desto sikrere kastede den.
+    # 20/8 kostede det tre forsoeg, hvor jeg rettede output-roden og
+    # LAN-adressen -- begge dele var i orden; det var sammensaetningen her.
+    if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+        throw "A4-25f kraever -OutputRoot med en sti uden for repositoryet."
+    }
+    if ([IO.Path]::IsPathRooted($OutputRoot)) {
+        $full = [IO.Path]::GetFullPath($OutputRoot)
+    } else {
+        $full = [IO.Path]::GetFullPath((Join-Path (Get-Location).Path $OutputRoot))
+    }
     $repoPrefix = [IO.Path]::GetFullPath($repoRoot).TrimEnd('\') + '\'
     if ($full.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase) -or
         [string]::Equals($full.TrimEnd('\'), [IO.Path]::GetFullPath($repoRoot).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
