@@ -216,7 +216,20 @@ if ($IncludeAgent4) {
   $Agent4OutputRoot = [IO.Path]::GetFullPath($Agent4OutputRoot)
   New-Item -ItemType Directory -Force -Path $Agent4OutputRoot | Out-Null
   Write-Host "  Agent 4-evidens: $Agent4OutputRoot" -ForegroundColor DarkGray
-  $a4args = @('-ExpectedSha', $sha, '-OutputRoot', $Agent4OutputRoot)
+  # Prepare KRAEVER -LanAddress med riggens konkrete private IPv4 og kaster
+  # ellers med det samme. Min kobling fra #637 sendte den aldrig, saa Prepare
+  # doede -- og fejlen der naaede skaermen kom fra Stop i finally, som saa
+  # kastede paa en tom tilstand. Symptomet pegede paa en sti; aarsagen var et
+  # manglende argument.
+  $a4lan = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -match '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)' -and
+                           $_.InterfaceAlias -notmatch 'Loopback|Tailscale' } |
+            Select-Object -First 1 -Expand IPAddress)
+  if ([string]::IsNullOrWhiteSpace($a4lan)) {
+    throw "Agent 4 kraever en privat LAN-adresse, og ingen blev fundet. Angiv den med -Agent4LanAddress."
+  }
+  Write-Host "  Agent 4 LAN-adresse: $a4lan" -ForegroundColor DarkGray
+  $a4args = @('-ExpectedSha', $sha, '-OutputRoot', $Agent4OutputRoot, '-LanAddress', $a4lan)
   try {
     Run 'Agent 4 (a4-25f): forbered fixture og stack' {
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 Prepare @a4args
@@ -240,7 +253,7 @@ if ($IncludeAgent4) {
     Write-Host "  Agent 4-kvalifikationen stoppede: $_" -ForegroundColor Yellow
     $a4pass = $false
   } finally {
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 Stop @a4args 2>$null | Out-Null
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 Stop -ExpectedSha $sha -OutputRoot $Agent4OutputRoot 2>$null | Out-Null
   }
 }
 
