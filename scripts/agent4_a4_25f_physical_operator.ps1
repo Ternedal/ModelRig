@@ -455,10 +455,19 @@ switch ($Action) {
             if (-not $Replace) { throw "A4-25f state findes allerede. Kør Stop eller brug bevidst -Replace." }
             try { Stop-A4Stack -State $existing } catch { Write-Warning $_.Exception.Message }
         }
+        # FIXTUREN FOERST, UNDERMAPPERNE BAGEFTER. Generatoren afviser en
+        # ikke-tom output-rod uden sin markoerfil -- og de tre New-Item-linjer
+        # laa FOER kaldet, saa de skabte praecis den tilstand den afviser.
+        # 20/8 fejlede Prepare paa en HELT TOM mappe, hver eneste gang:
+        #   "non-empty output root is not an existing ModelRig A4-25f workspace"
+        #
+        # --replace hjaelper ikke; det tjek ligger EFTER det der kaster.
+        # To halvdele der aldrig havde koert sammen -- samme fejlform som
+        # resten af suiten indtil den blev koblet paa kampagnen.
         New-Item -ItemType Directory -Path $output -Force | Out-Null
+        Invoke-PythonFixture -ReplaceFixture:$Replace
         New-Item -ItemType Directory -Path $phoneReceipts -Force | Out-Null
         New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
-        Invoke-PythonFixture -ReplaceFixture:$Replace
         $apk = Build-PhysicalArtifacts
         $deviceSerial = Resolve-AdbSerial
         $state = [pscustomobject][ordered]@{
