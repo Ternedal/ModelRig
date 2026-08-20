@@ -3,7 +3,7 @@
 # CI installs from THIS file, so tests and the released worker exe use the
 # same versions. Bump deliberately: change here, run the suites, ship.
 fastapi==0.141.1
-uvicorn==0.52.0
+uvicorn==0.52.3
 httpx==0.28.1
 pydantic==2.13.4
 # Official public-key verification primitive used by the dormant Development
