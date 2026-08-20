@@ -60,7 +60,7 @@ DEFAULT_SPEC = ROOT / "eval" / "workflows_v1.json"
 #     "scratch_before": 120,        # bytes, or None if not applicable
 #     "scratch_after": 180,
 #     "rag_sources": ["a.pdf"],
-#     "status": "ok" | "denied" | "error",
+#     "status": "ok" | "denied" | "error" | "expired" | "already-used",
 #     "error": None,
 #   }
 # --------------------------------------------------------------------------
@@ -236,7 +236,13 @@ def evaluate(spec: dict, tr: dict) -> dict:
         "id": spec.get("id"),
         "title": spec.get("title"),
         "mode": spec.get("mode"),
-        "completed": not failures and tr.get("status") != "error",
+        # "expired" og "already-used" kom til i #662, da runneren holdt op med
+        # at klumpe udloebne bekraeftelser sammen med transportfejl. En
+        # bekraeftelse der naaede at udloebe er IKKE et gennemfoert workflow --
+        # men denne linje kendte kun "error", saa "expired" gled forbi som
+        # gennemfoert hvis ingen anden forventning faeldede den. Min egen
+        # rettelse efterlod evaluatoren med et foraeldet ordforraad.
+        "completed": not failures and tr.get("status") not in ("error", "expired", "already-used"),
         "failures": failures,
         "steps": steps,
         "approvals": len(_events(tr, "decision")),
