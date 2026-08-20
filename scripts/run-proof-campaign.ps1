@@ -148,6 +148,11 @@ if (-not $SkipT023) {
       }
     }
     Start-Sleep -Seconds 3
+    # Run-hjaelperen doemmer paa $LASTEXITCODE. Dette trin koerer INGEN native
+    # kommando, saa variablen beholder vaerdien fra det forrige trin -- og
+    # 20/8 var det 1 fra de blokerede workflow-runder. Resultat: et trin der
+    # gjorde praecis sit arbejde blev meldt som fejlet og stoppede kampagnen.
+    $global:LASTEXITCODE = 0
   }
   Run 'Cleanup før T-023' { python scripts\stage_a_resume_cleanup.py }
   & python scripts\proof_t023_current.py
