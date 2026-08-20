@@ -99,8 +99,17 @@ for ($i=1; $i -le $WorkflowRounds; $i++) {
   if (Test-Path $src) {
     Copy-Item $src (Join-Path $out ("workflow-baseline-{0:D2}.json" -f $i)) -Force
     $j=Get-Content $src -Raw | ConvertFrom-Json
-    if ($null -ne $j.completion_rate) { $rates += [double]$j.completion_rate }
-    elseif ($null -ne $j.summary.completion_rate) { $rates += [double]$j.summary.completion_rate }
+    # Set-StrictMode goer $j.completion_rate til en KASTENDE fejl naar feltet
+    # ikke findes -- ikke til $null. Derfor naaede elseif'en aldrig at proeve
+    # summary-varianten, og kampagnen doede EFTER en gyldig maaling: 20/8 stod
+    # der 10/14 paa skaermen, og saa faldt scriptet over sin egen aflaesning.
+    # PSObject.Properties spoerger uden at kaste.
+    $cr = $null
+    if ($j.PSObject.Properties.Name -contains 'completion_rate') { $cr = $j.completion_rate }
+    elseif (($j.PSObject.Properties.Name -contains 'summary') -and
+            ($null -ne $j.summary) -and
+            ($j.summary.PSObject.Properties.Name -contains 'completion_rate')) { $cr = $j.summary.completion_rate }
+    if ($null -ne $cr) { $rates += [double]$cr }
   }
   if (Test-Path $raw) { Copy-Item $raw (Join-Path $out ("workflow-run-{0:D2}.json" -f $i)) -Force }
 }
