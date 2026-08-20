@@ -9,6 +9,9 @@ param(
     [string]$OutputRoot,
     [string]$LanAddress,
     [string]$Serial,
+    # Faerdigbygget A425f-APK, f.eks. fra a425f-apk-workflowet. Angives den
+    # ikke, bygger operatoeren som foer -- en rig med SDK aendrer ikke adfaerd.
+    [string]$ApkPath,
     [switch]$Replace
 )
 
@@ -341,10 +344,31 @@ function Build-PhysicalArtifacts {
         if ($LASTEXITCODE -ne 0) { throw "Agent4 grant CLI build fejlede." }
     } finally { Pop-Location }
 
+    # APKEN KAN KOMME UDEFRA. Gradle kraever hele Android SDK'et -- platform og
+    # build-tools, flere GB -- og riggen har det ikke. 20/8 stoppede Agent 4
+    # praecis her, efter fem andre forhindringer var ryddet.
+    #
+    # Med -ApkPath bruges en faerdigbygget APK i stedet, f.eks. hentet fra
+    # a425f-apk-workflowet. Uden flaget bygges der som foer, saa en rig MED
+    # SDK ikke aendrer adfaerd.
+    if (-not [string]::IsNullOrWhiteSpace($ApkPath)) {
+        if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf)) {
+            throw "Den angivne A425f-APK findes ikke: $ApkPath"
+        }
+        $ekstern = (Resolve-Path -LiteralPath $ApkPath).Path
+        if (-not $ekstern.EndsWith(".apk", [StringComparison]::OrdinalIgnoreCase)) {
+            throw "-ApkPath skal pege paa en .apk-fil."
+        }
+        Write-Host "  A425f-APK: bruger faerdigbygget $ekstern" -ForegroundColor DarkGray
+        return $ekstern
+    }
     Push-Location (Join-Path $repoRoot "android")
     try {
         & .\gradlew.bat :app:assembleA425f --no-daemon --console=plain
-        if ($LASTEXITCODE -ne 0) { throw "A425f APK build fejlede." }
+        if ($LASTEXITCODE -ne 0) {
+            throw "A425f APK build fejlede. Mangler riggen Android SDK, saa byg " +
+                  "APKen i a425f-apk-workflowet og angiv den med -ApkPath."
+        }
     } finally { Pop-Location }
     $apks = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot "android\app\build\outputs\apk\a425f") -Filter "*.apk" -File -ErrorAction Stop)
     if ($apks.Count -ne 1) { throw "Forventede præcis én A425f APK; fandt $($apks.Count)." }

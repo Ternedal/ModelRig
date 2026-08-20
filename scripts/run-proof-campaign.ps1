@@ -17,7 +17,10 @@ param(
   # saa de tre stderr-defekter i den var latente indtil 19/8. Den er
   # OPT-IN, fordi den kraever A425f-appen parret paa enheden een gang.
   [switch]$IncludeAgent4,
-  [string]$Agent4OutputRoot = ""
+  [string]$Agent4OutputRoot = "",
+  # Faerdigbygget A425f-APK fra a425f-apk-workflowet. Kraeves paa en rig uden
+  # Android SDK, hvor Prepare ellers doer paa gradle.
+  [string]$Agent4ApkPath = ""
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -230,6 +233,13 @@ if ($IncludeAgent4) {
   }
   Write-Host "  Agent 4 LAN-adresse: $a4lan" -ForegroundColor DarkGray
   $a4args = @('-ExpectedSha', $sha, '-OutputRoot', $Agent4OutputRoot, '-LanAddress', $a4lan)
+  if (-not [string]::IsNullOrWhiteSpace($Agent4ApkPath)) {
+    if (-not (Test-Path -LiteralPath $Agent4ApkPath -PathType Leaf)) {
+      throw "Agent4ApkPath findes ikke: $Agent4ApkPath"
+    }
+    $a4args += @('-ApkPath', (Resolve-Path -LiteralPath $Agent4ApkPath).Path)
+    Write-Host "  Agent 4 APK: $Agent4ApkPath" -ForegroundColor DarkGray
+  }
   try {
     Run 'Agent 4 (a4-25f): forbered fixture og stack' {
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File $a4 Prepare @a4args

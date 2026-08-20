@@ -1,0 +1,86 @@
+name: a425f-apk
+
+# A425f-testappen bygget i CI, saa Agent 4 kan koeres uden Android SDK.
+#
+# Agent 4's Prepare bygger tre ting: to Go-binaerer og A425f-APKen. Go-delene
+# klarer riggen fint. Gradle-delen kraever hele Android SDK'et -- platform og
+# build-tools, flere GB -- og det har riggen ikke. 20/8 stoppede Agent 4
+# praecis dér, efter at fem andre forhindringer var ryddet:
+#
+#   SDK location not found ... :app:compileA425fJavaWithJavac
+#
+# Samme moenster som candidate-apk.yml (#644): CI bygger, operatoeren henter.
+# Forskellen er at DENNE app er en testfixture -- den installeres ved siden af
+# den rigtige app via applicationIdSuffix og roerer ikke brugerens data.
+#
+# DEN RELEASER INTET. Intet tag, intet GitHub-release, ingen updater-kaede.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Gren eller SHA der skal bygges (default: den koerende ref)"
+        required: false
+        type: string
+  push:
+    branches:
+      - "physical-proof/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a425f-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install platform + build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build A425f APK
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:assembleA425f --no-daemon --console=plain
+
+      - name: Verify exactly one signed APK
+        working-directory: android
+        run: |
+          set -e
+          DIR=app/build/outputs/apk/a425f
+          COUNT="$(find "$DIR" -maxdepth 1 -name '*.apk' -type f | wc -l)"
+          # Operatoeren kraever PRAECIS eet resultat og kaster ellers. Vi
+          # afviser her i stedet, saa fejlen ikke foerst dukker op paa riggen.
+          [ "$COUNT" = "1" ] || { echo "forventede 1 APK i $DIR, fandt $COUNT"; exit 1; }
+          APK="$(find "$DIR" -maxdepth 1 -name '*.apk' -type f)"
+          BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
+          "$BT/apksigner" verify --print-certs "$APK" >/dev/null \
+            || { echo "APK er ikke gyldigt signeret"; exit 1; }
+          AAPT="$BT/aapt"; [ -x "$AAPT" ] || AAPT="$BT/aapt2"
+          "$AAPT" dump badging "$APK" | grep -q "a425f" \
+            || { echo "APKen baerer ikke a425f-suffikset"; exit 1; }
+          echo "ok: $APK"
+
+      - name: Upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kaliv-a425f-apk-${{ github.sha }}
+          path: android/app/build/outputs/apk/a425f/*.apk
+          if-no-files-found: error
+          retention-days: 14
