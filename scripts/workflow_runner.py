@@ -108,6 +108,24 @@ def run_workflow(
     except Exception as e:  # a transport failure is a real outcome, not a crash
         status = "error"
         error = f"{type(e).__name__}: {e}"
+        # EN UDLOEBET BEKRAEFTELSE ER IKKE EN TRANSPORTFEJL. Bekraeftelsen
+        # lever CONFIRM_TTL_SECONDS = 60s; modellen brugte 20/8 op til 38s pr.
+        # tur. Loeb den forbi, svarede workeren 410, og ALT hvad denne except
+        # fangede blev til det samme "error".
+        #
+        # Konsekvens: W-11 kunne ikke skelne "afvisningen virkede" fra
+        # "kortet naaede at udloebe", og fejlede i alle 22 runder uden at
+        # nogen kunne se hvorfor. Scoringen sagde "status='error', forventet
+        # 'denied'" -- hvilket lyder som en modelfejl og ikke er det.
+        #
+        # Statuskoden ER svaret. Den skal med i transskriptionen.
+        kode = getattr(e, "code", None) or getattr(getattr(e, "response", None), "status", None)
+        if kode:
+            error = f"HTTP {kode}: {error}"
+            if int(kode) == 410:
+                status = "expired"
+            elif int(kode) == 409:
+                status = "already-used"
 
     return {
         "events": events,
