@@ -8,6 +8,8 @@ model. It registers no tool and enables no desktop input.
 """
 from __future__ import annotations
 
+import inspect
+
 import base64
 import hashlib
 import json
@@ -268,6 +270,21 @@ def install_desktop_vision_bridge(main_module: Any) -> bool:
                 status_code=exc.status_code,
                 detail=f"desktop vision stopped safely ({exc.code}): {exc}",
             ) from exc
+        # Send KUN det modtageren kan tage imod. Broen wrapper en funktion vi
+        # ikke ejer signaturen paa: produktionens _run_tool_loop tager on_phase
+        # og context, men testenes stand-in tager kun de otte positionelle.
+        # Videresender vi blindt, flytter TypeError'en bare fra den ene side til
+        # den anden -- det gjorde den 20/8, foerst paa riggen og saa i CI.
+        ekstra: dict[str, Any] = {"on_phase": on_phase, "context": context}
+        ekstra.update(kwargs)
+        try:
+            params = inspect.signature(original).parameters
+        except (TypeError, ValueError):
+            params = None
+        if params is not None and not any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        ):
+            ekstra = {k: v for k, v in ekstra.items() if k in params}
         return await original(
             prepared,
             selected_model,
@@ -277,9 +294,7 @@ def install_desktop_vision_bridge(main_module: Any) -> bool:
             origin,
             sources,
             tools_used,
-            on_phase=on_phase,
-            context=context,
-            **kwargs,
+            **ekstra,
         )
 
     bridged_tool_loop._kaliv_desktop_vision_bridge = True  # type: ignore[attr-defined]
