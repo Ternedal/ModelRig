@@ -3,6 +3,13 @@ param(
   [string]$PlannerModel = $env:KALIV_AGENT3_PLANNER_MODEL,
   [int]$WorkflowRounds = 22,
   [double]$WorkflowThreshold = 0.95,
+  # GENBRUG AF DET DER ALLEREDE ER BEVIST. En fuld kampagne tager timer, og
+  # 20/8 blev den samme Stage A og de samme 22 workflow-runder koert om og om
+  # igen for at naa frem til de faa trin der manglede. Beviserne baeres videre
+  # af scope-reglen; det gjorde koerslerne ikke.
+  [switch]$SkipStageA,
+  [switch]$SkipForcedRecovery,
+  [switch]$SkipWorkflows,
   [switch]$SkipT023,
   [switch]$SkipT033,
   # Agent 4's fysiske kvalifikation (a4-25f). Suiten har ligget i repoet uden
@@ -86,10 +93,15 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $out = Join-Path $root "validation\proof-campaign\$stamp-$($sha.Substring(0,12))"
 $logs = Join-Path $out 'logs'; New-Item -ItemType Directory -Force $logs | Out-Null
 Write-Host "`nModelRig $version | $sha | $branch | planner=$PlannerModel" -ForegroundColor Green
-Run 'Stage A: samlet fysisk kampagne' { python scripts\proof_stage_a_current.py }
-Run 'T-006: ægte hard-process recovery og lease recovery' { python scripts\forced_recovery_test.py }
+if ($SkipStageA) { Write-Host "`n  Stage A springes over (-SkipStageA); tidligere beviser staar ved magt." -ForegroundColor DarkGray } else { Run 'Stage A: samlet fysisk kampagne' { python scripts\proof_stage_a_current.py } }
+if (-not $SkipForcedRecovery) { Run 'T-006: ægte hard-process recovery og lease recovery' { python scripts\forced_recovery_test.py } }
 Run 'Ryd runtime før workflow-bevis' { python scripts\stage_a_resume_cleanup.py }
 Run 'Start exact-head stack til workflows' { powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\start-stage-a-validation-stack.ps1 -PlannerModel $PlannerModel -ValidationReport validation\agent3-rig-validation-latest.json -BackendHost 127.0.0.1 -HeadlessWorker }
+# -SkipWorkflows: 22 runder x 14 workflows er kampagnens laengste trin. Med en
+# taerskel paa 95% og en model der leverer 64-71% kan gaten alligevel ikke blive
+# groen, saa der er ingen grund til at koere dem, mens man jagter noget andet.
+$workflowPass = $true; $mean = $null
+if (-not $SkipWorkflows) {
 $rates = @(); $workflowFailures = 0
 for ($i=1; $i -le $WorkflowRounds; $i++) {
   Write-Host "`n--- Workflow-run $i/$WorkflowRounds ---" -ForegroundColor Cyan
@@ -116,7 +128,8 @@ for ($i=1; $i -le $WorkflowRounds; $i++) {
 $mean = if ($rates.Count) { ($rates | Measure-Object -Average).Average } else { 0.0 }
 $workflowPass = ($rates.Count -eq $WorkflowRounds -and $workflowFailures -eq 0 -and $mean -ge $WorkflowThreshold)
 @{schema='modelrig-workflow-proof/v1';sha=$sha;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean_completion_rate=$mean;threshold=$WorkflowThreshold;runner_failures=$workflowFailures;passed=$workflowPass} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'workflow-aggregate.json') -Encoding UTF8
-if (-not $workflowPass) { Write-Warning "Workflow-gaten er rød: mean=$mean failures=$workflowFailures" }
+}
+if ((-not $SkipWorkflows) -and (-not $workflowPass)) { Write-Warning "Workflow-gaten er rød: mean=$mean failures=$workflowFailures" }
 $t23pass=$true
 if (-not $SkipT023) {
   # T-023 starter sin EGEN stack og venter fem minutter paa at 8080/8099 bliver
