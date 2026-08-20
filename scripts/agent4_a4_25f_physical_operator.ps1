@@ -132,7 +132,14 @@ function New-EphemeralAdminKey {
 function Test-PrivateIPv4 {
     param([Parameter(Mandatory = $true)][string]$Address)
     $ip = $null
-    if (-not [Net.IPAddress]::TryParse($Address, [ref]$ip) -or $null -eq $ip -or $null -eq $ip.To4()) { return $false }
+    # .To4() findes IKKE i .NET -- det er en Java-metode. Windows PowerShell
+    # kaster derfor "does not contain a method named 'To4'", og A4-25f kunne
+    # aldrig komme forbi Prepare. Fejlen var latent, fordi ingen havde koert
+    # suiten foer 20/8.
+    #
+    # Det rigtige spoergsmaal er adressefamilien.
+    if (-not [Net.IPAddress]::TryParse($Address, [ref]$ip) -or $null -eq $ip) { return $false }
+    if ($ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $false }
     $b = $ip.GetAddressBytes()
     return ($b[0] -eq 10) -or ($b[0] -eq 192 -and $b[1] -eq 168) -or ($b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31)
 }
