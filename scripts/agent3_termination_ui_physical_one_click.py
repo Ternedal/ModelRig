@@ -232,6 +232,17 @@ def ensure_stack_and_readiness(token: str) -> None:
                 BASE_URL,
                 "-PlannerModel",
                 planner,
+                # UDEN DENNE BLOKERER T-023 SIG SELV. Valideringen regenererer
+                # ACTIVATION_READINESS.md i trin 3/3, og pilot-evidensen kraever
+                # umiddelbart efter et RENT arbejdstrae -- saa wizarden
+                # snavsede sit eget trae til og faldt over det, hver eneste
+                # gang. 20/8 kostede det flere fulde koersler, og en manuel
+                # "git checkout ACTIVATION_READINESS.md" foer start hjalp ikke,
+                # fordi regenereringen sker INDE i koerslen.
+                #
+                # stage_a_one_click.py sender allerede flaget; denne wizard
+                # havde bare aldrig faaet det.
+                "-SkipReadinessRegeneration",
             ]
         )
         stage.run(
