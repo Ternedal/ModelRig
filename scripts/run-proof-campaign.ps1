@@ -10,7 +10,7 @@ param(
   # saa de tre stderr-defekter i den var latente indtil 19/8. Den er
   # OPT-IN, fordi den kraever A425f-appen parret paa enheden een gang.
   [switch]$IncludeAgent4,
-  [string]$Agent4OutputRoot = "$env:USERPROFILE\modelrig-a4-25f-evidence"
+  [string]$Agent4OutputRoot = ""
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -119,6 +119,36 @@ $workflowPass = ($rates.Count -eq $WorkflowRounds -and $workflowFailures -eq 0 -
 if (-not $workflowPass) { Write-Warning "Workflow-gaten er rød: mean=$mean failures=$workflowFailures" }
 $t23pass=$true
 if (-not $SkipT023) {
+  # T-023 starter sin EGEN stack og venter fem minutter paa at 8080/8099 bliver
+  # fri. Workflow-trinnet lige foer har startet en stack paa netop dem, og
+  # wizarden lukker kun processer under sin egen runtime-mappe -- vores hoerer
+  # ikke til der. 20/8 gav det "Port 8080 blev ikke frigivet inden for fem
+  # minutter" EFTER 22 gennemfoerte workflow-runder.
+  #
+  # Vi lukker derfor det VI selv startede, og kun det: kun processer hvis
+  # eksekverbare ligger i repoet eller er den python der koerer worker'en.
+  Run 'Frigiv 8080/8099 efter workflow-stakken' {
+    $repoPrefix = (Resolve-Path '.').Path.TrimEnd('\') + '\'
+    foreach ($port in 8080, 8099) {
+      $pids = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+                Select-Object -Expand OwningProcess -Unique)
+      foreach ($processId in $pids) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+        if ($null -eq $proc) { continue }
+        $sti = [string]$proc.ExecutablePath
+        $kommando = [string]$proc.CommandLine
+        $vores = $sti.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+                 $kommando -match 'app\.main|uvicorn|modelrig-server'
+        if ($vores) {
+          Write-Host "  lukker vores egen proces $processId paa $port" -ForegroundColor DarkGray
+          Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        } else {
+          Write-Host "  LADER proces $processId paa $port staa (ikke vores: $sti)" -ForegroundColor Yellow
+        }
+      }
+    }
+    Start-Sleep -Seconds 3
+  }
   Run 'Cleanup før T-023' { python scripts\stage_a_resume_cleanup.py }
   & python scripts\proof_t023_current.py
   $t23pass = ($LASTEXITCODE -eq 0)
@@ -153,6 +183,21 @@ if ($IncludeAgent4) {
   # snapshot-stadierne og haevder invarianterne i kode. Det eneste manuelle er
   # eengangs-parringen af A425f-appen mellem Prepare og DeviceInfo.
   $a4 = 'scripts\agent4_a4_25f_physical_operator.ps1'
+  # Roden skal vaere ABSOLUT og ligge UDEN FOR repoet -- operatoeren afviser
+  # begge dele. En param-default med $env:USERPROFILE ekspanderer ikke
+  # paalideligt naar launcheren kalder scriptet, og en TOM streng naaede helt
+  # ind til [IO.Path]::GetFullPath(""), som kastede "Den angivne stis format
+  # understoettes ikke" -- efter hele kampagnen var koert. Derfor udledes den
+  # her, hvor $env garanteret er sat.
+  if ([string]::IsNullOrWhiteSpace($Agent4OutputRoot)) {
+    $base = if ($env:USERPROFILE) { $env:USERPROFILE }
+            elseif ($env:HOMEDRIVE -and $env:HOMEPATH) { Join-Path $env:HOMEDRIVE $env:HOMEPATH }
+            else { [Environment]::GetFolderPath('UserProfile') }
+    $Agent4OutputRoot = Join-Path $base 'modelrig-a4-25f-evidence'
+  }
+  $Agent4OutputRoot = [IO.Path]::GetFullPath($Agent4OutputRoot)
+  New-Item -ItemType Directory -Force -Path $Agent4OutputRoot | Out-Null
+  Write-Host "  Agent 4-evidens: $Agent4OutputRoot" -ForegroundColor DarkGray
   $a4args = @('-ExpectedSha', $sha, '-OutputRoot', $Agent4OutputRoot)
   try {
     Run 'Agent 4 (a4-25f): forbered fixture og stack' {
