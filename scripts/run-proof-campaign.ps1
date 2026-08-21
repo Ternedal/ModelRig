@@ -126,6 +126,19 @@ function Record-Gate([string]$Name) {
   return Invoke-GateReceipt 'record' $Name $true
 }
 
+# BEGIN WORKFLOW TRANSCRIPT COUNT FUNCTION
+function Get-WorkflowTranscriptCount([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return 0 }
+  try {
+    $doc = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($null -eq $doc -or $doc -isnot [pscustomobject]) { return 0 }
+    return @($doc.PSObject.Properties).Count
+  } catch {
+    return 0
+  }
+}
+# END WORKFLOW TRANSCRIPT COUNT FUNCTION
+
 # git.exe opløses eksplicit som Application, så Git()-funktionen ikke kalder sig selv.
 $script:GitExe = (Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
                   Select-Object -First 1).Source
@@ -242,6 +255,8 @@ $mean = $null
 $workflowRoundsMeasured = $null
 $workflowExecutions = $null
 $workflowFailures = $null
+$workflowSpecCount = $null
+$expectedWorkflowExecutions = $null
 if ($SkipWorkflows) {
   $reuse = Try-ReuseGate 'workflows'
   if ($reuse) {
@@ -252,6 +267,12 @@ if ($SkipWorkflows) {
     $workflowExecutions = [int]$wj.executions
     $workflowFailures = [int]$wj.runner_failures
     $mean = [double]$wj.mean_completion_rate
+    if ($wj.PSObject.Properties.Name -contains 'workflows_per_round') {
+      $workflowSpecCount = [int]$wj.workflows_per_round
+    }
+    if ($wj.PSObject.Properties.Name -contains 'expected_executions') {
+      $expectedWorkflowExecutions = [int]$wj.expected_executions
+    }
     $workflowGate.reused = $true
     $workflowGate.evidence = $reuse.receipt
     $workflowGate.taken_on_sha = $reuse.taken_on_sha
@@ -261,12 +282,18 @@ if ($SkipWorkflows) {
   Remove-GateReceipt 'workflows'
   $workflowLatest = 'validation\workflow-proof-latest.json'
   if (Test-Path -LiteralPath $workflowLatest) { Remove-Item -LiteralPath $workflowLatest -Force }
-  $rates = @(); $workflowFailures = 0
+  $workflowSpecDoc = Get-Content 'eval\workflows_v1.json' -Raw | ConvertFrom-Json
+  $workflowSpecCount = @($workflowSpecDoc.workflows).Count
+  if ($workflowSpecCount -le 0) { throw 'Workflow-specen indeholder ingen workflows.' }
+  $rates = @(); $workflowFailures = 0; $workflowExecutions = 0
   for ($i=1; $i -le $WorkflowRounds; $i++) {
     Write-Host "`n--- Workflow-run $i/$WorkflowRounds ---" -ForegroundColor Cyan
+    $src='validation\workflow-baseline-latest.json'; $raw='validation\workflow-run-latest.json'
+    foreach ($fresh in @($src, $raw)) {
+      if (Test-Path -LiteralPath $fresh) { Remove-Item -LiteralPath $fresh -Force }
+    }
     & python scripts\workflow_baseline_one_click.py --model $PlannerModel
     if ($LASTEXITCODE -ne 0) { $workflowFailures++ }
-    $src='validation\workflow-baseline-latest.json'; $raw='validation\workflow-run-latest.json'
     if (Test-Path $src) {
       Copy-Item $src (Join-Path $out ("workflow-baseline-{0:D2}.json" -f $i)) -Force
       $j=Get-Content $src -Raw | ConvertFrom-Json
@@ -277,17 +304,27 @@ if ($SkipWorkflows) {
               ($j.summary.PSObject.Properties.Name -contains 'completion_rate')) { $cr = $j.summary.completion_rate }
       if ($null -ne $cr) { $rates += [double]$cr }
     }
-    if (Test-Path $raw) { Copy-Item $raw (Join-Path $out ("workflow-run-{0:D2}.json" -f $i)) -Force }
+    if (Test-Path $raw) {
+      Copy-Item $raw (Join-Path $out ("workflow-run-{0:D2}.json" -f $i)) -Force
+      $roundExecutions = Get-WorkflowTranscriptCount $raw
+      $workflowExecutions += $roundExecutions
+    }
   }
   $mean = if ($rates.Count) { ($rates | Measure-Object -Average).Average } else { 0.0 }
   $workflowRoundsMeasured = $rates.Count
-  $workflowExecutions = $WorkflowRounds * 14
-  $workflowPass = ($rates.Count -eq $WorkflowRounds -and $workflowFailures -eq 0 -and $mean -ge $WorkflowThreshold)
+  $expectedWorkflowExecutions = $WorkflowRounds * $workflowSpecCount
+  $workflowPass = ($rates.Count -eq $WorkflowRounds -and
+                   $workflowFailures -eq 0 -and
+                   $workflowExecutions -eq $expectedWorkflowExecutions -and
+                   $mean -ge $WorkflowThreshold)
   $workflowReport = [ordered]@{
     schema='modelrig-workflow-proof/v1'
     sha=$sha
     planner_model=$PlannerModel
-    rounds=$WorkflowRounds
+    requested_rounds=$WorkflowRounds
+    rounds=$workflowRoundsMeasured
+    workflows_per_round=$workflowSpecCount
+    expected_executions=$expectedWorkflowExecutions
     executions=$workflowExecutions
     mean_completion_rate=$mean
     threshold=$WorkflowThreshold
@@ -304,7 +341,7 @@ if ($SkipWorkflows) {
     $workflowGate.evidence = Get-GateReceiptPath 'workflows'
     $workflowGate.passed = $true
   } else {
-    Write-Warning "Workflow-gaten er rød: mean=$mean failures=$workflowFailures"
+    Write-Warning "Workflow-gaten er rød: rounds=$workflowRoundsMeasured executions=$workflowExecutions/$expectedWorkflowExecutions mean=$mean failures=$workflowFailures"
   }
 }
 
@@ -502,6 +539,8 @@ $summary=[ordered]@{
     passed=$workflowGate.passed
     requested_rounds=$WorkflowRounds
     rounds=$workflowRoundsMeasured
+    workflows_per_round=$workflowSpecCount
+    expected_executions=$expectedWorkflowExecutions
     executions=$workflowExecutions
     mean=$mean
     threshold=$WorkflowThreshold
@@ -527,7 +566,7 @@ Write-Host "`n==================================================================
 Write-Host "  RESULTAT: $(if($passed){'PASS'}else{'IKKE FULDT BEVIST ENDNU'})" -ForegroundColor $(if($passed){'Green'}else{'Yellow'})
 Write-Host "  Evidence: $out"
 if ($null -ne $workflowExecutions) {
-  Write-Host "  Workflow: $workflowExecutions executioner, mean=$mean"
+  Write-Host "  Workflow: $workflowExecutions målte executioner, mean=$mean"
 } else {
   Write-Host "  Workflow: ikke udført og intet gyldigt reusable receipt" -ForegroundColor Yellow
 }
