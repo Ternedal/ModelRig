@@ -113,8 +113,9 @@ for unsafe in (
     "$t33pass=$true",
     "stage_a=$true",
     "forced_recovery=$true",
+    "$workflowExecutions = $WorkflowRounds * 14",
 ):
-    check(unsafe not in source, f"optimistic legacy default is absent: {unsafe}")
+    check(unsafe not in source, f"optimistic/synthetic legacy default is absent: {unsafe}")
 
 check("schema='modelrig-proof-day/v2'" in source, "summary schema was bumped for structured gate records")
 check("[string]$Agent4LanAddress = \"\"" in source, "Agent4LanAddress is a real operator parameter")
@@ -125,6 +126,15 @@ check(
     "passed = $false" in source[source.index("function New-ProofGate"):source.index("# BEGIN PROOF VERDICT FUNCTION")],
     "new gates start red",
 )
+for marker, message in (
+    ("$workflowSpecCount = @($workflowSpecDoc.workflows).Count", "workflow expectation comes from the current spec"),
+    ("$roundExecutions = Get-WorkflowTranscriptCount $raw", "each round counts the actual transcript"),
+    ("$workflowExecutions += $roundExecutions", "measured transcript counts are accumulated"),
+    ("$workflowExecutions -eq $expectedWorkflowExecutions", "workflow PASS requires measured executions to match expectation"),
+    ("rounds=$workflowRoundsMeasured", "workflow report records measured rounds"),
+    ("foreach ($fresh in @($src, $raw))", "stale per-round evidence is removed before execution"),
+):
+    check(marker in source, message)
 
 print("\nactual PowerShell verdict over all 32 skip subsets:")
 match = re.search(
@@ -163,6 +173,47 @@ if match is not None:
             len(mutant_observed) == 32 and all(mutant_observed.get(mask) == 1 for mask in range(32)),
             f"verdict harness exposes an always-true mutation under {label}",
         )
+
+print("\nmeasured workflow transcript count:")
+count_match = re.search(
+    r"# BEGIN WORKFLOW TRANSCRIPT COUNT FUNCTION\s*(function Get-WorkflowTranscriptCount[\s\S]*?)\s*# END WORKFLOW TRANSCRIPT COUNT FUNCTION",
+    source,
+)
+check(count_match is not None, "production transcript counter can be extracted")
+if count_match is not None:
+    count_function = count_match.group(1)
+    engines = powershell_engines()
+    check(bool(engines), "PowerShell is available for transcript-count execution")
+    with tempfile.TemporaryDirectory(prefix="modelrig-workflow-count-test-") as td:
+        tmp = Path(td)
+        valid = tmp / "valid.json"
+        malformed = tmp / "malformed.json"
+        missing = tmp / "missing.json"
+        valid.write_text(json.dumps({"W-01": {}, "W-02": {}, "W-03": {}}), encoding="utf-8")
+        malformed.write_text("{not-json", encoding="utf-8")
+
+        def ps_quote(path: Path) -> str:
+            return "'" + str(path).replace("'", "''") + "'"
+
+        for shell in engines:
+            label = Path(shell).name
+            probe = count_function + "\n" + "\n".join(
+                [
+                    f"Write-Output ('valid:' + (Get-WorkflowTranscriptCount {ps_quote(valid)}))",
+                    f"Write-Output ('malformed:' + (Get-WorkflowTranscriptCount {ps_quote(malformed)}))",
+                    f"Write-Output ('missing:' + (Get-WorkflowTranscriptCount {ps_quote(missing)}))",
+                ]
+            )
+            result = run(shell, "-NoProfile", "-Command", probe)
+            observed: dict[str, int] = {}
+            for line in result.stdout.splitlines():
+                m = re.fullmatch(r"(valid|malformed|missing):(\d+)", line.strip())
+                if m:
+                    observed[m.group(1)] = int(m.group(2))
+            check(result.returncode == 0, f"transcript counter executes under {label}")
+            check(observed.get("valid") == 3, f"{label} counts actual transcript keys")
+            check(observed.get("malformed") == 0, f"{label} fails closed on malformed transcript JSON")
+            check(observed.get("missing") == 0, f"{label} fails closed on missing transcript JSON")
 
 print("\nreceipt behaviour against real Git history:")
 M = load_receipt_module()
