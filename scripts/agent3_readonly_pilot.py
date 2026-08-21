@@ -25,7 +25,9 @@ import math
 import importlib.util
 import os
 import platform
+import re as _re
 import socket
+import sys
 import statistics
 import subprocess
 import tempfile
@@ -100,6 +102,7 @@ class Client:
     base_url: str
     token: str
     timeout: float = 300.0
+    transient_retries: int = 0
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None=None) -> urllib.response.addinfourl:
         body = None if payload is None else json.dumps(payload).encode('utf-8')
@@ -119,6 +122,41 @@ class Client:
             raise PilotError(f'cannot reach {self.base_url}: {exc.reason}') from exc
 
     def request(self, method: str, path: str, payload: dict[str, Any] | None=None) -> dict[str, Any]:
+        # EEN TRANSIENT HTTP-FEJL MAA IKKE FAELDE 20/20-GATEN. Uden retry blev
+        # et enkelt 503 fra Ollama under modelskift til 'transport'-fejl paa
+        # een opgave -- og kravet er alt-eller-intet, saa hele T-023 faldt.
+        # 20/8 svingede piloten 16-19/20 paa en rig hvor qwen3:14b beviseligt
+        # blev evicted midt i koersler. Det er infrastruktur, ikke modellen.
+        #
+        # Retryen er BEVIDST snaever, saa gaten ikke bliver falsk groen:
+        #  - kun EET ekstra forsoeg, kun ved 5xx eller manglende forbindelse;
+        #  - kun GET (polls) og POST .../plan (preview -- at danne et nyt
+        #    preview er harmloest). ALDRIG start/cancel: et 5xx paa start er
+        #    tvetydigt, og et gentaget start kunne dobbeltstarte et run;
+        #  - kontraktbrud (4xx, plan mismatch, receipts) retryes ALDRIG --
+        #    det ER systemet under proeve.
+        # Hvert retry taelles i rapporten, saa stoejen kan ses.
+        forsoeg = 0
+        while True:
+            forsoeg += 1
+            try:
+                return self._request_json(method, path, payload)
+            except PilotError as exc:
+                besked = str(exc)
+                transient = ('cannot reach' in besked
+                             or _re.search(r'returned HTTP 5\d\d', besked) is not None)
+                maa_retry = (method == 'GET'
+                             or (method == 'POST' and path.endswith('/plan')))
+                if forsoeg == 1 and transient and maa_retry:
+                    # Requester er frozen=True; almindelig tildeling kaster.
+                    object.__setattr__(self, 'transient_retries', self.transient_retries + 1)
+                    print(f"  transient {method} {path}: {besked[:80]} -- proever een gang til",
+                          file=sys.stderr)
+                    time.sleep(0.75)
+                    continue
+                raise
+
+    def _request_json(self, method: str, path: str, payload: dict[str, Any] | None=None) -> dict[str, Any]:
         with self._request(method, path, payload) as response:
             raw = response.read(MAX_HTTP_BYTES + 1)
         if len(raw) > MAX_HTTP_BYTES:
@@ -463,7 +501,12 @@ def _error_type(message: str) -> str:
 
 def _failure_result(task: dict[str, Any], exc: PilotError) -> dict[str, Any]:
     message = str(exc)
-    return {'task_id': task['id'], 'category': task['category'], 'success': False, 'prompt_sha256': hashlib.sha256(task['prompt'].encode('utf-8')).hexdigest(), 'error_type': _error_type(message), 'error_sha256': hashlib.sha256(message.encode('utf-8')).hexdigest()}
+    # Rapporten gemmer kun sha256 af beskeden (bevidst), men HTTP-koden er
+    # ikke foelsom -- og uden den kunne man 20/8 ikke se OM en fejlet opgave
+    # faldt paa 500, 503 eller noget helt tredje. Koden alene aendrer
+    # fejlsoegning fra gaetteri til aflaesning.
+    _m = _re.search(r'returned HTTP (\d{3})', message)
+    return {'task_id': task['id'], 'category': task['category'], 'success': False, 'prompt_sha256': hashlib.sha256(task['prompt'].encode('utf-8')).hexdigest(), 'error_type': _error_type(message), 'http_status': int(_m.group(1)) if _m else None, 'error_sha256': hashlib.sha256(message.encode('utf-8')).hexdigest()}
 
 def _percentile(values: list[float], percentile: float) -> float | None:
     if not values:
@@ -534,7 +577,7 @@ def run_pilot(client: Requester, task_set: dict[str, Any], *, planner_model: str
         message = str(exc)
         stop_fallback = {'success': False, 'error_type': _error_type(message), 'error_sha256': hashlib.sha256(message.encode('utf-8')).hexdigest()}
     summary = summarize(results)
-    report = {'schema': SCHEMA, 'started_at': started_at.isoformat(), 'finished_at': datetime.now(timezone.utc).isoformat(), 'success': summary['tasks'] == 20 and summary['successes'] == 20 and (stop_fallback['success'] is True), 'host': {'hostname': socket.gethostname(), 'platform': platform.platform(), 'python': platform.python_version()}, 'candidate': source, 'target': {'base_url': getattr(client, 'base_url', None), 'planner_model': planner_model, 'answer_model': answer_model, 'fallback_model': fallback_model, 'execution_mode': 'experimental-read-only', 'production_activation': False}, 'backend': {'worker_version': status.get('worker_version'), 'code_sha256': status.get('code_sha256'), 'rig_validation': status.get('rig_validation'), 'planner': status.get('planner'), 'replanner': status.get('replanner'), 'read_review': status.get('read_review'), 'production_tools_path_untouched': status.get('production_tools_path_untouched'), 'production_activation': status.get('production_activation')}, 'task_set': {'schema': task_set['schema'], 'name': task_set['name'], 'version': task_set['version'], 'task_count': len(task_set['tasks']), 'sha256': _sha256_json(task_set)}, 'summary': summary, 'stop_fallback': stop_fallback, 'results': results}
+    report = {'schema': SCHEMA, 'started_at': started_at.isoformat(), 'finished_at': datetime.now(timezone.utc).isoformat(), 'success': summary['tasks'] == 20 and summary['successes'] == 20 and (stop_fallback['success'] is True), 'host': {'hostname': socket.gethostname(), 'platform': platform.platform(), 'python': platform.python_version()}, 'candidate': source, 'target': {'base_url': getattr(client, 'base_url', None), 'planner_model': planner_model, 'answer_model': answer_model, 'fallback_model': fallback_model, 'execution_mode': 'experimental-read-only', 'production_activation': False}, 'backend': {'worker_version': status.get('worker_version'), 'code_sha256': status.get('code_sha256'), 'rig_validation': status.get('rig_validation'), 'planner': status.get('planner'), 'replanner': status.get('replanner'), 'read_review': status.get('read_review'), 'production_tools_path_untouched': status.get('production_tools_path_untouched'), 'production_activation': status.get('production_activation')}, 'task_set': {'schema': task_set['schema'], 'name': task_set['name'], 'version': task_set['version'], 'task_count': len(task_set['tasks']), 'sha256': _sha256_json(task_set)}, 'summary': summary, 'transient_retries': getattr(client, 'transient_retries', 0), 'stop_fallback': stop_fallback, 'results': results}
     return report
 
 def _print_summary(report: dict[str, Any]) -> None:
