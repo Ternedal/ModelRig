@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
+import inspect
 import json
 import os
 import sys
@@ -15,6 +17,7 @@ sys.path.insert(0, str(ROOT / "worker"))
 
 from fastapi import HTTPException  # noqa: E402
 from app import desktop_vision_bridge as V  # noqa: E402
+from app import main_impl as MAIN_IMPL  # noqa: E402
 
 passed = failed = 0
 
@@ -241,6 +244,68 @@ check(out["answer"] == "visible window described", "wrapped loop preserves the o
 check(captured["model"] == "qwen2.5vl:7b", "wrapped loop invokes the local vision model")
 check(captured["messages"][-1].get("images") == [encoded], "wrapped loop passes the image structurally")
 check(captured["base_url"] is None and captured["key"] is None, "wrapped loop never adds a cloud destination")
+
+print("\nproduction signature contract:")
+production_captured = {}
+
+
+@functools.wraps(MAIN_IMPL._run_tool_loop)
+async def production_probe(*args, **kwargs):
+    production_captured["args"] = args
+    production_captured["kwargs"] = kwargs
+    return {"status": "answered", "answer": "production-shaped bridge call"}
+
+
+production_module = SimpleNamespace(_run_tool_loop=production_probe, HTTPException=HTTPException)
+check(V.install_desktop_vision_bridge(production_module) is True, "bridge installs around the real production call contract")
+production_signature = inspect.signature(MAIN_IMPL._run_tool_loop)
+bridge_signature = inspect.signature(production_module._run_tool_loop)
+production_params = production_signature.parameters
+bridge_params = bridge_signature.parameters
+bridge_has_kwargs = any(
+    parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in bridge_params.values()
+)
+missing_from_bridge = [
+    name for name in production_params if name not in bridge_params and not bridge_has_kwargs
+]
+check(not missing_from_bridge, f"bridge accepts every production tool-loop parameter: missing={missing_from_bridge}")
+production_has_kwargs = any(
+    parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in production_params.values()
+)
+required_forwarded = {"on_phase", "context"}
+check(
+    required_forwarded.issubset(production_params) or production_has_kwargs,
+    "production tool-loop still declares the phase/context contract that callers rely on",
+)
+phase_marker = object()
+context_marker = [{"role": "system", "content": "signature-contract"}]
+try:
+    production_out = asyncio.run(
+        production_module._run_tool_loop(
+            messages,
+            "text-only:7b",
+            None,
+            None,
+            "conv-production",
+            "local",
+            [],
+            ["desktop_screenshot"],
+            on_phase=phase_marker,
+            context=context_marker,
+        )
+    )
+except TypeError as exc:
+    check(False, f"production-shaped bridge call accepts current keyword arguments: {exc}")
+else:
+    check(production_out["answer"] == "production-shaped bridge call", "production-shaped bridge call completes")
+    check(
+        production_captured.get("kwargs", {}).get("on_phase") is phase_marker,
+        "bridge forwards production on_phase instead of silently dropping it",
+    )
+    check(
+        production_captured.get("kwargs", {}).get("context") is context_marker,
+        "bridge forwards production context instead of silently dropping it",
+    )
 
 try:
     asyncio.run(
