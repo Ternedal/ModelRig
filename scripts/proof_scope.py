@@ -52,6 +52,17 @@ _FAELLES = (
     "backend/cmd",
 )
 
+# Kampagne-gates er med vilje bredere end de enkelte baselines. De er
+# sammensatte releasebeviser, og deres reuse er kun en tidsoptimering. Et scope
+# der er lidt for bredt koster en genkoersel; et scope der er for smalt kan
+# fremstille en falsk groen kampagne. Harness-filerne er derfor med her, fordi
+# en aendret maaler ogsaa aendrer hvad receiptet betyder.
+_CAMPAIGN_RUNTIME = (
+    "worker/app",
+    "backend/internal",
+    "backend/cmd",
+)
+
 PROOF_SCOPES: dict[str, tuple[str, ...]] = {
     # Rig-parathed: hele kæden, fordi den måler den.
     "preflight": _FAELLES,
@@ -74,6 +85,42 @@ PROOF_SCOPES: dict[str, tuple[str, ...]] = {
     "rag": _FAELLES + ("worker/app/rag_pdf.py", "worker/app/rag_docx.py",
                        "worker/app/rag_pptx.py", "worker/app/rag_html.py"),
     "scheduler_pilot": _FAELLES + ("worker/app/agent3",),
+
+    # run-proof-campaign.ps1 gate-reuse.  Disse fem navne er de navne receipt-
+    # adapteren bruger; ukendt navn giver None og maa aldrig tolkes som reuse.
+    "stage_a": _CAMPAIGN_RUNTIME + (
+        "android/app/src",
+        "scripts/proof_stage_a_current.py",
+        "scripts/stage_a_one_click.py",
+        "scripts/stage_a_one_click.retained",
+        "scripts/run-stage-a-physical-validation.ps1",
+        "scripts/physical_validation_candidate_campaign.py",
+        "scripts/physical_validation_candidate_gate.py",
+    ),
+    "forced_recovery": _FAELLES + (
+        "worker/app/jobs.py",
+        "worker/app/scheduler.py",
+        "worker/app/schedule_runner.py",
+        "worker/app/tools.py",
+        "scripts/forced_recovery_test.py",
+    ),
+    "workflows": _CAMPAIGN_RUNTIME + (
+        "eval",
+        "scripts/workflow_baseline_one_click.py",
+        "scripts/run-proof-campaign.ps1",
+    ),
+    "t023": _CAMPAIGN_RUNTIME + (
+        "android/app/src",
+        "scripts/proof_t023_current.py",
+        "scripts/agent3_termination_ui_physical_one_click.py",
+        "scripts/agent3_termination_ui_physical_report.py",
+        "scripts/agent3_termination_ui_physical_gate.py",
+    ),
+    "t033": _CAMPAIGN_RUNTIME + (
+        "scripts/proof_t033_current.py",
+        "scripts/agent3_memory_protected_backup_physical.py",
+        "scripts/agent3_memory_protected_backup_physical_gate.py",
+    ),
 }
 
 

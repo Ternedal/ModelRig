@@ -3,30 +3,24 @@ param(
   [string]$PlannerModel = $env:KALIV_AGENT3_PLANNER_MODEL,
   [int]$WorkflowRounds = 22,
   [double]$WorkflowThreshold = 0.95,
-  # GENBRUG AF DET DER ALLEREDE ER BEVIST. En fuld kampagne tager timer, og
-  # 20/8 blev den samme Stage A og de samme 22 workflow-runder koert om og om
-  # igen for at naa frem til de faa trin der manglede. Beviserne baeres videre
-  # af scope-reglen; det gjorde koerslerne ikke.
+  # Skip betyder KUN "forsøg at genbruge et valideret receipt". Et manglende,
+  # stale eller scope-ændret receipt efterlader gaten rød; skip er aldrig PASS.
   [switch]$SkipStageA,
   [switch]$SkipForcedRecovery,
   [switch]$SkipWorkflows,
   [switch]$SkipT023,
   [switch]$SkipT033,
-  # Agent 4's fysiske kvalifikation (a4-25f). Suiten har ligget i repoet uden
-  # at vaere koblet paa noget: kampagnen kaldte ikke eet eneste agent4-script,
-  # saa de tre stderr-defekter i den var latente indtil 19/8. Den er
-  # OPT-IN, fordi den kraever A425f-appen parret paa enheden een gang.
   [switch]$IncludeAgent4,
   [string]$Agent4OutputRoot = "",
-  # Faerdigbygget A425f-APK fra a425f-apk-workflowet. Kraeves paa en rig uden
-  # Android SDK, hvor Prepare ellers doer paa gradle.
-  [string]$Agent4ApkPath = ""
+  [string]$Agent4ApkPath = "",
+  [string]$Agent4LanAddress = ""
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
 $env:PYTHONDONTWRITEBYTECODE = '1'
+
 function Run([string]$Label, [scriptblock]$Action) {
   Write-Host "`n============================================================================" -ForegroundColor Cyan
   Write-Host "  $Label" -ForegroundColor Cyan
@@ -34,18 +28,108 @@ function Run([string]$Label, [scriptblock]$Action) {
   & $Action
   if ($LASTEXITCODE -ne 0) { throw "$Label fejlede med exitkode $LASTEXITCODE" }
 }
-# git.exe opløses EKSPLICIT som Application. PowerShell opløser funktioner FØR
-# eksterne programmer, saa "& git" inde i en funktion ved navn Git kalder sig
-# selv -> CallDepthOverflow paa foerste kald. Launcheren koerer med -NoProfile,
-# saa en brugerdefineret git-alias redder den ikke. Reproduceret 18/8.
+
+function New-ProofGate([string]$Name) {
+  return @{
+    name = $Name
+    executed = $false
+    reused = $false
+    evidence = $null
+    taken_on_sha = $null
+    passed = $false
+  }
+}
+
+# BEGIN PROOF VERDICT FUNCTION
+function Get-ProofCampaignPassed(
+  [hashtable]$StageA,
+  [hashtable]$ForcedRecovery,
+  [hashtable]$Workflow,
+  [hashtable]$T023,
+  [hashtable]$T033
+) {
+  return [bool]($StageA.passed -and $ForcedRecovery.passed -and
+                $Workflow.passed -and $T023.passed -and $T033.passed)
+}
+# END PROOF VERDICT FUNCTION
+
+$script:GateReceiptPaths = @{
+  stage_a = 'validation\proof-gates\stage-a-latest.json'
+  forced_recovery = 'validation\proof-gates\forced-recovery-latest.json'
+  workflows = 'validation\proof-gates\workflows-latest.json'
+  t023 = 'validation\proof-gates\t023-latest.json'
+  t033 = 'validation\proof-gates\t033-latest.json'
+}
+
+function Get-GateReceiptPath([string]$Name) {
+  if (-not $script:GateReceiptPaths.ContainsKey($Name)) { throw "Ukendt proof-gate: $Name" }
+  return [string]$script:GateReceiptPaths[$Name]
+}
+
+function Remove-GateReceipt([string]$Name) {
+  $path = Get-GateReceiptPath $Name
+  if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+}
+
+function Get-GateReceiptArgs([string]$Action, [string]$Name) {
+  $args = @('scripts\proof_campaign_gate_receipt.py', $Action, '--gate', $Name)
+  if ($Action -eq 'record') {
+    $args += @('--sha', $sha, '--version', $version)
+  } else {
+    $args += @('--head-sha', $sha)
+  }
+  if ($Name -eq 'stage_a') {
+    $args += @('--planner-model', $PlannerModel)
+  } elseif ($Name -eq 'workflows') {
+    $args += @('--planner-model', $PlannerModel,
+               '--workflow-rounds', [string]$WorkflowRounds,
+               '--workflow-threshold', [string]$WorkflowThreshold)
+  }
+  return $args
+}
+
+function Invoke-GateReceipt([string]$Action, [string]$Name, [bool]$Required) {
+  $args = Get-GateReceiptArgs $Action $Name
+  $raw = & python @args
+  $code = $LASTEXITCODE
+  $text = ($raw | ForEach-Object { [string]$_ }) -join "`n"
+  $parsed = $null
+  if (-not [string]::IsNullOrWhiteSpace($text)) {
+    try { $parsed = $text | ConvertFrom-Json }
+    catch { if ($Required) { throw "Gate-receipt $Action/$Name returnerede ugyldig JSON: $text" } }
+  }
+  if ($code -ne 0) {
+    if ($Required) {
+      $detail = if ($parsed -and $parsed.PSObject.Properties.Name -contains 'detail') { $parsed.detail } else { $text }
+      throw "Gate-receipt $Action/$Name fejlede: $detail"
+    }
+    return $null
+  }
+  if ($null -eq $parsed -or $parsed.passed -ne $true) {
+    if ($Required) { throw "Gate-receipt $Action/$Name gav ikke PASS." }
+    return $null
+  }
+  return $parsed
+}
+
+function Try-ReuseGate([string]$Name) {
+  $receipt = Invoke-GateReceipt 'validate' $Name $false
+  if ($null -eq $receipt) {
+    Write-Warning "$Name blev bedt sprunget over, men intet gyldigt reusable receipt findes. Gaten forbliver rød."
+    return $null
+  }
+  Write-Host "  genbruger $Name fra $($receipt.taken_on_sha) via $($receipt.receipt)" -ForegroundColor DarkGray
+  return $receipt
+}
+
+function Record-Gate([string]$Name) {
+  return Invoke-GateReceipt 'record' $Name $true
+}
+
+# git.exe opløses eksplicit som Application, så Git()-funktionen ikke kalder sig selv.
 $script:GitExe = (Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
                   Select-Object -First 1).Source
 if (-not $script:GitExe) { throw 'git mangler paa PATH.' }
-# git skriver normal fremdrift til STDERR ("From https://...", ogsaa med
-# --quiet). Med $ErrorActionPreference='Stop' og 2>&1 bliver de linjer til
-# ErrorRecords i Windows PowerShell og udloeser NativeCommandError -- selv naar
-# git returnerer 0. Derfor saenkes preferencen omkring selve kaldet, og
-# ErrorRecords flades til tekst. EXITKODEN er verdiktet, ikke stderr.
 function Git([Parameter(ValueFromRemainingArguments=$true)][string[]]$A) {
   $prev = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
@@ -58,9 +142,8 @@ function Git([Parameter(ValueFromRemainingArguments=$true)][string[]]$A) {
   if ($LASTEXITCODE -ne 0) { throw $v }
   return $v.Trim()
 }
+
 if ($env:OS -ne 'Windows_NT') { throw 'Beviskampagnen må kun køres på Windows-riggen.' }
-# -CommandType Application: uden den finder Get-Command 'git' funktionen
-# ovenfor, og tjekket kan aldrig fyre for netop det program det skal beskytte.
 foreach ($cmd in @('git','python','powershell.exe','go','ollama')) {
   if (-not (Get-Command $cmd -CommandType Application -ErrorAction SilentlyContinue)) {
     throw "$cmd mangler på PATH."
@@ -75,6 +158,7 @@ Git pull --ff-only origin $branch | Out-Null
 $sha = Git rev-parse HEAD
 if ($sha -ne (Git rev-parse "origin/$branch")) { throw 'HEAD matcher ikke remote.' }
 $version = (Get-Content VERSION -Raw).Trim()
+
 if ([string]::IsNullOrWhiteSpace($env:MODELRIG_TOKEN)) {
   $secure = Read-Host 'MODELRIG_TOKEN (skjult; gemmes ikke)' -AsSecureString
   $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
@@ -82,6 +166,7 @@ if ([string]::IsNullOrWhiteSpace($env:MODELRIG_TOKEN)) {
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
 }
 if ($env:MODELRIG_TOKEN -notmatch '^[0-9a-fA-F]{64}$') { throw 'MODELRIG_TOKEN skal være 64 hex-tegn.' }
+
 try { $models = (Invoke-RestMethod http://127.0.0.1:11434/api/tags -TimeoutSec 5).models.name } catch {
   Start-Process ollama -ArgumentList 'serve'; Start-Sleep 3
   $models = (Invoke-RestMethod http://127.0.0.1:11434/api/tags -TimeoutSec 10).models.name
@@ -90,59 +175,150 @@ if (-not $PlannerModel) {
   foreach ($m in @('qwen3:14b','qwen3:8b','qwen2.5:14b','hermes3:8b')) { if ($models -contains $m) { $PlannerModel=$m; break } }
 }
 if (-not $PlannerModel) { & ollama pull qwen3:8b; if ($LASTEXITCODE) { throw 'Kunne ikke hente qwen3:8b.' }; $PlannerModel='qwen3:8b' }
-if (-not ($models | Where-Object { $_ -eq 'nomic-embed-text' -or $_ -like 'nomic-embed-text:*' })) { & ollama pull nomic-embed-text; if ($LASTEXITCODE) { throw 'Kunne ikke hente nomic-embed-text.' } }
+if (-not ($models | Where-Object { $_ -eq 'nomic-embed-text' -or $_ -like 'nomic-embed-text:*' })) {
+  & ollama pull nomic-embed-text
+  if ($LASTEXITCODE) { throw 'Kunne ikke hente nomic-embed-text.' }
+}
 $env:KALIV_AGENT3_PLANNER_MODEL = $PlannerModel
+
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $out = Join-Path $root "validation\proof-campaign\$stamp-$($sha.Substring(0,12))"
 $logs = Join-Path $out 'logs'; New-Item -ItemType Directory -Force $logs | Out-Null
 Write-Host "`nModelRig $version | $sha | $branch | planner=$PlannerModel" -ForegroundColor Green
-if ($SkipStageA) { Write-Host "`n  Stage A springes over (-SkipStageA); tidligere beviser staar ved magt." -ForegroundColor DarkGray } else { Run 'Stage A: samlet fysisk kampagne' { python scripts\proof_stage_a_current.py } }
-if (-not $SkipForcedRecovery) { Run 'T-006: ægte hard-process recovery og lease recovery' { python scripts\forced_recovery_test.py } }
-Run 'Ryd runtime før workflow-bevis' { python scripts\stage_a_resume_cleanup.py }
-Run 'Start exact-head stack til workflows' { powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\start-stage-a-validation-stack.ps1 -PlannerModel $PlannerModel -ValidationReport validation\agent3-rig-validation-latest.json -BackendHost 127.0.0.1 -HeadlessWorker }
-# -SkipWorkflows: 22 runder x 14 workflows er kampagnens laengste trin. Med en
-# taerskel paa 95% og en model der leverer 64-71% kan gaten alligevel ikke blive
-# groen, saa der er ingen grund til at koere dem, mens man jagter noget andet.
-$workflowPass = $true; $mean = $null
-if (-not $SkipWorkflows) {
-$rates = @(); $workflowFailures = 0
-for ($i=1; $i -le $WorkflowRounds; $i++) {
-  Write-Host "`n--- Workflow-run $i/$WorkflowRounds ---" -ForegroundColor Cyan
-  & python scripts\workflow_baseline_one_click.py --model $PlannerModel
-  if ($LASTEXITCODE -ne 0) { $workflowFailures++ }
-  $src='validation\workflow-baseline-latest.json'; $raw='validation\workflow-run-latest.json'
-  if (Test-Path $src) {
-    Copy-Item $src (Join-Path $out ("workflow-baseline-{0:D2}.json" -f $i)) -Force
-    $j=Get-Content $src -Raw | ConvertFrom-Json
-    # Set-StrictMode goer $j.completion_rate til en KASTENDE fejl naar feltet
-    # ikke findes -- ikke til $null. Derfor naaede elseif'en aldrig at proeve
-    # summary-varianten, og kampagnen doede EFTER en gyldig maaling: 20/8 stod
-    # der 10/14 paa skaermen, og saa faldt scriptet over sin egen aflaesning.
-    # PSObject.Properties spoerger uden at kaste.
-    $cr = $null
-    if ($j.PSObject.Properties.Name -contains 'completion_rate') { $cr = $j.completion_rate }
-    elseif (($j.PSObject.Properties.Name -contains 'summary') -and
-            ($null -ne $j.summary) -and
-            ($j.summary.PSObject.Properties.Name -contains 'completion_rate')) { $cr = $j.summary.completion_rate }
-    if ($null -ne $cr) { $rates += [double]$cr }
+
+$stageAGate = New-ProofGate 'stage_a'
+$forcedRecoveryGate = New-ProofGate 'forced_recovery'
+$workflowGate = New-ProofGate 'workflows'
+$t23Gate = New-ProofGate 't023'
+$t33Gate = New-ProofGate 't033'
+
+# Stage A ---------------------------------------------------------------------
+if ($SkipStageA) {
+  $reuse = Try-ReuseGate 'stage_a'
+  if ($reuse) {
+    $stageAGate.reused = $true
+    $stageAGate.evidence = $reuse.receipt
+    $stageAGate.taken_on_sha = $reuse.taken_on_sha
+    $stageAGate.passed = $true
   }
-  if (Test-Path $raw) { Copy-Item $raw (Join-Path $out ("workflow-run-{0:D2}.json" -f $i)) -Force }
+} else {
+  Remove-GateReceipt 'stage_a'
+  Run 'Stage A: samlet fysisk kampagne' { python scripts\proof_stage_a_current.py }
+  [void](Record-Gate 'stage_a')
+  $stageAGate.executed = $true
+  $stageAGate.evidence = Get-GateReceiptPath 'stage_a'
+  $stageAGate.taken_on_sha = $sha
+  $stageAGate.passed = $true
 }
-$mean = if ($rates.Count) { ($rates | Measure-Object -Average).Average } else { 0.0 }
-$workflowPass = ($rates.Count -eq $WorkflowRounds -and $workflowFailures -eq 0 -and $mean -ge $WorkflowThreshold)
-@{schema='modelrig-workflow-proof/v1';sha=$sha;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean_completion_rate=$mean;threshold=$WorkflowThreshold;runner_failures=$workflowFailures;passed=$workflowPass} | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'workflow-aggregate.json') -Encoding UTF8
+
+# Forced recovery -------------------------------------------------------------
+if ($SkipForcedRecovery) {
+  $reuse = Try-ReuseGate 'forced_recovery'
+  if ($reuse) {
+    $forcedRecoveryGate.reused = $true
+    $forcedRecoveryGate.evidence = $reuse.receipt
+    $forcedRecoveryGate.taken_on_sha = $reuse.taken_on_sha
+    $forcedRecoveryGate.passed = $true
+  }
+} else {
+  Remove-GateReceipt 'forced_recovery'
+  Run 'T-006: ægte hard-process recovery og lease recovery' { python scripts\forced_recovery_test.py }
+  [void](Record-Gate 'forced_recovery')
+  $forcedRecoveryGate.executed = $true
+  $forcedRecoveryGate.evidence = Get-GateReceiptPath 'forced_recovery'
+  $forcedRecoveryGate.taken_on_sha = $sha
+  $forcedRecoveryGate.passed = $true
 }
-if ((-not $SkipWorkflows) -and (-not $workflowPass)) { Write-Warning "Workflow-gaten er rød: mean=$mean failures=$workflowFailures" }
-$t23pass=$true
-if (-not $SkipT023) {
-  # T-023 starter sin EGEN stack og venter fem minutter paa at 8080/8099 bliver
-  # fri. Workflow-trinnet lige foer har startet en stack paa netop dem, og
-  # wizarden lukker kun processer under sin egen runtime-mappe -- vores hoerer
-  # ikke til der. 20/8 gav det "Port 8080 blev ikke frigivet inden for fem
-  # minutter" EFTER 22 gennemfoerte workflow-runder.
-  #
-  # Vi lukker derfor det VI selv startede, og kun det: kun processer hvis
-  # eksekverbare ligger i repoet eller er den python der koerer worker'en.
+
+Run 'Ryd runtime før workflow-bevis' { python scripts\stage_a_resume_cleanup.py }
+Run 'Start exact-head stack til workflows' {
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\start-stage-a-validation-stack.ps1 `
+    -PlannerModel $PlannerModel -ValidationReport validation\agent3-rig-validation-latest.json `
+    -BackendHost 127.0.0.1 -HeadlessWorker
+}
+
+# Workflows -------------------------------------------------------------------
+$mean = $null
+$workflowRoundsMeasured = $null
+$workflowExecutions = $null
+$workflowFailures = $null
+if ($SkipWorkflows) {
+  $reuse = Try-ReuseGate 'workflows'
+  if ($reuse) {
+    $workflowSource = 'validation\workflow-proof-latest.json'
+    $wj = Get-Content $workflowSource -Raw | ConvertFrom-Json
+    # Receipt-validatoren har allerede hash-, verdict- og config-valideret filen.
+    $workflowRoundsMeasured = [int]$wj.rounds
+    $workflowExecutions = [int]$wj.executions
+    $workflowFailures = [int]$wj.runner_failures
+    $mean = [double]$wj.mean_completion_rate
+    $workflowGate.reused = $true
+    $workflowGate.evidence = $reuse.receipt
+    $workflowGate.taken_on_sha = $reuse.taken_on_sha
+    $workflowGate.passed = $true
+  }
+} else {
+  Remove-GateReceipt 'workflows'
+  $workflowLatest = 'validation\workflow-proof-latest.json'
+  if (Test-Path -LiteralPath $workflowLatest) { Remove-Item -LiteralPath $workflowLatest -Force }
+  $rates = @(); $workflowFailures = 0
+  for ($i=1; $i -le $WorkflowRounds; $i++) {
+    Write-Host "`n--- Workflow-run $i/$WorkflowRounds ---" -ForegroundColor Cyan
+    & python scripts\workflow_baseline_one_click.py --model $PlannerModel
+    if ($LASTEXITCODE -ne 0) { $workflowFailures++ }
+    $src='validation\workflow-baseline-latest.json'; $raw='validation\workflow-run-latest.json'
+    if (Test-Path $src) {
+      Copy-Item $src (Join-Path $out ("workflow-baseline-{0:D2}.json" -f $i)) -Force
+      $j=Get-Content $src -Raw | ConvertFrom-Json
+      $cr = $null
+      if ($j.PSObject.Properties.Name -contains 'completion_rate') { $cr = $j.completion_rate }
+      elseif (($j.PSObject.Properties.Name -contains 'summary') -and
+              ($null -ne $j.summary) -and
+              ($j.summary.PSObject.Properties.Name -contains 'completion_rate')) { $cr = $j.summary.completion_rate }
+      if ($null -ne $cr) { $rates += [double]$cr }
+    }
+    if (Test-Path $raw) { Copy-Item $raw (Join-Path $out ("workflow-run-{0:D2}.json" -f $i)) -Force }
+  }
+  $mean = if ($rates.Count) { ($rates | Measure-Object -Average).Average } else { 0.0 }
+  $workflowRoundsMeasured = $rates.Count
+  $workflowExecutions = $WorkflowRounds * 14
+  $workflowPass = ($rates.Count -eq $WorkflowRounds -and $workflowFailures -eq 0 -and $mean -ge $WorkflowThreshold)
+  $workflowReport = [ordered]@{
+    schema='modelrig-workflow-proof/v1'
+    sha=$sha
+    planner_model=$PlannerModel
+    rounds=$WorkflowRounds
+    executions=$workflowExecutions
+    mean_completion_rate=$mean
+    threshold=$WorkflowThreshold
+    runner_failures=$workflowFailures
+    passed=$workflowPass
+  }
+  $workflowJson = $workflowReport | ConvertTo-Json -Depth 5
+  $workflowJson | Set-Content (Join-Path $out 'workflow-aggregate.json') -Encoding UTF8
+  $workflowJson | Set-Content $workflowLatest -Encoding UTF8
+  $workflowGate.executed = $true
+  $workflowGate.taken_on_sha = $sha
+  if ($workflowPass) {
+    [void](Record-Gate 'workflows')
+    $workflowGate.evidence = Get-GateReceiptPath 'workflows'
+    $workflowGate.passed = $true
+  } else {
+    Write-Warning "Workflow-gaten er rød: mean=$mean failures=$workflowFailures"
+  }
+}
+
+# T-023 -----------------------------------------------------------------------
+if ($SkipT023) {
+  $reuse = Try-ReuseGate 't023'
+  if ($reuse) {
+    $t23Gate.reused = $true
+    $t23Gate.evidence = $reuse.receipt
+    $t23Gate.taken_on_sha = $reuse.taken_on_sha
+    $t23Gate.passed = $true
+  }
+} else {
+  Remove-GateReceipt 't023'
   Run 'Frigiv 8080/8099 efter workflow-stakken' {
     $repoPrefix = (Resolve-Path '.').Path.TrimEnd('\') + '\'
     foreach ($port in 8080, 8099) {
@@ -164,52 +340,90 @@ if (-not $SkipT023) {
       }
     }
     Start-Sleep -Seconds 3
-    # Run-hjaelperen doemmer paa $LASTEXITCODE. Dette trin koerer INGEN native
-    # kommando, saa variablen beholder vaerdien fra det forrige trin -- og
-    # 20/8 var det 1 fra de blokerede workflow-runder. Resultat: et trin der
-    # gjorde praecis sit arbejde blev meldt som fejlet og stoppede kampagnen.
     $global:LASTEXITCODE = 0
   }
   Run 'Cleanup før T-023' { python scripts\stage_a_resume_cleanup.py }
   & python scripts\proof_t023_current.py
-  $t23pass = ($LASTEXITCODE -eq 0)
-  if (-not $t23pass) { Write-Warning 'T-023 er ikke grønt.' }
+  if ($LASTEXITCODE -eq 0) {
+    [void](Record-Gate 't023')
+    $t23Gate.executed = $true
+    $t23Gate.evidence = Get-GateReceiptPath 't023'
+    $t23Gate.taken_on_sha = $sha
+    $t23Gate.passed = $true
+  } else {
+    $t23Gate.executed = $true
+    $t23Gate.taken_on_sha = $sha
+    Write-Warning 'T-023 er ikke grønt.'
+  }
 }
-$t33pass=$true; $t33pending=$false
-if (-not $SkipT033) {
+
+# T-033 -----------------------------------------------------------------------
+$t33pending = $false
+if ($SkipT033) {
+  $reuse = Try-ReuseGate 't033'
+  if ($reuse) {
+    $t33Gate.reused = $true
+    $t33Gate.evidence = $reuse.receipt
+    $t33Gate.taken_on_sha = $reuse.taken_on_sha
+    $t33Gate.passed = $true
+  }
+} else {
   $latest='validation\agent3-memory-protected-backup-physical-latest.json'
   $validLatest=$false
-  if (Test-Path $latest) { try { $lj=Get-Content $latest -Raw|ConvertFrom-Json; $validLatest=($lj.success -eq $true -and $lj.candidate.git_sha -eq $sha) } catch {} }
-  if (-not $validLatest) {
+  if (Test-Path $latest) {
+    try {
+      $lj=Get-Content $latest -Raw|ConvertFrom-Json
+      $generated = [DateTimeOffset]::Parse([string]$lj.generated_at).ToUniversalTime()
+      $ageHours = ([DateTimeOffset]::UtcNow - $generated).TotalHours
+      $validLatest=($lj.success -eq $true -and $lj.candidate.git_sha -eq $sha -and
+                    $ageHours -ge -0.25 -and $ageHours -le 24.0)
+    } catch { $validLatest=$false }
+  }
+  if ($validLatest) {
+    # Et eksisterende, frisk exact-SHA fysisk report er allerede målingen.
+    [void](Record-Gate 't033')
+    $t33Gate.reused = $true
+    $t33Gate.evidence = Get-GateReceiptPath 't033'
+    $t33Gate.taken_on_sha = $sha
+    $t33Gate.passed = $true
+  } else {
+    Remove-GateReceipt 't033'
     $states=Get-ChildItem 'validation\agent3-memory-protected-backup-physical' -Filter state.json -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
     $state=$null
-    foreach($s in $states){ try{$sj=Get-Content $s.FullName -Raw|ConvertFrom-Json;if($sj.candidate.git_sha -eq $sha){$state=$s;$stateJson=$sj;break}}catch{} }
+    foreach($s in $states){
+      try{
+        $sj=Get-Content $s.FullName -Raw|ConvertFrom-Json
+        if($sj.candidate.git_sha -eq $sha){$state=$s;$stateJson=$sj;break}
+      }catch{}
+    }
     if ($state -and (Test-Path $stateJson.probe_request.public_probe_path)) {
       & python scripts\proof_t033_current.py collect --state $state.FullName --probe $stateJson.probe_request.public_probe_path
-      $t33pass=($LASTEXITCODE -eq 0)
+      $t33Gate.executed = $true
+      $t33Gate.taken_on_sha = $sha
+      if ($LASTEXITCODE -eq 0) {
+        [void](Record-Gate 't033')
+        $t33Gate.evidence = Get-GateReceiptPath 't033'
+        $t33Gate.passed = $true
+      }
     } elseif ($state) {
-      $t33pass=$false;$t33pending=$true
+      $t33pending=$true
       Write-Host "`nT-033 mangler kun en anden Windows-SID. Kør fra den anden bruger:" -ForegroundColor Yellow
       Write-Host "python `"$root\scripts\proof_t033_current.py`" probe --request `"$($stateJson.probe_request.public_request_path)`" --output `"$($stateJson.probe_request.public_probe_path)`""
       Write-Host 'Kør derefter START_PROOF_CAMPAIGN.cmd igen; collect sker automatisk.' -ForegroundColor Yellow
     } else {
       & python scripts\proof_t033_current.py prepare
-      if ($LASTEXITCODE -eq 0) { $t33pending=$true; $t33pass=$false } else { $t33pass=$false }
+      $t33Gate.executed = $true
+      $t33Gate.taken_on_sha = $sha
+      if ($LASTEXITCODE -eq 0) { $t33pending=$true }
     }
   }
 }
+
+# Agent 4 ---------------------------------------------------------------------
 $a4pass = $null
+$a4lan = $null
 if ($IncludeAgent4) {
-  # RunMatrix er FULDAUTOMATISK: den driver adb, koerer mutationerne, fanger
-  # snapshot-stadierne og haevder invarianterne i kode. Det eneste manuelle er
-  # eengangs-parringen af A425f-appen mellem Prepare og DeviceInfo.
   $a4 = 'scripts\agent4_a4_25f_physical_operator.ps1'
-  # Roden skal vaere ABSOLUT og ligge UDEN FOR repoet -- operatoeren afviser
-  # begge dele. En param-default med $env:USERPROFILE ekspanderer ikke
-  # paalideligt naar launcheren kalder scriptet, og en TOM streng naaede helt
-  # ind til [IO.Path]::GetFullPath(""), som kastede "Den angivne stis format
-  # understoettes ikke" -- efter hele kampagnen var koert. Derfor udledes den
-  # her, hvor $env garanteret er sat.
   if ([string]::IsNullOrWhiteSpace($Agent4OutputRoot)) {
     $base = if ($env:USERPROFILE) { $env:USERPROFILE }
             elseif ($env:HOMEDRIVE -and $env:HOMEPATH) { Join-Path $env:HOMEDRIVE $env:HOMEPATH }
@@ -219,15 +433,18 @@ if ($IncludeAgent4) {
   $Agent4OutputRoot = [IO.Path]::GetFullPath($Agent4OutputRoot)
   New-Item -ItemType Directory -Force -Path $Agent4OutputRoot | Out-Null
   Write-Host "  Agent 4-evidens: $Agent4OutputRoot" -ForegroundColor DarkGray
-  # Prepare KRAEVER -LanAddress med riggens konkrete private IPv4 og kaster
-  # ellers med det samme. Min kobling fra #637 sendte den aldrig, saa Prepare
-  # doede -- og fejlen der naaede skaermen kom fra Stop i finally, som saa
-  # kastede paa en tom tilstand. Symptomet pegede paa en sti; aarsagen var et
-  # manglende argument.
-  $a4lan = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-            Where-Object { $_.IPAddress -match '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)' -and
-                           $_.InterfaceAlias -notmatch 'Loopback|Tailscale' } |
-            Select-Object -First 1 -Expand IPAddress)
+
+  $a4lan = $Agent4LanAddress.Trim()
+  if (-not [string]::IsNullOrWhiteSpace($a4lan)) {
+    if ($a4lan -notmatch '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)') {
+      throw "Agent4LanAddress skal være en privat RFC1918 IPv4-adresse: $a4lan"
+    }
+  } else {
+    $a4lan = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+              Where-Object { $_.IPAddress -match '^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)' -and
+                             $_.InterfaceAlias -notmatch 'Loopback|Tailscale' } |
+              Select-Object -First 1 -Expand IPAddress)
+  }
   if ([string]::IsNullOrWhiteSpace($a4lan)) {
     throw "Agent 4 kraever en privat LAN-adresse, og ingen blev fundet. Angiv den med -Agent4LanAddress."
   }
@@ -267,17 +484,56 @@ if ($IncludeAgent4) {
   }
 }
 
-# Agent 4 taeller IKKE med i $passed. Suiten er ny i kampagnen, den er opt-in,
-# og dens evidens har endnu ingen validator i campaign-kontrakten. At lade den
-# loefte et samlet PASS ville vaere den slags falske groenne repoet er bygget
-# for at undgaa. Den rapporteres for sig.
-$passed = $workflowPass -and $t23pass -and $t33pass
-$summary=@{schema='modelrig-proof-day/v1';generated_at=(Get-Date).ToUniversalTime().ToString('o');candidate=@{version=$version;sha=$sha;branch=$branch};planner=$PlannerModel;stage_a=$true;forced_recovery=$true;workflow=@{passed=$workflowPass;rounds=$WorkflowRounds;executions=$WorkflowRounds*14;mean=$mean};t023=$t23pass;t033=@{passed=$t33pass;pending_second_sid=$t33pending};agent4_a4_25f=@{included=[bool]$IncludeAgent4;passed=$a4pass;counts_toward_passed=$false;output_root=$Agent4OutputRoot};stage_b_release_lifecycle=@{included=$false;reason='requires exact candidate to exist as a published release and rig to start on previous release; never inferred from source-only run'};passed=$passed;production_activation=$false}
+# Final verdict ---------------------------------------------------------------
+$passed = Get-ProofCampaignPassed $stageAGate $forcedRecoveryGate $workflowGate $t23Gate $t33Gate
+$summary=[ordered]@{
+  schema='modelrig-proof-day/v2'
+  generated_at=(Get-Date).ToUniversalTime().ToString('o')
+  candidate=@{version=$version;sha=$sha;branch=$branch}
+  planner=$PlannerModel
+  stage_a=$stageAGate
+  forced_recovery=$forcedRecoveryGate
+  workflow=[ordered]@{
+    name=$workflowGate.name
+    executed=$workflowGate.executed
+    reused=$workflowGate.reused
+    evidence=$workflowGate.evidence
+    taken_on_sha=$workflowGate.taken_on_sha
+    passed=$workflowGate.passed
+    requested_rounds=$WorkflowRounds
+    rounds=$workflowRoundsMeasured
+    executions=$workflowExecutions
+    mean=$mean
+    threshold=$WorkflowThreshold
+    runner_failures=$workflowFailures
+  }
+  t023=$t23Gate
+  t033=[ordered]@{
+    name=$t33Gate.name
+    executed=$t33Gate.executed
+    reused=$t33Gate.reused
+    evidence=$t33Gate.evidence
+    taken_on_sha=$t33Gate.taken_on_sha
+    passed=$t33Gate.passed
+    pending_second_sid=$t33pending
+  }
+  agent4_a4_25f=@{included=[bool]$IncludeAgent4;passed=$a4pass;counts_toward_passed=$false;output_root=$Agent4OutputRoot;lan_address=$a4lan}
+  stage_b_release_lifecycle=@{included=$false;reason='requires exact candidate to exist as a published release and rig to start on previous release; never inferred from source-only run'}
+  passed=$passed
+  production_activation=$false
+}
 $summary|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'summary.json') -Encoding UTF8
 Write-Host "`n============================================================================" -ForegroundColor Cyan
 Write-Host "  RESULTAT: $(if($passed){'PASS'}else{'IKKE FULDT BEVIST ENDNU'})" -ForegroundColor $(if($passed){'Green'}else{'Yellow'})
 Write-Host "  Evidence: $out"
-Write-Host "  Workflow: $($WorkflowRounds*14) executioner, mean=$mean"
+if ($null -ne $workflowExecutions) {
+  Write-Host "  Workflow: $workflowExecutions executioner, mean=$mean"
+} else {
+  Write-Host "  Workflow: ikke udført og intet gyldigt reusable receipt" -ForegroundColor Yellow
+}
 Write-Host "  Stage B updater/reboot: separat release-bound gate; bliver aldrig fake-grøn her."
 Write-Host "============================================================================"
-if ($passed) { exit 0 }; if ($t33pending -and $workflowPass -and $t23pass) { exit 3 }; exit 1
+if ($passed) { exit 0 }
+$otherFour = [bool]($stageAGate.passed -and $forcedRecoveryGate.passed -and $workflowGate.passed -and $t23Gate.passed)
+if ($t33pending -and $otherFour) { exit 3 }
+exit 1
