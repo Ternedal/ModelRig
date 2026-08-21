@@ -133,6 +133,9 @@ for marker, message in (
     ("$workflowExecutions -eq $expectedWorkflowExecutions", "workflow PASS requires measured executions to match expectation"),
     ("rounds=$workflowRoundsMeasured", "workflow report records measured rounds"),
     ("foreach ($fresh in @($src, $raw))", "stale per-round evidence is removed before execution"),
+    ("$roundExit = $LASTEXITCODE", "workflow helper exit is captured separately from execution evidence"),
+    ("Test-WorkflowRoundExecutionEvidence $roundExecutions $workflowSpecCount $roundRate",
+     "runner failures are classified from measured execution evidence"),
 ):
     check(marker in source, message)
 
@@ -214,6 +217,62 @@ if count_match is not None:
             check(observed.get("valid") == 3, f"{label} counts actual transcript keys")
             check(observed.get("malformed") == 0, f"{label} fails closed on malformed transcript JSON")
             check(observed.get("missing") == 0, f"{label} fails closed on missing transcript JSON")
+
+print("\nworkflow runner-failure classification:")
+evidence_match = re.search(
+    r"# BEGIN WORKFLOW ROUND EVIDENCE FUNCTION\s*(function Test-WorkflowRoundExecutionEvidence[\s\S]*?)\s*# END WORKFLOW ROUND EVIDENCE FUNCTION",
+    source,
+)
+check(evidence_match is not None, "production workflow round evidence function can be extracted")
+if evidence_match is not None:
+    evidence_function = evidence_match.group(1)
+    engines = powershell_engines()
+    check(bool(engines), "PowerShell is available for workflow evidence execution")
+
+    for shell in engines:
+        label = Path(shell).name
+        probe = evidence_function + "\n" + "\n".join(
+            [
+                "Write-Output ('complete-low-score:' + ([int][bool](Test-WorkflowRoundExecutionEvidence 14 14 0.786)))",
+                "Write-Output ('complete-zero-score:' + ([int][bool](Test-WorkflowRoundExecutionEvidence 14 14 0.0)))",
+                "Write-Output ('missing-rate:' + ([int][bool](Test-WorkflowRoundExecutionEvidence 14 14 $null)))",
+                "Write-Output ('partial-transcript:' + ([int][bool](Test-WorkflowRoundExecutionEvidence 13 14 0.786)))",
+            ]
+        )
+
+        result = run(shell, "-NoProfile", "-Command", probe)
+        observed: dict[str, int] = {}
+
+        for line in result.stdout.splitlines():
+            m = re.fullmatch(
+                r"(complete-low-score|complete-zero-score|missing-rate|partial-transcript):([01])",
+                line.strip(),
+            )
+            if m:
+                observed[m.group(1)] = int(m.group(2))
+
+        check(result.returncode == 0, f"workflow evidence classifier executes under {label}")
+        check(
+            observed.get("complete-low-score") == 1,
+            f"{label} accepts complete execution evidence below 100 percent quality",
+        )
+        check(
+            observed.get("complete-zero-score") == 1,
+            f"{label} separates execution evidence from the quality threshold",
+        )
+        check(
+            observed.get("missing-rate") == 0,
+            f"{label} fails closed when completion rate is missing",
+        )
+        check(
+            observed.get("partial-transcript") == 0,
+            f"{label} fails closed on incomplete workflow transcript",
+        )
+
+check(
+    "if ($LASTEXITCODE -ne 0) { $workflowFailures++ }" not in source,
+    "evaluator quality exit is not classified directly as runner failure",
+)
 
 print("\nreceipt behaviour against real Git history:")
 M = load_receipt_module()

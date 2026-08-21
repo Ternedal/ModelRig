@@ -139,6 +139,16 @@ function Get-WorkflowTranscriptCount([string]$Path) {
 }
 # END WORKFLOW TRANSCRIPT COUNT FUNCTION
 
+# BEGIN WORKFLOW ROUND EVIDENCE FUNCTION
+function Test-WorkflowRoundExecutionEvidence(
+  [int]$Executions,
+  [int]$ExpectedExecutions,
+  $CompletionRate
+) {
+  return [bool]($Executions -eq $ExpectedExecutions -and $null -ne $CompletionRate)
+}
+# END WORKFLOW ROUND EVIDENCE FUNCTION
+
 # git.exe opløses eksplicit som Application, så Git()-funktionen ikke kalder sig selv.
 $script:GitExe = (Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
                   Select-Object -First 1).Source
@@ -293,7 +303,9 @@ if ($SkipWorkflows) {
       if (Test-Path -LiteralPath $fresh) { Remove-Item -LiteralPath $fresh -Force }
     }
     & python scripts\workflow_baseline_one_click.py --model $PlannerModel
-    if ($LASTEXITCODE -ne 0) { $workflowFailures++ }
+    $roundExit = $LASTEXITCODE
+    $roundRate = $null
+    $roundExecutions = 0
     if (Test-Path $src) {
       Copy-Item $src (Join-Path $out ("workflow-baseline-{0:D2}.json" -f $i)) -Force
       $j=Get-Content $src -Raw | ConvertFrom-Json
@@ -302,12 +314,27 @@ if ($SkipWorkflows) {
       elseif (($j.PSObject.Properties.Name -contains 'summary') -and
               ($null -ne $j.summary) -and
               ($j.summary.PSObject.Properties.Name -contains 'completion_rate')) { $cr = $j.summary.completion_rate }
-      if ($null -ne $cr) { $rates += [double]$cr }
+      if ($null -ne $cr) {
+        $roundRate = [double]$cr
+        $rates += $roundRate
+      }
     }
     if (Test-Path $raw) {
       Copy-Item $raw (Join-Path $out ("workflow-run-{0:D2}.json" -f $i)) -Force
       $roundExecutions = Get-WorkflowTranscriptCount $raw
       $workflowExecutions += $roundExecutions
+    }
+
+    $roundEvidenceComplete =
+      Test-WorkflowRoundExecutionEvidence $roundExecutions $workflowSpecCount $roundRate
+
+    if (-not $roundEvidenceComplete) {
+      $workflowFailures++
+      Write-Warning "Workflow-run $i mangler komplet execution-evidens: executions=$roundExecutions/$workflowSpecCount rate=$roundRate exit=$roundExit"
+    } elseif ($roundExit -ne 0) {
+      # workflow_eval returnerer nonzero ved kvalitetsfejl. Det er ikke en
+      # runner-fejl naar transcriptet er komplet og completion_rate blev maalt.
+      Write-Host "  workflow-run $i returnerede exit $roundExit pga. score; execution-evidensen er komplet." -ForegroundColor DarkGray
     }
   }
   $mean = if ($rates.Count) { ($rates | Measure-Object -Average).Average } else { 0.0 }
