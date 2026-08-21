@@ -124,10 +124,13 @@ PROOF_SCOPES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _git(root: Path, *args: str) -> str:
-    return subprocess.run(
+def _git(root: Path, *args: str) -> str | None:
+    result = subprocess.run(
         ["git", *args], cwd=root, capture_output=True, text=True
-    ).stdout.strip()
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
 
 
 #: De fire sites version_tool.py vedligeholder maskinelt. En aendring HER der
@@ -153,6 +156,8 @@ def _kun_versionsbogholderi(root: Path, fil: str, a: str, b: str) -> bool:
     if fil not in _VERSIONSSITES:
         return False
     diff = _git(root, "diff", "--unified=0", f"{a}..{b}", "--", fil)
+    if diff is None:
+        return False
     for linje in diff.splitlines():
         if not linje.startswith(("+", "-")):
             continue
@@ -174,14 +179,18 @@ def scope_unchanged(root: Path, name: str, taken_on_sha: str, head_sha: str) -> 
     stier = PROOF_SCOPES.get(name)
     if not stier or not taken_on_sha or not head_sha:
         return None
+    for sha in (taken_on_sha, head_sha):
+        kind = _git(root, "cat-file", "-t", sha)
+        if kind != "commit":
+            return None
     if taken_on_sha == head_sha:
         return True
-    for sha in (taken_on_sha, head_sha):
-        if not _git(root, "cat-file", "-t", sha).strip() == "commit":
-            return None
-    aendrede = [l for l in _git(
+    changed = _git(
         root, "diff", "--name-only", f"{taken_on_sha}..{head_sha}", "--", *stier
-    ).splitlines() if l]
+    )
+    if changed is None:
+        return None
+    aendrede = [l for l in changed.splitlines() if l]
     reelle = [f for f in aendrede
               if not _kun_versionsbogholderi(root, f, taken_on_sha, head_sha)]
     return not reelle
@@ -192,8 +201,11 @@ def changed_paths(root: Path, name: str, taken_on_sha: str, head_sha: str) -> li
     stier = PROOF_SCOPES.get(name)
     if not stier:
         return []
-    aendrede = [l for l in _git(
+    changed = _git(
         root, "diff", "--name-only", f"{taken_on_sha}..{head_sha}", "--", *stier
-    ).splitlines() if l]
+    )
+    if changed is None:
+        return []
+    aendrede = [l for l in changed.splitlines() if l]
     return [f for f in aendrede
             if not _kun_versionsbogholderi(root, f, taken_on_sha, head_sha)]
