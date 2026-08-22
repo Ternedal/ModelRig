@@ -2,11 +2,13 @@ name: agent3-diagnostics
 
 # candidate_freeze_check.py kraever dette workflow GROENT paa kandidatens
 # eksakte head. Et path-filter gjorde det kravet uopfyldeligt: enhver landing
-# der ikke roerte agent3-stier (fx en docs-commit) efterlod en head uden
-# koersel, og frysningen kunne ikke passere uden at flytte SHA'en. Trigger
-# derfor paa hver PR — som agent3-full-diagnostics allerede goer — plus
-# workflow_dispatch som manuel udvej for en head der allerede findes.
+# der ikke roerte agent3-stier efterlod en head uden koersel. Koer derfor paa
+# hver PR OG hvert push til main, saa merge-committen automatisk faar den
+# exact-SHA provenance freeze-gaten kraever. workflow_dispatch er beholdt som
+# fail-closed recovery for en allerede eksisterende head.
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
