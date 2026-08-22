@@ -38,9 +38,13 @@ def rejects(fn, expected, name: str, contains: str = "") -> None:
 
 
 def route_count(app) -> int:
+    router = getattr(app, "router", None)
+    routes = getattr(router, "routes", None)
+    if routes is None:
+        routes = getattr(app, "routes", ())
     return sum(
         1
-        for route in getattr(app, "routes", ())
+        for route in routes
         if str(getattr(route, "path", "")).startswith("/read-connectors")
     )
 
