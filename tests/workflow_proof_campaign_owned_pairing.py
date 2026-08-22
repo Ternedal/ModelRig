@@ -123,6 +123,15 @@ def main() -> int:
         and "run-proof-campaign.ps1" in wrapper,
     )
     check(
+        "blank planner stays omitted so the core can perform zero-config model discovery",
+        "if (-not [string]::IsNullOrWhiteSpace($PlannerModel)) { $coreArgs += @('-PlannerModel',$PlannerModel) }" in wrapper,
+    )
+    check(
+        "workflow threshold is serialized invariantly for non-English Windows locales",
+        "$WorkflowThreshold.ToString([Globalization.CultureInfo]::InvariantCulture)" in wrapper
+        and "'-WorkflowThreshold',$thresholdInvariant" in wrapper,
+    )
+    check(
         "all existing skip/reuse switches are forwarded instead of reimplemented",
         all(
             f"if (${name}) {{ $coreArgs += '-{name}' }}" in wrapper
