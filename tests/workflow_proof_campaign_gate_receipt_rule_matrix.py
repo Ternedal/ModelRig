@@ -96,14 +96,21 @@ with tempfile.TemporaryDirectory(prefix="modelrig-proof-receipt-matrix-") as td:
     source_path = repo / M.SOURCES["workflows"]
     planner = "qwen3:14b"
     rounds = 1
+    workflows_per_round = 3
+    expected_executions = rounds * workflows_per_round
     threshold = 0.95
 
+    # Deliberately not 14. This baseline proves the validator consumes the
+    # producer's explicit cardinality fields instead of a repository constant.
     baseline_report = {
         "schema": "modelrig-workflow-proof/v1",
         "sha": sha,
         "planner_model": planner,
+        "requested_rounds": rounds,
         "rounds": rounds,
-        "executions": 14,
+        "workflows_per_round": workflows_per_round,
+        "expected_executions": expected_executions,
+        "executions": expected_executions,
         "mean_completion_rate": 0.97,
         "threshold": threshold,
         "runner_failures": 0,
@@ -130,8 +137,10 @@ with tempfile.TemporaryDirectory(prefix="modelrig-proof-receipt-matrix-") as td:
         )
 
     accepted = validate()
-    check(accepted.get("passed") is True and accepted.get("reused") is True,
-          "untouched workflow receipt is accepted")
+    check(
+        accepted.get("passed") is True and accepted.get("reused") is True,
+        "untouched non-14 workflow receipt is accepted",
+    )
 
     def apply_case(
         receipt_mutator: Callable[[dict], None] | None,
@@ -215,11 +224,49 @@ with tempfile.TemporaryDirectory(prefix="modelrig-proof-receipt-matrix-") as td:
             "workflow aggregate is not PASS",
         ),
         (
-            "workflow execution count",
+            "workflow requested rounds validity",
             None,
-            set_report(("executions",), 1),
+            set_report(("requested_rounds",), 0),
             True,
-            "workflow execution count does not match measured rounds",
+            "workflow requested_rounds are invalid",
+        ),
+        (
+            "workflow measured rounds validity",
+            None,
+            set_report(("rounds",), 0),
+            True,
+            "workflow rounds are invalid",
+        ),
+        (
+            "workflow workflows-per-round validity",
+            None,
+            set_report(("workflows_per_round",), 0),
+            True,
+            "workflow workflows_per_round is invalid",
+        ),
+        (
+            "workflow expected-executions validity",
+            None,
+            set_report(("expected_executions",), 0),
+            True,
+            "workflow expected_executions is invalid",
+        ),
+        (
+            "workflow expected execution relationship",
+            None,
+            lambda report: (
+                nested_set(report, ("expected_executions",), expected_executions + 1),
+                nested_set(report, ("executions",), expected_executions + 1),
+            ),
+            True,
+            "workflow expected execution count does not match measured rounds/spec",
+        ),
+        (
+            "workflow measured execution count",
+            None,
+            set_report(("executions",), expected_executions - 1),
+            True,
+            "workflow execution count does not match expected executions",
         ),
         (
             "workflow runner failures",
@@ -229,11 +276,19 @@ with tempfile.TemporaryDirectory(prefix="modelrig-proof-receipt-matrix-") as td:
             "workflow aggregate contains runner failures",
         ),
         (
+            "workflow requested rounds configuration",
+            None,
+            set_report(("requested_rounds",), 2),
+            True,
+            "workflow requested rounds differ from requested configuration",
+        ),
+        (
             "workflow rounds configuration",
             None,
             lambda report: (
                 nested_set(report, ("rounds",), 2),
-                nested_set(report, ("executions",), 28),
+                nested_set(report, ("expected_executions",), 2 * workflows_per_round),
+                nested_set(report, ("executions",), 2 * workflows_per_round),
             ),
             True,
             "workflow rounds differ from requested configuration",
