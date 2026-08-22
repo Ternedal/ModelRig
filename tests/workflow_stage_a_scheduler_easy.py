@@ -47,13 +47,13 @@ check(not list(state_path.parent.glob("*.tmp")),
       "atomic state updates leave no temporary file")
 
 check(
-    'CANDIDATE_BRANCH_PREFIX = "agent/unified-candidate-"' in source
+    'CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.11"' in source
     and 'EXPECTED_VERSION = "2.0.11"' in source
     and 'stage-a-checkpoint-ux' not in source
-    and 'current.startswith(CANDIDATE_BRANCH_PREFIX)' in source
+    and 'current != CANDIDATE_BRANCH_PREFIX' in source
     and '"git", "switch"' not in source
     and '"git", "fetch"' not in source,
-    "the easy flow binds to the checked-out rig candidate and never switches or fetches a branch",
+    "the easy flow binds to the exact active rig candidate and never switches or fetches a branch",
 )
 check(
     'if stack_ready()' in source

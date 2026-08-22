@@ -24,7 +24,7 @@ RUNTIME = ROOT / "validation" / "stage-a-runtime"
 PHONE_STATE = RUNTIME / "phone-test-state.json"
 PHONE_INSTRUCTIONS = RUNTIME / "PHONE_TEST.txt"
 PHONE_SCRIPT = ROOT / "scripts" / "stage-a-phone-test.ps1"
-CANDIDATE_BRANCH_PREFIX = "agent/unified-candidate-"
+CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.11"
 EXPECTED_VERSION = "2.0.11"
 
 STEPS = (
@@ -142,10 +142,10 @@ def ensure_checkout() -> str:
     # would move the checkout off the frozen candidate and bind the evidence to
     # the wrong SHA (which the candidate campaign would then reject).
     current = capture(["git", "branch", "--show-current"], label="Aktuel branch")
-    if not current.startswith(CANDIDATE_BRANCH_PREFIX):
+    if current != CANDIDATE_BRANCH_PREFIX:
         raise EasyPilotError(
             "Scheduler-piloten skal køre på den udcheckede rig-kandidat "
-            f"({CANDIDATE_BRANCH_PREFIX}*), ikke '{current or 'detached HEAD'}'. "
+            f"'{CANDIDATE_BRANCH_PREFIX}', ikke '{current or 'detached HEAD'}'. "
             "Checkout kandidaten først; piloten skifter ikke branch."
         )
 
