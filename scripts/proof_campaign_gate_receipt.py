@@ -209,16 +209,43 @@ def _source_verdict(
             raise ReceiptError("workflow aggregate schema mismatch")
         if report.get("passed") is not True:
             raise ReceiptError("workflow aggregate is not PASS")
+        requested_rounds = report.get("requested_rounds")
         rounds = report.get("rounds")
+        workflows_per_round = report.get("workflows_per_round")
+        expected_executions = report.get("expected_executions")
         executions = report.get("executions")
         failures = report.get("runner_failures")
         mean = report.get("mean_completion_rate")
         threshold = report.get("threshold")
         planner = report.get("planner_model")
+        if (
+            isinstance(requested_rounds, bool)
+            or not isinstance(requested_rounds, int)
+            or requested_rounds <= 0
+        ):
+            raise ReceiptError("workflow requested_rounds are invalid")
         if isinstance(rounds, bool) or not isinstance(rounds, int) or rounds <= 0:
             raise ReceiptError("workflow rounds are invalid")
-        if executions != rounds * 14:
-            raise ReceiptError("workflow execution count does not match measured rounds")
+        if (
+            isinstance(workflows_per_round, bool)
+            or not isinstance(workflows_per_round, int)
+            or workflows_per_round <= 0
+        ):
+            raise ReceiptError("workflow workflows_per_round is invalid")
+        if (
+            isinstance(expected_executions, bool)
+            or not isinstance(expected_executions, int)
+            or expected_executions <= 0
+        ):
+            raise ReceiptError("workflow expected_executions is invalid")
+        if expected_executions != rounds * workflows_per_round:
+            raise ReceiptError(
+                "workflow expected execution count does not match measured rounds/spec"
+            )
+        if isinstance(executions, bool) or not isinstance(executions, int) or executions < 0:
+            raise ReceiptError("workflow execution count is invalid")
+        if executions != expected_executions:
+            raise ReceiptError("workflow execution count does not match expected executions")
         if failures != 0:
             raise ReceiptError("workflow aggregate contains runner failures")
         if not isinstance(mean, (int, float)) or not isinstance(threshold, (int, float)):
@@ -228,6 +255,8 @@ def _source_verdict(
         if not isinstance(planner, str) or not planner.strip():
             raise ReceiptError("workflow aggregate planner_model is missing")
         if configuration:
+            if requested_rounds != configuration.get("workflow_rounds"):
+                raise ReceiptError("workflow requested rounds differ from requested configuration")
             if rounds != configuration.get("workflow_rounds"):
                 raise ReceiptError("workflow rounds differ from requested configuration")
             if abs(float(threshold) - float(configuration.get("workflow_threshold"))) > 1e-12:
