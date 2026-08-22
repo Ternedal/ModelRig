@@ -252,6 +252,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_read_connector_eval.py`
 - `tests/worker_read_connector_package_contract.py`
 - `tests/worker_read_connector_provider_request.py`
+- `tests/worker_read_connector_provider_transport.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_read_scope_windows_aliases.py`
 - `tests/worker_research_claim_evidence.py`
