@@ -2,9 +2,9 @@
 """Regression contract for the proof campaign's automatic pairing bootstrap.
 
 The launcher may remove manual token-copying. It may not gain authority over
-unrelated listeners, reuse the operator's normal pairing store, bypass the real
-pair/start -> pair/claim protocol, weaken the core proof gates, or persist the
-minted device token.
+unrelated listeners, reuse the operator's normal pairing store, dirty the exact
+checkout, bypass the real pair/start -> pair/claim protocol, weaken the core
+proof gates, or persist the minted device token.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "START_PROOF_CAMPAIGN.cmd"
 WRAPPER = ROOT / "scripts" / "run-proof-campaign-owned-pairing.ps1"
 CORE = ROOT / "scripts" / "run-proof-campaign.ps1"
+GITIGNORE = ROOT / ".gitignore"
 
 passed = 0
 failed = 0
@@ -32,7 +33,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> int:
-    missing = [str(p.relative_to(ROOT)) for p in (LAUNCHER, WRAPPER, CORE) if not p.is_file()]
+    required = (LAUNCHER, WRAPPER, CORE, GITIGNORE)
+    missing = [str(p.relative_to(ROOT)) for p in required if not p.is_file()]
     check("required proof files exist", not missing, f"missing={missing}")
     if missing:
         return 1
@@ -40,6 +42,7 @@ def main() -> int:
     launcher = LAUNCHER.read_text(encoding="utf-8")
     wrapper = WRAPPER.read_text(encoding="utf-8")
     core = CORE.read_text(encoding="utf-8")
+    gitignore = GITIGNORE.read_text(encoding="utf-8")
     lower = wrapper.lower()
 
     check(
@@ -55,9 +58,14 @@ def main() -> int:
         and "$bootstrapPort = Get-FreeLoopbackPort" in wrapper,
     )
     check(
-        "bootstrap store is per-run and isolated under proof-bootstrap",
-        "validation\\proof-bootstrap" in wrapper
+        "bootstrap store is per-run and isolated under ignored stage-a-runtime",
+        "validation\\stage-a-runtime\\proof-pairing" in wrapper
+        and "/validation/stage-a-runtime/" in gitignore
         and "$pairingStore = Join-Path $bootstrapDir 'pairing-data.json'" in wrapper,
+    )
+    check(
+        "bootstrap does not create the old unignored validation/proof-bootstrap path",
+        "validation\\proof-bootstrap" not in wrapper,
     )
     check(
         "bootstrap authenticates pair/start with a process-local random admin key",
