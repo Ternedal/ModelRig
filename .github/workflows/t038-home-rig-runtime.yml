@@ -1,0 +1,272 @@
+name: t038-home-rig-runtime
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_tool.py"
+      - "worker/app/home_rig_operator.py"
+      - "worker/app/home_rig_connector_contract.py"
+      - "worker/app/home_rig_read_boundary.py"
+      - "worker/app/home_rig_provider_gate.py"
+      - "worker/app/home_assistant_provider_transport.py"
+      - "worker/app/riggate_v1_contract.py"
+      - "worker/app/riggate_provider_transport.py"
+      - "worker/app/data_sharing.py"
+      - "worker/app/main.py"
+      - ".github/workflows/t038-home-rig-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install worker deps
+        run: python -m pip install -q -r worker/requirements.txt
+      - name: Qualify default-off home/rig runtime
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import json
+          import os
+          import tempfile
+          from pathlib import Path
+          from types import SimpleNamespace
+
+          from fastapi import FastAPI
+          from fastapi.testclient import TestClient
+
+          import app.home_rig_tool as runtime_module
+          from app import tools
+          from app.data_sharing import DataSharingLedger
+          from app.home_rig_connector_contract import HomeRigAuditLog, HomeRigGrantStore, HomeRigScope
+          from app.home_rig_provider_gate import finish_home_assistant_state_request
+          from app.riggate_v1_contract import finish_riggate_request
+
+          source = Path("worker/app/home_rig_tool.py").read_text(encoding="utf-8")
+          ast.parse(source)
+          assert "PRODUCTION_ACTIVATION = False" in source
+          for forbidden in (
+              "wake_execute", "control_execute", "turn_on(", "turn_off(", "toggle(",
+              "subprocess", "REGISTRY[name] =" + " args",  # no model-defined registration
+          ):
+              assert forbidden not in source, forbidden
+          main_source = Path("worker/app/main.py").read_text(encoding="utf-8")
+          assert 'os.getenv("KALIV_HOME_RIG_PILOT"' in main_source
+
+          class UUIDs:
+              def __init__(self, start=0):
+                  self.value = start
+              def __call__(self):
+                  import uuid
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          class Clock:
+              def __init__(self, value=1000):
+                  self.value = value
+              def __call__(self):
+                  self.value += 1
+                  return self.value
+
+          with tempfile.TemporaryDirectory(prefix="modelrig-t038-runtime-") as td:
+              root = Path(td)
+              grants = HomeRigGrantStore(str(root / "grants.db"), uuid_factory=UUIDs())
+              audit = HomeRigAuditLog(str(root / "audit.db"))
+              sharing = DataSharingLedger(str(root / "sharing.db"), uuid_factory=UUIDs(100))
+              clock = Clock()
+              runtime = runtime_module.HomeRigRuntime(grants=grants, audit=audit, sharing=sharing, now=clock)
+
+              grant = grants.create(
+                  HomeRigScope(
+                      rig_ids=("render-rig-1",),
+                      entity_ids=("sensor.gpu_temp",),
+                      operations=(
+                          "rig_health", "rig_power_readiness", "entity_state",
+                          "wake_preview", "control_preview",
+                      ),
+                  ),
+                  actor="operator",
+                  now=clock(),
+              )
+
+              # T-032 categories are not weakened to public just to make runtime easy.
+              rig_claim = runtime.prepare_claim(
+                  target_kind="rig", target_id="render-rig-1", operation="rig_health"
+              )
+              rig_request = runtime.sharing_request(rig_claim)
+              assert rig_request.data_category == "operational"
+              assert rig_request.preview()["decision"] == "confirmation_required"
+              ha_claim = runtime.prepare_claim(
+                  target_kind="entity", target_id="sensor.gpu_temp", operation="entity_state"
+              )
+              ha_request = runtime.sharing_request(ha_claim)
+              assert ha_request.data_category == "private"
+              assert ha_request.preview()["decision"] == "confirmation_required"
+
+              # No approved exact permission -> no provider/config boundary is touched.
+              connection_calls = []
+              original_rig_connection = runtime_module._riggate_connection
+              runtime_module._riggate_connection = lambda: connection_calls.append(True)
+              try:
+                  try:
+                      runtime.read(
+                          target_kind="rig", target_id="render-rig-1", operation="rig_health",
+                          permission_id="dsp_00000000000000000000000000000000",
+                      )
+                  except tools.ToolDenied:
+                      pass
+                  else:
+                      raise AssertionError("unapproved T-032 permission reached RigGate")
+                  assert connection_calls == []
+              finally:
+                  runtime_module._riggate_connection = original_rig_connection
+
+              # Exact one-use permission authorizes exactly one RigGate read.
+              proposal = sharing.propose(rig_request, now=clock())
+              sharing.approve(proposal.permission_id, actor="operator", now=clock())
+              original_rig_exec = runtime_module.execute_riggate_status_read
+              original_rig_connection = runtime_module._riggate_connection
+              def fake_rig_exec(grants_arg, ledger_arg, authorized, connection, *, now, **kwargs):
+                  finish_riggate_request(
+                      ledger_arg, authorized, outcome="completed",
+                      bytes_sent=authorized.sharing_request.max_bytes, now=now,
+                  )
+                  return SimpleNamespace(state="ready", observed_at=now)
+              runtime_module.execute_riggate_status_read = fake_rig_exec
+              runtime_module._riggate_connection = lambda: object()
+              try:
+                  result = json.loads(runtime.read(
+                      target_kind="rig", target_id="render-rig-1", operation="rig_health",
+                      permission_id=proposal.permission_id,
+                  ))
+                  assert result["observation"]["state"] == "ready"
+                  assert result["observation"]["freshness"] == "fresh"
+                  assert result["production_activation"] is False
+                  try:
+                      runtime.read(
+                          target_kind="rig", target_id="render-rig-1", operation="rig_health",
+                          permission_id=proposal.permission_id,
+                      )
+                  except tools.ToolDenied:
+                      pass
+                  else:
+                      raise AssertionError("T-032 permission was reusable")
+              finally:
+                  runtime_module.execute_riggate_status_read = original_rig_exec
+                  runtime_module._riggate_connection = original_rig_connection
+
+              # Home Assistant uses a separate exact PRIVATE permission and projects no attributes.
+              ha_claim = runtime.prepare_claim(
+                  target_kind="entity", target_id="sensor.gpu_temp", operation="entity_state"
+              )
+              ha_request = runtime.sharing_request(ha_claim)
+              ha_proposal = sharing.propose(ha_request, now=clock())
+              sharing.approve(ha_proposal.permission_id, actor="operator", now=clock())
+              original_ha_exec = runtime_module.execute_home_assistant_state_read
+              original_ha_connection = runtime_module._home_assistant_connection
+              def fake_ha_exec(grants_arg, ledger_arg, authorized, connection, *, now, **kwargs):
+                  finish_home_assistant_state_request(
+                      ledger_arg, authorized, outcome="completed",
+                      bytes_sent=authorized.sharing_request.max_bytes, now=now,
+                  )
+                  return SimpleNamespace(state="61", observed_at=now)
+              runtime_module.execute_home_assistant_state_read = fake_ha_exec
+              runtime_module._home_assistant_connection = lambda: object()
+              try:
+                  result = json.loads(runtime.read(
+                      target_kind="entity", target_id="sensor.gpu_temp", operation="entity_state",
+                      permission_id=ha_proposal.permission_id,
+                  ))
+                  assert result["observation"]["target_id"] == "sensor.gpu_temp"
+                  assert result["observation"]["state"] == "61"
+                  assert "attributes" not in json.dumps(result)
+              finally:
+                  runtime_module.execute_home_assistant_state_read = original_ha_exec
+                  runtime_module._home_assistant_connection = original_ha_connection
+
+              # Wake/control remains an inert preview, never a provider execution.
+              wake = json.loads(runtime.preview(
+                  target_kind="rig", target_id="render-rig-1", action="wake"
+              ))
+              assert wake["action"] == "wake" and wake["would_execute"] is False
+              control = json.loads(runtime.preview(
+                  target_kind="entity", target_id="sensor.gpu_temp", action="turn_off"
+              ))
+              assert control["action"] == "turn_off" and control["would_execute"] is False
+
+              # Loopback sharing surface creates/approves an exact permission from a digest preview.
+              app = FastAPI()
+              app.include_router(runtime_module.build_home_rig_runtime_router(runtime))
+              client = TestClient(app)
+              preview_resp = client.post("/home-rig/sharing/preview", json={
+                  "target_kind": "rig", "target_id": "render-rig-1", "operation": "rig_power_readiness"
+              })
+              assert preview_resp.status_code == 200, preview_resp.text
+              preview_json = preview_resp.json()
+              assert preview_json["request"]["decision"] == "confirmation_required"
+              proposal_resp = client.post("/home-rig/sharing/permissions", json={
+                  "target_kind": "rig", "target_id": "render-rig-1", "operation": "rig_power_readiness",
+                  "expected_request_digest": preview_json["request"]["request_digest"],
+              })
+              assert proposal_resp.status_code == 200, proposal_resp.text
+              permission_id = proposal_resp.json()["proposal"]["permission_id"]
+              approve_resp = client.post(
+                  f"/home-rig/sharing/permissions/{permission_id}/approve", json={"confirm": True}
+              )
+              assert approve_resp.status_code == 200 and approve_resp.json()["status"] == "approved"
+
+              # Registration remains completely default-off, then atomically mounts three tools.
+              names = ("riggate_read", "home_assistant_read", "home_rig_preview")
+              saved = {name: tools.REGISTRY.pop(name, None) for name in names}
+              old_flag = os.environ.pop("KALIV_HOME_RIG_PILOT", None)
+              old_default = runtime_module._DEFAULT_RUNTIME
+              runtime_module._DEFAULT_RUNTIME = runtime
+              try:
+                  off_app = FastAPI()
+                  assert runtime_module.register_home_rig_pilot(off_app) is False
+                  assert all(name not in tools.REGISTRY for name in names)
+                  os.environ["KALIV_HOME_RIG_PILOT"] = "1"
+                  on_app = FastAPI()
+                  assert runtime_module.register_home_rig_pilot(on_app) is True
+                  assert all(name in tools.REGISTRY for name in names)
+                  assert tools.REGISTRY["riggate_read"].network == "configured_service"
+                  assert tools.REGISTRY["riggate_read"].sensitivity == "operational"
+                  assert tools.REGISTRY["home_assistant_read"].sensitivity == "private"
+                  assert tools.REGISTRY["home_rig_preview"].network == "none"
+                  assert runtime_module.register_home_rig_pilot(on_app) is False
+              finally:
+                  for name in names:
+                      tools.REGISTRY.pop(name, None)
+                      if saved[name] is not None:
+                          tools.REGISTRY[name] = saved[name]
+                  runtime_module._DEFAULT_RUNTIME = old_default
+                  if old_flag is None:
+                      os.environ.pop("KALIV_HOME_RIG_PILOT", None)
+                  else:
+                      os.environ["KALIV_HOME_RIG_PILOT"] = old_flag
+
+              audit_rows = audit.recent(limit=50)
+              assert any(row["connector"] == "riggate" for row in audit_rows)
+              assert any(row["connector"] == "home_assistant" for row in audit_rows)
+              grants.close(); audit.close(); sharing.close()
+
+          print("===== T-038 HOME/RIG RUNTIME: PASS =====")
+          PY

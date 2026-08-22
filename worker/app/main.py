@@ -82,6 +82,16 @@ if _os.getenv("KALIV_READ_CONNECTOR_PILOT", "0").strip().lower() in {"1", "true"
 
     _register_read_connector_pilot(_impl.app)
 
+# T-038 RigGate/Home Assistant read-first pilot: default-off composition of the
+# exact grant boundary, one-use T-032 data-sharing permission, pinned provider
+# transports and side-effect-free wake/control preview. The literal switch is
+# intentionally visible to activation_readiness; enabling it still does not
+# create any wake/control execution path.
+if _os.getenv("KALIV_HOME_RIG_PILOT", "0").strip().lower() in {"1", "true", "on"}:
+    from .home_rig_tool import register_home_rig_pilot as _register_home_rig_pilot
+
+    _register_home_rig_pilot(_impl.app)
+
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
 # into a wrapper namespace whose functions would still close over main_impl.

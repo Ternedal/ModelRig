@@ -47,6 +47,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
+| `KALIV_HOME_RIG_PILOT` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
@@ -236,6 +237,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_eval.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
+- `tests/worker_home_rig_runtime.py`
 - `tests/worker_jobs.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
