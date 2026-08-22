@@ -567,11 +567,37 @@ def _recognized_tool(connector: Connector, existing: _tools.Tool) -> bool:
     )
 
 
+def _route_collection(app):
+    router = getattr(app, "router", None)
+    routes = getattr(router, "routes", None)
+    if routes is not None:
+        return routes
+    return getattr(app, "routes", ())
+
+
 def _operator_routes_mounted(app) -> bool:
     return any(
         str(getattr(route, "path", "")).startswith("/read-connectors")
-        for route in getattr(app, "routes", ())
+        for route in _route_collection(app)
     )
+
+
+def _mount_operator_routes(app) -> None:
+    routes = _route_collection(app)
+    before = len(routes) if hasattr(routes, "__len__") else None
+    try:
+        app.include_router(build_read_connector_router())
+    except Exception:
+        # Match the established Agent 3 production-mount contract: route
+        # composition is transactional. If FastAPI appended any routes before a
+        # later include failure, remove only this attempt's additions.
+        if before is not None:
+            current = _route_collection(app)
+            try:
+                del current[before:]
+            except (AttributeError, TypeError):
+                pass
+        raise
 
 
 def register_read_connector_pilot(app) -> bool:
@@ -598,7 +624,7 @@ def register_read_connector_pilot(app) -> bool:
                 return False
             # The registry is process-global but FastAPI routes belong to one app.
             # A fresh app in the same process must receive its operator surface.
-            app.include_router(build_read_connector_router())
+            _mount_operator_routes(app)
             return True
 
         if routes_mounted:
@@ -606,15 +632,14 @@ def register_read_connector_pilot(app) -> bool:
                 "T-037 read connector operator routes are mounted without registry tools"
             )
 
-        # Build descriptors and router before exposing any model-visible tool.
-        # include_router happens first so a route-composition failure cannot leave
-        # a half-activated process-global Tool registry behind.
+        # Build descriptors before exposing any model-visible tool. Operator
+        # routes are mounted first and transactionally so a route-composition
+        # failure cannot leave a half-activated process-global Tool registry.
         prepared = tuple(
             (_TOOL_BY_CONNECTOR[connector], _lazy_tool(connector))
             for connector in connectors()
         )
-        router = build_read_connector_router()
-        app.include_router(router)
+        _mount_operator_routes(app)
         for name, tool in prepared:
             _tools.REGISTRY[name] = tool
         return True
