@@ -11,6 +11,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -37,6 +38,7 @@ from .home_rig_connector_contract import (
 from .home_rig_operator import build_home_rig_operator_router
 from .home_rig_provider_gate import (
     authorize_home_assistant_state_request,
+    finish_home_assistant_state_request,
     prepare_home_assistant_state_sharing_request,
 )
 from .home_rig_read_boundary import HomeRigReadClaim, fulfill_read, prepare_read
@@ -46,7 +48,11 @@ from .riggate_provider_transport import (
     RigGateTransportError,
     execute_riggate_status_read,
 )
-from .riggate_v1_contract import authorize_riggate_request, prepare_riggate_sharing_request
+from .riggate_v1_contract import (
+    authorize_riggate_request,
+    finish_riggate_request,
+    prepare_riggate_sharing_request,
+)
 
 _FEATURE_ENV = "KALIV_HOME_RIG_PILOT"
 _GRANTS_DB = _paths.resolve("./kaliv-home-rig-grants.db", env="KALIV_HOME_RIG_GRANTS_DB")
@@ -57,8 +63,8 @@ _REGISTER_LOCK = threading.Lock()
 _DEFAULT_LOCK = threading.Lock()
 PRODUCTION_ACTIVATION = False
 
-_READ_TOOLS = ("riggate_read", "home_assistant_read")
 _PREVIEW_TOOL = "home_rig_preview"
+_APP_MOUNT_MARKER = "_kaliv_home_rig_pilot_mounted"
 
 
 def home_rig_pilot_enabled() -> bool:
@@ -127,7 +133,7 @@ class HomeRigRuntime:
     grants: HomeRigGrantStore
     audit: HomeRigAuditLog
     sharing: DataSharingLedger
-    now: callable = _now
+    now: Callable[[], int] = _now
     max_freshness_seconds: int = 120
 
     def _matching_grants(
@@ -139,15 +145,11 @@ class HomeRigRuntime:
     ) -> tuple[HomeRigGrant, ...]:
         matches: list[HomeRigGrant] = []
         for grant in self.grants.list_grants():
-            try:
-                allowed = grant.scope.allows(
-                    target_kind=target_kind,
-                    target_id=target_id,
-                    operation=operation,
-                )
-            except HomeRigContractError:
-                raise
-            if allowed:
+            if grant.scope.allows(
+                target_kind=target_kind,
+                target_id=target_id,
+                operation=operation,
+            ):
                 matches.append(grant)
         return tuple(matches)
 
@@ -228,6 +230,26 @@ class HomeRigRuntime:
             summary=summary,
         )
 
+    def _finish_config_failure(self, authorized, *, target_kind: Literal["rig", "entity"], now: int) -> None:
+        if target_kind == "rig":
+            finish_riggate_request(
+                self.sharing,
+                authorized,
+                outcome="failed",
+                bytes_sent=0,
+                error_code="provider_config_failed",
+                now=now,
+            )
+        else:
+            finish_home_assistant_state_request(
+                self.sharing,
+                authorized,
+                outcome="failed",
+                bytes_sent=0,
+                error_code="provider_config_failed",
+                now=now,
+            )
+
     def read(
         self,
         *,
@@ -261,11 +283,16 @@ class HomeRigRuntime:
                     permission_id=permission_id,
                     now=authorized_at,
                 )
+                try:
+                    connection = _riggate_connection()
+                except RigGateTransportError:
+                    self._finish_config_failure(authorized, target_kind="rig", now=self.now())
+                    raise
                 evidence = execute_riggate_status_read(
                     self.grants,
                     self.sharing,
                     authorized,
-                    _riggate_connection(),
+                    connection,
                     now=self.now(),
                 )
                 source_state = evidence.state
@@ -282,11 +309,16 @@ class HomeRigRuntime:
                     permission_id=permission_id,
                     now=authorized_at,
                 )
+                try:
+                    connection = _home_assistant_connection()
+                except HomeAssistantTransportError:
+                    self._finish_config_failure(authorized, target_kind="entity", now=self.now())
+                    raise
                 evidence = execute_home_assistant_state_read(
                     self.grants,
                     self.sharing,
                     authorized,
-                    _home_assistant_connection(),
+                    connection,
                     now=self.now(),
                 )
                 source_state = evidence.state
@@ -545,12 +577,32 @@ def _prepared_tools(runtime: HomeRigRuntime) -> tuple[tuple[str, _tools.Tool], .
     )
 
 
-def _route_paths(app) -> tuple[str, ...]:
-    return tuple(getattr(route, "path", "") for route in getattr(app, "routes", ()))
+def _route_collection(app):
+    router = getattr(app, "router", None)
+    routes = getattr(router, "routes", None)
+    if routes is not None:
+        return routes
+    return getattr(app, "routes", ())
+
+
+def _iter_route_paths(routes, seen: set[int] | None = None):
+    seen = set() if seen is None else seen
+    for route in routes:
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            yield path
+        nested = getattr(route, "original_router", None)
+        nested_routes = getattr(nested, "routes", None)
+        if nested_routes is not None and id(nested) not in seen:
+            seen.add(id(nested))
+            yield from _iter_route_paths(nested_routes, seen)
 
 
 def _routes_mounted(app) -> bool:
-    return any(path.startswith("/home-rig") for path in _route_paths(app))
+    state = getattr(app, "state", None)
+    if state is not None and bool(getattr(state, _APP_MOUNT_MARKER, False)):
+        return True
+    return any(path.startswith("/home-rig") for path in _iter_route_paths(_route_collection(app)))
 
 
 def _recognized(existing: _tools.Tool, expected: _tools.Tool) -> bool:
@@ -565,16 +617,23 @@ def _recognized(existing: _tools.Tool, expected: _tools.Tool) -> bool:
 
 
 def _mount_routes(app, runtime: HomeRigRuntime) -> None:
-    routes = getattr(app, "routes", None)
-    before = len(routes) if routes is not None else None
+    routes = _route_collection(app)
+    before = len(routes) if hasattr(routes, "__len__") else None
     try:
         app.include_router(build_home_rig_runtime_router(runtime))
+        state = getattr(app, "state", None)
+        if state is not None:
+            setattr(state, _APP_MOUNT_MARKER, True)
     except Exception:
         if before is not None:
+            current = _route_collection(app)
             try:
-                del app.routes[before:]
+                del current[before:]
             except (AttributeError, TypeError):
                 pass
+        state = getattr(app, "state", None)
+        if state is not None:
+            setattr(state, _APP_MOUNT_MARKER, False)
         raise
 
 
