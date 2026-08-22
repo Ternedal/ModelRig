@@ -40,19 +40,24 @@ def main() -> int:
         return 1
 
     launcher = LAUNCHER.read_text(encoding="utf-8")
+    launcher_commands = "\n".join(
+        line for line in launcher.splitlines()
+        if not line.lstrip().lower().startswith("rem ")
+    )
     wrapper = WRAPPER.read_text(encoding="utf-8")
     core = CORE.read_text(encoding="utf-8")
     gitignore = GITIGNORE.read_text(encoding="utf-8")
     lower = wrapper.lower()
+    core_lower = core.lower()
 
     check(
         "double-click launcher uses the Windows admin role and routes through owned pairing wrapper",
-        "WindowsPrincipal" in launcher
-        and "WindowsBuiltInRole]::Administrator" in launcher
-        and "-Verb RunAs" in launcher
-        and "net session" not in launcher.lower()
-        and "run-proof-campaign-owned-pairing.ps1" in launcher
-        and "run-proof-campaign.ps1\" %*" not in launcher,
+        "WindowsPrincipal" in launcher_commands
+        and "WindowsBuiltInRole]::Administrator" in launcher_commands
+        and "-Verb RunAs" in launcher_commands
+        and "net session" not in launcher_commands.lower()
+        and "run-proof-campaign-owned-pairing.ps1" in launcher_commands
+        and "run-proof-campaign.ps1\" %*" not in launcher_commands,
     )
     check(
         "bootstrap chooses an ephemeral loopback port instead of commandeering 8080",
@@ -141,7 +146,7 @@ def main() -> int:
         "skip/reuse remains delegated to receipt validation in the core",
         "function Try-ReuseGate" in core
         and "Invoke-GateReceipt 'validate'" in core
-        and "gaten forbliver rød" in core,
+        and "gaten forbliver rød" in core_lower,
     )
     check(
         "minted token is cleared/restored after the child proof process",
