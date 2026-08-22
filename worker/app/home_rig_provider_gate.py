@@ -83,6 +83,33 @@ def _outbound_identity(*, claim: HomeRigReadClaim, entity_id: str) -> bytes:
     ).encode("utf-8")
 
 
+def prepare_home_assistant_state_sharing_request(
+    grants: HomeRigGrantStore,
+    claim: HomeRigReadClaim,
+    *,
+    data_category: str,
+    purpose_code: str,
+    purpose: str,
+    summary: str,
+) -> DataSharingRequest:
+    """Build the exact T-032 request used for preview/proposal and later consume."""
+    grant = _authorize_exact(grants, claim)
+    entity_id = claim.target_id.strip().lower()
+    if entity_id not in grant.scope.entity_ids:
+        raise HomeRigDenied("Home Assistant entity is outside exact durable scope")
+    outbound = _outbound_identity(claim=claim, entity_id=entity_id)
+    return build_home_rig_sharing_request(
+        grant.scope,
+        target_kind="entity",
+        data_category=data_category,
+        purpose_code=purpose_code,
+        purpose=purpose,
+        summary=summary,
+        content_sha256=hashlib.sha256(outbound).hexdigest(),
+        max_bytes=len(outbound),
+    )
+
+
 @dataclass(frozen=True)
 class HomeAssistantStateRequestPlan:
     grant_id: str
@@ -187,22 +214,14 @@ def authorize_home_assistant_state_request(
         raise HomeRigContractError("provider gate requires DataSharingLedger")
     now = _time(now)
 
-    # First durable check: no T-032 request may be authorized for a stale claim.
-    grant = _authorize_exact(grants, claim)
-    entity_id = claim.target_id.strip().lower()
-    if entity_id not in grant.scope.entity_ids:
-        raise HomeRigDenied("Home Assistant entity is outside exact durable scope")
-
-    outbound = _outbound_identity(claim=claim, entity_id=entity_id)
-    sharing_request = build_home_rig_sharing_request(
-        grant.scope,
-        target_kind="entity",
+    # Rebuild the exact preview/proposal request only after a fresh durable check.
+    sharing_request = prepare_home_assistant_state_sharing_request(
+        grants,
+        claim,
         data_category=data_category,
         purpose_code=purpose_code,
         purpose=purpose,
         summary=summary,
-        content_sha256=hashlib.sha256(outbound).hexdigest(),
-        max_bytes=len(outbound),
     )
 
     # T-032 consumes an exact approved permission when policy requires one and
@@ -231,17 +250,8 @@ def authorize_home_assistant_state_request(
             now=now,
         )
         raise
-    if final_grant.scope.digest != grant.scope.digest:
-        ledger.complete(
-            receipt,
-            sharing_request,
-            outcome="blocked",
-            bytes_sent=0,
-            error_code="scope_changed",
-            now=now,
-        )
-        raise HomeRigDenied("home/rig scope changed before provider request construction")
 
+    entity_id = claim.target_id.strip().lower()
     plan = HomeAssistantStateRequestPlan(
         grant_id=final_grant.grant_id,
         scope_sha256=final_grant.scope.digest,
