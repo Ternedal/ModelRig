@@ -70,7 +70,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 17 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 18 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -85,6 +85,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` | slukket |
 | `KALIV_MAX_UPLOAD_MB` | `25` | indstilling |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` | indstilling |
+| `KALIV_READ_CONNECTOR_PILOT` | `0` | slukket |
 | `KALIV_SCHEDULER` | `(tom)` | slukket |
 | `KALIV_SCHEDULER_API` | `0` | slukket |
 | `KALIV_SCHEDULER_POLL_S` | `(tom)` | slukket |
