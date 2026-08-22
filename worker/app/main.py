@@ -71,6 +71,17 @@ if _os.getenv("KALIV_GITHUB_CONNECTOR_PILOT", "0").strip().lower() in {"1", "tru
     # request; the authenticated Go backend remains the remote operator edge.
     _impl.app.include_router(_build_github_connector_admin_router())
 
+# T-037 Google/Notion read-first package: four separate capabilities, one
+# explicit default-off pilot decision.  The connector module repeats this guard
+# and owns only read operations; standing grant administration is loopback-only
+# and never enters ToolGate as a model-visible mutation.
+if _os.getenv("KALIV_READ_CONNECTOR_PILOT", "0").strip().lower() in {"1", "true", "on"}:
+    from .read_connector_tool import (
+        register_read_connector_pilot as _register_read_connector_pilot,
+    )
+
+    _register_read_connector_pilot(_impl.app)
+
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
 # into a wrapper namespace whose functions would still close over main_impl.
