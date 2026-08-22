@@ -1,8 +1,8 @@
 """Default-off ToolGate/runtime composition for T-037 read-first connectors.
 
 This layer mounts the already-qualified authority, credential and pinned-provider
-transport behind four separate read-only ToolGate capabilities.  It deliberately
-adds no provider write operation.  Standing grant administration is loopback-only
+transport behind four separate read-only ToolGate capabilities. It deliberately
+adds no provider write operation. Standing grant administration is loopback-only
 and never model-visible; every model read still passes ToolGate's public-network
 confirmation boundary.
 """
@@ -56,6 +56,7 @@ _AUDIT_DB = _paths.resolve(
 )
 _OPERATOR_ACTOR = "loopback-operator"
 _MUTATION_LOCK = threading.Lock()
+_REGISTER_LOCK = threading.Lock()
 _TOOL_BY_CONNECTOR: dict[Connector, str] = {
     "google_calendar": "google_calendar_read",
     "google_drive": "google_drive_read",
@@ -97,15 +98,6 @@ def _store() -> ReadConnectorGrantStore:
 
 def _audit() -> ReadConnectorAuditLog:
     return ReadConnectorAuditLog(_AUDIT_DB)
-
-
-def _client(
-    connector: Connector,
-    grants: ReadConnectorGrantStore,
-) -> tuple[EnvironmentFileReadConnectorCredentialProvider, AccountBoundReadConnectorClient]:
-    credentials = _credentials(connector)
-    transport = ProviderPinnedTransport(credentials=credentials)
-    return credentials, AccountBoundReadConnectorClient(grants=grants, transport=transport)
 
 
 def _iso_now() -> int:
@@ -154,6 +146,12 @@ class ReadConnectorRuntime:
             )
         except (ReadConnectorCredentialError, ReadConnectorRemoteError, ReadConnectorContractError) as exc:
             raise _tools.ToolDenied("Connector-læsningens scope/argumenter er ugyldige") from exc
+
+        # ProviderReadRequest validates provider-safe shapes, while the authority
+        # contract owns the closed operation set. Enforce that set before any
+        # credential metadata, DNS or transport can be touched.
+        if request.operation not in allowed_operations(connector):
+            raise _tools.ToolDenied("Connector-læsningens operation er ikke tilladt")
 
         try:
             credentials = self.credential_factory(connector)
@@ -355,12 +353,20 @@ class GrantScopeReq(BaseModel):
 
 
 class CreateGrantReq(GrantScopeReq):
-    expected_scope_sha256: str = Field(min_length=64, max_length=64)
+    expected_scope_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
 class RevokeGrantReq(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    expected_scope_sha256: str = Field(min_length=64, max_length=64)
+    expected_scope_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     confirm_revoke: Literal[True]
 
 
@@ -440,7 +446,14 @@ def build_read_connector_router() -> APIRouter:
         with _MUTATION_LOCK:
             store = _store()
             try:
-                overlap = next((g for g in store.list_grants(connector=scope.connector) if _overlaps(g.scope, scope)), None)
+                overlap = next(
+                    (
+                        grant
+                        for grant in store.list_grants(connector=scope.connector)
+                        if _overlaps(grant.scope, scope)
+                    ),
+                    None,
+                )
                 if overlap is not None:
                     raise HTTPException(status_code=409, detail="Connector scope overlaps an active grant")
                 grant = store.create_grant(scope, actor=_OPERATOR_ACTOR)
@@ -531,21 +544,44 @@ def build_read_connector_router() -> APIRouter:
     return router
 
 
+def _recognized_tool(connector: Connector, existing: _tools.Tool) -> bool:
+    return (
+        existing.name == _TOOL_BY_CONNECTOR[connector]
+        and existing.risk == "read"
+        and existing.impact == "read"
+        and existing.network == "public"
+        and existing.network_destinations == _NETWORK_DESTINATIONS[connector]
+    )
+
+
 def register_read_connector_pilot(app) -> bool:
-    """Register the four read capabilities exactly once under explicit opt-in."""
+    """Atomically register the four read capabilities under explicit opt-in."""
     if not read_connector_pilot_enabled():
         return False
-    for connector in connectors():
-        name = _TOOL_BY_CONNECTOR[connector]
-        existing = _tools.REGISTRY.get(name)
-        if existing is not None:
-            if (
-                existing.network == "public"
-                and existing.network_destinations == _NETWORK_DESTINATIONS[connector]
-                and existing.risk == "read"
-            ):
+
+    with _REGISTER_LOCK:
+        present: list[Connector] = []
+        for connector in connectors():
+            name = _TOOL_BY_CONNECTOR[connector]
+            existing = _tools.REGISTRY.get(name)
+            if existing is None:
                 continue
-            raise RuntimeError(f"{name} is already registered by another capability")
-        _tools.REGISTRY[name] = _lazy_tool(connector)
-    app.include_router(build_read_connector_router())
-    return True
+            if not _recognized_tool(connector, existing):
+                raise RuntimeError(f"{name} is already registered by another capability")
+            present.append(connector)
+
+        if present:
+            if len(present) == len(connectors()):
+                return False
+            raise RuntimeError("T-037 read connector registry is partially populated")
+
+        # Build all descriptors before mutating the registry so descriptor
+        # construction cannot leave a half-registered capability package.
+        prepared = tuple(
+            (_TOOL_BY_CONNECTOR[connector], _lazy_tool(connector))
+            for connector in connectors()
+        )
+        for name, tool in prepared:
+            _tools.REGISTRY[name] = tool
+        app.include_router(build_read_connector_router())
+        return True
