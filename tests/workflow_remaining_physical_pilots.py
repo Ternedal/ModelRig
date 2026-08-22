@@ -90,4 +90,22 @@ _source = _source.replace(
     ')',
 )
 
+_source = _source.replace(
+    'for forbidden in (\n',
+    'rigdag = (ROOT / "RIGDAG_SIMPEL.md").read_text(encoding="utf-8")\n'
+    'check(\n'
+    '    "origin/physical-proof/2.0.11" in rigdag,\n'
+    '    "rig-day authority is the fetched remote 2.0.11 candidate branch",\n'
+    ')\n'
+    'check(\n'
+    '    "candidate_freeze_check.py --expected-sha $CandidateSha" in rigdag,\n'
+    '    "rig-day preflight revalidates the exact candidate SHA",\n'
+    ')\n'
+    'check(\n'
+    '    "PR #412" not in rigdag,\n'
+    '    "rig-day authority no longer points at the historical 1.58.151 freeze PR",\n'
+    ')\n\n'
+    'for forbidden in (\n',
+)
+
 exec(compile(_source, str(_source_path), "exec"), globals(), globals())
