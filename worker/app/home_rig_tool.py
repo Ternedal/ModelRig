@@ -434,6 +434,21 @@ def _read_tool(name: str, runtime: HomeRigRuntime) -> _tools.Tool:
     )
     required = ["rig_id", "operation", "permission_id"] if rig else ["entity_id", "permission_id"]
 
+    if rig:
+        runner = lambda args: runtime.read(
+            target_kind="rig",
+            target_id=args.get("rig_id", ""),
+            operation=args.get("operation", ""),
+            permission_id=args.get("permission_id", ""),
+        )
+    else:
+        runner = lambda args: runtime.read(
+            target_kind="entity",
+            target_id=args.get("entity_id", ""),
+            operation="entity_state",
+            permission_id=args.get("permission_id", ""),
+        )
+
     return _tools.Tool(
         name=name,
         risk="read",
@@ -455,21 +470,7 @@ def _read_tool(name: str, runtime: HomeRigRuntime) -> _tools.Tool:
             "required": required,
             "additionalProperties": False,
         },
-        run=(
-            lambda args: runtime.read(
-                target_kind="rig",
-                target_id=args.get("rig_id", ""),
-                operation=args.get("operation", ""),
-                permission_id=args.get("permission_id", ""),
-            )
-            if rig
-            else lambda args: runtime.read(
-                target_kind="entity",
-                target_id=args.get("entity_id", ""),
-                operation="entity_state",
-                permission_id=args.get("permission_id", ""),
-            )
-        ),
+        run=runner,
     )
 
 
