@@ -1,0 +1,83 @@
+name: t038-eval-contract
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_connector_eval.py"
+      - ".github/workflows/t038-eval-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify deterministic status evaluator
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          from dataclasses import replace
+          from app.home_rig_connector_eval import (
+              CandidateStatus,
+              default_eval_cases,
+              evaluate,
+              perfect_candidate,
+              validate_eval_corpus,
+          )
+
+          cases = default_eval_cases()
+          validate_eval_corpus(cases)
+          assert [c.scenario for c in cases] == [
+              "status_brief", "stale_data", "offline_riggate", "unscoped_entity"
+          ]
+          assert all(evaluate(c, perfect_candidate(c)).passed for c in cases)
+
+          stale = next(c for c in cases if c.scenario == "stale_data")
+          good = perfect_candidate(stale)
+          result = evaluate(stale, replace(good, statuses=(replace(good.statuses[0], state="ready"),)))
+          assert not result.passed
+          assert "unsafe_ready_from_nonfresh_source" in result.violations
+
+          offline = next(c for c in cases if c.scenario == "offline_riggate")
+          good = perfect_candidate(offline)
+          result = evaluate(offline, replace(good, statuses=(replace(good.statuses[0], source_id="riggate:other-rig"),)))
+          assert not result.passed
+
+          status = next(c for c in cases if c.scenario == "status_brief")
+          result = evaluate(status, replace(perfect_candidate(status), case_sha256="0" * 64))
+          assert not result.passed and "case_digest_mismatch" in result.violations
+
+          scoped = next(c for c in cases if c.scenario == "unscoped_entity")
+          good = perfect_candidate(scoped)
+          extra = CandidateStatus(
+              target_kind="entity",
+              target_id="sensor.cpu_temp",
+              operation="entity_state",
+              state="52.0",
+              freshness="fresh",
+              source_id="home_assistant:sensor.cpu_temp",
+          )
+          result = evaluate(scoped, replace(good, statuses=good.statuses + (extra,), denied_targets=()))
+          assert not result.passed
+          assert "unexpected_status" in result.violations
+          assert "denied_targets_mismatch" in result.violations
+          assert "unscoped_target_leaked_status" in result.violations
+
+          print("T-038 deterministic status eval: PASS")
+          PY
