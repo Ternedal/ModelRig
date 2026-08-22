@@ -49,6 +49,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
+| `KALIV_READ_CONNECTOR_PILOT` | `0` |
 | `KALIV_SCHEDULER` | `` |
 | `KALIV_SCHEDULER_API` | `0` |
 | `KALIV_SCHEDULER_POLL_S` | `` |
@@ -253,6 +254,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_read_connector_package_contract.py`
 - `tests/worker_read_connector_provider_request.py`
 - `tests/worker_read_connector_provider_transport.py`
+- `tests/worker_read_connector_registration_hardening.py`
+- `tests/worker_read_connector_runtime.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_read_scope_windows_aliases.py`
 - `tests/worker_research_claim_evidence.py`
