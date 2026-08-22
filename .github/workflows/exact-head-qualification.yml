@@ -68,19 +68,30 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          : > /tmp/exact-head-python.log
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
             echo "::group::$f"
-            PYTHONPATH=worker python3 "$f" || {
-              status=$?
-              echo "FAILED: $f (exit $status)"
+            echo "===== $f =====" | tee -a /tmp/exact-head-python.log
+            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/exact-head-python.log || {
+              status=${PIPESTATUS[0]}
+              echo "FAILED: $f (exit $status)" | tee -a /tmp/exact-head-python.log
               echo "::endgroup::"
               break
             }
             echo "::endgroup::"
           done
           exit "$status"
+
+      - name: Upload exact-head failed Python log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: exact-head-python-failure
+          path: /tmp/exact-head-python.log
+          if-no-files-found: error
+          retention-days: 7
 
       - name: DevControl DC-L01 through DC-L13 tests on exact head
         env:
