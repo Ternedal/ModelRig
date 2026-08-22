@@ -575,11 +575,28 @@ def _route_collection(app):
     return getattr(app, "routes", ())
 
 
+def _iter_route_paths(routes, seen: set[int] | None = None):
+    """Yield visible paths across FastAPI's eager and deferred router layouts.
+
+    FastAPI 0.141 stores include_router() as an internal included-router wrapper
+    whose own path is empty while its original_router retains the child routes.
+    Walk that structure by attributes instead of importing the private wrapper
+    type, so older eager route lists and the pinned deferred layout both work.
+    """
+    seen = set() if seen is None else seen
+    for route in routes:
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            yield path
+        nested = getattr(route, "original_router", None)
+        nested_routes = getattr(nested, "routes", None)
+        if nested_routes is not None and id(nested) not in seen:
+            seen.add(id(nested))
+            yield from _iter_route_paths(nested_routes, seen)
+
+
 def _operator_routes_mounted(app) -> bool:
-    return any(
-        str(getattr(route, "path", "")).startswith("/read-connectors")
-        for route in _route_collection(app)
-    )
+    return any(path.startswith("/read-connectors") for path in _iter_route_paths(_route_collection(app)))
 
 
 def _mount_operator_routes(app) -> None:
