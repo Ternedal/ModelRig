@@ -76,6 +76,26 @@ function Restore-EnvValue([string]$Name, [string]$Value, [bool]$WasPresent) {
   }
 }
 
+function Find-PairingSeed {
+  $candidates = New-Object System.Collections.Generic.List[string]
+  if ($env:MODELRIG_DATA) { $candidates.Add([string]$env:MODELRIG_DATA) }
+  $candidates.Add((Join-Path $root 'modelrig-data.json'))
+  $candidates.Add((Join-Path $root 'scripts\modelrig-data.json'))
+  if ($env:USERPROFILE) { $candidates.Add((Join-Path $env:USERPROFILE 'Desktop\modelrig-data.json')) }
+
+  $seen = @{}
+  foreach ($candidate in $candidates) {
+    if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+    try { $full = [IO.Path]::GetFullPath($candidate) } catch { continue }
+    if ($seen.ContainsKey($full)) { continue }
+    $seen[$full] = $true
+    if (Test-Path -LiteralPath $full -PathType Leaf) {
+      return (Resolve-Path -LiteralPath $full).Path
+    }
+  }
+  return $null
+}
+
 if ($env:OS -ne 'Windows_NT') { throw 'Beviskampagnen må kun køres på Windows-riggen.' }
 foreach ($cmd in @('git','python','powershell.exe','go','ollama')) {
   if (-not (Get-Command $cmd -CommandType Application -ErrorAction SilentlyContinue)) {
@@ -104,11 +124,23 @@ $pairingStore = Join-Path $bootstrapDir 'pairing-data.json'
 $stdoutLog = Join-Path $bootstrapDir 'backend.stdout.log'
 $stderrLog = Join-Path $bootstrapDir 'backend.stderr.log'
 
+# Bevar riggens eksisterende parrede klienter uden at give proof-flowet skriveadgang
+# til den originale store. Kun kopien muteres, når det midlertidige proof-token mintes.
+$pairingSeed = Find-PairingSeed
+if ($pairingSeed) {
+  Copy-Item -LiteralPath $pairingSeed -Destination $pairingStore -Force
+}
+
 Write-Host "`n============================================================================" -ForegroundColor Cyan
 Write-Host '  MODELRIG — EJET LOOPBACK-PARRING TIL FYSISK PROOF' -ForegroundColor Cyan
 Write-Host '============================================================================' -ForegroundColor Cyan
 Write-Host "  Kandidat: $version | $sha | $branch" -ForegroundColor DarkGray
 Write-Host '  Pairing bootstrap bruger separat loopback-port og separat midlertidig store.' -ForegroundColor DarkGray
+if ($pairingSeed) {
+  Write-Host '  Eksisterende pairing-data er kopieret read-only ind i den isolerede proof-store.' -ForegroundColor DarkGray
+} else {
+  Write-Host '  Ingen eksisterende pairing-store fundet; proof-store starter tom.' -ForegroundColor DarkGray
+}
 Write-Host '  Eksisterende listeners på 8080/8099 røres ikke af bootstrapen.' -ForegroundColor DarkGray
 
 Push-Location (Join-Path $root 'backend')
