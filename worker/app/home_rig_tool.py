@@ -1,9 +1,9 @@
 """Default-off ToolGate/runtime composition for T-038 home/rig reads.
 
-This layer composes the already-qualified T-038 authority, T-032 one-use data
-sharing gate, pinned Home Assistant/RigGate transports and freshness/audit
-boundary. It deliberately exposes only two provider reads plus side-effect-free
-wake/control preview. No wake/control execution exists here.
+This layer composes the qualified T-038 authority, T-032 one-use sharing gate,
+pinned Home Assistant/RigGate transports and freshness/audit boundary. It
+exposes read-only provider access plus side-effect-free wake/control previews;
+there is no wake/control execution path in this module.
 """
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ def home_rig_pilot_enabled() -> bool:
 
 
 def _env_text(name: str) -> str:
-    """Deployment setting lookup kept distinct from readiness feature switches."""
+    """Read deployment settings without presenting them as readiness switches."""
     return os.getenv(name, "").strip()
 
 
@@ -121,16 +121,8 @@ def _riggate_connection() -> RigGateConnection:
 def _purpose(target_kind: Literal["rig", "entity"], operation: str) -> tuple[str, str, str]:
     if target_kind == "rig":
         label = "health" if operation == "rig_health" else "power/readiness"
-        return (
-            "operational",
-            "status_brief",
-            f"Read {label} for one explicitly scoped rig.",
-        )
-    return (
-        "private",
-        "status_brief",
-        "Read one explicitly scoped Home Assistant entity state.",
-    )
+        return "operational", "status_brief", f"Read {label} for one explicitly scoped rig."
+    return "private", "status_brief", "Read one explicitly scoped Home Assistant entity state."
 
 
 @dataclass
@@ -148,15 +140,15 @@ class HomeRigRuntime:
         target_id: str,
         operation: str,
     ) -> tuple[HomeRigGrant, ...]:
-        matches: list[HomeRigGrant] = []
-        for grant in self.grants.list_grants():
+        return tuple(
+            grant
+            for grant in self.grants.list_grants()
             if grant.scope.allows(
                 target_kind=target_kind,
                 target_id=target_id,
                 operation=operation,
-            ):
-                matches.append(grant)
-        return tuple(matches)
+            )
+        )
 
     def _exact_grant(
         self,
@@ -235,7 +227,13 @@ class HomeRigRuntime:
             summary=summary,
         )
 
-    def _finish_config_failure(self, authorized, *, target_kind: Literal["rig", "entity"], now: int) -> None:
+    def _finish_config_failure(
+        self,
+        authorized,
+        *,
+        target_kind: Literal["rig", "entity"],
+        now: int,
+    ) -> None:
         if target_kind == "rig":
             finish_riggate_request(
                 self.sharing,
@@ -263,6 +261,7 @@ class HomeRigRuntime:
         operation: str,
         permission_id: str,
     ) -> str:
+        """Perform one exact read; provider unavailability normalizes to unknown."""
         try:
             claim = self.prepare_claim(
                 target_kind=target_kind,
@@ -276,6 +275,7 @@ class HomeRigRuntime:
                 else "Scoped Home Assistant entity-state read"
             )
             authorized_at = self.now()
+
             if target_kind == "rig":
                 authorized = authorize_riggate_request(
                     self.grants,
@@ -293,15 +293,23 @@ class HomeRigRuntime:
                 except RigGateTransportError:
                     self._finish_config_failure(authorized, target_kind="rig", now=self.now())
                     raise
-                evidence = execute_riggate_status_read(
-                    self.grants,
-                    self.sharing,
-                    authorized,
-                    connection,
-                    now=self.now(),
-                )
-                source_state = evidence.state
-                observed_at = evidence.observed_at
+                try:
+                    evidence = execute_riggate_status_read(
+                        self.grants,
+                        self.sharing,
+                        authorized,
+                        connection,
+                        now=self.now(),
+                    )
+                except RigGateTransportError:
+                    # The transport already closed the one-use T-032 receipt as
+                    # failed. T-038 still owes the caller a safe status: no
+                    # trustworthy provider evidence is exactly "unavailable".
+                    source_state = None
+                    observed_at = None
+                else:
+                    source_state = evidence.state
+                    observed_at = evidence.observed_at
             else:
                 authorized = authorize_home_assistant_state_request(
                     self.grants,
@@ -319,15 +327,20 @@ class HomeRigRuntime:
                 except HomeAssistantTransportError:
                     self._finish_config_failure(authorized, target_kind="entity", now=self.now())
                     raise
-                evidence = execute_home_assistant_state_read(
-                    self.grants,
-                    self.sharing,
-                    authorized,
-                    connection,
-                    now=self.now(),
-                )
-                source_state = evidence.state
-                observed_at = evidence.observed_at
+                try:
+                    evidence = execute_home_assistant_state_read(
+                        self.grants,
+                        self.sharing,
+                        authorized,
+                        connection,
+                        now=self.now(),
+                    )
+                except HomeAssistantTransportError:
+                    source_state = None
+                    observed_at = None
+                else:
+                    source_state = evidence.state
+                    observed_at = evidence.observed_at
 
             receipt = fulfill_read(
                 self.grants,
@@ -338,24 +351,31 @@ class HomeRigRuntime:
                 now=self.now(),
                 max_freshness_seconds=self.max_freshness_seconds,
             )
-            return json.dumps(receipt.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            return json.dumps(
+                receipt.to_dict(),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         except (DataSharingDenied, HomeRigDenied) as exc:
             raise _tools.ToolDenied("home/rig-læsningen mangler præcis aktiv tilladelse") from exc
         except (DataSharingContractError, HomeRigContractError) as exc:
             raise _tools.ToolDenied("home/rig-læsningens scope eller delingstilladelse er ugyldig") from exc
         except (HomeAssistantTransportError, RigGateTransportError) as exc:
+            # These are deployment/configuration failures. Actual provider
+            # unavailability after a valid request boundary is normalized above.
             try:
                 self.audit.record(
                     target_kind=target_kind,
                     target_id=target_id,
                     operation=operation,
                     outcome="error",
-                    detail="provider_execution_failed",
+                    detail="provider_configuration_failed",
                     now=self.now(),
                 )
             except HomeRigContractError:
                 pass
-            raise _tools.ToolError("home/rig-providerkaldet fejlede") from exc
+            raise _tools.ToolError("home/rig-providerkonfigurationen fejlede") from exc
 
     def preview(
         self,
@@ -381,11 +401,39 @@ class HomeRigRuntime:
             )
         except (HomeRigDenied, HomeRigContractError) as exc:
             raise _tools.ToolDenied("home/rig-preview er uden for aktivt exact scope") from exc
-        return json.dumps(preview.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            preview.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
 
 def _read_tool(name: str, runtime: HomeRigRuntime) -> _tools.Tool:
     rig = name == "riggate_read"
+    properties = (
+        {
+            "rig_id": {"type": "string"},
+            "operation": {
+                "type": "string",
+                "enum": ["rig_health", "rig_power_readiness"],
+            },
+            "permission_id": {
+                "type": "string",
+                "pattern": "^dsp_[0-9a-f]{32}$",
+            },
+        }
+        if rig
+        else {
+            "entity_id": {"type": "string"},
+            "permission_id": {
+                "type": "string",
+                "pattern": "^dsp_[0-9a-f]{32}$",
+            },
+        }
+    )
+    required = ["rig_id", "operation", "permission_id"] if rig else ["entity_id", "permission_id"]
+
     return _tools.Tool(
         name=name,
         risk="read",
@@ -403,35 +451,24 @@ def _read_tool(name: str, runtime: HomeRigRuntime) -> _tools.Tool:
         ),
         params={
             "type": "object",
-            "properties": (
-                {
-                    "rig_id": {"type": "string"},
-                    "operation": {"type": "string", "enum": ["rig_health", "rig_power_readiness"]},
-                    "permission_id": {"type": "string", "pattern": "^dsp_[0-9a-f]{32}$"},
-                }
-                if rig
-                else {
-                    "entity_id": {"type": "string"},
-                    "permission_id": {"type": "string", "pattern": "^dsp_[0-9a-f]{32}$"},
-                }
-            ),
-            "required": (["rig_id", "operation", "permission_id"] if rig else ["entity_id", "permission_id"]),
+            "properties": properties,
+            "required": required,
             "additionalProperties": False,
         },
         run=(
-            (lambda args: runtime.read(
+            lambda args: runtime.read(
                 target_kind="rig",
                 target_id=args.get("rig_id", ""),
                 operation=args.get("operation", ""),
                 permission_id=args.get("permission_id", ""),
-            ))
+            )
             if rig
-            else (lambda args: runtime.read(
+            else lambda args: runtime.read(
                 target_kind="entity",
                 target_id=args.get("entity_id", ""),
                 operation="entity_state",
                 permission_id=args.get("permission_id", ""),
-            ))
+            )
         ),
     )
 
@@ -452,7 +489,10 @@ def _preview_tool(runtime: HomeRigRuntime) -> _tools.Tool:
             "properties": {
                 "target_kind": {"type": "string", "enum": ["rig", "entity"]},
                 "target_id": {"type": "string"},
-                "action": {"type": "string", "enum": ["wake", "turn_on", "turn_off", "toggle"]},
+                "action": {
+                    "type": "string",
+                    "enum": ["wake", "turn_on", "turn_off", "toggle"],
+                },
             },
             "required": ["target_kind", "target_id", "action"],
             "additionalProperties": False,
@@ -473,7 +513,11 @@ class SharingReadReq(BaseModel):
 
 
 class SharingProposalReq(SharingReadReq):
-    expected_request_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    expected_request_digest: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
 class PermissionDecisionReq(BaseModel):
@@ -612,9 +656,20 @@ def _routes_mounted(app) -> bool:
 
 def _recognized(existing: _tools.Tool, expected: _tools.Tool) -> bool:
     fields = (
-        "name", "risk", "description", "params", "sensitivity", "isolate",
-        "env_allow", "network", "network_destinations", "impact", "cancellation",
-        "idempotent", "schedulable", "unschedulable_because",
+        "name",
+        "risk",
+        "description",
+        "params",
+        "sensitivity",
+        "isolate",
+        "env_allow",
+        "network",
+        "network_destinations",
+        "impact",
+        "cancellation",
+        "idempotent",
+        "schedulable",
+        "unschedulable_because",
     )
     return all(getattr(existing, field) == getattr(expected, field) for field in fields) and (
         getattr(existing.run, "__module__", None) == __name__
