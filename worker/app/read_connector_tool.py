@@ -545,17 +545,37 @@ def build_read_connector_router() -> APIRouter:
 
 
 def _recognized_tool(connector: Connector, existing: _tools.Tool) -> bool:
-    return (
-        existing.name == _TOOL_BY_CONNECTOR[connector]
-        and existing.risk == "read"
-        and existing.impact == "read"
-        and existing.network == "public"
-        and existing.network_destinations == _NETWORK_DESTINATIONS[connector]
+    expected = _lazy_tool(connector)
+    fields = (
+        "name",
+        "risk",
+        "description",
+        "params",
+        "sensitivity",
+        "isolate",
+        "env_allow",
+        "network",
+        "network_destinations",
+        "impact",
+        "cancellation",
+        "idempotent",
+        "schedulable",
+        "unschedulable_because",
+    )
+    return all(getattr(existing, field) == getattr(expected, field) for field in fields) and (
+        getattr(existing.run, "__module__", None) == __name__
+    )
+
+
+def _operator_routes_mounted(app) -> bool:
+    return any(
+        str(getattr(route, "path", "")).startswith("/read-connectors")
+        for route in getattr(app, "routes", ())
     )
 
 
 def register_read_connector_pilot(app) -> bool:
-    """Atomically register the four read capabilities under explicit opt-in."""
+    """Compose all four read capabilities and operator routes fail-closed."""
     if not read_connector_pilot_enabled():
         return False
 
@@ -570,18 +590,31 @@ def register_read_connector_pilot(app) -> bool:
                 raise RuntimeError(f"{name} is already registered by another capability")
             present.append(connector)
 
+        routes_mounted = _operator_routes_mounted(app)
         if present:
-            if len(present) == len(connectors()):
+            if len(present) != len(connectors()):
+                raise RuntimeError("T-037 read connector registry is partially populated")
+            if routes_mounted:
                 return False
-            raise RuntimeError("T-037 read connector registry is partially populated")
+            # The registry is process-global but FastAPI routes belong to one app.
+            # A fresh app in the same process must receive its operator surface.
+            app.include_router(build_read_connector_router())
+            return True
 
-        # Build all descriptors before mutating the registry so descriptor
-        # construction cannot leave a half-registered capability package.
+        if routes_mounted:
+            raise RuntimeError(
+                "T-037 read connector operator routes are mounted without registry tools"
+            )
+
+        # Build descriptors and router before exposing any model-visible tool.
+        # include_router happens first so a route-composition failure cannot leave
+        # a half-activated process-global Tool registry behind.
         prepared = tuple(
             (_TOOL_BY_CONNECTOR[connector], _lazy_tool(connector))
             for connector in connectors()
         )
+        router = build_read_connector_router()
+        app.include_router(router)
         for name, tool in prepared:
             _tools.REGISTRY[name] = tool
-        app.include_router(build_read_connector_router())
         return True
