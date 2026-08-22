@@ -2,7 +2,7 @@
 """Regression contract for the proof campaign's automatic pairing bootstrap.
 
 The launcher may remove manual token-copying. It may not gain authority over
-unrelated listeners, reuse the operator's normal pairing store, dirty the exact
+unrelated listeners, mutate the operator's normal pairing store, dirty the exact
 checkout, bypass the real pair/start -> pair/claim protocol, weaken the core
 proof gates, or persist the minted device token.
 """
@@ -76,6 +76,19 @@ def main() -> int:
         "validation\\proof-bootstrap" not in wrapper,
     )
     check(
+        "existing paired clients can seed only the isolated copy",
+        "function Find-PairingSeed" in wrapper
+        and "Copy-Item -LiteralPath $pairingSeed -Destination $pairingStore -Force" in wrapper
+        and "Copy-Item -LiteralPath $pairingStore -Destination $pairingSeed" not in wrapper
+        and "Set-Content -LiteralPath $pairingSeed" not in wrapper,
+    )
+    check(
+        "pairing seed discovery does not inspect or take ownership of listener processes",
+        "Get-NetTCPConnection" not in wrapper
+        and "Get-ListenerPid" not in wrapper
+        and "Win32_Process" not in wrapper,
+    )
+    check(
         "bootstrap authenticates pair/start with a process-local random admin key",
         "New-RandomHex 32" in wrapper
         and "'X-Admin-Key' = $bootstrapAdminKey" in wrapper
@@ -100,14 +113,11 @@ def main() -> int:
     check(
         "bootstrap cleanup stops only the PID returned for its owned process",
         "Stop-Process -Id $bootstrap.Id" in wrapper
-        and "Get-NetTCPConnection" not in wrapper
-        and "taskkill" not in lower
-        and "Win32_Process" not in wrapper,
+        and "taskkill" not in lower,
     )
     check(
         "unrelated 8080/8099 listeners are not touched by bootstrap code",
-        "Get-ListenerPid" not in wrapper
-        and "LocalPort 8080" not in wrapper
+        "LocalPort 8080" not in wrapper
         and "LocalPort 8099" not in wrapper,
     )
     check(
