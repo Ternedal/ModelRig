@@ -37,16 +37,25 @@ def rejects(fn, expected, name: str, contains: str = "") -> None:
         check(False, name)
 
 
+def _route_paths(routes, seen: set[int] | None = None):
+    seen = set() if seen is None else seen
+    for route in routes:
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            yield path
+        nested = getattr(route, "original_router", None)
+        nested_routes = getattr(nested, "routes", None)
+        if nested_routes is not None and id(nested) not in seen:
+            seen.add(id(nested))
+            yield from _route_paths(nested_routes, seen)
+
+
 def route_count(app) -> int:
     router = getattr(app, "router", None)
     routes = getattr(router, "routes", None)
     if routes is None:
         routes = getattr(app, "routes", ())
-    return sum(
-        1
-        for route in routes
-        if str(getattr(route, "path", "")).startswith("/read-connectors")
-    )
+    return sum(1 for path in _route_paths(routes) if path.startswith("/read-connectors"))
 
 
 saved_env = os.environ.get("KALIV_READ_CONNECTOR_PILOT")
