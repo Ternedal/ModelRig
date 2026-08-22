@@ -269,6 +269,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_research_sharing_boundary_consistency.py`
 - `tests/worker_research_sharing_execution.py`
 - `tests/worker_research_sharing_execution_async_contract.py`
+- `tests/worker_riggate_v1_contract.py`
 - `tests/worker_schedule_admin_persistence_time.py`
 - `tests/worker_schedule_admin_preview_time.py`
 - `tests/worker_schedule_api.py`
