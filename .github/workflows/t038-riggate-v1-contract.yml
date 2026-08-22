@@ -4,10 +4,12 @@ on:
   pull_request:
     paths:
       - "worker/app/riggate_v1_contract.py"
+      - "worker/app/riggate_provider_transport.py"
       - "worker/app/home_rig_connector_contract.py"
       - "worker/app/home_rig_read_boundary.py"
       - "worker/app/data_sharing.py"
       - "tests/worker_riggate_v1_contract.py"
+      - "tests/worker_riggate_provider_transport.py"
       - ".github/workflows/t038-riggate-v1-contract.yml"
   workflow_dispatch:
 
@@ -29,9 +31,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Qualify dormant RigGate v1 contract
+      - name: Qualify dormant RigGate v1 contract and provider transport
         shell: bash
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: worker
-        run: python3 tests/worker_riggate_v1_contract.py
+        run: |
+          python3 tests/worker_riggate_v1_contract.py
+          python3 tests/worker_riggate_provider_transport.py
