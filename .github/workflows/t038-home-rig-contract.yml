@@ -1,0 +1,280 @@
+name: t038-home-rig-contract
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_connector_contract.py"
+      - ".github/workflows/t038-home-rig-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify T-038 dormant authority and freshness contract
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import hashlib
+          import uuid
+
+          from app.data_sharing import DEFAULT_POLICY
+          from app.home_rig_connector_contract import (
+              HomeRigAuditLog,
+              HomeRigDenied,
+              HomeRigGrantStore,
+              HomeRigScope,
+              build_control_preview,
+              build_home_rig_sharing_request,
+              normalize_observation,
+          )
+
+          source = open("worker/app/home_rig_connector_contract.py", encoding="utf-8").read()
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".", 1)[0])
+          assert {"socket", "ssl", "http", "urllib", "requests", "httpx", "subprocess", "os"}.isdisjoint(imported)
+          for forbidden in (
+              "REGISTRY[", "FastAPI(", "APIRouter(", "include_router(",
+              "os.getenv(", "os.environ", "urlopen(", "requests.", "httpx.",
+              "wake(", "turn_on(", "turn_off(", "toggle(",
+          ):
+              assert forbidden not in source, forbidden
+          assert "PRODUCTION_ACTIVATION = False" in source
+
+          scope = HomeRigScope(
+              rig_ids=("modelrig", "mediaserver"),
+              entity_ids=("sensor.gpu_temp", "binary_sensor.nas_online"),
+              operations=(
+                  "rig_health", "rig_power_readiness", "entity_state",
+                  "wake_preview", "control_preview",
+              ),
+          )
+          same = HomeRigScope(
+              rig_ids=("mediaserver", "modelrig"),
+              entity_ids=("binary_sensor.nas_online", "sensor.gpu_temp"),
+              operations=(
+                  "control_preview", "wake_preview", "entity_state",
+                  "rig_power_readiness", "rig_health",
+              ),
+          )
+          assert scope.digest == same.digest
+          assert scope.allows(target_kind="rig", target_id="modelrig", operation="rig_health")
+          assert scope.allows(target_kind="entity", target_id="sensor.gpu_temp", operation="entity_state")
+          assert not scope.allows(target_kind="entity", target_id="sensor.cpu_temp", operation="entity_state")
+          assert scope.to_dict()["production_activation"] is False
+          assert scope.to_dict()["capability_ids"] == ["tool:riggate_read", "tool:home_assistant_read"]
+
+          class UUIDs:
+              def __init__(self):
+                  self.value = 0
+              def __call__(self):
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          grants = HomeRigGrantStore(uuid_factory=UUIDs())
+          grant = grants.create(scope, actor="operator", now=100)
+          assert grants.authorize(
+              grant.grant_id,
+              target_kind="rig",
+              target_id="modelrig",
+              operation="rig_power_readiness",
+          ).grant_id == grant.grant_id
+          try:
+              grants.authorize(
+                  grant.grant_id,
+                  target_kind="entity",
+                  target_id="sensor.cpu_temp",
+                  operation="entity_state",
+              )
+          except HomeRigDenied:
+              pass
+          else:
+              raise AssertionError("unscoped entity was authorized")
+
+          try:
+              grants.revoke(
+                  grant.grant_id,
+                  expected_scope_sha256="0" * 64,
+                  actor="operator",
+                  now=110,
+              )
+          except HomeRigDenied:
+              pass
+          else:
+              raise AssertionError("stale scope digest revoked authority")
+          assert grants.get(grant.grant_id).active is True
+
+          fresh = normalize_observation(
+              target_kind="rig",
+              target_id="modelrig",
+              operation="rig_power_readiness",
+              source_state="ready",
+              observed_at=980,
+              checked_at=1000,
+              max_freshness_seconds=60,
+          )
+          assert fresh.state == "ready" and fresh.freshness == "fresh"
+          assert fresh.to_dict()["source"] == "riggate"
+          assert fresh.to_dict()["checked_at"]
+          assert fresh.to_dict()["freshness_seconds"] == 20
+
+          stale = normalize_observation(
+              target_kind="rig",
+              target_id="modelrig",
+              operation="rig_power_readiness",
+              source_state="ready",
+              observed_at=900,
+              checked_at=1000,
+              max_freshness_seconds=60,
+          )
+          assert stale.state == "unknown" and stale.freshness == "stale"
+          assert stale.freshness_seconds == 100
+
+          offline = normalize_observation(
+              target_kind="rig",
+              target_id="mediaserver",
+              operation="rig_health",
+              source_state=None,
+              observed_at=None,
+              checked_at=1000,
+          )
+          assert offline.state == "unknown" and offline.freshness == "unavailable"
+          assert offline.to_dict()["source_id"] == "riggate:mediaserver"
+
+          unavailable = normalize_observation(
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              source_state="unavailable",
+              observed_at=999,
+              checked_at=1000,
+          )
+          assert unavailable.state == "unknown" and unavailable.freshness == "unavailable"
+          assert unavailable.observed_at is None
+
+          source_unknown = normalize_observation(
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              source_state="unknown",
+              observed_at=999,
+              checked_at=1000,
+          )
+          assert source_unknown.state == "unknown" and source_unknown.freshness == "fresh"
+
+          wake = build_control_preview(
+              grants,
+              grant.grant_id,
+              target_kind="rig",
+              target_id="modelrig",
+              action="wake",
+              now=1000,
+          )
+          control = build_control_preview(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="binary_sensor.nas_online",
+              action="toggle",
+              now=1000,
+          )
+          for preview in (wake, control):
+              assert preview.would_execute is False
+              assert preview.production_activation is False
+              assert preview.to_dict()["would_execute"] is False
+
+          audit = HomeRigAuditLog()
+          audit.record(
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              outcome="executed",
+              grant_id=grant.grant_id,
+              scope_sha256=scope.digest,
+              freshness="stale",
+              detail="state_read",
+              now=1000,
+          )
+          rows = audit.recent()
+          assert len(rows) == 1
+          assert rows[0]["connector"] == "home_assistant"
+          assert rows[0]["target_id"] == "sensor.gpu_temp"
+          assert rows[0]["freshness"] == "stale"
+          assert "state" not in rows[0]
+
+          content_digest = hashlib.sha256(b"status-query").hexdigest()
+          sharing = build_home_rig_sharing_request(
+              scope,
+              target_kind="entity",
+              data_category="operational",
+              purpose_code="status_read",
+              purpose="Read explicitly scoped sensor status",
+              summary="Scoped Home Assistant status read",
+              content_sha256=content_digest,
+              max_bytes=1024,
+          )
+          assert sharing.surface == "connector"
+          assert sharing.destination_type == "connector"
+          assert sharing.provider == "home_assistant"
+          assert sharing.destination == f"home_assistant/{scope.digest}"
+          assert "sensor.gpu_temp" not in sharing.destination
+          assert DEFAULT_POLICY.decision(sharing) == "confirmation_required"
+
+          secret = build_home_rig_sharing_request(
+              scope,
+              target_kind="rig",
+              data_category="secret",
+              purpose_code="status_read",
+              purpose="Read scoped rig status",
+              summary="Scoped RigGate status read",
+              content_sha256=content_digest,
+              max_bytes=1024,
+          )
+          assert DEFAULT_POLICY.decision(secret) == "forbidden"
+
+          revoked = grants.revoke(
+              grant.grant_id,
+              expected_scope_sha256=scope.digest,
+              actor="operator",
+              now=1200,
+          )
+          assert revoked.active is False
+          try:
+              grants.authorize(
+                  grant.grant_id,
+                  target_kind="rig",
+                  target_id="modelrig",
+                  operation="rig_health",
+              )
+          except HomeRigDenied:
+              pass
+          else:
+              raise AssertionError("revoked grant remained authoritative")
+
+          audit.close()
+          grants.close()
+          print("T-038 dormant home/rig authority contract: PASS")
+          PY
