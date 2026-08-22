@@ -71,6 +71,11 @@ def home_rig_pilot_enabled() -> bool:
     return os.getenv(_FEATURE_ENV, "0").strip().lower() in {"1", "true", "on"}
 
 
+def _env_text(name: str) -> str:
+    """Deployment setting lookup kept distinct from readiness feature switches."""
+    return os.getenv(name, "").strip()
+
+
 def _env_bool(name: str) -> bool:
     return os.getenv(name, "0").strip().lower() in {"1", "true", "on"}
 
@@ -90,8 +95,8 @@ def _require_operator(request: Request) -> None:
 
 
 def _home_assistant_connection() -> HomeAssistantConnection:
-    origin = os.getenv("KALIV_HOME_ASSISTANT_ORIGIN", "").strip()
-    token_file = os.getenv("KALIV_HOME_ASSISTANT_TOKEN_FILE", "").strip()
+    origin = _env_text("KALIV_HOME_ASSISTANT_ORIGIN")
+    token_file = _env_text("KALIV_HOME_ASSISTANT_TOKEN_FILE")
     if not origin or not token_file:
         raise HomeAssistantTransportError("Home Assistant deployment configuration is incomplete")
     return HomeAssistantConnection(
@@ -102,8 +107,8 @@ def _home_assistant_connection() -> HomeAssistantConnection:
 
 
 def _riggate_connection() -> RigGateConnection:
-    origin = os.getenv("KALIV_RIGGATE_ORIGIN", "").strip()
-    token_file = os.getenv("KALIV_RIGGATE_TOKEN_FILE", "").strip()
+    origin = _env_text("KALIV_RIGGATE_ORIGIN")
+    token_file = _env_text("KALIV_RIGGATE_TOKEN_FILE")
     if not origin or not token_file:
         raise RigGateTransportError("RigGate deployment configuration is incomplete")
     return RigGateConnection(
