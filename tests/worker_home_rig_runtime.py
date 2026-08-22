@@ -66,6 +66,59 @@ def permit(runtime: runtime_module.HomeRigRuntime, *, kind: str, target: str, op
 
 
 def main() -> int:
+    # Pin ToolGate dispatch itself, not only HomeRigRuntime.read(). A conditional
+    # lambda once made the Home Assistant tool return another lambda instead of
+    # executing the read, while the underlying runtime tests stayed green.
+    class DispatchRuntime:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def read(self, **kwargs) -> str:
+            self.calls.append(kwargs)
+            return "dispatched"
+
+    dispatch = DispatchRuntime()
+    rig_tool = runtime_module._read_tool("riggate_read", dispatch)
+    ha_tool = runtime_module._read_tool("home_assistant_read", dispatch)
+    rig_permission = "dsp_" + "1" * 32
+    ha_permission = "dsp_" + "2" * 32
+    rig_dispatch_result = rig_tool.run(
+        {
+            "rig_id": "render-rig-1",
+            "operation": "rig_health",
+            "permission_id": rig_permission,
+        }
+    )
+    check(rig_dispatch_result == "dispatched", "RigGate ToolGate dispatch executes runtime read")
+    check(
+        dispatch.calls[-1]
+        == {
+            "target_kind": "rig",
+            "target_id": "render-rig-1",
+            "operation": "rig_health",
+            "permission_id": rig_permission,
+        },
+        "RigGate ToolGate dispatch preserves exact arguments",
+    )
+    ha_dispatch_result = ha_tool.run(
+        {
+            "entity_id": "sensor.gpu_temp",
+            "permission_id": ha_permission,
+        }
+    )
+    check(ha_dispatch_result == "dispatched", "Home Assistant ToolGate dispatch executes runtime read")
+    check(not callable(ha_dispatch_result), "Home Assistant ToolGate dispatch does not return nested lambda")
+    check(
+        dispatch.calls[-1]
+        == {
+            "target_kind": "entity",
+            "target_id": "sensor.gpu_temp",
+            "operation": "entity_state",
+            "permission_id": ha_permission,
+        },
+        "Home Assistant ToolGate dispatch binds exact entity_state operation",
+    )
+
     with tempfile.TemporaryDirectory(prefix="modelrig-t038-runtime-test-") as td:
         grants = HomeRigGrantStore(os.path.join(td, "grants.db"), uuid_factory=UUIDs())
         audit = HomeRigAuditLog(os.path.join(td, "audit.db"))
