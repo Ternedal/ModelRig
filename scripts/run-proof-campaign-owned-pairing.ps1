@@ -94,8 +94,10 @@ $sha = Invoke-Git rev-parse HEAD
 if ($sha -ne (Invoke-Git rev-parse "origin/$branch")) { throw 'HEAD matcher ikke remote.' }
 $version = (Get-Content VERSION -Raw).Trim()
 
+# stage-a-runtime er allerede eksplicit git-ignoreret. Bootstrapen må aldrig gøre
+# working tree dirty mellem sin egen exact-head-check og core-engineens identiske gate.
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$bootstrapDir = Join-Path $root ("validation\proof-bootstrap\{0}-{1}" -f $stamp, $sha.Substring(0,12))
+$bootstrapDir = Join-Path $root ("validation\stage-a-runtime\proof-pairing\{0}-{1}" -f $stamp, $sha.Substring(0,12))
 New-Item -ItemType Directory -Path $bootstrapDir -Force | Out-Null
 $backendExe = Join-Path $bootstrapDir 'modelrig-server-proof-pairing.exe'
 $pairingStore = Join-Path $bootstrapDir 'pairing-data.json'
@@ -124,15 +126,15 @@ $proofToken = $null
 $coreExit = 1
 
 $oldHostPresent = Test-Path Env:MODELRIG_HOST
-$oldHost = [string]$env:MODELRIG_HOST
+$oldHost = if ($oldHostPresent) { [string]$env:MODELRIG_HOST } else { '' }
 $oldPortPresent = Test-Path Env:MODELRIG_PORT
-$oldPort = [string]$env:MODELRIG_PORT
+$oldPort = if ($oldPortPresent) { [string]$env:MODELRIG_PORT } else { '' }
 $oldDataPresent = Test-Path Env:MODELRIG_DATA
-$oldData = [string]$env:MODELRIG_DATA
+$oldData = if ($oldDataPresent) { [string]$env:MODELRIG_DATA } else { '' }
 $oldAdminPresent = Test-Path Env:MODELRIG_ADMIN_KEY
-$oldAdmin = [string]$env:MODELRIG_ADMIN_KEY
+$oldAdmin = if ($oldAdminPresent) { [string]$env:MODELRIG_ADMIN_KEY } else { '' }
 $oldTokenPresent = Test-Path Env:MODELRIG_TOKEN
-$oldToken = [string]$env:MODELRIG_TOKEN
+$oldToken = if ($oldTokenPresent) { [string]$env:MODELRIG_TOKEN } else { '' }
 
 try {
   $env:MODELRIG_HOST = '127.0.0.1'
