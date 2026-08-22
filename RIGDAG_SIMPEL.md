@@ -8,8 +8,8 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
 - version: `2.0.11`;
 - branch: `physical-proof/2.0.11`;
-- freeze: candidate_freeze_check groen paa exact SHA;
-- exact SHA: `7b2fe732...` erstattet af den aktuelle kandidat; læses fra grenen og må aldrig gættes;
+- freeze: `candidate_freeze_check.py` grøn på exact SHA;
+- exact SHA: læses fra den fetch'ede `origin/physical-proof/2.0.11` og må aldrig gættes eller kopieres fra ældre evidens;
 - produktion: ikke aktiveret.
 
 Evidens fra 2.0.10 eller fra en tidligere ugyldiggjort 2.0.11-head må ikke
@@ -31,7 +31,7 @@ python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/physical-proof/2.0.11` og den grønne `candidate_freeze_check` er den
+`origin/physical-proof/2.0.11` og den grønne `candidate_freeze_check.py` er den
 aktuelle kandidat-authority. Historiske freeze-PR'er eller ældre 2.0.11-heads
 må ikke bruges som SHA-reference.
 
