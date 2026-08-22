@@ -5,8 +5,9 @@ title ModelRig - Physical Proof Campaign
 set "PYTHONDONTWRITEBYTECODE=1"
 
 rem Telefon/voice-bevis kan kraeve elevation senere i den eksisterende proof-engine.
-rem Dobbeltklik beder derfor selv om UAC; pairing-bootstrapen bruger kun loopback.
-net session >nul 2>&1
+rem Brug Windows-principalens faktiske administratorrolle; net session kan fejle
+rem paa en allerede elevated pc hvis Server-tjenesten ikke koerer.
+powershell.exe -NoProfile -Command "if (([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 0 } else { exit 1 }"
 if not "%ERRORLEVEL%"=="0" (
   echo Starter igen som administrator - godkend Windows UAC-dialogen...
   powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs -WorkingDirectory '%~dp0'"
