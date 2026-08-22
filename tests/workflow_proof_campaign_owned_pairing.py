@@ -46,8 +46,11 @@ def main() -> int:
     lower = wrapper.lower()
 
     check(
-        "double-click launcher self-elevates and routes through owned pairing wrapper",
-        "-Verb RunAs" in launcher
+        "double-click launcher uses the Windows admin role and routes through owned pairing wrapper",
+        "WindowsPrincipal" in launcher
+        and "WindowsBuiltInRole]::Administrator" in launcher
+        and "-Verb RunAs" in launcher
+        and "net session" not in launcher.lower()
         and "run-proof-campaign-owned-pairing.ps1" in launcher
         and "run-proof-campaign.ps1\" %*" not in launcher,
     )
