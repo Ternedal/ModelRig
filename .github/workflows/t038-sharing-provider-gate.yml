@@ -1,0 +1,298 @@
+name: t038-sharing-provider-gate
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_provider_gate.py"
+      - "worker/app/home_rig_read_boundary.py"
+      - "worker/app/home_rig_connector_contract.py"
+      - "worker/app/data_sharing.py"
+      - ".github/workflows/t038-sharing-provider-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify T-032 one-use provider-plan gate
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import uuid
+
+          from app.data_sharing import DataSharingDenied, DataSharingLedger
+          from app.home_rig_connector_contract import (
+              HomeRigDenied,
+              HomeRigGrantStore,
+              HomeRigScope,
+          )
+          from app.home_rig_provider_gate import (
+              authorize_home_assistant_state_request,
+              finish_home_assistant_state_request,
+              prepare_home_assistant_state_sharing_request,
+          )
+          from app.home_rig_read_boundary import prepare_read
+
+          source = open("worker/app/home_rig_provider_gate.py", encoding="utf-8").read()
+          tree = ast.parse(source)
+          imported = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imported.add(node.module.split(".", 1)[0])
+          assert {"socket", "ssl", "http", "requests", "httpx", "subprocess", "os"}.isdisjoint(imported)
+          for forbidden in (
+              "REGISTRY[", "FastAPI(", "APIRouter(", "include_router(",
+              "os.getenv(", "os.environ", "urlopen(", "requests.", "httpx.",
+              "Authorization", "Bearer ",
+          ):
+              assert forbidden not in source, forbidden
+          assert "PRODUCTION_ACTIVATION = False" in source
+          assert "RigGate transport remains undefined" in source
+
+          class UUIDs:
+              def __init__(self, start=0): self.value = start
+              def __call__(self):
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          def scope():
+              return HomeRigScope(
+                  entity_ids=("sensor.gpu_temp",),
+                  operations=("entity_state",),
+              )
+
+          # Public data may use T-032 automatic authorization, but the receipt is
+          # still claimed exactly once before the provider plan exists.
+          grants = HomeRigGrantStore(uuid_factory=UUIDs())
+          ledger = DataSharingLedger(uuid_factory=UUIDs(100))
+          grant = grants.create(scope(), actor="operator", now=100)
+          claim = prepare_read(
+              grants,
+              grant.grant_id,
+              target_kind="entity",
+              target_id="sensor.gpu_temp",
+              operation="entity_state",
+              now=101,
+          )
+          preview = prepare_home_assistant_state_sharing_request(
+              grants,
+              claim,
+              data_category="public",
+              purpose_code="status_brief",
+              purpose="Read one explicitly scoped Home Assistant sensor state.",
+              summary="Scoped sensor-state lookup",
+          )
+          assert preview.provider == "home_assistant"
+          assert preview.destination == f"home_assistant/{grant.scope.digest}"
+          assert preview.max_bytes > 0
+          automatic = authorize_home_assistant_state_request(
+              grants,
+              ledger,
+              claim,
+              data_category="public",
+              purpose_code="status_brief",
+              purpose="Read one explicitly scoped Home Assistant sensor state.",
+              summary="Scoped sensor-state lookup",
+              now=102,
+          )
+          assert automatic.sharing_request.digest == preview.digest
+          assert automatic.sharing_receipt.authorization == "automatic"
+          assert automatic.plan.path == "/api/states/sensor.gpu_temp"
+          assert automatic.plan.origin_mode == "home_assistant_origin_injected_at_execute"
+          assert automatic.plan.credential_mode == "bearer_injected_at_execute"
+          assert automatic.plan.follow_redirects is False
+          assert automatic.plan.production_activation is False
+          assert "origin" not in automatic.plan.to_dict()
+          assert "token" not in automatic.plan.to_dict()
+          try:
+              ledger.claim(automatic.sharing_receipt, automatic.sharing_request, now=103)
+          except DataSharingDenied as exc:
+              assert "not claimable" in str(exc)
+          else:
+              raise AssertionError("claimed T-032 receipt was reusable")
+          finish_home_assistant_state_request(
+              ledger,
+              automatic,
+              outcome="completed",
+              bytes_sent=automatic.sharing_request.max_bytes,
+              now=104,
+          )
+          events = ledger.recent_events()
+          assert {row["event_type"] for row in events} >= {"authorized", "claimed", "finished"}
+          grants.close(); ledger.close()
+
+          # Operational data requires an exact approved proposal. The preview
+          # digest is stable across approval and later authorize/rebuild.
+          grants = HomeRigGrantStore(uuid_factory=UUIDs(200))
+          ledger = DataSharingLedger(uuid_factory=UUIDs(300))
+          grant = grants.create(scope(), actor="operator", now=200)
+          claim = prepare_read(
+              grants, grant.grant_id,
+              target_kind="entity", target_id="sensor.gpu_temp",
+              operation="entity_state", now=201,
+          )
+          operational_preview = prepare_home_assistant_state_sharing_request(
+              grants, claim,
+              data_category="operational",
+              purpose_code="status_brief",
+              purpose="Read one explicitly scoped operational sensor state.",
+              summary="Operational sensor-state lookup",
+          )
+          try:
+              authorize_home_assistant_state_request(
+                  grants, ledger, claim,
+                  data_category="operational",
+                  purpose_code="status_brief",
+                  purpose="Read one explicitly scoped operational sensor state.",
+                  summary="Operational sensor-state lookup",
+                  now=202,
+              )
+          except DataSharingDenied as exc:
+              assert "exact permission" in str(exc)
+          else:
+              raise AssertionError("operational read bypassed T-032 permission")
+          proposal = ledger.propose(operational_preview, now=203)
+          ledger.approve(proposal.permission_id, actor="operator", now=204)
+          permitted = authorize_home_assistant_state_request(
+              grants, ledger, claim,
+              data_category="operational",
+              purpose_code="status_brief",
+              purpose="Read one explicitly scoped operational sensor state.",
+              summary="Operational sensor-state lookup",
+              permission_id=proposal.permission_id,
+              now=205,
+          )
+          assert permitted.sharing_request.digest == operational_preview.digest
+          assert permitted.sharing_receipt.authorization == "permission"
+          try:
+              authorize_home_assistant_state_request(
+                  grants, ledger, claim,
+                  data_category="operational",
+                  purpose_code="status_brief",
+                  purpose="Read one explicitly scoped operational sensor state.",
+                  summary="Operational sensor-state lookup",
+                  permission_id=proposal.permission_id,
+                  now=206,
+              )
+          except DataSharingDenied as exc:
+              assert "not approved" in str(exc)
+          else:
+              raise AssertionError("consumed T-032 permission was reusable")
+          finish_home_assistant_state_request(
+              ledger, permitted, outcome="completed",
+              bytes_sent=permitted.sharing_request.max_bytes, now=207,
+          )
+          grants.close(); ledger.close()
+
+          # Secret data is structurally forbidden by T-032 before any plan can
+          # exist, even though the exact preview itself is representable.
+          grants = HomeRigGrantStore(uuid_factory=UUIDs(400))
+          ledger = DataSharingLedger(uuid_factory=UUIDs(500))
+          grant = grants.create(scope(), actor="operator", now=300)
+          claim = prepare_read(
+              grants, grant.grant_id,
+              target_kind="entity", target_id="sensor.gpu_temp",
+              operation="entity_state", now=301,
+          )
+          try:
+              authorize_home_assistant_state_request(
+                  grants, ledger, claim,
+                  data_category="secret",
+                  purpose_code="forbidden_secret",
+                  purpose="This must never cross the connector boundary.",
+                  summary="Forbidden secret connector request",
+                  now=302,
+              )
+          except DataSharingDenied as exc:
+              assert "forbids" in str(exc)
+          else:
+              raise AssertionError("secret data produced a provider plan")
+          grants.close(); ledger.close()
+
+          # Simulate an authority revoke after T-032 claim but before the final
+          # durable check. No provider plan may escape, and the in-flight receipt
+          # is closed as blocked rather than left reusable.
+          class RevokingStore(HomeRigGrantStore):
+              def __init__(self):
+                  super().__init__(uuid_factory=UUIDs(600))
+                  self.calls = 0
+                  self.revoke_on_call = None
+              def authorize(self, grant_id, *, target_kind, target_id, operation):
+                  self.calls += 1
+                  if self.revoke_on_call == self.calls:
+                      current = self.get(grant_id)
+                      assert current is not None
+                      self.revoke(
+                          grant_id,
+                          expected_scope_sha256=current.scope.digest,
+                          actor="concurrent-operator",
+                          now=404,
+                      )
+                  return super().authorize(
+                      grant_id,
+                      target_kind=target_kind,
+                      target_id=target_id,
+                      operation=operation,
+                  )
+
+          grants = RevokingStore()
+          ledger = DataSharingLedger(uuid_factory=UUIDs(700))
+          grant = grants.create(scope(), actor="operator", now=400)
+          claim = prepare_read(
+              grants, grant.grant_id,
+              target_kind="entity", target_id="sensor.gpu_temp",
+              operation="entity_state", now=401,
+          )
+          concurrent_preview = prepare_home_assistant_state_sharing_request(
+              grants, claim,
+              data_category="operational",
+              purpose_code="status_brief",
+              purpose="Read one scoped sensor with concurrent-revoke protection.",
+              summary="Concurrent revoke proof",
+          )
+          proposal = ledger.propose(concurrent_preview, now=402)
+          ledger.approve(proposal.permission_id, actor="operator", now=403)
+          # Calls so far: prepare_read=1, preview=2. authorize() rebuilds preview
+          # on call 3, claims T-032, then must perform final durable call 4.
+          grants.revoke_on_call = 4
+          try:
+              authorize_home_assistant_state_request(
+                  grants, ledger, claim,
+                  data_category="operational",
+                  purpose_code="status_brief",
+                  purpose="Read one scoped sensor with concurrent-revoke protection.",
+                  summary="Concurrent revoke proof",
+                  permission_id=proposal.permission_id,
+                  now=404,
+              )
+          except HomeRigDenied:
+              pass
+          else:
+              raise AssertionError("revoke after T-032 claim produced a provider plan")
+          finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+          assert finished and finished[0]["outcome"] == "blocked"
+          assert finished[0]["error_code"] == "authority_revoked"
+          grants.close(); ledger.close()
+
+          print("===== T-038 SHARING PROVIDER GATE: PASS =====")
+          PY
