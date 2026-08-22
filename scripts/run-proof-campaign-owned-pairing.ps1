@@ -196,12 +196,15 @@ if ($proofToken -notmatch '^[0-9a-fA-F]{64}$') {
 # ejer fortsat ALLE evidensgates, skip/reuse-semantikker og fysiske attesteringer.
 $env:MODELRIG_DATA = $pairingStore
 $env:MODELRIG_TOKEN = $proofToken
+$thresholdInvariant = $WorkflowThreshold.ToString([Globalization.CultureInfo]::InvariantCulture)
 $coreArgs = @(
   '-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'run-proof-campaign.ps1'),
-  '-PlannerModel',$PlannerModel,
   '-WorkflowRounds',[string]$WorkflowRounds,
-  '-WorkflowThreshold',[string]$WorkflowThreshold
+  '-WorkflowThreshold',$thresholdInvariant
 )
+# Tom PlannerModel skal ikke serialiseres som et flag uden værdi. Core har sin egen
+# model-discovery/pull-logik og skal have lov at vælge planner ved ren dobbeltklik-start.
+if (-not [string]::IsNullOrWhiteSpace($PlannerModel)) { $coreArgs += @('-PlannerModel',$PlannerModel) }
 if ($SkipStageA) { $coreArgs += '-SkipStageA' }
 if ($SkipForcedRecovery) { $coreArgs += '-SkipForcedRecovery' }
 if ($SkipWorkflows) { $coreArgs += '-SkipWorkflows' }
