@@ -23,11 +23,17 @@ git fetch origin
 git switch physical-proof/2.0.11
 git pull --ff-only origin physical-proof/2.0.11
 $CandidateSha = (git rev-parse HEAD).Trim()
+$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.11).Trim()
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.11: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.11") { throw "Forkert version" }
+python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
+if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-Sammenhold `$CandidateSha` med PR #412. Stop ved forskel.
+`origin/physical-proof/2.0.11` og den grønne `candidate_freeze_check` er den
+aktuelle kandidat-authority. Historiske freeze-PR'er eller ældre 2.0.11-heads
+må ikke bruges som SHA-reference.
 
 Fra første fysiske bevis til promotion eller abandonment må branchen ikke
 pushes, rebases, force-pushes, merges, amendes eller redigeres. Enhver head-
