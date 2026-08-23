@@ -90,6 +90,23 @@ check("MODELRIG_TOKEN" in _runbook and "KALIV_AGENT3_ENABLED" in _runbook,
       "runbook documents the model_eval prerequisites the smoke proved "
       "necessary (paired token, flag on both backend and worker)")
 
+# A4-25f: the old PR #475 physical head predates fixes discovered on the rig.
+# The live operator runbook must resolve a freshly qualified current-main SHA
+# rather than revive that stale PR/SHA as launch authority.
+_a425f = (ROOT / "docs" / "agent4" / "A4-25F_PHYSICAL_QUALIFICATION_RUNBOOK.md").read_text(
+    encoding="utf-8"
+)
+check("freshly exact-head-qualified current-main" in _a425f,
+      "A4-25f runbook resolves a fresh current-main physical authority")
+check("agent4-a4-25f-harness" in _a425f and "exact-head-qualification" in _a425f,
+      "A4-25f runbook requires both dedicated and exact-head qualification")
+check("Never use PR #475" in _a425f,
+      "A4-25f runbook explicitly rejects old PR #475 as new launch authority")
+check("recorded on PR #475 / issue #474" not in _a425f,
+      "A4-25f runbook no longer delegates SHA authority to old PR text")
+check('$sha = "371b0dc4da35461cfa670305f2839a0d8d5e4462"' not in _a425f,
+      "A4-25f runbook does not hardcode the known-defective old physical head")
+
 # The detector must be able to fail.
 check(bool(HEADER_VERSION.search("**Version:** v1.58.52")),
       "self-test: a header version claim IS detected")

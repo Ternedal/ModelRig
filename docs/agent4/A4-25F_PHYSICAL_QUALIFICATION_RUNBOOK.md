@@ -4,9 +4,18 @@ A4-25f is the isolated physical qualification campaign for the immutable Agent 4
 
 This runbook **does not authorize production activation**. A successful run only proves that the repository-qualified A4-25f harness produced complete physical evidence on one Windows rig + Pixel execution and that a human explicitly accepted or rejected that physical campaign.
 
+## Repository authority
+
+The old PR #475 head is historical reference material, not a launch SHA. The harness was clean-landed on `main` through PR #510 and was subsequently hardened after real rig failures. The physical target must therefore be one freshly repository-qualified **exact current-main SHA**, recorded at campaign preparation time.
+
+Before physical evidence starts, require the same exact SHA to have successful repository qualification for `ci`, `codeql`, `agent3-diagnostics`, `agent3-full-diagnostics`, `exact-head-qualification` and the dedicated `agent4-a4-25f-harness` workflow. Do not copy a SHA from an old PR, issue body or failed physical attempt. Once the first authority-bearing physical observation is taken, that exact SHA is immutable for the campaign.
+
+Issue #474 is the current physical acceptance tracker. It records the qualification requirements and physical matrix, but its prose is not a substitute for resolving and verifying the exact current-main SHA at run time.
+
 ## Hard boundaries
 
-- Use only the exact repository-qualified A4-25f commit SHA recorded on PR #475 / issue #474.
+- Use only the freshly exact-head-qualified current-main A4-25f SHA selected under issue #474.
+- Never use PR #475 / `371b0dc4da35461cfa670305f2839a0d8d5e4462` as a new physical launch authority.
 - The checkout must be clean. Do not run from a modified working tree.
 - Use the isolated Android package `dk.ternedal.modelrig.a425f`; do not retarget the normal Kaliv package.
 - Use a concrete RFC1918 address on a Windows network profile marked **Private**.
@@ -20,8 +29,8 @@ This runbook **does not authorize production activation**. A successful run only
 
 On the physical Windows rig:
 
-1. Check out the exact repository-qualified A4-25f SHA.
-2. Confirm `git status --porcelain` is empty.
+1. Fetch `origin/main`, resolve one exact current-main SHA, and verify all required A4-25f/repository gates are green on that same SHA.
+2. Check out that exact SHA and confirm `git status --porcelain` is empty.
 3. Have Java/Gradle, Go, Python, adb and PowerShell available as required by the harness.
 4. Connect exactly the intended Pixel through adb, or pass its serial explicitly.
 5. Choose a new output directory **outside the repository** for this attempt.
@@ -30,7 +39,7 @@ On the physical Windows rig:
 Example variables:
 
 ```powershell
-$sha = "<repository-qualified A4-25f SHA>"
+$sha = "<freshly exact-head-qualified current-main SHA>"
 $output = "C:\ModelRig-A4-25f\$sha"
 $lan = "<rig RFC1918 address>"
 $serial = "<adb serial>"
