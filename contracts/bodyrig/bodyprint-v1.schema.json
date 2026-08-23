@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/bodyrig/bodyprint-v1.schema.json",
+  "title": "ModelRig BodyPrint v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version"],
+  "properties": {
+    "format": {"const": "modelrig-bodyprint"},
+    "version": {"const": 1},
+    "shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "height_scale": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 4.0},
+        "shoulder_to_height": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "hip_to_height": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "arm_to_height": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "leg_to_height": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "motion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "energy": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "gesture_frequency": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "gesture_amplitude": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "head_motion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "turn_speed": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "walk_cadence_spm": {"type": "number", "minimum": 0.0, "maximum": 300.0}
+      }
+    },
+    "expression": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blink_rate_per_min": {"type": "number", "minimum": 0.0, "maximum": 120.0},
+        "gaze_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "head_tilt": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "speech_motion": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idle_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "gaze_smoothing": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "gesture_intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "breathing_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+      }
+    }
+  }
+}
