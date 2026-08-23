@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Real optional-runtime check: exact versions + local H.264 MP4 decode.
 
-The workflow creates the tiny synthetic source itself. No MediaPipe model asset
-is downloaded; dummy task files are enough to prove version/model provenance
-and media inspection/decode. Real landmark extraction remains a separate gate
-that requires explicit local MediaPipe task assets.
+The script creates a tiny synthetic H.264 source through the installed PyAV
+runtime, then opens and decodes that file again. No runner-image ffmpeg CLI and
+no MediaPipe model download is required. Dummy task files are enough to prove
+runtime/model provenance and media inspection/decode; real landmark extraction
+remains a separate gate requiring explicit local MediaPipe task assets.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import av  # type: ignore  # noqa: E402
+import numpy as np  # type: ignore  # noqa: E402
 from bodyrig.local_tracking import LocalTrackingConfig, LocalTrackingRuntimeError  # noqa: E402
 from bodyrig.local_tracking_runtime import (  # noqa: E402
     EXPECTED_MEDIAPIPE_VERSION,
@@ -25,13 +27,43 @@ from bodyrig.local_tracking_runtime import (  # noqa: E402
 )
 
 
+def _generate_h264_fixture(path: Path) -> None:
+    """Create three deterministic H.264 frames with the runtime under test."""
+    try:
+        with av.open(str(path), mode="w", format="mp4") as container:
+            stream = container.add_stream("libx264", rate=30)
+            stream.width = 64
+            stream.height = 64
+            stream.pix_fmt = "yuv420p"
+            for index in range(3):
+                pixels = np.zeros((64, 64, 3), dtype=np.uint8)
+                pixels[:, :, 0] = index * 60
+                pixels[:, :, 1] = np.arange(64, dtype=np.uint8)[None, :]
+                pixels[:, :, 2] = np.arange(64, dtype=np.uint8)[:, None]
+                frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
+                frame.pts = index
+                for packet in stream.encode(frame):
+                    container.mux(packet)
+            for packet in stream.encode():
+                container.mux(packet)
+    except Exception as exc:
+        raise SystemExit(
+            f"pinned PyAV runtime could not generate H.264 fixture: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise SystemExit("PyAV H.264 fixture generation produced no file")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("video", type=Path)
     args = parser.parse_args()
     video = args.video.resolve()
-    if not video.is_file():
-        raise SystemExit(f"fixture missing: {video}")
+    video.parent.mkdir(parents=True, exist_ok=True)
+    if video.exists():
+        video.unlink()
+    _generate_h264_fixture(video)
 
     with tempfile.TemporaryDirectory(prefix="bodyrig-model-placeholders-") as td:
         root = Path(td).resolve()
@@ -88,8 +120,8 @@ def main() -> int:
             if tuple(rgb.shape) != (64, 64, 3):
                 raise SystemExit(f"unexpected decoded RGB shape: {rgb.shape}")
 
-    if len(timestamps) < 2:
-        raise SystemExit(f"expected multiple decoded H.264 frames, got {len(timestamps)}")
+    if len(timestamps) != 3:
+        raise SystemExit(f"expected exactly three decoded H.264 frames, got {len(timestamps)}")
     if any(right <= left for left, right in zip(timestamps, timestamps[1:])):
         raise SystemExit(f"decoded PTS are not strictly increasing: {timestamps}")
 
@@ -97,7 +129,7 @@ def main() -> int:
         "PASS bodyrig real H264 decode: "
         f"runtime={backend.backend_version} codec={facts.codec} "
         f"geometry={facts.width}x{facts.height} fps={facts.nominal_fps:.3f} "
-        f"frames={len(timestamps)}"
+        f"frames={len(timestamps)} timestamps={timestamps}"
     )
     return 0
 
