@@ -1,6 +1,14 @@
 """BodyRig embodiment runtime bootstrap."""
 
 from .bodyprint import BodyprintValidationError, validate_manifest
+from .fingerprint import (
+    FingerprintConfig,
+    FingerprintError,
+    build_bodyprint,
+    canonical_bodyprint_json,
+    gesture_intent,
+    validate_bodyprint_package,
+)
 from .runtime import (
     BodyRigRuntime,
     BodyState,
@@ -26,6 +34,12 @@ __all__ = [
     "RuntimeSnapshot",
     "BodyprintValidationError",
     "validate_manifest",
+    "FingerprintConfig",
+    "FingerprintError",
+    "build_bodyprint",
+    "canonical_bodyprint_json",
+    "gesture_intent",
+    "validate_bodyprint_package",
     "EmbodimentScheduler",
     "RenderFrame",
     "SchedulerError",
