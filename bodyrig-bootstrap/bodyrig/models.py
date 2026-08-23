@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class BodyCue(BaseModel):
@@ -27,9 +27,22 @@ class BodyCue(BaseModel):
             return value
         if value.startswith("object:") and 0 < len(value[7:]) <= 120:
             import re
+
             if re.fullmatch(r"[A-Za-z0-9._:-]+", value[7:]):
                 return value
         raise ValueError("invalid gaze target")
+
+    @model_validator(mode="after")
+    def require_semantic_instruction(self) -> Self:
+        # `intensity`/`duration_ms` modify a semantic instruction; they do not
+        # constitute one by themselves. Keep this exactly aligned with
+        # contracts/bodyrig/body-cue-v1.schema.json.
+        if all(
+            value is None
+            for value in (self.emotion, self.energy, self.gesture, self.gaze, self.posture)
+        ):
+            raise ValueError("BodyCue requires at least one semantic body instruction")
+        return self
 
 
 class SpeechTiming(BaseModel):
