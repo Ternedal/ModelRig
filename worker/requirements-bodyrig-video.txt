@@ -1,0 +1,9 @@
+# Optional BodyRig local video decoder only. NOT installed by normal ModelRig CI
+# or the base worker. Install explicitly on a BodyRig ingest host.
+#
+# PyAV 18.0.0 ships Windows/Linux/macOS wheels with FFmpeg libraries and gives
+# BodyRig direct access to frame PTS/time_base. Some Windows Application Control
+# policies may reject bundled native DLLs; BodyRig therefore keeps this decoder
+# behind VideoDecoder and must support another local decoder before production
+# activation on hosts where that policy applies.
+av==18.0.0
