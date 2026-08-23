@@ -81,7 +81,7 @@ All are editable at runtime in the Settings panel.
 
 ## Version note
 Current `build.gradle.kts` pins Kotlin JVM `2.4.10`, Compose Compiler plugin
-`2.4.10`, Kotlin serialization `2.4.10`, and Compose Multiplatform `1.7.0`.
+`2.4.10`, Kotlin serialization `2.4.10`, and Compose Multiplatform `1.11.1`.
 The compile claim above is the historical 2026-07-04 checkpoint; current
 compatibility is qualified by the repository's exact-head CI rather than by
 rewriting that older evidence.
