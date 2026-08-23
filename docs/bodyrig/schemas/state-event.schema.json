@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/bodyrig/state-event-0.1.json",
+  "title": "BodyRig state event v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "version", "session_id", "sequence", "timestamp_ms", "state"],
+  "properties": {
+    "type": {"const": "bodyrig.state"},
+    "version": {"const": "0.1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 0},
+    "timestamp_ms": {"type": "integer", "minimum": 0},
+    "state": {"enum": ["idle", "listening", "thinking", "speaking", "waiting_for_tool", "interrupted", "error"]},
+    "transition_ms": {"type": "integer", "minimum": 0, "maximum": 10000}
+  }
+}
