@@ -22,6 +22,9 @@ on:
       - "scripts/bodyrig_body_motion_mixer_contract.py"
       - "scripts/bodyrig_build_identity_bundle.py"
       - "scripts/bodyrig_identity_bundle_contract.py"
+      - "scripts/bodyrig_build_mrbody.py"
+      - "scripts/bodyrig_validate_mrbody.py"
+      - "scripts/bodyrig_mrbody_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
@@ -43,6 +46,9 @@ on:
       - "scripts/bodyrig_body_motion_mixer_contract.py"
       - "scripts/bodyrig_build_identity_bundle.py"
       - "scripts/bodyrig_identity_bundle_contract.py"
+      - "scripts/bodyrig_build_mrbody.py"
+      - "scripts/bodyrig_validate_mrbody.py"
+      - "scripts/bodyrig_mrbody_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -121,6 +127,18 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_build_identity_bundle.py --help
+      - name: Validate BodyRig M2.5 mrbody archive builder and pre-extraction validator
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_mrbody_contract.py
+      - name: Validate BodyRig M2.5 build CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_build_mrbody.py --help
+      - name: Validate BodyRig M2.5 validation CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_validate_mrbody.py --help
 
   h264-runtime:
     runs-on: ubuntu-latest
