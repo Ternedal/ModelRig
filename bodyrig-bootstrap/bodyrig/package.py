@@ -8,6 +8,7 @@ import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
@@ -39,6 +40,11 @@ OPTIONAL = {
 ALLOWED = REQUIRED | OPTIONAL
 SLUG_RE = re.compile(r"^[a-z0-9æøå_-]{1,160}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+BUILDER_VERSION_RE = re.compile(r"^[0-9A-Za-z.+_-]{1,64}$")
+PIPELINE_STAGE_RE = re.compile(r"^[a-z0-9_-]{1,80}$")
+PIPELINE_ADAPTER_RE = re.compile(r"^[A-Za-z0-9._+-]{1,120}$")
+PIPELINE_REVISION_RE = re.compile(r"^[A-Za-z0-9._/+:-]{1,128}$")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 class MRBodyError(ValueError):
@@ -53,25 +59,71 @@ class ValidatedBody:
     payload_names: tuple[str, ...]
 
 
+def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise MRBodyError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _loads_json(data: bytes, name: str) -> Any:
     if len(data) > MAX_JSON:
         raise MRBodyError(f"{name}: JSON payload exceeds limit")
     try:
-        return json.loads(data.decode("utf-8"))
+        text = data.decode("utf-8")
+        return json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                MRBodyError(f"{name}: non-finite JSON constant {token}")
+            ),
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise MRBodyError(f"{name}: invalid UTF-8 JSON") from exc
+
+
+def _dumps_json(value: object, *, pretty: bool = False) -> bytes:
+    try:
+        if pretty:
+            text = json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=2,
+                sort_keys=True,
+            ) + "\n"
+        else:
+            text = json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+    except (TypeError, ValueError) as exc:
+        raise MRBodyError("package JSON contains unsupported/non-finite value") from exc
+    return text.encode("utf-8")
 
 
 def _validate_number(value: Any, lo: float, hi: float, field: str) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise MRBodyError(f"bodyprint.{field}: expected number")
-    if not math.isfinite(float(value)) or not lo <= float(value) <= hi:
+    number = float(value)
+    if not math.isfinite(number) or not lo <= number <= hi:
         raise MRBodyError(f"bodyprint.{field}: outside {lo}..{hi}")
 
 
-def _validate_object_fields(obj: Any, allowed: Mapping[str, tuple[float, float]], section: str) -> None:
+def _validate_object_fields(
+    obj: Any,
+    allowed: Mapping[str, tuple[float, float]],
+    section: str,
+) -> None:
     if not isinstance(obj, dict):
         raise MRBodyError(f"bodyprint.{section}: expected object")
+    if not obj:
+        raise MRBodyError(f"bodyprint.{section}: section may not be empty")
     unknown = set(obj) - set(allowed)
     if unknown:
         raise MRBodyError(f"bodyprint.{section}: unknown fields: {sorted(unknown)}")
@@ -119,16 +171,30 @@ def validate_bodyprint(value: Any) -> dict[str, Any]:
             "breathing_strength": (0.0, 1.0),
         },
     }
+    observed = 0
     for section, rules in sections.items():
         if section in value:
+            observed += 1
             _validate_object_fields(value[section], rules, section)
+    if observed == 0:
+        raise MRBodyError("bodyprint.json: at least one observed section is required")
     return value
 
 
 def validate_manifest(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise MRBodyError("manifest.json: expected object")
-    required = {"format", "format_version", "id", "name", "avatar", "bodyprint", "provenance", "thumbnail", "builder"}
+    required = {
+        "format",
+        "format_version",
+        "id",
+        "name",
+        "avatar",
+        "bodyprint",
+        "provenance",
+        "thumbnail",
+        "builder",
+    }
     if set(value) != required:
         raise MRBodyError("manifest.json: fields must match v1 contract exactly")
     if value["format"] != FORMAT or value["format_version"] != FORMAT_VERSION:
@@ -139,15 +205,27 @@ def validate_manifest(value: Any) -> dict[str, Any]:
         raise MRBodyError("manifest.json: invalid name")
     if value["avatar"] != {"format": "vrm", "version": "1.0", "path": "avatar.vrm"}:
         raise MRBodyError("manifest.json: invalid avatar descriptor")
-    if value["bodyprint"] != "bodyprint.json" or value["provenance"] != "provenance.json" or value["thumbnail"] != "thumbnail.png":
+    if (
+        value["bodyprint"] != "bodyprint.json"
+        or value["provenance"] != "provenance.json"
+        or value["thumbnail"] != "thumbnail.png"
+    ):
         raise MRBodyError("manifest.json: invalid payload path")
     builder = value["builder"]
-    if not isinstance(builder, dict) or set(builder) - {"name", "version", "revision"} or not {"name", "version"} <= set(builder):
+    if (
+        not isinstance(builder, dict)
+        or set(builder) - {"name", "version", "revision"}
+        or not {"name", "version"} <= set(builder)
+    ):
         raise MRBodyError("manifest.json: invalid builder")
-    if builder["name"] != "bodyrig" or not isinstance(builder["version"], str) or not 1 <= len(builder["version"]) <= 64:
+    if builder["name"] != "bodyrig":
         raise MRBodyError("manifest.json: invalid builder identity")
+    if not isinstance(builder["version"], str) or not BUILDER_VERSION_RE.fullmatch(builder["version"]):
+        raise MRBodyError("manifest.json: invalid builder version")
     revision = builder.get("revision")
-    if revision is not None and (not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision)):
+    if revision is not None and (
+        not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision)
+    ):
         raise MRBodyError("manifest.json: invalid builder revision")
     return value
 
@@ -155,16 +233,52 @@ def validate_manifest(value: Any) -> dict[str, Any]:
 def validate_provenance(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise MRBodyError("provenance.json: expected object")
-    if value.get("format") != "modelrig-body-provenance" or value.get("version") != 1:
+    required = {
+        "format",
+        "version",
+        "created_at",
+        "source",
+        "synthetic_avatar",
+        "pipeline",
+    }
+    if set(value) != required:
+        raise MRBodyError("provenance.json: fields must match v1 contract exactly")
+    if value["format"] != "modelrig-body-provenance" or value["version"] != 1:
         raise MRBodyError("provenance.json: unsupported format/version")
-    if value.get("synthetic_avatar") is not True:
+    if value["synthetic_avatar"] is not True:
         raise MRBodyError("provenance.json: synthetic_avatar must be true")
-    source = value.get("source")
-    if not isinstance(source, dict) or source.get("kind") != "user-supplied-local-media":
-        raise MRBodyError("provenance.json: invalid source")
-    count = source.get("count")
-    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 100:
-        raise MRBodyError("provenance.json: invalid source count")
+
+    created_at = value["created_at"]
+    if not isinstance(created_at, str) or not 20 <= len(created_at) <= 40:
+        raise MRBodyError("provenance.json: invalid created_at")
+    try:
+        parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise MRBodyError("provenance.json: invalid created_at") from exc
+    if parsed.tzinfo is None:
+        raise MRBodyError("provenance.json: created_at requires timezone")
+
+    source = value["source"]
+    if not isinstance(source, dict) or set(source) != {"kind", "count"}:
+        raise MRBodyError("provenance.json: source fields must match v1 exactly")
+    if source["kind"] != "user-supplied-local-media":
+        raise MRBodyError("provenance.json: invalid source kind")
+    count = source["count"]
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 10:
+        raise MRBodyError("provenance.json: source count must be 1..10")
+
+    pipeline = value["pipeline"]
+    if not isinstance(pipeline, list) or not 1 <= len(pipeline) <= 32:
+        raise MRBodyError("provenance.json: pipeline must contain 1..32 stages")
+    for index, stage in enumerate(pipeline):
+        if not isinstance(stage, dict) or set(stage) != {"stage", "adapter", "revision"}:
+            raise MRBodyError(f"provenance.json: pipeline[{index}] fields are invalid")
+        if not isinstance(stage["stage"], str) or not PIPELINE_STAGE_RE.fullmatch(stage["stage"]):
+            raise MRBodyError(f"provenance.json: pipeline[{index}].stage is invalid")
+        if not isinstance(stage["adapter"], str) or not PIPELINE_ADAPTER_RE.fullmatch(stage["adapter"]):
+            raise MRBodyError(f"provenance.json: pipeline[{index}].adapter is invalid")
+        if not isinstance(stage["revision"], str) or not PIPELINE_REVISION_RE.fullmatch(stage["revision"]):
+            raise MRBodyError(f"provenance.json: pipeline[{index}].revision is invalid")
     return value
 
 
@@ -225,27 +339,29 @@ def validate_package(path: str | os.PathLike[str]) -> ValidatedBody:
         if not REQUIRED <= name_set:
             raise MRBodyError(f"missing required files: {sorted(REQUIRED - name_set)}")
 
-        manifest = validate_manifest(_loads_json(archive.read("manifest.json"), "manifest.json"))
+        manifest_raw = archive.read("manifest.json")
+        manifest = validate_manifest(_loads_json(manifest_raw, "manifest.json"))
         bodyprint = validate_bodyprint(_loads_json(archive.read("bodyprint.json"), "bodyprint.json"))
         provenance = validate_provenance(_loads_json(archive.read("provenance.json"), "provenance.json"))
         checksums = _loads_json(archive.read("checksums.json"), "checksums.json")
         if not isinstance(checksums, dict):
             raise MRBodyError("checksums.json: expected object")
 
-        payloads = name_set - {"manifest.json", "checksums.json"}
-        if set(checksums) != payloads:
-            raise MRBodyError("checksums.json: entries must exactly match payload files")
-        for name, expected in checksums.items():
+        checksummed_files = name_set - {"checksums.json"}
+        if set(checksums) != checksummed_files:
+            raise MRBodyError("checksums.json: entries must exactly match all files except checksums.json")
+        for checksum_name, expected in checksums.items():
             if not isinstance(expected, str) or not SHA_RE.fullmatch(expected):
-                raise MRBodyError(f"checksums.json: invalid hash for {name}")
-            if hashlib.sha256(archive.read(name)).hexdigest() != expected:
-                raise MRBodyError(f"checksum mismatch: {name}")
+                raise MRBodyError(f"checksums.json: invalid hash for {checksum_name}")
+            if hashlib.sha256(archive.read(checksum_name)).hexdigest() != expected:
+                raise MRBodyError(f"checksum mismatch: {checksum_name}")
 
         _validate_glb(archive.read("avatar.vrm"), "avatar.vrm")
-        if not archive.read("thumbnail.png").startswith(b"\x89PNG\r\n\x1a\n"):
+        if not archive.read("thumbnail.png").startswith(PNG_SIGNATURE):
             raise MRBodyError("thumbnail.png: invalid PNG signature")
-        for name in payloads & OPTIONAL:
-            _validate_glb(archive.read(name), name)
+        payloads = name_set - {"manifest.json", "checksums.json"}
+        for motion_name in payloads & OPTIONAL:
+            _validate_glb(archive.read(motion_name), motion_name)
 
         return ValidatedBody(
             manifest=manifest,
@@ -287,35 +403,47 @@ def build_package(
     }
     if builder_revision is not None:
         manifest["builder"]["revision"] = builder_revision
+
+    bodyprint_dict = validate_bodyprint(dict(bodyprint))
+    provenance_dict = validate_provenance(dict(provenance))
     validate_manifest(manifest)
-    validate_bodyprint(dict(bodyprint))
-    validate_provenance(dict(provenance))
     _validate_glb(avatar_vrm, "avatar.vrm")
-    if not thumbnail_png.startswith(b"\x89PNG\r\n\x1a\n"):
+    if not thumbnail_png.startswith(PNG_SIGNATURE):
         raise MRBodyError("thumbnail_png: invalid PNG signature")
     for motion_name, motion_data in motions.items():
         _validate_glb(motion_data, motion_name)
 
-    payloads: dict[str, bytes] = {
+    manifest_bytes = _dumps_json(manifest, pretty=True)
+    file_bytes: dict[str, bytes] = {
+        "manifest.json": manifest_bytes,
         "avatar.vrm": avatar_vrm,
-        "bodyprint.json": json.dumps(bodyprint, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8"),
-        "provenance.json": json.dumps(provenance, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8"),
+        "bodyprint.json": _dumps_json(bodyprint_dict),
+        "provenance.json": _dumps_json(provenance_dict),
         "thumbnail.png": thumbnail_png,
         **motions,
     }
-    checksums = {key: hashlib.sha256(value).hexdigest() for key, value in payloads.items()}
+    checksums = {
+        filename: hashlib.sha256(data).hexdigest()
+        for filename, data in file_bytes.items()
+    }
+    checksums_bytes = _dumps_json(checksums, pretty=True)
 
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=destination.name + ".", suffix=".tmp", dir=destination.parent)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=destination.name + ".",
+        suffix=".tmp",
+        dir=destination.parent,
+    )
     os.close(fd)
     temp_path = Path(temp_name)
     try:
         with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-            archive.writestr("checksums.json", json.dumps(checksums, indent=2, sort_keys=True) + "\n")
-            for key, value in payloads.items():
-                archive.writestr(key, value)
+            archive.writestr("manifest.json", manifest_bytes)
+            archive.writestr("checksums.json", checksums_bytes)
+            for filename, data in file_bytes.items():
+                if filename != "manifest.json":
+                    archive.writestr(filename, data)
         validate_package(temp_path)
         os.replace(temp_path, destination)
     finally:
@@ -323,13 +451,20 @@ def build_package(
     return destination
 
 
-def install_package(package_path: str | os.PathLike[str], library_dir: str | os.PathLike[str]) -> Path:
+def install_package(
+    package_path: str | os.PathLike[str],
+    library_dir: str | os.PathLike[str],
+) -> Path:
     validated = validate_package(package_path)
     library = Path(library_dir)
     library.mkdir(parents=True, exist_ok=True)
     target = library / f"{validated.manifest['id']}.mrbody"
     data = Path(package_path).read_bytes()
-    fd, temp_name = tempfile.mkstemp(prefix=target.name + ".", suffix=".tmp", dir=library)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=target.name + ".",
+        suffix=".tmp",
+        dir=library,
+    )
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
