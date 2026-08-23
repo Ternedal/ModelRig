@@ -1,3 +1,3 @@
 # Isolated BrowserHost runtime only. Do not combine this file with
-# worker/requirements.txt: Browser Use 0.13.7 pins a different Pydantic version.
-browser-use[core]==0.13.7
+# worker/requirements.txt: Browser Use pins a different Pydantic version.
+browser-use[core]==0.13.8
