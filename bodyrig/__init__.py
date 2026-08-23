@@ -17,6 +17,13 @@ from .runtime import (
     RuntimeSnapshot,
 )
 from .scheduler import EmbodimentScheduler, RenderFrame, SchedulerError
+from .shape import (
+    ShapeConfig,
+    ShapeProfileError,
+    build_shape_profile,
+    canonical_shape_json,
+    validate_shape_profile,
+)
 from .voicerig_adapter import (
     SpeechFrame,
     SpeechTrack,
@@ -40,6 +47,11 @@ __all__ = [
     "canonical_bodyprint_json",
     "gesture_intent",
     "validate_bodyprint_package",
+    "ShapeConfig",
+    "ShapeProfileError",
+    "build_shape_profile",
+    "canonical_shape_json",
+    "validate_shape_profile",
     "EmbodimentScheduler",
     "RenderFrame",
     "SchedulerError",
