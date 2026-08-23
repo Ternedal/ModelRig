@@ -6,11 +6,14 @@
   "additionalProperties": false,
   "required": ["type", "version", "utterance_id"],
   "anyOf": [
+    {"required": ["body_id"]},
     {"required": ["emotion"]},
+    {"required": ["intensity"]},
     {"required": ["energy"]},
     {"required": ["gesture"]},
     {"required": ["gaze"]},
-    {"required": ["posture"]}
+    {"required": ["posture"]},
+    {"required": ["duration_ms"]}
   ],
   "properties": {
     "type": {
