@@ -5,9 +5,12 @@ Run: python3 tests/workflow_bodyrig_contracts.py
 from __future__ import annotations
 
 from io import BytesIO
+import hashlib
+import json
 import math
 import struct
 import sys
+import tempfile
 import wave
 from pathlib import Path
 
@@ -26,6 +29,14 @@ from bodyrig import (  # noqa: E402
     timed_track,
     validate_manifest,
     wav_envelope_track,
+)
+from bodyrig.tracking import (  # noqa: E402
+    BackendFrame,
+    Landmark,
+    MediaFacts,
+    TrackingContractError,
+    build_tracking_timeline,
+    canonical_tracking_json,
 )
 
 passed = failed = 0
@@ -272,6 +283,186 @@ except SchedulerError:
     check(True, "scheduler rejects cross-session snapshot injection")
 else:
     check(False, "scheduler rejects cross-session snapshot injection")
+
+# ---------------------------------------------------------------------------
+# M1.1 video tracking contract. Tiny source bytes + deterministic fake backend;
+# this proves the stable normalized boundary without pulling an ML model into CI.
+# ---------------------------------------------------------------------------
+def track_lm(x: float, y: float, confidence: float = 0.9, z: float = 0.0) -> Landmark:
+    return Landmark(x=x, y=y, z=z, confidence=confidence)
+
+
+class FakeTrackingBackend:
+    backend_id = "fixture-tracker"
+    backend_version = "1.0"
+    model_revision = "fixture-r1"
+
+    def __init__(self, frames: list[BackendFrame]) -> None:
+        self.frames = tuple(frames)
+        self.inspect_calls: list[str] = []
+        self.extract_calls: list[str] = []
+
+    def inspect(self, source_path) -> MediaFacts:
+        self.inspect_calls.append(Path(source_path).name)
+        return MediaFacts("h264", 1920, 1080, 1_000_000, 30.0)
+
+    def extract(self, source_path):
+        self.extract_calls.append(Path(source_path).name)
+        return iter(self.frames)
+
+
+class MutatingTrackingBackend(FakeTrackingBackend):
+    def inspect(self, source_path) -> MediaFacts:
+        facts = super().inspect(source_path)
+        Path(source_path).write_bytes(b"different-source-bytes")
+        return facts
+
+
+class ReplacingTrackingBackend(FakeTrackingBackend):
+    def extract(self, source_path):
+        path = Path(source_path)
+        replacement = path.with_suffix(".replacement")
+        replacement.write_bytes(b"replacement-source-bytes")
+        replacement.replace(path)
+        return super().extract(source_path)
+
+
+full_track_frame = BackendFrame(
+    timestamp_us=0,
+    body={
+        "left_shoulder": track_lm(0.4, 0.3, 0.94),
+        "right_shoulder": track_lm(0.6, 0.3, 0.92),
+        "left_hip": track_lm(0.45, 0.65, 0.91),
+        "right_hip": track_lm(0.55, 0.65, 0.90),
+    },
+    left_hand={"wrist": track_lm(0.35, 0.55, 0.82), "index_tip": track_lm(0.31, 0.48, 0.78)},
+    right_hand={"wrist": track_lm(0.65, 0.55, 0.84), "index_tip": track_lm(0.69, 0.48, 0.80)},
+    face={"nose_tip": track_lm(0.5, 0.18, 0.96), "mouth_left": track_lm(0.47, 0.23, 0.93)},
+    expressions={"jaw_open": 0.2, "blink_left": 0.0, "blink_right": 0.0},
+)
+body_only_track_frame = BackendFrame(
+    timestamp_us=33333,
+    body={
+        "left_shoulder": track_lm(0.41, 0.3, 0.88),
+        "right_shoulder": track_lm(0.61, 0.3, 0.87),
+    },
+)
+loss_track_frame = BackendFrame(timestamp_us=66666)
+expression_track_frame = BackendFrame(
+    timestamp_us=99999,
+    expressions={"jaw_open": 0.6, "blink_left": 0.1},
+)
+
+with tempfile.TemporaryDirectory(prefix="bodyrig-m11-") as td:
+    td_path = Path(td)
+    first = td_path / "subject-a.mp4"
+    second = td_path / "subject-b.mp4"
+    first.write_bytes(b"synthetic-mp4-h264-a")
+    second.write_bytes(b"synthetic-mp4-h264-b")
+
+    tracking_backend = FakeTrackingBackend([
+        full_track_frame, body_only_track_frame, loss_track_frame, expression_track_frame
+    ])
+    timeline = build_tracking_timeline(
+        first,
+        backend=tracking_backend,
+        permission_assertion="user-supplied local source with permission",
+    )
+    check(timeline["schema"] == "bodyrig.tracking/v1", "M1.1 tracking schema id is stable")
+    check(timeline["source"]["sha256"] == hashlib.sha256(first.read_bytes()).hexdigest(),
+          "tracking provenance binds exact source bytes")
+    serialized = canonical_tracking_json(timeline)
+    check(str(first) not in serialized and first.name not in serialized,
+          "tracking receipt does not leak source path/name")
+    check([frame["timestamp_us"] for frame in timeline["frames"]] == [0, 33333, 99999],
+          "total detection loss produces a truthful timeline gap")
+    check(timeline["coverage"]["body"]["coverage"] == 0.5,
+          "detection-loss frame still counts against body coverage")
+    check(timeline["coverage"]["hands"]["coverage"] == 0.25,
+          "hand coverage degrades independently")
+    check(timeline["coverage"]["face"]["coverage"] == 0.5
+          and timeline["coverage"]["face"]["confidence_frames"] == 1,
+          "expression-only face presence does not fabricate detector confidence")
+    check(timeline["production_activation"] is False,
+          "M1.1 contract cannot activate BodyRig production")
+
+    reordered = BackendFrame(
+        timestamp_us=0,
+        body={
+            "right_hip": track_lm(0.55, 0.65, 0.90),
+            "left_hip": track_lm(0.45, 0.65, 0.91),
+            "right_shoulder": track_lm(0.6, 0.3, 0.92),
+            "left_shoulder": track_lm(0.4, 0.3, 0.94),
+        },
+        right_hand={"index_tip": track_lm(0.69, 0.48, 0.80), "wrist": track_lm(0.65, 0.55, 0.84)},
+        left_hand={"index_tip": track_lm(0.31, 0.48, 0.78), "wrist": track_lm(0.35, 0.55, 0.82)},
+        face={"mouth_left": track_lm(0.47, 0.23, 0.93), "nose_tip": track_lm(0.5, 0.18, 0.96)},
+        expressions={"blink_right": 0.0, "blink_left": 0.0, "jaw_open": 0.2},
+    )
+    one_a = build_tracking_timeline(first, backend=FakeTrackingBackend([full_track_frame]), permission_assertion="ok")
+    one_b = build_tracking_timeline(first, backend=FakeTrackingBackend([reordered]), permission_assertion="ok")
+    check(canonical_tracking_json(one_a) == canonical_tracking_json(one_b),
+          "normalized tracking serialization is deterministic")
+
+    second_timeline = build_tracking_timeline(second, backend=tracking_backend, permission_assertion="ok")
+    check(second_timeline["source"]["sha256"] != timeline["source"]["sha256"],
+          "separate tracking jobs have separate source identity")
+    check(timeline["source"]["sha256"] not in canonical_tracking_json(second_timeline),
+          "tracking jobs do not leak previous source identity")
+
+    try:
+        build_tracking_timeline(
+            first,
+            backend=FakeTrackingBackend([
+                BackendFrame(timestamp_us=0, body={"engine_joint_42": track_lm(0.5, 0.5)})
+            ]),
+            permission_assertion="ok",
+        )
+    except TrackingContractError:
+        check(True, "extractor-native landmark ids fail closed")
+    else:
+        check(False, "extractor-native landmark ids fail closed")
+
+    first.write_bytes(b"original-source-bytes")
+    try:
+        build_tracking_timeline(
+            first,
+            backend=MutatingTrackingBackend([full_track_frame]),
+            permission_assertion="ok",
+        )
+    except TrackingContractError:
+        check(True, "source byte mutation during extraction invalidates provenance")
+    else:
+        check(False, "source byte mutation during extraction invalidates provenance")
+
+    first.write_bytes(b"original-source-bytes")
+    try:
+        build_tracking_timeline(
+            first,
+            backend=ReplacingTrackingBackend([full_track_frame]),
+            permission_assertion="ok",
+        )
+    except TrackingContractError:
+        check(True, "source path replacement during extraction invalidates provenance")
+    else:
+        check(False, "source path replacement during extraction invalidates provenance")
+
+schema = json.loads((root / "docs/bodyrig/schemas/tracking.schema.json").read_text("utf-8"))
+defs = schema["$defs"]
+body_ids = set(defs["body_landmarks"]["propertyNames"]["enum"])
+hand_ids = set(defs["hand_landmarks"]["propertyNames"]["enum"])
+face_ids = set(defs["face_landmarks"]["propertyNames"]["enum"])
+expression_ids = set(defs["expressions"]["propertyNames"]["enum"])
+check("engine_joint_42" not in body_ids | hand_ids | face_ids,
+      "JSON schema rejects extractor-native landmark ids")
+check("nose" in body_ids and "index_tip" not in body_ids,
+      "JSON schema keeps body ids distinct from hand ids")
+check("index_tip" in hand_ids and "nose_tip" not in hand_ids,
+      "JSON schema keeps hand ids distinct from face ids")
+check("nose_tip" in face_ids and "jaw_open" not in face_ids,
+      "JSON schema keeps face geometry distinct from expression coefficients")
+check("jaw_open" in expression_ids,
+      "JSON schema pins canonical expression coefficients")
 
 print(f"BodyRig contracts: {passed} passed, {failed} failed")
 raise SystemExit(0 if failed == 0 else 1)
