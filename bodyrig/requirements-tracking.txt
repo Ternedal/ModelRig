@@ -1,0 +1,5 @@
+# Optional BodyRig M1.1 local video tracking runtime.
+# Deliberately separate from ModelRig core/worker dependencies: CI contract tests
+# use injected fakes and must not download ML models or this media stack implicitly.
+av==18.1.0
+mediapipe==1.0.1

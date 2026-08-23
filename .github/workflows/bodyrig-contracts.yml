@@ -4,17 +4,25 @@ on:
   push:
     branches: [main]
     paths:
+      - "bodyrig/**"
       - "contracts/bodyrig/**"
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_extract_video.py"
+      - "scripts/bodyrig_local_tracking_contract.py"
+      - "scripts/bodyrig_pyav_h264_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
+      - "bodyrig/**"
       - "contracts/bodyrig/**"
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_extract_video.py"
+      - "scripts/bodyrig_local_tracking_contract.py"
+      - "scripts/bodyrig_pyav_h264_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -45,3 +53,48 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_contract_check.py
+      - name: Validate BodyRig M1.1 local tracking adapter
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_local_tracking_contract.py
+      - name: Validate BodyRig M1.1 local ingest CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_extract_video.py --help
+
+  h264-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA" || {
+            echo "checkout authority mismatch: expected $EXPECTED_SHA, got $actual" >&2
+            exit 1
+          }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install exact optional tracking runtime
+        run: python -m pip install --disable-pip-version-check -r bodyrig/requirements-tracking.txt
+      - name: Verify exact installed runtime versions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.metadata as m
+          expected = {"av": "18.1.0", "mediapipe": "1.0.1"}
+          actual = {name: m.version(name) for name in expected}
+          print(actual)
+          if actual != expected:
+              raise SystemExit(f"tracking runtime version mismatch: {actual} != {expected}")
+          PY
+      - name: Generate and decode real H264 fixture through pinned PyAV runtime
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_pyav_h264_contract.py "$RUNNER_TEMP/bodyrig-h264.mp4"
