@@ -9,6 +9,7 @@ on:
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_extract_video.py"
       - "scripts/bodyrig_local_tracking_contract.py"
       - "scripts/bodyrig_pyav_h264_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
@@ -19,6 +20,7 @@ on:
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_extract_video.py"
       - "scripts/bodyrig_local_tracking_contract.py"
       - "scripts/bodyrig_pyav_h264_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
@@ -55,6 +57,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_local_tracking_contract.py
+      - name: Validate BodyRig M1.1 local ingest CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_extract_video.py --help
 
   h264-runtime:
     runs-on: ubuntu-latest
