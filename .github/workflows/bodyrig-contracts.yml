@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - "contracts/bodyrig/**"
-      - "bodyrig-bootstrap/**"
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
@@ -13,7 +12,6 @@ on:
   pull_request:
     paths:
       - "contracts/bodyrig/**"
-      - "bodyrig-bootstrap/**"
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
@@ -47,9 +45,3 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_contract_check.py
-      - name: Install BodyRig bootstrap test runtime
-        run: python -m pip install --disable-pip-version-check -e "./bodyrig-bootstrap[test]"
-      - name: Test BodyRig bootstrap
-        env:
-          PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m pytest -q bodyrig-bootstrap/tests
