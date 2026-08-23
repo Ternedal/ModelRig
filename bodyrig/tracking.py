@@ -78,7 +78,7 @@ class Landmark:
     x: float
     y: float
     z: float
-    confidence: float
+    confidence: float | None
 
     def normalized(self) -> "Landmark":
         x = _unit(self.x, "landmark.x")
@@ -86,8 +86,10 @@ class Landmark:
         z = _finite(self.z, "landmark.z")
         if not -4.0 <= z <= 4.0:
             raise TrackingContractError("landmark.z must be within [-4,4]")
-        confidence = _unit(self.confidence, "landmark.confidence")
-        return Landmark(_round(x), _round(y), _round(z), _round(confidence))
+        confidence = None
+        if self.confidence is not None:
+            confidence = _round(_unit(self.confidence, "landmark.confidence"))
+        return Landmark(_round(x), _round(y), _round(z), confidence)
 
     def to_dict(self) -> dict:
         item = self.normalized()
@@ -191,7 +193,14 @@ def _validate_expressions(values: Mapping[str, float] | None) -> dict[str, float
 def _mean_confidence(points: Mapping[str, dict] | None) -> float | None:
     if not points:
         return None
-    return _round(sum(item["confidence"] for item in points.values()) / len(points))
+    values = [
+        item["confidence"]
+        for item in points.values()
+        if item.get("confidence") is not None
+    ]
+    if not values:
+        return None
+    return _round(sum(values) / len(values))
 
 
 def _observation_state(frame: dict, subsystem: str) -> tuple[bool, float | None]:
