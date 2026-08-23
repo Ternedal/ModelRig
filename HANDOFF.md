@@ -751,7 +751,89 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 18/8)
+## 9. Kø — hvem har bolden (16/7, opdateret 23/8)
+
+**[23/8 kl. 21:30 UTC — status. main = `274c8f60`, VERSION 2.0.11, seneste tag
+v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig
+`origin/main` (#731). Ingen `validation/` på main. Åbne PRs: 3 (#338, #395,
+#720). Åbne issues: 33. 18/8-blokken længere nede er historik.]**
+
+### FREEZE-VINDUE — læs før enhver landing på main
+
+Fra det øjeblik riggen har produceret et grønt `candidate_freeze_check.py`-
+receipt på en exact SHA (meldt som kommentar på #731 / #58), og indtil den SHA
+enten er promoveret (fast-forward + tag `v2.0.11` + release) eller eksplicit
+opgivet, må INTET lande på `main`. Hver landing flytter `main` væk fra
+kandidaten, og efter #731 §A/§E/§F.1 er freeze og al fysisk evidens derefter
+ugyldig — `main` kan ikke flyttes tilbage.
+
+Det skete 23/8: freeze PASS på `c45d97ed` kl. 20:23 UTC; #732, #734, #736 og
+#738 landede 20:28–21:20 UTC. Kandidaten stod 4 bagud, og Stage A-evidens på
+den SHA kunne ikke promoveres. Ingen af de fire PR'er var forkerte — det var
+tidspunktet.
+
+Regel for enhver session (Claude, Sol eller andre) før merge/fast-forward af
+`main`:
+
+1. Læs seneste kommentar på #731. Står der et freeze PASS uden efterfølgende
+   promotion/abandonment: **land ikke**. Kommentér på #731 at PR'en venter.
+2. Er der intet aktivt freeze: land, og forvent at kandidaten re-ankres
+   bagefter (`scripts/anchor_and_freeze.py`).
+3. Rig-dagens rækkefølge er derfor: alle ventende landinger FØRST → anchor +
+   qualification → freeze på riggen → Stage A → beslutning → tag → Stage B →
+   landinger genoptages.
+
+### Hvad der skete 20-23/8 (siden 18/8-blokken nedenfor)
+
+- 20/8: Stage A bestod 7/7 + T-006 på `bf505800`. Den evidens er historik —
+  hovedet er flyttet flere gange siden, og RIGDAG_SIMPEL forbyder genbrug af
+  evidens fra en ugyldiggjort head. Apparatet er dermed bevist at virke; beviset
+  skal indsamles igen på den frosne SHA.
+- 20/8: ti måleapparat-defekter fundet og lukket (#650–#667). Vigtigst #662
+  (W-11 var CONFIRM_TTL, ikke modelkvalitet) og #667 (T-023 uden retry). Det
+  reelle workflow-tal er stadig ukendt — kør `-WorkflowRounds 3` med
+  #667-retryet før tærsklerne diskuteres.
+- 21-23/8: proof-kæden gjort fail-closed (#670, #673, #675, `fec2e514`, #700 —
+  regelmatricer 41→111 checks, kandidat-gate 9→26). Eneste produktændring i
+  perioden er #668 (Computer Use-bro).
+- 22/8: authority-kontrakterne pinnet (#693–#696): kandidat = `origin/
+  physical-proof/2.0.11`, aldrig en gammel SHA. Rig-stien i alle docs er nu
+  `C:\Users\admin\Desktop\ModelRig-git`.
+- 23/8: flåden ryddet (~50 → 3 åbne PRs). Afhængigheder kvalificeret på exact
+  head (#705–#712: AGP 9.3.1, Gradle 9.6.1, Compose MP 1.11.1, uvicorn 0.52.3,
+  cryptography 50.0.0 m.fl.). T-035 scoped read-only file capabilities (#716).
+  T-044 fysisk review bundet til én kandidat (#714).
+- 23/8: NYT SPOR — BodyRig (embodiment, `.mrbody`): kontrakter #702,
+  runtime-kerne #715, M1.1–M2.5 (#721–#738), `docs/BODYRIG_V1.md`,
+  aktiveringsgate #704 (dormant/off indtil fysiske beviser i `Ternedal/BodyRig`
+  findes). #720 (M0.3 Unity/VRM-renderer) er åben draft.
+
+### Hvem har bolden
+
+**Anders:**
+
+- Tokenrotation (P0, uændret siden 19/8): GitHub-PAT'er med admin på et
+  offentligt repo ligger i klartekst på Notion, én i en sidetitel. Rotér til
+  fine-grained med Contents/PRs/Actions/Issues. Ingen tokenværdier i dette repo.
+- Rig-dagen efter #731: re-anchor + freeze på current main → Stage A →
+  beslutning → tag `v2.0.11` → Stage B. Samme session, hvis muligt: rent
+  workflow-tal (`-WorkflowRounds 3`, qwen3:14b, ≥1 dokument i indekset) og
+  Agent 4-APK (`MODELRIG_TOKEN` sat i miljøet FØR kommandoen).
+- Beslutninger: tærskler for T-023 (20/20) og workflow-gaten (0,95) på baggrund
+  af rene tal; T-033-metode; containment (AppContainer + Job Object vs.
+  kravspec V5's separate Windows-konto) → låser MCP; ADR-MCP-001; ROADMAP.md
+  efter 2.0.11.
+- Efter tag: bump main til 2.0.12 (otte kilder, §4) — ikke før.
+
+**Sol:** T-033-probe med eksplicit campaign-id (ét brugerskift i stedet for
+fire, jf. 20/8) — Anders afgør om den accepteres som evidens; DevControl-
+opdeling mod ADR-DC-001 (#338/#395); egne #296-fund.
+
+**Claude:** intet der kan landes under et freeze-vindue. Denne §9-opdatering
+lander FØR næste freeze. Ikke nu: MCP (park til containment-beslutningen),
+DevControl trin C, nye gate-matricer.
+
+---
 
 **[18/8 — status. main = `45d39b13`, VERSION 2.0.9, seneste tag v2.0.8.
 `v2.0.9` er IKKE sat. Se rig-dagsnoten nedenfor FØR du rører riggen.]**
