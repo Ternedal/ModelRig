@@ -3,8 +3,9 @@
 
 This script is run only by the BodyRig ingest workflow after installing the
 pinned optional wheels. It generates a tiny local H.264/MP4 with ffmpeg,
-decodes it through the production OpenCV decoder, and verifies the current
-MediaPipe Holistic API surface without downloading model weights.
+decodes it through the production OpenCV decoder, verifies the current
+MediaPipe Holistic API surface, and exercises native-result mapping without
+downloading model weights.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -24,6 +26,7 @@ from bodyrig.mediapipe_backend import (  # noqa: E402
     OpenCvVideoDecoder,
     _installed_version,
     _load_mediapipe,
+    mediapipe_result_to_backend_frame,
 )
 
 passed = failed = 0
@@ -63,6 +66,23 @@ def run_ffmpeg(output: Path) -> None:
     subprocess.run(command, check=True, timeout=30)
 
 
+def point(
+    x: float,
+    y: float,
+    z: float = 0.0,
+    *,
+    visibility: float | None = None,
+    presence: float | None = None,
+):
+    return SimpleNamespace(
+        x=x,
+        y=y,
+        z=z,
+        visibility=visibility,
+        presence=presence,
+    )
+
+
 check(_installed_version("mediapipe") == MEDIAPIPE_VERSION, "pinned MediaPipe wheel is active")
 check(
     _installed_version("opencv-python-headless") == OPENCV_HEADLESS_VERSION,
@@ -76,6 +96,37 @@ check(hasattr(mp.tasks.vision.HolisticLandmarker, "create_from_options"), "Holis
 check(hasattr(mp.tasks.vision.HolisticLandmarker, "detect_for_video"), "Holistic VIDEO detection API exists")
 check(hasattr(mp.tasks.BaseOptions.Delegate, "CPU"), "MediaPipe CPU delegate exists")
 check(hasattr(mp.tasks.vision.RunningMode, "VIDEO"), "MediaPipe VIDEO running mode exists")
+
+# Native result mapping is tested without a model asset. Pose landmarks expose
+# confidence here; hands/face intentionally do not, proving we keep confidence
+# unknown rather than manufacturing 1.0.
+pose = [point(0.5, 0.5, visibility=0.9, presence=0.8) for _ in range(33)]
+left_hand = [point(0.25, 0.5) for _ in range(21)]
+right_hand = [point(0.75, 0.5) for _ in range(21)]
+face = [point(0.5, 0.25) for _ in range(468)]
+blendshapes = [
+    SimpleNamespace(category_name="eyeBlinkLeft", score=0.2),
+    SimpleNamespace(category_name="jawOpen", score=0.6),
+    SimpleNamespace(category_name="mouthSmileRight", score=0.7),
+    SimpleNamespace(category_name="not_in_contract", score=0.9),
+]
+native = SimpleNamespace(
+    pose_landmarks=pose,
+    left_hand_landmarks=left_hand,
+    right_hand_landmarks=right_hand,
+    face_landmarks=face,
+    face_blendshapes=blendshapes,
+)
+mapped = mediapipe_result_to_backend_frame(native, timestamp_us=123_000)
+check(mapped.timestamp_us == 123_000, "native result keeps source timestamp")
+check(mapped.body is not None and set(mapped.body) >= {"left_shoulder", "right_hip"}, "pose indices map to semantic BodyRig ids")
+check(mapped.left_hand is not None and set(mapped.left_hand) >= {"wrist", "index_tip"}, "left hand indices map to semantic ids")
+check(mapped.right_hand is not None and set(mapped.right_hand) >= {"wrist", "thumb_tip"}, "right hand indices map to semantic ids")
+check(mapped.face is not None and set(mapped.face) >= {"nose_tip", "chin", "mouth_left"}, "face mesh maps to stable semantic subset")
+check(mapped.body is not None and mapped.body["left_shoulder"].confidence == 0.8, "available pose confidence uses conservative visibility/presence minimum")
+check(mapped.face is not None and mapped.face["nose_tip"].confidence is None, "unsupported face confidence remains unknown")
+check(mapped.left_hand is not None and mapped.left_hand["wrist"].confidence is None, "unsupported hand confidence remains unknown")
+check(mapped.expressions == {"blink_left": 0.2, "jaw_open": 0.6, "mouth_smile_right": 0.7}, "blendshapes map only to canonical expression ids")
 
 with tempfile.TemporaryDirectory(prefix="bodyrig-ingest-runtime-") as td:
     root = Path(td)
