@@ -129,7 +129,7 @@ dependencies {
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively
     // no branded splash. This API is the supported way to theme it.
-    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.core:core-splashscreen:1.2.0")
 
     // T-044 Control Center UI/accessibility gate. These tests run on a real
     // API-35 emulator in CI because Compose's Accessibility Test Framework
