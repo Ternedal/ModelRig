@@ -8,6 +8,15 @@ from .runtime import (
     EventRejected,
     RuntimeSnapshot,
 )
+from .scheduler import EmbodimentScheduler, RenderFrame, SchedulerError
+from .voicerig_adapter import (
+    SpeechFrame,
+    SpeechTrack,
+    TimingMode,
+    VoiceRigContractError,
+    timed_track,
+    wav_envelope_track,
+)
 
 __all__ = [
     "BodyRigRuntime",
@@ -17,4 +26,13 @@ __all__ = [
     "RuntimeSnapshot",
     "BodyprintValidationError",
     "validate_manifest",
+    "EmbodimentScheduler",
+    "RenderFrame",
+    "SchedulerError",
+    "SpeechFrame",
+    "SpeechTrack",
+    "TimingMode",
+    "VoiceRigContractError",
+    "timed_track",
+    "wav_envelope_track",
 ]
