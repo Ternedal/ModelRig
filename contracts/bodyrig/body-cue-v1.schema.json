@@ -5,6 +5,13 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "version", "utterance_id"],
+  "anyOf": [
+    {"required": ["emotion"]},
+    {"required": ["energy"]},
+    {"required": ["gesture"]},
+    {"required": ["gaze"]},
+    {"required": ["posture"]}
+  ],
   "properties": {
     "type": {
       "const": "modelrig-body-cue"
