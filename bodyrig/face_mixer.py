@@ -169,10 +169,10 @@ class FaceBehaviorMixer:
             f"{session_id}:{bodyprint_id}:{profile_fingerprint}".encode("utf-8")
         ).digest()
         generic_digest = hashlib.sha256(f"{session_id}:{bodyprint_id}".encode("utf-8")).digest()
-        self._phase = {
-            "left": int.from_bytes(digest[0:4], "big") / 2**32,
-            "right": int.from_bytes(digest[4:8], "big") / 2**32,
-        }
+        # Both eyes share one normalized profile phase. Equal observed rates
+        # therefore remain synchronized; different rates can still drift and
+        # preserve actual left/right cadence differences without invented winks.
+        self._profile_phase = int.from_bytes(digest[0:4], "big") / 2**32
         self._generic_phase = int.from_bytes(generic_digest[0:4], "big") / 2**32
         self._generic_period_ms = 3300 + int.from_bytes(generic_digest[8:10], "big") % 1900
 
@@ -204,10 +204,11 @@ class FaceBehaviorMixer:
         if period_ms is None:
             return 0.0
 
-        if self._blink_rate_sources[side] == "generic":
-            phase = self._generic_phase
-        else:
-            phase = self._phase[side]
+        phase = (
+            self._generic_phase
+            if self._blink_rate_sources[side] == "generic"
+            else self._profile_phase
+        )
         phase_ms = int(phase * period_ms)
         position = (timestamp_ms + phase_ms) % period_ms
         pulse_ms = min(160, max(80, period_ms // 4))
