@@ -1,6 +1,13 @@
 """BodyRig embodiment runtime bootstrap."""
 
 from .bodyprint import BodyprintValidationError, validate_manifest
+from .face_behavior import (
+    FACE_BEHAVIOR_SCHEMA,
+    FaceBehaviorError,
+    build_face_behavior,
+    canonical_face_behavior_json,
+    validate_face_behavior,
+)
 from .fingerprint import (
     FingerprintConfig,
     FingerprintError,
@@ -34,6 +41,11 @@ __all__ = [
     "RuntimeSnapshot",
     "BodyprintValidationError",
     "validate_manifest",
+    "FACE_BEHAVIOR_SCHEMA",
+    "FaceBehaviorError",
+    "build_face_behavior",
+    "canonical_face_behavior_json",
+    "validate_face_behavior",
     "FingerprintConfig",
     "FingerprintError",
     "build_bodyprint",
