@@ -5,6 +5,7 @@ import hashlib
 import math
 from typing import Any, Mapping
 
+from .body_motion_mixer import BodyMotionMixer, BodyMotionMixerError
 from .face_mixer import FaceBehaviorMixer, FaceMixerError
 from .runtime import BodyState, RuntimeSnapshot
 from .voicerig_adapter import SpeechTrack, TimingMode, VoiceRigContractError
@@ -36,6 +37,16 @@ class RenderFrame:
     face_profile_id: str | None = None
     face_channels: tuple[tuple[str, float], ...] = ()
     face_channel_sources: tuple[tuple[str, str], ...] = ()
+    body_motion_profile_id: str | None = None
+    body_motion_source: str = "generic"
+    head_motion_scale: float = 1.0
+    micro_motion_scale: float = 1.0
+    posture_lean_x: float = 0.0
+    posture_source: str = "generic"
+    resolved_gesture: str | None = None
+    gesture_resolution_source: str = "none"
+    dominant_side_hint: str | None = None
+    gesture_frequency_per_minute: float | None = None
 
 
 class EmbodimentScheduler:
@@ -44,8 +55,9 @@ class EmbodimentScheduler:
     Output values are semantic/procedural hints rather than bone rotations or
     morph-target names. A renderer adapter owns retargeting and final blending.
     M2.2 may optionally personalize renderer-neutral facial hints from a
-    validated M2.1 face-behavior profile; omitting the profile preserves the
-    original generic procedural path.
+    validated M2.1 face-behavior profile. M2.3 may optionally personalize body
+    motion from a validated M1.2 bodyprint package. Omitting either profile
+    preserves the corresponding generic procedural path.
     """
 
     def __init__(
@@ -54,6 +66,7 @@ class EmbodimentScheduler:
         session_id: str,
         bodyprint_id: str,
         face_behavior: Mapping[str, Any] | None = None,
+        bodyprint_package: Mapping[str, Any] | None = None,
     ) -> None:
         if not session_id or not bodyprint_id:
             raise ValueError("session_id and bodyprint_id are required")
@@ -76,6 +89,18 @@ class EmbodimentScheduler:
                 else None
             )
         except FaceMixerError as exc:
+            raise SchedulerError(str(exc)) from exc
+        try:
+            self._body_motion_mixer = (
+                BodyMotionMixer(
+                    session_id=session_id,
+                    bodyprint_id=bodyprint_id,
+                    bodyprint_package=bodyprint_package,
+                )
+                if bodyprint_package is not None
+                else None
+            )
+        except BodyMotionMixerError as exc:
             raise SchedulerError(str(exc)) from exc
 
     def attach_speech(self, track: SpeechTrack, *, started_at_ms: int) -> None:
@@ -183,6 +208,36 @@ class EmbodimentScheduler:
             face_channel_sources = tuple((channel.name, channel.source) for channel in face.channels)
             blink = max(face.value("blink_left"), face.value("blink_right"))
 
+        body_motion_profile_id: str | None = None
+        body_motion_source = "generic"
+        head_motion_scale = 1.0
+        micro_motion_scale = 1.0
+        posture_lean_x = 0.0
+        posture_source = "generic"
+        resolved_gesture: str | None = None
+        gesture_resolution_source = "semantic" if snapshot.active_gesture else "none"
+        dominant_side_hint: str | None = None
+        gesture_frequency_per_minute: float | None = None
+        if self._body_motion_mixer is not None:
+            try:
+                motion = self._body_motion_mixer.render(snapshot, timestamp_ms=timestamp_ms)
+            except BodyMotionMixerError as exc:
+                raise SchedulerError(str(exc)) from exc
+            body_motion_profile_id = motion.profile_id
+            body_motion_source = motion.source
+            head_motion_scale = motion.head_motion_scale
+            micro_motion_scale = motion.micro_motion_scale
+            posture_lean_x = motion.posture_lean_x
+            posture_source = motion.posture_source
+            resolved_gesture = motion.gesture_replay
+            gesture_resolution_source = motion.gesture_source
+            dominant_side_hint = motion.dominant_side
+            gesture_frequency_per_minute = motion.gesture_frequency_per_minute
+
+            yaw *= head_motion_scale
+            pitch *= head_motion_scale
+            breath = max(0.0, min(1.0, 0.5 + (breath - 0.5) * micro_motion_scale))
+
         return RenderFrame(
             timestamp_ms=timestamp_ms,
             state=snapshot.state,
@@ -202,4 +257,14 @@ class EmbodimentScheduler:
             face_profile_id=face_profile_id,
             face_channels=face_channels,
             face_channel_sources=face_channel_sources,
+            body_motion_profile_id=body_motion_profile_id,
+            body_motion_source=body_motion_source,
+            head_motion_scale=head_motion_scale,
+            micro_motion_scale=micro_motion_scale,
+            posture_lean_x=posture_lean_x,
+            posture_source=posture_source,
+            resolved_gesture=resolved_gesture,
+            gesture_resolution_source=gesture_resolution_source,
+            dominant_side_hint=dominant_side_hint,
+            gesture_frequency_per_minute=gesture_frequency_per_minute,
         )
