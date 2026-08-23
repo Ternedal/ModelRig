@@ -49,10 +49,7 @@
         "model_revision": {"type": "string", "minLength": 1, "maxLength": 128}
       }
     },
-    "frames": {
-      "type": "array",
-      "items": {"$ref": "#/$defs/frame"}
-    },
+    "frames": {"type": "array", "items": {"$ref": "#/$defs/frame"}},
     "coverage": {
       "type": "object",
       "additionalProperties": false,
@@ -66,9 +63,7 @@
     "recommendations": {
       "type": "array",
       "uniqueItems": true,
-      "items": {
-        "enum": ["need_more_full_body", "more_visible_hands", "need_clearer_face"]
-      }
+      "items": {"enum": ["need_more_full_body", "more_visible_hands", "need_clearer_face"]}
     },
     "production_activation": {"const": false}
   },
@@ -84,14 +79,56 @@
         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
       }
     },
-    "landmark_map": {
+    "body_landmarks": {
       "type": ["object", "null"],
       "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+          "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+          "left_wrist", "right_wrist", "left_hip", "right_hip",
+          "left_knee", "right_knee", "left_ankle", "right_ankle",
+          "left_heel", "right_heel", "left_foot_index", "right_foot_index"
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/landmark"}
+    },
+    "hand_landmarks": {
+      "type": ["object", "null"],
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "wrist", "thumb_cmc", "thumb_mcp", "thumb_ip", "thumb_tip",
+          "index_mcp", "index_pip", "index_dip", "index_tip",
+          "middle_mcp", "middle_pip", "middle_dip", "middle_tip",
+          "ring_mcp", "ring_pip", "ring_dip", "ring_tip",
+          "pinky_mcp", "pinky_pip", "pinky_dip", "pinky_tip"
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/landmark"}
+    },
+    "face_landmarks": {
+      "type": ["object", "null"],
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "nose_tip", "chin", "mouth_left", "mouth_right", "upper_lip", "lower_lip",
+          "left_eye_inner", "left_eye_outer", "right_eye_inner", "right_eye_outer",
+          "left_brow_inner", "left_brow_outer", "right_brow_inner", "right_brow_outer"
+        ]
+      },
       "additionalProperties": {"$ref": "#/$defs/landmark"}
     },
     "expressions": {
       "type": ["object", "null"],
       "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "blink_left", "blink_right", "jaw_open", "mouth_smile_left",
+          "mouth_smile_right", "mouth_frown_left", "mouth_frown_right",
+          "brow_inner_up", "brow_down_left", "brow_down_right"
+        ]
+      },
       "additionalProperties": {"type": "number", "minimum": 0.0, "maximum": 1.0}
     },
     "frame": {
@@ -100,10 +137,10 @@
       "required": ["timestamp_us", "body", "left_hand", "right_hand", "face", "expressions"],
       "properties": {
         "timestamp_us": {"type": "integer", "minimum": 0},
-        "body": {"$ref": "#/$defs/landmark_map"},
-        "left_hand": {"$ref": "#/$defs/landmark_map"},
-        "right_hand": {"$ref": "#/$defs/landmark_map"},
-        "face": {"$ref": "#/$defs/landmark_map"},
+        "body": {"$ref": "#/$defs/body_landmarks"},
+        "left_hand": {"$ref": "#/$defs/hand_landmarks"},
+        "right_hand": {"$ref": "#/$defs/hand_landmarks"},
+        "face": {"$ref": "#/$defs/face_landmarks"},
         "expressions": {"$ref": "#/$defs/expressions"}
       }
     },
@@ -111,11 +148,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "observed_frames",
-        "total_frames",
-        "coverage",
-        "confidence_frames",
-        "mean_confidence"
+        "observed_frames", "total_frames", "coverage", "confidence_frames", "mean_confidence"
       ],
       "properties": {
         "observed_frames": {"type": "integer", "minimum": 0},
