@@ -10,9 +10,13 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
+import sys
 import tempfile
 
-from bodyrig.tracking import (
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from bodyrig.tracking import (  # noqa: E402
     BackendFrame,
     Landmark,
     MediaFacts,
@@ -233,7 +237,7 @@ with tempfile.TemporaryDirectory(prefix="bodyrig-m11-") as td:
         "permission/provenance assertion is mandatory",
     )
 
-schema_path = pathlib.Path("docs/bodyrig/schemas/tracking.schema.json")
+schema_path = ROOT / "docs/bodyrig/schemas/tracking.schema.json"
 schema = json.loads(schema_path.read_text(encoding="utf-8"))
 check(schema["properties"]["schema"]["const"] == "bodyrig.tracking/v1",
       "JSON schema pins tracking v1")
