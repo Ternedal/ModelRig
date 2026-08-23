@@ -34,6 +34,16 @@ from .identity import (
     compose_identity_bundle,
     validate_identity_bundle,
 )
+from .mrbody import (
+    MRBodyError,
+    MRBodyInspection,
+    build_mrbody,
+    portable_bodyprint_from_identity,
+    provenance_from_identity,
+    validate_mrbody,
+    validate_png_bytes,
+    validate_vrm1_bytes,
+)
 from .runtime import (
     BodyRigRuntime,
     BodyState,
@@ -89,6 +99,14 @@ __all__ = [
     "canonical_identity_json",
     "compose_identity_bundle",
     "validate_identity_bundle",
+    "MRBodyError",
+    "MRBodyInspection",
+    "build_mrbody",
+    "portable_bodyprint_from_identity",
+    "provenance_from_identity",
+    "validate_mrbody",
+    "validate_png_bytes",
+    "validate_vrm1_bytes",
     "ShapeConfig",
     "ShapeProfileError",
     "build_shape_profile",
