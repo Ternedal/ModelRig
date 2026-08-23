@@ -3,8 +3,8 @@
 
 This is deliberately not a model downloader. The operator supplies the source
 video and three local MediaPipe Tasks model assets. The supported backend binds
-installed runtime versions + exact model hashes into the existing stable
-``bodyrig.tracking/v1`` provenance and writes canonical JSON atomically.
+installed runtime versions + exact snapshotted model hashes into the existing
+stable ``bodyrig.tracking/v1`` provenance and writes canonical JSON atomically.
 """
 from __future__ import annotations
 
@@ -98,23 +98,22 @@ def main(argv: list[str] | None = None) -> int:
     if output.exists() and (output.is_symlink() or not output.is_file()):
         raise SystemExit("existing output must be a regular non-symlink file")
 
-    backend = LocalTrackingBackend(
-        LocalTrackingConfig(
-            pose_model=pose,
-            hand_model=hand,
-            face_model=face,
-            frame_stride=args.frame_stride,
-            min_detection_confidence=args.min_detection_confidence,
-            min_presence_confidence=args.min_presence_confidence,
-            min_tracking_confidence=args.min_tracking_confidence,
-            delegate=args.delegate,
+    config = LocalTrackingConfig(
+        pose_model=pose,
+        hand_model=hand,
+        face_model=face,
+        frame_stride=args.frame_stride,
+        min_detection_confidence=args.min_detection_confidence,
+        min_presence_confidence=args.min_presence_confidence,
+        min_tracking_confidence=args.min_tracking_confidence,
+        delegate=args.delegate,
+    )
+    with LocalTrackingBackend(config) as backend:
+        payload = build_tracking_timeline(
+            source,
+            backend=backend,
+            permission_assertion=args.permission_assertion,
         )
-    )
-    payload = build_tracking_timeline(
-        source,
-        backend=backend,
-        permission_assertion=args.permission_assertion,
-    )
     canonical = canonical_tracking_json(payload)
     _atomic_write(output, canonical)
     print(
