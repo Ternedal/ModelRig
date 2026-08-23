@@ -1,0 +1,40 @@
+name: bodyrig-ingest
+
+on:
+  pull_request:
+    paths:
+      - "bodyrig/**"
+      - "docs/bodyrig/schemas/tracking.schema.json"
+      - "scripts/bodyrig_ingest_runtime_check.py"
+      - ".github/workflows/bodyrig-ingest.yml"
+  push:
+    branches: [main]
+    paths:
+      - "bodyrig/**"
+      - "docs/bodyrig/schemas/tracking.schema.json"
+      - "scripts/bodyrig_ingest_runtime_check.py"
+      - ".github/workflows/bodyrig-ingest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  h264-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bodyrig/requirements-ingest.txt
+      - name: Verify runner H.264 toolchain
+        run: |
+          ffmpeg -version
+          ffmpeg -hide_banner -encoders 2>/dev/null | grep -q 'libx264'
+      - name: Install exact optional ingest runtime
+        run: python -m pip install -r bodyrig/requirements-ingest.txt
+      - name: Decode real synthetic H.264 and verify MediaPipe API
+        run: python scripts/bodyrig_ingest_runtime_check.py
