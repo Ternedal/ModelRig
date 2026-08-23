@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import shutil
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import agent4_a4_18r_audit as audit  # noqa: E402
+import agent4_a4_18r_receipt_verify_offline as offline  # noqa: E402
 
 EXPECTED_SHA = "a" * 40
 DIGEST_A = "sha256:" + "1" * 64
@@ -92,7 +94,13 @@ class A418rAuditTests(unittest.TestCase):
             "evidence_head_hash": DIGEST_B,
             "first_payload_sha256": DIGEST_A,
             "last_payload_sha256": DIGEST_B,
-            "persisted_files": [],
+            "persisted_files": [
+                {
+                    "path": "agent4/campaigns/a4-18r-physical-primary.json",
+                    "size_bytes": 123,
+                    "sha256": DIGEST_A,
+                }
+            ],
             "external_dispatch": False,
             "background_runtime": False,
             "public_network": False,
@@ -209,6 +217,14 @@ class A418rAuditTests(unittest.TestCase):
     def _audit(self) -> dict[str, object]:
         return audit.audit_evidence(self.output, expected_sha=EXPECTED_SHA, repo_root=self.repo)
 
+    def _receipt(self) -> dict[str, object]:
+        return json.loads(
+            (self.output / "a4-18r-physical-read-receipt.json").read_text(encoding="utf-8")
+        )
+
+    def _offline(self) -> dict[str, object]:
+        return offline.verify_receipt(self._receipt(), expected_sha=EXPECTED_SHA)
+
     def _rewrite_receipt(self, mutator) -> None:
         path = self.output / "a4-18r-physical-read-receipt.json"
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -270,6 +286,71 @@ class A418rAuditTests(unittest.TestCase):
             self.skipTest("symlinks unavailable")
         with self.assertRaisesRegex(ValueError, "symlink"):
             self._audit()
+
+    def test_offline_receipt_verifier_accepts_valid_self_contained_receipt(self) -> None:
+        result = self._offline()
+        self.assertEqual(result["result"], "PASS")
+        self.assertTrue(result["receipt_only"])
+        self.assertTrue(result["canonical_runtime_audit_still_required"])
+        self.assertFalse(result["artifact_bytes_verified"])
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["repository_lookup_used"])
+        self.assertFalse(result["subprocess_used"])
+        self.assertFalse(result["mutation_performed"])
+
+    def test_offline_verifier_rejects_wrong_external_sha(self) -> None:
+        with self.assertRaisesRegex(ValueError, "receipt exact SHA mismatch"):
+            offline.verify_receipt(self._receipt(), expected_sha="b" * 40)
+
+    def test_offline_verifier_rejects_rebound_raw_token_and_sha_prefix_laundering(self) -> None:
+        for note in ("a" * 64, "sha256:" + "a" * 64):
+            with self.subTest(note_prefix=note[:8]):
+                self._rewrite_receipt(
+                    lambda value, note=note: value["trials"]["no_write_controls"].__setitem__(
+                        "note", note
+                    )
+                )
+                with self.assertRaisesRegex(ValueError, "credential-like"):
+                    self._offline()
+                self._build_valid_evidence()
+
+    def test_offline_verifier_rejects_missing_critical_artifact_receipt(self) -> None:
+        self._rewrite_receipt(
+            lambda value: value.__setitem__(
+                "artifacts",
+                [
+                    entry
+                    for entry in value["artifacts"]
+                    if entry["path"] != "bin/modelrig-a4-18r.apk"
+                ],
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "critical output artifact receipts are missing"):
+            self._offline()
+
+    def test_offline_verifier_rejects_duplicate_json_keys_before_semantic_verification(self) -> None:
+        with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+            json.loads(
+                '{"schema":"one","schema":"two"}',
+                object_pairs_hook=offline.reject_duplicate_object_pairs,
+            )
+
+    def test_offline_verifier_has_read_only_authority_surface(self) -> None:
+        source_path = ROOT / "scripts" / "agent4_a4_18r_receipt_verify_offline.py"
+        source = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imported: set[str] = set()
+        calls: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".", 1)[0])
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                calls.add(node.func.attr)
+        self.assertFalse(imported & {"socket", "subprocess", "urllib", "http", "requests", "os"})
+        self.assertFalse(calls & {"write_text", "write_bytes", "unlink", "rename", "replace", "mkdir", "rmdir"})
+        self.assertNotIn("agent4_a4_18r_audit", imported)
 
 
 if __name__ == "__main__":
