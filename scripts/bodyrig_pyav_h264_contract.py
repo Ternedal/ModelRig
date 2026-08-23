@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Real optional-runtime check: inspect/decode a local H.264 MP4 with PyAV.
+"""Real optional-runtime check: exact versions + local H.264 MP4 decode.
 
 The workflow creates the tiny synthetic source itself. No MediaPipe model asset
-is downloaded; dummy task files are sufficient because this gate deliberately
-stops at media inspection/decode. Extraction has its own dependency-free adapter
-contract until explicit model assets are supplied by a real ingest environment.
+is downloaded; dummy task files are enough to prove version/model provenance
+and media inspection/decode. Real landmark extraction remains a separate gate
+that requires explicit local MediaPipe task assets.
 """
 from __future__ import annotations
 
@@ -17,7 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import av  # type: ignore  # noqa: E402
-from bodyrig.local_tracking import LocalTrackingConfig, MediaPipePyAVTrackingBackend  # noqa: E402
+from bodyrig.local_tracking import LocalTrackingConfig, LocalTrackingRuntimeError  # noqa: E402
+from bodyrig.local_tracking_runtime import (  # noqa: E402
+    EXPECTED_MEDIAPIPE_VERSION,
+    EXPECTED_PYAV_VERSION,
+    LocalTrackingBackend,
+)
 
 
 def main() -> int:
@@ -35,7 +40,32 @@ def main() -> int:
             path = root / name
             path.write_bytes(("placeholder:" + name).encode("ascii"))
             models.append(path)
-        backend = MediaPipePyAVTrackingBackend(LocalTrackingConfig(*models))
+
+        backend = LocalTrackingBackend(LocalTrackingConfig(*models))
+        expected_identity = (
+            f"adapter=1;pyav={EXPECTED_PYAV_VERSION};"
+            f"mediapipe={EXPECTED_MEDIAPIPE_VERSION}"
+        )
+        if backend.backend_version != expected_identity:
+            raise SystemExit(
+                f"backend runtime identity mismatch: {backend.backend_version!r}"
+            )
+
+        # A model replacement after construction must invalidate the backend
+        # before it can produce a receipt claiming the old model revision.
+        models[0].write_bytes(b"mutated-pose-model")
+        try:
+            backend.inspect(video)
+        except LocalTrackingRuntimeError as exc:
+            if "model assets changed" not in str(exc):
+                raise
+        else:
+            raise SystemExit("mutated model asset was accepted")
+
+        # Reconstructing the backend intentionally captures the new exact model
+        # set. It may inspect/decode media without loading the placeholder task
+        # files; extraction would correctly require real task assets.
+        backend = LocalTrackingBackend(LocalTrackingConfig(*models))
         facts = backend.inspect(video)
 
     if facts.codec not in {"h264", "avc1"}:
@@ -65,8 +95,9 @@ def main() -> int:
 
     print(
         "PASS bodyrig real H264 decode: "
-        f"codec={facts.codec} geometry={facts.width}x{facts.height} "
-        f"fps={facts.nominal_fps:.3f} frames={len(timestamps)}"
+        f"runtime={backend.backend_version} codec={facts.codec} "
+        f"geometry={facts.width}x{facts.height} fps={facts.nominal_fps:.3f} "
+        f"frames={len(timestamps)}"
     )
     return 0
 
