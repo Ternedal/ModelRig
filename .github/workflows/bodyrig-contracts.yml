@@ -4,17 +4,21 @@ on:
   push:
     branches: [main]
     paths:
+      - "bodyrig/**"
       - "contracts/bodyrig/**"
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_local_tracking_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
+      - "bodyrig/**"
       - "contracts/bodyrig/**"
       - "docs/BODYRIG_V1.md"
       - "docs/MRBODY_SPEC.md"
       - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_local_tracking_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -45,3 +49,7 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_contract_check.py
+      - name: Validate BodyRig M1.1 local tracking adapter
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_local_tracking_contract.py
