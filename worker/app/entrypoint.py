@@ -12,6 +12,7 @@ import os
 from .agent3.cancellation_status import install_termination_contract
 from .agent3.production_mount import mount_agent3
 from .control_center_api import build_control_center_router
+from .file_capabilities_mount import mount_file_capabilities
 from .hardening import harden
 from .main import app as fastapi_app
 from .schedule_api import build_schedule_router
@@ -55,10 +56,12 @@ if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
         compose_agent4_operator_context_from_environment(),
     )
 
-# Web-research selvvagter paa KALIV_WEB_RESEARCH_ENABLED (default off) paa samme
-# maade. Flaget er en SEPARAT beslutning fra D6: D6 fastlagde politikken for
-# hvornaar noget maa sendes udad, ikke hvilken flade der aabnes.
+# Web research and scoped file access are separate opt-in capabilities. Each
+# mount owns its own default-off guard. T-035 additionally refuses registration
+# unless the trusted workspace is explicit and ToolHost process isolation is on;
+# no file route is added here and no absolute path becomes model-controlled.
 mount_web_research(fastapi_app)
+mount_file_capabilities(fastapi_app)
 
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle, and the hook itself creates no scheduler

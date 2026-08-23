@@ -130,10 +130,14 @@ class Agent4ProductionBootstrapTests(unittest.TestCase):
             1,
         )
         self.assertEqual(calls.count("mount_agent4_operator"), 1)
-        self.assertLess(
-            source.index("compose_agent4_operator_context_from_environment(),"),
-            source.index("# Web-research"),
+        bootstrap_at = source.index(
+            "compose_agent4_operator_context_from_environment(),"
         )
+        for later_mount in (
+            "mount_web_research(fastapi_app)",
+            "mount_file_capabilities(fastapi_app)",
+        ):
+            self.assertLess(bootstrap_at, source.index(later_mount))
         for forbidden in (
             ".recover(",
             ".reconcile_projections(",
