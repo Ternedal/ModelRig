@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/bodyrig/body-cue-v1.schema.json",
+  "title": "ModelRig BodyCue v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "version", "utterance_id"],
+  "anyOf": [
+    {"required": ["body_id"]},
+    {"required": ["emotion"]},
+    {"required": ["intensity"]},
+    {"required": ["energy"]},
+    {"required": ["gesture"]},
+    {"required": ["gaze"]},
+    {"required": ["posture"]},
+    {"required": ["duration_ms"]}
+  ],
+  "properties": {
+    "type": {
+      "const": "modelrig-body-cue"
+    },
+    "version": {
+      "const": 1
+    },
+    "utterance_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "body_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-z0-9æøå_-]+$"
+    },
+    "emotion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "intensity": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "energy": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "gesture": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "gaze": {
+      "oneOf": [
+        {
+          "enum": ["user", "away", "neutral"]
+        },
+        {
+          "type": "string",
+          "pattern": "^object:[A-Za-z0-9._:-]{1,120}$"
+        }
+      ]
+    },
+    "posture": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 120000
+    }
+  }
+}
