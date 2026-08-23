@@ -71,6 +71,15 @@ Allowed MVP states:
 
 ## 4. VoiceRig -> BodyRig: speech lifecycle
 
+### Current compatibility boundary
+
+BodyRig supports two speech-timing fidelity modes:
+
+- `audio_envelope`: approximate mouth energy derived from an actual PCM16 WAV payload. This is the current compatibility path for the inspected VoiceRig RC25 `/api/tts/synthesize` endpoint, which returns complete WAV audio plus sample-rate/duration metadata but no phoneme/viseme timeline.
+- `timed`: precise timestamped visemes supplied explicitly by an upstream component. BodyRig never creates text-derived visemes and then labels them as authoritative timing.
+
+See `VOICERIG_COMPAT.md` for the pinned upstream observation and fail-closed metadata rules.
+
 ### Speech start
 
 ```json
@@ -81,11 +90,14 @@ Allowed MVP states:
   "utterance_id": "u_44",
   "sequence": 190,
   "timestamp_ms": 16000,
-  "audio_clock_ms": 0
+  "audio_clock_ms": 0,
+  "timing_mode": "audio_envelope"
 }
 ```
 
-### Streaming viseme frame
+### Streaming timed-viseme frame
+
+This event is valid only when an upstream component actually supplied explicit timing (`timing_mode = timed`).
 
 ```json
 {
@@ -104,6 +116,8 @@ Allowed MVP states:
 ```
 
 BodyRig MAY map canonical viseme IDs to avatar-specific blendshapes.
+
+For `audio_envelope`, the corresponding scheduler input contains only bounded mouth-energy values and no fabricated viseme identifiers.
 
 ### Prosody hint
 
@@ -158,8 +172,8 @@ This is a first-class protocol operation.
 
 Upon accepted cancellation BodyRig MUST:
 
-1. stop consuming queued viseme/prosody frames for the target utterance;
-2. release mouth shapes toward neutral;
+1. stop consuming queued viseme/prosody/envelope frames for the target utterance;
+2. release mouth output toward neutral immediately;
 3. cancel or gracefully exit speech gestures;
 4. transition to `interrupted` and then the next commanded state;
 5. prevent stale queued events from reactivating the cancelled utterance.
@@ -180,6 +194,8 @@ Upon accepted cancellation BodyRig MUST:
   "health": "ok"
 }
 ```
+
+The headless scheduler additionally emits renderer-neutral procedural hints such as blink, breath, gaze strength and normalized head-motion hints. These are not bone names or avatar-specific morph targets.
 
 ## 7. Attention targets
 
