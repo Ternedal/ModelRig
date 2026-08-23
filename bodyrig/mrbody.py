@@ -313,20 +313,10 @@ def _parse_glb_json(data: bytes, label: str) -> dict[str, Any]:
         chunk_index += 1
     if offset != len(data) or first_json is None:
         raise MRBodyError(f"{label} has invalid GLB framing")
-    try:
-        decoded = first_json.rstrip(b" \t\r\n\x00").decode("utf-8")
-        document = json.loads(
-            decoded,
-            parse_constant=lambda token: (_ for _ in ()).throw(
-                MRBodyError(f"{label} GLB JSON contains {token}")
-            ),
-        )
-    except MRBodyError:
-        raise
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        raise MRBodyError(f"{label} GLB JSON is malformed") from exc
-    if not isinstance(document, dict):
-        raise MRBodyError(f"{label} GLB JSON root must be an object")
+    document = _json_object(
+        first_json.rstrip(b" \t\r\n\x00"),
+        f"{label} GLB JSON",
+    )
     asset = document.get("asset")
     if not isinstance(asset, Mapping) or asset.get("version") != "2.0":
         raise MRBodyError(f"{label} GLB asset.version must be 2.0")
@@ -442,8 +432,6 @@ def portable_bodyprint_from_identity(identity: Mapping[str, Any]) -> dict[str, A
 
 def _pipeline_item(stage: str, adapter: str, revision: str) -> dict[str, str]:
     item = {"stage": stage, "adapter": adapter, "revision": revision}
-    # Reuse the complete provenance validator on a minimal envelope so unsupported
-    # backend tokens fail closed instead of being silently sanitized.
     probe = {
         "format": "modelrig-body-provenance",
         "version": 1,
@@ -603,7 +591,6 @@ def build_mrbody(
     result = output.getvalue()
     if len(result) > MAX_ARCHIVE_BYTES:
         raise MRBodyError("package archive bytes exceed implementation safety cap")
-    # The builder validates its own exact output through the same untrusted path.
     inspection = validate_mrbody(result, expected_identity_id=identifier)
     if inspection.body_id != identifier:
         raise MRBodyError("builder self-validation lost identity binding")
