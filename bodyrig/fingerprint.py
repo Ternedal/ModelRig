@@ -365,6 +365,30 @@ def _arm_sample(frame: Mapping[str, Any], side: str) -> dict[str, Any] | None:
     return sample if "wrist" in sample["points"] else None
 
 
+def _gesture_digest_payload(
+    side: str, start_us: int, end_us: int, trajectory: list[dict[str, Any]]
+) -> dict[str, Any]:
+    return {
+        "side": side,
+        "start_us": start_us,
+        "end_us": end_us,
+        "trajectory": trajectory,
+    }
+
+
+def _gesture_id(
+    side: str, start_us: int, end_us: int, trajectory: list[dict[str, Any]]
+) -> str:
+    digest = hashlib.sha256(
+        json.dumps(
+            _gesture_digest_payload(side, start_us, end_us, trajectory),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"gesture-{digest[:16]}"
+
+
 def _segment_gestures(frames: list[dict[str, Any]], config: Mapping[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     threshold = config["gesture_speed_threshold"]
@@ -404,18 +428,9 @@ def _segment_gestures(frames: list[dict[str, Any]], config: Mapping[str, Any]) -
                 sample["points"]["wrist"]["confidence"]
                 for sample in trajectory
             ]
-            digest_payload = {
-                "side": side,
-                "start_us": start_us,
-                "end_us": end_us,
-                "trajectory": trajectory,
-            }
-            digest = hashlib.sha256(
-                json.dumps(digest_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
             candidates.append(
                 {
-                    "id": f"gesture-{digest[:16]}",
+                    "id": _gesture_id(side, start_us, end_us, trajectory),
                     "side": side,
                     "start_us": start_us,
                     "end_us": end_us,
@@ -431,6 +446,27 @@ def _segment_gestures(frames: list[dict[str, Any]], config: Mapping[str, Any]) -
 def _confidence(payload: Mapping[str, Any], subsystem: str) -> float:
     coverage, mean_confidence = _coverage(payload, subsystem)
     return _round(coverage * mean_confidence)
+
+
+def _bodyprint_content_hash(
+    motion_profile: Mapping[str, Any],
+    gestures: list[dict[str, Any]],
+    provenance: Mapping[str, Any],
+) -> str:
+    core = {
+        "motion_profile": motion_profile,
+        "gestures": gestures,
+        "provenance": provenance,
+    }
+    return hashlib.sha256(
+        json.dumps(
+            core,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _build_profile(
@@ -525,12 +561,7 @@ def build_bodyprint(
         },
         "source_video_required_at_runtime": False,
     }
-    core = {"motion_profile": profile, "gestures": gestures, "provenance": provenance}
-    content_hash = hashlib.sha256(
-        json.dumps(core, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
-            "utf-8"
-        )
-    ).hexdigest()
+    content_hash = _bodyprint_content_hash(profile, gestures, provenance)
 
     capabilities = ["motion_style"]
     if gestures:
@@ -639,12 +670,15 @@ def validate_bodyprint_package(package: Mapping[str, Any]) -> None:
         if gesture_id in seen:
             raise FingerprintError("gesture ids must be unique")
         seen.add(gesture_id)
-        if gesture.get("side") not in {"left", "right"}:
+        side = gesture.get("side")
+        if side not in {"left", "right"}:
             raise FingerprintError(f"gestures[{index}].side is invalid")
         for field in ("start_us", "end_us", "duration_us"):
             if type(gesture.get(field)) is not int or gesture[field] < 0:
                 raise FingerprintError(f"gestures[{index}].{field} must be non-negative integer")
-        if gesture["end_us"] < gesture["start_us"] or gesture["duration_us"] != gesture["end_us"] - gesture["start_us"]:
+        start_us = gesture["start_us"]
+        end_us = gesture["end_us"]
+        if end_us < start_us or gesture["duration_us"] != end_us - start_us:
             raise FingerprintError(f"gestures[{index}] timing is inconsistent")
         _unit(gesture.get("confidence"), f"gestures[{index}].confidence")
         if gesture.get("trajectory_space") != FEATURE_SPACE:
@@ -670,6 +704,8 @@ def validate_bodyprint_package(package: Mapping[str, Any]) -> None:
                     if not -20.0 <= value <= 20.0:
                         raise FingerprintError(f"gestures[{index}] trajectory coordinate is out of range")
                 _unit(point.get("confidence"), f"gestures[{index}].trajectory.{name}.confidence")
+        if gesture_id != _gesture_id(side, start_us, end_us, trajectory):
+            raise FingerprintError(f"gestures[{index}].id does not match gesture content")
 
     provenance = package.get("provenance")
     if not isinstance(provenance, Mapping):
@@ -681,6 +717,10 @@ def validate_bodyprint_package(package: Mapping[str, Any]) -> None:
     builder = provenance.get("builder")
     if not isinstance(builder, Mapping) or builder.get("id") != BUILDER_ID or builder.get("version") != BUILDER_VERSION:
         raise FingerprintError("builder provenance is invalid")
+
+    expected_id = f"bodyprint-{_bodyprint_content_hash(profile, gestures, provenance)[:24]}"
+    if manifest.get("id") != expected_id:
+        raise FingerprintError("manifest.id does not match bodyprint content")
 
 
 def canonical_bodyprint_json(package: Mapping[str, Any]) -> str:
