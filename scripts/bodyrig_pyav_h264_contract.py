@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Real optional-runtime check: exact versions + local H.264 MP4 decode.
+"""Real optional-runtime check: exact Tasks API + local H.264 MP4 decode.
 
 The script creates a tiny synthetic H.264 source through the installed PyAV
-runtime, then opens and decodes that file again. No runner-image ffmpeg CLI and
-no MediaPipe model download is required. Dummy task files are enough to prove
-runtime/model provenance and media inspection/decode; real landmark extraction
-remains a separate gate requiring explicit local MediaPipe task assets.
+runtime, then opens and decodes that file again. It also constructs the exact
+MediaPipe Tasks option objects used by the adapter. No runner-image ffmpeg CLI
+and no MediaPipe model download is required. Real landmark extraction remains a
+separate gate requiring explicit local MediaPipe task assets.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import av  # type: ignore  # noqa: E402
+import mediapipe as mp  # type: ignore  # noqa: E402
 import numpy as np  # type: ignore  # noqa: E402
 from bodyrig.local_tracking import LocalTrackingConfig  # noqa: E402
 from bodyrig.local_tracking_runtime import (  # noqa: E402
@@ -25,6 +26,44 @@ from bodyrig.local_tracking_runtime import (  # noqa: E402
     EXPECTED_PYAV_VERSION,
     LocalTrackingBackend,
 )
+
+
+def _verify_mediapipe_tasks_api() -> None:
+    """Prove the pinned package exposes the exact API our adapter calls."""
+    vision = mp.tasks.vision
+    for class_name in ("PoseLandmarker", "HandLandmarker", "FaceLandmarker"):
+        cls = getattr(vision, class_name, None)
+        if cls is None or not hasattr(cls, "create_from_options"):
+            raise SystemExit(f"MediaPipe Tasks API missing {class_name}.create_from_options")
+        if not hasattr(cls, "detect_for_video"):
+            raise SystemExit(f"MediaPipe Tasks API missing {class_name}.detect_for_video")
+
+    base = mp.tasks.BaseOptions(
+        model_asset_path="placeholder.task",
+        delegate=mp.tasks.BaseOptions.Delegate.CPU,
+    )
+    common = {"running_mode": vision.RunningMode.VIDEO, "min_tracking_confidence": 0.5}
+    vision.PoseLandmarkerOptions(
+        base_options=base, num_poses=1,
+        min_pose_detection_confidence=0.5,
+        min_pose_presence_confidence=0.5,
+        **common,
+    )
+    vision.HandLandmarkerOptions(
+        base_options=base, num_hands=2,
+        min_hand_detection_confidence=0.5,
+        min_hand_presence_confidence=0.5,
+        **common,
+    )
+    face_options = vision.FaceLandmarkerOptions(
+        base_options=base, num_faces=1,
+        min_face_detection_confidence=0.5,
+        min_face_presence_confidence=0.5,
+        output_face_blendshapes=True,
+        **common,
+    )
+    if face_options.output_face_blendshapes is not True:
+        raise SystemExit("MediaPipe FaceLandmarkerOptions did not retain blendshape output")
 
 
 def _generate_h264_fixture(path: Path) -> None:
@@ -59,6 +98,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("video", type=Path)
     args = parser.parse_args()
+    _verify_mediapipe_tasks_api()
+
     video = args.video.resolve()
     video.parent.mkdir(parents=True, exist_ok=True)
     if video.exists():
@@ -127,11 +168,11 @@ def main() -> int:
         raise SystemExit(f"decoded PTS are not strictly increasing: {timestamps}")
 
     print(
-        "PASS bodyrig real H264 decode: "
-        f"runtime={runtime_identity} codec={facts.codec} "
-        f"geometry={facts.width}x{facts.height} fps={facts.nominal_fps:.3f} "
-        f"frames={len(timestamps)} timestamps={timestamps} "
-        f"model_revision_changed={first_revision != second_revision}"
+        "PASS bodyrig real runtime: "
+        f"runtime={runtime_identity} tasks_api=pose+hand+face "
+        f"codec={facts.codec} geometry={facts.width}x{facts.height} "
+        f"fps={facts.nominal_fps:.3f} frames={len(timestamps)} "
+        f"timestamps={timestamps} model_revision_changed={first_revision != second_revision}"
     )
     return 0
 
