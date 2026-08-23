@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 import av  # type: ignore  # noqa: E402
 import numpy as np  # type: ignore  # noqa: E402
-from bodyrig.local_tracking import LocalTrackingConfig, LocalTrackingRuntimeError  # noqa: E402
+from bodyrig.local_tracking import LocalTrackingConfig  # noqa: E402
 from bodyrig.local_tracking_runtime import (  # noqa: E402
     EXPECTED_MEDIAPIPE_VERSION,
     EXPECTED_PYAV_VERSION,
@@ -65,6 +65,10 @@ def main() -> int:
         video.unlink()
     _generate_h264_fixture(video)
 
+    expected_identity = (
+        f"adapter=1;pyav={EXPECTED_PYAV_VERSION};"
+        f"mediapipe={EXPECTED_MEDIAPIPE_VERSION}"
+    )
     with tempfile.TemporaryDirectory(prefix="bodyrig-model-placeholders-") as td:
         root = Path(td).resolve()
         models = []
@@ -73,32 +77,29 @@ def main() -> int:
             path.write_bytes(("placeholder:" + name).encode("ascii"))
             models.append(path)
 
-        backend = LocalTrackingBackend(LocalTrackingConfig(*models))
-        expected_identity = (
-            f"adapter=1;pyav={EXPECTED_PYAV_VERSION};"
-            f"mediapipe={EXPECTED_MEDIAPIPE_VERSION}"
-        )
-        if backend.backend_version != expected_identity:
-            raise SystemExit(
-                f"backend runtime identity mismatch: {backend.backend_version!r}"
-            )
+        # The supported backend snapshots these exact bytes. Mutating the
+        # operator path afterwards cannot change what the active job will load.
+        with LocalTrackingBackend(LocalTrackingConfig(*models)) as first_backend:
+            if first_backend.backend_version != expected_identity:
+                raise SystemExit(
+                    f"backend runtime identity mismatch: {first_backend.backend_version!r}"
+                )
+            first_revision = first_backend.model_revision
+            models[0].write_bytes(b"mutated-pose-model")
+            facts = first_backend.inspect(video)
+            if first_backend.model_revision != first_revision:
+                raise SystemExit("private model snapshot revision changed after source mutation")
 
-        # A model replacement after construction must invalidate the backend
-        # before it can produce a receipt claiming the old model revision.
-        models[0].write_bytes(b"mutated-pose-model")
-        try:
-            backend.inspect(video)
-        except LocalTrackingRuntimeError as exc:
-            if "model assets changed" not in str(exc):
-                raise
-        else:
-            raise SystemExit("mutated model asset was accepted")
-
-        # Reconstructing the backend intentionally captures the new exact model
-        # set. It may inspect/decode media without loading the placeholder task
-        # files; extraction would correctly require real task assets.
-        backend = LocalTrackingBackend(LocalTrackingConfig(*models))
-        facts = backend.inspect(video)
+        # A fresh backend intentionally snapshots the new bytes and therefore
+        # receives a different exact model revision.
+        with LocalTrackingBackend(LocalTrackingConfig(*models)) as second_backend:
+            second_revision = second_backend.model_revision
+            runtime_identity = second_backend.backend_version
+            second_facts = second_backend.inspect(video)
+        if second_revision == first_revision:
+            raise SystemExit("new backend did not observe changed model bytes")
+        if second_facts != facts:
+            raise SystemExit("model revision change unexpectedly altered media inspection facts")
 
     if facts.codec not in {"h264", "avc1"}:
         raise SystemExit(f"expected H.264 codec, got {facts.codec!r}")
@@ -127,9 +128,10 @@ def main() -> int:
 
     print(
         "PASS bodyrig real H264 decode: "
-        f"runtime={backend.backend_version} codec={facts.codec} "
+        f"runtime={runtime_identity} codec={facts.codec} "
         f"geometry={facts.width}x{facts.height} fps={facts.nominal_fps:.3f} "
-        f"frames={len(timestamps)} timestamps={timestamps}"
+        f"frames={len(timestamps)} timestamps={timestamps} "
+        f"model_revision_changed={first_revision != second_revision}"
     )
     return 0
 
