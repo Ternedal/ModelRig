@@ -1,0 +1,5 @@
+# Optional BodyRig M1.1 local video-ingest runtime.
+# Not installed by the base worker and never downloads model weights implicitly.
+# Install explicitly on a rig that will perform body tracking.
+mediapipe==1.0.1
+opencv-python-headless==4.14.0.94
