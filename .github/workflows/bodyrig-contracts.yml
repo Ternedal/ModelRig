@@ -19,6 +19,7 @@ on:
       - "scripts/bodyrig_build_face_behavior.py"
       - "scripts/bodyrig_face_behavior_contract.py"
       - "scripts/bodyrig_face_mixer_contract.py"
+      - "scripts/bodyrig_body_motion_mixer_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
@@ -37,6 +38,7 @@ on:
       - "scripts/bodyrig_build_face_behavior.py"
       - "scripts/bodyrig_face_behavior_contract.py"
       - "scripts/bodyrig_face_mixer_contract.py"
+      - "scripts/bodyrig_body_motion_mixer_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -103,6 +105,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_face_mixer_contract.py
+      - name: Validate BodyRig M2.3 personalized body motion mixer
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_body_motion_mixer_contract.py
 
   h264-runtime:
     runs-on: ubuntu-latest
