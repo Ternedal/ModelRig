@@ -26,6 +26,14 @@ from .fingerprint import (
     gesture_intent,
     validate_bodyprint_package,
 )
+from .identity import (
+    IdentityBundleError,
+    build_identity_bundle,
+    canonical_component_jsons,
+    canonical_identity_json,
+    compose_identity_bundle,
+    validate_identity_bundle,
+)
 from .runtime import (
     BodyRigRuntime,
     BodyState,
@@ -75,6 +83,12 @@ __all__ = [
     "canonical_bodyprint_json",
     "gesture_intent",
     "validate_bodyprint_package",
+    "IdentityBundleError",
+    "build_identity_bundle",
+    "canonical_component_jsons",
+    "canonical_identity_json",
+    "compose_identity_bundle",
+    "validate_identity_bundle",
     "ShapeConfig",
     "ShapeProfileError",
     "build_shape_profile",
