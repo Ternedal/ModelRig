@@ -110,11 +110,18 @@
     "coverage": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["observed_frames", "total_frames", "coverage", "mean_confidence"],
+      "required": [
+        "observed_frames",
+        "total_frames",
+        "coverage",
+        "confidence_frames",
+        "mean_confidence"
+      ],
       "properties": {
         "observed_frames": {"type": "integer", "minimum": 0},
         "total_frames": {"type": "integer", "minimum": 0},
         "coverage": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "confidence_frames": {"type": "integer", "minimum": 0},
         "mean_confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
       }
     }
