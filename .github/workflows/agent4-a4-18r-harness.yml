@@ -1,0 +1,99 @@
+name: agent4-a4-18r-harness
+
+on:
+  pull_request:
+    paths:
+      - "android/app/build.gradle.kts"
+      - "android/app/src/a425f/**"
+      - "android/app/src/main/java/dk/ternedal/modelrig/net/Agent4OperatorClient.kt"
+      - "android/app/src/main/java/dk/ternedal/modelrig/ui/Agent4OperatorScreen.kt"
+      - "android/app/src/main/java/dk/ternedal/modelrig/ui/Agent4CampaignDetailScreen.kt"
+      - "backend/cmd/modelrig-server/**"
+      - "backend/cmd/modelrig-agent4-grants/**"
+      - "backend/internal/httpapi/agent4_*.go"
+      - "worker/app/agent4/**"
+      - "scripts/agent4_a4_18r_*"
+      - "tests/workflow_agent4_a4_18r_*.py"
+      - "docs/agent4/A4-18R_PHYSICAL_READ_PRODUCT.md"
+      - "CURRENT_STATE.md"
+      - ".github/workflows/agent4-a4-18r-harness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.23"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install worker dependencies
+        run: python -m pip install --quiet --disable-pip-version-check -r worker/requirements.txt
+      - name: Run A4-18R canonical fixture and mutation contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: python tests/workflow_agent4_a4_18r_fixture.py
+      - name: Run A4-18R operator and authority contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/workflow_agent4_a4_18r_operator_contract.py
+      - name: Run A4-18R fail-closed audit contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/workflow_agent4_a4_18r_audit.py
+      - name: Test current backend and loopback grant CLI boundaries
+        working-directory: backend
+        run: go test ./cmd/modelrig-server ./cmd/modelrig-agent4-grants ./internal/httpapi
+      - name: Parse A4-18R PowerShell harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          @(
+            "scripts/agent4_a4_18r_physical_operator.ps1",
+            "scripts/agent4_a4_18r_fault_window.ps1"
+          ) | ForEach-Object {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $_ -Raw))
+            Write-Host "parsed $_"
+          }
+
+  android-current-product-variant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+      - name: Install platform + build-tools
+        run: sdkmanager "platforms;android-36" "platforms;android-35" "build-tools;35.0.0"
+      - name: Compile isolated variant with current product sources
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:compileA425fKotlin :app:processA425fMainManifest --no-daemon --console=plain
