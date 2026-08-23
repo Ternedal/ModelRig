@@ -135,11 +135,11 @@ check(
 worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
 pyproject = (root / "devcontrol/pyproject.toml").read_text(encoding="utf-8")
 check(
-    worker_requirements.count("cryptography==49.0.0") == 1,
+    worker_requirements.count("cryptography==50.0.0") == 1,
     "the CI/runtime environment pins the reviewed Ed25519 implementation exactly once",
 )
 check(
-    pyproject.count('"cryptography==49.0.0"') == 1,
+    pyproject.count('"cryptography==50.0.0"') == 1,
     "the DevControl package metadata pins the same Ed25519 implementation",
 )
 
