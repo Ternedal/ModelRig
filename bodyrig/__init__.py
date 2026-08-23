@@ -1,5 +1,10 @@
 """BodyRig embodiment runtime bootstrap."""
 
+from .body_motion_mixer import (
+    BodyMotionMixer,
+    BodyMotionMixerError,
+    BodyMotionRuntimeFrame,
+)
 from .bodyprint import BodyprintValidationError, validate_manifest
 from .face_behavior import (
     FaceBehaviorError,
@@ -46,6 +51,9 @@ from .voicerig_adapter import (
 )
 
 __all__ = [
+    "BodyMotionMixer",
+    "BodyMotionMixerError",
+    "BodyMotionRuntimeFrame",
     "BodyRigRuntime",
     "BodyState",
     "CancelScope",
