@@ -88,13 +88,7 @@ jobs:
           if actual != expected:
               raise SystemExit(f"tracking runtime version mismatch: {actual} != {expected}")
           PY
-      - name: Generate tiny licensed-free synthetic H264 MP4
-        shell: bash
-        run: |
-          ffmpeg -hide_banner -loglevel error -y \
-            -f lavfi -i "testsrc=size=64x64:rate=30" -frames:v 3 \
-            -c:v libx264 -pix_fmt yuv420p "$RUNNER_TEMP/bodyrig-h264.mp4"
-      - name: Decode real H264 fixture through pinned PyAV runtime
+      - name: Generate and decode real H264 fixture through pinned PyAV runtime
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_pyav_h264_contract.py "$RUNNER_TEMP/bodyrig-h264.mp4"
