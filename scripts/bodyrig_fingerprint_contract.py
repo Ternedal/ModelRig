@@ -197,6 +197,20 @@ rendered = EmbodimentScheduler(
 ).render(snapshot, timestamp_ms=250)
 check(rendered.gesture == intent, "extracted gesture reference replays through headless scheduler contract")
 
+# A content-addressed identity is only meaningful if the package validator
+# recomputes it. This mutation stays structurally/range valid and therefore
+# must fail specifically because the old manifest id no longer names the
+# modified content.
+tampered_content = copy.deepcopy(active)
+old_x = tampered_content["gestures"][0]["trajectory"][0]["points"]["wrist"]["x"]
+tampered_content["gestures"][0]["trajectory"][0]["points"]["wrist"]["x"] = old_x + 0.001
+try:
+    validate_bodyprint_package(tampered_content)
+except FingerprintError:
+    check(True, "content-addressed bodyprint id rejects valid-shape content mutation")
+else:
+    check(False, "content-addressed bodyprint id rejects valid-shape content mutation")
+
 bad_metric = copy.deepcopy(active)
 bad_metric["motion_profile"]["metrics"]["gesture_range"] = -1.0
 try:
