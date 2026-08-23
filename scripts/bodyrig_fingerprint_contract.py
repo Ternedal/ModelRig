@@ -199,8 +199,7 @@ check(rendered.gesture == intent, "extracted gesture reference replays through h
 
 # A content-addressed identity is only meaningful if the package validator
 # recomputes it. This mutation stays structurally/range valid and therefore
-# must fail specifically because the old manifest id no longer names the
-# modified content.
+# must fail because the old manifest id no longer names the modified content.
 tampered_content = copy.deepcopy(active)
 old_x = tampered_content["gestures"][0]["trajectory"][0]["points"]["wrist"]["x"]
 tampered_content["gestures"][0]["trajectory"][0]["points"]["wrist"]["x"] = old_x + 0.001
@@ -210,6 +209,20 @@ except FingerprintError:
     check(True, "content-addressed bodyprint id rejects valid-shape content mutation")
 else:
     check(False, "content-addressed bodyprint id rejects valid-shape content mutation")
+
+# Manifest claims are package content too. Keep the value valid, but alter it
+# without regenerating the id; a whole-package content identity must reject it.
+tampered_manifest = copy.deepcopy(active)
+old_motion_confidence = tampered_manifest["manifest"]["confidence"]["motion"]
+tampered_manifest["manifest"]["confidence"]["motion"] = (
+    old_motion_confidence - 0.01 if old_motion_confidence >= 0.01 else old_motion_confidence + 0.01
+)
+try:
+    validate_bodyprint_package(tampered_manifest)
+except FingerprintError:
+    check(True, "content-addressed bodyprint id rejects valid manifest mutation")
+else:
+    check(False, "content-addressed bodyprint id rejects valid manifest mutation")
 
 bad_metric = copy.deepcopy(active)
 bad_metric["motion_profile"]["metrics"]["gesture_range"] = -1.0
