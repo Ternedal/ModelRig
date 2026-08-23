@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
+from typing import Any, Mapping
 
+from .face_mixer import FaceBehaviorMixer, FaceMixerError
 from .runtime import BodyState, RuntimeSnapshot
 from .voicerig_adapter import SpeechTrack, TimingMode, VoiceRigContractError
 
@@ -31,6 +33,9 @@ class RenderFrame:
     breath: float
     head_yaw_hint: float
     head_pitch_hint: float
+    face_profile_id: str | None = None
+    face_channels: tuple[tuple[str, float], ...] = ()
+    face_channel_sources: tuple[tuple[str, str], ...] = ()
 
 
 class EmbodimentScheduler:
@@ -38,9 +43,18 @@ class EmbodimentScheduler:
 
     Output values are semantic/procedural hints rather than bone rotations or
     morph-target names. A renderer adapter owns retargeting and final blending.
+    M2.2 may optionally personalize renderer-neutral facial hints from a
+    validated M2.1 face-behavior profile; omitting the profile preserves the
+    original generic procedural path.
     """
 
-    def __init__(self, *, session_id: str, bodyprint_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        bodyprint_id: str,
+        face_behavior: Mapping[str, Any] | None = None,
+    ) -> None:
         if not session_id or not bodyprint_id:
             raise ValueError("session_id and bodyprint_id are required")
         self._session_id = session_id
@@ -51,6 +65,18 @@ class EmbodimentScheduler:
         self._blink_period_ms = 3300 + int.from_bytes(digest[8:10], "big") % 1900
         self._tracks: dict[str, tuple[SpeechTrack, int]] = {}
         self._cancelled: set[str] = set()
+        try:
+            self._face_mixer = (
+                FaceBehaviorMixer(
+                    session_id=session_id,
+                    bodyprint_id=bodyprint_id,
+                    face_behavior=face_behavior,
+                )
+                if face_behavior is not None
+                else None
+            )
+        except FaceMixerError as exc:
+            raise SchedulerError(str(exc)) from exc
 
     def attach_speech(self, track: SpeechTrack, *, started_at_ms: int) -> None:
         if started_at_ms < 0:
@@ -74,8 +100,8 @@ class EmbodimentScheduler:
     def _blink(self, timestamp_ms: int) -> float:
         phase_ms = int(self._phase_a * self._blink_period_ms)
         position = (timestamp_ms + phase_ms) % self._blink_period_ms
-        # A deterministic 160 ms close/open pulse. The bodyprint layer can later
-        # replace period/shape with source-specific blink statistics.
+        # A deterministic 160 ms close/open pulse. M2.2 replaces this only when
+        # a validated source-specific face behavior profile is explicitly used.
         if position >= 160:
             return 0.0
         if position <= 80:
@@ -139,6 +165,24 @@ class EmbodimentScheduler:
                     timing_mode = track.mode
 
         breath, yaw, pitch, gaze_strength = self._procedural(snapshot, timestamp_ms)
+        blink = self._blink(timestamp_ms)
+        face_profile_id: str | None = None
+        face_channels: tuple[tuple[str, float], ...] = ()
+        face_channel_sources: tuple[tuple[str, str], ...] = ()
+        if self._face_mixer is not None:
+            try:
+                face = self._face_mixer.render(
+                    snapshot,
+                    timestamp_ms=timestamp_ms,
+                    speech_mouth_open=mouth_open,
+                )
+            except FaceMixerError as exc:
+                raise SchedulerError(str(exc)) from exc
+            face_profile_id = face.profile_id
+            face_channels = tuple((channel.name, channel.value) for channel in face.channels)
+            face_channel_sources = tuple((channel.name, channel.source) for channel in face.channels)
+            blink = max(face.value("blink_left"), face.value("blink_right"))
+
         return RenderFrame(
             timestamp_ms=timestamp_ms,
             state=snapshot.state,
@@ -151,8 +195,11 @@ class EmbodimentScheduler:
             mouth_open=mouth_open,
             visemes=visemes,
             speech_timing_mode=timing_mode,
-            blink=self._blink(timestamp_ms),
+            blink=blink,
             breath=breath,
             head_yaw_hint=yaw,
             head_pitch_hint=pitch,
+            face_profile_id=face_profile_id,
+            face_channels=face_channels,
+            face_channel_sources=face_channel_sources,
         )
