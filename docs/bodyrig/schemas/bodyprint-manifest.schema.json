@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/bodyrig/bodyprint-manifest-0.1.json",
+  "title": "BodyRig bodyprint manifest v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "id", "created_at", "capabilities", "confidence"],
+  "properties": {
+    "format": {"const": "bodyrig.bodyprint"},
+    "version": {"type": "string", "pattern": "^0\\.1\\.[0-9]+$"},
+    "id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "display_name": {"type": "string"},
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["appearance", "body_shape", "motion_style", "face_behavior", "gaze", "gestures"]
+      }
+    },
+    "avatar": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path", "format", "optional"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "format": {"type": "string", "minLength": 1},
+        "optional": {"type": "boolean"}
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appearance", "body_shape", "motion", "face_behavior", "hands", "gaze"],
+      "properties": {
+        "appearance": {"$ref": "#/$defs/confidence"},
+        "body_shape": {"$ref": "#/$defs/confidence"},
+        "motion": {"$ref": "#/$defs/confidence"},
+        "face_behavior": {"$ref": "#/$defs/confidence"},
+        "hands": {"$ref": "#/$defs/confidence"},
+        "gaze": {"$ref": "#/$defs/confidence"}
+      }
+    }
+  },
+  "$defs": {
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}
