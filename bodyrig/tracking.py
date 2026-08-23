@@ -206,43 +206,36 @@ def _mean_confidence(points: Mapping[str, dict] | None) -> float | None:
     return _round(sum(item["confidence"] for item in points.values()) / len(points))
 
 
-def _subsystem_confidence(frame: dict, subsystem: str) -> float | None:
+def _observation_state(frame: dict, subsystem: str) -> tuple[bool, float | None]:
+    """Return whether a subsystem was observed and any real detector confidence.
+
+    Presence and confidence are intentionally separate. Expression coefficients
+    are intensities, not confidence values, so an expressions-only face frame is
+    observed but contributes no invented confidence sample.
+    """
     if subsystem == "hands":
-        values = [
-            value for value in (
-                _mean_confidence(frame.get("left_hand")),
-                _mean_confidence(frame.get("right_hand")),
-            )
-            if value is not None
-        ]
-        return _round(sum(values) / len(values)) if values else None
+        left = _mean_confidence(frame.get("left_hand"))
+        right = _mean_confidence(frame.get("right_hand"))
+        values = [value for value in (left, right) if value is not None]
+        observed = frame.get("left_hand") is not None or frame.get("right_hand") is not None
+        confidence = _round(sum(values) / len(values)) if values else None
+        return observed, confidence
     if subsystem == "face":
-        points = _mean_confidence(frame.get("face"))
-        expressions = frame.get("expressions")
-        expr = None
-        if expressions:
-            # Expression coefficients are intensities, not detector confidence;
-            # their presence proves a face-expression observation exists but is
-            # not promoted into a fake confidence value.
-            expr = 1.0
-        values = [value for value in (points, expr) if value is not None]
-        return _round(sum(values) / len(values)) if values else None
-    return _mean_confidence(frame.get(subsystem))
+        observed = frame.get("face") is not None or frame.get("expressions") is not None
+        return observed, _mean_confidence(frame.get("face"))
+    points = frame.get(subsystem)
+    return points is not None, _mean_confidence(points)
 
 
-def _coverage(frames: list[dict], subsystem: str) -> dict:
-    if not frames:
-        return {"observed_frames": 0, "total_frames": 0, "coverage": 0.0, "mean_confidence": 0.0}
-    confidences = [
-        value for frame in frames
-        if (value := _subsystem_confidence(frame, subsystem)) is not None
-    ]
-    observed = len(confidences)
+def _coverage(total_frames: int, states: list[tuple[bool, float | None]]) -> dict:
+    observed = sum(1 for present, _confidence in states if present)
+    confidences = [confidence for _present, confidence in states if confidence is not None]
     return {
         "observed_frames": observed,
-        "total_frames": len(frames),
-        "coverage": _round(observed / len(frames)),
-        "mean_confidence": _round(sum(confidences) / observed) if observed else 0.0,
+        "total_frames": total_frames,
+        "coverage": _round(observed / total_frames) if total_frames else 0.0,
+        "confidence_frames": len(confidences),
+        "mean_confidence": _round(sum(confidences) / len(confidences)) if confidences else 0.0,
     }
 
 
@@ -303,6 +296,12 @@ def build_tracking_timeline(
     identity = _backend_identity(backend)
 
     normalized: list[dict] = []
+    coverage_states: dict[str, list[tuple[bool, float | None]]] = {
+        "body": [],
+        "hands": [],
+        "face": [],
+    }
+    attempted_frames = 0
     last_timestamp = -1
     for raw in backend.extract(path):
         if not isinstance(raw, BackendFrame):
@@ -314,29 +313,34 @@ def build_tracking_timeline(
         if raw.timestamp_us > media["duration_us"]:
             raise TrackingContractError("frame timestamp exceeds media duration")
         last_timestamp = raw.timestamp_us
+        attempted_frames += 1
 
         body = _validate_landmarks(raw.body, allowed=_BODY_IDS, subsystem="body")
         left = _validate_landmarks(raw.left_hand, allowed=_HAND_IDS, subsystem="left_hand")
         right = _validate_landmarks(raw.right_hand, allowed=_HAND_IDS, subsystem="right_hand")
         face = _validate_landmarks(raw.face, allowed=_FACE_IDS, subsystem="face")
         expressions = _validate_expressions(raw.expressions)
-        if all(value is None for value in (body, left, right, face, expressions)):
-            # Detection loss is omitted entirely rather than emitted as a fake
-            # all-zero person frame. Timestamp gaps therefore preserve truth.
-            continue
-        normalized.append({
+        frame = {
             "timestamp_us": raw.timestamp_us,
             "body": body,
             "left_hand": left,
             "right_hand": right,
             "face": face,
             "expressions": expressions,
-        })
+        }
+        for subsystem in coverage_states:
+            coverage_states[subsystem].append(_observation_state(frame, subsystem))
+
+        if all(value is None for value in (body, left, right, face, expressions)):
+            # Detection loss is omitted entirely rather than emitted as a fake
+            # all-zero person frame. Coverage still counts this attempted frame,
+            # so omission cannot inflate quality metrics.
+            continue
+        normalized.append(frame)
 
     coverage = {
-        "body": _coverage(normalized, "body"),
-        "hands": _coverage(normalized, "hands"),
-        "face": _coverage(normalized, "face"),
+        subsystem: _coverage(attempted_frames, states)
+        for subsystem, states in coverage_states.items()
     }
     payload = {
         "schema": SCHEMA,
