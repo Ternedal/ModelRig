@@ -1,10 +1,7 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 import java.util.Properties
 
 plugins {
     id("com.android.application")
-    kotlin("android")
     kotlin("plugin.compose")
     id("io.github.takahirom.roborazzi")
 }
@@ -70,12 +67,7 @@ android {
     }
 }
 
-// Kotlin 2.4 fjernede 'kotlinOptions { jvmTarget = "17" }'. Samme maal, ny DSL.
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-    }
-}
+// AGP 9 built-in Kotlin inherits its JVM target from compileOptions above.
 
 android.testOptions {
     unitTests {
