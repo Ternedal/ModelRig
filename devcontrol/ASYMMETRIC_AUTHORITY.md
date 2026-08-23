@@ -39,7 +39,7 @@ window, future signature, revoked key, payload mismatch or invalid Ed25519
 signature. Revocation applies at verification time even when the signature was
 created before the revocation timestamp.
 
-`cryptography==49.0.0` is pinned in both the Development Control Plane package
+`cryptography==50.0.0` is pinned in both the Development Control Plane package
 metadata and the repository test/runtime requirements. The implementation uses
 the library's official Ed25519 public-key primitive; no custom cryptography is
 implemented.
