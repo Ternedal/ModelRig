@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Protocol
@@ -69,9 +70,6 @@ def _unit(value: float, label: str) -> float:
 
 
 def _round(value: float) -> float:
-    # Contract precision. This makes engine jitter below 1e-6 irrelevant to
-    # serialized determinism while preserving far more precision than tracking
-    # quality warrants.
     return round(float(value), 6)
 
 
@@ -93,23 +91,11 @@ class Landmark:
 
     def to_dict(self) -> dict:
         item = self.normalized()
-        return {
-            "x": item.x,
-            "y": item.y,
-            "z": item.z,
-            "confidence": item.confidence,
-        }
+        return {"x": item.x, "y": item.y, "z": item.z, "confidence": item.confidence}
 
 
 @dataclass(frozen=True)
 class BackendFrame:
-    """Engine-neutral observation returned by a TrackingBackend.
-
-    ``None`` means the subsystem was not observed on this frame. An empty map
-    is invalid: backends must not disguise detection loss as a successful but
-    content-free observation.
-    """
-
     timestamp_us: int
     body: Mapping[str, Landmark] | None = None
     left_hand: Mapping[str, Landmark] | None = None
@@ -147,19 +133,21 @@ class MediaFacts:
         }
 
 
+@dataclass(frozen=True)
+class _SourceSnapshot:
+    sha256: str
+    size: int
+    device: int
+    inode: int
+    mtime_ns: int
+
+
 class TrackingBackend(Protocol):
-    """Replaceable extraction backend boundary.
-
-    Native model/SDK objects must not cross this interface. A backend returns
-    MediaFacts and BackendFrame values only.
-    """
-
     backend_id: str
     backend_version: str
     model_revision: str
 
     def inspect(self, source_path: os.PathLike[str] | str) -> MediaFacts: ...
-
     def extract(self, source_path: os.PathLike[str] | str) -> Iterable[BackendFrame]: ...
 
 
@@ -207,12 +195,6 @@ def _mean_confidence(points: Mapping[str, dict] | None) -> float | None:
 
 
 def _observation_state(frame: dict, subsystem: str) -> tuple[bool, float | None]:
-    """Return whether a subsystem was observed and any real detector confidence.
-
-    Presence and confidence are intentionally separate. Expression coefficients
-    are intensities, not confidence values, so an expressions-only face frame is
-    observed but contributes no invented confidence sample.
-    """
     if subsystem == "hands":
         left = _mean_confidence(frame.get("left_hand"))
         right = _mean_confidence(frame.get("right_hand"))
@@ -250,17 +232,66 @@ def _recommendations(coverage: dict[str, dict]) -> list[str]:
     return result
 
 
-def _source_sha256(path: os.PathLike[str] | str) -> tuple[str, int]:
+def _capture_source(path: Path) -> _SourceSnapshot:
+    """Hash one stable regular file and bind the digest to its file identity."""
+    try:
+        path_before = os.lstat(path)
+    except OSError as exc:
+        raise TrackingContractError(f"source cannot be inspected: {type(exc).__name__}") from exc
+    if stat.S_ISLNK(path_before.st_mode) or not stat.S_ISREG(path_before.st_mode):
+        raise TrackingContractError("source_path must name a non-symlink regular file")
+
     digest = hashlib.sha256()
     total = 0
-    with open(path, "rb") as handle:
-        while True:
-            block = handle.read(1024 * 1024)
-            if not block:
-                break
-            total += len(block)
-            digest.update(block)
-    return digest.hexdigest(), total
+    try:
+        with open(path, "rb") as handle:
+            opened_before = os.fstat(handle.fileno())
+            if (opened_before.st_dev, opened_before.st_ino) != (path_before.st_dev, path_before.st_ino):
+                raise TrackingContractError("source identity changed before hashing")
+            while True:
+                block = handle.read(1024 * 1024)
+                if not block:
+                    break
+                total += len(block)
+                digest.update(block)
+            opened_after = os.fstat(handle.fileno())
+    except TrackingContractError:
+        raise
+    except OSError as exc:
+        raise TrackingContractError(f"source cannot be hashed: {type(exc).__name__}") from exc
+
+    try:
+        path_after = os.lstat(path)
+    except OSError as exc:
+        raise TrackingContractError("source disappeared while hashing") from exc
+
+    identity_before = (
+        opened_before.st_dev,
+        opened_before.st_ino,
+        opened_before.st_size,
+        opened_before.st_mtime_ns,
+    )
+    identity_after = (
+        opened_after.st_dev,
+        opened_after.st_ino,
+        opened_after.st_size,
+        opened_after.st_mtime_ns,
+    )
+    path_identity = (
+        path_after.st_dev,
+        path_after.st_ino,
+        path_after.st_size,
+        path_after.st_mtime_ns,
+    )
+    if identity_before != identity_after or identity_after != path_identity or total != opened_after.st_size:
+        raise TrackingContractError("source changed while hashing")
+    return _SourceSnapshot(
+        sha256=digest.hexdigest(),
+        size=total,
+        device=int(opened_after.st_dev),
+        inode=int(opened_after.st_ino),
+        mtime_ns=int(opened_after.st_mtime_ns),
+    )
 
 
 def _backend_identity(backend: TrackingBackend) -> dict:
@@ -281,25 +312,20 @@ def build_tracking_timeline(
     backend: TrackingBackend,
     permission_assertion: str,
 ) -> dict:
-    """Inspect/extract one source video into deterministic BodyRig tracking v1."""
+    """Inspect/extract one immutable source into deterministic tracking v1."""
     if not isinstance(permission_assertion, str) or not permission_assertion.strip():
         raise TrackingContractError("permission_assertion is required")
     if len(permission_assertion) > 256:
         raise TrackingContractError("permission_assertion is too long")
 
     path = Path(source_path)
-    if not path.is_file():
-        raise TrackingContractError("source_path must name an existing regular file")
-
-    source_hash, source_bytes = _source_sha256(path)
+    source_before = _capture_source(path)
     media = backend.inspect(path).to_dict()
     identity = _backend_identity(backend)
 
     normalized: list[dict] = []
     coverage_states: dict[str, list[tuple[bool, float | None]]] = {
-        "body": [],
-        "hands": [],
-        "face": [],
+        "body": [], "hands": [], "face": [],
     }
     attempted_frames = 0
     last_timestamp = -1
@@ -330,13 +356,15 @@ def build_tracking_timeline(
         }
         for subsystem in coverage_states:
             coverage_states[subsystem].append(_observation_state(frame, subsystem))
-
         if all(value is None for value in (body, left, right, face, expressions)):
-            # Detection loss is omitted entirely rather than emitted as a fake
-            # all-zero person frame. Coverage still counts this attempted frame,
-            # so omission cannot inflate quality metrics.
             continue
         normalized.append(frame)
+
+    source_after = _capture_source(path)
+    if source_after != source_before:
+        raise TrackingContractError(
+            "source changed during extraction; tracking provenance is invalid"
+        )
 
     coverage = {
         subsystem: _coverage(attempted_frames, states)
@@ -346,8 +374,8 @@ def build_tracking_timeline(
         "schema": SCHEMA,
         "coordinate_space": COORDINATE_SPACE,
         "source": {
-            "sha256": source_hash,
-            "bytes": source_bytes,
+            "sha256": source_before.sha256,
+            "bytes": source_before.size,
             "permission_assertion": permission_assertion.strip(),
             "media": media,
         },
@@ -357,8 +385,6 @@ def build_tracking_timeline(
         "recommendations": _recommendations(coverage),
         "production_activation": False,
     }
-    # Round-trip through canonical JSON now so non-JSON backend values cannot
-    # sneak into what looks like a valid timeline.
     canonical_tracking_json(payload)
     return payload
 
@@ -370,4 +396,10 @@ def canonical_tracking_json(payload: Mapping) -> str:
         raise TrackingContractError(f"tracking schema must be {SCHEMA}")
     if payload.get("production_activation") is not False:
         raise TrackingContractError("production_activation must remain false")
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
