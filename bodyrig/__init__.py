@@ -7,6 +7,12 @@ from .face_behavior import (
     canonical_face_behavior_json,
     validate_face_behavior,
 )
+from .face_mixer import (
+    FaceBehaviorMixer,
+    FaceChannel,
+    FaceMixerError,
+    FaceRuntimeFrame,
+)
 from .fingerprint import (
     FingerprintConfig,
     FingerprintError,
@@ -51,6 +57,10 @@ __all__ = [
     "build_face_behavior",
     "canonical_face_behavior_json",
     "validate_face_behavior",
+    "FaceBehaviorMixer",
+    "FaceChannel",
+    "FaceMixerError",
+    "FaceRuntimeFrame",
     "FingerprintConfig",
     "FingerprintError",
     "build_bodyprint",
