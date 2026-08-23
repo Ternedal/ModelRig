@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/bodyrig/expression-plan-0.1.json",
+  "title": "BodyRig ExpressionPlan v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "version", "session_id", "sequence", "timestamp_ms", "state"],
+  "properties": {
+    "type": {"const": "bodyrig.expression_plan"},
+    "version": {"const": "0.1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 0},
+    "timestamp_ms": {"type": "integer", "minimum": 0},
+    "state": {"enum": ["idle", "listening", "thinking", "speaking", "waiting_for_tool", "interrupted", "error"]},
+    "emotion": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["name", "intensity"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "intensity": {"$ref": "#/$defs/unit"}
+      }
+    },
+    "gesture": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["intent", "intensity", "optional"],
+      "properties": {
+        "intent": {"type": "string", "minLength": 1},
+        "intensity": {"$ref": "#/$defs/unit"},
+        "optional": {"type": "boolean"}
+      }
+    },
+    "gaze": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["target"],
+      "properties": {
+        "target": {"type": "string", "minLength": 1},
+        "intensity": {"$ref": "#/$defs/unit"}
+      }
+    },
+    "energy": {"$ref": "#/$defs/unit"}
+  },
+  "$defs": {
+    "unit": {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}
