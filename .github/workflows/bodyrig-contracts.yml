@@ -16,6 +16,8 @@ on:
       - "scripts/bodyrig_fingerprint_contract.py"
       - "scripts/bodyrig_build_shape_profile.py"
       - "scripts/bodyrig_shape_contract.py"
+      - "scripts/bodyrig_build_face_behavior.py"
+      - "scripts/bodyrig_face_behavior_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
@@ -31,6 +33,8 @@ on:
       - "scripts/bodyrig_fingerprint_contract.py"
       - "scripts/bodyrig_build_shape_profile.py"
       - "scripts/bodyrig_shape_contract.py"
+      - "scripts/bodyrig_build_face_behavior.py"
+      - "scripts/bodyrig_face_behavior_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -85,6 +89,14 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_build_shape_profile.py --help
+      - name: Validate BodyRig M2.1 facial behavior builder
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_face_behavior_contract.py
+      - name: Validate BodyRig M2.1 facial behavior CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_build_face_behavior.py --help
 
   h264-runtime:
     runs-on: ubuntu-latest
