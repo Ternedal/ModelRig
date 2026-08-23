@@ -1,14 +1,12 @@
 // Kotlin 2.0+ requires the separate Compose Compiler Gradle plugin
 // (org.jetbrains.kotlin.plugin.compose), applied per-module below.
 //
-// VERSION NOTE: this Kotlin 2.0.21 / Compose Multiplatform 1.7.0 pairing is
-// plausible but was NOT built in the environment that generated this repo (no
-// Kotlin/Gradle toolchain there). If Gradle complains about the Compose
-// compiler / Kotlin version, bump these to the current matched pair from
-// https://github.com/JetBrains/compose-multiplatform/releases
+// Keep Kotlin JVM, Compose Compiler and serialization on the same Kotlin
+// release. Compose Multiplatform is versioned independently; exact-head CI is
+// the compatibility authority for this repository.
 plugins {
     kotlin("jvm") version "2.4.10" apply false
-    kotlin("plugin.compose") version "2.0.21" apply false
+    kotlin("plugin.compose") version "2.4.10" apply false
     kotlin("plugin.serialization") version "2.4.10" apply false
     id("org.jetbrains.compose") version "1.7.0" apply false
 }
