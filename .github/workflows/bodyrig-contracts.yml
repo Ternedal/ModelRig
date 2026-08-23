@@ -14,6 +14,7 @@ on:
       - "scripts/bodyrig_pyav_h264_contract.py"
       - "scripts/bodyrig_build_bodyprint.py"
       - "scripts/bodyrig_fingerprint_contract.py"
+      - "scripts/bodyrig_face_behavior_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - "scripts/bodyrig_pyav_h264_contract.py"
       - "scripts/bodyrig_build_bodyprint.py"
       - "scripts/bodyrig_fingerprint_contract.py"
+      - "scripts/bodyrig_face_behavior_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -73,6 +75,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_build_bodyprint.py --help
+      - name: Validate BodyRig M2.1 face behavior priors
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_face_behavior_contract.py
 
   h264-runtime:
     runs-on: ubuntu-latest
