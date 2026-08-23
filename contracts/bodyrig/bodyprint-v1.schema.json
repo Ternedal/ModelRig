@@ -5,12 +5,19 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "version"],
+  "anyOf": [
+    {"required": ["shape"]},
+    {"required": ["motion"]},
+    {"required": ["expression"]},
+    {"required": ["runtime"]}
+  ],
   "properties": {
     "format": {"const": "modelrig-bodyprint"},
     "version": {"const": 1},
     "shape": {
       "type": "object",
       "additionalProperties": false,
+      "minProperties": 1,
       "properties": {
         "height_scale": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 4.0},
         "shoulder_to_height": {"type": "number", "minimum": 0.0, "maximum": 1.0},
@@ -22,6 +29,7 @@
     "motion": {
       "type": "object",
       "additionalProperties": false,
+      "minProperties": 1,
       "properties": {
         "energy": {"type": "number", "minimum": 0.0, "maximum": 1.0},
         "gesture_frequency": {"type": "number", "minimum": 0.0, "maximum": 1.0},
@@ -34,6 +42,7 @@
     "expression": {
       "type": "object",
       "additionalProperties": false,
+      "minProperties": 1,
       "properties": {
         "blink_rate_per_min": {"type": "number", "minimum": 0.0, "maximum": 120.0},
         "gaze_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
@@ -44,6 +53,7 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
+      "minProperties": 1,
       "properties": {
         "idle_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
         "gaze_smoothing": {"type": "number", "minimum": 0.0, "maximum": 1.0},
