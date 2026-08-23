@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Any, Mapping
 
 
@@ -33,13 +34,27 @@ class RuntimeSnapshot:
     state: BodyState
     active_utterance_id: str | None
     active_gesture: str | None
+    gaze_target: str | None
+    emotion: str
+    emotion_intensity: float
+    energy: float
     health: str
+
+
+def _unit(value: object, *, field: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise EventRejected(f"{field} must be numeric") from exc
+    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+        raise EventRejected(f"{field} must be within 0..1")
+    return number
 
 
 class BodyRigRuntime:
     """Small renderer-neutral state machine for embodiment control.
 
-    This class deliberately contains no renderer, audio or ML dependency.  It
+    This class deliberately contains no renderer, audio or ML dependency. It
     enforces the cross-system semantic boundary and can therefore be exercised
     in CI before a Unity/VRM adapter exists.
     """
@@ -56,6 +71,10 @@ class BodyRigRuntime:
         self._active_utterance_id: str | None = None
         self._active_gesture: str | None = None
         self._cancelled_utterances: set[str] = set()
+        self._gaze_target: str | None = None
+        self._emotion = "neutral"
+        self._emotion_intensity = 0.0
+        self._energy = 0.3
         self._health = "ok"
 
     @property
@@ -67,6 +86,10 @@ class BodyRigRuntime:
             state=self._state,
             active_utterance_id=self._active_utterance_id,
             active_gesture=self._active_gesture,
+            gaze_target=self._gaze_target,
+            emotion=self._emotion,
+            emotion_intensity=self._emotion_intensity,
+            energy=self._energy,
             health=self._health,
         )
 
@@ -105,9 +128,39 @@ class BodyRigRuntime:
             intent = gesture.get("intent")
             if not isinstance(intent, str) or not intent:
                 raise EventRejected("gesture intent must be a non-empty string")
+            _unit(gesture.get("intensity", 0.5), field="gesture intensity")
             self._active_gesture = intent
         else:
             raise EventRejected("gesture must be an object or null")
+
+        gaze = plan.get("gaze")
+        if gaze is None:
+            self._gaze_target = None
+        elif isinstance(gaze, Mapping):
+            target = gaze.get("target")
+            if not isinstance(target, str) or not target:
+                raise EventRejected("gaze target must be a non-empty string")
+            _unit(gaze.get("intensity", 1.0), field="gaze intensity")
+            self._gaze_target = target
+        else:
+            raise EventRejected("gaze must be an object or null")
+
+        emotion = plan.get("emotion")
+        if emotion is None:
+            self._emotion = "neutral"
+            self._emotion_intensity = 0.0
+        elif isinstance(emotion, Mapping):
+            name = emotion.get("name")
+            if not isinstance(name, str) or not name:
+                raise EventRejected("emotion name must be a non-empty string")
+            self._emotion = name
+            self._emotion_intensity = _unit(
+                emotion.get("intensity", 0.5), field="emotion intensity"
+            )
+        else:
+            raise EventRejected("emotion must be an object or null")
+
+        self._energy = _unit(plan.get("energy", self._energy), field="energy")
         return self.snapshot
 
     def start_speech(self, *, sequence: int, utterance_id: str) -> RuntimeSnapshot:
@@ -124,7 +177,7 @@ class BodyRigRuntime:
         """Accept a viseme/prosody frame if it still belongs to active speech.
 
         Cancelled or no-longer-active utterances are ignored after sequence
-        ordering has been enforced.  This is the stale-queue protection used by
+        ordering has been enforced. This is the stale-queue protection used by
         future renderer/audio adapters.
         """
 
