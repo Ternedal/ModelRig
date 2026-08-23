@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bodyrig"
+version = "0.1.0"
+description = "Local-first embodiment/body profile service for ModelRig"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.8"
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+bodyrig = "bodyrig.app:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bodyrig"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
