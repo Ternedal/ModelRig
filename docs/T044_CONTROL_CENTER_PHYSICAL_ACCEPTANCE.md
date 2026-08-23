@@ -12,27 +12,54 @@ It is intentionally not an automated green gate. A headless emulator proves Comp
 - Use a disposable GitHub connector grant limited to a test repository and only the read operations needed by the test.
 - Do not record Bearer tokens, GitHub credentials, issue/PR bodies, diffs, workflow logs, private prompts, tool arguments, or result payloads in evidence.
 - A failed or missing observation is **not** green evidence. Record it as failed/blocked/unknown.
-- The run is valid only for the exact app/backend/worker heads recorded below.
+- One physical campaign is valid for exactly one 40-character **ModelRig candidate SHA**. Android, backend, worker and the Control Center/GitHub connector code exercised by the campaign must all come from the same clean checkout of that SHA.
+- Historical component/PR heads are provenance only. They must not be mixed into a new physical receipt as if they were separately executable authorities.
 
-## Prerequisites
+## Candidate authority
 
-1. The Android Control Center candidate and its stacked dependencies have fresh exact-head CI/diagnostics qualification.
-2. The GitHub connector authority candidate is available on the local rig and remains feature-gated/default-off outside the test setup.
-3. One physical Android device is available with USB debugging enabled.
-4. TalkBack is installed and can be enabled from the device accessibility settings.
-5. The device is paired with the local ModelRig backend through the normal paired-device flow.
-6. A disposable, narrow GitHub read grant exists for the test. Record only its `grant_id`, repository scope and scope SHA-256; never the credential.
-
-## Build and install
+Before collecting the first physical observation, select the exact ModelRig commit to test. It may be a freshly qualified `main` commit or a dedicated candidate commit, but the receipt is bound to the literal commit SHA rather than a moving branch name.
 
 From the repository root on Windows:
 
 ```powershell
+$ExpectedSha = "<40-char exact candidate SHA>"
+$ObservedSha = (git rev-parse HEAD).Trim()
+if ($ObservedSha -ne $ExpectedSha) { throw "HEAD $ObservedSha does not match expected $ExpectedSha" }
+if (git status --porcelain) { throw "Working tree is not clean" }
+```
+
+Before the physical run starts, the same exact candidate SHA must have fresh green repository qualification for the software surfaces used here, including normal CI, Agent 3 diagnostics/full diagnostics, exact-head qualification and the Control Center Android accessibility/emulator gate when that workflow is applicable to the candidate tree.
+
+Once the first physical observation is recorded, do not rebase, squash, amend, fast-forward or otherwise substitute a different SHA into that campaign. A code/head change requires a fresh physical campaign; previous observations remain evidence for the old SHA only.
+
+## Prerequisites
+
+1. The selected exact ModelRig candidate SHA is a clean checkout and has the fresh qualification described above.
+2. Android, backend, worker, Control Center and GitHub connector authority exercised by the run are built/started from that same exact checkout; no historical stacked-PR head is substituted for one component.
+3. The GitHub connector remains feature-gated/default-off outside the explicit local test setup.
+4. One physical Android device is available with USB debugging enabled.
+5. TalkBack is installed and can be enabled from the device accessibility settings.
+6. The device is paired with the local ModelRig backend through the normal paired-device flow.
+7. A disposable, narrow GitHub read grant exists for the test. Record only its `grant_id`, repository scope and scope SHA-256; never the credential.
+
+## Build and install
+
+From the same clean exact-candidate repository root on Windows:
+
+```powershell
+$ObservedSha = (git rev-parse HEAD).Trim()
+if ($ObservedSha -ne $ExpectedSha) { throw "HEAD changed before Android build" }
+if (git status --porcelain) { throw "Working tree changed before Android build" }
+
 cd android
 .\gradlew.bat :app:assembleDebug
+$Apk = Resolve-Path .\app\build\outputs\apk\debug\app-debug.apk
+Get-FileHash -Algorithm SHA256 $Apk
 adb devices
-adb install -r .\app\build\outputs\apk\debug\app-debug.apk
+adb install -r $Apk
 ```
+
+Record the APK SHA-256 in the evidence header. The hash proves which built artifact was installed; it does not replace the exact source-SHA binding.
 
 Record physical-device identity without collecting personal data:
 
@@ -54,10 +81,16 @@ Fill this before testing:
 Issue: #88 / T-044
 Date/time (local):
 Tester:
-Android app head SHA:
-Desktop parity head SHA:
-T-036/backend authority head SHA:
-Backend/worker candidate head SHA(s):
+Exact ModelRig candidate SHA:
+Observed git HEAD:
+Working tree clean: yes/no
+Normal CI qualification (run / result):
+Agent 3 diagnostics qualification (run / result):
+Agent 3 full diagnostics qualification (run / result):
+Exact-head qualification (run / result):
+Control Center accessibility/emulator qualification (run / result or not-applicable with reason):
+Android APK SHA-256:
+Same candidate checkout owns Android/backend/worker/connector code: yes/no
 production_activation: false
 Device manufacturer:
 Device model:
@@ -73,7 +106,7 @@ Disposable repository scope:
 Disposable scope SHA-256:
 ```
 
-If any required head cannot be identified exactly, stop and mark the run invalid rather than inferring provenance.
+If the exact SHA cannot be identified, the working tree is dirty, any exercised component comes from another checkout/SHA, or a required qualification is missing, stop and mark the run invalid rather than inferring provenance.
 
 ## Test A — open/close and focus order
 
@@ -179,7 +212,7 @@ Use only the disposable grant prepared for this test.
 5. Verify the UI did not optimistically change state before server confirmation.
 6. Attempt the same revoke again only if the product surface permits it; an already-revoked/stale case must not be described as “pilot missing”.
 
-The T-036 authority owns the server-side guarantee that revocation stops new connector calls. Link the matching T-036 exact-head evidence rather than duplicating credentials or raw connector responses in this manual report.
+The T-036 authority owns the server-side guarantee that revocation stops new connector calls. Link the matching repository-qualified T-036 evidence that is ancestor/included in the exact ModelRig candidate rather than substituting the old T-036 implementation head as a second physical runtime authority. Do not duplicate credentials or raw connector responses in this manual report.
 
 ## Test I — light/dark and readable semantics
 
@@ -218,8 +251,11 @@ A valid acceptance comment on #88 must state all of the following explicitly:
 ```text
 Physical-device review: PASS/FAIL
 TalkBack review: PASS/FAIL
-Exact Android head tested: <40-char SHA>
-Exact backend/worker authority head(s): <SHA(s)>
+Exact ModelRig candidate SHA tested: <40-char SHA>
+Observed git HEAD: <40-char SHA>
+Android APK SHA-256: <64 hex>
+Same candidate checkout owned Android/backend/worker/connector code: yes/no
+Fresh required repository qualification on the exact candidate: yes/no
 Connector filter tested from first-class connector evidence: yes/no
 External GitHub account + outbound data boundary read with TalkBack: yes/no
 Disposable scoped revoke tested: yes/no
@@ -228,4 +264,4 @@ Known blocked/not-exercised items: <list or none>
 No credential/private-content evidence attached: confirmed/not-confirmed
 ```
 
-T-044 must remain open if a required acceptance item is failed, blocked, not exercised, or lacks exact-head provenance.
+T-044 must remain open if a required acceptance item is failed, blocked, not exercised, lacks exact-candidate provenance, mixes component SHAs/checkouts, or lacks the required fresh repository qualification.
