@@ -235,6 +235,9 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_desktop_win32.py`
 - `tests/worker_desktop_win32_abi.py`
 - `tests/worker_eval.py`
+- `tests/worker_file_capabilities.py`
+- `tests/worker_file_capabilities_audit.py`
+- `tests/worker_file_capabilities_scope_authority.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
 - `tests/worker_home_rig_runtime.py`
