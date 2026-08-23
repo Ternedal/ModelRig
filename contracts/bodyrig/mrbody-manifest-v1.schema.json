@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/bodyrig/mrbody-manifest-v1.schema.json",
+  "title": "ModelRig Body Package Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "format_version", "id", "name", "avatar", "bodyprint", "provenance", "thumbnail", "builder"],
+  "properties": {
+    "format": {"const": "modelrig-body"},
+    "format_version": {"const": 1},
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-z0-9æøå_-]+$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "avatar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "version", "path"],
+      "properties": {
+        "format": {"const": "vrm"},
+        "version": {"const": "1.0"},
+        "path": {"const": "avatar.vrm"}
+      }
+    },
+    "bodyprint": {"const": "bodyprint.json"},
+    "provenance": {"const": "provenance.json"},
+    "thumbnail": {"const": "thumbnail.png"},
+    "builder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"const": "bodyrig"},
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[0-9A-Za-z.+_-]+$"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    }
+  }
+}
