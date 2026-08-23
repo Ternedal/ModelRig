@@ -44,6 +44,14 @@ from .mrbody import (
     validate_png_bytes,
     validate_vrm1_bytes,
 )
+from .profile_store import (
+    MRBodyProfileNotFoundError,
+    MRBodyProfileReceipt,
+    MRBodyProfileStore,
+    MRBodyProfileStoreError,
+    MRBodyStoredProfile,
+    MRBodyStoredProfileError,
+)
 from .runtime import (
     BodyRigRuntime,
     BodyState,
@@ -107,6 +115,12 @@ __all__ = [
     "validate_mrbody",
     "validate_png_bytes",
     "validate_vrm1_bytes",
+    "MRBodyProfileNotFoundError",
+    "MRBodyProfileReceipt",
+    "MRBodyProfileStore",
+    "MRBodyProfileStoreError",
+    "MRBodyStoredProfile",
+    "MRBodyStoredProfileError",
     "ShapeConfig",
     "ShapeProfileError",
     "build_shape_profile",

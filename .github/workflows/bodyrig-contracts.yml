@@ -25,6 +25,8 @@ on:
       - "scripts/bodyrig_build_mrbody.py"
       - "scripts/bodyrig_validate_mrbody.py"
       - "scripts/bodyrig_mrbody_contract.py"
+      - "scripts/bodyrig_install_mrbody.py"
+      - "scripts/bodyrig_profile_store_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
@@ -49,6 +51,8 @@ on:
       - "scripts/bodyrig_build_mrbody.py"
       - "scripts/bodyrig_validate_mrbody.py"
       - "scripts/bodyrig_mrbody_contract.py"
+      - "scripts/bodyrig_install_mrbody.py"
+      - "scripts/bodyrig_profile_store_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -139,6 +143,14 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_validate_mrbody.py --help
+      - name: Validate BodyRig M2.6 atomic profile store
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_profile_store_contract.py
+      - name: Validate BodyRig M2.6 install CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_install_mrbody.py --help
 
   h264-runtime:
     runs-on: ubuntu-latest
