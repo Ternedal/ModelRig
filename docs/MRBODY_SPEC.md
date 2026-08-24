@@ -38,7 +38,7 @@ Example:
 {
   "format": "modelrig-body",
   "format_version": 1,
-  "id": "anders-body-12345678",
+  "id": "bodyid-1234567890abcdef12345678",
   "name": "Anders",
   "avatar": {
     "format": "vrm",
@@ -58,6 +58,31 @@ Example:
 `id` is a local runtime identity and must use a path-safe slug. V1 permits only lowercase letters/digits plus `æøå`, `_` and `-`, with a maximum length of 160 characters.
 
 Importer code must validate the id before materializing any files.
+
+### Managed identity binding
+
+ModelRig's managed profile store is stricter than the generic V1 manifest grammar: installed/current profiles use canonical `bodyid-<24 lowercase hex>` identities and require a matching `identity_content` provenance binding during staged install and every fresh load.
+
+M2.9 recognizes exactly these independent identity authorities:
+
+```text
+modelrig.bodyrig.identity_bundle
+bodyrig.portable_identity
+```
+
+A recognized binding has the form:
+
+```json
+{
+  "stage": "identity_content",
+  "adapter": "bodyrig.portable_identity",
+  "revision": "1234567890abcdef12345678"
+}
+```
+
+The revision is the 24-hex suffix of the canonical manifest id. The adapter identifies which system is authoritative for deriving that content identity; ModelRig does not reinterpret an upstream BodyRig portable identity as a ModelRig M2.4 identity bundle.
+
+At most one `identity_content` stage is allowed when ModelRig resolves a package identity. Multiple such stages are ambiguous and rejected. An unknown adapter remains ordinary provenance data, but it cannot satisfy an expected identity during managed install/load. This keeps future provenance extensible without allowing an untrusted adapter name to impersonate a canonical identity authority.
 
 ## Bodyprint
 
