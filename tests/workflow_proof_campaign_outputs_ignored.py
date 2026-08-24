@@ -27,6 +27,21 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 RECEIPT_MODULE = ROOT / "scripts" / "proof_campaign_gate_receipt.py"
 CORE = ROOT / "scripts" / "run-proof-campaign.ps1"
 
+# The campaign core delegates T-023 and T-033 to these operators (via the
+# proof_t*_current wrappers, which import them). Their outputs live in their
+# OWN sources, invisible to RECEIPTS/SOURCES and to the core's path literals --
+# the exact gap that left agent3-termination-ui-evidence/ unignored (#743 P1).
+DELEGATED = [
+    ROOT / "scripts" / "proof_t023_current.py",
+    ROOT / "scripts" / "proof_t033_current.py",
+    ROOT / "scripts" / "agent3_termination_ui_physical_one_click.py",
+    ROOT / "scripts" / "agent3_termination_ui_physical_report.py",
+    ROOT / "scripts" / "agent3_termination_ui_physical_gate.py",
+    ROOT / "scripts" / "physical_validation_termination_campaign.py",
+    ROOT / "scripts" / "agent3_memory_protected_backup_physical.py",
+    ROOT / "scripts" / "agent3_memory_protected_backup_physical_gate.py",
+]
+
 passed = 0
 failed = 0
 
@@ -60,6 +75,35 @@ def campaign_output_roots(core_text: str) -> list[str]:
     for match in re.finditer(r"'validation\\([A-Za-z0-9_-]+)\\", core_text):
         roots.add(f"validation/{match.group(1)}/")
     return sorted(roots)
+
+
+def delegated_operator_paths() -> dict[str, str]:
+    """Every validation/ path a delegated operator mentions in source.
+
+    Derivation, not enumeration: string literals of the forms
+    ``"validation/<x>"`` (f-string tails are cut at ``{``) and
+    ``VALIDATION / "<x>"``. A segment with an extension is a file, everything
+    else a directory. Over-collection is harmless -- an extra mention of an
+    already-ignored path just re-asserts it.
+    """
+    found: dict[str, str] = {}
+    for module in DELEGATED:
+        text = module.read_text(encoding="utf-8")
+        raw: set[str] = set()
+        for match in re.finditer(r"[\"']validation/([A-Za-z0-9_./-]+)", text):
+            raw.add(match.group(1))
+        for match in re.finditer(r"VALIDATION\s*/\s*[\"']([A-Za-z0-9_.-]+)[\"']", text):
+            raw.add(match.group(1))
+        for tail in raw:
+            tail = tail.strip("/")
+            if not tail:
+                continue
+            leaf = tail.rsplit("/", 1)[-1]
+            if "." in leaf:
+                found[f"delegated {module.name}: validation/{tail}"] = f"validation/{tail}"
+            else:
+                found[f"delegated {module.name}: validation/{tail}/"] = f"validation/{tail}/"
+    return found
 
 
 def is_ignored(path: str) -> bool:
@@ -104,6 +148,32 @@ def main() -> int:
     )
     for root in roots:
         derived[f"campaign output root {root}"] = root
+
+    missing_delegated = [
+        str(p.relative_to(ROOT)) for p in DELEGATED if not p.is_file()
+    ]
+    check(
+        "all delegated operator modules exist",
+        not missing_delegated,
+        f"missing={missing_delegated} -- a rename must update DELEGATED, not silently empty it",
+    )
+    delegated = delegated_operator_paths() if not missing_delegated else {}
+    check(
+        "delegated derivation found at least 8 paths",
+        len(set(delegated.values())) >= 8,
+        f"found {sorted(set(delegated.values()))}",
+    )
+    for anchor in (
+        "validation/agent3-termination-ui-evidence/",
+        "validation/agent3-memory-protected-backup-physical/",
+        "validation/physical-validation-termination-final-latest.json",
+    ):
+        check(
+            f"delegated derivation contains anchor {anchor}",
+            anchor in delegated.values(),
+            "the derivation lost a known operator output -- regex or source drifted",
+        )
+    derived.update(delegated)
 
     for label, path in sorted(derived.items()):
         check(f"{label} is git-ignored: {path}", is_ignored(path), "git check-ignore rejects it")

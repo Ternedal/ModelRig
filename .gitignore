@@ -82,6 +82,18 @@ kaliv-tools-state.json.tmp
 /validation/agent3-termination-ui-physical-latest.json.tmp
 /validation/agent3-memory-protected-backup-physical-latest.json
 /validation/agent3-memory-protected-backup-physical-latest.json.tmp
+# Delegated T-023/T-033 operators write their own evidence under validation/:
+# the termination-ui chain (observations, evidence tree, campaign composition)
+# and the memory-backup campaign root with per-campaign state.json/report.
+# Unignored, they recreate the same self-blocking one run later in the chain.
+/validation/agent3-termination-ui-evidence/
+/validation/agent3-termination-ui-observations.json
+/validation/agent3-termination-ui-observations.json.tmp
+/validation/physical-validation-termination-candidate-latest.json
+/validation/physical-validation-termination-candidate-latest.json.tmp
+/validation/physical-validation-termination-final-latest.json
+/validation/physical-validation-termination-final-latest.json.tmp
+/validation/agent3-memory-protected-backup-physical/
 
 # One-click Stage A wizard: local progress, exact-head runtime binaries, generated
 # launchers, resumable checkpoints and archived rolling reports stay on the rig.
