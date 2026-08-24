@@ -27,6 +27,9 @@ on:
       - "scripts/bodyrig_mrbody_contract.py"
       - "scripts/bodyrig_install_mrbody.py"
       - "scripts/bodyrig_profile_store_contract.py"
+      - "scripts/bodyrig_select_current_mrbody.py"
+      - "scripts/bodyrig_current_mrbody.py"
+      - "scripts/bodyrig_current_profile_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
@@ -53,6 +56,9 @@ on:
       - "scripts/bodyrig_mrbody_contract.py"
       - "scripts/bodyrig_install_mrbody.py"
       - "scripts/bodyrig_profile_store_contract.py"
+      - "scripts/bodyrig_select_current_mrbody.py"
+      - "scripts/bodyrig_current_mrbody.py"
+      - "scripts/bodyrig_current_profile_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -151,6 +157,18 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_install_mrbody.py --help
+      - name: Validate BodyRig M2.7 current profile selection and runtime binding
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_current_profile_contract.py
+      - name: Validate BodyRig M2.7 selection CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_select_current_mrbody.py --help
+      - name: Validate BodyRig M2.7 current inspection CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_current_mrbody.py --help
 
   h264-runtime:
     runs-on: ubuntu-latest
