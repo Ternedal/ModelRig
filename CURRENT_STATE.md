@@ -408,6 +408,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_stale_check.py`
 - `tests/workflow_success_harness.py`
+- `tests/workflow_t033_campaign_id_operator.py`
 - `tests/workflow_t037_provider_request_boundary.py`
 - `tests/workflow_t037_read_connector_boundary.py`
 - `tests/workflow_test_coverage.py`
