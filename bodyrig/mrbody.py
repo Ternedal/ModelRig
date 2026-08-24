@@ -48,6 +48,9 @@ ALLOWED_PATHS = frozenset((*REQUIRED_PATHS, *OPTIONAL_MOTION_PATHS))
 PAYLOAD_REQUIRED = frozenset(
     {"avatar.vrm", "bodyprint.json", "provenance.json", "thumbnail.png"}
 )
+IDENTITY_CONTENT_AUTHORITIES = frozenset(
+    {"modelrig.bodyrig.identity_bundle", "bodyrig.portable_identity"}
+)
 
 MAX_ENTRIES = 12
 MAX_TOTAL_UNCOMPRESSED = 256 * 1024 * 1024
@@ -477,18 +480,19 @@ def provenance_from_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _identity_from_provenance(provenance: Mapping[str, Any]) -> str | None:
-    matches = [
+    identity_stages = [
         item
         for item in provenance.get("pipeline", [])
-        if isinstance(item, Mapping)
-        and item.get("stage") == "identity_content"
-        and item.get("adapter") == "modelrig.bodyrig.identity_bundle"
+        if isinstance(item, Mapping) and item.get("stage") == "identity_content"
     ]
-    if not matches:
+    if not identity_stages:
         return None
-    if len(matches) != 1:
+    if len(identity_stages) != 1:
         raise MRBodyError("provenance contains ambiguous identity_content stages")
-    revision = matches[0].get("revision")
+    stage = identity_stages[0]
+    if stage.get("adapter") not in IDENTITY_CONTENT_AUTHORITIES:
+        return None
+    revision = stage.get("revision")
     if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{24}", revision) is None:
         raise MRBodyError("provenance identity_content revision is invalid")
     return f"bodyid-{revision}"
