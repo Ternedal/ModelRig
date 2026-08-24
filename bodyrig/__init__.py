@@ -44,6 +44,17 @@ from .mrbody import (
     validate_png_bytes,
     validate_vrm1_bytes,
 )
+from .profile_selection import (
+    CURRENT_PROFILE_FORMAT,
+    CURRENT_PROFILE_VERSION,
+    MRBodyCurrentMarker,
+    MRBodyCurrentProfile,
+    MRBodyCurrentProfileError,
+    MRBodyCurrentProfileNotSelectedError,
+    MRBodyCurrentProfileStaleError,
+    MRBodyCurrentProfileStore,
+    MRBodyRuntimeBinding,
+)
 from .profile_store import (
     MRBodyProfileNotFoundError,
     MRBodyProfileReceipt,
@@ -115,6 +126,15 @@ __all__ = [
     "validate_mrbody",
     "validate_png_bytes",
     "validate_vrm1_bytes",
+    "CURRENT_PROFILE_FORMAT",
+    "CURRENT_PROFILE_VERSION",
+    "MRBodyCurrentMarker",
+    "MRBodyCurrentProfile",
+    "MRBodyCurrentProfileError",
+    "MRBodyCurrentProfileNotSelectedError",
+    "MRBodyCurrentProfileStaleError",
+    "MRBodyCurrentProfileStore",
+    "MRBodyRuntimeBinding",
     "MRBodyProfileNotFoundError",
     "MRBodyProfileReceipt",
     "MRBodyProfileStore",
