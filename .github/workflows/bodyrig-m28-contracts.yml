@@ -1,0 +1,62 @@
+name: bodyrig-m28-contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bodyrig/render_frame.py"
+      - "bodyrig/renderer_handoff.py"
+      - "bodyrig/__init__.py"
+      - "docs/bodyrig/schemas/render-frame.schema.json"
+      - "scripts/bodyrig_render_frame_contract.py"
+      - "scripts/bodyrig_renderer_handoff_contract.py"
+      - "scripts/bodyrig_prepare_renderer_profile.py"
+      - ".github/workflows/bodyrig-m28-contracts.yml"
+  pull_request:
+    paths:
+      - "bodyrig/render_frame.py"
+      - "bodyrig/renderer_handoff.py"
+      - "bodyrig/__init__.py"
+      - "docs/bodyrig/schemas/render-frame.schema.json"
+      - "scripts/bodyrig_render_frame_contract.py"
+      - "scripts/bodyrig_renderer_handoff_contract.py"
+      - "scripts/bodyrig_prepare_renderer_profile.py"
+      - ".github/workflows/bodyrig-m28-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA" || {
+            echo "checkout authority mismatch: expected $EXPECTED_SHA, got $actual" >&2
+            exit 1
+          }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Validate BodyRig M2.8 complete renderer-neutral frame wire
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_render_frame_contract.py
+      - name: Validate BodyRig M2.8 digest-bound renderer handoff
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_renderer_handoff_contract.py
+      - name: Validate BodyRig M2.8 renderer preparation CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_prepare_renderer_profile.py --help
