@@ -63,6 +63,19 @@ from .profile_store import (
     MRBodyStoredProfile,
     MRBodyStoredProfileError,
 )
+from .renderer_handoff import (
+    MRBodyRendererHandoff,
+    RENDERER_PROFILE_FORMAT,
+    RENDERER_PROFILE_VERSION,
+    RendererHandoffError,
+    RendererProfileDescriptor,
+    RendererProfileHandoff,
+)
+from .render_frame import (
+    RenderFrameValidationError,
+    render_frame_from_mapping,
+    render_frame_to_mapping,
+)
 from .runtime import (
     BodyRigRuntime,
     BodyState,
@@ -141,6 +154,15 @@ __all__ = [
     "MRBodyProfileStoreError",
     "MRBodyStoredProfile",
     "MRBodyStoredProfileError",
+    "MRBodyRendererHandoff",
+    "RENDERER_PROFILE_FORMAT",
+    "RENDERER_PROFILE_VERSION",
+    "RendererHandoffError",
+    "RendererProfileDescriptor",
+    "RendererProfileHandoff",
+    "RenderFrameValidationError",
+    "render_frame_from_mapping",
+    "render_frame_to_mapping",
     "ShapeConfig",
     "ShapeProfileError",
     "build_shape_profile",
