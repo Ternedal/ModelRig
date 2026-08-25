@@ -438,6 +438,16 @@ func (s *server) handleToolsChat(w http.ResponseWriter, r *http.Request) {
 	s.WorkerSlow.Forward(w, r, "/tools/chat")
 }
 
+// handleToolsChatStream is the same turn as handleToolsChat, but the worker
+// narrates its phases as NDJSON lines while it works. The proxy already
+// flushes chunk-by-chunk, so each phase reaches the phone as it happens. The
+// app's streaming client calls this; shipping the app without this route was
+// the 2.0.11 contract break the task_ui gate caught (#754).
+func (s *server) handleToolsChatStream(w http.ResponseWriter, r *http.Request) {
+	// WorkerSlow: this is an LLM turn, possibly two.
+	s.WorkerSlow.Forward(w, r, "/tools/chat/stream")
+}
+
 // handleToolsConfirm proxies the human decision on a pending write action.
 func (s *server) handleToolsConfirm(w http.ResponseWriter, r *http.Request) {
 	// WorkerSlow: an approval is followed by an LLM turn to phrase the answer.

@@ -81,6 +81,7 @@ var toolRoutes = []struct {
 }{
 	{http.MethodGet, "/api/v1/tools"},
 	{http.MethodPost, "/api/v1/tools/chat"},
+	{http.MethodPost, "/api/v1/tools/chat/stream"},
 	{http.MethodPost, "/api/v1/tools/confirm"},
 	{http.MethodGet, "/api/v1/tools/audit"},
 	{http.MethodPost, "/api/v1/tools/enabled"},
@@ -150,11 +151,12 @@ func TestToolRoutesForwardToTheWorkerPathsThatExist(t *testing.T) {
 	h, workerHits, _ := upstreams(t)
 
 	want := map[string]string{
-		"/api/v1/tools":         "/tools",
-		"/api/v1/tools/chat":    "/tools/chat",
-		"/api/v1/tools/confirm": "/tools/confirm/chat", // approve + phrase the answer
-		"/api/v1/tools/audit":   "/tools/audit",
-		"/api/v1/tools/enabled": "/tools/enabled",
+		"/api/v1/tools":             "/tools",
+		"/api/v1/tools/chat":        "/tools/chat",
+		"/api/v1/tools/chat/stream": "/tools/chat/stream",
+		"/api/v1/tools/confirm":     "/tools/confirm/chat", // approve + phrase the answer
+		"/api/v1/tools/audit":       "/tools/audit",
+		"/api/v1/tools/enabled":     "/tools/enabled",
 	}
 
 	for _, rt := range toolRoutes {
@@ -188,5 +190,61 @@ func TestHealthIsPublicButApiIsNot(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/tools/audit", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("/api/v1/tools/audit without token: got %d, want 401", rec.Code)
+	}
+}
+
+// TestToolsChatStreamForwardsNdjsonAsItArrives proves the gateway does not
+// buffer or reshape the narrated turn: every NDJSON line the worker writes
+// must reach the client verbatim and in order, with the worker's content type
+// intact. This is the exact property the phone's fail-closed stream reader
+// depends on, and the route whose absence the task_ui gate caught (#754).
+func TestToolsChatStreamForwardsNdjsonAsItArrives(t *testing.T) {
+	lines := []string{`{"phase":"thinking"}`, `{"phase":"tool:status"}`, `{"result":{"reply":"ok"}}`}
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tools/chat/stream" {
+			t.Errorf("worker path: got %q, want /tools/chat/stream", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		fl, _ := w.(http.Flusher)
+		for _, ln := range lines {
+			_, _ = w.Write([]byte(ln + "\n"))
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+	}))
+	t.Cleanup(worker.Close)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.AddDevice(store.Device{
+		ID: "dev1", Name: "test", TokenHash: auth.Hash(testToken),
+		CreatedAt: time.Now(), LastSeen: time.Now(),
+	}); err != nil {
+		t.Fatalf("AddDevice: %v", err)
+	}
+	h := New(Deps{
+		Cfg:        config.Config{ClaimMax: 5, RequestTimeout: 5 * time.Second},
+		Store:      st,
+		Ollama:     proxy.New(worker.URL, 5*time.Second),
+		Worker:     proxy.New(worker.URL, 5*time.Second),
+		WorkerSlow: proxy.New(worker.URL, 30*time.Second),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tools/chat/stream", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if got, want := rec.Body.String(), strings.Join(lines, "\n")+"\n"; got != want {
+		t.Fatalf("body:\n got %q\nwant %q", got, want)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/x-ndjson" {
+		t.Fatalf("content type: got %q, want application/x-ndjson", ct)
 	}
 }
