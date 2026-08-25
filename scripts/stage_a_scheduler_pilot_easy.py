@@ -24,8 +24,8 @@ RUNTIME = ROOT / "validation" / "stage-a-runtime"
 PHONE_STATE = RUNTIME / "phone-test-state.json"
 PHONE_INSTRUCTIONS = RUNTIME / "PHONE_TEST.txt"
 PHONE_SCRIPT = ROOT / "scripts" / "stage-a-phone-test.ps1"
-CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.11"
-EXPECTED_VERSION = "2.0.11"
+CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.12"
+EXPECTED_VERSION = "2.0.12"
 
 STEPS = (
     ("read-plan", ROOT / "scripts" / "stage_a_scheduler_read.py"),

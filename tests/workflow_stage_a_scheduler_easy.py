@@ -47,8 +47,8 @@ check(not list(state_path.parent.glob("*.tmp")),
       "atomic state updates leave no temporary file")
 
 check(
-    'CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.11"' in source
-    and 'EXPECTED_VERSION = "2.0.11"' in source
+    'CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.12"' in source
+    and 'EXPECTED_VERSION = "2.0.12"' in source
     and 'stage-a-checkpoint-ux' not in source
     and 'current != CANDIDATE_BRANCH_PREFIX' in source
     and '"git", "switch"' not in source

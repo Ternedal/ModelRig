@@ -2,7 +2,7 @@
 """Fail-closed contract gate: every API path the Android app calls must have a
 registered backend route.
 
-Shipping 2.0.11 proved why this must live in CI and not on the rig: the app's
+Shipping 2.0.12 proved why this must live in CI and not on the rig: the app's
 tools client called POST /api/v1/tools/chat/stream, the backend never
 registered that route, and the break was only caught by the physical task_ui
 gate after release (#754). This gate derives both sides from the code -- it is

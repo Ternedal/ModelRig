@@ -7,7 +7,7 @@
 from pathlib import Path as _Path
 
 BRANCH = "physical-proof/2.0.12"
-VERSION = "2.0.11"
+VERSION = "2.0.12"
 _RETAINED = _Path(__file__).with_name("stage_a_one_click.retained")
 _source = _RETAINED.read_text(encoding="utf-8")
 _source = _source.replace("agent/unified-candidate-1.58.143", BRANCH)
@@ -41,7 +41,7 @@ globals()["__name__"] = "_stage_a_one_click_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
 globals()["__name__"] = _name
 BRANCH = "physical-proof/2.0.12"
-VERSION = "2.0.11"
+VERSION = "2.0.12"
 
 # Static review markers preserve the retained wizard's exact flow and controls:
 # strict_stage("Prepare", sha)
