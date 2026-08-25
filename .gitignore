@@ -146,3 +146,4 @@ kaliv-tools-state.json.tmp
 # freeze a fingerprint of whatever the tree looked like on someone laptop --
 # another number typed into a file that stops being true the next commit.
 worker/app/_build_stamp.py
+/validation/stage-b-easy-state.json
