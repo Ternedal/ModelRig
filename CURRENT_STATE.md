@@ -87,6 +87,7 @@ are the same versioned values validated by worker, backend and clients.
 Run by glob, so a file that matches is a file that runs
 (`tests/workflow_test_coverage.py` proves none can hide).
 
+- `tests/app_backend_route_contract.py`
 - `tests/backend_smoke.py`
 - `tests/backend_v1.py`
 - `tests/e2e.py`
