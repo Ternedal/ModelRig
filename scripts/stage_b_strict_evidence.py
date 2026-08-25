@@ -23,8 +23,8 @@ LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 # The released predecessor of the target. See stage_b_one_click_v2 for the full
 # reason: 1.58.150 was bumped but never published -- no release, tag or draft
 # exists -- so a source appliance could never be installed from it.
-EXPECTED_SOURCE_VERSION = "2.0.10"
-EXPECTED_TARGET_VERSION = "2.0.11"
+EXPECTED_SOURCE_VERSION = "2.0.11"
+EXPECTED_TARGET_VERSION = "2.0.12"
 UPDATER_ASSET = "modelrig-updater-windows-x64.exe"
 EXPECTED_SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
 EXPECTED_SIGNER_WORKFLOW = "Ternedal/ModelRig/.github/workflows/build-and-release.yml"

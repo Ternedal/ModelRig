@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Run the retained staged-promotion contract plus live 2.0.11 authority checks."""
+"""Run the retained staged-promotion contract plus live 2.0.12 authority checks."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 _source_path = Path(__file__).with_name("workflow_staged_promotion_runbook.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.11"),
-    ("1.58.143", "2.0.11"),
-    ("1.58.142", "2.0.10"),
-    ("draft-PR #150", "origin/physical-proof/2.0.11"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.12"),
+    ("1.58.143", "2.0.12"),
+    ("1.58.142", "2.0.11"),
+    ("draft-PR #150", "origin/physical-proof/2.0.12"),
 ):
     _source = _source.replace(_old, _new)
 exec(compile(_source, str(_source_path), "exec"), globals(), globals())
 
 # The retained contract proves the historical promotion shape. These checks pin
-# the live 2.0.11 authority so a future mechanical version rewrite cannot
+# the live 2.0.12 authority so a future mechanical version rewrite cannot
 # reintroduce a historical PR/SHA placeholder or an ambiguous freeze sentence.
 rigdag = (ROOT / "RIGDAG_SIMPEL.md").read_text(encoding="utf-8")
 staged = (ROOT / "STAGED_PHYSICAL_PROMOTION.md").read_text(encoding="utf-8")
@@ -27,8 +27,8 @@ _live_contracts = (
         "staged runbook contains no mechanically rewritten freeze placeholder",
     ),
     (
-        "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.11).Trim()" in rigdag
-        and "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.11).Trim()" in staged,
+        "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.12).Trim()" in rigdag
+        and "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.12).Trim()" in staged,
         "both operator runbooks resolve the fetched remote candidate SHA",
     ),
     (
@@ -42,8 +42,8 @@ _live_contracts = (
         "both operator runbooks run the exact-SHA candidate freeze gate",
     ),
     (
-        "origin/physical-proof/2.0.11" in rigdag
-        and "origin/physical-proof/2.0.11" in staged,
+        "origin/physical-proof/2.0.12" in rigdag
+        and "origin/physical-proof/2.0.12" in staged,
         "both operator runbooks name the active remote candidate authority",
     ),
 )

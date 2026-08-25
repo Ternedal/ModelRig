@@ -182,7 +182,7 @@ class A418rAuditTests(unittest.TestCase):
                 "android_release": "16",
                 "sdk": "36",
                 "package_name": "dk.ternedal.modelrig.a425f",
-                "version_name_line": "versionName=2.0.11-a425f",
+                "version_name_line": "versionName=2.0.12-a425f",
                 "version_code_line": "versionCode=292",
             },
             "trials": trials,
