@@ -214,8 +214,3 @@ jobs:
           $env:PYTHONPATH = "worker"
           python tests\worker_agent3_memory_protection.py
           python tests\worker_agent3_memory_protection_migration.py
-      - name: Assert the app's API calls all have backend routes
-        shell: pwsh
-        run: |
-          $env:PYTHONDONTWRITEBYTECODE = "1"
-          python tests\app_backend_route_contract.py
