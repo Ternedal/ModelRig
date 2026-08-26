@@ -374,6 +374,26 @@ halv release og lignede en hel. Flowet nu:
     sammenligner strengt semver og tilbyder opdateringen.
     Publicér derfor aldrig en release du ikke har verificeret — der er ikke
     længere et manuelt sideload-trin imellem dig og enheden.
+11. **Æra-skiftet er STØRRE end version_tool + generatorerne.** Lært den
+    hårde vej ved 2.0.12 (#757, fire identiske rig-blokeringer): udover
+    punkterne ovenfor bærer disse steder æraen og skal rykkes manuelt i
+    samme bump —
+    wizard/pilot-`BRANCH`-pins (`stage_a_one_click.py`,
+    `agent3_readonly_pilot_one_click.py`, `scheduler_pilot_wizard.py` —
+    wizarden `git switch`'er selv til pinnen ved start, så en glemt pin
+    trækker riggen tilbage til den gamle kandidat);
+    operator-stemplerne `EXPECTED_VERSION` (`stage_a_physical_operator.py`
+    m.fl.) og `EXPECTED_SOURCE_VERSION` (`stage_b_one_click_v2.py`,
+    `stage_b_strict_evidence.py` — kilden er den NETOP udgivne version);
+    loader-substitutionsparrene i `tests/workflow_*`-loaderne (kilde- og
+    målversion rykker begge ét hak);
+    kontraktfixtures i `tests/workflow_stage_b*`;
+    og de tre gate-læste runbooks `RIGDAG_SIMPEL.md`,
+    `STAGED_PHYSICAL_PROMOTION.md`, `STAGE_B_UPDATER_EVIDENCE.md`
+    (kilde-versionen skal FORBLIVE eksplicit — kontrakterne kræver både
+    kilde og mål nævnt).
+    Det strukturelle fix er en udledt gate over æra-pins (#753); indtil
+    den findes, er denne liste bump-proceduren.
 
 ---
 
