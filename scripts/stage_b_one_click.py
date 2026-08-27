@@ -146,12 +146,42 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_state() -> dict[str, Any]:
+def _archive_stale_state(state: dict[str, Any], reason: str) -> None:
+    archive = VALIDATION / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = archive / f"stage-b-easy-state-stale-{stamp}.json"
+    target.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"  ->    Gemt checkpoint hoerer ikke til denne kandidat ({reason}).")
+    print(f"        Arkiveret til {target}; kaeden koerer forfra paa aegte fysik.")
+
+
+def load_state(expected_git_sha: str | None = None) -> dict[str, Any]:
+    """Checkpoints are only authority for the candidate that wrote them.
+
+    A state file without a candidate binding, or bound to another git sha,
+    is archived and ignored -- twice now (1.58->2.0.11 and 2.0.11->2.0.12) a
+    surviving state let the engine skip the real transition on a new era's
+    rig day (#753 items 3 and 8). Fail closed: no binding, no trust.
+    """
     try:
         value = json.loads(STATE_PATH.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    if expected_git_sha:
+        bound = value.get("candidate_git_sha")
+        if bound != expected_git_sha:
+            if value:
+                reason = f"bundet til {bound or 'ingen sha'}"
+                _archive_stale_state(value, reason)
+            value = {}
+        value["candidate_git_sha"] = expected_git_sha
+    return value
 
 
 def save_state(state: dict[str, Any]) -> None:
@@ -812,7 +842,19 @@ def build_observations(candidate: dict[str, Any]) -> dict[str, Any]:
         try:
             existing = json.loads(OBSERVATIONS.read_text(encoding="utf-8-sig"))
             if isinstance(existing, dict) and existing.get("schema") == LIFECYCLE_SCHEMA:
-                return existing
+                held = (existing.get("candidate") or {}).get("git_sha")
+                if held == candidate.get("git_sha"):
+                    return existing
+                # Another era's observations are evidence for THAT era; keep
+                # them aside and build fresh ones for this candidate (#753
+                # item 8 -- yesterday's file merging into today's run cost a
+                # full morning of false mismatches).
+                archive = VALIDATION / "archive"
+                archive.mkdir(parents=True, exist_ok=True)
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                target = archive / f"appliance-lifecycle-observations-{stamp}.json"
+                OBSERVATIONS.replace(target)
+                print(f"  ->    Observationsfil fra anden kandidat ({held or 'ukendt'}) arkiveret til {target}")
         except (OSError, json.JSONDecodeError):
             pass
     observations = json.loads(EXAMPLE.read_text(encoding="utf-8"))
@@ -869,7 +911,7 @@ def main(argv: list[str] | None = None) -> int:
     print("  Den kan ikke merge, pushe, tagge, release eller aktivere produktion.")
 
     candidate = preflight()
-    state = load_state()
+    state = load_state(str(candidate.get("git_sha") or "") or None)
     observations = build_observations(candidate)
     EVIDENCE.mkdir(parents=True, exist_ok=True)
 
