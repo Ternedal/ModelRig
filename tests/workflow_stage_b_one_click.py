@@ -16,6 +16,17 @@ for _name in (
     for _old, _new in (("1.58.149", "2.0.12"), ("1.58.151", "2.0.13"), ("1.58.148", "2.0.7")):
         _source = _source.replace(_old, _new)
     if _name == "workflow_stage_b_one_click.retained":
+        # The current collector is a version-bound loader around the retained
+        # strict implementation. Static source contracts must inspect both
+        # halves; runtime behaviour is still exercised through STRICT_WIZARD.
+        _collector_read = 'collector_source = STRICT_WIZARD.read_text(encoding="utf-8")'
+        _collector_read_with_retained = (
+            'collector_source = STRICT_WIZARD.read_text(encoding="utf-8") + "\\n" + '
+            'STRICT_WIZARD.with_name("stage_b_one_click_v2.retained").read_text(encoding="utf-8")'
+        )
+        if _source.count(_collector_read) != 1:
+            raise RuntimeError("Stage B collector source contract drifted")
+        _source = _source.replace(_collector_read, _collector_read_with_retained)
         _source = _source.replace(
             '        "observed_swapped_count=1",\n        "updater_process_pid=4321",',
             '        "observed_swapped_count=1",\n        "observed_swapped_assets=modelrig-server-windows-x64.exe",\n        "updater_process_pid=4321",',
