@@ -717,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(legacy.ROOT)
 
     candidate = legacy.preflight()
-    state = legacy.load_state()
+    state = legacy.load_state(str(candidate.get("git_sha") or "") or None)
     observations = _load_observations(candidate)
     legacy.EVIDENCE.mkdir(parents=True, exist_ok=True)
     _verify_bootstrap(candidate, observations, state)
