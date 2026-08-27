@@ -1,7 +1,7 @@
-# Stage B updater-evidens — release 2.0.12
+# Stage B updater-evidens — release 2.0.13
 
 Denne runbook bruges først efter, at den beståede Stage A-SHA er fast-forwardet
-til `main`, tagget som `v2.0.12` på præcis samme SHA og publiceret som et
+til `main`, tagget som `v2.0.13` på præcis samme SHA og publiceret som et
 komplet signeret release-sæt. Ingen kommando her merger, tagger, releaser eller
 aktiverer produktion.
 
@@ -9,28 +9,24 @@ aktiverer produktion.
 
 Stage B håndhæver denne præcise transition:
 
-- source appliance: signeret `2.0.11`;
-- target appliance: signeret `2.0.12`;
-- updateren fra `v2.0.12` installeres én gang som bootstrap;
+- source appliance: signeret `2.0.12`;
+- target appliance: signeret `2.0.13`;
+- updateren fra `v2.0.13` verificeres én gang som bootstrap-grænse;
 - bootstrap-binarien verificeres mod samme releases `SHA256SUMS.txt`, target-
   commit, tagref og release-workflow;
 - server, supervisor og worker flyttes derefter kun gennem updateren.
 
-### Åbent punkt: #401's forudsætning ser ud til at være opfyldt nu
+### Åbent punkt: #401's forudsætning er nu til stede, men beviset er separat
 
-Da denne runbook blev skrevet, var `2.0.12` den første release med
-updater self-update-support, og den tidligere `2.0.10`-updater kunne derfor
-ikke erstatte sig selv. Det ægte automatiske
-signed-release-to-signed-release-bevis blev udsat til issue **#401**, som
-krævede signeret `2.0.12` som source og en senere signeret target.
+`2.0.12` er en signeret source med updater self-update-support, og `2.0.13` er
+en senere signeret target, når denne runbook må køres. Dermed er den historiske
+forudsætning for issue **#401** til stede i denne æra.
 
-Med `2.0.11` som source og `2.0.12` som target er den forudsætning opfyldt: begge
-ligger efter `2.0.12`, så sourcens updater har allerede self-update-support.
-
-**Det er ikke afgjort her, om bootstrap-trinnet dermed kan udelades for 2.0.12.**
-Scripterne udfører det fortsat, og at fjerne det ændrer hvad evidensen beviser.
-Det er en beslutning, ikke en oprydning — og den hører til i #401. Bootstrap
-blokerer ikke promotion af `2.0.12`.
+Det er **ikke** det samme som at #401 automatisk er bevist. Scripterne udfører
+fortsat den eksisterende bootstrap-verifikation, og at fjerne eller omfortolke
+det trin ændrer hvad evidensen beviser. Den ændring kræver #401's egen reviewede
+authority; versionsbumpet alene må ikke fremstille et self-update-claim.
+Bootstrap blokerer ikke promotion af `2.0.13`.
 
 ## Autoritativ indgang
 
@@ -46,8 +42,8 @@ alene certificere Stage B.
 
 Strict-wrapperen:
 
-1. kræver backend og worker på præcis `2.0.11`;
-2. måler live-updaterens SHA-256 mod `v2.0.12/SHA256SUMS.txt`;
+1. kræver backend og worker på præcis `2.0.12`;
+2. måler live-updaterens SHA-256 mod `v2.0.13/SHA256SUMS.txt`;
 3. kører `gh attestation verify` med repository, target-commit, tagref og
    signer-workflow bundet til samme release;
 4. genmåler live-updateren og genkører provenance ved hvert resume;
@@ -57,24 +53,24 @@ Strict-wrapperen:
 8. afbryder først, når netop den transaktion viser `state=swapping` og mindst ét
    live swap er registreret;
 9. kører updateren med `-recover`;
-10. kræver backend og worker tilbage på 2.0.10, alle fire live executables
+10. kræver backend og worker tilbage på 2.0.12, alle fire live executables
     til stede og ingen aktiv journal;
 11. kører derefter den normale gode update, reboot, supervisor-restarts og den
     ugyldige update.
 
 Fremdriften checkpointes i `validation/stage-b-easy-state.json`. Hvis en god
 update allerede er gennemført uden interruption-beviset, stopper wrapperen og
-kræver source 2.0.10 gendannet før en ny kampagne.
+kræver source 2.0.12 gendannet før en ny kampagne.
 
 ## Release-checkout
 
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch --tags origin
-git switch --detach v2.0.12
+git switch --detach v2.0.13
 if ((git rev-parse HEAD).Trim().Length -ne 40) { throw "Ugyldig release-SHA" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "2.0.12") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.13") { throw "Forkert version" }
 $env:GH_TOKEN = gh auth token
 $env:KALIV_STAGE_B_BAD_REPO = "Ternedal/ModelRig-updater-negative"
 ```
@@ -96,15 +92,15 @@ Den faktiske provenance-kontrol svarer til:
 ```powershell
 gh attestation verify <updater.exe> `
   --repo Ternedal/ModelRig `
-  --source-digest <v2.0.12-git-sha> `
-  --source-ref refs/tags/v2.0.12 `
+  --source-digest <v2.0.13-git-sha> `
+  --source-ref refs/tags/v2.0.13 `
   --signer-workflow Ternedal/ModelRig/.github/workflows/build-and-release.yml
 ```
 
 Lifecycle-feltet `trials.updater_bootstrap` skal indeholde:
 
 - `performed=true`;
-- release-version og release-SHA for 2.0.12;
+- release-version og release-SHA for 2.0.13;
 - assetnavnet `modelrig-updater-windows-x64.exe`;
 - ens forventet og faktisk SHA-256;
 - `source_digest`, `source_ref` og `signer_workflow` som ovenfor;
@@ -126,8 +122,8 @@ Wrapperen må først terminere den updaterproces, den selv startede, når samme 
 transaktion viser:
 
 ```text
-from=2.0.10
-to=v2.0.12
+from=2.0.12
+to=v2.0.13
 state=swapping
 swapped_count>=1
 transaction_id=<non-empty>
@@ -138,8 +134,8 @@ Derefter kører wrapperen `modelrig-updater-windows-x64.exe -recover` og kræver
 
 ```text
 recovery_exit_code=0
-backend_version=2.0.10
-worker_version=2.0.10
+backend_version=2.0.12
+worker_version=2.0.12
 live_executables_present=true
 journal_absent=true
 ```
@@ -154,16 +150,16 @@ Log og observation binder transaction-ID, revision, journalens source/target,
 den lancerede updater-PID, kill-resultat og recovery-resultat. En gammel eller
 konfliktende `.tmp`, ID-skift eller faldende revision stopper kampagnen.
 
-Det er det gennemførlige appliance-swap-bevis for 2.0.12. Interruption af den
-detached updater-replacement-helper kræver en senere signeret updater-target og
-er derfor en del af #401, ikke en promotion blocker for 2.0.12.
+Det er det gennemførlige appliance-swap-bevis for 2.0.13. Et særskilt claim om
+selve updaterens automatiske replacement på tværs af signerede releases hører
+fortsat under #401, ikke under versionsbumpets egen promotion-authority.
 
 ## Normal lifecycle efter recovery
 
 Når interruption-recovery er grøn, gennemføres:
 
-1. god appliance-update 2.0.10 → 2.0.12;
-2. reboot til ready på 2.0.12;
+1. god appliance-update 2.0.12 → 2.0.13;
+2. reboot til ready på 2.0.13;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
 5. ugyldig update, der enten afvises før swap eller rulles helt tilbage;
@@ -172,7 +168,7 @@ Når interruption-recovery er grøn, gennemføres:
 Den gode updater-log skal blandt andet indeholde:
 
 ```text
-update available: 2.0.10 -> v2.0.12
+update available: 2.0.12 -> v2.0.13
 downloading modelrig-server-windows-x64.exe
 downloading modelrig-supervisor-windows-x64.exe
 downloading modelrig-worker-windows-x64.exe
@@ -180,7 +176,7 @@ checksums verified for 3 exe(s)
 build provenance verified for 3 exe(s)
 stopping supervisor + processes so the exes unlock
 supervisor heartbeat advanced past the restart
-update OK: backend + worker report 2.0.12 and the supervisor is looping
+update OK: backend + worker report 2.0.13 and the supervisor is looping
 ```
 
 `ROLLBACK FAILED`, `manual_recovery`, manglende live executable, aktiv journal
@@ -233,7 +229,6 @@ summary.total=8
 Review hashes for strict-, updater-chain-, campaign- og component-final-
 rapporterne. Stop derefter. Aktivering kræver fortsat en separat eksplicit
 beslutning.
-
 
 ## Rollback-reglen: binærer og journal følges ad
 

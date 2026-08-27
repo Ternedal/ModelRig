@@ -16,7 +16,7 @@ Det her maa ikke bero paa operatoerens hukommelse: manglende eller igangvaerende
 workflow-evidence er NOT FROZEN, og en fejlet automatisk run bliver ikke skjult
 ved automatisk rerun.
 
-Run: GITHUB_TOKEN=... python3 scripts/anchor_and_freeze.py --branch physical-proof/2.0.12
+Run: GITHUB_TOKEN=... python3 scripts/anchor_and_freeze.py --branch physical-proof/2.0.13
      tilfoej --dry-run for at se hvad der ville ske
 """
 from __future__ import annotations
@@ -108,7 +108,7 @@ def _latest_by_name(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--branch", required=True, help="anker-gren, fx physical-proof/2.0.12"
+        "--branch", required=True, help="anker-gren, fx physical-proof/2.0.13"
     )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--timeout-minutes", type=int, default=15)

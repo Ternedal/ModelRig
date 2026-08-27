@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "stage_a_scheduler_pilot_easy.py"
+RETAINED = ROOT / "scripts" / "stage_a_scheduler_pilot_easy.retained"
 POWERSHELL = ROOT / "scripts" / "run-stage-a-scheduler-pilot.ps1"
 LAUNCHER = ROOT / "RUN_STAGE_A_SCHEDULER_PILOT.cmd"
 
@@ -30,12 +31,14 @@ def check(condition: bool, message: str) -> None:
 
 
 source = SCRIPT.read_text(encoding="utf-8")
-source_lower = source.lower()
+retained_source = RETAINED.read_text(encoding="utf-8")
+combined_source = source + "\n" + retained_source
+source_lower = combined_source.lower()
 ps = POWERSHELL.read_text(encoding="utf-8")
 ps_lower = ps.lower()
 launcher = LAUNCHER.read_text(encoding="utf-8")
 launcher_lower = launcher.lower()
-main_source = source[source.index("def main() -> int:") :]
+main_source = retained_source[retained_source.index("def main() -> int:") :]
 
 root = Path(tempfile.mkdtemp(prefix="stage-a-scheduler-easy-"))
 state_path = root / "nested" / "state.json"
@@ -47,23 +50,25 @@ check(not list(state_path.parent.glob("*.tmp")),
       "atomic state updates leave no temporary file")
 
 check(
-    'CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.12"' in source
-    and 'EXPECTED_VERSION = "2.0.12"' in source
-    and 'stage-a-checkpoint-ux' not in source
-    and 'current != CANDIDATE_BRANCH_PREFIX' in source
-    and '"git", "switch"' not in source
-    and '"git", "fetch"' not in source,
-    "the easy flow binds to the exact active rig candidate and never switches or fetches a branch",
+    'CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.13"' in source
+    and 'EXPECTED_VERSION = "2.0.13"' in source
+    and module.CANDIDATE_BRANCH_PREFIX == "physical-proof/2.0.13"
+    and module.EXPECTED_VERSION == "2.0.13"
+    and 'stage-a-checkpoint-ux' not in combined_source
+    and 'current != CANDIDATE_BRANCH_PREFIX' in combined_source
+    and '"git", "switch"' not in combined_source
+    and '"git", "fetch"' not in combined_source,
+    "the easy flow binds to the exact active 2.0.13 rig candidate and never switches or fetches a branch",
 )
 check(
-    'if stack_ready()' in source
-    and 'Genbruger den levende, isolerede scheduler-teststack' in source,
+    'if stack_ready()' in retained_source
+    and 'Genbruger den levende, isolerede scheduler-teststack' in retained_source,
     "a still-live isolated stack is resumed instead of replaced",
 )
 check(
-    source.index('("read-plan", ROOT / "scripts" / "stage_a_scheduler_read.py")')
-    < source.index('("revocation", ROOT / "scripts" / "stage_a_scheduler_revocation.py")')
-    < source.index('("crash-recovery", ROOT / "scripts" / "stage_a_scheduler_crash_recovery.py")'),
+    retained_source.index('("read-plan", ROOT / "scripts" / "stage_a_scheduler_read.py")')
+    < retained_source.index('("revocation", ROOT / "scripts" / "stage_a_scheduler_revocation.py")')
+    < retained_source.index('("crash-recovery", ROOT / "scripts" / "stage_a_scheduler_crash_recovery.py")'),
     "bounded physical mechanisms remain ordered read -> revoke -> recovery",
 )
 check(
@@ -75,24 +80,24 @@ check(
     "the one-click flow refreshes pairing after automation and cleans up only after publication",
 )
 check(
-    'http://127.0.0.1:8080/api/v1/pair/start' in source
-    and 'state["pairing_code"] = code' in source
-    and 'PHONE_INSTRUCTIONS.write_text' in source,
+    'http://127.0.0.1:8080/api/v1/pair/start' in retained_source
+    and 'state["pairing_code"] = code' in retained_source
+    and 'PHONE_INSTRUCTIONS.write_text' in retained_source,
     "a fresh live pairing code is issued immediately before Android approval",
 )
 check(
-    'run([sys.executable, str(FINALIZER)]' in source
-    and 'run([sys.executable, str(PUBLISHER)]' in source
-    and 'CAMPAIGN_REPORT.is_file()' in source,
+    'run([sys.executable, str(FINALIZER)]' in retained_source
+    and 'run([sys.executable, str(PUBLISHER)]' in retained_source
+    and 'CAMPAIGN_REPORT.is_file()' in retained_source,
     "authoritative finalization precedes campaign publication and report existence check",
 )
 check(
-    'Delresultater er bevaret. Lad teststacken stå' in source
+    'Delresultater er bevaret. Lad teststacken stå' in retained_source
     and main_source.index("except (EasyPilotError, KeyboardInterrupt)")
     > main_source.index("finalize_and_publish()"),
     "a stopped run preserves the live resumable stack instead of fabricating completion",
 )
-check('input(' not in source and 'getpass' not in source,
+check('input(' not in combined_source and 'getpass' not in combined_source,
       "no token, schedule ID, or JSON is copied into the orchestrator")
 
 check(
