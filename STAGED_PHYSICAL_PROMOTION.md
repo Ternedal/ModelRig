@@ -196,3 +196,30 @@ summary.total=8
 
 Kun denne schema-distinkte kvittering kan indgå i en senere separat
 aktiveringsbeslutning. Den aktiverer stadig intet af sig selv.
+
+
+## task_ui-beviset (T-021) — fulde krav
+
+Verify-kampagnens ottende bevis kræver mere end telefonens flow; alle dele er
+obligatoriske og fælder tavst hvis de mangler:
+
+1. **To klienter:** task-UI-flowet observeres på BÅDE Android-appen og
+   Windows-desktop-appen (`Kaliv-windows-x64-<version>.jar` fra releasen,
+   verificeret mod `SHA256SUMS.txt`). Flow pr. klient: én Agent 3-opgave med
+   tools til (surface, server-begrundelse, plan-review uden eksekvering,
+   tool-status, Stop med terminal-tilstand, receipts) samt én normal chat-tur
+   uden tools (`normal_chat_round_trip`).
+2. **Evidensnote pr. klient** under `validation/agent3-task-ui-evidence/`
+   (1 byte – 1 MB, repository-relativ, ingen symlinks) og notens SHA-256 i
+   observationsfilens `evidence_sha256` — skabelonens `FILL_ME_64_HEX` fælder.
+3. **Maskinproben** kører automatisk under valideringen og kræver et parret
+   `MODELRIG_TOKEN` mod den kørende 2.0.12-backend.
+4. Kandidat-triplen i observationsfilen skal matche den friske
+   `frozen-candidate.json` — kør `freeze_check.py` FØR filen udfyldes.
+
+## Efter Stage B-kæden: bring appliancen frem før verify
+
+Interruption-trialet efterlader BY DESIGN kilden gendannet. Kør derfor den
+normale opdatering (`modelrig-updater-windows-x64.exe -dir <appliance>`) efter
+kæden, og verificér `healthz` = target-versionen, FØR kampagne-verify — ellers
+fælder lifecycle på kørende version ≠ kandidat.
