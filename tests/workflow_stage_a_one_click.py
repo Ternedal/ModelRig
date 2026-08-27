@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the retained Stage A one-click contract against candidate 2.0.13."""
+# ruff: noqa: F821 -- retained contract injects wizard/check/ROOT/counters via exec.
 import os
 from pathlib import Path
 
