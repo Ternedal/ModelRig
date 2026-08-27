@@ -14,8 +14,12 @@ _RETAINED = _Path(__file__).with_name("stage_b_one_click_v2.retained")
 _source = _RETAINED.read_text(encoding="utf-8")
 _old_source = 'EXPECTED_SOURCE_VERSION = "2.0.11"'
 _old_target = 'EXPECTED_TARGET_VERSION = "2.0.12"'
+_old_state_load = "    state = legacy.load_state()"
+_new_state_load = '    state = legacy.load_state(str(candidate.get("git_sha") or "") or None)'
 if _source.count(_old_source) != 1 or _source.count(_old_target) != 1:
     raise RuntimeError("Stage B version authority drifted; refusing ambiguous era replacement")
+if _source.count(_old_state_load) != 1:
+    raise RuntimeError("Stage B candidate-state binding drifted; refusing ambiguous era replacement")
 _source = _source.replace(
     _old_source,
     f'EXPECTED_SOURCE_VERSION = "{EXPECTED_SOURCE_VERSION}"',
@@ -24,6 +28,7 @@ _source = _source.replace(
     _old_target,
     f'EXPECTED_TARGET_VERSION = "{EXPECTED_TARGET_VERSION}"',
 )
+_source = _source.replace(_old_state_load, _new_state_load)
 _name = __name__
 globals()["__name__"] = "_stage_b_one_click_v2_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
