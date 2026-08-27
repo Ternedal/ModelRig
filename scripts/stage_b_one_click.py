@@ -133,6 +133,15 @@ def get_json(url: str, *, timeout: float = 5.0, token: str | None = None) -> Any
         return json.load(response)
 
 
+def _github_token() -> str | None:
+    """The rig's PAT when the session carries one, else None.
+
+    Unauthenticated GitHub API calls share a 60/hour per-IP budget that a
+    single rig day exhausts (#753 item 9); authenticated calls do not.
+    """
+    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or None
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -204,20 +213,26 @@ def remote_release_identity(repo: str) -> tuple[str, str]:
     """
     try:
         release = get_json(
-            f"https://api.github.com/repos/{repo}/releases/latest", timeout=15.0
+            f"https://api.github.com/repos/{repo}/releases/latest",
+            timeout=15.0,
+            token=_github_token(),
         )
         tag = str(release.get("tag_name") or "")
         if not tag:
             return "", ""
         ref = get_json(
-            f"https://api.github.com/repos/{repo}/git/ref/tags/{tag}", timeout=15.0
+            f"https://api.github.com/repos/{repo}/git/ref/tags/{tag}",
+            timeout=15.0,
+            token=_github_token(),
         )
         obj = ref.get("object") if isinstance(ref, dict) else None
         sha = str(obj.get("sha") or "") if isinstance(obj, dict) else ""
         # An annotated tag points at a tag object; dereference it to the commit.
         if isinstance(obj, dict) and obj.get("type") == "tag" and _SHA40.fullmatch(sha):
             tag_obj = get_json(
-                f"https://api.github.com/repos/{repo}/git/tags/{sha}", timeout=15.0
+                f"https://api.github.com/repos/{repo}/git/tags/{sha}",
+                timeout=15.0,
+                token=_github_token(),
             )
             inner = tag_obj.get("object") if isinstance(tag_obj, dict) else None
             if isinstance(inner, dict):
@@ -255,6 +270,7 @@ def released_worker_exe_sha256(version: str) -> str:
         release = get_json(
             f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}",
             timeout=15.0,
+            token=_github_token(),
         )
         assets = release.get("assets") if isinstance(release, dict) else None
         url = ""
