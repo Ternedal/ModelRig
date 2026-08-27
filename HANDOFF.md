@@ -771,7 +771,39 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 23/8)
+## 9. Kø — hvem har bolden (16/7, opdateret 27/8)
+
+**[27/8 kl. 21:30 UTC — status. main = `178a352f`, VERSION 2.0.12, seneste tag
+v2.0.12 (shipped 26/8 på én dag: bump #756 → æra-pakke #757 → Stage A 7/7 →
+tag → release 9 assets verificeret). Kandidat = `origin/physical-proof/2.0.12`
+= `76fc3fa2` (post-tag; main er foran, hvilket er korrekt efter promovering).
+23/8-blokken nedenfor er historik.]**
+
+### Hvad der skete 24-27/8
+
+- 24/8: #747-planen afstemt med Sol (færdig = M1+M2+M3; "shipped" = M1) og
+  beslutning B truffet. v2.0.11 shipped 24-25/8 med fuld Stage A+B-kæde.
+- 25/8: task_ui-gaten fangede en ÆGTE 2.0.11-defekt: appen kalder
+  `/api/v1/tools/chat/stream`, backend manglede ruten (#754). Fixet + udledt
+  app↔backend-rutekontraktgate landet som #755. Stage B 2.0.11 bestod.
+- 26/8: 2.0.12 shipped. Æra-skiftet afslørede den udokumenterede pin-pakke
+  (#757, nu §4.11). Kanonisering #750, token-selv-mint #768 og
+  release-opslag-token #770 landet.
+- 27/8: Stage B-kæden BESTÅET på 2.0.12 (strict PASS: interruption, ægte
+  opdatering gennem updateren, reboot, checksum-afvisning). Appens tools-chat
+  bekræftet fysisk mod 2.0.12. Udestående: task_ui-bogføringen (begge
+  klienter + evidensnoter — fulde krav nu i STAGED_PHYSICAL_PROMOTION §task_ui)
+  og lifecycle-verify-genkørsel. Dagens fund: #753 pkt. 8-12.
+
+### Bolden nu
+
+- **Anders:** task_ui-sessionen (én kort seance, proceduren står i runbooken)
+  → verify 8/8 → M2-kampagnen for tærskeltal → ROADMAP-beslutning om 2.0.13
+  (anbefaling: M3-lukning).
+- **Claude:** state/observations-kandidatbinding (#753 pkt. 3+8, fixet er
+  næste kodede opgave), udledt gate over æra-pins (#753), M2-kampagneblokke.
+- **Sol:** T-033-kontrakten (aftalt, afventes).
+
 
 **[23/8 kl. 21:30 UTC — status. main = `274c8f60`, VERSION 2.0.11, seneste tag
 v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig

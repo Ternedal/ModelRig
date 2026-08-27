@@ -229,3 +229,12 @@ summary.total=8
 Review hashes for strict-, updater-chain-, campaign- og component-final-
 rapporterne. Stop derefter. Aktivering kræver fortsat en separat eksplicit
 beslutning.
+
+## Rollback-reglen: binærer og journal følges ad
+
+Bootstrappens `updater -recover` fuldfører enhver efterladt
+`update-transaction.json` — også hen over manuelt tilbagerullede binærer.
+En kilde-rollback er derfor altid TO ting sammen: de signerede binærer
+(verificeret mod kildereleasens `SHA256SUMS.txt`) OG arkivering af
+`update-transaction.json`/`.tmp` fra appliance-roden. Én af delene alene
+giver en appliance der "mystisk" skifter version ved næste start.
