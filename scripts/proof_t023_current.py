@@ -28,6 +28,10 @@ def main()->int:
     op.BRANCH,op.VERSION=branch,version
     op.stage.BRANCH,op.stage.VERSION=branch,version
     op.stage.ensure_candidate=exact
+    # T-023 is an explicit operator-invoked physical proof. Opt the child stack
+    # into the dedicated task UI for this proof process only; readiness still
+    # requires exact physical evidence and keeps production_activation=false.
+    os.environ["KALIV_AGENT3_TASK_UI"]="1"
     return int(op.main())
 if __name__=="__main__":
     try: raise SystemExit(main())
