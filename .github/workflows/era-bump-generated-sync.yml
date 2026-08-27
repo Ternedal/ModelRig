@@ -3,13 +3,18 @@ name: era-bump-generated-sync
 on:
   push:
     branches: [chore/2.0.13-era-bump]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   sync-generated:
-    if: github.repository == 'Ternedal/ModelRig' && github.ref == 'refs/heads/chore/2.0.13-era-bump'
+    if: >-
+      github.repository == 'Ternedal/ModelRig' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/chore/2.0.13-era-bump') ||
+       (github.event_name == 'pull_request' && github.head_ref == 'chore/2.0.13-era-bump'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
