@@ -5,6 +5,7 @@ The verified 2.0.12 implementation is retained byte-for-byte beside this file.
 Only the released source and target version authority is shifted for the current
 release era before the retained implementation is executed.
 """
+# ruff: noqa: F821 -- main is injected by the retained implementation at runtime.
 from pathlib import Path as _Path
 
 EXPECTED_SOURCE_VERSION = "2.0.12"

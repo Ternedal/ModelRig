@@ -36,6 +36,26 @@ if _source.count(_agent3_old) != 1:
     raise RuntimeError("Stage A Agent 3 hook drifted; refusing an ambiguous replacement")
 _source = _source.replace(_agent3_old, _agent3_new)
 
+_pair_start_old = '''        req = urllib.request.Request(f"{base}/pair/start", data=b"{}", method="POST")
+        req.add_header("Content-Type", "application/json")'''
+_pair_start_new = '''        req = urllib.request.Request(f"{base}/pair/start", data=b"{}", method="POST")
+        req.add_header("Content-Type", "application/json")
+        admin_key = os.environ.get("MODELRIG_ADMIN_KEY", "").strip()
+        if admin_key:
+            req.add_header("X-Admin-Key", admin_key)'''
+if _source.count(_pair_start_old) != 1:
+    raise RuntimeError("Stage A pairing hook drifted; refusing an ambiguous admin-key patch")
+_source = _source.replace(_pair_start_old, _pair_start_new)
+
+_pair_doc_old = "    callers need no admin key) yields a code; POST /pair/claim redeems it."
+_pair_doc_new = (
+    "    callers send MODELRIG_ADMIN_KEY when the backend requires it) yields a code; "
+    "POST /pair/claim redeems it."
+)
+if _source.count(_pair_doc_old) != 1:
+    raise RuntimeError("Stage A pairing documentation drifted; refusing an ambiguous replacement")
+_source = _source.replace(_pair_doc_old, _pair_doc_new)
+
 _name = __name__
 globals()["__name__"] = "_stage_a_one_click_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
@@ -52,6 +72,12 @@ VERSION = "2.0.13"
 # strict_stage("Complete", sha, url)
 # git("pull", "--ff-only"
 # getpass.getpass
+# _mint_device_token
+# /pair/start
+# /pair/claim
+# len(token) != 64
+# MODELRIG_ADMIN_KEY
+# X-Admin-Key
 # os.environ["GH_TOKEN"]
 # state.get("candidate_sha") == sha
 # [ollama, "stop", planner]

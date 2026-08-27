@@ -47,6 +47,16 @@ Dobbeltklik:
 START_STAGE_A_TEST.cmd
 ```
 
+Ved trin 4/8 forsøger wizarden først selv at minte et device-token mod
+`127.0.0.1:8080` via loopback pairing. Hvis backenden er konfigureret med
+`MODELRIG_ADMIN_KEY`, sendes den process-lokale nøgle som `X-Admin-Key`; værdien
+vises eller gemmes ikke af wizarden.
+
+Hvis auto-mint fejler, bruger du wizardens skjulte token-prompt. Har du mintet
+et token manuelt i en separat PowerShell, kopierer du kun tokenværdien og
+indsætter den direkte i den allerede kørende wizard. `$env:MODELRIG_TOKEN` i
+et andet PowerShell-vindue kan ikke ændre en allerede kørende wizard.
+
 Wizard'en samler og genoptager de seks kandidatbeviser samt det interaktive
 browserbevis. De menneskelige handlinger er fortsat de fysiske observationer:
 voice-fraser, Pixel-matrix, den afgrænsede approval, scheduler-timing og det ene
