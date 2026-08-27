@@ -4,6 +4,7 @@
 The verified 2.0.12 implementation is retained byte-for-byte beside this file.
 Only candidate branch and version authority are shifted for the current era.
 """
+# ruff: noqa: F821 -- main is injected by the retained implementation at runtime.
 from pathlib import Path as _Path
 
 CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.13"
