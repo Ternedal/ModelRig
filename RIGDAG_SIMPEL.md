@@ -47,6 +47,20 @@ Dobbeltklik:
 START_STAGE_A_TEST.cmd
 ```
 
+Ved trin 4/8 (parret device-token) minter wizarden selv et token mod den
+koerende backend paa `127.0.0.1:8080` (loopback pairing) og springer prompten
+over. Prompter den alligevel, koerer backenden ikke — start valideringsstacken
+og lad wizarden fortsaette, eller mint manuelt i et andet vindue:
+
+```powershell
+$pair = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/pair/start" -TimeoutSec 10
+$claim = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/pair/claim" -ContentType 'application/json' -Body (@{ device_name = "stage-a-manuel"; code = $pair.code } | ConvertTo-Json -Compress) -TimeoutSec 10
+$env:MODELRIG_TOKEN = $claim.token
+```
+
+Token-miljoevariablen laeses ved wizard-start, saa saet den FOER
+START_STAGE_A_TEST.cmd hvis du minter manuelt.
+
 Wizard'en samler og genoptager de seks kandidatbeviser samt det interaktive
 browserbevis. De menneskelige handlinger er fortsat de fysiske observationer:
 voice-fraser, Pixel-matrix, den afgrænsede approval, scheduler-timing og det ene

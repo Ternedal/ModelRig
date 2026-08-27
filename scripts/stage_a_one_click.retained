@@ -299,10 +299,46 @@ def ensure_models() -> str:
     return planner
 
 
+def _mint_device_token() -> str | None:
+    """Mint a device token against the running backend's loopback pairing API.
+
+    Same flow the owned-pairing campaign uses: POST /pair/start (loopback
+    callers need no admin key) yields a code; POST /pair/claim redeems it.
+    Returns the 64-hex token, or None if the backend is down or answers
+    oddly -- the caller falls back to the manual prompt in that case.
+    """
+    base = "http://127.0.0.1:8080/api/v1"
+    try:
+        req = urllib.request.Request(f"{base}/pair/start", data=b"{}", method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            code = json.loads(response.read().decode("utf-8")).get("code")
+        if not code:
+            return None
+        body = json.dumps({"device_name": "stage-a-wizard", "code": code}).encode("utf-8")
+        req = urllib.request.Request(f"{base}/pair/claim", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            token = json.loads(response.read().decode("utf-8")).get("token")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    if not isinstance(token, str) or len(token) != 64:
+        return None
+    if any(ch not in "0123456789abcdefABCDEF" for ch in token):
+        return None
+    return token
+
+
 def ensure_device_token() -> None:
     if os.environ.get("MODELRIG_TOKEN"):
         return
     heading("4/8  Parret device-token")
+    minted = _mint_device_token()
+    if minted:
+        os.environ["MODELRIG_TOKEN"] = minted
+        ok("Device-token mintet automatisk mod den koerende backend (loopback pairing).")
+        return
+    note("Kunne ikke minte automatisk (koerer backenden paa :8080?). Manuel indtastning:")
     token = getpass.getpass("  Indsæt MODELRIG_TOKEN (skjult, gemmes ikke): ").strip()
     if not token:
         raise WizardError("Device-tokenet var tomt.")
