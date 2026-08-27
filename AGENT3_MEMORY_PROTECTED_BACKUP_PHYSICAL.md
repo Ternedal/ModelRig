@@ -64,14 +64,43 @@ A green same-user phase is **not** a green T-033 report.
 
 ## Run the cross-user probe
 
-The first phase prints a `runas` command. Run that command with a genuinely
-separate Windows account/profile. The account must have another Windows SID.
+The first phase prints the generated canonical campaign id, for example:
 
-Equivalent form:
+```text
+t033-20260824-104800-abcd1234
+```
+
+For the current-head proof adapter, that id is enough to derive both Public
+paths. Run exactly one process under a genuinely separate Windows account/SID,
+for example from the owner session with `runas`:
 
 ```powershell
-runas /user:<ANDEN-BRUGER> "\"<repo>\START_AGENT3_MEMORY_BACKUP_PHYSICAL.cmd\" probe --request \"<public-request.json>\" --output \"<public-probe.json>\""
+runas /user:<ANDEN-BRUGER> "python \"<repo>\scripts\proof_t033_current.py\" probe --campaign-id t033-20260824-104800-abcd1234"
 ```
+
+`--campaign-id` is deliberately strict and accepts only the canonical
+`t033-YYYYMMDD-HHMMSS-<8 lowercase hex>` form. It cannot contain slashes,
+backslashes, traversal segments or alternate output paths. The adapter derives:
+
+```text
+%PUBLIC%\Documents\Kaliv-T033\<campaign-id>\request.json
+%PUBLIC%\Documents\Kaliv-T033\<campaign-id>\probe.json
+```
+
+and then delegates to the **same existing physical probe**. It does not weaken,
+replace or reinterpret the T-033 evidence contract.
+
+The legacy explicit-path form remains available for diagnostics/backward
+compatibility:
+
+```powershell
+python .\scripts\proof_t033_current.py probe `
+  --request <public-request.json> `
+  --output <public-probe.json>
+```
+
+Do not mix `--campaign-id` with explicit request/output paths; campaign-id mode
+is intentionally exclusive and fail-closed.
 
 The probe:
 
@@ -86,13 +115,28 @@ An unexpected successful restore is red.
 
 ## Collect the physical report
 
-Return to the owner Windows account and run the command printed by `prepare`:
+After the cross-user `runas` process finishes, the owner session can rerun the
+proof campaign. It finds the existing exact-SHA state and probe and performs the
+normal collect path; it must not create a fresh campaign just to rediscover the
+probe.
+
+For a direct/manual collect, the same campaign id can be used instead of copying
+both absolute paths:
 
 ```powershell
-.\START_AGENT3_MEMORY_BACKUP_PHYSICAL.cmd collect `
-  --state <campaign>\state.json `
-  --probe <Public>\Documents\Kaliv-T033\<campaign-id>\probe.json
+python .\scripts\proof_t033_current.py collect `
+  --campaign-id t033-20260824-104800-abcd1234
 ```
+
+The adapter then derives:
+
+```text
+validation\agent3-memory-protected-backup-physical\<campaign-id>\state.json
+%PUBLIC%\Documents\Kaliv-T033\<campaign-id>\probe.json
+```
+
+and delegates to the unchanged collector. The legacy explicit-path form is still
+accepted by the underlying operator.
 
 The operator must type this exact phrase:
 
@@ -122,6 +166,11 @@ kaliv-agent3-memory-protected-backup-physical/v1
 ```
 
 ## Evidence boundary
+
+The campaign-id mode is **operator ergonomics only**. The same physical Windows
+DPAPI current-user proof, exact candidate binding, distinct-SID requirement,
+manual attestation and independent gate remain authoritative. A passing CI
+contract test for campaign-id plumbing is not T-033 physical evidence.
 
 CI is not the physical Windows rig. CI can test the state machine, mutations and
 real DPAPI on an ephemeral Windows runner. It cannot honestly claim that the
