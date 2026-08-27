@@ -52,6 +52,10 @@ VERSION = "2.0.12"
 # strict_stage("Complete", sha, url)
 # git("pull", "--ff-only"
 # getpass.getpass
+# _mint_device_token
+# /pair/start
+# /pair/claim
+# len(token) != 64
 # os.environ["GH_TOKEN"]
 # state.get("candidate_sha") == sha
 # [ollama, "stop", planner]
