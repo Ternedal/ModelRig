@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet("Prepare", "DeviceInfo", "Grant", "RunMatrix", "Status", "Stop")]

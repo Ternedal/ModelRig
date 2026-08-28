@@ -385,6 +385,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_proof_campaign_owned_pairing.py`
 - `tests/workflow_proof_campaign_skip_fail_closed.py`
 - `tests/workflow_proof_scope_git_fail_closed.py`
+- `tests/workflow_ps1_encoding.py`
 - `tests/workflow_release.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_rig_preflight.py`
