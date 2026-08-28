@@ -13,7 +13,9 @@ function_end = operator.index("\ndef find_adb", function_start)
 stack_setup = operator[function_start:function_end]
 
 enable = 'os.environ["KALIV_AGENT3_TASK_UI"] = "1"'
-stack_start = "stage.start_stack(planner)"
+# The worker cmd builds an explicit env, so the flag must travel as a switch;
+# a bare env set never reaches the child stack (#753).
+stack_start = "stage.start_stack(planner, enable_task_ui=True)"
 required_gate = '(env.get("KALIV_AGENT3_TASK_UI") or "").strip() == "1"'
 
 stack_positions = []
@@ -33,6 +35,9 @@ checks = {
         enable in stack_setup
         and bool(stack_positions)
         and all(stack_setup.index(enable) < position for position in stack_positions)
+    ),
+    "every T-023 stack start carries the task-ui switch": (
+        "stage.start_stack(planner)" not in operator
     ),
     "T-023 does not enable production activation": (
         '"production_activation": True' not in operator

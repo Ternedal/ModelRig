@@ -28,7 +28,8 @@ param(
 
     [switch]$HeadlessWorker,
 
-    [switch]$WorkerOnly
+    [switch]$WorkerOnly,
+    [switch]$EnableTaskUi
 )
 
 $ErrorActionPreference = "Stop"
@@ -173,7 +174,12 @@ if ($EnableScheduler) {
     $resolvedSchedulerDir = Resolve-RepoPath -Value $SchedulerDataDir -Label "SchedulerDataDir" -CreateDirectory
     $escapedSchedulerDir = Escape-CmdValue $resolvedSchedulerDir
     $pollText = $SchedulerPollSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)
-    $schedulerEnv = @"
+    $schedulerEnv = # T-023's task-UI qualification only: the flag is default-off by design, and
+# the generated cmd files build an explicit env, so process inheritance never
+# reaches the worker (#753 -- the campaign's T-023 died on operator_disabled).
+$taskUiEnv = if ($EnableTaskUi) { 'set "KALIV_AGENT3_TASK_UI=1"' } else { '' }
+
+@"
 set "KALIV_SCHEDULER=$schedulerValue"
 set "KALIV_SCHEDULER_POLL_S=$pollText"
 set "KALIV_SCHEDULES_DB=$escapedSchedulerDir\kaliv-schedules.db"
@@ -202,6 +208,7 @@ cd /d "$escapedRepo"
 set "PYTHONPATH=$escapedRepo\worker"
 set "PYTHONDONTWRITEBYTECODE=1"
 set "KALIV_AGENT3_ENABLED=1"
+$taskUiEnv
 set "KALIV_TOOLS_ENABLED=1"
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
@@ -250,6 +257,7 @@ set "MODELRIG_HOST=$escapedHost"
 set "MODELRIG_PORT=8080"
 set "MODELRIG_DATA=$escapedData"
 set "KALIV_AGENT3_ENABLED=1"
+$taskUiEnv
 set "KALIV_SCHEDULER_API=$schedulerApiValue"
 set "KALIV_SCHEDULER_APPROVAL_SECRET=$escapedSecret"
 "$backendExe"
