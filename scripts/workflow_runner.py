@@ -96,9 +96,20 @@ def run_workflow(
             else:
                 decision = spec.get("decision", "approve")
                 events.append({"type": "decision", "decision": decision})
-                d2 = post("/tools/confirm", {
+                # Workflow specs use the human-facing word "reject" because the
+                # evaluator must preserve what the scenario asked us to do. The
+                # worker wire contract deliberately uses approve|deny. Translate
+                # only at the boundary; never rewrite the recorded evidence.
+                wire_decision = "deny" if decision == "reject" else decision
+                # This confirmation belongs to /tools/chat, so use the chat-aware
+                # continuation endpoint. The generic /tools/confirm executes the
+                # write but returns only {status, tool, result}; that made a real
+                # note_append invisible to record_turn() and also discarded the
+                # model's post-write answer. /tools/confirm/chat surfaces the
+                # executed_write marker and continues the parked turn.
+                d2 = post("/tools/confirm/chat", {
                     "confirmation_id": d.get("confirmation_id"),
-                    "decision": decision,
+                    "decision": wire_decision,
                 })
                 record_turn(d2)
                 status = d2.get("status") or "ok"

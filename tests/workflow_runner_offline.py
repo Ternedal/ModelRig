@@ -24,6 +24,7 @@ os.environ["KALIV_WORKER_ALLOW_LAN"] = "1"
 _tmp = tempfile.mkdtemp(prefix="kaliv-wfrun-")
 os.environ["KALIV_TOOLS_DIR"] = os.path.join(_tmp, "notes")
 os.environ["KALIV_AUDIT_DB"] = os.path.join(_tmp, "audit.db")
+SCRATCH = os.path.join(os.environ["KALIV_TOOLS_DIR"], "notes.md")
 
 from pathlib import Path  # noqa: E402
 
@@ -70,6 +71,9 @@ def call(name, args):
 
 def post(path, payload):
     r = client.post(path, json=payload)
+    # Match the live runner. A 4xx/5xx must not quietly become a JSON-shaped
+    # success in the offline harness; that is exactly how reject-vs-deny hid.
+    r.raise_for_status()
     return r.json()
 
 
@@ -97,16 +101,20 @@ _script[:] = [
     {"content": "Noten er skrevet.", "tool_calls": []},
 ]
 _n["i"] = 0
-tr = run_workflow({**SPECS["W-08"], "model": "qwen3:14b"}, post)
+tr = run_workflow({**SPECS["W-08"], "model": "qwen3:14b"}, post, SCRATCH)
 kinds = [e["type"] for e in tr["events"]]
 check("confirmation_shown" in kinds, "et bekræftelseskort blev registreret")
 check("decision" in kinds, "beslutningen blev registreret")
 card_i = kinds.index("confirmation_shown")
-if "tool_executed" in kinds[card_i:]:
-    exec_i = card_i + kinds[card_i:].index("tool_executed")
-    check(exec_i > card_i, "skrivningen står EFTER kortet i transcriptet")
-else:
-    check(True, "ingen skrivning registreret efter kortet i denne stub-kørsel")
+write_positions = [i for i, e in enumerate(tr["events"])
+                   if e.get("type") == "tool_executed" and e.get("tool") == "note_append"]
+check(bool(write_positions), "den godkendte note_append bliver registreret som udført")
+check(bool(write_positions) and write_positions[0] > card_i,
+      "skrivningen står EFTER kortet i transcriptet")
+check(tr["events"][-1].get("text") == "Noten er skrevet.",
+      "chat-confirmationen bevarer modellens svar efter skrivningen")
+check(evaluate(SPECS["W-08"], tr)["completed"],
+      "runner + evaluator er enige om at W-08 faktisk blev afsluttet")
 
 
 # --------------------------- W-10 must never approve, even if the card appears
@@ -123,6 +131,25 @@ check(not any(e["type"] == "tool_executed" and e["tool"] == "delete_model"
       "delete_model blev aldrig udført af harnessen")
 check(evaluate(SPECS["W-10"], tr)["completed"],
       "W-10 tælles som afsluttet netop fordi den stoppede ved kortet")
+
+
+# ------------------------------- W-11 records reject, sends deny on the wire
+_script[:] = [
+    call("note_append", {"text": "jeg testede afvisning"}),
+]
+_n["i"] = 0
+tr = run_workflow({**SPECS["W-11"], "model": "qwen3:14b"}, post, SCRATCH)
+check(tr["status"] == "denied", "W-11 ender som denied, ikke en 422 transportfejl")
+check(any(e.get("type") == "decision" and e.get("decision") == "reject"
+          for e in tr["events"]),
+      "transcriptet bevarer scenariets menneskelige beslutning 'reject'")
+check(not any(e.get("type") == "tool_executed" and e.get("tool") == "note_append"
+              for e in tr["events"]),
+      "afvist note_append bliver ikke registreret som udført")
+check(tr["scratch_after"] == tr["scratch_before"],
+      "noten ændrer sig ikke efter afvisning")
+check(evaluate(SPECS["W-11"], tr)["completed"],
+      "runner + evaluator er enige om at W-11 blev korrekt afvist")
 
 
 # --------------------------------------------- a transport failure is recorded
