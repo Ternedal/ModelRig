@@ -852,13 +852,25 @@ fun App() {
                         if (auditRows.isEmpty() && auditError == null)
                             Text("(ingen handlinger endnu)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
                         auditRows.forEach { e ->
-                            Text(
-                                "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
-                                    (if (e.origin != "local") "  ·  ${e.origin}" else "") +
-                                    (if (e.result_summary.isNotBlank()) "\n    ${e.result_summary}" else ""),
-                                color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
-                                modifier = Modifier.padding(vertical = 4.dp),
-                            )
+                            // Header and payload are separate texts: the summary is a
+                            // multi-line value dump, and inlining it after "\n    " only
+                            // indented its FIRST line (#779 item 6). Block padding
+                            // indents every line; monospace keeps key=value columns.
+                            Column(Modifier.padding(vertical = 4.dp)) {
+                                Text(
+                                    "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
+                                        (if (e.origin != "local") "  ·  ${e.origin}" else ""),
+                                    color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
+                                )
+                                if (e.result_summary.isNotBlank()) {
+                                    Text(
+                                        e.result_summary.trimEnd(),
+                                        color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 },

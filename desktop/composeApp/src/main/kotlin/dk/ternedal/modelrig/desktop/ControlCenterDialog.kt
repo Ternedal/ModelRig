@@ -233,12 +233,23 @@ fun DesktopControlCenterDialog(
                         title = desktopControlCenterOverallLabel(current.overall),
                         state = current.overall,
                     ) {
+                        // Name the culprits: a status card that says "attention"
+                        // without saying WHAT is unreadable (#779 item 7).
+                        val notHealthy = current.components.values
+                            .filter { it.state != "healthy" }
+                            .joinToString { desktopControlCenterTitle(it.name) }
                         Text(
                             when (current.overall) {
                                 "healthy" -> "Alle påkrævede kilder er friske og klar."
-                                "attention" -> "Riggen svarer, men en valgfri del eller routing kræver opmærksomhed."
-                                "unavailable" -> "Mindst én påkrævet del rapporterer utilgængelig."
-                                else -> "Der mangler frisk eller entydig serverevidens."
+                                "attention" ->
+                                    if (notHealthy.isNotBlank()) "Riggen svarer, men kræver opmærksomhed: $notHealthy."
+                                    else "Riggen svarer, men en valgfri del eller routing kræver opmærksomhed."
+                                "unavailable" ->
+                                    if (notHealthy.isNotBlank()) "Utilgængelig eller degraderet: $notHealthy."
+                                    else "Mindst én påkrævet del rapporterer utilgængelig."
+                                else ->
+                                    if (notHealthy.isNotBlank()) "Mangler frisk eller entydig evidens fra: $notHealthy."
+                                    else "Der mangler frisk eller entydig serverevidens."
                             },
                             color = KalivTheme.colors.TextMuted,
                             fontSize = 12.sp,
