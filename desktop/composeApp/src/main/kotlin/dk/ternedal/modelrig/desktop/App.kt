@@ -1546,7 +1546,16 @@ private fun PhonePairingQrRow(localUrl: String) {
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             hosts.forEach { h ->
+                // PillToggle's label is accessibility-only; without visible
+                // text the address choices were three blank pills (#779 item 3).
                 PillToggle(h == host, label = "$h:$port") { host = h; link = null }
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "$h:$port",
+                    color = if (h == host) KalivTheme.colors.TextHigh else KalivTheme.colors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.clickable { host = h; link = null },
+                )
                 Spacer(Modifier.width(6.dp))
             }
         }
