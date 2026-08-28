@@ -64,6 +64,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
@@ -1222,7 +1224,7 @@ private fun SettingsCard(
             Field("Base-URL (Ollama direkte, eller rig'ens backend :8080)", localUrl, onLocalUrl)
             Field("Lokal chat-sti (/api/chat direkte · /api/v1/chat via backend)", localPath, onLocalPath)
             Field("Lokal model", localModel, onLocalModel)
-            Field("Enhedstoken (kun ved brug af backenden)", token, onToken)
+            SecretField("Enhedstoken (kun ved brug af backenden)", token, onToken)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onPair) { Text("Par med rig (dev-mode)", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                 pairStatus?.let { Spacer(Modifier.width(8.dp)); Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
@@ -1594,6 +1596,26 @@ private fun Field(label: String, value: String, onChange: (String) -> Unit) {
         onValueChange = onChange,
         label = { Text(label, fontSize = 12.sp) },
         singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
+    // Tokens are credentials: masked by default, revealed only on explicit
+    // request (#779 item 4 -- the device token was readable on screen).
+    var reveal by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label, fontSize = 12.sp) },
+        singleLine = true,
+        visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            TextButton(onClick = { reveal = !reveal }) {
+                Text(if (reveal) "Skjul" else "Vis", fontSize = 11.sp)
+            }
+        },
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
     )
 }
