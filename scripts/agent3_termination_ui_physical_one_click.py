@@ -206,6 +206,9 @@ def ensure_stack_and_readiness(token: str) -> None:
     planner = stage.ensure_models()
     os.environ["KALIV_AGENT3_VALIDATION_REPORT"] = str(RIG_REPORT)
     os.environ["KALIV_AGENT3_PILOT_REPORT"] = str(PILOT_REPORT)
+    # The T-023 operator is an explicit, interactive task-UI qualification.
+    # Enable only its child stack; product/default startup remains default-off.
+    os.environ["KALIV_AGENT3_TASK_UI"] = "1"
     stage.ensure_device_token()
 
     try:
