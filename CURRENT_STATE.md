@@ -320,6 +320,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_agent3_memory_protected_backup_physical.py`
 - `tests/workflow_agent3_readonly_pilot_one_click.py`
+- `tests/workflow_agent3_t023_task_ui_enable.py`
 - `tests/workflow_agent3_termination_physical_campaign.py`
 - `tests/workflow_agent3_termination_ui_physical_operator.py`
 - `tests/workflow_agent3_write_pilot_collect_operator.py`
