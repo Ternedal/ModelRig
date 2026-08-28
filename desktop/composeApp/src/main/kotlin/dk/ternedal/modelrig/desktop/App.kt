@@ -444,6 +444,10 @@ fun App() {
                         KalivScreen.MODELS -> { showModels = true; showConvos = false; showSettings = false; activeScreen = KalivScreen.CHAT }
                         KalivScreen.DOCS -> { ragMode = true; loadRagSources(); activeScreen = KalivScreen.CHAT }
                         KalivScreen.SETTINGS -> { showSettings = true; showModels = false; showConvos = false; activeScreen = KalivScreen.CHAT }
+                        // Chat must always be reachable: close every panel. Without
+                        // this case the panels never closed and the chat surface was
+                        // unreachable from the sidebar (#779 item 1).
+                        KalivScreen.CHAT -> { showSettings = false; showModels = false; showConvos = false }
                         else -> {}
                     }
                 },
@@ -463,6 +467,7 @@ fun App() {
                         when (screen) {
                             KalivScreen.MODELS -> { showModels = true; activeScreen = KalivScreen.CHAT }
                             KalivScreen.SETTINGS -> { showSettings = true; activeScreen = KalivScreen.CHAT }
+                            KalivScreen.CHAT -> { showSettings = false; showModels = false; showConvos = false }
                             else -> {}
                         }
                     },
