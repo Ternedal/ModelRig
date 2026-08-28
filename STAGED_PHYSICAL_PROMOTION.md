@@ -221,3 +221,30 @@ Interruption-trialet efterlader BY DESIGN kilden gendannet. Kør derfor den
 normale opdatering (`modelrig-updater-windows-x64.exe -dir <appliance>`) efter
 kæden, og verificér `healthz` = target-versionen, FØR kampagne-verify — ellers
 fælder lifecycle på kørende version ≠ kandidat.
+
+
+## Agent 4 (a4-25f) i kampagnen — de fysiske trin
+
+Kampagnens Agent 4-kvalifikation stopper fail-closed, hvis operatørtrinnene
+springes over; de er obligatoriske og kommer i denne rækkefølge:
+
+1. **APK'en skal installeres på Pixel-enheden FØR parringstrinnet** —
+   kampagnen bygger/bruger `app-a425f.apk` (pakken `dk.ternedal.modelrig.a425f`,
+   separat fra hoved-appen) men kan ikke installere den for dig. Overfør og
+   installér den, når stien vises.
+2. **Par appen mod den viste server-URL** (`http://<LAN>:18080` — den
+   isolerede A4-stack, ikke appliancens :8080) med engangskoden på skærmen.
+   Tryk FØRST Enter, når appen viser parret.
+3. `DeviceInfo`-trinnet venter derefter på Pixel-receiptet
+   (`a4-25f-device-info.json`) fra den parrede app; udebliver det, er
+   parringen ikke lykkedes — kør trinnet igen frem for at fortsætte.
+4. Genkørsler af fixturen kræver `-Agent4ReplaceFixture` (fra 2.0.13) eller
+   arkivering af `modelrig-a4-25f-evidence`-mappen først — fixturen nægter
+   ærligt at overskrive eksisterende evidens.
+
+## T-023 i kampagnen — operatørens rolle
+
+T-023 kan ikke se UI'en og auto-godkender intet: hver case kræver de to
+præcise operatørfraser og et kandidatbundet screenshot, når wizarden beder om
+dem. Stop/fallback-proben tåler planner-varians (op til tre plan-forsøg fra
+2.0.13); selve eksekverings-kontrakterne er uændret strikse.
