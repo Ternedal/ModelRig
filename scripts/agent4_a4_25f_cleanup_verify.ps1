@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$ExpectedSha,
     [Parameter(Mandatory = $true)][string]$OutputRoot,
