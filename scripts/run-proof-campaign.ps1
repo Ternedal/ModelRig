@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$PlannerModel = $env:KALIV_AGENT3_PLANNER_MODEL,
   [int]$WorkflowRounds = 22,
