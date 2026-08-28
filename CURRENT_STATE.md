@@ -315,6 +315,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_web_research_tool.py`
 - `tests/workflow_access_derivation_parity.py`
 - `tests/workflow_action_pins.py`
+- `tests/workflow_activation_flip_guard.py`
 - `tests/workflow_activation_readiness.py`
 - `tests/workflow_agent3_android_termination_ui.py`
 - `tests/workflow_agent3_dormant.py`
