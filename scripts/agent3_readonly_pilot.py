@@ -576,11 +576,34 @@ def run_pilot(client: Requester, task_set: dict[str, Any], *, planner_model: str
     if rig_validation.get('version_match') is not True or rig_validation.get('code_match') is not True:
         raise PilotError('rig validation is not bound to the running candidate')
     results: list[dict[str, Any]] = []
+    infra_task_retries = 0
     for task in task_set['tasks']:
-        try:
-            result = run_task(client, task, planner_model=planner_model, answer_model=answer_model, poll_seconds=poll_seconds, max_wait_seconds=max_wait_seconds)
-        except PilotError as exc:
-            result = _failure_result(task, exc)
+        # Task-level infrastructure retry, same principle as the request-level
+        # one above, one level up: a model eviction costs a whole task (polls
+        # succeed, the run just never finishes inside max_wait), which the
+        # request retry cannot see. ONE extra attempt, ONLY when the failure
+        # classifies as transport/timeout -- never on a wrong answer or a
+        # contract breach, which IS the system under test. Counted in the
+        # report so the noise stays visible; a retried-then-successful task
+        # leaves no error_types residue, because the infrastructure hiccup is
+        # not a task failure (three rig runs on 28-29/08 lost 1-3 tasks each
+        # to exactly this, 17-19/20 against a 20/20 gate).
+        attempt_error: PilotError | None = None
+        result = None
+        for infra_attempt in range(2):
+            try:
+                result = run_task(client, task, planner_model=planner_model, answer_model=answer_model, poll_seconds=poll_seconds, max_wait_seconds=max_wait_seconds)
+                break
+            except PilotError as exc:
+                attempt_error = exc
+                if infra_attempt == 0 and _error_type(str(exc)) in ('transport', 'timeout'):
+                    infra_task_retries += 1
+                    print(f"  infra-fejl paa {task.get('id')}: {str(exc)[:80]} -- proever opgaven een gang til", file=sys.stderr)
+                    time.sleep(1.5)
+                    continue
+                break
+        if result is None:
+            result = _failure_result(task, attempt_error)
         results.append(result)
     try:
         stop_fallback = run_stop_fallback_probe(client, planner_model=planner_model, fallback_model=fallback_model, poll_seconds=poll_seconds, max_wait_seconds=max_wait_seconds)
@@ -588,7 +611,7 @@ def run_pilot(client: Requester, task_set: dict[str, Any], *, planner_model: str
         message = str(exc)
         stop_fallback = {'success': False, 'error_type': _error_type(message), 'error_sha256': hashlib.sha256(message.encode('utf-8')).hexdigest()}
     summary = summarize(results)
-    report = {'schema': SCHEMA, 'started_at': started_at.isoformat(), 'finished_at': datetime.now(timezone.utc).isoformat(), 'success': summary['tasks'] == 20 and summary['successes'] == 20 and (stop_fallback['success'] is True), 'host': {'hostname': socket.gethostname(), 'platform': platform.platform(), 'python': platform.python_version()}, 'candidate': source, 'target': {'base_url': getattr(client, 'base_url', None), 'planner_model': planner_model, 'answer_model': answer_model, 'fallback_model': fallback_model, 'execution_mode': 'experimental-read-only', 'production_activation': False}, 'backend': {'worker_version': status.get('worker_version'), 'code_sha256': status.get('code_sha256'), 'rig_validation': status.get('rig_validation'), 'planner': status.get('planner'), 'replanner': status.get('replanner'), 'read_review': status.get('read_review'), 'production_tools_path_untouched': status.get('production_tools_path_untouched'), 'production_activation': status.get('production_activation')}, 'task_set': {'schema': task_set['schema'], 'name': task_set['name'], 'version': task_set['version'], 'task_count': len(task_set['tasks']), 'sha256': _sha256_json(task_set)}, 'summary': summary, 'transient_retries': getattr(client, 'transient_retries', 0), 'stop_fallback': stop_fallback, 'results': results}
+    report = {'schema': SCHEMA, 'started_at': started_at.isoformat(), 'finished_at': datetime.now(timezone.utc).isoformat(), 'success': summary['tasks'] == 20 and summary['successes'] == 20 and (stop_fallback['success'] is True), 'host': {'hostname': socket.gethostname(), 'platform': platform.platform(), 'python': platform.python_version()}, 'candidate': source, 'target': {'base_url': getattr(client, 'base_url', None), 'planner_model': planner_model, 'answer_model': answer_model, 'fallback_model': fallback_model, 'execution_mode': 'experimental-read-only', 'production_activation': False}, 'backend': {'worker_version': status.get('worker_version'), 'code_sha256': status.get('code_sha256'), 'rig_validation': status.get('rig_validation'), 'planner': status.get('planner'), 'replanner': status.get('replanner'), 'read_review': status.get('read_review'), 'production_tools_path_untouched': status.get('production_tools_path_untouched'), 'production_activation': status.get('production_activation')}, 'task_set': {'schema': task_set['schema'], 'name': task_set['name'], 'version': task_set['version'], 'task_count': len(task_set['tasks']), 'sha256': _sha256_json(task_set)}, 'summary': summary, 'transient_retries': getattr(client, 'transient_retries', 0), 'infra_task_retries': infra_task_retries, 'stop_fallback': stop_fallback, 'results': results}
     return report
 
 def _print_summary(report: dict[str, Any]) -> None:
