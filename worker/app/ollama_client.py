@@ -39,16 +39,32 @@ class OllamaError(RuntimeError):
 
 
 async def embed(text: str, model: str | None = None) -> list[float]:
+    """Embed via /api/embed, falling back to the legacy /api/embeddings.
+
+    Ollama 0.33.x removed the legacy route on the rig (it answered 405 on
+    29/08 and broke RAG ingest for every era at once). The modern route
+    takes {"model","input"} and answers {"embeddings": [[...]]}; older
+    servers only know {"model","prompt"} -> {"embedding": [...]}. Try
+    modern first, keep legacy so a downgraded Ollama still works.
+    """
     model = model or EMBED_MODEL
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-            r = await c.post(f"{OLLAMA_URL}/api/embeddings",
-                             json={"model": model, "prompt": text, "keep_alive": KEEP_ALIVE})
+            r = await c.post(f"{OLLAMA_URL}/api/embed",
+                             json={"model": model, "input": text, "keep_alive": KEEP_ALIVE})
+            if r.status_code in (404, 405):
+                r = await c.post(f"{OLLAMA_URL}/api/embeddings",
+                                 json={"model": model, "prompt": text, "keep_alive": KEEP_ALIVE})
     except httpx.HTTPError as e:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
         raise OllamaError(f"embeddings failed ({r.status_code}): {r.text[:200]}")
-    emb = r.json().get("embedding")
+    body = r.json()
+    emb = body.get("embedding")
+    if not emb:
+        rows = body.get("embeddings")
+        if isinstance(rows, list) and rows and isinstance(rows[0], list):
+            emb = rows[0]
     if not emb:
         raise OllamaError("embeddings response missing 'embedding' "
                           f"(is model '{model}' pulled?)")
