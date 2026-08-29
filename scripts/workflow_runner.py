@@ -131,7 +131,15 @@ def run_workflow(
         # 'denied'" -- hvilket lyder som en modelfejl og ikke er det.
         #
         # Statuskoden ER svaret. Den skal med i transskriptionen.
-        kode = getattr(e, "code", None) or getattr(getattr(e, "response", None), "status", None)
+        # httpx names it status_code; urllib-style clients say code/status.
+        # Reading only .status left today's 422 unmapped -- the transcript
+        # said bare "error" while the exception text carried the real code.
+        resp = getattr(e, "response", None)
+        kode = (
+            getattr(e, "code", None)
+            or getattr(resp, "status_code", None)
+            or getattr(resp, "status", None)
+        )
         if kode:
             error = f"HTTP {kode}: {error}"
             if int(kode) == 410:
