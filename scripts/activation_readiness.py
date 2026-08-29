@@ -28,6 +28,8 @@ import os
 import json
 import re
 import subprocess
+import urllib.error
+import urllib.request
 import sys
 import time
 from datetime import UTC, datetime
@@ -604,6 +606,56 @@ def dormancy() -> tuple[bool, str]:
     return r.returncode == 0, (tail[-1].strip() if tail else "no output")
 
 
+def live_appliance_probe() -> dict:
+    """Ask the RUNNING appliance instead of guessing from this process's env.
+
+    The generator used to read report paths and flags from its own
+    environment, so the verdict depended on which shell it ran in -- a
+    status tool that can misjudge a correctly configured rig (#753). When
+    an appliance answers on 127.0.0.1:8080, ITS task-readiness and ITS
+    scheduler route are the truth; the env-based path remains only as the
+    fallback for CI, where no appliance exists.
+    """
+    out = {"reachable": False, "version": None, "surface": None,
+           "surface_reasons": [], "schedules_http": None}
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=3) as r:
+            out["version"] = json.load(r).get("version")
+            out["reachable"] = True
+    except Exception:
+        return out
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:8080/api/v1/pair/start", data=b"{}",
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            code = json.load(r).get("code")
+        req = urllib.request.Request(
+            "http://127.0.0.1:8080/api/v1/pair/claim",
+            data=json.dumps({"device_name": "activation-readiness-probe",
+                             "code": code}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            token = json.load(r).get("token")
+        req = urllib.request.Request(
+            "http://127.0.0.1:8080/api/v1/experimental/agent3/task-readiness",
+            headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            ready = json.load(r)
+        out["surface"] = ready.get("selected_surface")
+        out["surface_reasons"] = list(ready.get("reasons") or [])
+    except Exception as exc:
+        out["surface_reasons"] = [f"probe-fejl: {exc}"]
+    try:
+        urllib.request.urlopen("http://127.0.0.1:8080/api/v1/schedules", timeout=5)
+        out["schedules_http"] = 200
+    except urllib.error.HTTPError as exc:
+        out["schedules_http"] = exc.code
+    except Exception:
+        out["schedules_http"] = None
+    return out
+
+
 def render() -> str:
     v = version()
     val = validation()
@@ -616,8 +668,19 @@ def render() -> str:
     switches = [f for f in flags if f[2] != "indstilling"]
     active = [f for f in switches if f[2] == "**AKTIV**"]
 
+    probe = live_appliance_probe()
+
     blockers: list[str] = []
-    if not val["ready"]:
+    if probe["reachable"] and probe["surface"] == "agent3_readonly":
+        # The running worker has validated its own reports -- the strongest
+        # truth available, and independent of this process's environment.
+        pass
+    elif probe["reachable"]:
+        blockers.append(
+            "**Kørende appliance " + str(probe["version"]) + " afviser task-readiness:** "
+            + (", ".join(probe["surface_reasons"]) or "surface er ikke agent3_readonly")
+        )
+    elif not val["ready"]:
         blockers.append(
             f"**Fysisk rig-validering:** {val.get('reason') or 'rapporten er ikke godkendt'}"
         )
@@ -639,6 +702,12 @@ def render() -> str:
         "handle selv. Den fejler lukket: ingen rapport = ikke klar.",
         "",
         f"**Version på main:** `{v}`",
+        (f"**Kørende appliance:** `{probe['version']}` — task-readiness: "
+         f"`{probe['surface'] or 'utilgængelig'}`, /api/v1/schedules: "
+         f"HTTP {probe['schedules_http']}"
+         if probe["reachable"] else
+         "**Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen "
+         "bygger på dette miljøs rapportstier (CI-fallback)"),
         f"**Genereret:** {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
         "---",
@@ -668,7 +737,7 @@ def render() -> str:
         "---",
         "",
         f"## Kan scheduleren aktiveres nu? "
-        f"**{'NEJ' if not (approval_ok and durability_ok) else verdict}**",
+        f"**{'ALLEREDE AKTIV på kørende appliance' if probe.get('schedules_http') == 401 else ('NEJ' if not (approval_ok and durability_ok) else verdict)}**",
         "",
         # A separate verdict on purpose. The scheduler and Agent 3 fail for
         # different reasons, and a page that pools their blockers tells a reader
