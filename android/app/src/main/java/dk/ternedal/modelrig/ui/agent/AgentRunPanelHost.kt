@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.net.Agent3TaskReadinessClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import dk.ternedal.modelrig.ui.theme.KalivTokens
 import dk.ternedal.modelrig.ui.theme.KalivType
@@ -153,6 +154,22 @@ fun AgentRunPanelHost(
     var reachable by remember(boundRunId) { mutableStateOf(true) }
     var stopArmed by remember(boundRunId) { mutableStateOf(false) }
     var stopping by remember(boundRunId) { mutableStateOf(false) }
+    // Fladen og begrundelsen kommer fra riggens egen readiness -- panelet
+    // kendte kun planens rutenavn, så operatøren kunne ikke se hvilken flade
+    // der kørte, hvorfor, eller at den var faldet tilbage til agent2.
+    var surface by remember(boundRunId) {
+        mutableStateOf<AgentRunPresentation.SurfaceUi?>(null)
+    }
+
+    LaunchedEffect(boundRunId, baseUrl, token) {
+        // Readiness er billig og ændrer sig sjældent under en kørsel: hentes
+        // én gang, og udebliver den, viser panelet bare ingen fladelinje
+        // frem for at gætte på operatørens vegne.
+        val ready = withContext(Dispatchers.IO) {
+            runCatching { Agent3TaskReadinessClient(baseUrl, token).readiness() }
+        }
+        surface = ready.getOrNull()?.let { AgentRunPresentation.surfaceUi(it) }
+    }
 
     LaunchedEffect(boundRunId, baseUrl, token) {
         var keepAsking = true
@@ -185,6 +202,13 @@ fun AgentRunPanelHost(
             return@Column
         }
         if (current == null) return@Column
+        surface?.let { ui ->
+            AgentSurfaceNote(
+                line = AgentRunPresentation.surfaceLine(ui),
+                fallback = AgentRunPresentation.fallbackLine(ui),
+            )
+            Spacer(Modifier.height(6.dp))
+        }
         AgentRunCard(
             steps = AgentRunPresentation.steps(current),
             title = AgentRunPresentation.title(current),
@@ -227,6 +251,24 @@ fun AgentRunPanelHost(
  * være et gæt, og et gæt om en kørsel der måske stadig arbejder på riggen er
  * den værste slags.
  */
+@Composable
+private fun AgentSurfaceNote(line: String, fallback: String?, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        Text(
+            line,
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        if (fallback != null) {
+            Text(
+                fallback,
+                color = KalivTheme.colors.danger,
+                fontSize = 11.sp,
+            )
+        }
+    }
+}
+
 @Composable
 fun AgentRunUnavailableNote(modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(KalivTokens.Radius.card)

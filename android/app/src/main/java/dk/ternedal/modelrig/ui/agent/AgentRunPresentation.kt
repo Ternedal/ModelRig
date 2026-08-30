@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.ui.agent
 
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.net.Agent3TaskReadinessClient
 
 /**
  * Oversættelse fra riggens agent-kørsel til kortet i chatten — statsløs, og
@@ -66,6 +67,47 @@ object AgentRunPresentation {
     /** Trinnene i et PREVIEW: intet er kørt endnu, så intet må se udført ud. */
     fun previewSteps(steps: List<Agent3Client.Step>): List<AgentStepUi> =
         steps.map { AgentStepUi(text = it.summary.ifBlank { it.tool }, state = AgentStepState.Pending) }
+
+    /**
+     * Riggens EGEN udmelding om hvilken flade der kører, og hvorfor.
+     *
+     * Panelet viste kun planens rutenavn, så operatøren kunne ikke se
+     * hverken den valgte flade, serverens begrundelse eller at fladen faldt
+     * tilbage til agent2 — tre af de tretten krav i
+     * scripts/agent3_task_ui_validation.py (selected_surface_visible,
+     * server_reason_visible, fallback_visible). Teksten citerer serveren
+     * ordret; klienten oversætter ikke og gætter ikke.
+     */
+    data class SurfaceUi(
+        val surface: String,
+        val reason: String,
+        val fallbackActive: Boolean,
+        val fallbackSurface: String,
+    )
+
+    fun surfaceUi(readiness: Agent3TaskReadinessClient.Readiness): SurfaceUi {
+        val selected = readiness.selectedSurface.trim()
+        return SurfaceUi(
+            surface = selected,
+            reason = readiness.reason.trim(),
+            fallbackActive = !readiness.agent3ReadonlySelected,
+            fallbackSurface = readiness.fallbackSurface.trim(),
+        )
+    }
+
+    /** Én linje: flade og begrundelse, som serveren formulerer dem. */
+    fun surfaceLine(ui: SurfaceUi): String {
+        val surface = ui.surface.ifBlank { "ukendt" }
+        val reason = ui.reason
+        return if (reason.isBlank()) "Flade: $surface" else "Flade: $surface · $reason"
+    }
+
+    /** Fallback-linjen — kun når riggen IKKE har valgt task-fladen. */
+    fun fallbackLine(ui: SurfaceUi): String? {
+        if (!ui.fallbackActive) return null
+        val fallback = ui.fallbackSurface.ifBlank { "agent2" }
+        return "Falder tilbage til $fallback — Stop gælder stadig den kørsel der er i gang."
+    }
 
     fun titleOf(routeKind: String): String =
         routeKind.trim().ifEmpty { "Plan" }.replaceFirstChar { it.uppercase() }
