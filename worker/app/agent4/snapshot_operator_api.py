@@ -201,11 +201,21 @@ def _verification(value: Any) -> dict[str, Any]:
     }
 
 
+# Errors must be typed as the operator surface, exactly like successes.
+# FastAPI renders HTTPException as application/json unless the response
+# carries its own content-type, so every public error below passes one:
+# the A4-25f evidence finalizer requires the vendor media type on ALL
+# physical trials, error stages included, and the fixture host builds its
+# own app -- so this has to hold at the source, not at mount time.
+_ERROR_HEADERS = {"content-type": SNAPSHOT_OPERATOR_MEDIA_TYPE}
+
+
 def _raise_public(exc: Exception) -> NoReturn:
     if isinstance(exc, OperatorSnapshotNotFoundError):
         raise HTTPException(
             status_code=410,
             detail="agent4 operator snapshot unavailable",
+            headers=_ERROR_HEADERS,
         ) from exc
     if isinstance(
         exc,
@@ -214,6 +224,7 @@ def _raise_public(exc: Exception) -> NoReturn:
         raise HTTPException(
             status_code=404,
             detail="agent4 operator resource not found",
+            headers=_ERROR_HEADERS,
         ) from exc
     if isinstance(
         exc,
@@ -229,6 +240,7 @@ def _raise_public(exc: Exception) -> NoReturn:
         raise HTTPException(
             status_code=422,
             detail="agent4 operator snapshot request rejected",
+            headers=_ERROR_HEADERS,
         ) from exc
     if isinstance(
         exc,
@@ -242,6 +254,7 @@ def _raise_public(exc: Exception) -> NoReturn:
         raise HTTPException(
             status_code=503,
             detail="agent4 operator snapshot read unavailable",
+            headers=_ERROR_HEADERS,
         ) from exc
     raise exc
 
