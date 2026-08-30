@@ -69,7 +69,12 @@ try {
         if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
     })
 } finally { $ErrorActionPreference = $_eap }
-if ($LASTEXITCODE -ne 0) { throw "Kunne ikke verificere A425f package cleanup via adb." }
+# "pm path" exits 1 for an unknown package -- which is EXACTLY the state this
+# script exists to confirm. Treating that as a tool failure meant cleanup
+# verification could never pass after a successful Stop. Empty output is the
+# proof of removal; a non-zero exit only counts as failure when adb actually
+# said something.
+if ($LASTEXITCODE -ne 0 -and ($packagePath -join "").Trim().Length -ne 0) { throw "Kunne ikke verificere A425f package cleanup via adb." }
 if (($packagePath -join "").Trim().Length -ne 0) { throw "Den isolerede A425f APK er stadig installeret." }
 
 $rule = @(Get-NetFirewallRule -DisplayName $firewallRule -ErrorAction SilentlyContinue)

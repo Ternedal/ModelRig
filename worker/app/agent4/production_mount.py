@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from .domain import CampaignValidationError
-from .operator_api import build_agent4_operator_router
+from .operator_api import OPERATOR_MEDIA_TYPE, build_agent4_operator_router
 from .operator_read_context import Agent4OperatorReadContext
 
 
@@ -93,6 +93,7 @@ def mount_agent4_operator(
                 context.evidence_operator,
             )
         )
+        _install_operator_error_media_type(app)
         app.state.agent4_runtime_context = context
         app.state.agent4_operator_mounted = True
         return True
@@ -101,3 +102,29 @@ def mount_agent4_operator(
         app.state.agent4_runtime_context = previous_context
         app.state.agent4_operator_mounted = False
         raise
+
+
+def _install_operator_error_media_type(app: FastAPI) -> None:
+    """Type the operator API's ERROR responses like its successes.
+
+    Success bodies carry application/vnd.modelrig.agent4.operator+json;
+    HTTPException bodies fell back to FastAPI's application/json, so a 404
+    from the operator surface was indistinguishable from a proxy's 404. The
+    A4-25f evidence finalizer requires the vendor type on every physical
+    trial, error stages included -- with the untyped errors it could never
+    pass, which is what blocked Agent 4 finalization on the rig 30/08.
+    """
+    if getattr(app.state, "agent4_operator_error_handler", False):
+        return
+
+    from fastapi.exception_handlers import http_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _typed_operator_errors(request, exc):  # type: ignore[no-untyped-def]
+        response = await http_exception_handler(request, exc)
+        if request.url.path.startswith("/experimental/agent4/operator"):
+            response.headers["content-type"] = OPERATOR_MEDIA_TYPE
+        return response
+
+    app.state.agent4_operator_error_handler = True
