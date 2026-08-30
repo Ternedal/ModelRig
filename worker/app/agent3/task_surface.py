@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Any, Callable
 
+from .. import ollama_client as _oc
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -395,6 +396,10 @@ def build_task_surface_router(
             steps = adapter.build_steps(proposal.calls, route, req.conversation_id)
         except (PlannerError, Agent3PlanError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except _oc.OllamaError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"planner model call failed: {exc}"
+            ) from exc
 
         template = AgentRun(
             request=request,

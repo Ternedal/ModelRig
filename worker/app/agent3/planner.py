@@ -329,6 +329,15 @@ def build_planner_router(
             steps = adapter.build_steps(proposal.calls, route, req.conversation_id)
         except (PlannerError, Agent3PlanError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except oc.OllamaError as exc:
+            # The model backend failing is NOT a planning contract error: it
+            # used to escape unhandled and reach the operator as a bare 500
+            # with no text, which cost two rig days of guesswork on 29-30/08.
+            # 502 says plainly that the upstream model call failed, and the
+            # message travels with it.
+            raise HTTPException(
+                status_code=502, detail=f"planner model call failed: {exc}"
+            ) from exc
 
         plan_id: str | None = None
         expires_in_seconds: int | None = None
