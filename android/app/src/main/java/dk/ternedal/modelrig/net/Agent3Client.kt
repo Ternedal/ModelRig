@@ -207,6 +207,23 @@ class Agent3Client(baseUrl: String, private val token: String) {
         }
     }
 
+    /**
+     * Antal omplanlægninger for en kørsel.
+     *
+     * Riggen svarer 501, hvis replanneren ikke er mountet — det er en
+     * gyldig konfiguration, ikke en fejl, så kaldet returnerer null i
+     * stedet for at kaste. Panelet viser så ingen replan-linje frem for
+     * at påstå "0 omplanlægninger" om en flade der ikke tæller dem.
+     */
+    fun replanCount(runId: String): Int? {
+        val root = runCatching {
+            get("/api/v1/experimental/agent3/runs/${seg(runId)}/replans")
+        }.getOrNull() ?: return null
+        if (!root.has("replan_count")) return null
+        val count = root.optInt("replan_count", -1)
+        return if (count < 0) null else count
+    }
+
     fun events(runId: String): List<Event> {
         val arr = get("/api/v1/experimental/agent3/runs/${seg(runId)}/events")
             .optJSONArray("events") ?: JSONArray()
