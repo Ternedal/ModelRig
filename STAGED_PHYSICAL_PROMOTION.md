@@ -248,3 +248,46 @@ T-023 kan ikke se UI'en og auto-godkender intet: hver case kræver de to
 præcise operatørfraser og et kandidatbundet screenshot, når wizarden beder om
 dem. Stop/fallback-proben tåler planner-varians (op til tre plan-forsøg fra
 2.0.13); selve eksekverings-kontrakterne er uændret strikse.
+
+
+## A4-25f: den fulde kvalifikationskæde og aktiveringstrappen
+
+Rækkefølgen er ikke valgfri — hvert trin skriver den kvittering, det næste
+kræver, og to af dem blev først opdaget ved at drive kæden igennem 30/08:
+
+1. `Prepare` (med `-Replace`, eller arkivér `modelrig-a4-25f-evidence` først)
+   — bygger fixture, isoleret stack på `:18080`, installerer APK'en over adb
+   og viser en engangs-parringskode.
+2. **Par a425f-appen på enheden** mod den viste server-URL. Uden dette
+   fejler `DeviceInfo` med "Pixel-receipt blev ikke tilgængelig".
+3. `DeviceInfo` → `Grant` → `RunMatrix`.
+4. **`agent4_a4_25f_cursor_matrix.ps1` — FØR `Stop`.** Den kræver
+   `matrix_complete` i state og en installeret app; `Stop` afinstallerer
+   appen og nulstiller state, så efter `Stop` er trinnet umuligt uden en
+   helt ny gennemkørsel.
+5. `Stop` — rydder processer, firewall-regel, isoleret APK og backend-store,
+   men bevarer evidensfilerne.
+6. `agent4_a4_25f_cleanup_verify.ps1` — et SELVSTÆNDIGT trin, som skriver
+   `a4-25f-cleanup.json`. `Stop` skriver den ikke.
+7. `agent4_a4_25f_finalize_evidence.py` — auditerer hele kæden og skriver
+   kvalifikationskvitteringen.
+
+Kæden kræver adb hele vejen. Kablet USB er den stabile vej; trådløs
+fejlfinding falder ud, når telefonens skærm slukker, og skal så parres og
+forbindes igen med de to porte enheden selv viser.
+
+### Aktiveringstrappen efter grøn kvalifikation
+
+`finalize_evidence` skriver `human_go_recorded: false` og
+`human_go_authorized: false` med vilje. Derfra:
+
+1. **Menneskelig GO:** `agent4_a4_25f_record_decision.py --decision GO
+   --reviewer <navn> --reason <begrundelse>`. Scriptet siger det selv: en GO
+   accepterer kun den fysiske kvalifikationskampagne — den autoriserer
+   aldrig production activation.
+2. **Aktivér operator-læsefladen:** `KALIV_AGENT4_OPERATOR_API=1` i
+   appliancens env. Default-off, og kun den eksakte streng `"1"` tæller.
+   Mounten er additiv, GET-only og komponerer ingen scheduler, kø eller
+   baggrundstråd.
+3. **Production activation** er et selvstændigt, senere skridt med egen
+   bevisrunde bag aktiverings-flip-værnet.

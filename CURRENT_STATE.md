@@ -196,6 +196,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent4_handoff_runtime.py`
 - `tests/worker_agent4_operator_api.py`
 - `tests/worker_agent4_operator_api_review.py`
+- `tests/worker_agent4_operator_error_media_type.py`
 - `tests/worker_agent4_production_bootstrap.py`
 - `tests/worker_agent4_production_read_mutation_boundary.py`
 - `tests/worker_agent4_recovery.py`
