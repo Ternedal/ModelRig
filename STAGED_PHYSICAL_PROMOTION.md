@@ -250,6 +250,24 @@ dem. Stop/fallback-proben tåler planner-varians (op til tre plan-forsøg fra
 2.0.13); selve eksekverings-kontrakterne er uændret strikse.
 
 
+
+## T-023: kør ALTID gennem proof-wrapperen
+
+`scripts/proof_t023_current.py` er den eneste rigtige indgang under en
+kampagne. Den overskriver wizardens `ensure_candidate` og pinner DEN
+AKTUELLE checkout.
+
+Kører man `agent3_termination_ui_physical_one_click.py` direkte, gør
+wizarden det, den er bygget til uden for kampagnen: skifter til
+`agent/t023-termination-physical-operator` og binder evidensen til den
+branchs egen kandidat (observeret 30/08: version 1.58.146). Evidensen er
+så bundet til en helt anden æra og ubrugelig for kampagnen — og checkouten
+skal manuelt tilbage til proof-branchen bagefter.
+
+Task-UI-flaget kommer ikke fra wrapperens miljø: worker-cmd'en bygges med
+en eksplicit env-blok, så flaget rejser som `-EnableTaskUi` fra wizardens
+`start_stack`-kald (jf. kontraktgaten `workflow_agent3_t023_task_ui_enable`).
+
 ## A4-25f: den fulde kvalifikationskæde og aktiveringstrappen
 
 Rækkefølgen er ikke valgfri — hvert trin skriver den kvittering, det næste
