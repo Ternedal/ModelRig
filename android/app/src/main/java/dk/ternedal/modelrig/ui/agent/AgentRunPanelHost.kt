@@ -160,6 +160,10 @@ fun AgentRunPanelHost(
     var surface by remember(boundRunId) {
         mutableStateOf<AgentRunPresentation.SurfaceUi?>(null)
     }
+    // Omplanlægninger er en del af det operatøren skal kunne se
+    // (replans_visible). Null betyder "riggen tæller dem ikke her", og så
+    // vises linjen ikke -- ikke "0".
+    var replans by remember(boundRunId) { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(boundRunId, baseUrl, token) {
         // Readiness er billig og ændrer sig sjældent under en kørsel: hentes
@@ -181,6 +185,11 @@ fun AgentRunPanelHost(
                 reachable = true
                 val visible = AgentRunPresentation.visibleRun(runs, boundRunId)
                 run = visible
+                if (visible != null) {
+                    replans = withContext(Dispatchers.IO) {
+                        Agent3Client(baseUrl, token).replanCount(visible.id)
+                    }
+                }
                 if (visible == null) {
                     // Kørslen er slut (eller findes ikke mere): bindingen skal
                     // ikke overleve den, ellers spøger den i samtalen.
@@ -206,6 +215,7 @@ fun AgentRunPanelHost(
             AgentSurfaceNote(
                 line = AgentRunPresentation.surfaceLine(ui),
                 fallback = AgentRunPresentation.fallbackLine(ui),
+                replans = AgentRunPresentation.replanLine(replans),
             )
             Spacer(Modifier.height(6.dp))
         }
@@ -252,13 +262,25 @@ fun AgentRunPanelHost(
  * den værste slags.
  */
 @Composable
-private fun AgentSurfaceNote(line: String, fallback: String?, modifier: Modifier = Modifier) {
+private fun AgentSurfaceNote(
+    line: String,
+    fallback: String?,
+    replans: String?,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier.fillMaxWidth()) {
         Text(
             line,
             color = KalivTheme.colors.textMuted,
             fontSize = 11.sp,
         )
+        if (replans != null) {
+            Text(
+                replans,
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+            )
+        }
         if (fallback != null) {
             Text(
                 fallback,

@@ -102,6 +102,18 @@ object AgentRunPresentation {
         return if (reason.isBlank()) "Flade: $surface" else "Flade: $surface · $reason"
     }
 
+    /**
+     * Replan-linjen. Null ind betyder at riggen ikke tæller omplanlægninger
+     * for denne kørsel, og så vises intet -- at skrive "0 omplanlægninger"
+     * ville påstå mere end serveren har sagt.
+     */
+    fun replanLine(count: Int?): String? = when {
+        count == null -> null
+        count == 0 -> "Ingen omplanlægninger"
+        count == 1 -> "1 omplanlægning"
+        else -> "$count omplanlægninger"
+    }
+
     /** Fallback-linjen — kun når riggen IKKE har valgt task-fladen. */
     fun fallbackLine(ui: SurfaceUi): String? {
         if (!ui.fallbackActive) return null

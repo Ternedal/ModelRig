@@ -75,6 +75,20 @@ class AgentSurfacePresentationTest {
     }
 
     @Test
+    fun `replan-linjen taeller i ental og flertal`() {
+        assertEquals("Ingen omplanlægninger", AgentRunPresentation.replanLine(0))
+        assertEquals("1 omplanlægning", AgentRunPresentation.replanLine(1))
+        assertEquals("3 omplanlægninger", AgentRunPresentation.replanLine(3))
+    }
+
+    @Test
+    fun `ukendt replan-tal viser ingen linje frem for at paastaa nul`() {
+        // Riggen svarer 501 når replanneren ikke er mountet. "0
+        // omplanlægninger" ville da påstå mere end serveren har sagt.
+        assertNull(AgentRunPresentation.replanLine(null))
+    }
+
+    @Test
     fun `tom begrundelse giver stadig en fladelinje`() {
         val ui = AgentRunPresentation.surfaceUi(readiness(reason = "  "))
         assertEquals("Flade: agent3_readonly", AgentRunPresentation.surfaceLine(ui))
