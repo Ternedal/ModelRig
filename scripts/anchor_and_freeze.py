@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -193,10 +194,15 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("workflows blev ikke faerdige i tide -- genfryser IKKE")
 
     # 4) genfrys
-    for p in ROOT.rglob("__pycache__"):
-        if ".git" not in p.parts:
-            subprocess.run(["rm", "-rf", str(p)], check=False)
-    subprocess.run(["rm", "-rf", str(ROOT / "validation")], check=False)
+    # shutil, not "rm -rf": this tool only ever runs on the Windows rig,
+    # where the shell has no rm and CreateProcess raises FileNotFoundError --
+    # the anchor moved, the gates went green, and the freeze died right here
+    # (30/08). ignore_errors keeps a locked runtime directory from aborting
+    # the freeze the way a stray stack process would.
+    for cache in ROOT.rglob("__pycache__"):
+        if ".git" not in cache.parts:
+            shutil.rmtree(cache, ignore_errors=True)
+    shutil.rmtree(ROOT / "validation", ignore_errors=True)
     r = subprocess.run(
         [
             sys.executable,
