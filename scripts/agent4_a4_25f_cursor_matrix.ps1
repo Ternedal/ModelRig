@@ -65,7 +65,10 @@ function Run-CursorStage {
     $file = "a4-25f-cursor-$Stage.json"
     Invoke-Adb -DeviceSerial $DeviceSerial shell run-as $packageName rm -f "files/$file" | Out-Null
     Invoke-Adb -DeviceSerial $DeviceSerial shell am force-stop $packageName | Out-Null
-    Invoke-Adb -DeviceSerial $DeviceSerial shell am start -W -n "$packageName/$activity" --es stage $Stage | Out-Null
+    # -W would bind as a PowerShell parameter name on the advanced function
+    # (ambiguous with -WarningAction/-WarningVariable) and the whole script
+    # died before its first stage. Bind the adb argv explicitly instead.
+    Invoke-Adb -DeviceSerial $DeviceSerial -Arguments @('shell', 'am', 'start', '-W', '-n', "$packageName/$activity", '--es', 'stage', $Stage) | Out-Null
     $deadline = (Get-Date).AddSeconds(30)
     do {
         try {
