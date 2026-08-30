@@ -16,6 +16,21 @@ import org.junit.Test
  */
 class AgentSurfacePresentationTest {
 
+    private fun terminalRun(
+        state: String,
+        id: String = "r1",
+        error: String? = null,
+    ) = dk.ternedal.modelrig.net.Agent3Client.Run(
+        id = id,
+        state = state,
+        routeKind = "rig_tools_local",
+        currentStep = 0,
+        steps = emptyList(),
+        answer = null,
+        error = error,
+        termination = null,
+    )
+
     private fun readiness(
         selected: String = "agent3_readonly",
         fallback: String = "agent2",
@@ -86,6 +101,39 @@ class AgentSurfacePresentationTest {
         // Riggen svarer 501 når replanneren ikke er mountet. "0
         // omplanlægninger" ville da påstå mere end serveren har sagt.
         assertNull(AgentRunPresentation.replanLine(null))
+    }
+
+    @Test
+    fun `udfaldet vises for hver terminal tilstand`() {
+        assertEquals("Afsluttet.", AgentRunPresentation.outcomeLine(terminalRun("completed")))
+        assertEquals(
+            "Stoppet — kørslen blev afbrudt.",
+            AgentRunPresentation.outcomeLine(terminalRun("cancelled")),
+        )
+        assertEquals(
+            "Stoppet — trinnet der var i gang nåede at blive færdigt.",
+            AgentRunPresentation.outcomeLine(terminalRun("completed_after_cancel")),
+        )
+        assertEquals(
+            "Fejlede: ollama svarede ikke",
+            AgentRunPresentation.outcomeLine(terminalRun("failed", error = "ollama svarede ikke")),
+        )
+        assertEquals("Fejlede.", AgentRunPresentation.outcomeLine(terminalRun("failed")))
+    }
+
+    @Test
+    fun `en koersel der stadig koerer har intet udfald`() {
+        assertNull(AgentRunPresentation.outcomeLine(terminalRun("running")))
+        assertNull(AgentRunPresentation.outcomeLine(null))
+    }
+
+    @Test
+    fun `boundRun finder ogsaa den afsluttede koersel`() {
+        val finished = terminalRun("completed", id = "r9")
+        assertEquals(finished, AgentRunPresentation.boundRun(listOf(finished), "r9"))
+        // visibleRun skjuler den med vilje -- boundRun er modstykket.
+        assertNull(AgentRunPresentation.visibleRun(listOf(finished), "r9"))
+        assertNull(AgentRunPresentation.boundRun(listOf(finished), null))
     }
 
     @Test

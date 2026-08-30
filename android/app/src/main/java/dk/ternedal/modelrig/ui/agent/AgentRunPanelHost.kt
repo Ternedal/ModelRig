@@ -164,6 +164,9 @@ fun AgentRunPanelHost(
     // (replans_visible). Null betyder "riggen tæller dem ikke her", og så
     // vises linjen ikke -- ikke "0".
     var replans by remember(boundRunId) { mutableStateOf<Int?>(null) }
+    // Udfaldet af den kørsel der lige sluttede. Kortet forsvinder med vilje,
+    // men operatøren skal kunne se HVAD der skete (terminal_outcome_visible).
+    var outcome by remember(boundRunId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(boundRunId, baseUrl, token) {
         // Readiness er billig og ændrer sig sjældent under en kørsel: hentes
@@ -192,7 +195,11 @@ fun AgentRunPanelHost(
                 }
                 if (visible == null) {
                     // Kørslen er slut (eller findes ikke mere): bindingen skal
-                    // ikke overleve den, ellers spøger den i samtalen.
+                    // ikke overleve den, ellers spøger den i samtalen. Men
+                    // udfaldet bliver stående, så operatøren kan se det.
+                    outcome = AgentRunPresentation.outcomeLine(
+                        AgentRunPresentation.boundRun(runs, boundRunId),
+                    )
                     bindings.clear(conversationId)
                     keepAsking = false
                 }
@@ -210,7 +217,10 @@ fun AgentRunPanelHost(
             AgentRunUnavailableNote()
             return@Column
         }
-        if (current == null) return@Column
+        if (current == null) {
+            outcome?.let { AgentRunOutcomeNote(it) }
+            return@Column
+        }
         surface?.let { ui ->
             AgentSurfaceNote(
                 line = AgentRunPresentation.surfaceLine(ui),
@@ -241,6 +251,9 @@ fun AgentRunPanelHost(
                         // RIGGENS svar bestemmer — ikke vores håb.
                         res.onSuccess { updated ->
                             if (AgentRunPresentation.isTerminal(updated)) {
+                                // Samme regel som når kørslen slutter af sig
+                                // selv: kortet går væk, udfaldet bliver.
+                                outcome = AgentRunPresentation.outcomeLine(updated)
                                 bindings.clear(conversationId)
                                 run = null
                             } else {
@@ -261,6 +274,16 @@ fun AgentRunPanelHost(
  * være et gæt, og et gæt om en kørsel der måske stadig arbejder på riggen er
  * den værste slags.
  */
+@Composable
+private fun AgentRunOutcomeNote(line: String, modifier: Modifier = Modifier) {
+    Text(
+        line,
+        color = KalivTheme.colors.textMuted,
+        fontSize = 11.sp,
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
 @Composable
 private fun AgentSurfaceNote(
     line: String,

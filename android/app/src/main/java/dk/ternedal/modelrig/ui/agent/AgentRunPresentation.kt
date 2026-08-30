@@ -103,6 +103,40 @@ object AgentRunPresentation {
     }
 
     /**
+     * Kørslen som den ER, terminal eller ej — modstykket til visibleRun().
+     *
+     * visibleRun() skjuler med vilje en afsluttet kørsel, så kortet ikke
+     * bliver stående som om noget stadig sker. Men udfaldet skal ses
+     * (terminal_outcome_visible), og det kræver adgang til den kørsel der
+     * lige sluttede.
+     */
+    fun boundRun(runs: List<Agent3Client.Run>, boundRunId: String?): Agent3Client.Run? {
+        if (boundRunId.isNullOrBlank()) return null
+        return runs.firstOrNull { it.id == boundRunId }
+    }
+
+    /**
+     * Udfaldslinjen for en afsluttet kørsel. Null for en kørsel der stadig
+     * kører — og for en kørsel riggen ikke har meldt et udfald for; vi
+     * opfinder ikke et.
+     */
+    fun outcomeLine(run: Agent3Client.Run?): String? {
+        if (run == null || !isTerminal(run)) return null
+        val error = run.error?.trim()
+        return when (run.state.trim().lowercase()) {
+            "cancelled" -> "Stoppet — kørslen blev afbrudt."
+            "completed_after_cancel" ->
+                "Stoppet — trinnet der var i gang nåede at blive færdigt."
+            "failed" ->
+                if (error.isNullOrBlank()) "Fejlede." else "Fejlede: $error"
+            "blocked" ->
+                if (error.isNullOrBlank()) "Blokeret." else "Blokeret: $error"
+            "completed", "succeeded" -> "Afsluttet."
+            else -> null
+        }
+    }
+
+    /**
      * Replan-linjen. Null ind betyder at riggen ikke tæller omplanlægninger
      * for denne kørsel, og så vises intet -- at skrive "0 omplanlægninger"
      * ville påstå mere end serveren har sagt.
