@@ -20,7 +20,7 @@ dependencies {
     // QR-parring, rig-siden. SAMME artefakt som Android-appen bruger til at
     // LAESE koden — her bruges den til at SKRIVE den. Ren Java, ingen
     // Android/Play Services-binding.
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:core:3.5.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     // SQLite-first, per project convention. Android uses its built-in SQLite;
     // plain JVM needs an explicit embedded driver -- this is that driver, not a
