@@ -17,7 +17,13 @@ val ksProps = Properties().apply {
 
 android {
     namespace = "dk.ternedal.modelrig"
-    compileSdk = 36
+    // 37, ikke 36: okhttp-android 5.5.0 (og dermed mockwebserver-bumpet i
+    // #759) kræver at afhængige projekter kompilerer mod API 37 eller nyere.
+    // compileSdk siger kun hvilke API'er koden MÅ bruge -- targetSdk og
+    // minSdk er urørte, så hverken runtime-adfærd eller understøttede
+    // enheder ændrer sig. Pixel 6a på riggen kører allerede SDK 37
+    // (jf. A4-25f-evidensens android_sdk_int).
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dk.ternedal.modelrig"
