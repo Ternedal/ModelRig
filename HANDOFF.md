@@ -771,7 +771,56 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 27/8)
+## 9. Kø — hvem har bolden (16/7, opdateret 30/8)
+
+**[30/8 kl. 21:00 UTC — status. main = `05e6b93d`+, VERSION 2.0.13. Frosset
+kandidat = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`
+(`anchor_and_freeze`, alle fire exact-SHA-gates grønne). 27/8-blokken nedenfor
+er historik.]**
+
+### Hvad der skete 29-30/8
+
+- **Agent 4 er kvalificeret, godkendt og aktiveret.** A4-25f kørt fysisk
+  igennem for første gang: `physical_qualification_evidence_complete: true`,
+  14/14 HTTP-trials, cursor-matrix, mutationskæde og cleanup verificeret,
+  root-kæde `47529c6f…` → `e70a781f…`. Menneskelig GO registreret (Anders,
+  30/8 18:10Z), og `KALIV_AGENT4_OPERATOR_API=1` sat på appliancen —
+  operator-fladen svarer 401, altså live og token-vogtet.
+  `production_activation` er fortsat false. Sporing: #474, #731.
+- **Scheduleren og Agent 3-readiness aktiveret** 29/8 (Fase 2 + Fase 3's
+  developer-flade): `/api/v1/schedules` svarer 401, og workerens
+  task-readiness siger `agent3_readonly` efter en fejlfri 20/20-pilot.
+- **Tre fejl blokerede A4-kæden i to æraer** — #797 (snapshot-operatorens
+  fejlsvar bar `application/json`; fixture-hosten bygger sin egen app, så
+  #794's mount-handler nåede den aldrig), #794 (`-W` bandt som
+  PowerShell-parameternavn; `pm path` exit 1 tolket som værktøjsfejl) og
+  #798 (`rm -rf` i `anchor_and_freeze` på en Windows-only rig).
+- **Rodårsag fundet for tre døgns spøgelser:** en env-spejling tog
+  `# kommentaren` med ind i variablens VÆRDI, så `MODELRIG_OLLAMA_URL` pegede
+  på en ødelagt URL. Det forklarede `bad upstream request`, embeddings-405 og
+  T-023's `plan → 500` på én gang. Env-filer må kun parses med kommentar-strip.
+- **Task-UI: tidligere konklusion var forkert.** Fladen findes — som den
+  dedikerede skærm `Agent3TaskScreen` (`kaliv://tasks`), ikke i chat-panelet.
+  Runbooken mapper nu alle tretten checks til deres plads på den skærm.
+  Chattens Agent-række er kun klikbar med parret rig, `rig`-mode OG tekst i
+  feltet. Panelet fik surface/reason/fallback (#799), replans (#800),
+  terminal-udfald (#801) og serverautoritativt Stop (#805, ægte T-023-brud).
+- **Vedligehold:** dependabot-puljen ryddet (#760, #761, #762, #764, #767).
+  `compileSdk` hævet til 37 (#803) — det blokerede både okhttp- og
+  compose-bom-linjen. CodeQL-trinnene flyttet samlet til v4.37.8 (#804);
+  dependabots enkeltvise PRs kunne aldrig bestå.
+
+### Bolden ligger hos Anders
+
+1. **2.0.13 på appliancen** — den kører stadig 2.0.12-binærer, mens
+   kvalifikationen er bundet til 2.0.13-koden. Stage B-updater-runde.
+2. **task_ui-beviset** — åbn `kaliv://tasks`, følg runbookens tabel,
+   sæt krydserne, kør valideringen. Estimeret et kvarter.
+3. **Beslutninger:** gradle-wrapper-majoren (#763), tærskeldommen på
+   workflow-tallene (de rene 2.0.13-tal mangler), og hvad der skal ske med
+   de tre gamle feature-spor (#720, #395, #338).
+4. **#789** (crash ved første send efter frisk parring) mangler en
+   `adb logcat -b crash -d` — kodelæsning fandt ingen usikre kald.
 
 **[27/8 kl. 21:30 UTC — status. main = `178a352f`, VERSION 2.0.12, seneste tag
 v2.0.12 (shipped 26/8 på én dag: bump #756 → æra-pakke #757 → Stage A 7/7 →
