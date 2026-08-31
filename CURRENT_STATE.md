@@ -374,6 +374,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_design_tokens.py`
 - `tests/workflow_desktop_agent3_termination_ui_contract.py`
 - `tests/workflow_doc_authority.py`
+- `tests/workflow_doc_candidate_freshness.py`
 - `tests/workflow_era_pins.py`
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_milestone3_current_main.py`
