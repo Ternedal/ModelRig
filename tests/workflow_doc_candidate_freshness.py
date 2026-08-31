@@ -36,6 +36,12 @@ OPERATIONAL_DOCS = (
     "STAGED_PHYSICAL_PROMOTION.md",
     "PHYSICAL_VALIDATION_CAMPAIGN.md",
     "STAGE_B_UPDATER_EVIDENCE.md",
+    # The physical runbooks under docs/ name no candidate today, so these
+    # two entries find nothing -- they are here for the era after next,
+    # when someone writes one in. A gate that only covers the documents
+    # that have already drifted protects nothing.
+    "docs/agent4/A4-25F_PHYSICAL_QUALIFICATION_RUNBOOK.md",
+    "docs/agent4/A4-18R_PHYSICAL_READ_PRODUCT.md",
 )
 
 # HANDOFF is a journal: check only the newest status block.
