@@ -229,11 +229,14 @@ fun AgentRunPanelHost(
             )
             Spacer(Modifier.height(6.dp))
         }
+        val plan = current.termination?.plan
         AgentRunCard(
             steps = AgentRunPresentation.steps(current),
             title = AgentRunPresentation.title(current),
             onStop = { stopArmed = true },
             onOpen = onOpenCheckpoint,
+            canStop = plan?.canRequest ?: true,
+            stopBlockedReason = plan?.reason,
         )
         if (stopArmed) {
             Spacer(Modifier.height(6.dp))

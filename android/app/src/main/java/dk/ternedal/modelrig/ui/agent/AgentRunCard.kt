@@ -52,6 +52,13 @@ fun AgentRunCard(
     modifier: Modifier = Modifier,
     title: String = "Plan",
     onOpen: (() -> Unit)? = null,
+    // Serveren afgør om planen overhovedet kan afbrydes. Kortet viste Stop
+    // ubetinget, altså også for et trin runtime ikke har et handle til --
+    // præcis den falske kontrol T-023 forbyder. Default true, så
+    // eksisterende kaldesteder og screenshots er uændrede; panelet sender
+    // den ægte værdi fra run.termination.plan.
+    canStop: Boolean = true,
+    stopBlockedReason: String? = null,
 ) {
     val shape = RoundedCornerShape(KalivTokens.Radius.card)
     Column(
@@ -74,16 +81,26 @@ fun AgentRunCard(
                 color = KalivTheme.colors.textSoft,
             )
             Spacer(Modifier.weight(1f))
-            Box(
-                Modifier
-                    .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(KalivTokens.Radius.round))
-                    .clickable(onClickLabel = "Stop plan") { onStop() }
-                    .padding(horizontal = 13.dp, vertical = 5.dp),
-            ) {
+            if (canStop) {
+                Box(
+                    Modifier
+                        .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(KalivTokens.Radius.round))
+                        .clickable(onClickLabel = "Stop plan") { onStop() }
+                        .padding(horizontal = 13.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        "Stop",
+                        style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
+                        color = KalivTheme.colors.danger,
+                    )
+                }
+            } else if (!stopBlockedReason.isNullOrBlank()) {
+                // Ingen knap, men heller ingen tavshed: serverens egen
+                // begrundelse for at planen ikke kan afbrydes lige nu.
                 Text(
-                    "Stop",
-                    style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 13.sp),
-                    color = KalivTheme.colors.danger,
+                    stopBlockedReason,
+                    style = TextStyle(fontFamily = KalivType.Inter, fontSize = 12.sp),
+                    color = KalivTheme.colors.textMuted,
                 )
             }
         }
