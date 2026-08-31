@@ -309,3 +309,45 @@ forbindes igen med de to porte enheden selv viser.
    baggrundstråd.
 3. **Production activation** er et selvstændigt, senere skridt med egen
    bevisrunde bag aktiverings-flip-værnet.
+
+
+## Task-UI-beviset: hvor operatøren finder de tretten krav
+
+`scripts/agent3_task_ui_validation.py` kræver tretten observationer pr.
+klient. De ligger IKKE i chat-panelet, men på den dedikerede
+operatør-skærm `Agent3TaskScreen` ("Kaliv Opgaver"), som bruger sin egen
+`Agent3ReadonlyTaskClient` mod task-fladen.
+
+**Sådan åbnes den.** Skærmen har ingen knap i UI'et endnu; den åbnes via
+dyb-link eller Intent:
+
+    adb shell am start -a android.intent.action.VIEW -d "kaliv://tasks"
+
+Chattens Agent-række i Kapaciteter er noget andet: den er KUN klikbar når
+riggen er parret, mode er `rig`, OG der står tekst i skrivefeltet — agenten
+planlægger for en besked, ikke for ingenting. Med tomt felt sker der intet,
+og undertitlen forklarer det ikke (kendt UX-hul; ændringen venter på at
+Kapaciteters golden-screenshots kan genskabes).
+
+**Hvor kravene ses på skærmen:**
+
+| Krav | Hvor |
+|---|---|
+| `selected_surface_visible` | Topkortets overskrift: "Agent 3 read-only valgt af serveren" (grøn) eller "Agent 2 fallback" (gul), plus `Aktiv surface`-rækken |
+| `server_reason_visible` | Linjen under overskriften: serverens `reason` ordret, fx `agent3_readonly_selected`; `readiness_unavailable` hvis readiness ikke kunne hentes |
+| `fallback_visible` | `Fallback`-rækken i topkortet, og overskriftens gule tilstand når fladen ER faldet tilbage |
+| `replans_visible` | `Replans`-rækken (og `Retry-events` ved siden af) |
+| `plan_review_visible` | `Lav plan-preview` → plan-kortet med de foreslåede trin |
+| `preview_did_not_execute` | Preview'et alene ændrer intet; `Start` er et separat, serverbundet klik |
+| `no_write_controls` | Feltets hjælpetekst: kun lokale, idempotente read-tools kan godkendes af serveren; write-trin kan ikke startes |
+| `tool_status_visible` | Trin-status i kørselskortet efter start |
+| `stop_visible` | `Stop` på plan-kortet — serverautoriseret, ikke en klient-annullering |
+| `stop_after_fallback` | Stop forbliver på skærmen i fallback-tilstand: pollingen stopper først når serverens kvittering siger det, aldrig fordi HTTP-kaldet blev afbrudt |
+| `receipts_visible` | `ReceiptCard` — vises både for preview og for kørselssnapshot |
+| `terminal_outcome_visible` | Kørselssnapshottets terminal-tilstand |
+| `normal_chat_round_trip` | Noten nederst: normal chat er urørt — bekræftes ved én almindelig besked i chatten uden tools |
+
+Krydserne sættes i `validation/agent3-task-ui-observations.json` og må kun
+sættes for det, der ER set. Efter redigering køres
+`scripts/agent3_task_ui_validation.py` med en frisk device-token; den
+binder observationerne til kandidatens sha og hasher evidensfilerne.
