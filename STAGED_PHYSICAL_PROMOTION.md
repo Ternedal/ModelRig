@@ -251,6 +251,44 @@ dem. Stop/fallback-proben tåler planner-varians (op til tre plan-forsøg fra
 
 
 
+
+## T-033 kræver en ANDEN Windows-bruger — vid det før kampagnen
+
+T-033 er det fysiske bevis for DPAPI-beskyttet backup/restore af Agent 3's
+hukommelse. Pointen med prøven er, at en anden Windows-konto (en anden SID)
+IKKE kan læse det, den første konto har beskyttet — så den kan ikke køres
+færdig fra én bruger.
+
+Kampagnen gør det i tre trin og pauser selv mellem dem:
+
+1. `prepare` kører automatisk som operatøren (samme-bruger backup/restore og
+   plaintext-scan). Kampagnen stopper med gult og printer den præcise
+   kommando til trin 2.
+2. `probe` kører **som en anden lokal Windows-konto** mod en staging-bundle i
+   `C:\Users\Public`. Nemmest fra samme skrivebord, uden at logge ud:
+
+       runas /user:<ANDEN-BRUGER> "python \"C:\Users\admin\Desktop\ModelRig-git\scripts\proof_t033_current.py\" probe --campaign-id <ID>"
+
+   Campaign-id'et står i kampagnens output. Kontoen skal findes på forhånd —
+   en almindelig lokal standardbruger rækker, den behøver ikke admin.
+3. Kør `START_PROOF_CAMPAIGN.cmd` igen fra ejer-sessionen; `collect` sker
+   automatisk, kræver den eksakte operatørfrase, og kører den uafhængige gate.
+
+Findes der ingen anden konto på riggen, skal den oprettes FØR kampagnen
+startes — ellers står T-033 rød, og `physical_campaign_complete` kan ikke
+blive sand.
+
+## Agent 4 i 2.0.13: brug den kandidatbundne APK
+
+CI bygger en a425f-APK pr. push til proof-branchen (workflow `a425f-apk`,
+artefakt `kaliv-a425f-apk-<exact-sha>`). Brug DEN til kampagnen — ikke en
+APK fra en tidligere æra, selv om `Prepare` accepterer den: evidensens
+`apk_sha256` skal svare til kandidaten.
+
+    gh run download <run-id> -n kaliv-a425f-apk-<exact-sha> -D $env:TEMP\a425f-<kort-sha>
+
+`Prepare` installerer den selv over adb, når `-ApkPath` peger på filen.
+
 ## T-023: kør ALTID gennem proof-wrapperen
 
 `scripts/proof_t023_current.py` er den eneste rigtige indgang under en
