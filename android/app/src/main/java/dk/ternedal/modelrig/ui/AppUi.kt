@@ -965,6 +965,12 @@ private fun ChatScreen(
     var rigOnline by remember { mutableStateOf<Boolean?>(null) }
     var lastOnlineAt by remember { mutableStateOf<Long?>(null) }
     var pingBusy by remember { mutableStateOf(false) }
+    // Cloud-tilbuddet stilles én gang pr. session. Riggen kan være nede i
+    // lang tid, og banneret dukkede op igen hver gang man skiftede tilbage
+    // til rig-mode -- altså samme spørgsmål igen og igen efter man havde
+    // svaret. Selve offline-beskeden bliver (den er sand og styrer køen),
+    // men knappen forsvinder: valget er truffet og kendt.
+    var cloudOfferTaken by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<String?>(null) }
     var updDownloading by remember { mutableStateOf(false) }
     var updProgress by remember { mutableStateOf(0) }
@@ -2229,7 +2235,7 @@ private fun ChatScreen(
                 lastSeenLabel = lastOnlineAt?.let {
                     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))
                 },
-                showCloudSwitch = hasCloud,
+                showCloudSwitch = hasCloud && !cloudOfferTaken,
                 retryBusy = pingBusy,
                 onRetry = {
                     pingBusy = true
@@ -2242,7 +2248,10 @@ private fun ChatScreen(
                         pingBusy = false
                     }
                 },
-                onSwitchCloud = { mode = "cloud"; store.chatMode = "cloud"; ragMode = false },
+                onSwitchCloud = {
+                    cloudOfferTaken = true
+                    mode = "cloud"; store.chatMode = "cloud"; ragMode = false
+                },
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
             )
         }
