@@ -2194,15 +2194,22 @@ private fun ChatScreen(
                     else -> "◈ tekst: $currentModel"
                 }
                 Text(textLabel, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-                Spacer(Modifier.width(10.dp))
-                // Voice routing: cloud only when the toggle is on AND a key exists.
-                val voiceCloud = voiceUsesCloud && store.cloudKey != null
-                val voiceLabel = if (voiceCloud) "☁ tale: ${store.voiceCloudModel}" else "🎙 tale: $currentModel"
-                Text(
-                    voiceLabel,
-                    color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
-                    fontSize = 11.sp,
-                )
+                // Tale-etiketten følger mikrofonen: den vises kun i rig-mode,
+                // hvor mic-knappen findes. I cloud-mode er knappen væk (ASR
+                // kører rig-side), så en "🎙 tale: …"-linje dér lovede en
+                // kapabilitet man ikke kunne starte -- samme slags falske
+                // signal som en Stop-knap uden handle bag.
+                if (mode == "rig") {
+                    Spacer(Modifier.width(10.dp))
+                    // Voice routing: cloud only when the toggle is on AND a key exists.
+                    val voiceCloud = voiceUsesCloud && store.cloudKey != null
+                    val voiceLabel = if (voiceCloud) "☁ tale: ${store.voiceCloudModel}" else "🎙 tale: $currentModel"
+                    Text(
+                        voiceLabel,
+                        color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                }
             }
             if (ingesting || ingestStatus != null || ingestError != null) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
