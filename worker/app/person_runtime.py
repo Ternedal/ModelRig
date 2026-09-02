@@ -81,3 +81,18 @@ def resolve_system_prompt(client_system: str | None) -> tuple[str | None, dict[s
         "personality_revision": bindings["personality"]["id"],
     }
     return (prompt or (client_system or None)), descriptor
+
+
+UNBOUND_SOURCES = {"", "unbound", "none", "-"}
+
+
+def active_voice_source() -> str | None:
+    """The selected person's voice source id (a VoiceRig voice id), or None
+    when no person is active or the voice candidate is still unbound. Read
+    through active_bindings() like the personality, so the voice can only
+    ever be the one the active Person Revision names."""
+    bindings = active_person()
+    if bindings is None:
+        return None
+    source = str(bindings["voice"].get("source_id", "")).strip()
+    return None if source.lower() in UNBOUND_SOURCES else source

@@ -221,21 +221,40 @@ def _synthesize_piper(text: str, out_path: str) -> dict:
     }
 
 
-def _synthesize_voicerig(text: str, out_path: str) -> dict:
-    body = json.dumps({"text": text}).encode("utf-8")
+def _voicerig_request(text: str, voice_id: "str | None"):
+    payload = {"text": text}
+    if voice_id:
+        # Person Profile binding (#752): ask for the selected person's voice.
+        # VoiceRig owns whether the id is honoured; we verify on the way back.
+        payload["voice_id"] = voice_id
     req = urllib.request.Request(
         _voicerig_base_url() + "/api/tts/synthesize",
-        data=body,
+        data=json.dumps(payload).encode("utf-8"),
         method="POST",
         headers={
             "Content-Type": "application/json",
             "Accept": "audio/wav",
         },
     )
+    with urllib.request.urlopen(req, timeout=_voicerig_timeout()) as resp:
+        return resp.read(), resp.headers
+
+
+def _synthesize_voicerig(text: str, out_path: str) -> dict:
+    from . import person_runtime
+
+    requested = person_runtime.active_voice_source()
     try:
-        with urllib.request.urlopen(req, timeout=_voicerig_timeout()) as resp:
-            raw = resp.read()
-            headers = resp.headers
+        try:
+            raw, headers = _voicerig_request(text, requested)
+        except urllib.error.HTTPError as exc:
+            if requested and 400 <= exc.code < 500:
+                # An older VoiceRig that rejects the voice_id field must not
+                # silence Kaliv: speak with its current profile and report the
+                # binding as not honoured instead of failing the turn.
+                raw, headers = _voicerig_request(text, None)
+            else:
+                raise
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:500]
         raise RuntimeError(f"VoiceRig TTS failed: HTTP {exc.code}: {detail}") from exc
@@ -273,6 +292,14 @@ def _synthesize_voicerig(text: str, out_path: str) -> dict:
         "package": headers.get("X-VoiceRig-Package"),
         "device": headers.get("X-VoiceRig-Device"),
         "provider": "voicerig",
+        # Person Profile binding (#752). None: no person voice requested.
+        # True: VoiceRig spoke with the person's voice. False: it spoke with
+        # another profile -- audible truth over a quiet mismatch.
+        "requested_voice_id": requested,
+        "voice_bound": (
+            None if not requested
+            else headers.get("X-VoiceRig-Voice-ID") == requested
+        ),
     }
 
 
