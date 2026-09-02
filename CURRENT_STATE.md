@@ -401,6 +401,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_scheduler_pilot_wizard.py`
 - `tests/workflow_screen_insets.py`
 - `tests/workflow_spec_contract.py`
+- `tests/workflow_stack_starter_scheduler_env.py`
 - `tests/workflow_stage_a_checkpoint.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
