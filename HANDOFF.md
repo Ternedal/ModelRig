@@ -771,7 +771,47 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 2/9)
+## 9. Kø — hvem har bolden (16/7, opdateret 2/9 aften)
+
+**[2/9 kl. 20:30 UTC — status. main = `#827`-landing, VERSION 2.0.13. Frosset
+kandidat uændret (`4f80693f`). 2/9-middagsblokken nedenfor er historik.]**
+
+### Eftermiddag 2/9: #752 Person Profile — hele featuren landet
+
+Kaliv kan være flere personer. Syv PRs, alle CI-grønne:
+
+- **Registry** (#821): `worker/app/person_registry.py` — stabilt
+  `person-<32 hex>`, komponentrevisioner som kandidater, uforanderlige
+  Person Revisions gated af det fulde compatibility-review, **én**
+  aktiveringsvej (`active_person_revision`). Rutesættet er kontrakten; en
+  test over ruteinventaret beviser at ingen sti kan aktivere én komponent.
+- **Backend** (#822): `/api/v1/persons` bag device-token, lukket allowlist,
+  404 før worker-hit for ugyldige id'er og enkeltkomponent-forsøg.
+- **Runtime** (#823): en valgt persons aktive personality ER system-prompten
+  på `tools/chat`; svaret bærer `person`. Uden valgt person: uændret.
+- **Skærm** (#824): ⋮ → **Personer** / launcher-genvej / `kaliv://persons`.
+  Viser hvem Kaliv taler som, lister, vælger. Ingen aktiveringsknap med
+  vilje — review er en operatørhandling.
+- **Værktøj** (#825): `scripts\person_create.py` — én kommando fra intet
+  til en person der taler; nægter uden `--reviewed`.
+- **Stemme** (#826 + rettelse #827): workeren sender `voice_package` (VoiceRigs
+  eget felt; `.mrvoice`-filnavn) og verificerer `X-VoiceRig-Package` →
+  `voice_bound`. Virker mod VoiceRig som den er i dag. #826 brugte et
+  opfundet `voice_id`, som pydantic droppede stille — læs den andens kode
+  først.
+
+Kontrakten: `docs/PERSON_PROFILE.md`. Kendte huller dér: plain
+`/api/v1/chat` (uden om workeren) er ikke bundet; body-binding er BodyRigs
+spor.
+
+### Bolden ligger hos Anders
+
+1. **Dev-kanalen, første kørsel** (tre kommandoer i `DEV_APPLIANCE.md`).
+2. **Bekræft #789 død** — frisk parring, ét send.
+3. **Opret Kaliv som person** — `person_create.py` (`--voice-source
+   <navn>.mrvoice` hvis en profil er installeret), åbn Personer, send én
+   besked, se `person` i svaret og hør stemmen.
+4. Uændret: #763, workflow-tærsklen, de tre gamle feature-spor.
 
 **[2/9 kl. 12:00 UTC — status. main = `b4bb1ed2`, VERSION 2.0.13. Frosset
 kandidat uændret = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`.
