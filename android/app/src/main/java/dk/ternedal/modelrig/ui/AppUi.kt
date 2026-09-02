@@ -1410,6 +1410,15 @@ private fun ChatScreen(
     LaunchedEffect(cloudModelTick) { cloudModel = store.cloudModel }
 
     LaunchedEffect(openConvId) {
+        // The send path creates the conversation lazily and reports its id
+        // through onConvChanged -- which lands right here, while the first
+        // reply is still streaming. Clearing and reloading on THAT change
+        // replaced the list under the stream's feet: the first delta then
+        // indexed past the reloaded [user] and killed the app (#789: crash on
+        // the first send after a fresh pairing, never after a restart, where
+        // convId already exists). Only a switch to a DIFFERENT conversation
+        // reloads; the id this screen just minted is already on screen.
+        if (openConvId != null && openConvId == convId) return@LaunchedEffect
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
@@ -1488,7 +1497,10 @@ private fun ChatScreen(
 
             val onDelta: (String) -> Unit = { delta ->
                 scope.launch {
-                    val cur = messages[idx]
+                    // Nested launch: an exception here is NOT caught by the
+                    // runCatching around the stream -- it is an app crash. Guard
+                    // the index; a replaced list means the user moved on.
+                    val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(text = cur.text + delta)
                 }
             }
@@ -1500,7 +1512,7 @@ private fun ChatScreen(
             }
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch {
-                    val cur = messages[idx]
+                    val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(sources = srcs)
                 }
             }
@@ -1510,7 +1522,7 @@ private fun ChatScreen(
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
-                        val cur = messages[idx]
+                        val cur = messages.getOrNull(idx) ?: return@launch
                         if (cur.streaming) messages[idx] = cur.copy(status = label)
                     }
                 }
@@ -1627,7 +1639,11 @@ private fun ChatScreen(
             activeCall = null
             // A parked write proposal: surface the card. Nothing has executed.
             proposal?.let { pendingTool = it }
-            val cur = messages[idx]
+            // The list can have been replaced mid-stream (a real conversation
+            // switch). Then there is nothing on screen to finish; bail rather
+            // than index past the end. The reply is not persisted in that
+            // case -- a loss, but a bounded one, where before it was a crash.
+            val cur = messages.getOrNull(idx) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text), fellBackToCloud = didFallback)
@@ -1679,7 +1695,7 @@ private fun ChatScreen(
         var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
             val onDelta: (String) -> Unit = { delta ->
-                scope.launch { val cur = messages[i]; messages[i] = cur.copy(text = cur.text + delta) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(text = cur.text + delta) }
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
@@ -1762,7 +1778,7 @@ private fun ChatScreen(
             activeCall = null
             // Same as the main path: a parked write proposal surfaces the card.
             proposal?.let { pendingTool = it }
-            val cur = messages[i]
+            val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text))
