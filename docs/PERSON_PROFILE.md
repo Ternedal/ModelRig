@@ -73,6 +73,8 @@ arbejdsmappe).
 ## Status
 
 - Registry, API og kontrakttests: landet (worker).
-- Backend-forwarding `/api/v1/persons` bag device-token: næste skridt.
+- Backend-forwarding `/api/v1/persons` bag device-token: landet. Lukket
+  allowlist af under-ruter; ugyldige id'er og ukendte handlinger afvises
+  FØR workeren nås; kræver loopback-worker.
 - Runtime-binding (at chat/voice faktisk anvender den valgte persons
   aktive personality): efterfølgende skridt; registret er kilden.
