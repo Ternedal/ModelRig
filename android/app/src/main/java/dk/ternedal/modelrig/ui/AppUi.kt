@@ -712,6 +712,8 @@ private data class Msg(
     // Deliberately separate from fellBackToCloud -- using cloud for voice is a
     // deliberate choice, not a fallback, and conflating them would mislead.
     val voiceModel: String? = null,
+    // Hvem der svarede (#752): sat fra riggens person-deskriptor, aldrig gaettet.
+    val personLabel: String? = null,
     val voiceViaCloud: Boolean = false,
     // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
     // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
@@ -1516,6 +1518,12 @@ private fun ChatScreen(
                     messages[idx] = cur.copy(sources = srcs)
                 }
             }
+            val onPerson: (String) -> Unit = { label ->
+                scope.launch {
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    messages[idx] = cur.copy(personLabel = label)
+                }
+            }
             // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
             // Ukendt fase -> null -> statussen staar; en nyere worker maa ikke
             // kunne blanke indikatoren.
@@ -1595,6 +1603,9 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            turn.personName?.let { name ->
+                                onPerson(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
+                            }
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -1704,7 +1715,10 @@ private fun ChatScreen(
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
-                scope.launch { val cur = messages[i]; messages[i] = cur.copy(sources = srcs) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(sources = srcs) }
+            }
+            val onPersonRetry: (String) -> Unit = { label ->
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
@@ -1741,6 +1755,9 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            turn.personName?.let { name ->
+                                onPersonRetry(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
+                            }
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -2466,6 +2483,8 @@ private fun ChatScreen(
                                 add((if (m.voiceViaCloud) "\u2601 " else "\u25c8 ") + "\ud83c\udf99 ${m.voiceModel}")
                             }
                             if (m.fellBackToCloud) add("\u2601 via cloud (rig utilg\u00e6ngelig)")
+                            // Hvem der svarede (#752) -- kun naar riggen sagde det.
+                            if (m.personLabel != null) add("\u25c8 ${m.personLabel}")
                         }
                         AssistantMessage(
                             m = ChatMessageUi(

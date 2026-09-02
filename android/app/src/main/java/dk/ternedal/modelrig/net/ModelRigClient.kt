@@ -1077,6 +1077,8 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
                 )
             }
         } ?: emptyList(),
+        personName = o.optJSONObject("person")?.optString("display_name")?.takeIf { it.isNotBlank() },
+        personRevision = o.optJSONObject("person")?.optString("person_revision")?.takeIf { it.isNotBlank() },
     )
 
     fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
@@ -1255,6 +1257,13 @@ data class ToolTurn(
      * sender navnene — så viser fladen chips som hidtil frem for at gætte.
      */
     val context: List<UsedChunk> = emptyList(),
+    /**
+     * Hvem der svarede (#752): display name og Person Revision fra riggens
+     * Person Profile-registry. Null når ingen person er valgt -- så taler
+     * Kaliv med appens sædvanlige persona, og fladen viser ingenting.
+     */
+    val personName: String? = null,
+    val personRevision: String? = null,
 )
 
 /**
