@@ -87,10 +87,11 @@ UNBOUND_SOURCES = {"", "unbound", "none", "-"}
 
 
 def active_voice_source() -> str | None:
-    """The selected person's voice source id (a VoiceRig voice id), or None
-    when no person is active or the voice candidate is still unbound. Read
-    through active_bindings() like the personality, so the voice can only
-    ever be the one the active Person Revision names."""
+    """The selected person's voice source -- the VoiceRig .mrvoice package
+    name, e.g. "kaliv.mrvoice" -- or None when no person is active or the
+    voice candidate is still unbound. Read through active_bindings() like
+    the personality, so the voice can only ever be the one the active
+    Person Revision names."""
     bindings = active_person()
     if bindings is None:
         return None

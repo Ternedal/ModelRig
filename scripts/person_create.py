@@ -85,7 +85,8 @@ def main() -> int:
     ap.add_argument("--language", default="dansk")
     ap.add_argument("--style", default="")
     ap.add_argument("--body-source", default="unbound", help="bodyid-* from BodyRig, or 'unbound'")
-    ap.add_argument("--voice-source", default="unbound", help="VoiceRig voice id, or 'unbound'")
+    ap.add_argument("--voice-source", default="unbound",
+                    help="VoiceRig .mrvoice package name (e.g. kaliv.mrvoice), or 'unbound'")
     ap.add_argument("--reviewer", required=True)
     ap.add_argument("--reviewed", action="store_true", help="I confirm the four compatibility checks")
     ap.add_argument("--note", default="")
