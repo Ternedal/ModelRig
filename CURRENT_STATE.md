@@ -249,6 +249,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_occurrence_ledger.py`
 - `tests/worker_paths.py`
 - `tests/worker_person_registry.py`
+- `tests/worker_person_runtime.py`
 - `tests/worker_pinned_http_transport.py`
 - `tests/worker_public_address_parity.py`
 - `tests/worker_rag.py`

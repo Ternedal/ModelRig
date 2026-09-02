@@ -76,5 +76,12 @@ arbejdsmappe).
 - Backend-forwarding `/api/v1/persons` bag device-token: landet. Lukket
   allowlist af under-ruter; ugyldige id'er og ukendte handlinger afvises
   FØR workeren nås; kræver loopback-worker.
-- Runtime-binding (at chat/voice faktisk anvender den valgte persons
-  aktive personality): efterfølgende skridt; registret er kilden.
+- Runtime-binding: landet for `tools/chat` og `tools/chat/stream` (den vej
+  Android altid bruger). Med en valgt person med aktiv revision vinder
+  registrets personality over klientens `system`-tekst, og svaret bærer
+  `person` (person_id, person_revision, personality_revision). Uden valgt
+  person er adfærden uændret. Plain `/api/v1/chat` går direkte til Ollama
+  uden om workeren og er IKKE bundet — kendt hul for desktop-plain-chat.
+- Voice-binding (VoiceRig-profil fra `voice`-revisionen) og body-binding
+  (BodyRig) læser samme `active_bindings()`; deres runtime-integration er
+  deres egne spor.
