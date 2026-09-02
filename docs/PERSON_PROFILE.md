@@ -97,6 +97,12 @@ arbejdsmappe).
   `person` (person_id, person_revision, personality_revision). Uden valgt
   person er adfærden uændret. Plain `/api/v1/chat` går direkte til Ollama
   uden om workeren og er IKKE bundet — kendt hul for desktop-plain-chat.
-- Voice-binding (VoiceRig-profil fra `voice`-revisionen) og body-binding
-  (BodyRig) læser samme `active_bindings()`; deres runtime-integration er
-  deres egne spor.
+- Voice-binding: landet på ModelRig-siden. Med en aktiv person hvis
+  voice-kandidat ikke er `unbound`, sender workeren `voice_id` (personens
+  `source_id`) til VoiceRigs `/api/tts/synthesize` og verificerer svaret mod
+  `X-VoiceRig-Voice-ID`; resultatet bærer `requested_voice_id` og
+  `voice_bound` (None/True/False). En ældre VoiceRig der afviser feltet
+  får ét forsøg uden — Kaliv taler stadig, og `voice_bound=false` siger
+  det. **VoiceRig-siden** (at honorere `voice_id`) er VoiceRigs kontrakt.
+- Body-binding (BodyRig) læser samme `active_bindings()`; runtime-
+  integrationen er BodyRigs spor.
