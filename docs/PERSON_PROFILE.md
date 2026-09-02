@@ -64,6 +64,21 @@ Der findes ingen rute, der aktiverer én komponent alene. Det er en del af
 kontrakten og bindes af `tests/worker_person_registry.py`, som læser
 routerens ruteinventar.
 
+## Opret den første person
+
+På riggen, mod workeren på loopback (intet token nødvendigt):
+
+    python scripts\person_create.py --name Kaliv ^
+        --instructions "Du er Kaliv, en rolig og præcis assistent." ^
+        --language dansk --style "korte svar" --reviewed --reviewer Anders
+
+Scriptet opretter identiteten, tre komponent-kandidater (`--body-source` /
+`--voice-source`, default `unbound` indtil BodyRig/VoiceRig leverer id'er),
+én Person Revision, aktiverer den og vælger personen. `--reviewed` er din
+erklæring om de fire compatibility-checks — uden det nægter scriptet.
+Fra næste besked i chatten svarer hun. Skift tilbage: vælg en anden
+person i **Personer**, eller lad `selected_person_id` stå tomt.
+
 ## Persistens
 
 Ét JSON-dokument (`modelrig-person-registry/v1`), skrevet atomisk.
