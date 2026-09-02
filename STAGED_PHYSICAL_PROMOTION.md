@@ -356,8 +356,8 @@ klient. De ligger IKKE i chat-panelet, men på den dedikerede
 operatør-skærm `Agent3TaskScreen` ("Kaliv Opgaver"), som bruger sin egen
 `Agent3ReadonlyTaskClient` mod task-fladen.
 
-**Sådan åbnes den.** Skærmen har ingen knap i UI'et endnu; den åbnes via
-dyb-link eller Intent:
+**Sådan åbnes den.** Fra chattens ⋮-menu → **Opgaver** (vises med parret rig
+i rig-mode). Alternativt via dyb-link eller Intent:
 
     adb shell am start -a android.intent.action.VIEW -d "kaliv://tasks"
 

@@ -1797,6 +1797,19 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Enheder") }, onClick = { overflow = false; onOpenDevices() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
+                        if (mode == "rig" && store.hasRig) {
+                            // Operatør-skærmen for Agent 3-opgaver fandtes kun bag
+                            // kaliv://tasks -- ingen vej ind fra UI'et. Den er
+                            // read-only og serverstyret, så et menupunkt er
+                            // ufarligt; ligesom Planer giver den kun mening med
+                            // en parret rig.
+                            DropdownMenuItem(text = { Text("Opgaver") }, onClick = {
+                                overflow = false
+                                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+                                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_TASK, true)
+                                context.startActivity(i)
+                            })
+                        }
                         if (mode == "rig" && store.cloudKey != null) {
                             DropdownMenuItem(
                                 text = {
