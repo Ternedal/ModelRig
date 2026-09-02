@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from . import ollama_client as oc
 from . import rag
 from .env_compat import legacy_names_in_use
+from . import person_runtime
 from .store import DocStore
 
 VERSION = "1.58.143"
@@ -822,8 +823,12 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         "action. If no tool fits, answer normally."
     )
     messages.append({"role": "system", "content": _tool_nudge})
-    if req.system:
-        messages.append({"role": "system", "content": req.system})
+    # Person Profile binding (#752): a selected person's active personality
+    # takes precedence over the client's persona text; with no person
+    # selected the client's prompt is used exactly as before.
+    system_text, person = person_runtime.resolve_system_prompt(req.system)
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
     trimmed = _trim_history(req.history)
     # A system message may only ever be first. One appearing mid-conversation is
     # a client bug at best, and at worst a replayed turn trying to speak with
@@ -831,8 +836,9 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     for i, m in enumerate(trimmed):
         if m.role == "system" and i > 0:
             m.role = "user"
-    if req.system:
-        # The caller passed it explicitly: drop any duplicate from history.
+    if system_text:
+        # A system prompt is in force (the caller's, or the registry's): drop
+        # any duplicate -- or a client-side legacy persona -- from history.
         trimmed = [m for m in trimmed if m.role != "system"]
     messages.extend(m.model_dump() for m in trimmed)
 
@@ -897,11 +903,16 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     messages.append(user_msg)
 
     origin = "cloud" if req.cloud_key else "local"
-    return await _run_tool_loop(
+    result = await _run_tool_loop(
         messages, req.model, req.cloud_base_url, req.cloud_key,
         req.conversation_id, origin, sources, [], on_phase=on_phase,
         context=context_used,
     )
+    if person is not None and isinstance(result, dict):
+        # Which person answered -- additive, so older clients ignore it and a
+        # newer one can show it. Absent means "no person selected".
+        result["person"] = person
+    return result
 
 
 @app.post("/tools/chat")
