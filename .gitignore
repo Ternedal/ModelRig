@@ -24,6 +24,14 @@ local.properties
 *.iml
 .kotlin/
 
+# Unity renderer proof: cache/build/editor-local state is never source authority.
+/renderers/bodyrig-unity/Library/
+/renderers/bodyrig-unity/Temp/
+/renderers/bodyrig-unity/Obj/
+/renderers/bodyrig-unity/Logs/
+/renderers/bodyrig-unity/UserSettings/
+/renderers/bodyrig-unity/Build/
+
 # OS
 .DS_Store
 Thumbs.db
