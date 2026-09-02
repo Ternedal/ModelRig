@@ -14,6 +14,7 @@ import dk.ternedal.modelrig.ui.Agent3ReplanScreen
 import dk.ternedal.modelrig.ui.Agent3ReviewScreen
 import dk.ternedal.modelrig.ui.Agent3Screen
 import dk.ternedal.modelrig.ui.Agent3TaskScreen
+import dk.ternedal.modelrig.ui.PersonsScreen
 import dk.ternedal.modelrig.ui.Agent3ValidationScreen
 import dk.ternedal.modelrig.ui.AppEntryUi
 import dk.ternedal.modelrig.ui.ScheduleScreen
@@ -39,6 +40,9 @@ class MainActivity : ComponentActivity() {
         val openAgent3Task =
             intent?.getBooleanExtra(EXTRA_AGENT3_TASK, false) == true ||
                 (intent?.data?.scheme == "kaliv" && intent?.data?.host == "tasks")
+        val openPersons =
+            intent?.getBooleanExtra(EXTRA_PERSONS, false) == true ||
+                (intent?.data?.scheme == "kaliv" && intent?.data?.host == "persons")
         val openAgent3 = intent?.getBooleanExtra(EXTRA_AGENT3, false) == true
         val openAgent3Memory = intent?.getBooleanExtra(EXTRA_AGENT3_MEMORY, false) == true
         val openAgent3Validation = intent?.getBooleanExtra(EXTRA_AGENT3_VALIDATION, false) == true
@@ -76,6 +80,12 @@ class MainActivity : ComponentActivity() {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
                         ScheduleScreen(store = store, onClose = { finish() })
+                    }
+                }
+                openPersons -> {
+                    val store = remember { TokenStore(this) }
+                    ModelRigTheme(dark = store.darkMode) {
+                        PersonsScreen(store = store, onClose = { finish() })
                     }
                 }
                 openAgent3Task -> {
@@ -149,6 +159,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_SCHEDULES = "dk.ternedal.modelrig.extra.SCHEDULES"
         const val EXTRA_AGENT3_TASK = "dk.ternedal.modelrig.extra.AGENT3_TASK"
+        const val EXTRA_PERSONS = "dk.ternedal.modelrig.extra.PERSONS"
         const val EXTRA_AGENT3 = "dk.ternedal.modelrig.extra.AGENT3"
         const val EXTRA_AGENT3_MEMORY = "dk.ternedal.modelrig.extra.AGENT3_MEMORY"
         const val EXTRA_AGENT3_VALIDATION = "dk.ternedal.modelrig.extra.AGENT3_VALIDATION"

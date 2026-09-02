@@ -24,4 +24,16 @@
             android:targetPackage="dk.ternedal.modelrig"
             android:targetClass="dk.ternedal.modelrig.MainActivity" />
     </shortcut>
+    <shortcut
+        android:shortcutId="persons"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_persons_short"
+        android:shortcutLongLabel="@string/shortcut_persons_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="kaliv://persons"
+            android:targetPackage="dk.ternedal.modelrig"
+            android:targetClass="dk.ternedal.modelrig.MainActivity" />
+    </shortcut>
 </shortcuts>

@@ -1825,6 +1825,14 @@ private fun ChatScreen(
                                 i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_TASK, true)
                                 context.startActivity(i)
                             })
+                            // Hvem Kaliv er (#752): vælg person; aktivering af
+                            // revisioner er en operatørhandling på riggen.
+                            DropdownMenuItem(text = { Text("Personer") }, onClick = {
+                                overflow = false
+                                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+                                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_PERSONS, true)
+                                context.startActivity(i)
+                            })
                         }
                         if (mode == "rig" && store.cloudKey != null) {
                             DropdownMenuItem(

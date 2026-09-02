@@ -359,7 +359,11 @@ operatør-skærm `Agent3TaskScreen` ("Kaliv Opgaver"), som bruger sin egen
 **Sådan åbnes den.** Fra chattens ⋮-menu → **Opgaver** (vises med parret rig
 i rig-mode). Alternativt via dyb-link eller Intent:
 
-    adb shell am start -a android.intent.action.VIEW -d "kaliv://tasks"
+    adb shell am start -n dk.ternedal.modelrig/.MainActivity -a android.intent.action.VIEW -d "kaliv://tasks"
+
+(`-n` er nødvendigt: manifestet registrerer kun `kaliv://pair` som dyb-link;
+`tasks`, `schedules` og `persons` løses via launcher-genvejene og
+Intent-extras, ikke via en intent-filter.)
 
 Chattens Agent-række i Kapaciteter er noget andet: den er KUN klikbar når
 riggen er parret, mode er `rig`, OG der står tekst i skrivefeltet — agenten
