@@ -108,6 +108,17 @@ func (s *server) routes() {
 	// Standing grants are a stronger capability than one-shot tool calls. Starting
 	// the local scheduler therefore does not automatically expose administration
 	// to every paired device; the backend boundary has its own explicit opt-in.
+	// Person Profile registry (#752): read and administer persons and their
+	// revisions. The worker enforces atomic activation; the backend forwards a
+	// closed allowlist behind the device token. Selecting a person is a
+	// runtime choice, not a capability grant, so no separate opt-in flag.
+	s.mux.Handle("GET /api/v1/persons", s.authMW(http.HandlerFunc(s.handlePersonsCollection)))
+	s.mux.Handle("POST /api/v1/persons", s.authMW(http.HandlerFunc(s.handlePersonsCollection)))
+	s.mux.Handle("GET /api/v1/persons/active", s.authMW(http.HandlerFunc(s.handlePersonsActive)))
+	s.mux.Handle("POST /api/v1/persons/select", s.authMW(http.HandlerFunc(s.handlePersonsSelect)))
+	s.mux.Handle("GET /api/v1/persons/{id}", s.authMW(http.HandlerFunc(s.handlePersonGet)))
+	s.mux.Handle("POST /api/v1/persons/{id}/{action}", s.authMW(http.HandlerFunc(s.handlePersonAction)))
+
 	if os.Getenv("KALIV_SCHEDULER_API") == "1" {
 		// Human schedule administration. The Bearer-authenticated backend is the
 		// remote boundary; schedules.go additionally refuses a non-loopback worker
