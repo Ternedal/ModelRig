@@ -29,6 +29,13 @@ fastapi_app.include_router(build_schedule_router())
 # collection until called and exposes no permission or activation write surface.
 fastapi_app.include_router(build_control_center_router())
 
+# Person Profile registry (#752). Route construction opens nothing; the
+# store is read on the first call. The route set is the contract: the only
+# activation route takes an approved Person Revision -- body, voice and
+# personality cannot be switched one at a time through any path here.
+from .person_api import build_person_router  # noqa: E402
+fastapi_app.include_router(build_person_router())
+
 # Middleware must be registered before the first ASGI request. It is inert when
 # no Agent 3 response exists: it only decorates JSON payloads under the dormant
 # /experimental/agent3 prefix and cannot mount or activate a route.
