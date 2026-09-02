@@ -18,6 +18,20 @@ Ny kode på riggen er derefter to skridt:
 `STOP_DEV_APPLIANCE.cmd` (eller `-Stop`) lukker dev-stakken og starter
 `KalivBootstrap` igen, så den signerede release kommer tilbage.
 
+## Telefonen: samme loop
+
+`INSTALL_DEV_APK.cmd` henter CI's kandidat-APK for `origin/main`s tip (og
+bestiller bygget, hvis det ikke findes), og installerer den over adb med
+`-r -d`. Debug- og release-builds signeres med samme `modelrig`-nøgle og
+deler pakkenavn, så den installeres **oven på** release-appen, og parringen
+bevares. Regn med 5-8 minutters CI-tid, hvis bygget ikke ligger klar.
+
+Ny kode hele vejen rundt er derfor:
+
+    git pull --ff-only
+    START_DEV_APPLIANCE.cmd
+    INSTALL_DEV_APK.cmd
+
 ## Hvad det ikke er
 
 - **Det er ikke bevis.** Intet, dev-appliancen kører, er kandidatbundet, og
