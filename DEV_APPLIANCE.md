@@ -32,6 +32,15 @@ Ny kode hele vejen rundt er derfor:
     START_DEV_APPLIANCE.cmd
     INSTALL_DEV_APK.cmd
 
+## UI-ændringer der rammer golden-screenshots
+
+CI verificerer Roborazzi-baselines, og ingen udviklingsmaskine har Android
+SDK. Derfor: lav UI-ændringen på en gren, åbn PR'en, og kør workflowet
+**record-goldens** på grenen (Actions → record-goldens → Run workflow →
+`ref` = grenens navn). Det optager alle baselines og committer de ændrede
+PNG'er tilbage til grenen; verify bliver grøn, og billed-diffen reviewes i
+PR'en. Workflowet nægter at køre mod `main`.
+
 ## Hvad det ikke er
 
 - **Det er ikke bevis.** Intet, dev-appliancen kører, er kandidatbundet, og
