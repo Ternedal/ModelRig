@@ -771,7 +771,64 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 30/8)
+## 9. Kø — hvem har bolden (16/7, opdateret 2/9)
+
+**[2/9 kl. 12:00 UTC — status. main = `b4bb1ed2`, VERSION 2.0.13. Frosset
+kandidat uændret = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`.
+30/8-blokken nedenfor er historik.]**
+
+### Beslutning 2/9: udviklingskanalen
+
+Anders: *så længe intet er i produktion, udvikles der så hurtigt som muligt.*
+Den fysiske promotion-vej (Stage A → kampagne → Stage B) er IKKE længere
+forudsætningen for at riggen kører ny kode; den er baren for produktion,
+den dag den bliver virkelig. `production_activation` er urørt overalt.
+
+Ny kode hele vejen rundt er nu tre kommandoer — se `DEV_APPLIANCE.md`:
+
+    git pull --ff-only
+    START_DEV_APPLIANCE.cmd     # backend+worker fra HEAD, egne data og env, LAN-bundet
+    INSTALL_DEV_APK.cmd         # CI's kandidat-APK over release-appen, parring bevaret
+
+`STOP_DEV_APPLIANCE.cmd` bringer den signerede release tilbage. UI-ændringer
+der rammer golden-screenshots optages af workflowet **record-goldens** på
+PR-grenen (#816) — første ægte brug var #817.
+
+### Hvad der skete 31/8-2/9
+
+- **#789 (crash ved første send efter frisk parring) — rodårsag fundet i
+  koden og fixet (#818):** `LaunchedEffect(openConvId)` ryddede og
+  genindlæste listen på det id, sendevejen selv lige havde udstedt, mens
+  første svar streamede; første delta indekserede forbi en ét-elements
+  liste fra en indlejret launch uden for `runCatching`. Effekten ignorerer
+  nu sit eget id, og alle stream-skrivninger bruger `getOrNull`. Fysisk
+  bekræftelse: ét parret send på dev-kanalen.
+- **Regression fra #785 fundet og rettet (#812):** task-ui-linjen var splejset
+  ind midt i scheduler-here-stringen, så `-EnableScheduler` stille mistede
+  `KALIV_SCHEDULER`, DB-stierne og secreten. Form-gate tilføjet.
+- **Rig-rapporterede UI-fejl fikset samme dag:** tale-etiketten i cloud-mode
+  (#809), cloud-tilbuddet stillet én gang pr. session (#810), Agent-rækkens
+  undertitel forklarer nu betingelsen (#817), og **Opgaver** i chattens
+  ⋮-menu åbner Agent 3-opgaveskærmen (#815) — den skærm der bærer alle
+  tretten task-UI-checks og før kun fandtes bag `kaliv://tasks`.
+- **Æra-drift lukket for prosa:** gate for kandidat-referencer i operative
+  runbooks (#807/#808); den fangede `PHYSICAL_VALIDATION_CAMPAIGN.md` på
+  2.0.11 i første kørsel. Tre issues (#69, #72, #401) rettet manuelt.
+- **Vedligehold:** dependabot-puljen ryddet, `compileSdk` 37 (#803), CodeQL
+  samlet til v4.37.8 (#804). T-033's krav om en anden Windows-konto og den
+  kandidatbundne a425f-APK dokumenteret (#811).
+
+### Bolden ligger hos Anders
+
+1. **Første kørsel af dev-kanalen** — tre kommandoer ovenfor. Nye scripts på
+   en maskine, de aldrig har kørt på: send outputtet, uanset hvad.
+2. **Bekræft #789 død** — fjern parring, par igen, send én besked.
+3. **task_ui-beviset** — ⋮ → Opgaver, følg tabellen i
+   `STAGED_PHYSICAL_PROMOTION.md`, sæt krydserne. Kun relevant hvis den
+   fysiske vej stadig skal lukkes for 2.0.13; ellers venter den.
+4. **Beslutninger uændret:** #763 (gradle-major), workflow-tærsklen, de tre
+   gamle feature-spor. Kandidat A (2.0.13 skiber som frosset; UI-fixes i
+   2.0.14) er valgt.
 
 **[30/8 kl. 21:00 UTC — status. main = `05e6b93d`+, VERSION 2.0.13. Frosset
 kandidat = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`
