@@ -166,6 +166,14 @@ $escapedSecret = Escape-CmdValue ([string]$SchedulerApprovalSecret)
 $schedulerValue = if ($EnableScheduler) { "1" } else { "0" }
 $schedulerApiValue = if ($EnableSchedulerApi) { "1" } else { "0" }
 $schedulerEnv = ""
+# T-023's task-UI qualification only: the flag is default-off by design, and
+# the generated cmd files build an explicit env, so process inheritance never
+# reaches the worker (#753 -- the campaign's T-023 died on operator_disabled).
+# Defined HERE, outside both scheduler branches: an earlier version of this
+# line was spliced into the middle of the scheduler here-string assignment,
+# which silently dropped KALIV_SCHEDULER, the DB paths and the approval
+# secret from the worker cmd whenever -EnableScheduler was set (#785).
+$taskUiEnv = if ($EnableTaskUi) { 'set "KALIV_AGENT3_TASK_UI=1"' } else { '' }
 $workerCommand = 'python -u -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099'
 $resolvedWorkerLog = $null
 $resolvedSchedulerDir = $null
@@ -174,12 +182,7 @@ if ($EnableScheduler) {
     $resolvedSchedulerDir = Resolve-RepoPath -Value $SchedulerDataDir -Label "SchedulerDataDir" -CreateDirectory
     $escapedSchedulerDir = Escape-CmdValue $resolvedSchedulerDir
     $pollText = $SchedulerPollSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)
-    $schedulerEnv = # T-023's task-UI qualification only: the flag is default-off by design, and
-# the generated cmd files build an explicit env, so process inheritance never
-# reaches the worker (#753 -- the campaign's T-023 died on operator_disabled).
-$taskUiEnv = if ($EnableTaskUi) { 'set "KALIV_AGENT3_TASK_UI=1"' } else { '' }
-
-@"
+    $schedulerEnv = @"
 set "KALIV_SCHEDULER=$schedulerValue"
 set "KALIV_SCHEDULER_POLL_S=$pollText"
 set "KALIV_SCHEDULES_DB=$escapedSchedulerDir\kaliv-schedules.db"
