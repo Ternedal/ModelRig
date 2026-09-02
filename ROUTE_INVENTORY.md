@@ -6,9 +6,9 @@ Aflæst fra appens OpenAPI-overflade, ikke fra importgrafer eller grep.
 En importgraf beviser at et *modul* kan nås; den siger intet om hvorvidt
 en *rute* serveres. En router kan bygges og aldrig inkluderes.
 
-- **Host-overflade (Agent 3 slukket): 45 ruter**
+- **Host-overflade (Agent 3 slukket): 54 ruter**
 - **Agent 3 tilføjer, når `KALIV_AGENT3_ENABLED=1`: 29 ruter**
-- I alt tændt: 74
+- I alt tændt: 83
 
 ## Dormans-invariant
 
@@ -24,6 +24,15 @@ og ingen af dem findes i host-overfladen.
 - `/health/deep`
 - `/health/full`
 - `/healthz`
+- `/persons`
+- `/persons/active`
+- `/persons/select`
+- `/persons/{person_id}`
+- `/persons/{person_id}/activate`
+- `/persons/{person_id}/body-revisions`
+- `/persons/{person_id}/person-revisions`
+- `/persons/{person_id}/personality-revisions`
+- `/persons/{person_id}/voice-revisions`
 - `/rag/chat`
 - `/rag/ingest`
 - `/rag/ingest/docx`
