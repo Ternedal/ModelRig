@@ -4,4 +4,6 @@
     <string name="shortcut_schedules_long">Administrér Kaliv-planer</string>
     <string name="shortcut_tasks_short">Opgaver</string>
     <string name="shortcut_tasks_long">Åbn Kaliv read-only opgaver</string>
+    <string name="shortcut_persons_short">Personer</string>
+    <string name="shortcut_persons_long">Vælg hvem Kaliv er</string>
 </resources>
