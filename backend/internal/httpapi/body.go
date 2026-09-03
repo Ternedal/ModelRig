@@ -71,3 +71,19 @@ func (s *server) handleBodySetState(w http.ResponseWriter, r *http.Request) {
 	}
 	s.forwardBody(w, r, "/body/state/"+name)
 }
+
+// Playback reports (slice B, sync). The phone tells the rig when a sentence
+// actually starts and stops playing, so the mouth follows the speaker rather
+// than the synthesizer. Utterance ids are the worker's own "voice-<hex>-<n>".
+
+var bodyUtteranceRe = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,80}$`)
+
+func (s *server) handleBodySpeech(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("utterance")
+	event := r.PathValue("event")
+	if !bodyUtteranceRe.MatchString(id) || (event != "started" && event != "ended") {
+		writeErr(w, http.StatusNotFound, "unknown speech event")
+		return
+	}
+	s.forwardBody(w, r, "/body/speech/"+id+"/"+event)
+}

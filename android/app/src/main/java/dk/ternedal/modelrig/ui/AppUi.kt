@@ -1158,7 +1158,10 @@ private fun ChatScreen(
             // Audio chunks flow from the network reader (producer) to the player
             // (consumer) through this channel. Unlimited: sentences are small and
             // we never want the reader to block on a slow player.
-            val audioChan = Channel<ByteArray>(Channel.UNLIMITED)
+            val audioChan = Channel<Pair<ByteArray, String?>>(Channel.UNLIMITED)
+            // The rig's body follows what the phone plays: report start and end
+            // of each sentence against its utterance id (slice B sync).
+            val bodyReporter = dk.ternedal.modelrig.net.BodyPlaybackReporter(store.baseUrl.orEmpty(), store.token.orEmpty())
             var transcriptText = ""
             var transcriptShown = false
             var replyIdx = -1
@@ -1173,10 +1176,12 @@ private fun ChatScreen(
                 dk.ternedal.modelrig.voice.BargeInDetector(rmsThreshold = bargeInThreshold.toDouble())
             } else null
             val player = launch(Dispatchers.IO) {
-                for (bytes in audioChan) {
+                for ((bytes, utteranceId) in audioChan) {
                     if (playbackStop.get()) break
                     speaking = true
+                    bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
+                    bodyReporter.report(utteranceId, "ended")
                     if (cut) { wasInterrupted = true; playbackStop.set(true); break }
                 }
                 speaking = false
@@ -1222,7 +1227,7 @@ private fun ChatScreen(
                                 messages.add(Msg("assistant", "", streaming = true))
                             }
                         },
-                        onChunk = { _, text, chunkB64 ->
+                        onChunk = { _, text, chunkB64, utteranceId ->
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
                             if (replyIdx in messages.indices) {
@@ -1230,7 +1235,7 @@ private fun ChatScreen(
                             }
                             if (chunkB64.isNotEmpty() && !playbackStop.get()) {
                                 val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
-                                audioChan.trySend(bytes)
+                                audioChan.trySend(bytes to utteranceId)
                             }
                         },
                         onDone = { reply, m, cloud ->

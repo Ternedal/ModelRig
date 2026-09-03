@@ -137,6 +137,34 @@ class BodySessionTests(unittest.TestCase):
         self.assertEqual(lines[0]["type"], "bodyrig.render_frame")
         self.assertGreaterEqual(lines[1]["timestamp_ms"], lines[0]["timestamp_ms"])
 
+    def test_playback_report_reanchors_the_mouth_to_the_phone(self) -> None:
+        self._select()
+        session = body_session.current_session()
+        duration = session.speak(utterance_id="s1", wav_bytes=tone_wav(400))
+        synth_now = body_session._now_ms()
+        # Synthesis-time approximation: the utterance would end at synth_now + duration.
+        # The phone starts playing 5 s later and says so.
+        import time as _t
+        _t.sleep(0.05)
+        r = self.c.post("/body/speech/s1/started")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["state"], "speaking")
+        # Re-anchored: still speaking well past the synthesis-time end.
+        frame = session.frame(timestamp_ms=synth_now + duration + 20)
+        self.assertEqual(frame["state"], "speaking")
+        self.assertGreater(frame["mouth_open"], 0.0)
+        r = self.c.post("/body/speech/s1/ended")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(session.frame()["state"], "idle")
+        self.assertEqual(self.c.post("/body/speech/never-synthesized/started").status_code, 404)
+
+    def test_interrupt_forgets_pending_tracks(self) -> None:
+        self._select()
+        session = body_session.current_session()
+        session.speak(utterance_id="s2", wav_bytes=tone_wav(300))
+        session.interrupt()
+        self.assertEqual(self.c.post("/body/speech/s2/started").status_code, 404)
+
     def test_session_is_replaced_when_the_active_body_changes(self) -> None:
         self._select()
         first = body_session.current_session()

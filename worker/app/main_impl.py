@@ -1601,6 +1601,9 @@ async def voice_converse_stream(req: ConverseUploadReq):
             "type": "chunk", "index": chunk["index"], "text": chunk["text"],
             "audio_base64": audio_b64, "synth_s": chunk.get("synth_s"),
             "ttfa_s": round(_time.time() - t_start, 2),
+            # The body's utterance for this sentence: the phone reports
+            # playback start/end against it so the mouth follows the speaker.
+            "utterance_id": chunk.get("utterance_id"),
         })
 
     async def run() -> None:

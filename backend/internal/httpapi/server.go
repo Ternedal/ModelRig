@@ -132,6 +132,7 @@ func (s *server) routes() {
 	s.mux.Handle("GET /api/v1/body/frames", s.authMW(http.HandlerFunc(s.handleBodyFrames)))
 	s.mux.Handle("POST /api/v1/body/interrupt", s.authMW(http.HandlerFunc(s.handleBodyInterrupt)))
 	s.mux.Handle("POST /api/v1/body/state/{name}", s.authMW(http.HandlerFunc(s.handleBodySetState)))
+	s.mux.Handle("POST /api/v1/body/speech/{utterance}/{event}", s.authMW(http.HandlerFunc(s.handleBodySpeech)))
 
 	if os.Getenv("KALIV_SCHEDULER_API") == "1" {
 		// Human schedule administration. The Bearer-authenticated backend is the

@@ -52,8 +52,11 @@ valgfrit `?limit=N`), `POST /body/interrupt` (hård afbrydelse: alle
 utterances annulleres, mund nulstilles, `interrupted`), `POST /body/state/{navn}`
 (klienten melder det kun den ved: `listening` når mic er åben). Uden aktiv
 krop svarer alt 404, og hooks i chat/voice er no-ops. Talestart er
-syntesetidspunkt på riggen, ikke afspilningstidspunkt på telefonen —
-klienten kan senere melde afspilningsstart for præcis synkronisering.
+syntesetidspunkt på riggen som tilnærmelse; **telefonen melder
+afspilning** (`POST /body/speech/{utterance}/started|ended`, utterance-id
+følger med hvert `chunk`-event), så munden forankres til det, der faktisk
+høres. Gamle klienter beholder tilnærmelsen; en rig uden krop svarer 404,
+og appen holder op med at melde for resten af sessionen.
 
 **Slice C — Unity frame-kilde.** Rendereren får en `BodyRigFrameSource` der
 kan læse frames fra fixturen (som nu) ELLER fra `/body/frames` (UnityWebRequest,
