@@ -825,6 +825,15 @@ Ikke en web-renderer; Unity/UniVRM-sporet fra `BODYRIG_V1.md`. Roadmap:
 Core er urørt i hver regel: workeren sekvenserer kun. Alt en Unity-klient på
 telefon/Quest skal hente fra riggen, findes nu bag device-token.
 
+### Stående instruks (Anders, 3/9): hold git opdateret
+
+Hver session: triagér dependabot (CI-grønne patch/minor-bumps landes; CodeQL-
+trinnene flyttes samlet; majors og governance-gates går til Anders), luk
+overhalede PRs, og hold draft-grene (#720, #846) merget med main, så den
+fysiske gate beviser nutidens kode. Gjort 3/9: 8 landet (#833–#836, #838,
+#839, #759, #853), 3 lukket (#840, #841, #775), #837 forklaret (Ed25519-
+review-pin), #720/#846 ajour med main (kontrakter 39/33/11 grønne).
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
