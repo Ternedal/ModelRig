@@ -92,3 +92,7 @@ A og B kan bygges og testes uden Unity og lander i dev-kanalen. C kræver at
 af Unity-projektet. MVP (den fysiske gate) er uafhængig og kan ske parallelt.
 
 Rig-runbook for den første levende krop: `docs/bodyrig/FIRST_LIVE_BODY.md`.
+
+**Parallel plan for den indlejrede vært (UaaL + ARFoundation):**
+`docs/bodyrig/KALIV_EMBEDDED_RENDERER.md` — detaljerer L2–L4 og ét åbent valg om
+MVP-værten (indlejret i Kaliv vs. separat app), som Anders afgør efter #720.
