@@ -28,13 +28,17 @@ netværkskilde. Det er hullet mellem proof og produkt.
 
 ## V1 — live krop på Windows og Android (ModelRig-spor, starter nu)
 
-**Slice A — asset-levering (renderer-neutral).** Worker: `GET /body/active`
+**Slice A — asset-levering (renderer-neutral). LANDET 3/9.** Worker: `GET /body/active`
 (manifest: body id, navn, sha256, hvilke motions findes), `/body/active/avatar.vrm`,
 `/body/active/motions/{navn}.vrma`, `/body/active/thumbnail.png` — læst gennem
 M2.8-handoff'en (kun validerede bytes, digest-bundet), for den valgte persons
 body-revision (#752) eller current-binding. Backend forwarder `/api/v1/body/*`
 bag device-token, lukket allowlist. Det er det, telefon og Quest henter
-kroppen fra; Windows-proofen kan blive ved fil-stien.
+kroppen fra; Windows-proofen kan blive ved fil-stien. Konfiguration:
+`KALIV_BODY_STORE=<profil-store-mappe>` i appliancens env; uden den svarer
+fladen 503 og siger hvilken variabel der mangler. Svar bærer
+`X-BodyRig-Body-ID`, `X-BodyRig-Package-SHA256` og `X-BodyRig-Member-SHA256`,
+som proxyen lader passere (præfiks-allowlist), så klienten kan verificere.
 
 **Slice B — live frames.** Worker: én `BodyRigRuntime`-session pr. valgt
 person, drevet af det der allerede sker i chatten: turn-start → `thinking`,

@@ -1,0 +1,96 @@
+package httpapi
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
+
+func TestBodyRoutesRequireBearerBeforeWorker(t *testing.T) {
+	hits := 0
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+	for _, path := range []string{
+		"/api/v1/body/active",
+		"/api/v1/body/active/avatar.vrm",
+		"/api/v1/body/active/thumbnail.png",
+		"/api/v1/body/active/motions/idle.vrma",
+	} {
+		for _, token := range []string{"", "wrong"} {
+			if rec := doScheduleRequest(h, http.MethodGet, path, token, ""); rec.Code != http.StatusUnauthorized {
+				t.Fatalf("GET %s token=%q: got %d, want 401", path, token, rec.Code)
+			}
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("unauthenticated requests reached worker %d time(s)", hits)
+	}
+}
+
+func TestBodyRoutesForwardBytesAndHeadersUntouched(t *testing.T) {
+	var seen []string
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "model/gltf-binary")
+		w.Header().Set("X-BodyRig-Body-ID", "bodyid-000000000000000000000abc")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("glTF\x02\x00\x00\x00"))
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+
+	cases := []struct{ path, want string }{
+		{"/api/v1/body/active", "GET /body/active"},
+		{"/api/v1/body/active/avatar.vrm", "GET /body/active/avatar.vrm"},
+		{"/api/v1/body/active/thumbnail.png", "GET /body/active/thumbnail.png"},
+		{"/api/v1/body/active/motions/talk.vrma", "GET /body/active/motions/talk.vrma"},
+	}
+	for i, c := range cases {
+		rec := doScheduleRequest(h, http.MethodGet, c.path, scheduleToken, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: got %d body=%s", c.path, rec.Code, rec.Body.String())
+		}
+		if seen[i] != c.want {
+			t.Fatalf("GET %s forwarded as %q, want %q", c.path, seen[i], c.want)
+		}
+		if rec.Header().Get("X-BodyRig-Body-ID") == "" {
+			t.Fatalf("GET %s: BodyRig headers must pass through", c.path)
+		}
+		if rec.Body.String() != "glTF\x02\x00\x00\x00" {
+			t.Fatalf("GET %s: binary body altered: %q", c.path, rec.Body.String())
+		}
+	}
+}
+
+func TestBodyRoutesRejectBadMotionNamesAndWritesBeforeWorker(t *testing.T) {
+	hits := 0
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+	for _, path := range []string{
+		"/api/v1/body/active/motions/Idle.vrma",
+		"/api/v1/body/active/motions/idle%2F..%2Fmanifest.vrma",
+		"/api/v1/body/active/motions/.vrma",
+	} {
+		if rec := doScheduleRequest(h, http.MethodGet, path, scheduleToken, ""); rec.Code != http.StatusNotFound {
+			t.Fatalf("GET %s: got %d, want 404", path, rec.Code)
+		}
+	}
+	for _, path := range []string{"/api/v1/body/active", "/api/v1/body/active/avatar.vrm"} {
+		if rec := doScheduleRequest(h, http.MethodPost, path, scheduleToken, `{}`); rec.Code == http.StatusOK {
+			t.Fatalf("POST %s must not be routable", path)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("rejected requests reached worker %d time(s)", hits)
+	}
+}
+
+func TestBodyRoutesRefuseNonLoopbackWorker(t *testing.T) {
+	h := scheduleHandler(t, "http://192.168.1.50:8099", 2*time.Second)
+	if rec := doScheduleRequest(h, http.MethodGet, "/api/v1/body/active", scheduleToken, ""); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("got %d, want 503", rec.Code)
+	}
+}
