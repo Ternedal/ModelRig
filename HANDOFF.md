@@ -802,12 +802,27 @@ Ikke en web-renderer; Unity/UniVRM-sporet fra `BODYRIG_V1.md`. Roadmap:
 - Fund undervejs: Go ServeMux tillader ikke `{name}.vrma` (ville have væltet
   backend ved opstart; test fangede det); proxyen lod kun `Content-Type`
   passere (nu præfiks-allowlist for `X-BodyRig-*`).
+- **Slice C — Unity frame-kilde (#846, DRAFT mod `agent/bodyrig-unity-renderer`):**
+  `BodyRigFrameSource` læser `/api/v1/body/frames` bag device-token gennem
+  samme `Apply` som fixturen; bootstrappen vælger den kun når `BODYRIG_RIG_URL`
+  + `BODYRIG_RIG_TOKEN` er sat. **Kompilerer kun i Unity** — verificeres af den
+  fysiske gate. Rækkefølge: #720's gate → #720 lander → #846 merges.
+- **Første krop fra en VRM alene (#847):** `scripts\bodyrig_demo_body.py --vrm
+  … --name … --store …` bygger/installerer/vælger en `.mrbody` med
+  demo-identitet (fixture, siger det selv). Rig-runbook:
+  `docs/bodyrig/FIRST_LIVE_BODY.md` — fra Unity i Hub til krop der følger chatten.
+- **Cues (#848), default fra:** `KALIV_BODY_CUES=1` → `explain` ved lange
+  sætninger, `curious` under thinking, `concerned` ved fejl; intet udledt af ordene.
+- Proces-fejl, min: landings-scriptet slettede en gren FØR mergen var
+  bekræftet, da et Windows-job flakede (#848). Gendannet uden tab; mønstret
+  rettet — sletning kun i samme program som en bekræftet merge.
 
 Core er urørt i hver regel: workeren sekvenserer kun. Alt en Unity-klient på
 telefon/Quest skal hente fra riggen, findes nu bag device-token.
 
 ### Bolden ligger hos Anders
 
+0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
 1. **Den fysiske Unity-gate** på #720 (Unity i Hub, VRM fra VRoid, `.mrbody`
    i store + valgt, proof → visuel accept → gate). Så lander #720, og
    **Slice C** (Unity frame-kilde mod `/body/frames`) kan bygges samme dag.
