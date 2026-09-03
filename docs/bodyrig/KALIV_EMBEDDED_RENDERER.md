@@ -89,3 +89,31 @@ taler med Kaliv, skifter ved personskift.
 2. L2: `BodyRigNetworkSource` i Unity-projektet + UaaL-eksportindstillinger.
 3. L3: `Krop`-skærm og Gradle-flag i Kaliv Android.
 4. L4: Android-build i den fysiske proof; visuel accept.
+
+## 8. Status 3/9 — afstemt med `UNITY_RENDERER_ROADMAP.md`
+
+Denne plan og roadmappen (#832) blev skrevet parallelt af to sessioner 2/9
+aften. De er enige om alt undtagen ét punkt, og det står nedenfor.
+
+**L1 er landet på main, som beskrevet her:** `/api/v1/body/active` + assets
+(#842), `/api/v1/body/frames` SSE fra `BodyRigRuntime` + `EmbodimentScheduler`
+drevet af chat-faser og TTS-sætninger (#843), telefonens afspilningsrapporter
+(#844), cues default fra (#848), cache mod re-validering pr. frame (#850),
+ingen timeout på streamen (#851), klient-rapporterbare tilstande begrænset
+til `listening`/`idle` (#852). `KALIV_BODY_STORE` i appliancens env.
+
+**L2's netværkskilde er skrevet:** `BodyRigFrameSource` (#846, draft mod
+#720-grenen) — samme `Apply` som fixturen, samme værn, genforbindelse;
+bootstrappen vælger den kun med `BODYRIG_RIG_URL`/`_TOKEN` sat. Kompilerer kun
+i Unity; verificeres af #720's fysiske gate. UaaL-eksportindstillingerne er
+IKKE lavet.
+
+**Det åbne valg — MVP-værten:** denne plan siger Unity as a Library inde i
+Kaliv fra MVP; roadmappen siger separat "Kaliv Body"-app først og UaaL som
+V2-spørgsmål (build-kompleksitet, APK +60–100 MB, én Gradle-integration mere
+i en app der i dag bygges rent i CI). Begge veje bruger samme L1 og samme
+Unity-kilde; kun L3 er forskellig. **Anders afgør**, når #720 er landet og
+kroppen er set på Windows.
+
+**Første krop og rig-dagen:** `docs/bodyrig/FIRST_LIVE_BODY.md` +
+`scripts/bodyrig_demo_body.py` (#847).
