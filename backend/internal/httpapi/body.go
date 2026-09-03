@@ -56,7 +56,17 @@ func (s *server) handleBodyState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleBodyFrames(w http.ResponseWriter, r *http.Request) {
-	s.forwardBody(w, r, "/body/frames")
+	// An intentionally unbounded stream. http.Client.Timeout covers the
+	// whole exchange including the body, so the slow client's ten minutes
+	// would cut every stream on the clock and freeze the avatar for the
+	// reconnect delay. No timeout here: the upstream request carries the
+	// client's context, so a renderer that disconnects ends the stream on
+	// the rig -- the client, not a timer, decides how long a body is watched.
+	if s.Worker == nil || !scheduleWorkerIsLoopback(s.Worker.BaseURL) {
+		writeErr(w, http.StatusServiceUnavailable, "body assets require a loopback worker upstream")
+		return
+	}
+	s.WorkerSlow.WithTimeout(0).Forward(w, r, "/body/frames")
 }
 
 func (s *server) handleBodyInterrupt(w http.ResponseWriter, r *http.Request) {

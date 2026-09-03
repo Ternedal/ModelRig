@@ -176,3 +176,29 @@ func TestBodySpeechReportsForwardOnlyKnownEvents(t *testing.T) {
 		t.Fatalf("without token: got %d", rec.Code)
 	}
 }
+
+func TestBodyFramesStreamOutlivesTheSlowClientTimeout(t *testing.T) {
+	// The worker stub keeps the stream open past the proxy timeout the test
+	// server is built with; the frame stream must still be delivered whole.
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		for i := 0; i < 3; i++ {
+			_, _ = w.Write([]byte("data: {\"state\":\"idle\"}\n\n"))
+			if flusher != nil {
+				flusher.Flush()
+			}
+			time.Sleep(150 * time.Millisecond)
+		}
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 200*time.Millisecond) // shorter than the stream
+	rec := doScheduleRequest(h, http.MethodGet, "/api/v1/body/frames", scheduleToken, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("frames: got %d", rec.Code)
+	}
+	if got := strings.Count(rec.Body.String(), "data: "); got != 3 {
+		t.Fatalf("frames stream cut by the client timeout: got %d of 3 events", got)
+	}
+}
