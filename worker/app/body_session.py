@@ -215,7 +215,9 @@ def current_session(create: bool = True) -> BodySession | None:
     global _session
     from .body_assets import resolve_active_body
     try:
-        active = resolve_active_body()
+        # Two seconds of staleness on WHICH body is active is invisible; a
+        # full archive re-validation per frame is not.
+        active = resolve_active_body(max_age_s=2.0)
     except HTTPException:
         return None
     with _session_lock:

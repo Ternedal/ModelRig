@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
+import time
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -104,7 +105,41 @@ def _person_body_id() -> str | None:
     return source if source.startswith("bodyid-") else None
 
 
-def resolve_active_body() -> ActiveBody:
+_resolved: dict[str, Any] = {"at": 0.0, "key": None, "body": None}
+
+
+def resolve_active_body(max_age_s: float | None = None) -> ActiveBody:
+    """The active body, freshly validated -- or, with max_age_s, the last
+    resolution when it is younger than that. The frame stream asks 20 times
+    a second and each fresh resolution re-validates the whole archive (a
+    sha256 over a 15 MB VRM is ~13 ms: a quarter of a core for nothing), so
+    the session passes a short age; asset downloads pass none and always
+    get a fresh, re-validated body."""
+    if max_age_s is not None:
+        cached = _resolved["body"]
+        if cached is not None and _resolved["key"] == _resolution_key() \
+                and (time.monotonic() - _resolved["at"]) < max_age_s:
+            return cached
+    body = _resolve_active_body_fresh()
+    _resolved.update(at=time.monotonic(), key=_resolution_key(), body=body)
+    return body
+
+
+def _resolution_key() -> tuple[Any, ...]:
+    """What can change WHICH body is active: the store, the selected person's
+    body, and the current-profile marker. All three are cheap to read (one
+    stat); the archive validation they guard is not."""
+    root = store_root()
+    marker_mtime: int | None = None
+    if root is not None:
+        try:
+            marker_mtime = MRBodyCurrentProfileStore(MRBodyProfileStore(Path(root))).marker_path.stat().st_mtime_ns
+        except (OSError, MRBodyProfileStoreError, MRBodyCurrentProfileError):
+            marker_mtime = None
+    return (root, _person_body_id(), marker_mtime)
+
+
+def _resolve_active_body_fresh() -> ActiveBody:
     root = store_root()
     if root is None:
         raise HTTPException(status_code=503, detail=f"{BODY_STORE_ENV} is not configured")

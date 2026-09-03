@@ -123,6 +123,22 @@ class BodyAssetTests(unittest.TestCase):
         self._person_with_body("unbound")
         self.assertEqual(self.c.get("/body/active").json()["source"], "current")
 
+    def test_session_path_caches_but_downloads_stay_fresh(self) -> None:
+        import time
+        from app import body_assets
+        self._select_current()
+        body_assets._resolved.update(at=0.0, key=None, body=None)
+        first = body_assets.resolve_active_body(max_age_s=2.0)
+        second = body_assets.resolve_active_body(max_age_s=2.0)
+        self.assertIs(first, second)  # within the age: the same resolution
+        fresh = body_assets.resolve_active_body()
+        self.assertIsNot(fresh, first)  # no age: re-validated
+        # A person selecting a different body invalidates the key immediately.
+        self._person_with_body("bodyid-" + "f" * 24)
+        with self.assertRaises(Exception):
+            body_assets.resolve_active_body(max_age_s=2.0)
+        body_assets._resolved.update(at=0.0, key=None, body=None)
+
     def test_unknown_and_absent_motions_are_404(self) -> None:
         self._select_current()
         self.assertEqual(self.c.get("/body/active/motions/idle.vrma").status_code, 404)
