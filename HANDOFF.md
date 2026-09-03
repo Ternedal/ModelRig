@@ -825,6 +825,35 @@ Ikke en web-renderer; Unity/UniVRM-sporet fra `BODYRIG_V1.md`. Roadmap:
 Core er urørt i hver regel: workeren sekvenserer kun. Alt en Unity-klient på
 telefon/Quest skal hente fra riggen, findes nu bag device-token.
 
+### Stående instruks (Anders, 3/9): hold git opdateret
+
+Hver session: triagér dependabot (CI-grønne patch/minor-bumps landes; CodeQL-
+trinnene flyttes samlet; majors og governance-gates går til Anders), luk
+overhalede PRs, og hold draft-grene (#720, #846) merget med main, så den
+fysiske gate beviser nutidens kode. Gjort 3/9: 8 landet (#833–#836, #838,
+#839, #759, #853), 3 lukket (#840, #841, #775), #837 forklaret (Ed25519-
+review-pin), #720/#846 ajour med main (kontrakter 39/33/11 grønne).
+
+### Rigdag 3/9 aften — bekræftet med Anders' øjne
+
+- **Dev-kanalen virker ende til ende, første kørsel.** Én ægte fejl: workeren
+  fejlede lukket, fordi `KALIV_AGENT4_OPERATOR_API=1` stod uden
+  `KALIV_AGENT4_DATA_ROOT` (min aktiveringsblok 30/8 manglede den; release-
+  workeren har sandsynligvis crash-loopet siden). Rettet i env; dokumenteret;
+  start-scriptet preflighter det nu. Anden "fejl" var kold worker-start > 90 s.
+- Fire efterladte Python-workere fra 2/9 og 3/9 holdt scheduler-lease'en, så
+  dev-workeren sprang hvert tick over. Dræbt manuelt; stop-scriptet dræber
+  nu også workere uden port.
+- **#789 bekræftet død** — frisk parring (adb reverse + `127.0.0.1:8080`),
+  flere beskeder, ingen crash. Lukket.
+- **#752 bekræftet fysisk** — `person_create.py` → Kaliv `person-r0001`;
+  `/tools/chat` svarer i hendes stil med `person`; Personer-skærmen viser
+  *"Taler lige nu som Kaliv"*. Body/voice `unbound` indtil VRM/.mrvoice.
+- Mikrofonen forsvinder i cloud-mode — bekræftet som ønsket adfærd (ASR kunne
+  teknisk køre via riggen i cloud-mode; produktvalg, ikke ændret).
+- Smoke fra riggen: healthz 2.0.13, schedules 200, agent4 403 uden
+  `agent4:read`-grant (korrekt), body 503 uden `KALIV_BODY_STORE` (korrekt).
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.

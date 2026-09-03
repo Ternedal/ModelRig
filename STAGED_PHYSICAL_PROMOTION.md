@@ -252,6 +252,21 @@ dem. Stop/fallback-proben tåler planner-varians (op til tre plan-forsøg fra
 
 
 
+## Agent 4-aktivering: flaget kræver en data-rod
+
+`KALIV_AGENT4_OPERATOR_API=1` alene får workeren til at fejle lukket ved
+opstart: *KALIV_AGENT4_DATA_ROOT is required when KALIV_AGENT4_OPERATOR_API=1*.
+Aktiveringen 30/8 satte flaget uden roden, og release-workeren crash-loopede
+derefter i tre døgn — usynligt, fordi kun backendens 401 blev verificeret.
+Dev-kanalen viste det på første kørsel 3/9. Begge linjer hører sammen:
+
+    KALIV_AGENT4_OPERATOR_API=1
+    KALIV_AGENT4_DATA_ROOT=C:\Users\admin\Desktop\ModelRig-appliance\agent4-data
+
+Roden skal være en absolut sti; mappen oprettes efter behov. Verificér altid
+BÅDE backend og worker efter en env-ændring: `/healthz` på 8080 er backendens;
+workerens er `http://127.0.0.1:8099/healthz`.
+
 ## T-033 kræver en ANDEN Windows-bruger — vid det før kampagnen
 
 T-033 er det fysiske bevis for DPAPI-beskyttet backup/restore af Agent 3's
