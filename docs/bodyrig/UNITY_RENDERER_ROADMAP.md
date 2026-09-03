@@ -53,7 +53,9 @@ Ingen sentiment-udledning fra ordene.
 Som landet: `GET /body/state` (én frame), `GET /body/frames` (SSE, 20 fps,
 valgfrit `?limit=N`), `POST /body/interrupt` (hård afbrydelse: alle
 utterances annulleres, mund nulstilles, `interrupted`), `POST /body/state/{navn}`
-(klienten melder det kun den ved: `listening` når mic er åben). Uden aktiv
+(klienten melder kun det, kun den ved: `listening` når mic er åben, `idle`
+når brugeren er gået — andre tilstande afvises med 422; de ejes af turen,
+talen, afbrydelsen og fejlvejen). Uden aktiv
 krop svarer alt 404, og hooks i chat/voice er no-ops. Talestart er
 syntesetidspunkt på riggen som tilnærmelse; **telefonen melder
 afspilning** (`POST /body/speech/{utterance}/started|ended`, utterance-id

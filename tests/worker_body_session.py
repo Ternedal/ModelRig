@@ -89,7 +89,11 @@ class BodySessionTests(unittest.TestCase):
         body_session.note_state("waiting_for_tool")
         self.assertEqual(self.c.get("/body/state").json()["state"], "waiting_for_tool")
         self.assertEqual(self.c.post("/body/state/listening").json()["state"], "listening")
+        self.assertEqual(self.c.post("/body/state/idle").json()["state"], "idle")
         self.assertEqual(self.c.post("/body/state/dancing").status_code, 422)
+        # States the client does not own are refused, even though the runtime knows them.
+        for owned_elsewhere in ("speaking", "thinking", "waiting_for_tool", "interrupted", "error"):
+            self.assertEqual(self.c.post(f"/body/state/{owned_elsewhere}").status_code, 422, owned_elsewhere)
 
     def test_speech_moves_the_mouth_and_ends_itself(self) -> None:
         self._select()
