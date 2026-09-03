@@ -156,6 +156,18 @@ func (c *Client) forward(
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
+	// Integrity attestations for renderer clients (body id, package and
+	// member digests) ride on X-BodyRig-* and are meaningless without a way
+	// to reach the client. A prefix, not a blanket copy: upstream internals
+	// still stop here.
+	for name, values := range resp.Header {
+		if !strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bodyrig-") {
+			continue
+		}
+		for _, v := range values {
+			w.Header().Add(name, v)
+		}
+	}
 	w.WriteHeader(resp.StatusCode)
 
 	flusher, _ := w.(http.Flusher)

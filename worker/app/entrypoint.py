@@ -36,6 +36,19 @@ fastapi_app.include_router(build_control_center_router())
 from .person_api import build_person_router  # noqa: E402
 fastapi_app.include_router(build_person_router())
 
+# Body assets (Unity renderer roadmap, slice A): the active body's validated
+# avatar/thumbnail/motions over HTTP for phone and headset clients. Reads
+# only through BodyRig's store and current-selection paths; the store is
+# opened per request, so mounting touches nothing.
+from .body_assets import build_body_router  # noqa: E402
+fastapi_app.include_router(build_body_router())
+
+# Live render frames (slice B): /body/state, /body/frames (SSE 20 fps),
+# /body/interrupt, /body/state/{name}. The session is created on first
+# use for the active body; without one every route answers 404.
+from .body_session import build_body_session_router  # noqa: E402
+fastapi_app.include_router(build_body_session_router())
+
 # Middleware must be registered before the first ASGI request. It is inert when
 # no Agent 3 response exists: it only decorates JSON payloads under the dormant
 # /experimental/agent3 prefix and cannot mount or activate a route.

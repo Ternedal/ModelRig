@@ -208,6 +208,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_approval_receipts.py`
 - `tests/worker_audit.py`
 - `tests/worker_backup.py`
+- `tests/worker_body_assets.py`
+- `tests/worker_body_session.py`
 - `tests/worker_browser_host.py`
 - `tests/worker_browser_peer_adapter.py`
 - `tests/worker_browser_peer_fulfillment.py`
@@ -359,6 +361,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_appliance_lifecycle_updater_chain.py`
 - `tests/workflow_baseline_one_click.py`
 - `tests/workflow_bodyrig_contracts.py`
+- `tests/workflow_bodyrig_demo_body.py`
 - `tests/workflow_brand_no_token_duplicates.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`

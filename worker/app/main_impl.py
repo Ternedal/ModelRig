@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from . import ollama_client as oc
 from . import rag
 from .env_compat import legacy_names_in_use
-from . import person_runtime
+from . import body_session, person_runtime
 from .store import DocStore
 
 VERSION = "1.58.143"
@@ -715,6 +715,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
 
+    _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
+
     async def _phase(name: str) -> None:
         """Udsend en fase, hvis kalderen lytter.
 
@@ -723,6 +725,10 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         streamende sender en callback ind. Loopets logik er den samme i begge
         tilfaelde -- fasen er observation, ikke kontrol.
         """
+        # The body follows the turn (Unity renderer roadmap, slice B): the
+        # same phase names the client sees drive the embodiment state.
+        if name in _BODY_STATES:
+            body_session.note_state(_BODY_STATES[name])
         if on_phase is not None:
             await on_phase(name)
 
@@ -1595,6 +1601,9 @@ async def voice_converse_stream(req: ConverseUploadReq):
             "type": "chunk", "index": chunk["index"], "text": chunk["text"],
             "audio_base64": audio_b64, "synth_s": chunk.get("synth_s"),
             "ttfa_s": round(_time.time() - t_start, 2),
+            # The body's utterance for this sentence: the phone reports
+            # playback start/end against it so the mouth follows the speaker.
+            "utterance_id": chunk.get("utterance_id"),
         })
 
     async def run() -> None:
