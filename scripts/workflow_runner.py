@@ -96,9 +96,20 @@ def run_workflow(
             else:
                 decision = spec.get("decision", "approve")
                 events.append({"type": "decision", "decision": decision})
-                d2 = post("/tools/confirm", {
+                # Workflow specs use the human-facing word "reject" because the
+                # evaluator must preserve what the scenario asked us to do. The
+                # worker wire contract deliberately uses approve|deny. Translate
+                # only at the boundary; never rewrite the recorded evidence.
+                wire_decision = "deny" if decision == "reject" else decision
+                # This confirmation belongs to /tools/chat, so use the chat-aware
+                # continuation endpoint. The generic /tools/confirm executes the
+                # write but returns only {status, tool, result}; that made a real
+                # note_append invisible to record_turn() and also discarded the
+                # model's post-write answer. /tools/confirm/chat surfaces the
+                # executed_write marker and continues the parked turn.
+                d2 = post("/tools/confirm/chat", {
                     "confirmation_id": d.get("confirmation_id"),
-                    "decision": decision,
+                    "decision": wire_decision,
                 })
                 record_turn(d2)
                 status = d2.get("status") or "ok"
@@ -120,7 +131,15 @@ def run_workflow(
         # 'denied'" -- hvilket lyder som en modelfejl og ikke er det.
         #
         # Statuskoden ER svaret. Den skal med i transskriptionen.
-        kode = getattr(e, "code", None) or getattr(getattr(e, "response", None), "status", None)
+        # httpx names it status_code; urllib-style clients say code/status.
+        # Reading only .status left today's 422 unmapped -- the transcript
+        # said bare "error" while the exception text carried the real code.
+        resp = getattr(e, "response", None)
+        kode = (
+            getattr(e, "code", None)
+            or getattr(resp, "status_code", None)
+            or getattr(resp, "status", None)
+        )
         if kode:
             error = f"HTTP {kode}: {error}"
             if int(kode) == 410:

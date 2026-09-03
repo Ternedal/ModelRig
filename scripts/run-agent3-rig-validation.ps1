@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BaseUrl = $(
         if ([string]::IsNullOrWhiteSpace($env:MODELRIG_BASE_URL)) {

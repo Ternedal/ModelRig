@@ -206,6 +206,9 @@ def ensure_stack_and_readiness(token: str) -> None:
     planner = stage.ensure_models()
     os.environ["KALIV_AGENT3_VALIDATION_REPORT"] = str(RIG_REPORT)
     os.environ["KALIV_AGENT3_PILOT_REPORT"] = str(PILOT_REPORT)
+    # The T-023 operator is an explicit, interactive task-UI qualification.
+    # Enable only its child stack; product/default startup remains default-off.
+    os.environ["KALIV_AGENT3_TASK_UI"] = "1"
     stage.ensure_device_token()
 
     try:
@@ -213,13 +216,13 @@ def ensure_stack_and_readiness(token: str) -> None:
     except OperatorError:
         stage.heading("Start exact-head backend og worker")
         stage.note("Luk gamle backend/worker-vinduer, når stackstarteren beder om det.")
-        stage.start_stack(planner)
+        stage.start_stack(planner, enable_task_ui=True)
         readiness = {}
 
     if readiness.get("selected_surface") != "agent3_readonly":
         stage.heading("Forbered exact kandidat-readiness")
         stage.note("Genstarter kandidat-stacken med de kandidatbundne rapportstier.")
-        stage.start_stack(planner)
+        stage.start_stack(planner, enable_task_ui=True)
         stage.run(
             [
                 "powershell.exe",

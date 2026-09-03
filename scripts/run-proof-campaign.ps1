@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$PlannerModel = $env:KALIV_AGENT3_PLANNER_MODEL,
   [int]$WorkflowRounds = 22,
@@ -13,7 +13,8 @@ param(
   [switch]$IncludeAgent4,
   [string]$Agent4OutputRoot = "",
   [string]$Agent4ApkPath = "",
-  [string]$Agent4LanAddress = ""
+  [string]$Agent4LanAddress = "",
+  [switch]$Agent4ReplaceFixture
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -514,6 +515,12 @@ if ($IncludeAgent4) {
   }
   Write-Host "  Agent 4 LAN-adresse: $a4lan" -ForegroundColor DarkGray
   $a4args = @('-ExpectedSha', $sha, '-OutputRoot', $Agent4OutputRoot, '-LanAddress', $a4lan)
+  if ($Agent4ReplaceFixture) {
+    # Re-runs hit the fixture's honest refusal ("already exists; pass
+    # --replace explicitly"); the operator script already supports -Replace,
+    # the campaign just never forwarded it (#753).
+    $a4args += '-Replace'
+  }
   if (-not [string]::IsNullOrWhiteSpace($Agent4ApkPath)) {
     if (-not (Test-Path -LiteralPath $Agent4ApkPath -PathType Leaf)) {
       throw "Agent4ApkPath findes ikke: $Agent4ApkPath"

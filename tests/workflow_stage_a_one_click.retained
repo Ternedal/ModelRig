@@ -71,6 +71,9 @@ check(
 
 check('git("pull", "--ff-only"' in wizard_text, "candidate update is fast-forward-only")
 check("getpass.getpass" in wizard_text, "device token is read without echo")
+check("/pair/start" in wizard_text and "/pair/claim" in wizard_text, "wizard mints the device token itself via loopback pairing before prompting")
+check("127.0.0.1:8080" in wizard_text, "self-mint targets the loopback backend only")
+check('len(token) != 64' in wizard_text, "minted token is length-validated before use")
 check('os.environ["GH_TOKEN"]' in wizard_text, "GitHub token remains process-local")
 check('state.get("candidate_sha") == sha' in wizard_text, "resume state is exact-SHA bound")
 check('[ollama, "stop", planner]' in wizard_text, "voice model is unloaded before cold start")

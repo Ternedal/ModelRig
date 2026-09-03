@@ -88,6 +88,7 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/rag/ingest/docx", s.authMW(http.HandlerFunc(s.handleRagIngestDocx)))
 	s.mux.Handle("GET /api/v1/tools", s.authMW(http.HandlerFunc(s.handleToolsList)))
 	s.mux.Handle("POST /api/v1/tools/chat", s.authMW(http.HandlerFunc(s.handleToolsChat)))
+	s.mux.Handle("POST /api/v1/tools/chat/stream", s.authMW(http.HandlerFunc(s.handleToolsChatStream)))
 	s.mux.Handle("POST /api/v1/tools/confirm", s.authMW(http.HandlerFunc(s.handleToolsConfirm)))
 	s.mux.Handle("GET /api/v1/tools/audit", s.authMW(http.HandlerFunc(s.handleToolsAudit)))
 	s.mux.Handle("POST /api/v1/tools/enabled", s.authMW(http.HandlerFunc(s.handleToolsEnabled)))
@@ -107,6 +108,32 @@ func (s *server) routes() {
 	// Standing grants are a stronger capability than one-shot tool calls. Starting
 	// the local scheduler therefore does not automatically expose administration
 	// to every paired device; the backend boundary has its own explicit opt-in.
+	// Person Profile registry (#752): read and administer persons and their
+	// revisions. The worker enforces atomic activation; the backend forwards a
+	// closed allowlist behind the device token. Selecting a person is a
+	// runtime choice, not a capability grant, so no separate opt-in flag.
+	s.mux.Handle("GET /api/v1/persons", s.authMW(http.HandlerFunc(s.handlePersonsCollection)))
+	s.mux.Handle("POST /api/v1/persons", s.authMW(http.HandlerFunc(s.handlePersonsCollection)))
+	s.mux.Handle("GET /api/v1/persons/active", s.authMW(http.HandlerFunc(s.handlePersonsActive)))
+	s.mux.Handle("POST /api/v1/persons/select", s.authMW(http.HandlerFunc(s.handlePersonsSelect)))
+	s.mux.Handle("GET /api/v1/persons/{id}", s.authMW(http.HandlerFunc(s.handlePersonGet)))
+	s.mux.Handle("POST /api/v1/persons/{id}/{action}", s.authMW(http.HandlerFunc(s.handlePersonAction)))
+
+	// Body assets (renderer roadmap, slice A): the active body's validated
+	// avatar, thumbnail and motions for phone/headset renderers. GET only.
+	s.mux.Handle("GET /api/v1/body/active", s.authMW(http.HandlerFunc(s.handleBodyActive)))
+	s.mux.Handle("GET /api/v1/body/active/avatar.vrm", s.authMW(http.HandlerFunc(s.handleBodyAvatar)))
+	s.mux.Handle("GET /api/v1/body/active/thumbnail.png", s.authMW(http.HandlerFunc(s.handleBodyThumbnail)))
+	// ServeMux wildcards must be whole segments: the ".vrma" suffix is part of
+	// the {file} value and is validated in the handler.
+	s.mux.Handle("GET /api/v1/body/active/motions/{file}", s.authMW(http.HandlerFunc(s.handleBodyMotion)))
+	// Live frames (slice B).
+	s.mux.Handle("GET /api/v1/body/state", s.authMW(http.HandlerFunc(s.handleBodyState)))
+	s.mux.Handle("GET /api/v1/body/frames", s.authMW(http.HandlerFunc(s.handleBodyFrames)))
+	s.mux.Handle("POST /api/v1/body/interrupt", s.authMW(http.HandlerFunc(s.handleBodyInterrupt)))
+	s.mux.Handle("POST /api/v1/body/state/{name}", s.authMW(http.HandlerFunc(s.handleBodySetState)))
+	s.mux.Handle("POST /api/v1/body/speech/{utterance}/{event}", s.authMW(http.HandlerFunc(s.handleBodySpeech)))
+
 	if os.Getenv("KALIV_SCHEDULER_API") == "1" {
 		// Human schedule administration. The Bearer-authenticated backend is the
 		// remote boundary; schedules.go additionally refuses a non-loopback worker

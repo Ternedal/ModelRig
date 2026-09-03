@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.net.Agent3TaskReadinessClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import dk.ternedal.modelrig.ui.theme.KalivTokens
 import dk.ternedal.modelrig.ui.theme.KalivType
@@ -153,6 +154,29 @@ fun AgentRunPanelHost(
     var reachable by remember(boundRunId) { mutableStateOf(true) }
     var stopArmed by remember(boundRunId) { mutableStateOf(false) }
     var stopping by remember(boundRunId) { mutableStateOf(false) }
+    // Fladen og begrundelsen kommer fra riggens egen readiness -- panelet
+    // kendte kun planens rutenavn, så operatøren kunne ikke se hvilken flade
+    // der kørte, hvorfor, eller at den var faldet tilbage til agent2.
+    var surface by remember(boundRunId) {
+        mutableStateOf<AgentRunPresentation.SurfaceUi?>(null)
+    }
+    // Omplanlægninger er en del af det operatøren skal kunne se
+    // (replans_visible). Null betyder "riggen tæller dem ikke her", og så
+    // vises linjen ikke -- ikke "0".
+    var replans by remember(boundRunId) { mutableStateOf<Int?>(null) }
+    // Udfaldet af den kørsel der lige sluttede. Kortet forsvinder med vilje,
+    // men operatøren skal kunne se HVAD der skete (terminal_outcome_visible).
+    var outcome by remember(boundRunId) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(boundRunId, baseUrl, token) {
+        // Readiness er billig og ændrer sig sjældent under en kørsel: hentes
+        // én gang, og udebliver den, viser panelet bare ingen fladelinje
+        // frem for at gætte på operatørens vegne.
+        val ready = withContext(Dispatchers.IO) {
+            runCatching { Agent3TaskReadinessClient(baseUrl, token).readiness() }
+        }
+        surface = ready.getOrNull()?.let { AgentRunPresentation.surfaceUi(it) }
+    }
 
     LaunchedEffect(boundRunId, baseUrl, token) {
         var keepAsking = true
@@ -164,9 +188,18 @@ fun AgentRunPanelHost(
                 reachable = true
                 val visible = AgentRunPresentation.visibleRun(runs, boundRunId)
                 run = visible
+                if (visible != null) {
+                    replans = withContext(Dispatchers.IO) {
+                        Agent3Client(baseUrl, token).replanCount(visible.id)
+                    }
+                }
                 if (visible == null) {
                     // Kørslen er slut (eller findes ikke mere): bindingen skal
-                    // ikke overleve den, ellers spøger den i samtalen.
+                    // ikke overleve den, ellers spøger den i samtalen. Men
+                    // udfaldet bliver stående, så operatøren kan se det.
+                    outcome = AgentRunPresentation.outcomeLine(
+                        AgentRunPresentation.boundRun(runs, boundRunId),
+                    )
                     bindings.clear(conversationId)
                     keepAsking = false
                 }
@@ -184,12 +217,26 @@ fun AgentRunPanelHost(
             AgentRunUnavailableNote()
             return@Column
         }
-        if (current == null) return@Column
+        if (current == null) {
+            outcome?.let { AgentRunOutcomeNote(it) }
+            return@Column
+        }
+        surface?.let { ui ->
+            AgentSurfaceNote(
+                line = AgentRunPresentation.surfaceLine(ui),
+                fallback = AgentRunPresentation.fallbackLine(ui),
+                replans = AgentRunPresentation.replanLine(replans),
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        val plan = current.termination?.plan
         AgentRunCard(
             steps = AgentRunPresentation.steps(current),
             title = AgentRunPresentation.title(current),
             onStop = { stopArmed = true },
             onOpen = onOpenCheckpoint,
+            canStop = plan?.canRequest ?: true,
+            stopBlockedReason = plan?.reason,
         )
         if (stopArmed) {
             Spacer(Modifier.height(6.dp))
@@ -207,6 +254,9 @@ fun AgentRunPanelHost(
                         // RIGGENS svar bestemmer — ikke vores håb.
                         res.onSuccess { updated ->
                             if (AgentRunPresentation.isTerminal(updated)) {
+                                // Samme regel som når kørslen slutter af sig
+                                // selv: kortet går væk, udfaldet bliver.
+                                outcome = AgentRunPresentation.outcomeLine(updated)
                                 bindings.clear(conversationId)
                                 run = null
                             } else {
@@ -227,6 +277,46 @@ fun AgentRunPanelHost(
  * være et gæt, og et gæt om en kørsel der måske stadig arbejder på riggen er
  * den værste slags.
  */
+@Composable
+private fun AgentRunOutcomeNote(line: String, modifier: Modifier = Modifier) {
+    Text(
+        line,
+        color = KalivTheme.colors.textMuted,
+        fontSize = 11.sp,
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun AgentSurfaceNote(
+    line: String,
+    fallback: String?,
+    replans: String?,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth()) {
+        Text(
+            line,
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        if (replans != null) {
+            Text(
+                replans,
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+            )
+        }
+        if (fallback != null) {
+            Text(
+                fallback,
+                color = KalivTheme.colors.danger,
+                fontSize = 11.sp,
+            )
+        }
+    }
+}
+
 @Composable
 fun AgentRunUnavailableNote(modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(KalivTokens.Radius.card)

@@ -19,7 +19,7 @@ if str(SCRIPTS) not in sys.path:
 import agent3_write_pilot_final_gate_operator as operator  # noqa: E402
 
 BRANCH = "agent/t022-final-gate-current-main"
-VERSION = "2.0.11"
+VERSION = "2.0.13"
 
 
 def configure_candidate() -> None:

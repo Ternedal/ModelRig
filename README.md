@@ -230,6 +230,14 @@ MODELRIG_HOST=0.0.0.0 ./modelrig-server      # LAN
 ```
 The backend logs this warning at startup; the Android pairing screen repeats it.
 
+## Udviklingskanalen: appliancen fra checkouten
+
+Så længe intet er i produktion, kører riggen den kode checkouten holder.
+`START_DEV_APPLIANCE.cmd` bygger backend fra HEAD og starter backend + worker
+med appliancens egne data og env; `STOP_DEV_APPLIANCE.cmd` bringer den
+signerede release tilbage. Ny kode = `git pull` + dobbeltklik. Det er ikke
+bevis, og det rører ikke `production_activation` — se `DEV_APPLIANCE.md`.
+
 ## Run order (local dev)
 
 **The easy way:** `scripts\start-kaliv.bat` starts all three processes correctly

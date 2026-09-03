@@ -10,7 +10,7 @@ import (
 )
 
 // Version is the ModelRig backend version.
-const Version = "2.0.11"
+const Version = "2.0.13"
 
 // Config holds the effective runtime configuration.
 type Config struct {

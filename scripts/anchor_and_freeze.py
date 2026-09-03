@@ -16,7 +16,7 @@ Det her maa ikke bero paa operatoerens hukommelse: manglende eller igangvaerende
 workflow-evidence er NOT FROZEN, og en fejlet automatisk run bliver ikke skjult
 ved automatisk rerun.
 
-Run: GITHUB_TOKEN=... python3 scripts/anchor_and_freeze.py --branch physical-proof/2.0.11
+Run: GITHUB_TOKEN=... python3 scripts/anchor_and_freeze.py --branch physical-proof/2.0.13
      tilfoej --dry-run for at se hvad der ville ske
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -108,7 +109,7 @@ def _latest_by_name(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--branch", required=True, help="anker-gren, fx physical-proof/2.0.11"
+        "--branch", required=True, help="anker-gren, fx physical-proof/2.0.13"
     )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--timeout-minutes", type=int, default=15)
@@ -193,10 +194,15 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("workflows blev ikke faerdige i tide -- genfryser IKKE")
 
     # 4) genfrys
-    for p in ROOT.rglob("__pycache__"):
-        if ".git" not in p.parts:
-            subprocess.run(["rm", "-rf", str(p)], check=False)
-    subprocess.run(["rm", "-rf", str(ROOT / "validation")], check=False)
+    # shutil, not "rm -rf": this tool only ever runs on the Windows rig,
+    # where the shell has no rm and CreateProcess raises FileNotFoundError --
+    # the anchor moved, the gates went green, and the freeze died right here
+    # (30/08). ignore_errors keeps a locked runtime directory from aborting
+    # the freeze the way a stray stack process would.
+    for cache in ROOT.rglob("__pycache__"):
+        if ".git" not in cache.parts:
+            shutil.rmtree(cache, ignore_errors=True)
+    shutil.rmtree(ROOT / "validation", ignore_errors=True)
     r = subprocess.run(
         [
             sys.executable,

@@ -712,6 +712,8 @@ private data class Msg(
     // Deliberately separate from fellBackToCloud -- using cloud for voice is a
     // deliberate choice, not a fallback, and conflating them would mislead.
     val voiceModel: String? = null,
+    // Hvem der svarede (#752): sat fra riggens person-deskriptor, aldrig gaettet.
+    val personLabel: String? = null,
     val voiceViaCloud: Boolean = false,
     // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
     // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
@@ -965,6 +967,12 @@ private fun ChatScreen(
     var rigOnline by remember { mutableStateOf<Boolean?>(null) }
     var lastOnlineAt by remember { mutableStateOf<Long?>(null) }
     var pingBusy by remember { mutableStateOf(false) }
+    // Cloud-tilbuddet stilles én gang pr. session. Riggen kan være nede i
+    // lang tid, og banneret dukkede op igen hver gang man skiftede tilbage
+    // til rig-mode -- altså samme spørgsmål igen og igen efter man havde
+    // svaret. Selve offline-beskeden bliver (den er sand og styrer køen),
+    // men knappen forsvinder: valget er truffet og kendt.
+    var cloudOfferTaken by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<String?>(null) }
     var updDownloading by remember { mutableStateOf(false) }
     var updProgress by remember { mutableStateOf(0) }
@@ -1150,7 +1158,10 @@ private fun ChatScreen(
             // Audio chunks flow from the network reader (producer) to the player
             // (consumer) through this channel. Unlimited: sentences are small and
             // we never want the reader to block on a slow player.
-            val audioChan = Channel<ByteArray>(Channel.UNLIMITED)
+            val audioChan = Channel<Pair<ByteArray, String?>>(Channel.UNLIMITED)
+            // The rig's body follows what the phone plays: report start and end
+            // of each sentence against its utterance id (slice B sync).
+            val bodyReporter = dk.ternedal.modelrig.net.BodyPlaybackReporter(store.baseUrl.orEmpty(), store.token.orEmpty())
             var transcriptText = ""
             var transcriptShown = false
             var replyIdx = -1
@@ -1165,10 +1176,12 @@ private fun ChatScreen(
                 dk.ternedal.modelrig.voice.BargeInDetector(rmsThreshold = bargeInThreshold.toDouble())
             } else null
             val player = launch(Dispatchers.IO) {
-                for (bytes in audioChan) {
+                for ((bytes, utteranceId) in audioChan) {
                     if (playbackStop.get()) break
                     speaking = true
+                    bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
+                    bodyReporter.report(utteranceId, "ended")
                     if (cut) { wasInterrupted = true; playbackStop.set(true); break }
                 }
                 speaking = false
@@ -1214,7 +1227,7 @@ private fun ChatScreen(
                                 messages.add(Msg("assistant", "", streaming = true))
                             }
                         },
-                        onChunk = { _, text, chunkB64 ->
+                        onChunk = { _, text, chunkB64, utteranceId ->
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
                             if (replyIdx in messages.indices) {
@@ -1222,7 +1235,7 @@ private fun ChatScreen(
                             }
                             if (chunkB64.isNotEmpty() && !playbackStop.get()) {
                                 val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
-                                audioChan.trySend(bytes)
+                                audioChan.trySend(bytes to utteranceId)
                             }
                         },
                         onDone = { reply, m, cloud ->
@@ -1404,6 +1417,15 @@ private fun ChatScreen(
     LaunchedEffect(cloudModelTick) { cloudModel = store.cloudModel }
 
     LaunchedEffect(openConvId) {
+        // The send path creates the conversation lazily and reports its id
+        // through onConvChanged -- which lands right here, while the first
+        // reply is still streaming. Clearing and reloading on THAT change
+        // replaced the list under the stream's feet: the first delta then
+        // indexed past the reloaded [user] and killed the app (#789: crash on
+        // the first send after a fresh pairing, never after a restart, where
+        // convId already exists). Only a switch to a DIFFERENT conversation
+        // reloads; the id this screen just minted is already on screen.
+        if (openConvId != null && openConvId == convId) return@LaunchedEffect
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
@@ -1482,7 +1504,10 @@ private fun ChatScreen(
 
             val onDelta: (String) -> Unit = { delta ->
                 scope.launch {
-                    val cur = messages[idx]
+                    // Nested launch: an exception here is NOT caught by the
+                    // runCatching around the stream -- it is an app crash. Guard
+                    // the index; a replaced list means the user moved on.
+                    val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(text = cur.text + delta)
                 }
             }
@@ -1494,8 +1519,14 @@ private fun ChatScreen(
             }
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch {
-                    val cur = messages[idx]
+                    val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(sources = srcs)
+                }
+            }
+            val onPerson: (String) -> Unit = { label ->
+                scope.launch {
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    messages[idx] = cur.copy(personLabel = label)
                 }
             }
             // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
@@ -1504,7 +1535,7 @@ private fun ChatScreen(
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
-                        val cur = messages[idx]
+                        val cur = messages.getOrNull(idx) ?: return@launch
                         if (cur.streaming) messages[idx] = cur.copy(status = label)
                     }
                 }
@@ -1577,6 +1608,9 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            turn.personName?.let { name ->
+                                onPerson(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
+                            }
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -1621,7 +1655,11 @@ private fun ChatScreen(
             activeCall = null
             // A parked write proposal: surface the card. Nothing has executed.
             proposal?.let { pendingTool = it }
-            val cur = messages[idx]
+            // The list can have been replaced mid-stream (a real conversation
+            // switch). Then there is nothing on screen to finish; bail rather
+            // than index past the end. The reply is not persisted in that
+            // case -- a loss, but a bounded one, where before it was a crash.
+            val cur = messages.getOrNull(idx) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text), fellBackToCloud = didFallback)
@@ -1673,7 +1711,7 @@ private fun ChatScreen(
         var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
             val onDelta: (String) -> Unit = { delta ->
-                scope.launch { val cur = messages[i]; messages[i] = cur.copy(text = cur.text + delta) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(text = cur.text + delta) }
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
@@ -1682,7 +1720,10 @@ private fun ChatScreen(
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
-                scope.launch { val cur = messages[i]; messages[i] = cur.copy(sources = srcs) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(sources = srcs) }
+            }
+            val onPersonRetry: (String) -> Unit = { label ->
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
@@ -1719,6 +1760,9 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            turn.personName?.let { name ->
+                                onPersonRetry(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
+                            }
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -1756,7 +1800,7 @@ private fun ChatScreen(
             activeCall = null
             // Same as the main path: a parked write proposal surfaces the card.
             proposal?.let { pendingTool = it }
-            val cur = messages[i]
+            val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text))
@@ -1791,6 +1835,27 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Enheder") }, onClick = { overflow = false; onOpenDevices() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
+                        if (mode == "rig" && store.hasRig) {
+                            // Operatør-skærmen for Agent 3-opgaver fandtes kun bag
+                            // kaliv://tasks -- ingen vej ind fra UI'et. Den er
+                            // read-only og serverstyret, så et menupunkt er
+                            // ufarligt; ligesom Planer giver den kun mening med
+                            // en parret rig.
+                            DropdownMenuItem(text = { Text("Opgaver") }, onClick = {
+                                overflow = false
+                                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+                                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_TASK, true)
+                                context.startActivity(i)
+                            })
+                            // Hvem Kaliv er (#752): vælg person; aktivering af
+                            // revisioner er en operatørhandling på riggen.
+                            DropdownMenuItem(text = { Text("Personer") }, onClick = {
+                                overflow = false
+                                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+                                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_PERSONS, true)
+                                context.startActivity(i)
+                            })
+                        }
                         if (mode == "rig" && store.cloudKey != null) {
                             DropdownMenuItem(
                                 text = {
@@ -2194,15 +2259,22 @@ private fun ChatScreen(
                     else -> "◈ tekst: $currentModel"
                 }
                 Text(textLabel, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-                Spacer(Modifier.width(10.dp))
-                // Voice routing: cloud only when the toggle is on AND a key exists.
-                val voiceCloud = voiceUsesCloud && store.cloudKey != null
-                val voiceLabel = if (voiceCloud) "☁ tale: ${store.voiceCloudModel}" else "🎙 tale: $currentModel"
-                Text(
-                    voiceLabel,
-                    color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
-                    fontSize = 11.sp,
-                )
+                // Tale-etiketten følger mikrofonen: den vises kun i rig-mode,
+                // hvor mic-knappen findes. I cloud-mode er knappen væk (ASR
+                // kører rig-side), så en "🎙 tale: …"-linje dér lovede en
+                // kapabilitet man ikke kunne starte -- samme slags falske
+                // signal som en Stop-knap uden handle bag.
+                if (mode == "rig") {
+                    Spacer(Modifier.width(10.dp))
+                    // Voice routing: cloud only when the toggle is on AND a key exists.
+                    val voiceCloud = voiceUsesCloud && store.cloudKey != null
+                    val voiceLabel = if (voiceCloud) "☁ tale: ${store.voiceCloudModel}" else "🎙 tale: $currentModel"
+                    Text(
+                        voiceLabel,
+                        color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                }
             }
             if (ingesting || ingestStatus != null || ingestError != null) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -2222,7 +2294,7 @@ private fun ChatScreen(
                 lastSeenLabel = lastOnlineAt?.let {
                     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))
                 },
-                showCloudSwitch = hasCloud,
+                showCloudSwitch = hasCloud && !cloudOfferTaken,
                 retryBusy = pingBusy,
                 onRetry = {
                     pingBusy = true
@@ -2235,7 +2307,10 @@ private fun ChatScreen(
                         pingBusy = false
                     }
                 },
-                onSwitchCloud = { mode = "cloud"; store.chatMode = "cloud"; ragMode = false },
+                onSwitchCloud = {
+                    cloudOfferTaken = true
+                    mode = "cloud"; store.chatMode = "cloud"; ragMode = false
+                },
                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
             )
         }
@@ -2413,6 +2488,8 @@ private fun ChatScreen(
                                 add((if (m.voiceViaCloud) "\u2601 " else "\u25c8 ") + "\ud83c\udf99 ${m.voiceModel}")
                             }
                             if (m.fellBackToCloud) add("\u2601 via cloud (rig utilg\u00e6ngelig)")
+                            // Hvem der svarede (#752) -- kun naar riggen sagde det.
+                            if (m.personLabel != null) add("\u25c8 ${m.personLabel}")
                         }
                         AssistantMessage(
                             m = ChatMessageUi(

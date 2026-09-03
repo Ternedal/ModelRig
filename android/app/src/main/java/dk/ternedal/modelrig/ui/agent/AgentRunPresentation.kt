@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.ui.agent
 
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.net.Agent3TaskReadinessClient
 
 /**
  * Oversættelse fra riggens agent-kørsel til kortet i chatten — statsløs, og
@@ -66,6 +67,93 @@ object AgentRunPresentation {
     /** Trinnene i et PREVIEW: intet er kørt endnu, så intet må se udført ud. */
     fun previewSteps(steps: List<Agent3Client.Step>): List<AgentStepUi> =
         steps.map { AgentStepUi(text = it.summary.ifBlank { it.tool }, state = AgentStepState.Pending) }
+
+    /**
+     * Riggens EGEN udmelding om hvilken flade der kører, og hvorfor.
+     *
+     * Panelet viste kun planens rutenavn, så operatøren kunne ikke se
+     * hverken den valgte flade, serverens begrundelse eller at fladen faldt
+     * tilbage til agent2 — tre af de tretten krav i
+     * scripts/agent3_task_ui_validation.py (selected_surface_visible,
+     * server_reason_visible, fallback_visible). Teksten citerer serveren
+     * ordret; klienten oversætter ikke og gætter ikke.
+     */
+    data class SurfaceUi(
+        val surface: String,
+        val reason: String,
+        val fallbackActive: Boolean,
+        val fallbackSurface: String,
+    )
+
+    fun surfaceUi(readiness: Agent3TaskReadinessClient.Readiness): SurfaceUi {
+        val selected = readiness.selectedSurface.trim()
+        return SurfaceUi(
+            surface = selected,
+            reason = readiness.reason.trim(),
+            fallbackActive = !readiness.agent3ReadonlySelected,
+            fallbackSurface = readiness.fallbackSurface.trim(),
+        )
+    }
+
+    /** Én linje: flade og begrundelse, som serveren formulerer dem. */
+    fun surfaceLine(ui: SurfaceUi): String {
+        val surface = ui.surface.ifBlank { "ukendt" }
+        val reason = ui.reason
+        return if (reason.isBlank()) "Flade: $surface" else "Flade: $surface · $reason"
+    }
+
+    /**
+     * Kørslen som den ER, terminal eller ej — modstykket til visibleRun().
+     *
+     * visibleRun() skjuler med vilje en afsluttet kørsel, så kortet ikke
+     * bliver stående som om noget stadig sker. Men udfaldet skal ses
+     * (terminal_outcome_visible), og det kræver adgang til den kørsel der
+     * lige sluttede.
+     */
+    fun boundRun(runs: List<Agent3Client.Run>, boundRunId: String?): Agent3Client.Run? {
+        if (boundRunId.isNullOrBlank()) return null
+        return runs.firstOrNull { it.id == boundRunId }
+    }
+
+    /**
+     * Udfaldslinjen for en afsluttet kørsel. Null for en kørsel der stadig
+     * kører — og for en kørsel riggen ikke har meldt et udfald for; vi
+     * opfinder ikke et.
+     */
+    fun outcomeLine(run: Agent3Client.Run?): String? {
+        if (run == null || !isTerminal(run)) return null
+        val error = run.error?.trim()
+        return when (run.state.trim().lowercase()) {
+            "cancelled" -> "Stoppet — kørslen blev afbrudt."
+            "completed_after_cancel" ->
+                "Stoppet — trinnet der var i gang nåede at blive færdigt."
+            "failed" ->
+                if (error.isNullOrBlank()) "Fejlede." else "Fejlede: $error"
+            "blocked" ->
+                if (error.isNullOrBlank()) "Blokeret." else "Blokeret: $error"
+            "completed", "succeeded" -> "Afsluttet."
+            else -> null
+        }
+    }
+
+    /**
+     * Replan-linjen. Null ind betyder at riggen ikke tæller omplanlægninger
+     * for denne kørsel, og så vises intet -- at skrive "0 omplanlægninger"
+     * ville påstå mere end serveren har sagt.
+     */
+    fun replanLine(count: Int?): String? = when {
+        count == null -> null
+        count == 0 -> "Ingen omplanlægninger"
+        count == 1 -> "1 omplanlægning"
+        else -> "$count omplanlægninger"
+    }
+
+    /** Fallback-linjen — kun når riggen IKKE har valgt task-fladen. */
+    fun fallbackLine(ui: SurfaceUi): String? {
+        if (!ui.fallbackActive) return null
+        val fallback = ui.fallbackSurface.ifBlank { "agent2" }
+        return "Falder tilbage til $fallback — Stop gælder stadig den kørsel der er i gang."
+    }
 
     fun titleOf(routeKind: String): String =
         routeKind.trim().ifEmpty { "Plan" }.replaceFirstChar { it.uppercase() }

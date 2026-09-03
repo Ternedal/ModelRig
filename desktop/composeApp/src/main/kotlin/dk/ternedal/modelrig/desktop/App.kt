@@ -64,6 +64,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
@@ -442,6 +444,10 @@ fun App() {
                         KalivScreen.MODELS -> { showModels = true; showConvos = false; showSettings = false; activeScreen = KalivScreen.CHAT }
                         KalivScreen.DOCS -> { ragMode = true; loadRagSources(); activeScreen = KalivScreen.CHAT }
                         KalivScreen.SETTINGS -> { showSettings = true; showModels = false; showConvos = false; activeScreen = KalivScreen.CHAT }
+                        // Chat must always be reachable: close every panel. Without
+                        // this case the panels never closed and the chat surface was
+                        // unreachable from the sidebar (#779 item 1).
+                        KalivScreen.CHAT -> { showSettings = false; showModels = false; showConvos = false }
                         else -> {}
                     }
                 },
@@ -461,6 +467,7 @@ fun App() {
                         when (screen) {
                             KalivScreen.MODELS -> { showModels = true; activeScreen = KalivScreen.CHAT }
                             KalivScreen.SETTINGS -> { showSettings = true; activeScreen = KalivScreen.CHAT }
+                            KalivScreen.CHAT -> { showSettings = false; showModels = false; showConvos = false }
                             else -> {}
                         }
                     },
@@ -845,13 +852,25 @@ fun App() {
                         if (auditRows.isEmpty() && auditError == null)
                             Text("(ingen handlinger endnu)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
                         auditRows.forEach { e ->
-                            Text(
-                                "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
-                                    (if (e.origin != "local") "  ·  ${e.origin}" else "") +
-                                    (if (e.result_summary.isNotBlank()) "\n    ${e.result_summary}" else ""),
-                                color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
-                                modifier = Modifier.padding(vertical = 4.dp),
-                            )
+                            // Header and payload are separate texts: the summary is a
+                            // multi-line value dump, and inlining it after "\n    " only
+                            // indented its FIRST line (#779 item 6). Block padding
+                            // indents every line; monospace keeps key=value columns.
+                            Column(Modifier.padding(vertical = 4.dp)) {
+                                Text(
+                                    "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
+                                        (if (e.origin != "local") "  ·  ${e.origin}" else ""),
+                                    color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
+                                )
+                                if (e.result_summary.isNotBlank()) {
+                                    Text(
+                                        e.result_summary.trimEnd(),
+                                        color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 },
@@ -1222,7 +1241,7 @@ private fun SettingsCard(
             Field("Base-URL (Ollama direkte, eller rig'ens backend :8080)", localUrl, onLocalUrl)
             Field("Lokal chat-sti (/api/chat direkte · /api/v1/chat via backend)", localPath, onLocalPath)
             Field("Lokal model", localModel, onLocalModel)
-            Field("Enhedstoken (kun ved brug af backenden)", token, onToken)
+            SecretField("Enhedstoken (kun ved brug af backenden)", token, onToken)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onPair) { Text("Par med rig (dev-mode)", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                 pairStatus?.let { Spacer(Modifier.width(8.dp)); Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
@@ -1544,7 +1563,16 @@ private fun PhonePairingQrRow(localUrl: String) {
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             hosts.forEach { h ->
+                // PillToggle's label is accessibility-only; without visible
+                // text the address choices were three blank pills (#779 item 3).
                 PillToggle(h == host, label = "$h:$port") { host = h; link = null }
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "$h:$port",
+                    color = if (h == host) KalivTheme.colors.TextHigh else KalivTheme.colors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.clickable { host = h; link = null },
+                )
                 Spacer(Modifier.width(6.dp))
             }
         }
@@ -1594,6 +1622,26 @@ private fun Field(label: String, value: String, onChange: (String) -> Unit) {
         onValueChange = onChange,
         label = { Text(label, fontSize = 12.sp) },
         singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
+    // Tokens are credentials: masked by default, revealed only on explicit
+    // request (#779 item 4 -- the device token was readable on screen).
+    var reveal by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label, fontSize = 12.sp) },
+        singleLine = true,
+        visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            TextButton(onClick = { reveal = !reveal }) {
+                Text(if (reveal) "Skjul" else "Vis", fontSize = 11.sp)
+            }
+        },
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
     )
 }

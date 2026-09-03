@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from . import ollama_client as oc
 from . import rag
 from .env_compat import legacy_names_in_use
+from . import body_session, person_runtime
 from .store import DocStore
 
 VERSION = "1.58.143"
@@ -714,6 +715,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
 
+    _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
+
     async def _phase(name: str) -> None:
         """Udsend en fase, hvis kalderen lytter.
 
@@ -722,6 +725,10 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         streamende sender en callback ind. Loopets logik er den samme i begge
         tilfaelde -- fasen er observation, ikke kontrol.
         """
+        # The body follows the turn (Unity renderer roadmap, slice B): the
+        # same phase names the client sees drive the embodiment state.
+        if name in _BODY_STATES:
+            body_session.note_state(_BODY_STATES[name])
         if on_phase is not None:
             await on_phase(name)
 
@@ -822,8 +829,12 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         "action. If no tool fits, answer normally."
     )
     messages.append({"role": "system", "content": _tool_nudge})
-    if req.system:
-        messages.append({"role": "system", "content": req.system})
+    # Person Profile binding (#752): a selected person's active personality
+    # takes precedence over the client's persona text; with no person
+    # selected the client's prompt is used exactly as before.
+    system_text, person = person_runtime.resolve_system_prompt(req.system)
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
     trimmed = _trim_history(req.history)
     # A system message may only ever be first. One appearing mid-conversation is
     # a client bug at best, and at worst a replayed turn trying to speak with
@@ -831,8 +842,9 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     for i, m in enumerate(trimmed):
         if m.role == "system" and i > 0:
             m.role = "user"
-    if req.system:
-        # The caller passed it explicitly: drop any duplicate from history.
+    if system_text:
+        # A system prompt is in force (the caller's, or the registry's): drop
+        # any duplicate -- or a client-side legacy persona -- from history.
         trimmed = [m for m in trimmed if m.role != "system"]
     messages.extend(m.model_dump() for m in trimmed)
 
@@ -897,11 +909,16 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     messages.append(user_msg)
 
     origin = "cloud" if req.cloud_key else "local"
-    return await _run_tool_loop(
+    result = await _run_tool_loop(
         messages, req.model, req.cloud_base_url, req.cloud_key,
         req.conversation_id, origin, sources, [], on_phase=on_phase,
         context=context_used,
     )
+    if person is not None and isinstance(result, dict):
+        # Which person answered -- additive, so older clients ignore it and a
+        # newer one can show it. Absent means "no person selected".
+        result["person"] = person
+    return result
 
 
 @app.post("/tools/chat")
@@ -1584,6 +1601,9 @@ async def voice_converse_stream(req: ConverseUploadReq):
             "type": "chunk", "index": chunk["index"], "text": chunk["text"],
             "audio_base64": audio_b64, "synth_s": chunk.get("synth_s"),
             "ttfa_s": round(_time.time() - t_start, 2),
+            # The body's utterance for this sentence: the phone reports
+            # playback start/end against it so the mouth follows the speaker.
+            "utterance_id": chunk.get("utterance_id"),
         })
 
     async def run() -> None:

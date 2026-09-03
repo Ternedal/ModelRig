@@ -1,0 +1,61 @@
+# record-goldens: optag nye screenshot-baselines paa en gren og commit dem.
+#
+# CI verificerer Roborazzi-baselines (ci.yml, -Proborazzi.test.verify=true),
+# men ingen udviklingsmaskine har Android SDK, saa en bevidst UI-aendring
+# kunne ikke lande uden at nogen optog nye billeder i haanden. Denne
+# workflow lukker det hul: koer den paa PR-grenen, den optager alle
+# baselines med -Proborazzi.test.record=true og committer de aendrede PNG'er
+# tilbage til grenen. PR'en viser saa billed-diffen til review, og verify
+# bliver groen igen.
+#
+# Den aendrer ALDRIG main direkte: ref er paakraevet, og main afvises.
+name: record-goldens
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Gren der skal have nye screenshot-baselines (ikke main)"
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: record-goldens-${{ inputs.ref }}
+  cancel-in-progress: false
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse main
+        run: |
+          case "${{ inputs.ref }}" in
+            main|refs/heads/main) echo "record-goldens koerer ikke mod main"; exit 1 ;;
+          esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+      - name: Install platform + build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Record screenshot baselines
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:testDebugUnitTest -Proborazzi.test.record=true --no-daemon --console=plain
+      - name: Commit changed baselines back to the branch
+        run: |
+          git config user.name "record-goldens"
+          git config user.email "record-goldens@users.noreply.github.com"
+          git add -A android/app/src/test/screenshots
+          if git diff --cached --quiet; then
+            echo "Ingen baselines aendrede sig."
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m "test(android): record screenshot baselines (record-goldens paa ${{ inputs.ref }})"
+          git push origin "HEAD:${{ inputs.ref }}"

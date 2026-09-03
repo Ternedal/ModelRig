@@ -1,6 +1,6 @@
-# Physical validation campaign — 2.0.11
+# Physical validation campaign — 2.0.13
 
-Denne runbook samler de fysiske Prove-opgaver for ModelRig 2.0.11. En
+Denne runbook samler de fysiske Prove-opgaver for ModelRig 2.0.13. En
 upubliceret kandidat starter i `STAGED_PHYSICAL_PROMOTION.md`. Releasefasens
 updater- og lifecycle-operationer styres af `STAGE_B_UPDATER_EVIDENCE.md`.
 
@@ -13,15 +13,15 @@ kampagnerapport med `production_activation=false`.
 
 Alle rapporter skal binde til samme:
 
-- version `2.0.11`;
+- version `2.0.13`;
 - eksakte 40-tegns kandidat-/release-SHA;
 - worker `code_sha256`, hvor runtime-koden måles;
 - rene checkout og konsistente versionsstempler;
 - friske timezone-aware timestamps;
 - grønne gates og komplet cleanup.
 
-Evidens fra 2.0.10 eller tidligere, og evidens fra en tidligere ugyldiggjort
-2.0.11-head, må ikke genbruges. Flytter HEAD eller `origin/main` sig, skal den
+Evidens fra 2.0.12 eller tidligere, og evidens fra en tidligere ugyldiggjort
+2.0.13-head, må ikke genbruges. Flytter HEAD eller `origin/main` sig, skal den
 relevante freeze køres igen før mere evidens samles eller accepteres.
 
 ## Stage A — kandidatbeviser

@@ -17,14 +17,20 @@ val ksProps = Properties().apply {
 
 android {
     namespace = "dk.ternedal.modelrig"
-    compileSdk = 36
+    // 37, ikke 36: okhttp-android 5.5.0 (og dermed mockwebserver-bumpet i
+    // #759) kræver at afhængige projekter kompilerer mod API 37 eller nyere.
+    // compileSdk siger kun hvilke API'er koden MÅ bruge -- targetSdk og
+    // minSdk er urørte, så hverken runtime-adfærd eller understøttede
+    // enheder ændrer sig. Pixel 6a på riggen kører allerede SDK 37
+    // (jf. A4-25f-evidensens android_sdk_int).
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dk.ternedal.modelrig"
         minSdk = 26
         targetSdk = 35
-        versionCode = 292          // monotonic, bumped every release (not tied to semver)
-        versionName = "2.0.11"
+        versionCode = 294          // monotonic, bumped every release (not tied to semver)
+        versionName = "2.0.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -96,9 +102,9 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Screenshot-regression: Robolectric 4.16 (SDK 36 + JDK 21) + Roborazzi.
     testImplementation("org.robolectric:robolectric:4.16.1")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.70.0")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.70.0")
-    testImplementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.73.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.73.0")
+    testImplementation(platform("androidx.compose:compose-bom:2026.08.00"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test.ext:junit:1.3.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
@@ -108,15 +114,15 @@ dependencies {
     testImplementation("org.json:json:20260719")
     // Scheduler client contracts need a real HTTP boundary without relying on
     // JDK-only com.sun.net.httpserver, which is absent from AGP's test compiler.
-    testImplementation("com.squareup.okhttp3:mockwebserver:5.4.0")
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
+    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-    implementation("com.squareup.okhttp3:okhttp:5.4.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively

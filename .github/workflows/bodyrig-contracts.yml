@@ -30,6 +30,7 @@ on:
       - "scripts/bodyrig_select_current_mrbody.py"
       - "scripts/bodyrig_current_mrbody.py"
       - "scripts/bodyrig_current_profile_contract.py"
+      - "scripts/bodyrig_m29_identity_authority_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   pull_request:
     paths:
@@ -59,6 +60,7 @@ on:
       - "scripts/bodyrig_select_current_mrbody.py"
       - "scripts/bodyrig_current_mrbody.py"
       - "scripts/bodyrig_current_profile_contract.py"
+      - "scripts/bodyrig_m29_identity_authority_contract.py"
       - ".github/workflows/bodyrig-contracts.yml"
   workflow_dispatch:
 
@@ -169,6 +171,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python scripts/bodyrig_current_mrbody.py --help
+      - name: Validate BodyRig M2.9 portable identity authority interoperability
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_m29_identity_authority_contract.py
 
   h264-runtime:
     runs-on: ubuntu-latest

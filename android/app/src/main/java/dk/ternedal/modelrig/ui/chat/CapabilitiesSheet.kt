@@ -158,8 +158,10 @@ fun CapabilitiesSheetContent(
             // Raekken er KUN en indgang, naar der staar noget i composeren:
             // agenten planlaegger for en besked, ikke for ingenting.
             onClick = onRunAsAgent,
+            // Utilgaengelig: sig HVORFOR, ellers ligner raekken en doed knap --
+            // operatoeren trykkede paa den i tre dage med tom composer.
             subtitle = if (onRunAsAgent != null) "Laeg en plan for det, du har skrevet"
-                       else "Planl\u00e6gger og udf\u00f8rer opgaver i trin",
+                       else "Skriv en besked f\u00f8rst \u2014 agenten planl\u00e6gger for det, du skriver",
             trailing = null,
         )
         HorizontalDivider(thickness = KalivTokens.Layout.hairline, color = KalivTheme.colors.divider)
