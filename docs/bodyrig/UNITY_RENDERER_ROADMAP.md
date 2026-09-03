@@ -58,7 +58,7 @@ følger med hvert `chunk`-event), så munden forankres til det, der faktisk
 høres. Gamle klienter beholder tilnærmelsen; en rig uden krop svarer 404,
 og appen holder op med at melde for resten af sessionen.
 
-**Slice C — Unity frame-kilde.** Rendereren får en `BodyRigFrameSource` der
+**Slice C — Unity frame-kilde. SKREVET 3/9 (#846, draft mod #720-grenen; kompilerer kun i Unity).** Rendereren får en `BodyRigFrameSource` der
 kan læse frames fra fixturen (som nu) ELLER fra `/body/frames` (UnityWebRequest,
 SSE). Fixturen bliver ved at være den deterministiske testkilde. C#-ændringen
 er lille; den verificeres af den fysiske gate, ikke af CI.
@@ -85,3 +85,5 @@ VRM-expression-nøgler krydser grænsen — kun v0.1-frames og validerede assets
 A og B kan bygges og testes uden Unity og lander i dev-kanalen. C kræver at
 #720 er landet (ellers redigerer vi en draft). D kræver C og en Android-build
 af Unity-projektet. MVP (den fysiske gate) er uafhængig og kan ske parallelt.
+
+Rig-runbook for den første levende krop: `docs/bodyrig/FIRST_LIVE_BODY.md`.
