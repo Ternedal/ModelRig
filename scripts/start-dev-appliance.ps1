@@ -66,7 +66,19 @@ function Stop-ReleaseAppliance {
         Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
+function Stop-StrayWorkers {
+    # Workers that lost their port but not their life: uvicorn parent/child
+    # pairs from earlier runs keep the scheduler lease through the DB and the
+    # new worker then skips every tick ("lease MISTET til en anden ejer" --
+    # seen on the rig 3/9, four of them). Anything running the worker app
+    # from this checkout that is not the one we are about to start goes.
+    Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'app\.entrypoint:app' -or $_.CommandLine -match 'app\.main:app' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
 function Stop-DevProcesses {
+    Stop-StrayWorkers
     if (Test-Path -LiteralPath $stateFile) {
         try {
             $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
@@ -107,6 +119,11 @@ if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
 $head = (& git -C $repoRoot rev-parse HEAD).Trim()
 $dirty = @(& git -C $repoRoot status --porcelain)
 $appEnv = Read-KalivEnvFile -Path $envFile
+if ($appEnv['KALIV_AGENT4_OPERATOR_API'] -eq '1' -and [string]::IsNullOrWhiteSpace($appEnv['KALIV_AGENT4_DATA_ROOT'])) {
+    # Said before anything starts, not after a 90 s wait for a worker that
+    # exited at import (rig 3/9): the flag fails closed without its data root.
+    throw "KALIV_AGENT4_OPERATOR_API=1 kraever KALIV_AGENT4_DATA_ROOT i $envFile -- workeren ville fejle lukket ved opstart."
+}
 
 Write-Host ""
 Write-Host "=================================================================" -ForegroundColor Cyan
