@@ -256,13 +256,15 @@ async def converse(
         synth_s = round(time.time() - s0, 2)
         if first_audio_at is None:
             first_audio_at = time.time()
-        chunk = {"index": idx, "text": sentence, "wav": wav, "synth_s": synth_s}
+        utterance_id = f"{turn_id}-{idx}"
+        chunk = {"index": idx, "text": sentence, "wav": wav, "synth_s": synth_s,
+                 "utterance_id": utterance_id}
         chunks.append(chunk)
         # The body speaks the sentence (slice B): an audio-envelope mouth track
         # from this WAV, from now, for its duration. Synthesis time, not the
         # phone's playback time -- an honest approximation until the client
         # reports playback start.
-        body_session.note_speech(utterance_id=f"{turn_id}-{idx}", wav_path=wav,
+        body_session.note_speech(utterance_id=utterance_id, wav_path=wav,
                                  headers=result if isinstance(result, dict) else None)
         if on_chunk is not None:
             await on_chunk(chunk)

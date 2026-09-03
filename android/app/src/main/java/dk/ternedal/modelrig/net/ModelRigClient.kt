@@ -194,7 +194,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         cloudKey: String? = null,
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onTranscript: (String) -> Unit,
-        onChunk: (index: Int, text: String, audioB64: String) -> Unit,
+        onChunk: (index: Int, text: String, audioB64: String, utteranceId: String?) -> Unit,
         onDone: (reply: String, model: String?, viaCloud: Boolean) -> Unit,
         onError: (status: Int, detail: String) -> Unit,
     ) {
@@ -224,7 +224,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 when (val ev = StreamContract.parse(line)) {
                     is StreamEvent.Phase -> Unit  // stemmestroemmen udsender ingen faser endnu
                     is StreamEvent.Transcript -> onTranscript(ev.text)
-                    is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64)
+                    is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64, ev.utteranceId)
                     is StreamEvent.Done -> {
                         sawTerminal = true
                         onDone(ev.reply, ev.model, ev.viaCloud)
@@ -1277,3 +1277,35 @@ data class UsedChunk(
     val score: Double,
     val excerpt: String,
 )
+
+
+/**
+ * Playback reports for the rig's body (Unity renderer roadmap, slice B sync):
+ * the mouth on the rig follows the sentence the phone is actually playing.
+ * Fire-and-forget; a rig without an active body answers 404 and the client
+ * stops reporting for the rest of the session rather than paying two calls
+ * per sentence for nothing.
+ */
+class BodyPlaybackReporter(private val base: String, private val token: String) {
+    @Volatile private var enabled = true
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .build()
+
+    fun report(utteranceId: String?, event: String) {
+        if (!enabled || utteranceId.isNullOrBlank()) return
+        val req = Request.Builder()
+            .url("$base/api/v1/body/speech/${seg(utteranceId)}/$event")
+            .post(ByteArray(0).toRequestBody(null))
+            .header("Authorization", "Bearer $token")
+            .build()
+        runCatching {
+            http.newCall(req).execute().use { r ->
+                if (r.code == 404) enabled = false
+            }
+        }
+    }
+
+    private fun seg(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
+}

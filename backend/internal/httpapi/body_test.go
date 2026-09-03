@@ -142,3 +142,37 @@ func TestBodySessionRoutesForwardAndValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestBodySpeechReportsForwardOnlyKnownEvents(t *testing.T) {
+	var seen []string
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+	for _, event := range []string{"started", "ended"} {
+		if rec := doScheduleRequest(h, http.MethodPost, "/api/v1/body/speech/voice-1a2b-0/"+event, scheduleToken, ""); rec.Code != http.StatusOK {
+			t.Fatalf("%s: got %d", event, rec.Code)
+		}
+	}
+	if seen[0] != "POST /body/speech/voice-1a2b-0/started" || seen[1] != "POST /body/speech/voice-1a2b-0/ended" {
+		t.Fatalf("forwarded as %v", seen)
+	}
+	hits := len(seen)
+	for _, path := range []string{
+		"/api/v1/body/speech/voice-1a2b-0/paused",
+		"/api/v1/body/speech/bad%20id/started",
+	} {
+		if rec := doScheduleRequest(h, http.MethodPost, path, scheduleToken, ""); rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: got %d, want 404", path, rec.Code)
+		}
+	}
+	if len(seen) != hits {
+		t.Fatalf("rejected speech reports reached the worker")
+	}
+	if rec := doScheduleRequest(h, http.MethodPost, "/api/v1/body/speech/voice-1a2b-0/started", "", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without token: got %d", rec.Code)
+	}
+}

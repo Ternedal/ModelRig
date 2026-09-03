@@ -67,6 +67,11 @@ class BodySession:
             # body from moving at all: fall back to generic motion.
             self._scheduler = EmbodimentScheduler(session_id=self.session_id, bodyprint_id=bodyprint_id)
         self._utterance_ends: dict[str, int] = {}
+        # Tracks kept for playback re-anchoring: the phone reports when it
+        # actually starts playing a sentence, and the mouth restarts from
+        # there. Bounded; a few sentences is all a turn ever needs in flight.
+        self._tracks: dict[str, Any] = {}
+        self._max_tracks = 16
 
     def _next(self) -> int:
         self._sequence += 1
@@ -90,6 +95,7 @@ class BodySession:
             except VoiceRigContractError:
                 return 0
             now = _now_ms()
+            self._remember_track(utterance_id, track)
             self._scheduler.attach_speech(track, started_at_ms=now)
             try:
                 self._runtime.start_speech(sequence=self._next(), utterance_id=utterance_id)
@@ -97,6 +103,39 @@ class BodySession:
                 return 0
             self._utterance_ends[utterance_id] = now + track.duration_ms
             return track.duration_ms
+
+    def _remember_track(self, utterance_id: str, track: Any) -> None:
+        self._tracks[utterance_id] = track
+        while len(self._tracks) > self._max_tracks:
+            self._tracks.pop(next(iter(self._tracks)))
+
+    def playback_started(self, utterance_id: str) -> bool:
+        """The client began playing this sentence NOW: restart its mouth track
+        from this instant. Returns False for an utterance the session does not
+        know (never synthesized here, or long gone)."""
+        with self._lock:
+            track = self._tracks.get(utterance_id)
+            if track is None:
+                return False
+            now = _now_ms()
+            self._scheduler.attach_speech(track, started_at_ms=now)
+            try:
+                self._runtime.start_speech(sequence=self._next(), utterance_id=utterance_id)
+            except EventRejected:
+                return False
+            self._utterance_ends[utterance_id] = now + track.duration_ms
+            return True
+
+    def playback_ended(self, utterance_id: str) -> bool:
+        with self._lock:
+            known = utterance_id in self._tracks
+            self._utterance_ends.pop(utterance_id, None)
+            self._tracks.pop(utterance_id, None)
+            try:
+                self._runtime.end_speech(sequence=self._next(), utterance_id=utterance_id)
+            except EventRejected:
+                pass
+            return known
 
     def end_speech(self, utterance_id: str) -> None:
         with self._lock:
@@ -112,6 +151,7 @@ class BodySession:
             for utterance_id in list(self._utterance_ends):
                 self._scheduler.cancel_utterance(utterance_id)
             self._utterance_ends.clear()
+            self._tracks.clear()
             try:
                 self._runtime.cancel(sequence=self._next(), scope=CancelScope.ALL)
             except EventRejected:
@@ -222,6 +262,24 @@ def build_body_session_router() -> APIRouter:
         if session is None:
             raise HTTPException(status_code=404, detail="no active body")
         session.set_state(name)
+        return JSONResponse({"ok": True, "state": session.frame()["state"]})
+
+    @router.post("/speech/{utterance_id}/started")
+    def speech_started(utterance_id: str) -> JSONResponse:
+        # Playback truth from the phone: the mouth restarts from this instant.
+        session = current_session(create=False)
+        if session is None:
+            raise HTTPException(status_code=404, detail="no active body session")
+        if not session.playback_started(utterance_id):
+            raise HTTPException(status_code=404, detail="unknown utterance")
+        return JSONResponse({"ok": True, "state": session.frame()["state"]})
+
+    @router.post("/speech/{utterance_id}/ended")
+    def speech_ended(utterance_id: str) -> JSONResponse:
+        session = current_session(create=False)
+        if session is None:
+            raise HTTPException(status_code=404, detail="no active body session")
+        session.playback_ended(utterance_id)
         return JSONResponse({"ok": True, "state": session.frame()["state"]})
 
     @router.get("/frames")
