@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,5 +93,52 @@ func TestBodyRoutesRefuseNonLoopbackWorker(t *testing.T) {
 	h := scheduleHandler(t, "http://192.168.1.50:8099", 2*time.Second)
 	if rec := doScheduleRequest(h, http.MethodGet, "/api/v1/body/active", scheduleToken, ""); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("got %d, want 503", rec.Code)
+	}
+}
+
+func TestBodySessionRoutesForwardAndValidate(t *testing.T) {
+	var seen []string
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"state\":\"idle\"}\n\n"))
+	}))
+	defer worker.Close()
+	h := scheduleHandler(t, worker.URL, 2*time.Second)
+
+	if rec := doScheduleRequest(h, http.MethodGet, "/api/v1/body/frames?limit=1", scheduleToken, ""); rec.Code != http.StatusOK {
+		t.Fatalf("frames: got %d", rec.Code)
+	} else if !strings.HasPrefix(rec.Body.String(), "data: ") {
+		t.Fatalf("frames: SSE body not passed through: %q", rec.Body.String())
+	}
+	if seen[0] != "GET /body/frames?limit=1" {
+		t.Fatalf("frames forwarded as %q (query must survive)", seen[0])
+	}
+	if rec := doScheduleRequest(h, http.MethodGet, "/api/v1/body/state", scheduleToken, ""); rec.Code != http.StatusOK {
+		t.Fatalf("state: got %d", rec.Code)
+	}
+	if rec := doScheduleRequest(h, http.MethodPost, "/api/v1/body/interrupt", scheduleToken, ""); rec.Code != http.StatusOK {
+		t.Fatalf("interrupt: got %d", rec.Code)
+	}
+	if rec := doScheduleRequest(h, http.MethodPost, "/api/v1/body/state/listening", scheduleToken, ""); rec.Code != http.StatusOK {
+		t.Fatalf("set state: got %d", rec.Code)
+	}
+	hits := len(seen)
+	if rec := doScheduleRequest(h, http.MethodPost, "/api/v1/body/state/Listening", scheduleToken, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad state name: got %d, want 404", rec.Code)
+	}
+	if len(seen) != hits {
+		t.Fatalf("bad state name reached the worker")
+	}
+	for _, c := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/body/frames"},
+		{http.MethodGet, "/api/v1/body/state"},
+		{http.MethodPost, "/api/v1/body/interrupt"},
+		{http.MethodPost, "/api/v1/body/state/listening"},
+	} {
+		if rec := doScheduleRequest(h, c.method, c.path, "", ""); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s without token: got %d, want 401", c.method, c.path, rec.Code)
+		}
 	}
 }

@@ -40,13 +40,20 @@ fladen 503 og siger hvilken variabel der mangler. Svar bærer
 `X-BodyRig-Body-ID`, `X-BodyRig-Package-SHA256` og `X-BodyRig-Member-SHA256`,
 som proxyen lader passere (præfiks-allowlist), så klienten kan verificere.
 
-**Slice B — live frames.** Worker: én `BodyRigRuntime`-session pr. valgt
+**Slice B — live frames. LANDET 3/9.** Worker: én `BodyRigRuntime`-session pr. valgt
 person, drevet af det der allerede sker i chatten: turn-start → `thinking`,
 tool-kald → `waiting_for_tool`, TTS-sætning → `speaking` med `audio_envelope`
 fra voice-pipelinen (visemes når VoiceRig leverer timing), stop → `interrupted`
 → `listening`. Udstillet som `GET /body/frames` (SSE: én v0.1-frame pr. linje)
 bag samme forwarding. BodyCue-mapning (emotion/gesture fra svaret) er en
 separat, lille slice ovenpå — MVP sender `neutral`/ingen gesture.
+Som landet: `GET /body/state` (én frame), `GET /body/frames` (SSE, 20 fps,
+valgfrit `?limit=N`), `POST /body/interrupt` (hård afbrydelse: alle
+utterances annulleres, mund nulstilles, `interrupted`), `POST /body/state/{navn}`
+(klienten melder det kun den ved: `listening` når mic er åben). Uden aktiv
+krop svarer alt 404, og hooks i chat/voice er no-ops. Talestart er
+syntesetidspunkt på riggen, ikke afspilningstidspunkt på telefonen —
+klienten kan senere melde afspilningsstart for præcis synkronisering.
 
 **Slice C — Unity frame-kilde.** Rendereren får en `BodyRigFrameSource` der
 kan læse frames fra fixturen (som nu) ELLER fra `/body/frames` (UnityWebRequest,

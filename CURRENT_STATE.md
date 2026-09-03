@@ -209,6 +209,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_audit.py`
 - `tests/worker_backup.py`
 - `tests/worker_body_assets.py`
+- `tests/worker_body_session.py`
 - `tests/worker_browser_host.py`
 - `tests/worker_browser_peer_adapter.py`
 - `tests/worker_browser_peer_fulfillment.py`
