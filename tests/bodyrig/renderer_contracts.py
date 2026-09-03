@@ -187,10 +187,11 @@ required_sources = {
     "BodyRigGestureRouter.cs",
     "BodyRigProceduralGestureDriver.cs",
     "BodyRigDemoBootstrap.cs",
+    "BodyRigFrameSource.cs",
 }
 check(
     required_sources.issubset({path.name for path in runtime_dir.glob("*.cs")}),
-    "Unity proof contains wire, loader, renderer, gesture, fixture and bootstrap components",
+    "Unity proof contains wire, loader, renderer, gesture, fixture, live-source and bootstrap components",
 )
 
 wire_source = (runtime_dir / "BodyRigRenderFrame.cs").read_text(encoding="utf-8")
@@ -260,6 +261,46 @@ check(
 check(
     "timestamp_ms + loopHoldMs" in player_source,
     "looping demo keeps the final fixture pose reachable before rewind",
+)
+
+# Live frame source (Unity renderer roadmap, slice C): the product path beside
+# the fixture. Same renderer contract, same guards, plus reconnect.
+source_source = (runtime_dir / "BodyRigFrameSource.cs").read_text(encoding="utf-8")
+check(
+    "/api/v1/body/frames" in source_source
+    and 'SetRequestHeader("Authorization", "Bearer " + token)' in source_source
+    and "DownloadHandlerScript" in source_source,
+    "live source reads the rig's SSE frame stream behind the device token",
+)
+check(
+    "frame.Validate();" in source_source
+    and source_source.index("frame.Validate();") < source_source.index("renderer.Apply(frame);"),
+    "live source validates every frame before applying it",
+)
+check(
+    "!renderer.IsBound" in source_source
+    and source_source.index("!renderer.IsBound") < source_source.index("renderer.Apply(frame);"),
+    "live source cannot apply frames before async VRM binding completes",
+)
+check(
+    "lastTimestampMs" in source_source and "WaitForSecondsRealtime(reconnectDelaySeconds)" in source_source,
+    "live source keeps timestamps monotonic within a stream and reconnects after a drop",
+)
+check(
+    "renderer.Apply(" in source_source and source_source.count("renderer.Apply(") == 1,
+    "live source feeds the renderer through Apply and nothing else",
+)
+check(
+    "HumanBodyBones" not in source_source and "VRM10" not in source_source,
+    "live source stays at the wire: no bones, no VRM types",
+)
+bootstrap_source = (runtime_dir / "BodyRigDemoBootstrap.cs").read_text(encoding="utf-8")
+check(
+    'GetEnvironmentVariable("BODYRIG_RIG_URL")' in bootstrap_source
+    and 'GetEnvironmentVariable("BODYRIG_RIG_TOKEN")' in bootstrap_source
+    and 'player.ResourceName = "bodyrig-demo";' in bootstrap_source
+    and bootstrap_source.index("BodyRigFrameSource") < bootstrap_source.index("BodyRigFixturePlayer"),
+    "bootstrap picks the live source only when a rig is named; the fixture proof path is unchanged",
 )
 
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
