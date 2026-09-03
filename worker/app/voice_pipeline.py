@@ -265,7 +265,8 @@ async def converse(
         # phone's playback time -- an honest approximation until the client
         # reports playback start.
         body_session.note_speech(utterance_id=utterance_id, wav_path=wav,
-                                 headers=result if isinstance(result, dict) else None)
+                                 headers=result if isinstance(result, dict) else None,
+                                 sentence=sentence)
         if on_chunk is not None:
             await on_chunk(chunk)
         idx += 1

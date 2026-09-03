@@ -165,6 +165,45 @@ class BodySessionTests(unittest.TestCase):
         session.interrupt()
         self.assertEqual(self.c.post("/body/speech/s2/started").status_code, 404)
 
+    def test_cues_are_off_by_default(self) -> None:
+        self._select()
+        os.environ.pop("KALIV_BODY_CUES", None)
+        session = body_session.current_session()
+        session.set_state("thinking")
+        f = session.frame()
+        self.assertEqual((f["state"], f["emotion"], f["gesture"]), ("thinking", "neutral", None))
+        session.speak(utterance_id="c0", wav_bytes=tone_wav(300), sentence="x" * 200)
+        self.assertIsNone(session.frame()["gesture"])
+
+    def test_cues_when_enabled_are_the_documented_policy_and_nothing_more(self) -> None:
+        self._select()
+        os.environ["KALIV_BODY_CUES"] = "1"
+        try:
+            session = body_session.current_session()
+            session.set_state("thinking")
+            f = session.frame()
+            self.assertEqual((f["state"], f["emotion"]), ("thinking", "curious"))
+            # A short sentence: speaking, no gesture. A long one: explain.
+            session.speak(utterance_id="c1", wav_bytes=tone_wav(300), sentence="Ja.")
+            f = session.frame()
+            self.assertEqual((f["state"], f["gesture"], f["emotion"]), ("speaking", None, "neutral"))
+            session.end_speech("c1")
+            session.speak(utterance_id="c2", wav_bytes=tone_wav(300), sentence="Det er fordi " + "forklaring " * 8)
+            f = session.frame()
+            self.assertEqual((f["state"], f["gesture"]), ("speaking", "explain"))
+            # Back to idle clears everything: no lingering gesture or emotion.
+            session.end_speech("c2")
+            session.set_state("idle")
+            f = session.frame()
+            self.assertEqual((f["state"], f["gesture"], f["emotion"]), ("idle", None, "neutral"))
+            # Interrupt is neutral too -- the interruption rule.
+            session.speak(utterance_id="c3", wav_bytes=tone_wav(500), sentence="x" * 100)
+            session.interrupt()
+            f = session.frame()
+            self.assertEqual((f["state"], f["gesture"], f["mouth_open"]), ("interrupted", None, 0.0))
+        finally:
+            os.environ.pop("KALIV_BODY_CUES", None)
+
     def test_session_is_replaced_when_the_active_body_changes(self) -> None:
         self._select()
         first = body_session.current_session()

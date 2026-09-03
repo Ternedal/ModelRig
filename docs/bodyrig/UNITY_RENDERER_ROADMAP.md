@@ -46,7 +46,10 @@ tool-kald → `waiting_for_tool`, TTS-sætning → `speaking` med `audio_envelop
 fra voice-pipelinen (visemes når VoiceRig leverer timing), stop → `interrupted`
 → `listening`. Udstillet som `GET /body/frames` (SSE: én v0.1-frame pr. linje)
 bag samme forwarding. BodyCue-mapning (emotion/gesture fra svaret) er en
-separat, lille slice ovenpå — MVP sender `neutral`/ingen gesture.
+separat, lille slice ovenpå — landet 3/9 som `body_cues.py`, **default fra**
+(`KALIV_BODY_CUES=1`): `explain` for lange sætninger, `curious` under
+thinking, `concerned` ved fejl, nulstilling ved idle/listening/interrupted.
+Ingen sentiment-udledning fra ordene.
 Som landet: `GET /body/state` (én frame), `GET /body/frames` (SSE, 20 fps,
 valgfrit `?limit=N`), `POST /body/interrupt` (hård afbrydelse: alle
 utterances annulleres, mund nulstilles, `interrupted`), `POST /body/state/{navn}`

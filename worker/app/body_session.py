@@ -40,6 +40,8 @@ from bodyrig.runtime import BodyRigRuntime, BodyState, CancelScope, EventRejecte
 from bodyrig.scheduler import EmbodimentScheduler, SchedulerError  # noqa: E402
 from bodyrig.voicerig_adapter import VoiceRigContractError, wav_envelope_track  # noqa: E402
 
+from . import body_cues  # noqa: E402
+
 FRAME_INTERVAL_S = 1 / 20
 
 
@@ -85,8 +87,20 @@ class BodySession:
                 self._runtime.apply_state(sequence=self._next(), state=state)
             except EventRejected:
                 pass
+            plan = body_cues.plan_for_state(str(getattr(state, "value", state)))
+            if plan is not None:
+                self._apply_plan(plan)
 
-    def speak(self, *, utterance_id: str, wav_bytes: bytes, headers: dict[str, Any] | None = None) -> int:
+    def _apply_plan(self, plan: dict[str, Any]) -> None:
+        # Cues are best effort: a plan the runtime rejects is dropped, the
+        # state it came with stands.
+        try:
+            self._runtime.apply_expression_plan(sequence=self._next(), plan=plan)
+        except EventRejected:
+            pass
+
+    def speak(self, *, utterance_id: str, wav_bytes: bytes, headers: dict[str, Any] | None = None,
+              sentence: str = "") -> int:
         """Attach a synthesized sentence and enter SPEAKING. Returns the track
         duration in ms so the caller can end the utterance when it is over."""
         with self._lock:
@@ -102,6 +116,9 @@ class BodySession:
             except EventRejected:
                 return 0
             self._utterance_ends[utterance_id] = now + track.duration_ms
+            plan = body_cues.plan_for_speech(sentence)
+            if plan is not None:
+                self._apply_plan(plan)
             return track.duration_ms
 
     def _remember_track(self, utterance_id: str, track: Any) -> None:
@@ -221,13 +238,14 @@ def note_state(state: str) -> None:
         pass
 
 
-def note_speech(*, utterance_id: str, wav_path: str, headers: dict[str, Any] | None = None) -> None:
+def note_speech(*, utterance_id: str, wav_path: str, headers: dict[str, Any] | None = None,
+                sentence: str = "") -> None:
     try:
         session = current_session(create=True)
         if session is None:
             return
         with open(wav_path, "rb") as fh:
-            session.speak(utterance_id=utterance_id, wav_bytes=fh.read(), headers=headers)
+            session.speak(utterance_id=utterance_id, wav_bytes=fh.read(), headers=headers, sentence=sentence)
     except Exception:
         pass
 
