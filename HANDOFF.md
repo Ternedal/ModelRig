@@ -771,7 +771,48 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 2/9 aften)
+## 9. Kø — hvem har bolden (16/7, opdateret 3/9)
+
+**[3/9 kl. 07:00 UTC — status. main = `#844`-landing, VERSION 2.0.13. Frosset
+kandidat uændret (`4f80693f`). 2/9-aftenblokken nedenfor er historik.]**
+
+### Beslutning 2/9 aften: den rigtige løsning til kroppen er Unity/UniVRM
+
+Anders: Kaliv skal kunne **vise, afspille og afvikle** `.mrbody` — AR-agtigt.
+Ikke en web-renderer; Unity/UniVRM-sporet fra `BODYRIG_V1.md`. Roadmap:
+`docs/bodyrig/UNITY_RENDERER_ROADMAP.md` (#832).
+
+### Hvad der skete 2/9 aften – 3/9 morgen
+
+- **#720 (Unity/VRM-proof) ajour og grøn:** merget 71 commits fra main uden
+  konflikter; 32/33/11 kontrakter + 14/14 CI på ny head. Forbliver draft
+  efter sin egen regel — kun den fysiske gate mangler. Riggens forudsætninger
+  står på PR'en: Unity `6000.3.21f1` i Hub, en rigtig VRM 1.0-avatar (VRoid
+  Studio), en `.mrbody` bygget/installeret/valgt.
+- **Slice A — assets (#842):** `GET /body/active` + `avatar.vrm`, thumbnail,
+  motions, læst kun gennem BodyRigs validerede veje, sha256 pr. medlem,
+  `X-BodyRig-*`-headers som proxyen nu lader passere. `KALIV_BODY_STORE` i env.
+- **Slice B — live frames (#843):** én embodiment-session pr. worker
+  (`BodyRigRuntime` + `EmbodimentScheduler` + `wav_envelope_track` + wire v0.1),
+  drevet af chat-faser og TTS-sætninger; `GET /body/frames` (SSE 20 fps),
+  `/body/state`, `POST /body/interrupt`, `POST /body/state/{navn}`.
+- **Afspilningssync (#844):** telefonen melder start/slut pr. sætning
+  (`POST /body/speech/{utterance}/started|ended`), munden forankres til det,
+  der faktisk høres. Gamle klienter uændrede.
+- Fund undervejs: Go ServeMux tillader ikke `{name}.vrma` (ville have væltet
+  backend ved opstart; test fangede det); proxyen lod kun `Content-Type`
+  passere (nu præfiks-allowlist for `X-BodyRig-*`).
+
+Core er urørt i hver regel: workeren sekvenserer kun. Alt en Unity-klient på
+telefon/Quest skal hente fra riggen, findes nu bag device-token.
+
+### Bolden ligger hos Anders
+
+1. **Den fysiske Unity-gate** på #720 (Unity i Hub, VRM fra VRoid, `.mrbody`
+   i store + valgt, proof → visuel accept → gate). Så lander #720, og
+   **Slice C** (Unity frame-kilde mod `/body/frames`) kan bygges samme dag.
+2. Dev-kanalen, #789-bekræftelse, `person_create.py` — uændret fra 2/9.
+3. `KALIV_BODY_STORE` sættes i appliancens env, når en profil-store findes.
 
 **[2/9 kl. 20:30 UTC — status. main = `#827`-landing, VERSION 2.0.13. Frosset
 kandidat uændret (`4f80693f`). 2/9-middagsblokken nedenfor er historik.]**
