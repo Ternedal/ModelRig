@@ -60,8 +60,11 @@ hvis den navngiver en installeret bodyid, ellers current.
 
 ## Hvad der ikke virker endnu, og hvorfor
 
-- **Emotion og gestik** er `neutral`/ingen: ingen cue-slice endnu. Rendereren
-  forstår `explain` under tale og `happy/amused/curious/surprised/sad/…`.
+- **Emotion og gestik** er `neutral`/ingen som standard. Sæt
+  `KALIV_BODY_CUES=1` i appliancens env for den lille, eksplicitte politik:
+  lange sætninger får `explain`-gestik under tale, thinking er `curious`
+  (lavt), fejl er `concerned`; idle/listening/interrupted nulstiller. Intet
+  udledes af ordene selv — ingen sentiment-gætteri. Se `worker/app/body_cues.py`.
 - **Telefon/Quest**: Unity-projektet bygger endnu ikke til Android; slice D.
 - **Demo-identiteten** er en fixture. Den rigtige krop kommer fra
   `bodyrig_extract_video.py` → `bodyrig_build_identity_bundle.py` →
