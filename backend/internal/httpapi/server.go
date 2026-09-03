@@ -127,6 +127,11 @@ func (s *server) routes() {
 	// ServeMux wildcards must be whole segments: the ".vrma" suffix is part of
 	// the {file} value and is validated in the handler.
 	s.mux.Handle("GET /api/v1/body/active/motions/{file}", s.authMW(http.HandlerFunc(s.handleBodyMotion)))
+	// Live frames (slice B).
+	s.mux.Handle("GET /api/v1/body/state", s.authMW(http.HandlerFunc(s.handleBodyState)))
+	s.mux.Handle("GET /api/v1/body/frames", s.authMW(http.HandlerFunc(s.handleBodyFrames)))
+	s.mux.Handle("POST /api/v1/body/interrupt", s.authMW(http.HandlerFunc(s.handleBodyInterrupt)))
+	s.mux.Handle("POST /api/v1/body/state/{name}", s.authMW(http.HandlerFunc(s.handleBodySetState)))
 
 	if os.Getenv("KALIV_SCHEDULER_API") == "1" {
 		// Human schedule administration. The Bearer-authenticated backend is the

@@ -43,3 +43,31 @@ func (s *server) handleBodyMotion(w http.ResponseWriter, r *http.Request) {
 	}
 	s.forwardBody(w, r, "/body/active/motions/"+name+".vrma")
 }
+
+// Live frames (slice B). /frames is a server-sent event stream the renderer
+// holds open; it rides the slow worker client, which flushes per chunk and
+// carries the long timeout. Interrupt and state reports are POSTs the
+// client makes about what only it knows (mic open, user gone, barge-in).
+
+var bodyStateRe = regexp.MustCompile(`^[a-z_]{1,32}$`)
+
+func (s *server) handleBodyState(w http.ResponseWriter, r *http.Request) {
+	s.forwardBody(w, r, "/body/state")
+}
+
+func (s *server) handleBodyFrames(w http.ResponseWriter, r *http.Request) {
+	s.forwardBody(w, r, "/body/frames")
+}
+
+func (s *server) handleBodyInterrupt(w http.ResponseWriter, r *http.Request) {
+	s.forwardBody(w, r, "/body/interrupt")
+}
+
+func (s *server) handleBodySetState(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !bodyStateRe.MatchString(name) {
+		writeErr(w, http.StatusNotFound, "unknown body state")
+		return
+	}
+	s.forwardBody(w, r, "/body/state/"+name)
+}

@@ -30,6 +30,7 @@ import re
 import time
 from typing import Awaitable, Callable
 
+from . import body_session
 from . import ollama_client as oc
 from . import voice_asr
 from . import voice_tts
@@ -224,6 +225,8 @@ async def converse(
     chunks: list[dict] = []
     first_audio_at: float | None = None
     idx = 0
+    # One id per converse() call so the body's utterances never collide across turns.
+    turn_id = f"voice-{int(time.time() * 1000):x}"
     llm_start = time.time()
 
     async def _synth(sentence: str) -> None:
@@ -255,6 +258,12 @@ async def converse(
             first_audio_at = time.time()
         chunk = {"index": idx, "text": sentence, "wav": wav, "synth_s": synth_s}
         chunks.append(chunk)
+        # The body speaks the sentence (slice B): an audio-envelope mouth track
+        # from this WAV, from now, for its duration. Synthesis time, not the
+        # phone's playback time -- an honest approximation until the client
+        # reports playback start.
+        body_session.note_speech(utterance_id=f"{turn_id}-{idx}", wav_path=wav,
+                                 headers=result if isinstance(result, dict) else None)
         if on_chunk is not None:
             await on_chunk(chunk)
         idx += 1
