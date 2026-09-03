@@ -43,6 +43,7 @@ from bodyrig.voicerig_adapter import VoiceRigContractError, wav_envelope_track  
 from . import body_cues  # noqa: E402
 
 FRAME_INTERVAL_S = 1 / 20
+CLIENT_REPORTABLE_STATES = frozenset({"listening", "idle"})
 
 
 def _now_ms() -> int:
@@ -275,9 +276,12 @@ def build_body_session_router() -> APIRouter:
     @router.post("/state/{name}")
     def set_state(name: str) -> JSONResponse:
         # For the client to report what only it knows -- listening while the
-        # mic is open, idle when the user walked away.
-        if name not in {s.value for s in BodyState}:
-            raise HTTPException(status_code=422, detail="unknown body state")
+        # mic is open, idle when the user walked away. Nothing else: thinking
+        # and waiting_for_tool come from the turn, speaking from a synthesized
+        # sentence, interrupted from /interrupt, error from a failure. A client
+        # cannot declare the body to be speaking with no mouth to speak.
+        if name not in CLIENT_REPORTABLE_STATES:
+            raise HTTPException(status_code=422, detail="state is not client-reportable")
         session = current_session(create=True)
         if session is None:
             raise HTTPException(status_code=404, detail="no active body")

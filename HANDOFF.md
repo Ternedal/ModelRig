@@ -813,6 +813,11 @@ Ikke en web-renderer; Unity/UniVRM-sporet fra `BODYRIG_V1.md`. Roadmap:
   `docs/bodyrig/FIRST_LIVE_BODY.md` — fra Unity i Hub til krop der følger chatten.
 - **Cues (#848), default fra:** `KALIV_BODY_CUES=1` → `explain` ved lange
   sætninger, `curious` under thinking, `concerned` ved fejl; intet udledt af ordene.
+- **Driftsfund ved gennemlæsning af egen kode (3/9 middag):** frame-streamen
+  re-validerede hele `.mrbody` 20×/s (#850 — nu cache med markør-mtime i
+  nøglen, 13 ms → 8 µs); proxyens 10-min timeout ville have klippet streamen
+  på klokken (#851 — frames forwardes uden timeout; klientens context lukker);
+  `/body/state/{navn}` tager nu kun `listening`/`idle` fra klienten (#852).
 - Proces-fejl, min: landings-scriptet slettede en gren FØR mergen var
   bekræftet, da et Windows-job flakede (#848). Gendannet uden tab; mønstret
   rettet — sletning kun i samme program som en bekræftet merge.
