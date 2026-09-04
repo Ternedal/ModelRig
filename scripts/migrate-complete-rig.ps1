@@ -58,6 +58,18 @@ function Resolve-ExistingDirectory {
     return (Resolve-Path -LiteralPath $Path).Path
 }
 
+function Assert-CanonicalModelRigRuntime {
+    param([string]$Runtime, [string]$Root)
+
+    $expected = [IO.Path]::GetFullPath((Join-Path $Root "ModelRig")).TrimEnd('\')
+    $actual = [IO.Path]::GetFullPath($Runtime).TrimEnd('\')
+    if (-not [string]::Equals($actual, $expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw ("Complete rig migration requires ModelRigRuntimeRoot to equal InstallRoot\\ModelRig so the final bootstrap validation cannot inspect a different appliance. " +
+            "Expected '{0}', got '{1}'. Use the standalone ModelRig migration operator for non-canonical layouts.") -f $expected, $actual
+    }
+    return $expected
+}
+
 function Resolve-VoiceRigRepository {
     if (-not [string]::IsNullOrWhiteSpace($VoiceRigRepo)) {
         $resolved = Resolve-ExistingDirectory -Path $VoiceRigRepo -Description "VoiceRig repository"
@@ -142,10 +154,22 @@ function Invoke-PowerShellOperator {
     }
 }
 
-function Test-ModelRigWasRunning {
-    $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+function Get-ModelRigProcesses {
+    return @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
         $_.ProcessName -like "modelrig-*"
     })
+}
+
+function Assert-ModelRigStopped {
+    $processes = @(Get-ModelRigProcesses)
+    if ($processes.Count -gt 0) {
+        $names = @($processes | ForEach-Object { $_.ProcessName + "(" + $_.Id + ")" }) -join ", "
+        throw "ModelRig must remain stopped across the complete migration boundary, but these processes are live: $names"
+    }
+}
+
+function Test-ModelRigWasRunning {
+    $processes = @(Get-ModelRigProcesses)
     if ($processes.Count -gt 0) { return $true }
 
     foreach ($taskName in @("KalivBootstrap", "KalivSupervisor")) {
@@ -158,20 +182,18 @@ function Test-ModelRigWasRunning {
 }
 
 function Resume-HeldModelRig {
-    $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.ProcessName -like "modelrig-*"
-    })
+    $processes = @(Get-ModelRigProcesses)
     if ($processes.Count -gt 0) {
-        Write-Host "ModelRig is already running; no held-export restart is needed."
+        Write-Host "ModelRig is already running; no recovery-first restart is needed."
         return
     }
 
     try {
         Get-ScheduledTask -TaskName "KalivBootstrap" -ErrorAction Stop | Out-Null
         Start-ScheduledTask -TaskName "KalivBootstrap"
-        Write-Host "Started 'KalivBootstrap' after complete export (recovery-first startup)."
+        Write-Host "Started 'KalivBootstrap' (recovery-first startup)."
     } catch {
-        throw "Complete export finished/failed with ModelRig held down, but KalivBootstrap could not be started: $($_.Exception.Message)"
+        throw "ModelRig was held down for complete migration, but KalivBootstrap could not be started: $($_.Exception.Message)"
     }
 }
 
@@ -365,6 +387,9 @@ $runtimeRoot = if ([string]::IsNullOrWhiteSpace($ModelRigRuntimeRoot)) {
 } else {
     $ModelRigRuntimeRoot
 }
+if ($Action -ne "Verify") {
+    $runtimeRoot = Assert-CanonicalModelRigRuntime -Runtime $runtimeRoot -Root $InstallRoot
+}
 
 if ($Action -eq "Export") {
     Write-Step "Creating complete migration bundle"
@@ -393,10 +418,12 @@ if ($Action -eq "Export") {
         Resolve-ExistingFile -Path ($modelArchive + ".migration.json") -Description "ModelRig migration sidecar" | Out-Null
 
         Write-Step "Exporting VoiceRig state while ModelRig remains stopped"
+        Assert-ModelRigStopped
         Invoke-PowerShellOperator -Path $paths.VoiceRigOperator -Label "VoiceRig state export" -Arguments @(
             "-Action", "Export",
             "-OutDir", $bundleDirectory
         )
+        Assert-ModelRigStopped
         $voiceArchive = Get-SingleArtifact -Directory $bundleDirectory -Filter "voicerig-migration-*.tar.gz" -Description "VoiceRig archive"
         Resolve-ExistingFile -Path ($voiceArchive + ".migration.json") -Description "VoiceRig migration sidecar" | Out-Null
 
@@ -441,20 +468,22 @@ if ($Action -eq "Verify") {
 $modelImported = $false
 $voiceImported = $false
 try {
-    Write-Step "Importing ModelRig/Kaliv state"
+    Write-Step "Importing ModelRig/Kaliv state and holding ModelRig stopped"
     $modelArgs = @(
         "-Action", "Import",
         "-RuntimeRoot", $runtimeRoot,
         "-RepoRoot", $paths.RepoRoot,
         "-Archive", $verified.ModelRigArchive,
         "-MinimumGpuCount", ([string]$MinimumGpuCount),
-        "-SkipValidation"
+        "-SkipValidation",
+        "-SkipRestart"
     )
     if ($ForceRestore) { $modelArgs += "-ForceRestore" }
     Invoke-PowerShellOperator -Path $paths.ModelRigOperator -Label "ModelRig state import" -Arguments $modelArgs
     $modelImported = $true
+    Assert-ModelRigStopped
 
-    Write-Step "Importing VoiceRig state"
+    Write-Step "Importing VoiceRig state while ModelRig remains stopped"
     $voiceArgs = @(
         "-Action", "Import",
         "-Archive", $verified.VoiceRigArchive
@@ -462,13 +491,18 @@ try {
     if ($ForceRestore) { $voiceArgs += "-ForceRestore" }
     Invoke-PowerShellOperator -Path $paths.VoiceRigOperator -Label "VoiceRig state import" -Arguments $voiceArgs
     $voiceImported = $true
+    Assert-ModelRigStopped
+
+    Write-Step "Starting restored ModelRig through recovery-first bootstrap"
+    Resume-HeldModelRig
 
     if (-not $SkipFinalValidation) {
         Write-Step "Running one final new-rig validation"
         Invoke-PowerShellOperator -Path $paths.BootstrapScript -Label "Final new-rig validation" -Arguments @(
             "-Phase", "Validate",
             "-InstallRoot", $InstallRoot,
-            "-MinimumGpuCount", ([string]$MinimumGpuCount)
+            "-MinimumGpuCount", ([string]$MinimumGpuCount),
+            "-SkipBodyRig"
         )
     }
 
