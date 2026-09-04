@@ -838,8 +838,9 @@ review-pin), #720/#846 ajour med main (kontrakter 39/33/11 grønne).
 
 - **Dev-kanalen virker ende til ende, første kørsel.** Én ægte fejl: workeren
   fejlede lukket, fordi `KALIV_AGENT4_OPERATOR_API=1` stod uden
-  `KALIV_AGENT4_DATA_ROOT` (min aktiveringsblok 30/8 manglede den; release-
-  workeren har sandsynligvis crash-loopet siden). Rettet i env; dokumenteret;
+  `KALIV_AGENT4_DATA_ROOT` (min aktiveringsblok 30/8 manglede den; kravet
+  findes i 2.0.12 siden 12/8, så release-workeren KUNNE ikke starte med den
+  env fra lørdag til torsdag). Rettet i env; dokumenteret;
   start-scriptet preflighter det nu. Anden "fejl" var kold worker-start > 90 s.
 - Fire efterladte Python-workere fra 2/9 og 3/9 holdt scheduler-lease'en, så
   dev-workeren sprang hvert tick over. Dræbt manuelt; stop-scriptet dræber
