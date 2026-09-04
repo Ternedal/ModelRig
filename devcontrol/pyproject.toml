@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kaliv-dev-control"
 version = "0.1.0"
-description = "Fail-closed DC-L01–L10 primitives for controlled self-development"
+description = "Fail-closed DC-L01–L14 primitives for controlled self-development"
 requires-python = ">=3.11"
 dependencies = ["cryptography==50.0.1"]
 
@@ -14,3 +14,4 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+exclude = ["kaliv_dev_control._compatibility_v1", "kaliv_dev_control._compatibility_v1.*"]

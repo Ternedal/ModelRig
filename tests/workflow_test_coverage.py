@@ -95,6 +95,12 @@ expected_modules = {
     "test_publisher_recovery_receipt_v3_h7.py",
     "test_publisher_recovery_signature_window_h6.py",
     "test_dc_l13_local_candidate_boundary.py",
+    "test_dc_l14_reproducible_packaging.py",
+    "test_h10i_tier_a_bundle_inventory.py",
+    "test_h10j_tier_a_execution_core_split_contract.py",
+    "test_h10p_tier_a_legacy_toolhost_extraction.py",
+    "test_publisher_protocol_inventory_h10f.py",
+    "test_tier_a_authority_bundle_closure.py",
     "test_slice10k_publisher_authorization.py",
     "test_slice10l_local_candidate_materialization.py",
     "test_physical_isolation_durable_publication_h10b.py",
@@ -129,7 +135,7 @@ observed_modules = {
 }
 check(
     observed_modules == expected_modules,
-    f"the fifty-one DC-L01–L13 test modules are present: {sorted(observed_modules)}",
+    f"the fifty-seven DC-L01–L14 test modules are present: {sorted(observed_modules)}",
 )
 
 worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
@@ -337,6 +343,57 @@ check(
         for token in ("Path(", "open(", "read_text", "read_bytes")
     ),
     "rollback-safe keyring state cannot be sourced from a local file",
+)
+
+bundle_lock = json.loads(
+    (root / "devcontrol/TIER_A_BUNDLE_INVENTORY.json").read_text(encoding="utf-8")
+)
+split_contract = json.loads(
+    (root / "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json").read_text(
+        encoding="utf-8"
+    )
+)
+build_script = (root / "scripts/build_devcontrol_artifacts.py").read_text(
+    encoding="utf-8"
+)
+protocol_inventory = (root / "devcontrol/PUBLISHER_PROTOCOL_INVENTORY.md").read_text(
+    encoding="utf-8"
+)
+check(
+    "Install exact DevControl packaging toolchain" in workflow
+    and "build==1.3.0 wheel==0.46.2 setuptools==75.8.2" in workflow,
+    "DC-L14 CI installs the exact local packaging toolchain",
+)
+check(
+    "DevControl DC-L14 final authority closure and reproducible packaging boundary"
+    in workflow,
+    "DC-L14 has an explicit final authority and packaging boundary gate",
+)
+check(
+    bundle_lock.get("file_count") == 50,
+    "DC-L14 locks the complete fifty-file Tier-A authority bundle",
+)
+check(
+    split_contract.get("schema")
+    == "kaliv-tier-a-execution-core-split-contract/v10"
+    and split_contract.get("import_only") is True,
+    "DC-L14 records the final import-only core split contract",
+)
+check(
+    "_normalize_sdist" in build_script
+    and "SOURCE_DATE_EPOCH" in build_script
+    and all(
+        token not in build_script.lower()
+        for token in ("twine", "repository-url", "api-token")
+    ),
+    "DC-L14 builds deterministic local artifacts without upload authority",
+)
+check(
+    "physically excluded from wheel and sdist artifacts" in protocol_inventory
+    and not (
+        root / "devcontrol/src/kaliv_dev_control/_compatibility_v1"
+    ).exists(),
+    "DC-L14 physically excludes rejected compatibility code from supported artifacts",
 )
 
 receipt_schema = json.loads(
