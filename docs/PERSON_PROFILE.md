@@ -79,6 +79,10 @@ erklæring om de fire compatibility-checks — uden det nægter scriptet.
 Fra næste besked i chatten svarer hun. Skift tilbage: vælg en anden
 person i **Personer**, eller lad `selected_person_id` stå tomt.
 
+Når krop og stemme findes, bindes de med `scripts\person_bind.py --person …
+--body bodyid-… --voice navn.mrvoice --reviewed --reviewer …` — som en NY
+reviewet revision; den aktive rettes aldrig.
+
 ## Persistens
 
 Ét JSON-dokument (`modelrig-person-registry/v1`), skrevet atomisk.

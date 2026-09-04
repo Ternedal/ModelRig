@@ -838,8 +838,9 @@ review-pin), #720/#846 ajour med main (kontrakter 39/33/11 grønne).
 
 - **Dev-kanalen virker ende til ende, første kørsel.** Én ægte fejl: workeren
   fejlede lukket, fordi `KALIV_AGENT4_OPERATOR_API=1` stod uden
-  `KALIV_AGENT4_DATA_ROOT` (min aktiveringsblok 30/8 manglede den; release-
-  workeren har sandsynligvis crash-loopet siden). Rettet i env; dokumenteret;
+  `KALIV_AGENT4_DATA_ROOT` (min aktiveringsblok 30/8 manglede den; kravet
+  findes i 2.0.12 siden 12/8, så release-workeren KUNNE ikke starte med den
+  env fra lørdag til torsdag). Rettet i env; dokumenteret;
   start-scriptet preflighter det nu. Anden "fejl" var kold worker-start > 90 s.
 - Fire efterladte Python-workere fra 2/9 og 3/9 holdt scheduler-lease'en, så
   dev-workeren sprang hvert tick over. Dræbt manuelt; stop-scriptet dræber
@@ -854,12 +855,22 @@ review-pin), #720/#846 ajour med main (kontrakter 39/33/11 grønne).
 - Smoke fra riggen: healthz 2.0.13, schedules 200, agent4 403 uden
   `agent4:read`-grant (korrekt), body 503 uden `KALIV_BODY_STORE` (korrekt).
 
+### Rettelse 4/9: #720 har været på main siden 2/9 21:13
+
+Den parallelle session mergede Unity-proofen via en base-gren
+(`feat/bodyrig-unity-renderer-base`) 2/9 kl. 21:13 UTC — **uden den fysiske
+gate** og tretten minutter før jeg skrev "ajour, venter på gaten" på den. Mine
+noter 2/9–3/9 om "#720 draft, venter på gate" var derfor forkerte. Sandheden:
+rendereren er på main; beviset (proof → visuel accept → gate) mangler stadig og
+køres mod main's head. #846 er retargetet til main. `agent/bodyrig-unity-
+renderer` er en død gren.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
-1. **Den fysiske Unity-gate** på #720 (Unity i Hub, VRM fra VRoid, `.mrbody`
-   i store + valgt, proof → visuel accept → gate). Så lander #720, og
-   **Slice C** (Unity frame-kilde mod `/body/frames`) kan bygges samme dag.
+1. **Den fysiske Unity-gate mod main** (Unity i Hub, VRM fra VRoid, `.mrbody`
+   i store + valgt, proof → visuel accept → gate). Derefter #846 (Slice C),
+   der kun kan verificeres ved at kompilere i Unity.
 2. Dev-kanalen, #789-bekræftelse, `person_create.py` — uændret fra 2/9.
 3. `KALIV_BODY_STORE` sættes i appliancens env, når en profil-store findes.
 

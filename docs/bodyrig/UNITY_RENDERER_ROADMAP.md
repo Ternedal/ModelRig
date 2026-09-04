@@ -12,19 +12,21 @@ afspille og afvikle** `.mrbody` på Windows, Android (AR) og Quest.
 | Profil-store, current-binding, digest-bound renderer-handoff (M2.6–M2.8) | landet |
 | `BodyRigRuntime` tilstandsmaskine (idle/listening/thinking/speaking/waiting_for_tool/interrupted/error) | landet i core |
 | Render-frame wire v0.1 (`bodyrig.render_frame`) | landet i core |
-| Unity `6000.3.21f1` + UniVRM `v0.131.2` proof: VRM-load, blink, envelope-mund, visemes, emotion, gaze, breath, gesture-router, afbrydelse | **#720, draft — venter kun på fysisk gate** |
+| Unity `6000.3.21f1` + UniVRM `v0.131.2` proof: VRM-load, blink, envelope-mund, visemes, emotion, gaze, breath, gesture-router, afbrydelse | **på main siden 2/9 21:13** (merget via base-gren uden fysisk gate — gaten er stadig IKKE kørt og skal køres mod main's head) |
 | Worker-udstilling af BodyRig (runtime, frames, assets) | **findes ikke** |
 | Android/Quest-klient | **findes ikke** |
 
 Unity-proofen afspiller en canned fixture (`bodyrig-demo.json`). Den har ingen
 netværkskilde. Det er hullet mellem proof og produkt.
 
-## MVP — proofen lander (BodyRig-spor, Anders på riggen)
+## MVP — proofen bevises (BodyRig-spor, Anders på riggen)
+
+Koden er på main (#720 merget 2/9 uden gate). Beviset mangler:
 
 1. Unity `6000.3.21f1` i Hub på standardstien; en rigtig VRM 1.0-avatar
    (VRoid Studio); `.mrbody` bygget, installeret og valgt i en profil-store.
-2. `bodyrig_unity_physical_proof.ps1` → visuel accept → `bodyrig_unity_physical_gate.py`.
-3. #720 ud af draft og ind på main. Ingen kode her — kun fysik.
+2. `bodyrig_unity_physical_proof.ps1` → visuel accept → `bodyrig_unity_physical_gate.py`
+   mod **main's exact head**. Ingen kode her — kun fysik.
 
 ## V1 — live krop på Windows og Android (ModelRig-spor, starter nu)
 
@@ -63,12 +65,12 @@ følger med hvert `chunk`-event), så munden forankres til det, der faktisk
 høres. Gamle klienter beholder tilnærmelsen; en rig uden krop svarer 404,
 og appen holder op med at melde for resten af sessionen.
 
-**Slice C — Unity frame-kilde. SKREVET 3/9 (#846, draft mod #720-grenen; kompilerer kun i Unity).** Rendereren får en `BodyRigFrameSource` der
+**Slice C — Unity frame-kilde. SKREVET 3/9 (#846, draft mod main; kompilerer kun i Unity).** Rendereren får en `BodyRigFrameSource` der
 kan læse frames fra fixturen (som nu) ELLER fra `/body/frames` (UnityWebRequest,
 SSE). Fixturen bliver ved at være den deterministiske testkilde. C#-ændringen
 er lille; den verificeres af den fysiske gate, ikke af CI.
 
-**Slice D — Android-host + AR. AR-byggeklodsen SKREVET 4/9 (#858, stablet på #846; kun bag `BODYRIG_AR`-define).** Kaliv Body som separat Unity Android-app
+**Slice D — Android-host + AR. Skrevet 4/9 som drafts stablet på #846: AR-placering (#858), rig-link (#860); værtsvalg taget: separat Kaliv Body-app startet fra Kalivs ⋮ → Krop med token som intent-extras (#861).** Kaliv Body som separat Unity Android-app
 først (parring som enhver anden klient; asset + frames fra rig), ARFoundation
 for kamera-passthrough og plan-forankring. Unity as a Library ind i Kaliv-appen
 er V2-spørgsmålet — det koster build-kompleksitet, og en separat app beviser
@@ -87,9 +89,9 @@ VRM-expression-nøgler krydser grænsen — kun v0.1-frames og validerede assets
 
 ## Rækkefølge
 
-A og B kan bygges og testes uden Unity og lander i dev-kanalen. C kræver at
-#720 er landet (ellers redigerer vi en draft). D kræver C og en Android-build
-af Unity-projektet. MVP (den fysiske gate) er uafhængig og kan ske parallelt.
+A og B er landet. C (#846) targeter main og kan lande, når den er kompileret i
+Unity på riggen. D kræver C og en Android-build af Unity-projektet. Den fysiske
+gate er uafhængig og kan køres når som helst mod main.
 
 Rig-runbook for den første levende krop: `docs/bodyrig/FIRST_LIVE_BODY.md`.
 

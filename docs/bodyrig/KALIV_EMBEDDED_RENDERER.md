@@ -108,7 +108,16 @@ bootstrappen vælger den kun med `BODYRIG_RIG_URL`/`_TOKEN` sat. Kompilerer kun
 i Unity; verificeres af #720's fysiske gate. UaaL-eksportindstillingerne er
 IKKE lavet.
 
-**Det åbne valg — MVP-værten:** denne plan siger Unity as a Library inde i
+**Valget om MVP-værten — taget 4/9, reversibelt:** separat **Kaliv Body**-app
+først (Unity-projektet bygget til Android, pakkenavn `dk.ternedal.kalivbody`),
+startet fra Kalivs ⋮ → **Krop** med riggen og Kalivs eget token som
+intent-extras (`KalivBodyBridge`), så den aldrig parres selv. Unity as a
+Library inde i Kaliv forbliver V2-vejen, hvis Anders vil have én app; alt
+under værten (assets, frames, RigLink, AR-placering) er det samme. Begrundelse:
+færrest bevægelige dele, ingen Gradle-integration i en app der bygges rent i
+CI, og kroppen kan ses på telefonen, før man beslutter noget om indlejring.
+
+**Det oprindelige åbne valg, til reference:** denne plan siger Unity as a Library inde i
 Kaliv fra MVP; roadmappen siger separat "Kaliv Body"-app først og UaaL som
 V2-spørgsmål (build-kompleksitet, APK +60–100 MB, én Gradle-integration mere
 i en app der i dag bygges rent i CI). Begge veje bruger samme L1 og samme
