@@ -865,6 +865,28 @@ rendereren er på main; beviset (proof → visuel accept → gate) mangler stadi
 køres mod main's head. #846 er retargetet til main. `agent/bodyrig-unity-
 renderer` er en død gren.
 
+### I luften 4/9 — læs FØR du bygger noget på kroppen (to sessioner kører)
+
+To sessioner har i dag landet identisk kode uafhængigt af hinanden (#861 og
+min lokale bro var tegn for tegn ens) og kostet tre README-konflikter. Tjek
+PR-listen, ikke kun denne fil, før du skriver:
+
+| # | Hvad | Status |
+|---|---|---|
+| #846 | `BodyRigFrameSource` — live frames fra riggen | draft mod main, ajour |
+| #858 | `BodyRigArPlacement` — kroppen i rummet, bag `BODYRIG_AR` | draft stablet på #846 |
+| #860 | `BodyRigRigLink` — env / intent-extras / PlayerPrefs / parringsformular | draft stablet på #858 |
+| #861 | Kaliv ⋮ → Krop → Kaliv Body med token som intent-extras | **landet** |
+
+Kontrakten mellem #861 og #860: extras `bodyrig_rig_url`/`bodyrig_rig_token`,
+pakke `dk.ternedal.kalivbody`. Alle tre drafts kompilerer kun i Unity og
+verificeres af første import på riggen; de lander i rækkefølge 846 → 858 → 860.
+`origin/agent/bodyrig-unity-renderer` er en død gren (#720 er på main), som
+en session har genskabt — slet den ikke, mens den anden session muligvis
+bruger den; den bærer intet, main ikke har.
+
+Værtsvalget er taget (separat Kaliv Body-app; UaaL som V2) — byg ikke UaaL.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
