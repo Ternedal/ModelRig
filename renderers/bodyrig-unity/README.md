@@ -83,7 +83,8 @@ To enable, in the Unity editor on the rig:
    (the current 6.x line for Unity 6000.3; take the versions the Package
    Manager offers, do not hand-edit `manifest.json`).
 2. Project Settings → XR Plug-in Management → Android → enable ARCore.
-3. Player Settings → Android: ARM64, IL2CPP, minimum API 24 or higher.
+3. Player Settings → Android: ARM64, IL2CPP, minimum API 24 or higher, and
+   package name **`dk.ternedal.kalivbody`** (see "Android host" below).
 4. Player Settings → Scripting Define Symbols (Android) → add `BODYRIG_AR`.
 5. Scene: add Unity's **XR Origin (AR)** and **AR Session**, and put an
    `ARRaycastManager` + `ARPlaneManager` on the XR Origin. The bootstrap finds
