@@ -302,5 +302,18 @@ if os.path.isfile(complete_operator):
         "complete migration: partial child success is never called cutover-ready",
     )
 
+bootstrap_operator = os.path.join(repo_root, "scripts", "bootstrap-new-rig.ps1")
+check(os.path.isfile(bootstrap_operator), "new-rig bootstrap: operator exists")
+if os.path.isfile(bootstrap_operator):
+    bootstrap_text = open(bootstrap_operator, "r", encoding="utf-8-sig").read()
+    check(
+        'http://127.0.0.1:8765/api/readiness' in bootstrap_text,
+        "new-rig bootstrap: VoiceRig readiness uses authoritative port 8765",
+    )
+    check(
+        'http://127.0.0.1:8079/api/readiness' not in bootstrap_text,
+        "new-rig bootstrap: stale VoiceRig port 8079 cannot return",
+    )
+
 print(f"\n===== BACKUP: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

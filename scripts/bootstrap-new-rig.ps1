@@ -791,8 +791,8 @@ function Validate-Rig {
         Add-Result -Step "ModelRig validate-rig" -Status WARN -Detail "runtime not installed yet"
     }
 
-    if (Test-Http "http://127.0.0.1:8079/api/readiness") {
-        Add-Result -Step "VoiceRig readiness" -Status PASS -Detail "127.0.0.1:8079/api/readiness reachable"
+    if (Test-Http "http://127.0.0.1:8765/api/readiness") {
+        Add-Result -Step "VoiceRig readiness" -Status PASS -Detail "127.0.0.1:8765/api/readiness reachable"
     } else {
         Add-Result -Step "VoiceRig readiness" -Status WARN -Detail "VoiceRig readiness endpoint not reachable; start/check VoiceRig if Core completed"
     }
