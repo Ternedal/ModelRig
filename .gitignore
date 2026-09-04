@@ -156,3 +156,4 @@ kaliv-tools-state.json.tmp
 worker/app/_build_stamp.py
 /validation/stage-b-easy-state.json
 persons-registry.json
+*.egg-info/
