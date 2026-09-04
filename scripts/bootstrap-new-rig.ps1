@@ -282,7 +282,7 @@ function Assert-ReleaseAttestation {
     try {
         $payload = Invoke-RestMethod -Uri $uri -Headers $headers -TimeoutSec 30
     } catch {
-        throw "cannot check build provenance for $AssetName: $($_.Exception.Message)"
+        throw "cannot check build provenance for ${AssetName}: $($_.Exception.Message)"
     }
 
     $matches = 0
