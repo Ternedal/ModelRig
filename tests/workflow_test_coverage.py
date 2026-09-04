@@ -135,11 +135,15 @@ check(
 worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
 pyproject = (root / "devcontrol/pyproject.toml").read_text(encoding="utf-8")
 check(
-    worker_requirements.count("cryptography==50.0.0") == 1,
+    # Reviewed 4/9/2026 for the 50.0.0 -> 50.0.1 move: src/rust/src/backend/ed25519.rs
+    # and hazmat/primitives/asymmetric/ed25519.py are byte-identical between the
+    # sdists; the only source change is a clippy allow in serialization.rs, and
+    # the changelog's only entry is wheels rebuilt with OpenSSL 4.0.2.
+    worker_requirements.count("cryptography==50.0.1") == 1,
     "the CI/runtime environment pins the reviewed Ed25519 implementation exactly once",
 )
 check(
-    pyproject.count('"cryptography==50.0.0"') == 1,
+    pyproject.count('"cryptography==50.0.1"') == 1,
     "the DevControl package metadata pins the same Ed25519 implementation",
 )
 
