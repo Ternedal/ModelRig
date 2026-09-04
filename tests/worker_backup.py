@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import shutil
 import sqlite3
@@ -100,6 +101,21 @@ def wipe():
             shutil.rmtree(it.path)
 
 
+def archive_with_schema(source: str, destination: str, schema: int) -> None:
+    """Copy an archive while changing only manifest.schema."""
+    with tarfile.open(source, "r:gz") as src, tarfile.open(destination, "w:gz") as dst:
+        for member in src.getmembers():
+            extracted = src.extractfile(member)
+            data = extracted.read() if extracted else b""
+            if member.name == "manifest.json":
+                manifest = json.loads(data)
+                manifest["schema"] = schema
+                data = json.dumps(manifest, indent=2, sort_keys=True).encode()
+            replacement = tarfile.TarInfo(member.name)
+            replacement.size = len(data)
+            dst.addfile(replacement, io.BytesIO(data))
+
+
 # --- inventory --------------------------------------------------------------
 required_keys = {
     "rag.db",
@@ -138,10 +154,26 @@ archive = backup.create(os.path.join(_root, "backups"))
 check(os.path.exists(archive), "create: archive written")
 check(archive.endswith(".tar.gz"), "create: archive is a gzip tarball")
 check(not os.path.exists(archive + ".tmp"), "create: no leftover temp file")
+manifest = backup._read_manifest(archive)
+check(manifest["schema"] == 2, "schema: expanded 2.x inventory writes schema 2")
+check(1 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: current code retains schema-1 restore compatibility")
 
 verified = backup.verify(archive)
 check(verified["ok"], "verify: a fresh backup passes its own hashes")
 check(verified["checked"] == len(before), "verify: every seeded file is in the archive")
+
+# A schema-1 archive remains readable by new code, while new archives no longer
+# masquerade as schema 1 to old code that cannot know the expanded inventory.
+legacy = os.path.join(_root, "legacy-schema-1.tar.gz")
+archive_with_schema(archive, legacy, 1)
+check(backup.verify(legacy)["ok"], "schema: current code still verifies legacy schema 1")
+future = os.path.join(_root, "unsupported-schema.tar.gz")
+archive_with_schema(archive, future, 999)
+try:
+    backup.verify(future)
+    check(False, "schema: unknown future schema is refused")
+except ValueError:
+    check(True, "schema: unknown future schema is refused")
 
 wipe()
 check(snapshot() == {}, "wipe: live state is gone")
@@ -206,6 +238,7 @@ check(len(forced["restored"]) == len(before), "restore --force: overwrites clean
 wipe()
 empty = backup.create(os.path.join(_root, "empty"))
 check(backup.verify(empty)["ok"], "create: an empty rig produces a valid empty backup")
+check(backup._read_manifest(empty)["schema"] == 2, "create: empty rig still emits current schema 2")
 
 print(f"\n===== BACKUP: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)
