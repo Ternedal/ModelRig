@@ -99,6 +99,16 @@ pairing card makes. The host choice (embedded or standalone Kaliv Body app)
 is the open decision in `docs/bodyrig/KALIV_EMBEDDED_RENDERER.md`; both work
 with this. Tap the floor; the body appears there and follows the conversation.
 
+## Android host: the Kaliv Body app
+
+Host choice taken 4/9 (reversible): a standalone Unity build of this project,
+package name **`dk.ternedal.kalivbody`**. Kaliv's ⋮ → **Krop** launches exactly
+that package and hands it the rig address and Kaliv's own device token as
+intent extras (`bodyrig_rig_url`, `bodyrig_rig_token`), which `BodyRigRigLink`
+reads first -- so the body app never pairs on its own. Unity as a Library
+inside Kaliv stays the V2 path if one app is wanted; everything below the
+host is identical. Set the package name in Player Settings → Android.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.

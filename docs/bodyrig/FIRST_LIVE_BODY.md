@@ -1,8 +1,9 @@
 # Den første levende krop — rig-runbook
 
 Alt her forudsætter dev-kanalen (`DEV_APPLIANCE.md`): riggen kører fra
-HEAD, telefonen fra CI's APK. Slice A/B er på main; #720 (Unity-proof) og
-#846 (live frame-kilde) er drafts, der lander via den fysiske gate.
+HEAD, telefonen fra CI's APK. Slice A/B og Unity-proofen (#720) er på main;
+#846 (live frame-kilde) er draft mod main og lander, når den er kompileret i
+Unity. Den fysiske gate er ikke kørt endnu — det er dét, afsnit 2 gør.
 
 ## 1. Forberedelse (én gang)
 
@@ -32,20 +33,22 @@ HEAD, telefonen fra CI's APK. Slice A/B er på main; #720 (Unity-proof) og
 
    Manifest med `name: Kaliv` og tre `data:`-linjer med `state: idle` = klar.
 
-## 2. Den fysiske Unity-gate (#720)
+## 2. Den fysiske Unity-gate (mod main)
 
-Fra `agent/bodyrig-unity-renderer`, ren working tree, telefon ikke nødvendig:
+Fra `main`, ren working tree, telefon ikke nødvendig:
 
-    git switch agent/bodyrig-unity-renderer; git pull --ff-only
+    git switch main; git pull --ff-only
     powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig_unity_physical_proof.ps1 -Store C:\Users\admin\Desktop\ModelRig-appliance\bodyrig-profiles
     powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig_unity_visual_acceptance.ps1 -StatesDistinct -GazeBlinkBreathVisible -ExplainGestureVisible -SpeechModesDiffer -InterruptionImmediateNeutral
     python scripts\bodyrig_unity_physical_gate.py --expected-sha (git rev-parse HEAD)
 
-Grøn gate → #720 ud af draft og ind på main. Så merges #846 ind.
+Grøn gate = rendereren på main er fysisk bevist. Derefter #846 (kræver at
+den kompilerer i Unity — første import viser det).
 
 ## 3. Kroppen følger samtalen (#846)
 
-Samme Unity-projekt, nu med riggen navngivet — ingen fixture:
+Samme Unity-projekt fra #846-grenen (`git switch feat/unity-frame-source`),
+nu med riggen navngivet — ingen fixture:
 
     $env:BODYRIG_VRM_PATH = "C:\Users\admin\Desktop\Kaliv.vrm"
     $env:BODYRIG_RIG_URL = "http://127.0.0.1:8080"
@@ -58,6 +61,38 @@ lyden), står stille ved stop. `voice_bound` og `person` i svaret er
 uafhængige af kroppen; den følger den valgte persons body-revision (#752),
 hvis den navngiver en installeret bodyid, ellers current.
 
+## 4. Kalivs stemme (VoiceRig → person)
+
+Stemmen bygges i VoiceRigs UI (vælg 1–10 klip → navn → byg → installér), som
+lægger en `.mrvoice` i VoiceRigs voices-mappe. Bind den til personen som en
+**ny** reviewet revision — den aktive rettes aldrig:
+
+    python scripts\person_bind.py --person person-5bc3e41093e058885fdd1e51a9fcef54 --voice kaliv.mrvoice --reviewed --reviewer Anders
+
+Fra næste sætning sender workeren `voice_package=kaliv.mrvoice` til VoiceRig
+og verificerer `X-VoiceRig-Package`; svaret bærer `voice_bound: true`.
+
+## 5. Den rigtige krop (video → `.mrbody` → person)
+
+Demo-kroppen fra afsnit 1 har en fixture-identitet. Den rigtige kommer fra
+en video af personen, med MediaPipe-modellerne (`.task`-filer, absolutte
+stier) og en samtykke-erklæring, som pipelinen kræver:
+
+    python scripts\bodyrig_extract_video.py --source C:\path\kaliv.mov --pose-model C:\models\pose_landmarker.task --hand-model C:\models\hand_landmarker.task --face-model C:\models\face_landmarker.task --permission-assertion "Jeg har tilladelse til at behandle denne optagelse" --output C:\work\kaliv-tracking.json
+    python scripts\bodyrig_build_identity_bundle.py C:\work\kaliv-tracking.json C:\work\kaliv-identity.json
+    python scripts\bodyrig_build_mrbody.py C:\work\kaliv-identity.json C:\Users\admin\Desktop\Kaliv.vrm C:\work\thumb.png C:\work\kaliv.mrbody --name Kaliv
+    python scripts\bodyrig_install_mrbody.py C:\work\kaliv.mrbody C:\Users\admin\Desktop\ModelRig-appliance\bodyrig-profiles
+    python scripts\bodyrig_select_current_mrbody.py C:\Users\admin\Desktop\ModelRig-appliance\bodyrig-profiles <bodyid fra install-output>
+
+Og bind den til personen (bodyid'et fra install-outputtet), gerne sammen
+med stemmen i samme revision:
+
+    python scripts\person_bind.py --person person-5bc3e41093e058885fdd1e51a9fcef54 --body bodyid-<hex> --voice kaliv.mrvoice --reviewed --reviewer Anders
+
+`/body/active` svarer derefter med `source: person`, og rendereren viser
+hendes krop, ikke demo-identitetens. MediaPipe-kravene står i
+`bodyrig/requirements-tracking.txt` (`mediapipe==1.0.1`).
+
 ## Hvad der ikke virker endnu, og hvorfor
 
 - **Emotion og gestik** er `neutral`/ingen som standard. Sæt
@@ -66,6 +101,4 @@ hvis den navngiver en installeret bodyid, ellers current.
   (lavt), fejl er `concerned`; idle/listening/interrupted nulstiller. Intet
   udledes af ordene selv — ingen sentiment-gætteri. Se `worker/app/body_cues.py`.
 - **Telefon/Quest**: Unity-projektet bygger endnu ikke til Android; slice D.
-- **Demo-identiteten** er en fixture. Den rigtige krop kommer fra
-  `bodyrig_extract_video.py` → `bodyrig_build_identity_bundle.py` →
-  `bodyrig_build_mrbody.py`.
+- **Demo-identiteten** er en fixture. Den rigtige krop: afsnit 5.

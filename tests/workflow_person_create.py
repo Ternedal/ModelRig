@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+import person_bind  # noqa: E402
 import person_create  # noqa: E402
 from app.person_api import build_person_router  # noqa: E402
 from app.person_registry import PersonRegistry  # noqa: E402
@@ -51,6 +52,37 @@ class PersonCreateTests(unittest.TestCase):
         self.assertEqual(result["active"]["personality"]["style_notes"], "korte svar")
         self.assertEqual(self.reg.selected_person_id, result["person_id"])
         self.assertEqual(self.reg.get(result["person_id"]).active_person_revision, "person-r0001")
+
+    def test_bind_makes_a_new_revision_and_moves_the_triple_whole(self) -> None:
+        created = person_create.run(
+            self.call, name="Kaliv", instructions="Du er Kaliv.", language="dansk", style="",
+            body_source="unbound", voice_source="unbound", reviewer="Anders", reviewed=True, note="", select=True)
+        pid = created["person_id"]
+        bound = person_bind.run(self.call, person_id=pid, body="bodyid-" + "a" * 24, voice="kaliv.mrvoice",
+                                reviewer="Anders", reviewed=True, note="virkelig krop og stemme")
+        self.assertEqual(bound["previous_revision"], "person-r0001")
+        self.assertEqual(bound["person_revision"], "person-r0002")
+        self.assertEqual((bound["body"], bound["voice"], bound["personality"]), ("body-r0002", "voice-r0002", "personality-r0001"))
+        person = self.reg.get(pid)
+        self.assertEqual(person.active_person_revision, "person-r0002")
+        # r0001 is untouched: immutable history.
+        self.assertEqual(person.revision("person-r0001").voice, "voice-r0001")
+        # Voice only, later: body candidate carried over from the active revision.
+        again = person_bind.run(self.call, person_id=pid, body=None, voice="kaliv-v2.mrvoice",
+                                reviewer="Anders", reviewed=True, note="")
+        self.assertEqual((again["body"], again["voice"]), ("body-r0002", "voice-r0003"))
+
+    def test_bind_refuses_without_reviewed_or_without_anything(self) -> None:
+        created = person_create.run(
+            self.call, name="Alva", instructions="x", language="dansk", style="",
+            body_source="unbound", voice_source="unbound", reviewer="Anders", reviewed=True, note="", select=False)
+        with self.assertRaises(SystemExit):
+            person_bind.run(self.call, person_id=created["person_id"], body=None, voice="v.mrvoice",
+                            reviewer="Anders", reviewed=False, note="")
+        with self.assertRaises(SystemExit):
+            person_bind.run(self.call, person_id=created["person_id"], body=None, voice=None,
+                            reviewer="Anders", reviewed=True, note="")
+        self.assertEqual(self.reg.get(created["person_id"]).active_person_revision, "person-r0001")
 
     def test_refuses_without_reviewed(self) -> None:
         with self.assertRaises(SystemExit) as ctx:
