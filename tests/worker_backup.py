@@ -280,7 +280,8 @@ if os.path.isfile(complete_operator):
     )
     check(
         "Assert-CanonicalModelRigRuntime" in complete_text
-        and "requires ModelRigRuntimeRoot to equal InstallRoot\\ModelRig" in complete_text,
+        and "requires ModelRigRuntimeRoot to equal InstallRoot" in complete_text
+        and "standalone ModelRig migration operator for non-canonical layouts" in complete_text,
         "complete migration: custom runtime cannot make final validation inspect another appliance",
     )
     check(
