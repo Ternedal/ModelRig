@@ -188,6 +188,7 @@ required_sources = {
     "BodyRigProceduralGestureDriver.cs",
     "BodyRigDemoBootstrap.cs",
     "BodyRigFrameSource.cs",
+    "BodyRigArPlacement.cs",
 }
 check(
     required_sources.issubset({path.name for path in runtime_dir.glob("*.cs")}),
@@ -294,6 +295,32 @@ check(
     "HumanBodyBones" not in source_source and "VRM10" not in source_source,
     "live source stays at the wire: no bones, no VRM types",
 )
+# AR placement (slice D): compiled only behind BODYRIG_AR so no package
+# version is pinned blind; moves the avatar root only.
+ar_source = (runtime_dir / "BodyRigArPlacement.cs").read_text(encoding="utf-8")
+check(
+    ar_source.lstrip("/\n ").find("#if BODYRIG_AR") >= 0
+    and ar_source.rstrip().endswith("#endif")
+    and ar_source.index("#if BODYRIG_AR") < ar_source.index("using UnityEngine.XR.ARFoundation;"),
+    "AR placement compiles only behind BODYRIG_AR -- the proof builds without AR Foundation",
+)
+check(
+    "TrackableType.PlaneWithinPolygon" in ar_source and "raycastManager.Raycast(" in ar_source,
+    "AR placement asks the raycast manager for a plane, nothing else about the scene",
+)
+check(
+    "avatarRoot.SetPositionAndRotation(" in ar_source
+    and "HumanBodyBones" not in ar_source
+    and "VRM10" not in ar_source
+    and "renderer.Apply" not in ar_source,
+    "AR placement moves the avatar root only: no bones, no VRM types, no frames",
+)
+check(
+    "avatarRoot.gameObject.SetActive(false);" in ar_source
+    and ar_source.index("SetActive(false)") < ar_source.index("SetActive(true)"),
+    "AR placement hides the body until the user has chosen a spot",
+)
+
 bootstrap_source = (runtime_dir / "BodyRigDemoBootstrap.cs").read_text(encoding="utf-8")
 check(
     'GetEnvironmentVariable("BODYRIG_RIG_URL")' in bootstrap_source
@@ -301,6 +328,12 @@ check(
     and 'player.ResourceName = "bodyrig-demo";' in bootstrap_source
     and bootstrap_source.index("BodyRigFrameSource") < bootstrap_source.index("BodyRigFixturePlayer"),
     "bootstrap picks the live source only when a rig is named; the fixture proof path is unchanged",
+)
+check(
+    "#if BODYRIG_AR" in bootstrap_source
+    and bootstrap_source.index("#if BODYRIG_AR") < bootstrap_source.index("BodyRigArPlacement")
+    and bootstrap_source.count("BodyRigArPlacement") >= 1,
+    "bootstrap adds AR placement only behind BODYRIG_AR; frames sources are chosen independently of it",
 )
 
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
