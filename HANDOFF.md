@@ -906,6 +906,13 @@ Værtsvalget er taget (separat Kaliv Body-app; UaaL som V2) — byg ikke UaaL.
 **Åbent i git nu: kun #846 → #858 → #860 (Unity-drafts).** Alt andet er landet
 eller lukket. Ingen gren bag main.
 
+Parallelt landede den anden session samme aften ny-rig-bootstrap og komplet
+ModelRig+VoiceRig-migration (`scripts/NEW_RIG_BOOTSTRAP.md`,
+`scripts/COMPLETE_RIG_MIGRATION.md`, `migrate-complete-rig.ps1`). Kropssporets
+env-krav flytter med: en ny rig skal have `KALIV_BODY_STORE` og
+`KALIV_AGENT4_DATA_ROOT` sat, ellers svarer body-fladen 503 og workeren
+fejler lukket — se `docs/bodyrig/FIRST_LIVE_BODY.md` afsnit 1.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
