@@ -1,8 +1,9 @@
 # Den første levende krop — rig-runbook
 
 Alt her forudsætter dev-kanalen (`DEV_APPLIANCE.md`): riggen kører fra
-HEAD, telefonen fra CI's APK. Slice A/B er på main; #720 (Unity-proof) og
-#846 (live frame-kilde) er drafts, der lander via den fysiske gate.
+HEAD, telefonen fra CI's APK. Slice A/B og Unity-proofen (#720) er på main;
+#846 (live frame-kilde) er draft mod main og lander, når den er kompileret i
+Unity. Den fysiske gate er ikke kørt endnu — det er dét, afsnit 2 gør.
 
 ## 1. Forberedelse (én gang)
 
@@ -32,20 +33,22 @@ HEAD, telefonen fra CI's APK. Slice A/B er på main; #720 (Unity-proof) og
 
    Manifest med `name: Kaliv` og tre `data:`-linjer med `state: idle` = klar.
 
-## 2. Den fysiske Unity-gate (#720)
+## 2. Den fysiske Unity-gate (mod main)
 
-Fra `agent/bodyrig-unity-renderer`, ren working tree, telefon ikke nødvendig:
+Fra `main`, ren working tree, telefon ikke nødvendig:
 
-    git switch agent/bodyrig-unity-renderer; git pull --ff-only
+    git switch main; git pull --ff-only
     powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig_unity_physical_proof.ps1 -Store C:\Users\admin\Desktop\ModelRig-appliance\bodyrig-profiles
     powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig_unity_visual_acceptance.ps1 -StatesDistinct -GazeBlinkBreathVisible -ExplainGestureVisible -SpeechModesDiffer -InterruptionImmediateNeutral
     python scripts\bodyrig_unity_physical_gate.py --expected-sha (git rev-parse HEAD)
 
-Grøn gate → #720 ud af draft og ind på main. Så merges #846 ind.
+Grøn gate = rendereren på main er fysisk bevist. Derefter #846 (kræver at
+den kompilerer i Unity — første import viser det).
 
 ## 3. Kroppen følger samtalen (#846)
 
-Samme Unity-projekt, nu med riggen navngivet — ingen fixture:
+Samme Unity-projekt fra #846-grenen (`git switch feat/unity-frame-source`),
+nu med riggen navngivet — ingen fixture:
 
     $env:BODYRIG_VRM_PATH = "C:\Users\admin\Desktop\Kaliv.vrm"
     $env:BODYRIG_RIG_URL = "http://127.0.0.1:8080"
