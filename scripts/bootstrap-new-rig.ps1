@@ -231,6 +231,149 @@ function Read-Sha256Sums {
     return $map
 }
 
+function Normalize-GitHubRepository {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    $normalized = $Value.Trim().ToLowerInvariant()
+    foreach ($prefix in @("https://github.com/", "http://github.com/", "github.com/")) {
+        if ($normalized.StartsWith($prefix)) {
+            $normalized = $normalized.Substring($prefix.Length)
+            break
+        }
+    }
+    if ($normalized.EndsWith(".git")) {
+        $normalized = $normalized.Substring(0, $normalized.Length - 4)
+    }
+    return $normalized.Trim("/")
+}
+
+function ConvertFrom-AttestationPayload {
+    param([Parameter(Mandatory = $true)][string]$Encoded)
+    $value = $Encoded.Trim().Replace("-", "+").Replace("_", "/")
+    switch ($value.Length % 4) {
+        0 { }
+        2 { $value += "==" }
+        3 { $value += "=" }
+        default { throw "invalid base64 attestation payload length" }
+    }
+    $bytes = [Convert]::FromBase64String($value)
+    return [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
+}
+
+function Assert-ReleaseAttestation {
+    param(
+        [Parameter(Mandatory = $true)][string]$Digest,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$AssetName
+    )
+
+    $digestValue = $Digest.Trim().ToLowerInvariant()
+    $tagValue = $Tag.Trim()
+    if ($tagValue.StartsWith("refs/tags/")) {
+        $tagValue = $tagValue.Substring("refs/tags/".Length)
+    }
+    $wantRef = "refs/tags/$tagValue"
+    $wantRepo = "ternedal/modelrig"
+    $headers = @{
+        "Accept" = "application/vnd.github+json"
+        "User-Agent" = "ModelRig-new-rig-bootstrap"
+        "X-GitHub-Api-Version" = "2022-11-28"
+    }
+    $uri = "https://api.github.com/repos/Ternedal/ModelRig/attestations/sha256:$digestValue"
+    try {
+        $payload = Invoke-RestMethod -Uri $uri -Headers $headers -TimeoutSec 30
+    } catch {
+        throw "cannot check build provenance for ${AssetName}: $($_.Exception.Message)"
+    }
+
+    $matches = 0
+    foreach ($attestation in @($payload.attestations)) {
+        $encoded = [string]$attestation.bundle.dsseEnvelope.payload
+        if ([string]::IsNullOrWhiteSpace($encoded)) { continue }
+        $statement = ConvertFrom-AttestationPayload -Encoded $encoded
+        $workflow = $statement.predicate.buildDefinition.externalParameters.workflow
+        $workflowPath = [string]$workflow.path
+        if ($workflowPath.Contains("@")) {
+            $workflowPath = $workflowPath.Split("@")[0]
+        }
+        $subjectMatch = $false
+        foreach ($subject in @($statement.subject)) {
+            $subjectDigest = [string]$subject.digest.sha256
+            if (-not [string]::IsNullOrWhiteSpace($subjectDigest) -and $subjectDigest.Trim().ToLowerInvariant() -eq $digestValue) {
+                $subjectMatch = $true
+                break
+            }
+        }
+        if ([string]$statement.predicateType -eq "https://slsa.dev/provenance/v1" -and
+            [string]$workflow.ref -eq $wantRef -and
+            (Normalize-GitHubRepository -Value ([string]$workflow.repository)) -eq $wantRepo -and
+            $workflowPath -eq ".github/workflows/build-and-release.yml" -and
+            $subjectMatch) {
+            $matches++
+        }
+    }
+
+    if ($matches -lt 1) {
+        throw "NO RELEASE-BOUND BUILD PROVENANCE for $AssetName (sha256 $($digestValue.Substring(0, 16))) at $wantRef; refusing installation"
+    }
+    Add-Result -Step "ModelRig provenance:$AssetName" -Status PASS -Detail "$wantRef + build-and-release.yml verified"
+}
+
+function Install-FileAtomically {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+    $parent = Split-Path -Parent $Destination
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    $pending = "$Destination.bootstrap-new"
+    $backup = "$Destination.bootstrap-old"
+    Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath $Source -Destination $pending -Force
+    if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+        [IO.File]::Replace($pending, $Destination, $backup, $true)
+        Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+    } else {
+        Move-Item -LiteralPath $pending -Destination $Destination
+    }
+}
+
+function Download-VerifiedReleaseAsset {
+    param(
+        [Parameter(Mandatory = $true)]$Release,
+        [Parameter(Mandatory = $true)][hashtable]$Sums,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$TempRoot,
+        [Parameter(Mandatory = $true)][string]$Tag
+    )
+    if (-not $Sums.ContainsKey($Name)) {
+        throw "SHA256SUMS.txt has no entry for $Name"
+    }
+    $asset = Get-ReleaseAsset -Release $Release -Name $Name
+    $download = Join-Path $TempRoot $Name
+    Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $download
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $download).Hash.ToLowerInvariant()
+    $expected = [string]$Sums[$Name]
+    if ($actual -ne $expected) {
+        throw "SHA-256 mismatch for $Name"
+    }
+    Assert-ReleaseAttestation -Digest $actual -Tag $Tag -AssetName $Name
+    return $download
+}
+
+function Get-ModelRigProcesses {
+    return @(Get-Process -Name "modelrig-server*", "modelrig-worker*", "modelrig-supervisor*", "modelrig-updater*" -ErrorAction SilentlyContinue)
+}
+
+function Get-ModelRigRunningVersion {
+    try {
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:8080/healthz" -TimeoutSec 4
+        return ([string]$health.version).Trim()
+    } catch {
+        return ""
+    }
+}
+
 function Copy-GitHubFileAtRef {
     param(
         [Parameter(Mandatory = $true)][string]$Ref,
@@ -271,41 +414,83 @@ function Ensure-ModelRigRuntime {
     try {
         $sumPath = Join-Path $tempRoot "SHA256SUMS.txt"
         Invoke-WebRequest -UseBasicParsing -Uri $sumAsset.browser_download_url -OutFile $sumPath
+        $sumDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath $sumPath).Hash.ToLowerInvariant()
+        Assert-ReleaseAttestation -Digest $sumDigest -Tag $tag -AssetName "SHA256SUMS.txt"
         $sums = Read-Sha256Sums -Path $sumPath
 
         $targets = @(
-            @{ Name = "modelrig-server-windows-x64.exe"; Dest = (Join-Path $RuntimePath "modelrig-server-windows-x64.exe") },
-            @{ Name = "modelrig-supervisor-windows-x64.exe"; Dest = (Join-Path $RuntimePath "modelrig-supervisor-windows-x64.exe") },
-            @{ Name = "modelrig-updater-windows-x64.exe"; Dest = (Join-Path $RuntimePath "modelrig-updater-windows-x64.exe") },
-            @{ Name = "modelrig-worker-windows-x64.exe"; Dest = (Join-Path $RuntimePath "worker\modelrig-worker-windows-x64.exe") }
+            @{ Name = "modelrig-server-windows-x64.exe"; Dest = (Join-Path $RuntimePath "modelrig-server-windows-x64.exe"); Managed = $true },
+            @{ Name = "modelrig-supervisor-windows-x64.exe"; Dest = (Join-Path $RuntimePath "modelrig-supervisor-windows-x64.exe"); Managed = $true },
+            @{ Name = "modelrig-updater-windows-x64.exe"; Dest = (Join-Path $RuntimePath "modelrig-updater-windows-x64.exe"); Managed = $false },
+            @{ Name = "modelrig-worker-windows-x64.exe"; Dest = (Join-Path $RuntimePath "worker\modelrig-worker-windows-x64.exe"); Managed = $true }
         )
 
-        foreach ($target in $targets) {
-            $name = [string]$target.Name
-            $dest = [string]$target.Dest
-            if (-not $sums.ContainsKey($name)) {
-                throw "SHA256SUMS.txt has no entry for $name"
-            }
-            $expected = [string]$sums[$name]
-            $valid = $false
-            if (Test-Path -LiteralPath $dest -PathType Leaf) {
-                $existing = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash.ToLowerInvariant()
-                $valid = ($existing -eq $expected)
-            }
-            if (-not $valid) {
-                $asset = Get-ReleaseAsset -Release $release -Name $name
-                $download = Join-Path $tempRoot $name
-                Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $download
-                $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $download).Hash.ToLowerInvariant()
-                if ($actual -ne $expected) {
-                    throw "SHA-256 mismatch for $name"
-                }
-                Copy-Item -LiteralPath $download -Destination $dest -Force
-            }
-            Add-Result -Step "ModelRig:$name" -Status PASS -Detail "$tag checksum verified"
+        $task = Get-ScheduledTask -TaskName "KalivSupervisor" -ErrorAction SilentlyContinue
+        $processes = @(Get-ModelRigProcesses)
+        $runtimeActive = ($null -ne $task)
+        if (-not $runtimeActive -and $processes.Count -gt 0) {
+            throw "ModelRig processes are running without the KalivSupervisor task; refusing direct executable replacement. Stop them or repair appliance registration first."
         }
 
-        Copy-Item -LiteralPath $sumPath -Destination (Join-Path $RuntimePath "SHA256SUMS.txt") -Force
+        if ($runtimeActive) {
+            foreach ($target in $targets) {
+                if (-not (Test-Path -LiteralPath ([string]$target.Dest) -PathType Leaf)) {
+                    throw "active ModelRig appliance is missing $($target.Name); refusing a partial direct repair. Run updater recovery or restore from backup."
+                }
+            }
+
+            $updaterTarget = @($targets | Where-Object { -not $_.Managed })[0]
+            $updaterPath = [string]$updaterTarget.Dest
+            $expectedUpdater = [string]$sums[[string]$updaterTarget.Name]
+            $currentUpdater = (Get-FileHash -Algorithm SHA256 -LiteralPath $updaterPath).Hash.ToLowerInvariant()
+            if ($currentUpdater -ne $expectedUpdater) {
+                $runningUpdater = @(Get-Process -Name "modelrig-updater*" -ErrorAction SilentlyContinue)
+                if ($runningUpdater.Count -gt 0) {
+                    throw "modelrig-updater is already running; refusing to replace its executable"
+                }
+                $verifiedUpdater = Download-VerifiedReleaseAsset -Release $release -Sums $sums -Name ([string]$updaterTarget.Name) -TempRoot $tempRoot -Tag $tag
+                Install-FileAtomically -Source $verifiedUpdater -Destination $updaterPath
+                Add-Result -Step "ModelRig:$($updaterTarget.Name)" -Status PASS -Detail "$tag verified updater installed before transaction"
+            } else {
+                Assert-ReleaseAttestation -Digest $currentUpdater -Tag $tag -AssetName ([string]$updaterTarget.Name)
+                Add-Result -Step "ModelRig:$($updaterTarget.Name)" -Status PASS -Detail "$tag updater already current"
+            }
+
+            $updateArgs = @("-dir", $RuntimePath)
+            $runningVersion = Get-ModelRigRunningVersion
+            if ([string]::IsNullOrWhiteSpace($runningVersion)) {
+                $marker = Join-Path $RuntimePath ".bootstrap-release-version"
+                if (Test-Path -LiteralPath $marker -PathType Leaf) {
+                    $markerVersion = (Get-Content -LiteralPath $marker -Raw).Trim()
+                    if (-not [string]::IsNullOrWhiteSpace($markerVersion)) {
+                        $updateArgs += @("-current", $markerVersion)
+                    }
+                }
+            }
+            Invoke-Native -FilePath $updaterPath -Arguments $updateArgs -Step "ModelRig transactional updater"
+
+            foreach ($target in @($targets | Where-Object { $_.Managed })) {
+                $dest = [string]$target.Dest
+                $name = [string]$target.Name
+                $expected = [string]$sums[$name]
+                $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash.ToLowerInvariant()
+                if ($actual -ne $expected) {
+                    throw "$name does not match latest release $tag after transactional updater. Refusing direct overwrite of an active appliance."
+                }
+                Assert-ReleaseAttestation -Digest $actual -Tag $tag -AssetName $name
+                Add-Result -Step "ModelRig:$name" -Status PASS -Detail "$tag transaction + checksum + provenance verified"
+            }
+        } else {
+            foreach ($target in $targets) {
+                $name = [string]$target.Name
+                $dest = [string]$target.Dest
+                $verified = Download-VerifiedReleaseAsset -Release $release -Sums $sums -Name $name -TempRoot $tempRoot -Tag $tag
+                Install-FileAtomically -Source $verified -Destination $dest
+                Add-Result -Step "ModelRig:$name" -Status PASS -Detail "$tag checksum + release provenance verified"
+            }
+        }
+
+        Install-FileAtomically -Source $sumPath -Destination (Join-Path $RuntimePath "SHA256SUMS.txt")
     }
     finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -765,12 +950,10 @@ try {
     }
 
     if ($runBody) {
-        if (-not (Test-Path -LiteralPath (Join-Path $BodyRigSource ".git") -PathType Container)) {
-            if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
-                throw "Git is missing. Run -Phase Base first."
-            }
-            Ensure-GitCheckout -Name "BodyRig" -Url "https://github.com/Ternedal/BodyRig.git" -Path $BodyRigSource -Ref $BodyRigRef -Pinned
+        if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
+            throw "Git is missing. Run -Phase Base first."
         }
+        Ensure-GitCheckout -Name "BodyRig" -Url "https://github.com/Ternedal/BodyRig.git" -Path $BodyRigSource -Ref $BodyRigRef -Pinned
         Ensure-BodyRig -SourcePath $BodyRigSource
     }
 
