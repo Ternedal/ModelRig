@@ -39,6 +39,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\migrate-new-rig-state.ps1 `
   -OutDir D:\ModelRigMigration
 ```
 
+If Agent 3 protected memory is active (`KALIV_AGENT3_MEMORY_STORE=protected`) and
+a protected memory database exists, this generic export deliberately stops with
+a blocker. Windows DPAPI current-user storage does not yet have a proven
+cross-machine restore contract in ModelRig; use the dedicated T-033 physical
+path when that proof exists rather than silently copying machine-bound
+ciphertext.
+
 Copy the generated `.tar.gz` archive and its `.migration.json` sidecar to the
 new rig. Configure any secrets that the sidecar names but deliberately does not
 export, then import the archive:
@@ -51,9 +58,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\migrate-new-rig-state.ps1 `
   -MinimumGpuCount 1
 ```
 
-Import verifies the complete archive before writing, refuses to clobber an
-already-used new rig unless `-ForceRestore` is explicit, starts through
-`KalivBootstrap`, and runs the normal `Validate` phase afterwards.
+Import requires the sidecar, checks its archive SHA-256, verifies every archived
+file before writing, refuses to clobber an already-used new rig unless
+`-ForceRestore` is explicit, starts through `KalivBootstrap` only after a
+complete restore, and runs the normal `Validate` phase afterwards. A failed or
+partial import leaves the appliance stopped for diagnosis.
 
 After the extra RTX 3060 has been moved, validate the final GPU count and
 services again:
@@ -169,10 +178,12 @@ does not copy or invent:
 - arbitrary Ollama blobs that are not listed in the bootstrap model manifest;
 - Stash API tokens or other credentials.
 
-Portable ModelRig/Kaliv state now has an explicit separate migration path in
-`scripts/migrate-new-rig-state.ps1`. Its verified archive includes the current
-RAG, pairing, tool/audit, scheduler/jobs, Agent 3, home-rig and notes stores, but
-**never exports secret values from `modelrig.env`**. Private VoiceRig data and
+Portable ModelRig/Kaliv state has an explicit separate migration path in
+`scripts/migrate-new-rig-state.ps1`. Its verified archive covers the current RAG,
+pairing, tool/audit, scheduler/jobs, legacy/portable Agent 3, home-rig and notes
+stores, while **never exporting secret values from `modelrig.env`**. Protected
+Agent 3 memory is intentionally blocked from generic cross-machine export until
+its Windows DPAPI restore is physically proven. Private VoiceRig data and
 licensed BodyRig assets remain separate operator inputs.
 
 Keep the old rig untouched until the new rig has passed post-restore validation
