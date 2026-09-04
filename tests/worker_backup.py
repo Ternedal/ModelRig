@@ -250,6 +250,7 @@ complete_operator = os.path.join(repo_root, "scripts", "migrate-complete-rig.ps1
 check(os.path.isfile(complete_operator), "complete migration: top-level operator exists")
 if os.path.isfile(complete_operator):
     complete_text = open(complete_operator, "r", encoding="utf-8-sig").read()
+    import_region = complete_text[complete_text.index("$modelImported = $false") :]
     check(
         '"complete-rig-migration/v1"' in complete_text,
         "complete migration: bundle schema is explicit",
@@ -267,11 +268,27 @@ if os.path.isfile(complete_operator):
         "complete migration: ModelRig snapshot precedes VoiceRig shared-voice snapshot",
     )
     check(
-        '"-SkipValidation"' in complete_text
-        and "VoiceRig state import" in complete_text
-        and "Final new-rig validation" in complete_text
-        and complete_text.index("VoiceRig state import") < complete_text.index("Final new-rig validation"),
-        "complete migration: one final validation runs after both child imports",
+        '"-SkipValidation",\n        "-SkipRestart"' in import_region
+        and "Assert-ModelRigStopped" in import_region
+        and "VoiceRig state import" in import_region,
+        "complete migration: ModelRig child import stays stopped through VoiceRig restore",
+    )
+    check(
+        "$voiceImported = $true\n    Assert-ModelRigStopped\n\n    Write-Step \"Starting restored ModelRig through recovery-first bootstrap\"\n    Resume-HeldModelRig"
+        in import_region,
+        "complete migration: recovery-first ModelRig restart happens only after VoiceRig restore",
+    )
+    check(
+        "Assert-CanonicalModelRigRuntime" in complete_text
+        and "requires ModelRigRuntimeRoot to equal InstallRoot\\ModelRig" in complete_text,
+        "complete migration: custom runtime cannot make final validation inspect another appliance",
+    )
+    check(
+        "VoiceRig state import" in import_region
+        and "Final new-rig validation" in import_region
+        and '"-SkipBodyRig"' in import_region
+        and import_region.index("VoiceRig state import") < import_region.index("Final new-rig validation"),
+        "complete migration: one core validation runs after both child imports",
     )
     check(
         "manual_inputs_not_bundled" in complete_text
