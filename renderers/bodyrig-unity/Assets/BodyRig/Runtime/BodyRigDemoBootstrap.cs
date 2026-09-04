@@ -38,14 +38,29 @@ namespace ModelRig.BodyRig.UnityRenderer
             var placement = root.AddComponent<BodyRigArPlacement>();
             placement.AvatarRoot = root.transform;
 #endif
+            // Frame source. On Windows with the env vars set, or on Android
+            // through intent extras / an earlier pairing / the pairing form,
+            // BodyRigRigLink resolves (url, token) and the live source starts.
+            // With nothing to resolve on a desktop run, the deterministic
+            // fixture plays -- the physical proof is unchanged.
             var rigUrl = Environment.GetEnvironmentVariable("BODYRIG_RIG_URL");
             var rigToken = Environment.GetEnvironmentVariable("BODYRIG_RIG_TOKEN");
-            if (!string.IsNullOrWhiteSpace(rigUrl) && !string.IsNullOrWhiteSpace(rigToken))
+            var liveRequested = (!string.IsNullOrWhiteSpace(rigUrl) && !string.IsNullOrWhiteSpace(rigToken))
+                || Application.platform == RuntimePlatform.Android;
+            if (liveRequested)
             {
-                var source = root.AddComponent<BodyRigFrameSource>();
-                source.Renderer = renderer;
-                source.BaseUrl = rigUrl;
-                source.Token = rigToken;
+                var link = root.AddComponent<BodyRigRigLink>();
+                link.Resolved += (url, token) =>
+                {
+                    if (root.GetComponent<BodyRigFrameSource>() != null)
+                    {
+                        return;
+                    }
+                    var source = root.AddComponent<BodyRigFrameSource>();
+                    source.Renderer = renderer;
+                    source.BaseUrl = url;
+                    source.Token = token;
+                };
                 return;
             }
 
