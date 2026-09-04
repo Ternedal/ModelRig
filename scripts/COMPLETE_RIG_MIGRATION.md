@@ -5,7 +5,9 @@ It composes the independently verified ModelRig/Kaliv and VoiceRig migration
 operators into one bundle and one final validation flow.
 
 It deliberately does **not** copy secrets or licensed/private BodyRig assets.
-Those remain explicit operator inputs.
+Those remain explicit operator inputs. BodyRig now has a separate evidence-only
+parity operator that records hashes/counts for the runtime assets without
+copying their bytes.
 
 ## What the bundle contains
 
@@ -91,6 +93,34 @@ verified, the old ModelRig runtime is restarted through recovery-first
 
 If complete export fails, `rig-migration.json` is not a valid cutover authority.
 The directory is retained only as diagnostic evidence.
+
+### Capture BodyRig private-input evidence before changing the old rig
+
+If BodyRig is already provisioned/READY on the old machine, capture an
+**evidence-only** manifest before moving hardware or deleting model files:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig-private-input-inventory.ps1 `
+  -Action Capture `
+  -BodyRigRepo C:\Rig\src\BodyRig `
+  -OutFile D:\RigMigration\bodyrig-private-inputs.json
+```
+
+This file contains no SMPL, SMPL-X or diffusion-model payload bytes. It records
+SHA-256 and byte/file counts for the assets the installed runtime actually uses:
+
+- the installed recovery SMPL file;
+- the installed SiTH `data/body_models/smplx` tree inside WSL;
+- the live SiTH diffusion-model tree inside WSL.
+
+The diffusion model is rehashed live and must still match BodyRig's validated
+SiTH setup report. This deliberately catches a stale report or a model that was
+changed after setup. Copy `bodyrig-private-inputs.json` to the new rig together
+with the normal migration material.
+
+If BodyRig was never READY on the old rig, there is no valid source runtime to
+compare and this step should remain explicitly unproven rather than fabricating
+evidence from source download directories.
 
 ## 3. Bootstrap the new rig before importing state
 
@@ -200,7 +230,31 @@ operator-provided licensed/private assets:
 - the pinned WSL/CUDA/Conda prerequisites checked by the bootstrap.
 
 Configure those paths in the local bootstrap config and run the BodyRig phase
-only after the base machine and GPU topology are stable.
+only after the base machine and GPU topology are stable:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-new-rig.ps1 `
+  -Phase BodyRig
+```
+
+If source-rig BodyRig evidence was captured in step 2, verify the newly
+provisioned **runtime bytes** against it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig-private-input-inventory.ps1 `
+  -Action Verify `
+  -BodyRigRepo C:\Rig\src\BodyRig `
+  -Manifest D:\RigMigration\bodyrig-private-inputs.json
+```
+
+The verifier ignores machine-specific path differences. It requires identical
+SHA-256 and byte/file counts for the installed SMPL file, installed SMPL-X WSL
+tree and live SiTH diffusion model. A mismatch is a blocker; do not paper over
+it by editing the evidence JSON.
+
+The inventory is deliberately not a redistribution mechanism. It never copies
+licensed/private model payloads and explicitly records
+`payload_bytes_included=false`.
 
 ## Cutover definition
 
@@ -214,6 +268,8 @@ success. Cutover requires all of the following on the physical new machine:
 - migrated VoiceRig profiles visible and intended default voice active;
 - a real Kaliv client can connect/authenticate;
 - an audible VoiceRig TTS request succeeds;
+- when BodyRig is part of this cutover and source evidence exists, BodyRig
+  private-input parity is verified;
 - BodyRig either passes its physical setup/renderer proof or is explicitly
   accepted as a later blocked workstream.
 
