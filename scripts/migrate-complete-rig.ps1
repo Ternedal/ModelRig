@@ -127,6 +127,7 @@ function Invoke-PowerShellOperator {
 
     Write-Host "Running $Label..."
     $previousPreference = $ErrorActionPreference
+    $exitCode = 1
     try {
         # Windows PowerShell 5.1 can surface native stderr as PowerShell error
         # records. Let the child process' exit code remain the authority.
@@ -138,6 +139,39 @@ function Invoke-PowerShellOperator {
     }
     if ($exitCode -ne 0) {
         throw "$Label failed with exit code $exitCode."
+    }
+}
+
+function Test-ModelRigWasRunning {
+    $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.ProcessName -like "modelrig-*"
+    })
+    if ($processes.Count -gt 0) { return $true }
+
+    foreach ($taskName in @("KalivBootstrap", "KalivSupervisor")) {
+        try {
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            if ([string]$task.State -eq "Running") { return $true }
+        } catch {}
+    }
+    return $false
+}
+
+function Resume-HeldModelRig {
+    $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.ProcessName -like "modelrig-*"
+    })
+    if ($processes.Count -gt 0) {
+        Write-Host "ModelRig is already running; no held-export restart is needed."
+        return
+    }
+
+    try {
+        Get-ScheduledTask -TaskName "KalivBootstrap" -ErrorAction Stop | Out-Null
+        Start-ScheduledTask -TaskName "KalivBootstrap"
+        Write-Host "Started 'KalivBootstrap' after complete export (recovery-first startup)."
+    } catch {
+        throw "Complete export finished/failed with ModelRig held down, but KalivBootstrap could not be started: $($_.Exception.Message)"
     }
 }
 
@@ -189,7 +223,7 @@ function Get-SafeLeafName {
     if ([string]::IsNullOrWhiteSpace($name) -or
         [IO.Path]::IsPathRooted($name) -or
         [IO.Path]::GetFileName($name) -ne $name -or
-        $name.Contains("/") -or $name.Contains("\")) {
+        $name.IndexOf('/') -ge 0 -or $name.IndexOf('\') -ge 0) {
         throw "$Description must be a relative leaf filename, got '$name'."
     }
     return $name
@@ -336,19 +370,29 @@ if ($Action -eq "Export") {
     Write-Step "Creating complete migration bundle"
     $bundleDirectory = New-UniqueBundleDirectory
     $completed = $false
+    $exportFailure = $null
+    $modelRigWasRunning = Test-ModelRigWasRunning
+
     try {
-        Write-Step "Exporting ModelRig/Kaliv state"
+        # Hold ModelRig down after its own consistent DB snapshot. VoiceRig then
+        # snapshots the shared ModelRig voice directory while ModelRig cannot
+        # change its default/package files. VoiceRig's own operator still owns
+        # its stop/restart boundary. This gives the complete bundle one coherent
+        # cross-system voice/default boundary without reimplementing either
+        # archive format.
+        Write-Step "Exporting ModelRig/Kaliv state and holding ModelRig stopped"
         Invoke-PowerShellOperator -Path $paths.ModelRigOperator -Label "ModelRig state export" -Arguments @(
             "-Action", "Export",
             "-RuntimeRoot", $runtimeRoot,
             "-RepoRoot", $paths.RepoRoot,
             "-OutDir", $bundleDirectory,
-            "-MinimumGpuCount", ([string]$MinimumGpuCount)
+            "-MinimumGpuCount", ([string]$MinimumGpuCount),
+            "-SkipRestart"
         )
         $modelArchive = Get-SingleArtifact -Directory $bundleDirectory -Filter "kaliv-backup-*.tar.gz" -Description "ModelRig archive"
         Resolve-ExistingFile -Path ($modelArchive + ".migration.json") -Description "ModelRig migration sidecar" | Out-Null
 
-        Write-Step "Exporting VoiceRig state"
+        Write-Step "Exporting VoiceRig state while ModelRig remains stopped"
         Invoke-PowerShellOperator -Path $paths.VoiceRigOperator -Label "VoiceRig state export" -Arguments @(
             "-Action", "Export",
             "-OutDir", $bundleDirectory
@@ -360,15 +404,29 @@ if ($Action -eq "Export") {
         $script:Bundle = $manifestPath
         [void](Get-VerifiedBundle -Paths $paths)
         $completed = $true
-
-        Write-Host "COMPLETE RIG EXPORT READY: $bundleDirectory" -ForegroundColor Green
-        Write-Host "Copy the entire directory to the new rig; do not separate its manifest, archives or sidecars."
+    } catch {
+        $exportFailure = $_
     } finally {
+        if ($modelRigWasRunning) {
+            try {
+                Resume-HeldModelRig
+            } catch {
+                if ($exportFailure) {
+                    Write-Warning "Complete export also failed to restore the old ModelRig runtime: $($_.Exception.Message)"
+                } else {
+                    $exportFailure = $_
+                }
+            }
+        }
         if (-not $completed) {
             Write-Warning "Complete export did not finish. '$bundleDirectory' is an incomplete evidence directory and must not be used for cutover."
         }
     }
-    exit 0
+
+    if ($exportFailure) { throw $exportFailure }
+    Write-Host "COMPLETE RIG EXPORT READY: $bundleDirectory" -ForegroundColor Green
+    Write-Host "Copy the entire directory to the new rig; do not separate its manifest, archives or sidecars."
+    return
 }
 
 $verified = Get-VerifiedBundle -Paths $paths
@@ -377,7 +435,7 @@ if ($Action -eq "Verify") {
     if ($verified.Manifest.voicerig.contains_private_job_inputs -eq $true) {
         Write-Warning "The bundle contains private VoiceRig source audio/video for resumable jobs. Treat the whole bundle as sensitive."
     }
-    exit 0
+    return
 }
 
 $modelImported = $false
