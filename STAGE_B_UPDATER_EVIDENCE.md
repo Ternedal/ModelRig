@@ -1,10 +1,34 @@
-# Stage B updater-evidens — release 1.58.148
+# Stage B updater-evidens — release 2.0.13
 
-Denne runbook bruges **først efter** at den beståede Stage A-SHA er fast-forwardet til
-`main`, tagget præcis samme SHA som `v1.58.148` og publiceret som komplet release-sæt.
-Ingen kommando her merger, tagger, releaser eller aktiverer produktion.
+Denne runbook bruges først efter, at den beståede Stage A-SHA er fast-forwardet
+til `main`, tagget som `v2.0.13` på præcis samme SHA og publiceret som et
+komplet signeret release-sæt. Ingen kommando her merger, tagger, releaser eller
+aktiverer produktion.
 
-## Nemmeste vej — anbefalet
+## Ærlig releasegrænse
+
+Stage B håndhæver denne præcise transition:
+
+- source appliance: signeret `2.0.12`;
+- target appliance: signeret `2.0.13`;
+- updateren fra `v2.0.13` verificeres én gang som bootstrap-grænse;
+- bootstrap-binarien verificeres mod samme releases `SHA256SUMS.txt`, target-
+  commit, tagref og release-workflow;
+- server, supervisor og worker flyttes derefter kun gennem updateren.
+
+### Åbent punkt: #401's forudsætning er nu til stede, men beviset er separat
+
+`2.0.12` er en signeret source med updater self-update-support, og `2.0.13` er
+en senere signeret target, når denne runbook må køres. Dermed er den historiske
+forudsætning for issue **#401** til stede i denne æra.
+
+Det er **ikke** det samme som at #401 automatisk er bevist. Scripterne udfører
+fortsat den eksisterende bootstrap-verifikation, og at fjerne eller omfortolke
+det trin ændrer hvad evidensen beviser. Den ændring kræver #401's egen reviewede
+authority; versionsbumpet alene må ikke fremstille et self-update-claim.
+Bootstrap blokerer ikke promotion af `2.0.13`.
+
+## Autoritativ indgang
 
 Dobbeltklik:
 
@@ -12,133 +36,139 @@ Dobbeltklik:
 START_STAGE_B_TEST.cmd
 ```
 
-Wizard'en (`scripts/stage_b_one_click.py`) måler selv alt, der kan måles, og udfylder
-`validation/appliance-lifecycle-observations.json` løbende:
+Launcheren kører `scripts/stage_b_one_click_v2.py`. Den gamle
+`stage_b_one_click.py` er kun den indre fem-trins lifecycle-motor og kan ikke
+alene certificere Stage B.
 
-- kandidatens version, Git-SHA og worker-fingerprint;
-- vært og tidsstempler;
-- reboot-tid og de versioner, der kom op bagefter;
-- supervisorens genstartstid for backend og worker (stopper processen og måler, indtil
-  supervisoren selv bringer den tilbage);
-- den gode updater-kørsel, tee'et til `good_update.log`;
-- den ugyldige kørsel og dens udfald;
-- SHA-256 for hver logfil;
-- om dokumenter og schedules overlevede (talt før og efter).
+Strict-wrapperen:
 
-Den er resumérbar: fremdriften gemmes i `validation/stage-b-easy-state.json`, så et
-sikkert stop kan genoptages med samme dobbeltklik.
+1. kræver backend og worker på præcis `2.0.12`;
+2. måler live-updaterens SHA-256 mod `v2.0.13/SHA256SUMS.txt`;
+3. kører `gh attestation verify` med repository, target-commit, tagref og
+   signer-workflow bundet til samme release;
+4. genmåler live-updateren og genkører provenance ved hvert resume;
+5. hashbinder `updater_binary_check.log` i lifecycle-observationerne;
+6. kræver både `update-transaction.json` og `.tmp` fraværende før launch;
+7. starter updateren og følger én ny transaction-ID med monotont revisionstal;
+8. afbryder først, når netop den transaktion viser `state=swapping` og mindst ét
+   live swap er registreret;
+9. kører updateren med `-recover`;
+10. kræver backend og worker tilbage på 2.0.12, alle fire live executables
+    til stede og ingen aktiv journal;
+11. kører derefter den normale gode update, reboot, supervisor-restarts og den
+    ugyldige update.
 
-**Du skal kun gøre to ting:** genstarte riggen når wizard'en beder om det, og godkende
-den ugyldige opdatering med `JA`.
+Fremdriften checkpointes i `validation/stage-b-easy-state.json`. Hvis en god
+update allerede er gennemført uden interruption-beviset, stopper wrapperen og
+kræver source 2.0.12 gendannet før en ny kampagne.
 
-Sæt testdepotet for den ugyldige kørsel, før du starter, så trin 5 kan køre selv:
+## Release-checkout
 
 ```powershell
+cd C:\Users\admin\Desktop\ModelRig-git
+git fetch --tags origin
+git switch --detach v2.0.13
+if ((git rev-parse HEAD).Trim().Length -ne 40) { throw "Ugyldig release-SHA" }
+if (git status --short) { throw "Working tree er ikke ren" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.13") { throw "Forkert version" }
+$env:GH_TOKEN = gh auth token
 $env:KALIV_STAGE_B_BAD_REPO = "Ternedal/ModelRig-updater-negative"
 ```
 
-## Hvad Stage B skal bevise
+Tag-SHA'en skal være identisk med den Stage A-SHA, der blev godkendt.
 
-Den gode update skal være en rigtig updater-kørsel fra 1.58.147 til 1.58.148 og bevise
-hele kæden:
+## Bindende strict evidens
 
-1. alle tre Windows-binaries downloades;
-2. `SHA256SUMS.txt` verificeres;
-3. GitHub build provenance verificeres;
-4. supervisor og processer stoppes før swap;
-5. backend og worker starter på 1.58.148;
-6. supervisor-heartbeat skriver efter restart og avancerer;
-7. updateren afslutter som `update OK` uden rollback eller bypass.
+### Updater-bootstrap
 
-Den ugyldige update skal enten afvises **før swap** eller afslutte en fuld rollback,
-hvor backend, worker og supervisor igen er bevist sunde på 1.58.148.
-
-Følgende må aldrig bruges i Stage B:
-
-```text
--insecure-skip-verify
--skip-attestation
--no-heartbeat-check
-```
-
-Den semantiske gate afviser logs med disse bypass-markører, selv hvis de øvrige
-booleans i lifecycle-JSON'en er sat til `true`.
-
-## Forudsætning: riggen skal starte på 1.58.147
-
-Updateren opdaterer kun til en **nyere** version. Riggen skal derfor køre den forrige
-publicerede release (1.58.147), før den gode kørsel giver mening — wizard'en stopper med
-en tydelig fejl, hvis riggen allerede kører 1.58.148.
-
-## 0. Brug den aktuelle updater
-
-Updateren opdaterer ikke sig selv. Hent derfor `modelrig-updater-windows-x64.exe` fra
-den publicerede `v1.58.148`-release og erstat den gamle updater, mens den ikke kører.
-Verificér filens SHA-256 mod den samme releases `SHA256SUMS.txt`, og gem outputtet
-under:
+Den målte fil er:
 
 ```text
 validation/appliance-lifecycle-evidence/updater_binary_check.log
 ```
 
-Dette er kun udskiftning af updater-værktøjet. Server, worker og supervisor må ikke
-kopieres manuelt; deres transition skal ske gennem updateren.
+Den faktiske provenance-kontrol svarer til:
 
-## Den ugyldige opdatering — hvordan den fremkaldes
+```powershell
+gh attestation verify <updater.exe> `
+  --repo Ternedal/ModelRig `
+  --source-digest <v2.0.13-git-sha> `
+  --source-ref refs/tags/v2.0.13 `
+  --signer-workflow Ternedal/ModelRig/.github/workflows/build-and-release.yml
+```
 
-Runbooken beskrev tidligere kun det krævede udfald, ikke hvordan man når det. Updateren
-læser `releases/latest` fra det depot, `-repo` peger på, og verificerer de tre binaries
-mod releasens `SHA256SUMS.txt`. Et separat, offentligt testdepot med bevidst forkerte
-digests giver derfor en ren afvisning før swap, uden at røre den rigtige release:
+Lifecycle-feltet `trials.updater_bootstrap` skal indeholde:
+
+- `performed=true`;
+- release-version og release-SHA for 2.0.13;
+- assetnavnet `modelrig-updater-windows-x64.exe`;
+- ens forventet og faktisk SHA-256;
+- `source_digest`, `source_ref` og `signer_workflow` som ovenfor;
+- `provenance_verified=true`;
+- repository-relativ logsti og hash over loggens faktiske bytes.
+
+Et tidligere `updater_bootstrap_done`-checkpoint er ikke tillid: den live fil og
+provenance verificeres igen før kampagnen fortsætter.
+
+### Kontrolleret appliance interruption
+
+Før den normale gode update starter, kræver wrapperen begge aktive journalstier
+fraværende. Derefter starter den updateren og overvåger
+`update-transaction.json` samt `.tmp`. Main og `.tmp` skal beskrive samme
+transaction-ID; højeste revision er autoritativ, og revisionen må aldrig gå
+baglæns.
+
+Wrapperen må først terminere den updaterproces, den selv startede, når samme nye
+transaktion viser:
 
 ```text
-Ternedal/ModelRig-updater-negative   (release v99.0.0)
+from=2.0.12
+to=v2.0.13
+state=swapping
+swapped_count>=1
+transaction_id=<non-empty>
+revision>=1
 ```
 
-Assets dér er korte tekstfiler, ikke binaries; de eksekveres aldrig, fordi updateren
-stopper ved checksum-kontrollen. Depotet skal være **offentligt** — updateren sender
-ingen GitHub-token.
-
-Manuel kørsel, hvis du hellere vil styre den selv:
-
-```powershell
-.\modelrig-updater-windows-x64.exe -repo Ternedal/ModelRig-updater-negative 2>&1 | `
-  Tee-Object validation\appliance-lifecycle-evidence\bad_update.log
-```
-
-Forventet i loggen: `update available: 1.58.148 -> v99.0.0`, `downloading …`, og
-`checksum MISMATCH … refusing to install` — og **intet**
-`stopping supervisor + processes`.
-
-## Manuel fallback
-
-Hele flowet kan stadig køres i hånden. Opret lifecycle-filerne:
-
-```powershell
-cd C:\Users\admin\Desktop\ModelRig-git
-Copy-Item `
-  eval\appliance_lifecycle_observations.example.json `
-  validation\appliance-lifecycle-observations.json
-New-Item -ItemType Directory `
-  validation\appliance-lifecycle-evidence `
-  -Force | Out-Null
-```
-
-Udfyld reboot- og supervisor-felterne som beskrevet i
-`PHYSICAL_VALIDATION_CAMPAIGN.md`.
-
-Kør den gode opdatering elevated og gem **hele** stdout og stderr:
-
-```powershell
-.\modelrig-updater-windows-x64.exe 2>&1 | `
-  Tee-Object `
-    validation\appliance-lifecycle-evidence\good_update.log
-```
-
-Loggen skal blandt andet indeholde:
+Derefter kører wrapperen `modelrig-updater-windows-x64.exe -recover` og kræver:
 
 ```text
-update available: 1.58.147 -> v1.58.148
+recovery_exit_code=0
+backend_version=2.0.12
+worker_version=2.0.12
+live_executables_present=true
+journal_absent=true
+```
+
+Evidensen ligger i:
+
+```text
+validation/appliance-lifecycle-evidence/appliance_interruption.log
+```
+
+Log og observation binder transaction-ID, revision, journalens source/target,
+den lancerede updater-PID, kill-resultat og recovery-resultat. En gammel eller
+konfliktende `.tmp`, ID-skift eller faldende revision stopper kampagnen.
+
+Det er det gennemførlige appliance-swap-bevis for 2.0.13. Et særskilt claim om
+selve updaterens automatiske replacement på tværs af signerede releases hører
+fortsat under #401, ikke under versionsbumpets egen promotion-authority.
+
+## Normal lifecycle efter recovery
+
+Når interruption-recovery er grøn, gennemføres:
+
+1. god appliance-update 2.0.12 → 2.0.13;
+2. reboot til ready på 2.0.13;
+3. backend supervisor-restart;
+4. worker supervisor-restart;
+5. ugyldig update, der enten afvises før swap eller rulles helt tilbage;
+6. bevarede data, credentials og schedules.
+
+Den gode updater-log skal blandt andet indeholde:
+
+```text
+update available: 2.0.12 -> v2.0.13
 downloading modelrig-server-windows-x64.exe
 downloading modelrig-supervisor-windows-x64.exe
 downloading modelrig-worker-windows-x64.exe
@@ -146,66 +176,49 @@ checksums verified for 3 exe(s)
 build provenance verified for 3 exe(s)
 stopping supervisor + processes so the exes unlock
 supervisor heartbeat advanced past the restart
-update OK: backend + worker report 1.58.148 and the supervisor is looping
+update OK: backend + worker report 2.0.13 and the supervisor is looping
 ```
 
-Udfyld `trials.good_update`, sæt `evidence_path` til loggen og beregn:
+`ROLLBACK FAILED`, `manual_recovery`, manglende live executable, aktiv journal
+eller mismatchende version blokerer.
 
-```powershell
-(Get-FileHash `
-  validation\appliance-lifecycle-evidence\good_update.log `
-  -Algorithm SHA256).Hash.ToLowerInvariant()
-```
+## Forbudte bypasses
 
-Gem den komplette log for den ugyldige kørsel som:
+Følgende må aldrig forekomme i kommandoer eller logs:
 
 ```text
-validation/appliance-lifecycle-evidence/bad_update.log
+-insecure-skip-verify
+-skip-attestation
+-no-heartbeat-check
 ```
 
-Gaten accepterer kun én af disse maskinelt synlige udfald:
+## Fail-closed slutverifikation
 
-- **pre-swap refusal:** checksum/provenance/release-integritet afvises, før loggen når
-  `stopping supervisor + processes`;
-- **healthy rollback:** loggen indeholder både `ROLLING BACK to 1.58.148` og
-  `rolled back to 1.58.148: backend + worker healthy and the supervisor is looping`.
-
-`ROLLBACK FAILED`, `manual_recovery`, bypass-flags eller en tilbageværende
-`update-transaction.json` blokerer Stage B.
-
-Udfyld `trials.bad_update`, sæt logsti/hash og bekræft fysisk, at data og schedules er
-bevaret.
-
-## Verificér hele Stage B-bundlen
-
-Sæt et GitHub-token i sessionen, så release-freeze kan kontrollere tag, publiceret
-release og exact-head checks:
-
-```powershell
-$env:GH_TOKEN = gh auth token
-```
-
-Dobbeltklik derefter:
+Dobbeltklik:
 
 ```text
 VERIFY_STAGE_B_EVIDENCE.cmd
 ```
 
-Launcheren udfører fail-closed i denne rækkefølge:
+Den kalder `scripts/stage_b_physical_gate_v2.py`. Før første subprocess
+overskrives den officielle slutkvittering atomisk med
+`status=verification_in_progress` og alle gates false. Et kill, crash eller
+strømsvigt kan derfor ikke efterlade en ældre grøn kvittering som aktuel.
 
-1. `freeze_check.py`;
-2. `appliance_lifecycle_updater_chain.py`;
-3. syv-bevis releasekampagnen;
-4. den eksisterende otte-bevis browser-/slutgate;
-5. den samlede `kaliv-stage-b-physical-final/v1`-kvittering.
+Verifieren fjerner gamle intermediate strict/base-rapporter, kører derefter
+`stage_b_strict_evidence.py`, og kun hvis strict-gaten er grøn, køres den
+eksisterende release-freeze, updater-chain, syv-bevis-kampagne og
+otte-bevis-slutgate. Den endelige kvittering hashbinder strict-rapporten.
 
 Kræv i `validation/stage-b-physical-final-latest.json`:
 
 ```text
 schema=kaliv-stage-b-physical-final/v1
+status=complete
 gate.passed=true
 release_freeze_complete=true
 updater_chain_complete=true
+strict_evidence_complete=true
 physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
@@ -213,5 +226,15 @@ production_activation=false
 summary.total=8
 ```
 
-Review også hashes for updater-chain-, campaign- og component-final-rapporterne.
-Stop derefter. En eventuel aktivering er fortsat en særskilt eksplicit beslutning.
+Review hashes for strict-, updater-chain-, campaign- og component-final-
+rapporterne. Stop derefter. Aktivering kræver fortsat en separat eksplicit
+beslutning.
+
+## Rollback-reglen: binærer og journal følges ad
+
+Bootstrappens `updater -recover` fuldfører enhver efterladt
+`update-transaction.json` — også hen over manuelt tilbagerullede binærer.
+En kilde-rollback er derfor altid TO ting sammen: de signerede binærer
+(verificeret mod kildereleasens `SHA256SUMS.txt`) OG arkivering af
+`update-transaction.json`/`.tmp` fra appliance-roden. Én af delene alene
+giver en appliance der "mystisk" skifter version ved næste start.

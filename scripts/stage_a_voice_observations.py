@@ -25,7 +25,17 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 MANUAL_SCHEMA = "kaliv-voice-manual-observations/v1"
 STATE_SCHEMA = "kaliv-stage-a-voice-observations-state/v1"
-PHONE_STATE_SCHEMA = "kaliv-stage-a-phone-test-state/v1"
+# v2 haevede schemaet 24/7 (a8849e68) for at tilfoeje scheduler-blokken, men
+# LAESEREN HER BLEV IKKE OPDATERET. De to halvdele af telefon-testen var derfor
+# uenige i tre uger, og fejlen dukkede foerst op da nogen koerte dem sammen paa
+# rig-dagen 18/8. v2 er rent additiv -- alle felter denne fil laeser findes i
+# begge -- saa begge accepteres. v1 beholdes, saa aeldre evidens kan laeses.
+PHONE_STATE_SCHEMAS = (
+    "kaliv-stage-a-phone-test-state/v1",
+    "kaliv-stage-a-phone-test-state/v2",
+)
+#: Bevaret navn: aeldre kald og tests refererer den enkelte konstant.
+PHONE_STATE_SCHEMA = PHONE_STATE_SCHEMAS[-1]
 DEFAULT_PHONE_STATE = Path("validation/stage-a-runtime/phone-test-state.json")
 DEFAULT_RESUME = Path("validation/stage-a-voice-observations-state.json")
 DEFAULT_OUTPUT = Path("validation/voice-manual-observations.json")
@@ -146,8 +156,11 @@ def _health(url: str) -> dict[str, Any]:
 
 def _phone_state(path: Path, candidate: dict[str, str]) -> dict[str, Any]:
     value = _read_json(path)
-    if value.get("schema") != PHONE_STATE_SCHEMA:
-        raise ObservationError("telefon-teststatus har forkert schema")
+    if value.get("schema") not in PHONE_STATE_SCHEMAS:
+        raise ObservationError(
+            "telefon-teststatus har forkert schema: "
+            f"{value.get('schema')!r} er ikke en af {PHONE_STATE_SCHEMAS}"
+        )
     if value.get("production_activation") is not False:
         raise ObservationError("telefon-teststatus bevarer ikke production_activation=false")
     if value.get("version") != candidate["version"]:
@@ -222,8 +235,13 @@ def _latency(raw: str, *, allow_unknown: bool) -> int | None:
     return parsed
 
 
+def _adb_executable() -> str | None:
+    """adb paa PATH, eller None."""
+    return shutil.which("adb")
+
+
 def _adb(*args: str) -> str | None:
-    executable = shutil.which("adb")
+    executable = _adb_executable()
     if not executable:
         return None
     try:
@@ -243,23 +261,56 @@ def _adb(*args: str) -> str | None:
 
 
 def _device_metadata(candidate: dict[str, str]) -> dict[str, str]:
-    model = _adb("shell", "getprop", "ro.product.model") or "Pixel 6a"
-    os_version = _adb("shell", "getprop", "ro.build.version.release")
-    package = _adb("shell", "dumpsys", "package", "dk.ternedal.modelrig") or ""
-    match = re.search(r"\bversionName=([^\s]+)", package)
-    app_version = match.group(1) if match else None
+    """Enhedens kendsgerninger LÆSES. De tastes ikke.
+
+    Model, Android-version og app-version er ting adb kan svare på præcist.
+    Tidligere faldt funktionen tilbage til at spørge operatøren, når adb ikke
+    svarede — og det gjorde en maskinlæst kendsgerning til et gæt. 18/8 tastede
+    operatøren app-versionen i hånden, ramte forkert, og kørslen blev blokeret
+    af sin egen fejlindtastning efter et helt forløb med parring.
+
+    Svarer adb ikke, er det en OPSÆTNING der skal rettes — telefonen i USB,
+    USB-debugging til, adb på PATH — ikke noget der skal skrives af et
+    menneske. Derfor er fallbacket nu en fejl med instruktion frem for en
+    prompt.
+    """
+    # ADB HVIS DEN ER DER -- ELLERS SPOERG. IKKE OMVENDT.
+    #
+    # 19/8 fjernede jeg prompt-fallbacket og gjorde adb obligatorisk, med den
+    # begrundelse at kendsgerninger skal laeses frem for tastes. Det var rigtigt
+    # for en rig med telefonen i USB. Anders saetter ALDRIG telefonen i USB --
+    # hans Pixel parres over netvaerket -- saa adb kan aldrig svare, og
+    # aendringen gjorde voice-beviset UMULIGT for ham.
+    #
+    # Enheden rapporterer ikke sin appversion til backenden (Device baerer id,
+    # navn, token-hash, grants -- ikke version), saa uden adb findes
+    # oplysningen kun hos operatoeren. Derfor: laes den naar vi kan, spoerg
+    # naar vi ikke kan, og sig hvilken vej den kom.
+    har_adb = bool(_adb_executable()) and bool(
+        [l for l in (_adb("devices") or "").splitlines()[1:] if "\tdevice" in l]
+    )
+
+    model = _adb("shell", "getprop", "ro.product.model") if har_adb else None
+    os_version = _adb("shell", "getprop", "ro.build.version.release") if har_adb else None
+    app_version = None
+    if har_adb:
+        package = _adb("shell", "dumpsys", "package", "dk.ternedal.modelrig") or ""
+        match = re.search(r"\bversionName=([^\s]+)", package)
+        app_version = match.group(1) if match else None
 
     print("\nEnhedsoplysninger")
     print("-----------------")
-    print(f"  Model: {model}")
-    if os_version:
-        print(f"  Android: {os_version} (læst automatisk)")
-    else:
-        os_version = _prompt("Android-version, fx 17")
-    if app_version:
-        print(f"  Kaliv-app: {app_version} (læst automatisk)")
-    else:
-        app_version = _prompt("Kaliv-appens version", candidate["version"])
+    if not har_adb:
+        print("  adb ser ingen enhed — oplysningerne indtastes.")
+        print("  (Det er i orden. De efterproeves mod kandidaten nedenfor.)")
+    model = model or _prompt("Telefonens model", "Pixel 6a")
+    os_version = os_version or _prompt("Android-version, fx 17")
+    app_version = app_version or _prompt("Kaliv-appens version", candidate["version"])
+    kilde = "adb" if har_adb else "indtastet"
+    print(f"  Model:     {model} ({kilde})")
+    print(f"  Android:   {os_version} ({kilde})")
+    print(f"  Kaliv-app: {app_version} ({kilde})")
+
     if app_version != candidate["version"]:
         raise ObservationError(
             f"Kaliv-appen er {app_version}, men kandidaten er {candidate['version']}; "

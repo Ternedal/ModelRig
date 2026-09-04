@@ -1,12 +1,33 @@
 from __future__ import annotations
 
 import io
+import json
+import os
 import socket
 import ssl
+import tempfile
+import uuid
+from pathlib import Path
 
+from app.github_connector_client import (
+    GitHubReadRemoteError,
+    GitHubTransportRequest,
+)
+from app.github_connector_contract import (
+    GitHubConnectorDenied,
+    GitHubConnectorGrantStore,
+    GitHubConnectorScope,
+)
+from app.github_connector_transport import (
+    AccountBoundGitHubReadClient,
+    EnvironmentFileGitHubCredentialProvider,
+    FileGitHubCredentialProvider,
+    GitHubCredentialError,
+    GitHubPinnedTransport,
+)
 from app.pinned_http_transport import PinnedHttpTransport
 from app.research_contract import ReadOnlyBrowserPolicy
-from app.web_fetch import DeterministicWebFetcher, WebFetchError
+from app.web_fetch import DeterministicWebFetcher, TransportResponse, WebFetchError
 
 passed = failed = 0
 
@@ -25,6 +46,15 @@ def rejects(fn, name: str, contains: str = "") -> None:
     try:
         fn()
     except WebFetchError as exc:
+        check(not contains or contains in str(exc), name)
+    else:
+        check(False, name)
+
+
+def rejects_type(fn, expected, name: str, contains: str = "") -> None:
+    try:
+        fn()
+    except expected as exc:
         check(not contains or contains in str(exc), name)
     else:
         check(False, name)
@@ -174,6 +204,7 @@ cases = [
     ("non-numeric peer is rejected", "https://example.com/", "not-an-ip", {}, FakeSocket(b""), "numeric IP"),
     ("caller Host header is forbidden", "https://example.com/", "1.1.1.1", {"host": "evil"}, FakeSocket(b""), "forbidden"),
     ("caller Cookie header is forbidden", "https://example.com/", "1.1.1.1", {"Cookie": "secret"}, FakeSocket(b""), "forbidden"),
+    ("caller Authorization header is forbidden", "https://example.com/", "1.1.1.1", {"Authorization": "Bearer model-data"}, FakeSocket(b""), "forbidden"),
     ("header injection is rejected", "https://example.com/", "1.1.1.1", {"x": "ok\r\nbad"}, FakeSocket(b""), "invalid"),
     ("URL credentials are rejected", "https://user:pass@example.com/", "1.1.1.1", {}, FakeSocket(b""), "credentials"),
     (
@@ -274,6 +305,183 @@ trace = DeterministicWebFetcher(
 check(trace.receipt.title == "Pinned", "transport composes with fetch engine")
 check("Trusted body" in trace.receipt.excerpt, "end-to-end receipt uses fetched entity")
 check(trace.receipt.adapter == "deterministic-web-fetch", "adapter identity stays stable")
+
+# T-036 trusted bearer seam. Public/untrusted headers are still closed, while a
+# connector-loaded secret can be appended only through the explicit method.
+bearer = "github_pat_fixture_1234567890"
+auth_sock = FakeSocket(wire(headers=(("Content-Type", "application/json"),), body=b"{}"))
+auth_transport, auth_factory, _ = make_transport(auth_sock)
+auth_transport.request_with_trusted_bearer(
+    "https://api.github.com/repos/ternedal/modelrig",
+    connect_address="1.1.1.1",
+    headers={"accept": "application/vnd.github+json"},
+    bearer_token=bearer,
+    timeout_seconds=2,
+    max_wire_bytes=64,
+)
+check(b"Authorization: Bearer " + bearer.encode("ascii") + b"\r\n" in auth_sock.sent, "trusted bearer is injected at pinned transport only")
+check(bearer.encode("ascii") not in b"application/vnd.github+json", "bearer is separate from ordinary request headers")
+
+invalid_bearer_sock = FakeSocket(b"")
+invalid_bearer_transport, invalid_bearer_factory, _ = make_transport(invalid_bearer_sock)
+rejects(
+    lambda: invalid_bearer_transport.request_with_trusted_bearer(
+        "https://api.github.com/",
+        connect_address="1.1.1.1",
+        headers={},
+        bearer_token="short",
+        timeout_seconds=2,
+        max_wire_bytes=64,
+    ),
+    "invalid trusted bearer fails closed",
+    "length",
+)
+check(invalid_bearer_factory.calls == [], "invalid bearer opens no socket")
+
+with tempfile.TemporaryDirectory() as temp:
+    token_path = Path(temp) / "github.token"
+    token_path.write_text(bearer + "\n", encoding="ascii")
+    if os.name == "posix":
+        token_path.chmod(0o600)
+    provider = FileGitHubCredentialProvider(account="Ternedal", token_file=token_path)
+    check(provider.account == "ternedal", "credential provider canonicalizes account")
+    check(provider.bearer_token() == bearer, "credential provider loads token on demand")
+    check(bearer not in repr(provider), "credential provider repr does not expose bearer")
+
+    env_provider = EnvironmentFileGitHubCredentialProvider(
+        {"KALIV_GITHUB_ACCOUNT": "TERNEDAL", "KALIV_GITHUB_TOKEN_FILE": str(token_path)}
+    )
+    check(env_provider.account == "ternedal", "environment config carries account, not token")
+    check(env_provider.bearer_token() == bearer, "environment file provider resolves configured secret file")
+
+    if os.name == "posix":
+        token_path.chmod(0o644)
+        rejects_type(
+            provider.bearer_token,
+            GitHubCredentialError,
+            "POSIX credential file rejects group/world-readable permissions",
+            "permissions",
+        )
+        token_path.chmod(0o600)
+
+    class CapturingPinned:
+        def __init__(self, *, peer="1.1.1.1"):
+            self.peer = peer
+            self.calls = []
+
+        def request_with_trusted_bearer(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            document = {"id": 1287914122, "full_name": "Ternedal/ModelRig"}
+            return TransportResponse(
+                status=200,
+                headers={
+                    "etag": 'W/"github-fixture-v1"',
+                    "x-ratelimit-remaining": "4999",
+                    "x-ratelimit-reset": "2000",
+                },
+                body=json.dumps(document, separators=(",", ":")).encode(),
+                connected_address=self.peer,
+            )
+
+    pinned = CapturingPinned()
+    github_transport = GitHubPinnedTransport(
+        credentials=provider,
+        resolver=lambda host, port: ("8.8.8.8", "1.1.1.1", "1.1.1.1"),
+        transport=pinned,
+        timeout_seconds=7,
+    )
+    request = GitHubTransportRequest(
+        path="/repos/ternedal/modelrig",
+        headers=(
+            ("accept", "application/vnd.github+json"),
+            ("x-github-api-version", "2022-11-28"),
+        ),
+        max_response_bytes=4096,
+    )
+    gh_response = github_transport.get(request)
+    url, call = pinned.calls[0]
+    check(url == "https://api.github.com/repos/ternedal/modelrig", "GitHub adapter never changes fixed API origin")
+    check(call["connect_address"] == "1.1.1.1", "GitHub adapter deterministically pins first public DNS address")
+    check(call["bearer_token"] == bearer, "bearer crosses only trusted transport seam")
+    check("authorization" not in call["headers"], "GitHub client headers still contain no Authorization")
+    check(call["timeout_seconds"] == 7 and call["max_wire_bytes"] == 4096, "GitHub adapter preserves bounded execution settings")
+    check(gh_response.status == 200, "GitHub adapter maps pinned response without following redirects")
+
+    rejects_type(
+        lambda: GitHubPinnedTransport(
+            credentials=provider,
+            resolver=lambda host, port: ("127.0.0.1",),
+            transport=CapturingPinned(),
+        ).get(request),
+        GitHubReadRemoteError,
+        "GitHub adapter rejects non-public DNS answers before socket",
+        "non-public",
+    )
+
+    wrong_peer = CapturingPinned(peer="8.8.8.8")
+    rejects_type(
+        lambda: GitHubPinnedTransport(
+            credentials=provider,
+            resolver=lambda host, port: ("1.1.1.1",),
+            transport=wrong_peer,
+        ).get(request),
+        GitHubReadRemoteError,
+        "GitHub adapter rejects peer mismatch after pinned connect",
+        "did not match",
+    )
+
+    # Account-bound facade proves a grant for another credential account cannot
+    # reach DNS, credential loading or transport.
+    grant_ids = iter((uuid.UUID(int=99), uuid.UUID(int=100)))
+    grants = GitHubConnectorGrantStore(":memory:", uuid_factory=lambda: next(grant_ids))
+    matching = grants.create(
+        GitHubConnectorScope(
+            account="Ternedal",
+            repositories=("Ternedal/ModelRig",),
+            operations=("repository",),
+        ),
+        actor="Anders",
+        now=1,
+    )
+    runtime_pinned = CapturingPinned()
+    runtime_transport = GitHubPinnedTransport(
+        credentials=provider,
+        resolver=lambda host, port: ("1.1.1.1",),
+        transport=runtime_pinned,
+    )
+    runtime = AccountBoundGitHubReadClient(grants=grants, transport=runtime_transport)
+    runtime_result = runtime.read(
+        matching.grant_id,
+        repository="Ternedal/ModelRig",
+        operation="repository",
+        now=2,
+    )
+    check(runtime_result.source.repository_id == 1287914122, "account-bound runtime composes grant + pinned transport + source")
+    check(len(runtime_pinned.calls) == 1, "matching account reaches pinned transport exactly once")
+
+    wrong = grants.create(
+        GitHubConnectorScope(
+            account="OtherAccount",
+            repositories=("Ternedal/ModelRig",),
+            operations=("repository",),
+        ),
+        actor="Anders",
+        now=3,
+    )
+    before = len(runtime_pinned.calls)
+    rejects_type(
+        lambda: runtime.read(
+            wrong.grant_id,
+            repository="Ternedal/ModelRig",
+            operation="repository",
+            now=4,
+        ),
+        GitHubConnectorDenied,
+        "grant account must match configured GitHub credential",
+        "account",
+    )
+    check(len(runtime_pinned.calls) == before, "account mismatch makes zero transport calls")
+    grants.close()
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

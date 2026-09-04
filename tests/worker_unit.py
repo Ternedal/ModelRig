@@ -211,12 +211,33 @@ os.environ.pop("KALIV_WORKER_ALLOW_LAN", None)
 _caps = client.get("/capabilities")
 check(_caps.status_code == 200, "/capabilities -> 200")
 _cj = _caps.json()
-check(set(_cj.keys()) == {"asr", "tts", "pdf", "docx", "cuda"},
-      f"/capabilities has the 5 capability keys -> got {sorted(_cj.keys())}")
+_CAP_KEYS = {"asr", "tts", "pdf", "docx", "pptx", "html", "cuda"}
+check(set(_cj.keys()) == _CAP_KEYS,
+      f"/capabilities has the 7 capability keys -> got {sorted(_cj.keys())}")
 check(all(isinstance(v, bool) for v in _cj.values()),
       "/capabilities values are all booleans (honest, no null/unknown)")
+
+# Every RAG loader that exists must report. A loader with an is_available()
+# that never reaches /capabilities is the exact gap this pins: the client can
+# gate what it sees and has to guess about the rest. Discovered by walking
+# worker/app/rag_*.py rather than by listing names here, so a NEW loader fails
+# this test instead of being quietly unreportable.
+import pathlib as _pl
+_loaders = set()
+for _p in sorted((_pl.Path(__file__).resolve().parent.parent / "worker" / "app").glob("rag_*.py")):
+    _name = _p.stem[len("rag_"):]
+    if "def is_available(" in _p.read_text(encoding="utf-8"):
+        _loaders.add(_name)
+check(len(_loaders) > 0, "found at least one rag_*.py loader with is_available() (test can fail)")
+check(_loaders.issubset(set(_cj.keys())),
+      f"/capabilities reports every rag loader -> missing {sorted(_loaders - set(_cj.keys()))}")
+
+# html.parser ships with Python, so this one is structurally always available.
+# Pinned because a False here means the loader broke, not that a dep is absent.
+check(_cj["html"] is True, "/capabilities: html is always True (stdlib html.parser)")
+
 _hf = client.get("/health/full").json()
-check(set(_hf.get("capabilities", {}).keys()) == {"asr", "tts", "pdf", "docx", "cuda"},
+check(set(_hf.get("capabilities", {}).keys()) == _CAP_KEYS,
       "/health/full includes the capabilities object")
 check("asr" not in _hf.get("faults", []) and "tts" not in _hf.get("faults", []),
       "/health/full does not fault on optional asr/tts (a core worker stays healthy on those)")

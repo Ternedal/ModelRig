@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Window-background colours, resolved by the OS from the system theme BEFORE
      Compose is alive. Light is the default set here; dark lives in
-     values-night/. Mirrored from 06_COLOR_SYSTEM/kaliv_design_tokens.json; keep
+     values-night/. Mirrored from assets/design/kaliv-ui-guide/kaliv-ui-tokens.json (DDR-001); keep
      in sync with ui/theme/Theme.kt.
 
      NOTE: the cold-start splash and the launcher icon follow the SYSTEM theme,
@@ -10,9 +10,9 @@
      toggle governs everything drawn by Compose, including the welcome screen. -->
 <resources>
     <!-- light (tokens "light") -->
-    <color name="kaliv_splash_bg">#F7F4EF</color>
-    <color name="kaliv_charred_black">#F7F4EF</color>   <!-- name kept for themes.xml; light window bg -->
-    <color name="kaliv_dark_walnut">#E6DFD2</color>
-    <color name="kaliv_ember_bronze">#8B6B3D</color>
-    <color name="kaliv_muted_ivory">#2A2118</color>
+    <color name="kaliv_splash_bg">#F7F3EC</color>
+    <color name="kaliv_charred_black">#F7F3EC</color>   <!-- name kept for themes.xml; light window bg -->
+    <color name="kaliv_dark_walnut">#EDE5D8</color>
+    <color name="kaliv_ember_bronze">#B08A3E</color>
+    <color name="kaliv_muted_ivory">#231E19</color>
 </resources>

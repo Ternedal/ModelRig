@@ -39,6 +39,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+import proof_scope  # noqa: E402
+
+
 SCHEMA = "kaliv-physical-validation-campaign/v1"
 LIFECYCLE_SCHEMA = "kaliv-appliance-lifecycle-observations/v1"
 PREFLIGHT_SCHEMA = "kaliv-rig-preflight/v1"
@@ -1115,6 +1121,54 @@ def validate_evidence(
 
     result = _base_result(name, relative, raw)
     validator, timestamp_fields = VALIDATORS[name]
+
+    # BAER ET UAENDRET BEVIS VIDERE.
+    #
+    # Bevisernes binding var kandidatens VERSIONSSTRENG. Et rent versionsbump
+    # -- hvor ikke een linje produktkode aendrer sig -- ugyldiggjorde derfor
+    # alt, ogsaa den haandindtastede Pixel-matrix. 2.0.9 -> 2.0.10 aendrede
+    # praecis tre linjer, alle versionsstrenge.
+    #
+    # Evidens skal binde til DET DER BLEV TESTET, ikke til navnet paa det.
+    # scripts/proof_scope.py erklaerer hvert bevis' stier; er de byte-identiske
+    # mellem beviset commit og kandidatens, valideres beviset mod den commit
+    # det faktisk blev taget paa. Aendres een linje i scopet, falder netop det
+    # bevis.
+    #
+    # STRAMMERE END FOER: den gamle regel spurgte om etiketten passede og sagde
+    # intet om koden bag. Denne spoerger om koden.
+    carried: dict[str, Any] | None = None
+    # Hvert bevis skriver sit sha der hvor DETS format lagde det. De fleste
+    # bruger build.git_sha; scheduler-piloten lagger den under candidate.git_sha.
+    # Foerste udgave kiggede kun det ene sted, saa carry-forward blev SPRUNGET
+    # OVER for scheduler -- og det haarde mismatch-tjek slog i stedet. Paa
+    # riggen 20/8 kostede det en Pixel-godkendelse der var taget en time foer.
+    taken_on = (
+        _nested(report, "build", "git_sha")
+        or _nested(report, "candidate", "git_sha")
+        or report.get("git_sha")
+        or report.get("exact_sha")
+    )
+    head_sha = candidate.get("git_sha")
+    if taken_on and head_sha and taken_on != head_sha:
+        try:
+            uaendret = proof_scope.scope_unchanged(root, name, taken_on, head_sha)
+        except Exception:
+            uaendret = None  # et ubesvaret spoergsmaal er ALDRIG et ja
+        if uaendret is True:
+            carried = {
+                "taken_on_git_sha": taken_on,
+                "candidate_git_sha": head_sha,
+                "taken_on_version": report.get("version") or _nested(report, "build", "version"),
+                "reason": "scope uaendret mellem de to commits",
+                "scope": list(proof_scope.PROOF_SCOPES.get(name, ())),
+            }
+            candidate = {
+                **candidate,
+                "git_sha": taken_on,
+                "version": carried["taken_on_version"] or candidate.get("version"),
+            }
+
     fresh, age_hours, freshness_error = _freshness(
         report,
         timestamp_fields,
@@ -1129,6 +1183,13 @@ def validate_evidence(
     except Exception as exc:
         result["errors"].append(
             f"validator failed unexpectedly: {type(exc).__name__}: {str(exc)[:200]}"
+        )
+    if carried is not None:
+        result["carried_forward"] = carried
+        result["warnings"].append(
+            "baaret videre fra "
+            f"{carried['taken_on_git_sha'][:12]} ({carried['taken_on_version']}): "
+            "beviset scope er uaendret"
         )
     result["status"] = "pass" if not result["errors"] else "fail"
     return result

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$PlannerModel,
     [switch]$EnableSchedulerPilot,
@@ -111,6 +111,26 @@ function Assert-PortFree {
     $process = Get-ProcessInfo -ProcessId $processId
     $name = if ($process) { [string]$process.Name } else { "ukendt proces" }
     $path = if ($process) { [string]$process.ExecutablePath } else { "ukendt sti" }
+
+    # Stage A-wizarden starter SELV en validation-stack i trin 5/8 til de
+    # automatiske beviser og river den ikke ned, foer telefon-testen skal bruge
+    # de samme porte. Kampagnen kolliderede derfor med sig selv, og operatoeren
+    # maatte lukke processen i haanden midt i en koersel -- tre gange 18/8.
+    #
+    # KUN vores EGEN runtime lukkes, og kun naar den ligger i dette repos
+    # validation\stage-a-runtime. Alt andet paa porten er stadig en haard fejl:
+    # en fremmed proces maa ikke stoppes af en test.
+    $ownRuntime = (Join-Path $repoRoot "validation\stage-a-runtime").ToLowerInvariant()
+    if ($path -and $path.ToLowerInvariant().StartsWith($ownRuntime)) {
+        Write-Host "  Lukker vores egen stage-a-runtime paa port $Port (proces $processId)." -ForegroundColor Yellow
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep -Milliseconds 250
+            if ($null -eq (Get-ListenerPid -Port $Port)) { return }
+        }
+        throw "$Label kan ikke startes: port $Port er stadig optaget efter at vores egen runtime blev lukket."
+    }
+
     throw "$Label kan ikke startes: port $Port bruges af $name (proces $processId, $path). Luk den proces og kør launcheren igen."
 }
 

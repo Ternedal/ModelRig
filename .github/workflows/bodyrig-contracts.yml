@@ -1,0 +1,214 @@
+name: bodyrig-contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bodyrig/**"
+      - "contracts/bodyrig/**"
+      - "docs/BODYRIG_V1.md"
+      - "docs/MRBODY_SPEC.md"
+      - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_extract_video.py"
+      - "scripts/bodyrig_local_tracking_contract.py"
+      - "scripts/bodyrig_pyav_h264_contract.py"
+      - "scripts/bodyrig_build_bodyprint.py"
+      - "scripts/bodyrig_fingerprint_contract.py"
+      - "scripts/bodyrig_build_shape_profile.py"
+      - "scripts/bodyrig_shape_contract.py"
+      - "scripts/bodyrig_build_face_behavior.py"
+      - "scripts/bodyrig_face_behavior_contract.py"
+      - "scripts/bodyrig_face_mixer_contract.py"
+      - "scripts/bodyrig_body_motion_mixer_contract.py"
+      - "scripts/bodyrig_build_identity_bundle.py"
+      - "scripts/bodyrig_identity_bundle_contract.py"
+      - "scripts/bodyrig_build_mrbody.py"
+      - "scripts/bodyrig_validate_mrbody.py"
+      - "scripts/bodyrig_mrbody_contract.py"
+      - "scripts/bodyrig_install_mrbody.py"
+      - "scripts/bodyrig_profile_store_contract.py"
+      - "scripts/bodyrig_select_current_mrbody.py"
+      - "scripts/bodyrig_current_mrbody.py"
+      - "scripts/bodyrig_current_profile_contract.py"
+      - "scripts/bodyrig_m29_identity_authority_contract.py"
+      - ".github/workflows/bodyrig-contracts.yml"
+  pull_request:
+    paths:
+      - "bodyrig/**"
+      - "contracts/bodyrig/**"
+      - "docs/BODYRIG_V1.md"
+      - "docs/MRBODY_SPEC.md"
+      - "scripts/bodyrig_contract_check.py"
+      - "scripts/bodyrig_extract_video.py"
+      - "scripts/bodyrig_local_tracking_contract.py"
+      - "scripts/bodyrig_pyav_h264_contract.py"
+      - "scripts/bodyrig_build_bodyprint.py"
+      - "scripts/bodyrig_fingerprint_contract.py"
+      - "scripts/bodyrig_build_shape_profile.py"
+      - "scripts/bodyrig_shape_contract.py"
+      - "scripts/bodyrig_build_face_behavior.py"
+      - "scripts/bodyrig_face_behavior_contract.py"
+      - "scripts/bodyrig_face_mixer_contract.py"
+      - "scripts/bodyrig_body_motion_mixer_contract.py"
+      - "scripts/bodyrig_build_identity_bundle.py"
+      - "scripts/bodyrig_identity_bundle_contract.py"
+      - "scripts/bodyrig_build_mrbody.py"
+      - "scripts/bodyrig_validate_mrbody.py"
+      - "scripts/bodyrig_mrbody_contract.py"
+      - "scripts/bodyrig_install_mrbody.py"
+      - "scripts/bodyrig_profile_store_contract.py"
+      - "scripts/bodyrig_select_current_mrbody.py"
+      - "scripts/bodyrig_current_mrbody.py"
+      - "scripts/bodyrig_current_profile_contract.py"
+      - "scripts/bodyrig_m29_identity_authority_contract.py"
+      - ".github/workflows/bodyrig-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA" || {
+            echo "checkout authority mismatch: expected $EXPECTED_SHA, got $actual" >&2
+            exit 1
+          }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Validate BodyRig V1 integration contracts
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_contract_check.py
+      - name: Validate BodyRig M1.1 local tracking adapter
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_local_tracking_contract.py
+      - name: Validate BodyRig M1.1 local ingest CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_extract_video.py --help
+      - name: Validate BodyRig M1.2 motion fingerprint builder
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_fingerprint_contract.py
+      - name: Validate BodyRig M1.2 bodyprint CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_build_bodyprint.py --help
+      - name: Validate BodyRig M1.3 shape profile builder
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_shape_contract.py
+      - name: Validate BodyRig M1.3 shape profile CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_build_shape_profile.py --help
+      - name: Validate BodyRig M2.1 facial behavior builder
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_face_behavior_contract.py
+      - name: Validate BodyRig M2.1 facial behavior CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_build_face_behavior.py --help
+      - name: Validate BodyRig M2.2 personalized face mixer
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_face_mixer_contract.py
+      - name: Validate BodyRig M2.3 personalized body motion mixer
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_body_motion_mixer_contract.py
+      - name: Validate BodyRig M2.4 unified identity bundle
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_identity_bundle_contract.py
+      - name: Validate BodyRig M2.4 identity CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_build_identity_bundle.py --help
+      - name: Validate BodyRig M2.5 mrbody archive builder and pre-extraction validator
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_mrbody_contract.py
+      - name: Validate BodyRig M2.5 build CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_build_mrbody.py --help
+      - name: Validate BodyRig M2.5 validation CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_validate_mrbody.py --help
+      - name: Validate BodyRig M2.6 atomic profile store
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_profile_store_contract.py
+      - name: Validate BodyRig M2.6 install CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_install_mrbody.py --help
+      - name: Validate BodyRig M2.7 current profile selection and runtime binding
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_current_profile_contract.py
+      - name: Validate BodyRig M2.7 selection CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_select_current_mrbody.py --help
+      - name: Validate BodyRig M2.7 current inspection CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_current_mrbody.py --help
+      - name: Validate BodyRig M2.9 portable identity authority interoperability
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_m29_identity_authority_contract.py
+
+  h264-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA" || {
+            echo "checkout authority mismatch: expected $EXPECTED_SHA, got $actual" >&2
+            exit 1
+          }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install exact optional tracking runtime
+        run: python -m pip install --disable-pip-version-check -r bodyrig/requirements-tracking.txt
+      - name: Verify exact installed runtime versions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.metadata as m
+          expected = {"av": "18.1.0", "mediapipe": "1.0.1"}
+          actual = {name: m.version(name) for name in expected}
+          print(actual)
+          if actual != expected:
+              raise SystemExit(f"tracking runtime version mismatch: {actual} != {expected}")
+          PY
+      - name: Generate and decode real H264 fixture through pinned PyAV runtime
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/bodyrig_pyav_h264_contract.py "$RUNNER_TEMP/bodyrig-h264.mp4"

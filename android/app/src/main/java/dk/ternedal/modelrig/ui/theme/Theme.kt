@@ -9,26 +9,25 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Kaliv brand colours -- from the QA-approved brand package
-// (06_COLOR_SYSTEM/kaliv_design_tokens.json). Two full palettes now: dark and
-// light. The app carried only a hardcoded dark scheme before; this makes the
-// palette a theme lookup so both modes are real, not a tint.
+// Kaliv-paletten -- fra og med DDR-001 (13/08-2026) er kilden de genererede
+// KalivTokens, ikke laengere haandskrevne literaler fra brandpakken. Aendr
+// JSON'en og koer generatoren; denne fil holder kun rolle-navnene og
+// M3-mappingen. Historik: 06_COLOR_SYSTEM-paletten baar appen indtil
+// redesignet; dens ink-paa-accent-regel lever videre i tokens (gold.on).
 //
-// The eight semantic slots below do NOT map cleanly onto Material3's role names
-// (no Material slot for "hairline", or for a distinct assistant-bubble surface),
-// so rather than flatten the brand into Material's vocabulary and lose meaning,
-// the names live in KalivColors and reach call sites as KalivTheme.colors.X.
-// Material still gets a derived scheme underneath, for the components (dialogs,
-// switches) that read MaterialTheme directly.
+// Rollerne mapper ikke rent til Material3's navne (ingen M3-slot for hairline,
+// sheet-flade eller brugerboble), saa navnene bor i KalivColors og naas som
+// KalivTheme.colors.X. Material faar stadig et afledt scheme nedenunder til de
+// komponenter (dialoger, switches) der laeser MaterialTheme direkte.
 //
-// CONTRAST, measured not assumed. Ember bronze #8B6B3D is the one accent shared
-// by both modes. White on it is ~3.0:1 -- below WCAG AA for body text -- so text
-// ON bronze is the mode's deep ink (dark: deep black; light: charcoal), never
-// white. That is why the user bubble reads dark-on-bronze.
+// KONTRAST, maalt ikke antaget (DDR-001): lys tekst paa guldfyldet #B08A3E
+// maalte 2,80:1 -- derfor er tekst PAA guld altid moerk ink (gold.on #2B1C05,
+// 5,15:1). Den lyse daempede tekst fulgte tidligere en AAA-pin (#5A4831,
+// Anders 30/07); pinnen er afloest af DDR-001 og vaerdien er nu tokenets --
+// se tests/workflow_android_palette_divergence.py for mekanikkens historik.
 
 /** Every colour the UI names, so a palette is one object and a mode is one instance. */
 data class KalivColors(
@@ -36,60 +35,100 @@ data class KalivColors(
     val surface: Color,
     val surfaceHigh: Color,
     val codeSurface: Color,
-    val signal: Color,         // filled button / user-bubble fill (deep bronze)
-    val signalPressed: Color,
-    val accent: Color,         // bronze text, links, focus (on the background)
+    val signal: Color,         // filled button fill (guld, jf. DDR-001)
+    val accent: Color,         // guld tekst/links/fokus (paa background)
     val amber: Color,
     val textHigh: Color,
     val textMuted: Color,
-    val onSignal: Color,
+    val onSignal: Color,       // ink paa guldfyld
     val success: Color,
     val danger: Color,
     val hairline: Color,
+    val surfaceDim: Color,     // bannere, info-kort
+    val sheet: Color,          // bottom-sheet-flade
+    val divider: Color,        // listedelere (svagere end hairline)
+    val userBubble: Color,
+    val userBubbleBorder: Color,
+    val faint: Color,          // svag tekst (tidsstempler, sub)
+    val textSoft: Color,       // bloed primaertekst (forslagskort, wordmark moerk)
+    val textBody: Color,       // assistentsvarenes broedtekst
+    val userBubbleText: Color, // tekst i brugerboblen
+    val accentSoft: Color,     // aktiv-chips og markdown-emfase
+    val selectedTint: Color,   // valgt kilde-/raekke-flade (sheets)
+    val caps: Color,           // caps-sektionslabels
+    val goldTint: Color,       // 16 % guld-tint-baggrund
+    val warn: Color,
+    val scrim: Color,
     val isDark: Boolean,
 )
 
-// -- Dark palette (tokens "dark") --------------------------------------------
+// -- Moerk palette (tokens "dark") -------------------------------------------
 val KalivDarkColors = KalivColors(
-    background = Color(0xFF0B0A09),
-    surface = Color(0xFF1B1612),
-    surfaceHigh = Color(0xFF2A1E14),
+    background = KalivTokens.Dark.canvas,
+    surface = KalivTokens.Dark.surface,
+    surfaceHigh = KalivTokens.Dark.elevated,
+    // Uden for tokensaettet: Markdown-kodefladen. Migreres naar Markdown-fladen
+    // redesignes (fase 2); indtil da er literalen bevidst.
     codeSurface = Color(0xFF080706),
-    signal = Color(0xFF6E5330),       // deep bronze button fill; ivory text = 6.2:1 AA
-    signalPressed = Color(0xFF5A4526),
-    accent = Color(0xFF8B6B3D),       // brand bronze for text/links (4.0:1 on deep black)
-    amber = Color(0xFFC8A864),
-    textHigh = Color(0xFFF3EFE6),
-    textMuted = Color(0xFFA89A82),
-    onSignal = Color(0xFFF3EFE6),     // ivory on deep bronze = 6.2:1 (black failed AA at 4.0)
-    success = Color(0xFF6E9E5E),
-    danger = Color(0xFFCF6A5C),
-    hairline = Color(0xFF3A2A1F),
+    signal = KalivTokens.Gold.fill,
+    accent = KalivTokens.Dark.accent,
+    // amber var brandpakkens sekundaere guld; redesignet har EN guld-accent.
+    // Midlertidigt = accent; konsolideres naar komponentbiblioteket lander.
+    amber = KalivTokens.Dark.accent,
+    textHigh = KalivTokens.Dark.text,
+    textMuted = KalivTokens.Dark.muted,
+    onSignal = KalivTokens.Gold.on,
+    success = KalivTokens.Dark.ok,
+    danger = KalivTokens.Dark.danger,
+    hairline = KalivTokens.Dark.border,
+    surfaceDim = KalivTokens.Dark.surfaceDim,
+    sheet = KalivTokens.Dark.sheet,
+    divider = KalivTokens.Dark.divider,
+    userBubble = KalivTokens.Dark.userBubble,
+    userBubbleBorder = KalivTokens.Dark.userBubbleBorder,
+    faint = KalivTokens.Dark.faint,
+    textSoft = KalivTokens.Dark.textSoft,
+    textBody = KalivTokens.Dark.textBody,
+    userBubbleText = KalivTokens.Dark.userBubbleText,
+    accentSoft = KalivTokens.Dark.accentSoft,
+    selectedTint = KalivTokens.Dark.selectedTint,
+    caps = KalivTokens.Dark.caps,
+    goldTint = KalivTokens.Gold.tint,
+    warn = KalivTokens.Dark.warn,
+    scrim = KalivTokens.Dark.scrim,
     isDark = true,
 )
 
-// -- Light palette (tokens "light") ------------------------------------------
+// -- Lys palette (tokens "light") --------------------------------------------
 val KalivLightColors = KalivColors(
-    background = Color(0xFFF7F4EF),
-    surface = Color(0xFFEFEAE0),
-    surfaceHigh = Color(0xFFE6DFD2),
-    codeSurface = Color(0xFFEAE3D5),
-    signal = Color(0xFF6E5330),       // deep bronze button fill; ivory text = 6.2:1 AA
-    signalPressed = Color(0xFF5A4526),
-    accent = Color(0xFF5E4728),       // bronze link/accent text: 8.0:1 on ivory
-    amber = Color(0xFFB69B73),
-    textHigh = Color(0xFF2A2118),
-    // BEVIDST OVERRIDE af tokenets color.light.muted (#6F665C), Anders 30/7-2026.
-    // Målt: denne værdi giver 7,96:1 mod baggrunden nedenfor (AAA); tokenets
-    // ville give 5,13:1 (kun AA). Telefonen læses i dagslys. Migrér IKKE til
-    // KalivTokens.Light.muted som oprydning — det er en æstetisk beslutning,
-    // der hører til rig-dagen. Pinnet i platformOverrides + gaten
-    // tests/workflow_android_palette_divergence.py.
-    textMuted = Color(0xFF5A4831),
-    onSignal = Color(0xFFF3EFE6),     // ivory on deep bronze = 6.2:1 (charcoal failed AA at 3.2)
-    success = Color(0xFF4F7A41),
-    danger = Color(0xFFA33529),
-    hairline = Color(0xFFCDBFA6),
+    background = KalivTokens.Light.canvas,
+    surface = KalivTokens.Light.surface,
+    surfaceHigh = KalivTokens.Light.elevated,
+    codeSurface = Color(0xFFEAE3D5), // uden for tokensaettet, se noten ovenfor
+    signal = KalivTokens.Gold.fill,
+    accent = KalivTokens.Light.accent,
+    amber = KalivTokens.Light.accent,
+    textHigh = KalivTokens.Light.text,
+    textMuted = KalivTokens.Light.muted,
+    onSignal = KalivTokens.Gold.on,
+    success = KalivTokens.Light.ok,
+    danger = KalivTokens.Light.danger,
+    hairline = KalivTokens.Light.border,
+    surfaceDim = KalivTokens.Light.surfaceDim,
+    sheet = KalivTokens.Light.sheet,
+    divider = KalivTokens.Light.divider,
+    userBubble = KalivTokens.Light.userBubble,
+    userBubbleBorder = KalivTokens.Light.userBubbleBorder,
+    faint = KalivTokens.Light.faint,
+    textSoft = KalivTokens.Light.textSoft,
+    textBody = KalivTokens.Light.textBody,
+    userBubbleText = KalivTokens.Light.userBubbleText,
+    accentSoft = KalivTokens.Light.accentSoft,
+    selectedTint = KalivTokens.Light.selectedTint,
+    caps = KalivTokens.Light.caps,
+    goldTint = KalivTokens.Gold.tint,
+    warn = KalivTokens.Light.warn,
+    scrim = KalivTokens.Light.scrim,
     isDark = false,
 )
 
@@ -138,16 +177,16 @@ private fun materialFrom(c: KalivColors) =
         )
     }
 
-private val Display = FontFamily.Serif
-
-private val KalivTypography = Typography(
+private val KalivM3Typography = Typography(
+    // Titler i EB Garamond 500 -- den bundlede instans (DDR-001, PR #523).
+    // Vaegten er Medium med vilje: Bold ville blive syntetisk.
     titleLarge = TextStyle(
-        fontFamily = Display,
-        fontSize = 20.sp, fontWeight = FontWeight.Bold, lineHeight = 26.sp,
+        fontFamily = KalivType.EbGaramond,
+        fontSize = 20.sp, fontWeight = FontWeight.Medium, lineHeight = 26.sp,
     ),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp),
-    labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp, lineHeight = 24.sp),
+    bodyMedium = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp, lineHeight = 22.sp),
+    labelSmall = TextStyle(fontFamily = KalivType.Inter, fontSize = 11.sp, fontWeight = FontWeight.Medium),
 )
 
 /**
@@ -161,7 +200,7 @@ fun ModelRigTheme(dark: Boolean = true, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalKalivColors provides colors) {
         MaterialTheme(
             colorScheme = materialFrom(colors),
-            typography = KalivTypography,
+            typography = KalivM3Typography,
             content = content,
         )
     }

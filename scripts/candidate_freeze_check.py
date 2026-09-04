@@ -7,6 +7,7 @@ explicitly different from ``freeze_check.py``:
 * ``freeze_check.py`` proves an exact published release and remains unchanged;
 * this command proves one unpublished, pushed candidate SHA is coherent, contains
   current ``origin/main`` and has all four software gates green on that exact SHA;
+* every receipt consumer refetches ``origin/main`` and rejects a moved anchor;
 * its receipt always says release validation is still pending and production is
   not activated.
 
@@ -232,6 +233,29 @@ def _current_identity(root: Path) -> dict[str, Any]:
     }
 
 
+def _fetch_current_main(root: Path) -> str:
+    """Fetch and return the current remote main SHA, or fail closed."""
+    fetch_code, fetch_detail = _run(root, "git", "fetch", "--quiet", "origin", "main")
+    if fetch_code != 0:
+        raise CandidateFreezeError(
+            "current origin/main could not be fetched: " + fetch_detail[-300:]
+        )
+    main_code, main_sha = _run(root, "git", "rev-parse", "origin/main")
+    if main_code != 0 or _SHA40.fullmatch(main_sha) is None:
+        raise CandidateFreezeError("fetched origin/main SHA is unavailable")
+    return main_sha
+
+
+def _require_main_ancestor(root: Path, candidate_sha: str, main_sha: str) -> None:
+    ancestor_code, _ = _run(
+        root, "git", "merge-base", "--is-ancestor", main_sha, candidate_sha
+    )
+    if ancestor_code != 0:
+        raise CandidateFreezeError(
+            f"candidate {candidate_sha} does not contain current origin/main {main_sha}"
+        )
+
+
 def create_receipt(
     expected_sha: str,
     *,
@@ -264,21 +288,8 @@ def create_receipt(
     if errors:
         raise CandidateFreezeError("; ".join(errors))
 
-    fetch_code, fetch_detail = _run(root, "git", "fetch", "--quiet", "origin", "main")
-    if fetch_code != 0:
-        raise CandidateFreezeError(
-            "current origin/main could not be fetched: " + fetch_detail[-300:]
-        )
-    main_code, main_sha = _run(root, "git", "rev-parse", "origin/main")
-    if main_code != 0 or _SHA40.fullmatch(main_sha) is None:
-        raise CandidateFreezeError("fetched origin/main SHA is unavailable")
-    ancestor_code, _ = _run(
-        root, "git", "merge-base", "--is-ancestor", main_sha, expected_sha
-    )
-    if ancestor_code != 0:
-        raise CandidateFreezeError(
-            f"candidate {expected_sha} does not contain current origin/main {main_sha}"
-        )
+    main_sha = _fetch_current_main(root)
+    _require_main_ancestor(root, expected_sha, main_sha)
 
     github_token = (token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
     if not github_token:
@@ -411,11 +422,14 @@ def load_receipt(
     main_sha = main_anchor.get("git_sha")
     if not isinstance(main_sha, str) or _SHA40.fullmatch(main_sha) is None:
         raise CandidateFreezeError("candidate freeze main SHA is invalid")
-    ancestor_code, _ = _run(
-        root, "git", "merge-base", "--is-ancestor", main_sha, recorded["git_sha"]
-    )
-    if ancestor_code != 0:
-        raise CandidateFreezeError("recorded main anchor is not an ancestor of candidate")
+
+    current_main_sha = _fetch_current_main(root)
+    if current_main_sha != main_sha:
+        raise CandidateFreezeError(
+            f"origin/main moved from frozen anchor {main_sha} to {current_main_sha}; "
+            "rerun candidate freeze before collecting or accepting evidence"
+        )
+    _require_main_ancestor(root, recorded["git_sha"], current_main_sha)
 
     tree = value.get("tree") if isinstance(value.get("tree"), dict) else {}
     paths = tree.get("paths")

@@ -101,6 +101,71 @@ func TestAgent4OperatorForwardsByteIdentical(t *testing.T) {
 	}
 }
 
+func TestAgent4OperatorPreservesSnapshotQueryStatusBodyAndMediaType(t *testing.T) {
+	t.Setenv("KALIV_AGENT4_OPERATOR_API", "1")
+	const rawQuery = "snapshot_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&after=%7B%22schema%22%3A%22bound%22%7D"
+	const workerBody = `{"detail":"agent4 operator snapshot unavailable"}`
+	type observedRequest struct {
+		path     string
+		rawQuery string
+	}
+	observed := make(chan observedRequest, 1)
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observed <- observedRequest{path: r.URL.Path, rawQuery: r.URL.RawQuery}
+		w.Header().Set("Content-Type", "application/vnd.modelrig.agent4.operator+json")
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(workerBody))
+	}))
+	t.Cleanup(worker.Close)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.AddDevice(store.Device{
+		ID: "dev1", Name: "test", TokenHash: auth.Hash(a4TestToken),
+		CreatedAt: time.Now(), LastSeen: time.Now(), Grants: []string{agent4ReadGrant},
+	}); err != nil {
+		t.Fatalf("AddDevice: %v", err)
+	}
+	h := New(Deps{
+		Cfg:        config.Config{ClaimMax: 5, RequestTimeout: 5 * time.Second},
+		Store:      st,
+		Worker:     proxy.New(worker.URL, 5*time.Second),
+		WorkerSlow: proxy.New(worker.URL, 30*time.Second),
+	})
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/experimental/agent4/operator/campaigns?"+rawQuery,
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+a4TestToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	select {
+	case got := <-observed:
+		if got.path != "/experimental/agent4/operator/campaigns" {
+			t.Fatalf("worker path was rewritten unexpectedly: %q", got.path)
+		}
+		if got.rawQuery != rawQuery {
+			t.Fatalf("snapshot query was rewritten: got %q want %q", got.rawQuery, rawQuery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("worker did not receive snapshot-bound request")
+	}
+	if rec.Code != http.StatusGone {
+		t.Fatalf("worker status was rewritten: got %d", rec.Code)
+	}
+	if rec.Body.String() != workerBody {
+		t.Fatalf("worker body was rewritten: got %q", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/vnd.modelrig.agent4.operator+json" {
+		t.Fatalf("worker media type was rewritten: %q", ct)
+	}
+}
+
 func TestDeviceHasGrantDefaultDeny(t *testing.T) {
 	if (store.Device{}).HasGrant(agent4ReadGrant) {
 		t.Fatal("empty device must have no grants")

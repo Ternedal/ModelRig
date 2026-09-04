@@ -15,6 +15,13 @@ from app.data_sharing import (
     DataSharingPolicy,
     DataSharingRequest,
 )
+from app.github_connector_contract import (
+    GitHubConnectorContractError,
+    GitHubConnectorDenied,
+    GitHubConnectorGrantStore,
+    GitHubConnectorScope,
+    GitHubSourceReceipt,
+)
 
 passed = failed = 0
 
@@ -288,6 +295,113 @@ with tempfile.TemporaryDirectory() as temp:
     durable_events = reopened.recent_events(20)
     check(any(e["event_type"] == "permission_approved" for e in durable_events), "approval survives reopen")
     check(any(e["error_code"] == "fixture_failure" for e in durable_events), "terminal receipt survives reopen")
+    reopened.close()
+
+# T-036: connector access is a separate durable authority from outbound
+# data-sharing permission.  It names exact repositories and read operations;
+# credentials/content never become part of this scope or its source receipt.
+gh_scope = GitHubConnectorScope(
+    account="Ternedal",
+    repositories=("Ternedal/ModelRig", "OpenAI/OpenAI"),
+    operations=("workflow_run", "issue", "repository", "pull_request"),
+)
+gh_scope_reordered = GitHubConnectorScope(
+    account="ternedal",
+    repositories=("openai/openai", "ternedal/modelrig"),
+    operations=("repository", "issue", "pull_request", "workflow_run"),
+)
+check(gh_scope == gh_scope_reordered, "GitHub connector scope is canonical")
+check(gh_scope.digest == gh_scope_reordered.digest, "GitHub scope digest ignores UI ordering")
+check(gh_scope.allows("TERNEDAL/ModelRig", "issue"), "exact scoped GitHub repository read is allowed")
+check(not gh_scope.allows("Ternedal/Other", "issue"), "different GitHub repository is outside scope")
+check(gh_scope.to_dict()["production_activation"] is False, "GitHub connector contract remains dormant")
+
+for override, label in (
+    ({"repositories": ("Ternedal/*",)}, "GitHub wildcard repository is rejected"),
+    ({"repositories": ("Ternedal/ModelRig.git",)}, "GitHub .git alias is rejected"),
+    ({"repositories": ("Ternedal/ModelRig", "ternedal/modelrig")}, "duplicate canonical repository is rejected"),
+    ({"operations": ("issue", "issue")}, "duplicate GitHub operation is rejected"),
+    ({"operations": ("issue", "delete_repository")}, "mutating GitHub operation is unrepresentable"),
+    ({"production_activation": True}, "GitHub production activation cannot be smuggled into scope"),
+):
+    rejects(
+        lambda override=override: GitHubConnectorScope(
+            account="Ternedal",
+            repositories=override.get("repositories", ("Ternedal/ModelRig",)),
+            operations=override.get("operations", ("repository", "issue")),
+            production_activation=override.get("production_activation", False),
+        ),
+        GitHubConnectorContractError,
+        label,
+    )
+
+with tempfile.TemporaryDirectory() as temp:
+    path = Path(temp) / "github-connector.db"
+    ids = UUIDs()
+    first = GitHubConnectorGrantStore(str(path), uuid_factory=ids)
+    gh_grant = first.create(gh_scope, actor="Anders", now=1000)
+    check(gh_grant.active, "GitHub connector grant starts active")
+    check(
+        first.authorize(
+            gh_grant.grant_id,
+            repository="ternedal/modelrig",
+            operation="pull_request",
+        ).active,
+        "active durable GitHub grant authorizes exact read",
+    )
+    rejects(
+        lambda: first.authorize(
+            gh_grant.grant_id,
+            repository="ternedal/other",
+            operation="pull_request",
+        ),
+        GitHubConnectorDenied,
+        "GitHub grant cannot widen repository scope",
+    )
+    rejects(
+        lambda: first.authorize(
+            gh_grant.grant_id,
+            repository="ternedal/modelrig",
+            operation="workflow_run" if "workflow_run" not in gh_grant.scope.operations else "repository_delete",
+        ),
+        GitHubConnectorContractError,
+        "unknown or mutating GitHub operation fails before authorization",
+    )
+    first.close()
+
+    reopened = GitHubConnectorGrantStore(str(path))
+    persisted = reopened.get(gh_grant.grant_id)
+    check(persisted is not None and persisted.scope.digest == gh_scope.digest, "GitHub grant survives reopen")
+    revoked_grant = reopened.revoke(gh_grant.grant_id, actor="Anders", now=1010)
+    check(not revoked_grant.active, "GitHub grant revocation is durable")
+    rejects(
+        lambda: reopened.authorize(
+            gh_grant.grant_id,
+            repository="ternedal/modelrig",
+            operation="issue",
+        ),
+        GitHubConnectorDenied,
+        "revoked GitHub grant stops new reads",
+    )
+    repeated = reopened.revoke(gh_grant.grant_id, actor="Other operator", now=1020)
+    check(repeated.revoked_at == 1010 and repeated.revoked_by == "Anders", "GitHub revoke is idempotent and preserves first evidence")
+
+    source = GitHubSourceReceipt(
+        grant_id=gh_grant.grant_id,
+        scope_sha256=gh_scope.digest,
+        repository="Ternedal/ModelRig",
+        repository_id=1287914122,
+        object_type="pull_request",
+        object_id="496",
+        revision="3b45eb4080accd94c1139a0154811e7995acdb02",
+        retrieved_at=1030,
+    )
+    source_json = json.dumps(source.to_dict(), ensure_ascii=False)
+    check(source.to_dict()["connector"] == "github", "GitHub source receipt identifies connector")
+    check(source.to_dict()["repository_id"] == 1287914122, "GitHub source receipt binds stable repository id")
+    check(source.to_dict()["object_id"] == "496", "GitHub source receipt binds object id")
+    check("3b45eb4080accd94c1139a0154811e7995acdb02" in source_json, "GitHub source receipt binds revision")
+    check(all(word not in source_json.lower() for word in ("token", "authorization", "body", "content", "secret")), "GitHub source receipt excludes credentials and raw content")
     reopened.close()
 
 print(f"\n{passed} passed, {failed} failed")

@@ -521,7 +521,10 @@ check(len(_trim_history(plain)) == TOOL_HISTORY_MAX_MESSAGES and
 src = _i.getsource(_M._tools_chat_turn)
 check('m.role == "system" and i > 0' in src,
       "T24: a system role mid-history is demoted to user")
-check('if req.system:' in src and 'm.role != "system"' in src,
+# The condition is on the resolved prompt -- the caller's or the Person
+# Profile registry's (#752) -- so a client-side legacy persona in history is
+# dropped whichever one is in force.
+check('if system_text:' in src and 'm.role != "system"' in src,
       "T24: an explicit system field wins over one smuggled in history")
 
 # ---------------------------------------------------------------------------

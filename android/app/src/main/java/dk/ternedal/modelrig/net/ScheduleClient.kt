@@ -60,7 +60,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
         return parsePreview(post("/api/v1/schedules/preview", body).getJSONObject("preview"))
     }
 
-    fun create(preview: SchedulePreview): ScheduleItem {
+    fun create(preview: SchedulePreview, label: String? = null): ScheduleItem {
         val body = JSONObject()
             .put("tool", preview.tool)
             .put("args", JSONObject(preview.argsJson))
@@ -69,6 +69,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
             .put("misfire_policy", preview.misfirePolicy)
             .put("ttl_days", preview.ttlDays)
             .put("max_runs", preview.maxRuns)
+        label?.trim()?.takeIf { it.isNotEmpty() }?.let { body.put("label", it) }
         approvalTokenForCreate(preview)?.let { body.put("approval_token", it) }
         return parseItem(post("/api/v1/schedules", body).getJSONObject("schedule"))
     }
@@ -204,6 +205,7 @@ class ScheduleClient(baseUrl: String, private val token: String) {
 
     private fun parseItem(o: JSONObject) = ScheduleItem(
         id = o.getString("schedule_id"),
+        label = o.optString("label").takeUnless { it.isBlank() || it == "null" },
         tool = o.getString("tool"),
         argsJson = o.optJSONObject("args")?.toString() ?: "{}",
         cadence = o.getString("cadence"),
@@ -268,6 +270,8 @@ data class SchedulePreview(
 
 data class ScheduleItem(
     val id: String,
+    /** Menneskenavnet; null på planer oprettet før feltet fandtes. */
+    val label: String?,
     val tool: String,
     val argsJson: String,
     val cadence: String,

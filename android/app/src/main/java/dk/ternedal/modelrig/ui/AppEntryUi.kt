@@ -37,7 +37,12 @@ import dk.ternedal.modelrig.ui.theme.ModelRigTheme
  * explicit recovery screen instead of looking like a fresh installation.
  */
 @Composable
-fun AppEntryUi(store: TokenStore) {
+fun AppEntryUi(
+    store: TokenStore,
+    pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+    shared: dk.ternedal.modelrig.net.SharedPayload? = null,
+    sharedTruncated: Boolean = false,
+) {
     val initialSources = remember {
         SourceAvailability.from(
             store.rigCredentialStatus,
@@ -52,7 +57,7 @@ fun AppEntryUi(store: TokenStore) {
     }
 
     if (continueToApp) {
-        AppUi()
+        AppUi(pairingLink, shared, sharedTruncated)
         return
     }
 

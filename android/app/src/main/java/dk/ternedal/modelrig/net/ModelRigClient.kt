@@ -53,6 +53,32 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         false
     }
 
+    /**
+     * Riggens egne evner: GET /capabilities. Kaldes ved connect, saa fladen kan
+     * gate paa hvad den TILSLUTTEDE worker kan i stedet for at vise en knap der
+     * fejler naar man trykker.
+     *
+     * Kaster ALDRIG og returnerer [WorkerCapabilities.UNKNOWN] paa enhver fejl.
+     * Et capability-probe der fejler maa ikke vaelte en forbindelse der virker,
+     * og UNKNOWN betyder "alt tilgaengeligt" -- se WorkerCapabilities.
+     * Endpointet er ugatet og billigt (kun import-checks), derfor eget korte
+     * budget frem for det fulde laesetimeout.
+     */
+    fun workerCapabilities(): WorkerCapabilities = try {
+        val quick = OkHttpClient.Builder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .build()
+        val rb = Request.Builder().url("$base/capabilities").get()
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        quick.newCall(rb.build()).execute().use { resp ->
+            if (!resp.isSuccessful) WorkerCapabilities.UNKNOWN
+            else WorkerCapabilities.parse(resp.body?.string())
+        }
+    } catch (_: Exception) {
+        WorkerCapabilities.UNKNOWN
+    }
+
     private val voiceHttp = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.MINUTES)
@@ -61,7 +87,18 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
 
     private val jsonType = "application/json".toMediaType()
 
-    fun claimPairing(deviceName: String, code: String): String {
+    /** Parringssvaret bærer også enhedens id — det bruges til at kende DENNE enhed i enhedslisten. */
+    data class Pairing(val token: String, val deviceId: String?)
+
+    /** En parret enhed set fra /api/v1/devices (uden token-hash — den forlader aldrig riggen). */
+    data class PairedDevice(
+        val id: String,
+        val name: String,
+        val createdAt: String?,
+        val lastSeen: String?,
+    )
+
+    fun claimPairing(deviceName: String, code: String): Pairing {
         val body = JSONObject()
             .put("device_name", deviceName)
             .put("code", code)
@@ -78,9 +115,10 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
             if (!resp.isSuccessful) {
                 throw ModelRigException("pairing failed (${resp.code}): $text")
             }
-            val tok = JSONObject(text).optString("token")
+            val root = JSONObject(text)
+            val tok = root.optString("token")
             if (tok.isEmpty()) throw ModelRigException("pairing response missing token")
-            return tok
+            return Pairing(tok, root.optString("device_id").takeIf { it.isNotEmpty() })
         }
     }
 
@@ -156,7 +194,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         cloudKey: String? = null,
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onTranscript: (String) -> Unit,
-        onChunk: (index: Int, text: String, audioB64: String) -> Unit,
+        onChunk: (index: Int, text: String, audioB64: String, utteranceId: String?) -> Unit,
         onDone: (reply: String, model: String?, viaCloud: Boolean) -> Unit,
         onError: (status: Int, detail: String) -> Unit,
     ) {
@@ -186,7 +224,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 when (val ev = StreamContract.parse(line)) {
                     is StreamEvent.Phase -> Unit  // stemmestroemmen udsender ingen faser endnu
                     is StreamEvent.Transcript -> onTranscript(ev.text)
-                    is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64)
+                    is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64, ev.utteranceId)
                     is StreamEvent.Done -> {
                         sawTerminal = true
                         onDone(ev.reply, ev.model, ev.viaCloud)
@@ -354,6 +392,84 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         }
     }
 
+    /**
+     * En RAG-kilde med rigens egne tal: antal udsnit og hvornår den sidst
+     * blev indekseret. Begge felter HAR ligget i /rag/sources hele tiden —
+     * klienten smed dem bare væk før nu.
+     */
+    data class RagSource(
+        val name: String,
+        val chunks: Int,
+        val lastIngestedAt: Double?,
+        /**
+         * Om kilden må hentes fra. Ældre rigge kender ikke feltet — så regnes
+         * kilden som TÆNDT, hvilket er præcis den adfærd de faktisk har.
+         */
+        val enabled: Boolean = true,
+    )
+
+    /** Kilder med tal. Rækkefølgen er rigens: nyest indekseret først. */
+    fun listRagSourceDetails(): List<RagSource> {
+        val rb = Request.Builder().url("$base/api/v1/rag/sources")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("rag sources failed (${resp.code}): $text")
+            val arr = JSONObject(text).optJSONArray("sources") ?: return emptyList()
+            val out = ArrayList<RagSource>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val name = o.optString("source")
+                if (name.isEmpty()) continue
+                out.add(
+                    RagSource(
+                        name = name,
+                        chunks = o.optInt("chunks", 0),
+                        lastIngestedAt = if (o.isNull("last_ingested_at")) null else o.optDouble("last_ingested_at"),
+                        enabled = o.optBoolean("enabled", true),
+                    ),
+                )
+            }
+            return out
+        }
+    }
+
+    /**
+     * Tænder eller slukker for hentning fra én kilde.
+     *
+     * Sletter intet: chunksene bliver, og kontakten kan vippes tilbage.
+     * Returnerer RIGGENS tilstand bagefter — klienten antager aldrig at dens
+     * egen skrivning lykkedes.
+     */
+    fun setRagSourceEnabled(source: String, enabled: Boolean): Boolean {
+        val payload = JSONObject().put("source", source).put("enabled", enabled)
+        val rb = Request.Builder()
+            .url("$base/api/v1/rag/source/enabled")
+            .post(payload.toString().toRequestBody(jsonType))
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("rag source toggle failed (${resp.code}): $text")
+            return JSONObject(text).optBoolean("enabled", enabled)
+        }
+    }
+
+    /**
+     * Fjerner ALLE udsnit for en kilde og returnerer hvor mange der blev slettet.
+     * Riggen svarer 404 hvis kilden ikke har nogen udsnit — det er ikke en
+     * stille succes, og kaldet kaster derfor også dér.
+     */
+    fun deleteRagSource(source: String): Int {
+        val encoded = java.net.URLEncoder.encode(source, "UTF-8")
+        val rb = Request.Builder().url("$base/api/v1/rag/source?source=$encoded").delete()
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("rag delete failed (${resp.code}): $text")
+            return JSONObject(text).optInt("removed", 0)
+        }
+    }
+
     /** Lists ingested RAG source names (for the source-filter picker). */
     fun listRagSources(): List<String> {
         val rb = Request.Builder().url("$base/api/v1/rag/sources")
@@ -447,6 +563,131 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 if (name.isNotEmpty()) out.add(RunningModel(name, o.optLong("size_vram", 0L), o.optString("expires_at")))
             }
             return out
+        }
+    }
+
+    /** Parrede enheder. Riggen udleverer aldrig token-hashes — kun id, navn og tidsstempler. */
+    fun listDevices(): List<PairedDevice> {
+        val rb = Request.Builder().url("$base/api/v1/devices")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("devices failed (${resp.code}): $text")
+            val arr = JSONObject(text).optJSONArray("devices") ?: return emptyList()
+            val out = ArrayList<PairedDevice>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val id = o.optString("id")
+                if (id.isEmpty()) continue
+                out.add(
+                    PairedDevice(
+                        id = id,
+                        name = o.optString("name").ifEmpty { "Uden navn" },
+                        createdAt = o.optString("created_at").takeIf { it.isNotEmpty() },
+                        lastSeen = o.optString("last_seen").takeIf { it.isNotEmpty() },
+                    ),
+                )
+            }
+            return out
+        }
+    }
+
+    /**
+     * Fjerner en enheds adgang. Riggen slår enheden op i sit live-lager ved
+     * HVERT kald, så et tilbagekaldt token holder op med at virke med det samme
+     * — også midt i en igangværende session.
+     */
+    fun revokeDevice(deviceId: String) {
+        val rb = Request.Builder().url("$base/api/v1/devices/$deviceId").delete()
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw ModelRigException("revoke failed (${resp.code}): ${resp.body?.string().orEmpty()}")
+            }
+        }
+    }
+
+    /**
+     * Rig-side system measurement (B3a: GET /api/v1/system/status).
+     * Every field is nullable on purpose: the endpoint is fail-soft and
+     * reports null for anything it cannot measure (no nvidia-smi, unknown
+     * OS), so the screen can say "ukendt" honestly instead of failing.
+     */
+    data class SystemStatus(
+        val gpuName: String?,
+        val gpuTempC: Int?,
+        val gpuUtilPct: Int?,
+        val vramTotalMb: Int?,
+        val vramUsedMb: Int?,
+        val vramFreeMb: Int?,
+        val cpuPct: Double?,
+        /** Backend-processens levetid i sekunder; null på rigge uden feltet. */
+        val uptimeSeconds: Long?,
+    )
+
+    /** Resultatet af en VRAM-frigørelse: hvad riggen FAKTISK slap. */
+    data class UnloadResult(val unloaded: List<String>, val freedBytes: Long, val failed: List<String>)
+
+    /**
+     * Beder riggen slippe alle indlæste modeller (Ollamas keep_alive=0).
+     * Ingen processer genstartes; næste prompt indlæser modellen igen.
+     * Kaster ved 404 fra ældre rigge — kalderen viser opgraderingsnoten.
+     */
+    fun unloadModels(): UnloadResult {
+        val rb = Request.Builder()
+            .url("$base/api/v1/models/unload")
+            .post(ByteArray(0).toRequestBody(jsonType))
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("unload failed (${resp.code}): $text")
+            val root = JSONObject(text)
+            val names = ArrayList<String>()
+            root.optJSONArray("unloaded")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.optString("name")?.takeIf { it.isNotEmpty() }?.let(names::add)
+                }
+            }
+            val failed = ArrayList<String>()
+            root.optJSONArray("failed")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optString(i).takeIf { it.isNotEmpty() }?.let(failed::add)
+                }
+            }
+            return UnloadResult(names, root.optLong("freed_bytes", 0L), failed)
+        }
+    }
+
+    /** Throws when the rig predates the endpoint (404) — caller shows the upgrade hint. */
+    fun systemStatus(): SystemStatus {
+        val rb = Request.Builder().url("$base/api/v1/system/status")
+        token?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ModelRigException("system status failed (${resp.code}): $text")
+            val root = JSONObject(text)
+            val gpu = root.optJSONObject("gpu")
+            val cpu = root.optJSONObject("cpu")
+            fun JSONObject?.intOrNull(key: String): Int? =
+                if (this == null || !has(key) || isNull(key)) null else optInt(key)
+            return SystemStatus(
+                gpuName = gpu?.optString("name")?.takeIf { it.isNotEmpty() },
+                gpuTempC = gpu.intOrNull("temperature_c"),
+                gpuUtilPct = gpu.intOrNull("utilization_pct"),
+                vramTotalMb = gpu.intOrNull("vram_total_mb"),
+                vramUsedMb = gpu.intOrNull("vram_used_mb"),
+                vramFreeMb = gpu.intOrNull("vram_free_mb"),
+                cpuPct = if (cpu == null || !cpu.has("utilization_pct") || cpu.isNull("utilization_pct")) {
+                    null
+                } else {
+                    cpu.optDouble("utilization_pct")
+                },
+                uptimeSeconds = if (!root.has("uptime_seconds") || root.isNull("uptime_seconds")) {
+                    null
+                } else {
+                    root.optLong("uptime_seconds")
+                },
+            )
         }
     }
 
@@ -823,6 +1064,21 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         sources = o.optJSONArray("sources")?.let { a ->
             (0 until a.length()).map { a.getString(it) }
         } ?: emptyList(),
+        context = o.optJSONArray("context")?.let { a ->
+            (0 until a.length()).mapNotNull { i ->
+                val c = a.optJSONObject(i) ?: return@mapNotNull null
+                val src = c.optString("source")
+                if (src.isEmpty()) return@mapNotNull null
+                UsedChunk(
+                    source = src,
+                    chunkIndex = if (c.isNull("chunk_index")) null else c.optInt("chunk_index"),
+                    score = c.optDouble("score", 0.0),
+                    excerpt = c.optString("excerpt"),
+                )
+            }
+        } ?: emptyList(),
+        personName = o.optJSONObject("person")?.optString("display_name")?.takeIf { it.isNotBlank() },
+        personRevision = o.optJSONObject("person")?.optString("person_revision")?.takeIf { it.isNotBlank() },
     )
 
     fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
@@ -996,4 +1252,60 @@ data class ToolTurn(
     val expiresInSeconds: Int,
     /** RAG sources that grounded this turn, if document context was used. */
     val sources: List<String> = emptyList(),
+    /**
+     * De udsnit der FAKTISK lå i konteksten. Tom på ældre rigge, som kun
+     * sender navnene — så viser fladen chips som hidtil frem for at gætte.
+     */
+    val context: List<UsedChunk> = emptyList(),
+    /**
+     * Hvem der svarede (#752): display name og Person Revision fra riggens
+     * Person Profile-registry. Null når ingen person er valgt -- så taler
+     * Kaliv med appens sædvanlige persona, og fladen viser ingenting.
+     */
+    val personName: String? = null,
+    val personRevision: String? = null,
 )
+
+/**
+ * Ét hentet udsnit: hvor det kom fra, hvor godt det matchede, og hvad der
+ * stod. Bevidst UDEN nogen kobling til en bestemt sætning i svaret — den
+ * kobling findes ikke i riggen, og et gæt ville se ud som et bevis.
+ */
+data class UsedChunk(
+    val source: String,
+    val chunkIndex: Int?,
+    val score: Double,
+    val excerpt: String,
+)
+
+
+/**
+ * Playback reports for the rig's body (Unity renderer roadmap, slice B sync):
+ * the mouth on the rig follows the sentence the phone is actually playing.
+ * Fire-and-forget; a rig without an active body answers 404 and the client
+ * stops reporting for the rest of the session rather than paying two calls
+ * per sentence for nothing.
+ */
+class BodyPlaybackReporter(private val base: String, private val token: String) {
+    @Volatile private var enabled = true
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .build()
+
+    fun report(utteranceId: String?, event: String) {
+        if (!enabled || utteranceId.isNullOrBlank()) return
+        val req = Request.Builder()
+            .url("$base/api/v1/body/speech/${seg(utteranceId)}/$event")
+            .post(ByteArray(0).toRequestBody(null))
+            .header("Authorization", "Bearer $token")
+            .build()
+        runCatching {
+            http.newCall(req).execute().use { r ->
+                if (r.code == 404) enabled = false
+            }
+        }
+    }
+
+    private fun seg(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
+}

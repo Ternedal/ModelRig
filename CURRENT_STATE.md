@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 1.58.150
+**Version:** 2.0.13
 
 ## Tools the model can see
 
@@ -46,8 +46,11 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_COMPUTER_USE` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
+| `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
+| `KALIV_HOME_RIG_PILOT` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
+| `KALIV_READ_CONNECTOR_PILOT` | `0` |
 | `KALIV_SCHEDULER` | `` |
 | `KALIV_SCHEDULER_API` | `0` |
 | `KALIV_SCHEDULER_POLL_S` | `` |
@@ -76,7 +79,7 @@ are the same versioned values validated by worker, backend and clients.
 | `CLIENT_STATE_DESIGN.md` | DELVIST · trin 1-2 leveret (1.58.44/45) · trin 3-5 kræver device-test · **Ejer:** Anders |
 | `ISOLATION_DESIGN.md` | LIVE · I0a+I0c leveret (dormant) · I0b afventer rig · **Ejer:** Anders (gates) — se CURRENT_STATE.md for switches |
 | `RAG_DESIGN.md` | LIVE · replace-by-source leveret (1.58.40) · atomisk ingest + corpus-kontrakt leveret (1.58.148) · T-043 benchmark-harness leveret · måling/kalibrering kræver rig · **Ejer:** Anders |
-| `UPDATER_DESIGN.md` | LIVE · §4a self-update UDESTÅR (manuel udskiftning indtil da) · **Ejer:** Anders (rig) |
+| `UPDATER_DESIGN.md` | LIVE · implementation complete + CI-verificeret · fysisk signed-release→signed-release acceptance afventer #401 · **Ejer:** Anders (rig) |
 | `VALIDATION-1.58.49.md` | AFVENTER KØRSEL · resultatfelter tomme · gælder 1.58.49+ · **Ejer:** Anders (rig + telefon) |
 
 ## Test suites in CI
@@ -135,6 +138,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_outcome_context.py`
 - `tests/worker_agent3_outcome_context_adversarial.py`
 - `tests/worker_agent3_plan_authority_api.py`
+- `tests/worker_agent3_plan_single_use.py`
 - `tests/worker_agent3_plan_store.py`
 - `tests/worker_agent3_planner.py`
 - `tests/worker_agent3_planner_capability_binding.py`
@@ -173,6 +177,14 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_validation_status.py`
 - `tests/worker_agent3_workflow_completion.py`
 - `tests/worker_agent3_workflow_receipt_integrity.py`
+- `tests/worker_agent4_a4_23_filter_before_summary.py`
+- `tests/worker_agent4_a4_25_snapshot_authority_guard.py`
+- `tests/worker_agent4_a4_25b_snapshot_store.py`
+- `tests/worker_agent4_a4_25c_snapshot_publisher.py`
+- `tests/worker_agent4_a4_25c_snapshot_recovery.py`
+- `tests/worker_agent4_a4_25d_snapshot_operator.py`
+- `tests/worker_agent4_campaign_list_api.py`
+- `tests/worker_agent4_campaign_list_query.py`
 - `tests/worker_agent4_checkpoints.py`
 - `tests/worker_agent4_foundation.py`
 - `tests/worker_agent4_handoff_barrier_placement.py`
@@ -184,14 +196,20 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent4_handoff_runtime.py`
 - `tests/worker_agent4_operator_api.py`
 - `tests/worker_agent4_operator_api_review.py`
+- `tests/worker_agent4_operator_error_media_type.py`
+- `tests/worker_agent4_production_bootstrap.py`
+- `tests/worker_agent4_production_read_mutation_boundary.py`
 - `tests/worker_agent4_recovery.py`
 - `tests/worker_agent4_resources.py`
 - `tests/worker_agent4_scheduler_service.py`
+- `tests/worker_agent4_snapshot_operator_error_media_type.py`
 - `tests/worker_agent_continue.py`
 - `tests/worker_agent_multistep.py`
 - `tests/worker_approval_receipts.py`
 - `tests/worker_audit.py`
 - `tests/worker_backup.py`
+- `tests/worker_body_assets.py`
+- `tests/worker_body_session.py`
 - `tests/worker_browser_host.py`
 - `tests/worker_browser_peer_adapter.py`
 - `tests/worker_browser_peer_fulfillment.py`
@@ -221,13 +239,20 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_desktop_win32.py`
 - `tests/worker_desktop_win32_abi.py`
 - `tests/worker_eval.py`
+- `tests/worker_file_capabilities.py`
+- `tests/worker_file_capabilities_audit.py`
+- `tests/worker_file_capabilities_scope_authority.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
+- `tests/worker_home_rig_runtime.py`
 - `tests/worker_jobs.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
 - `tests/worker_paths.py`
+- `tests/worker_person_registry.py`
+- `tests/worker_person_runtime.py`
+- `tests/worker_person_voice_binding.py`
 - `tests/worker_pinned_http_transport.py`
 - `tests/worker_public_address_parity.py`
 - `tests/worker_rag.py`
@@ -235,6 +260,14 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_cloud.py`
 - `tests/worker_rag_corpus_contract.py`
 - `tests/worker_rag_pdf_lifecycle.py`
+- `tests/worker_rag_source_toggle.py`
+- `tests/worker_read_connector_data_sharing_identity.py`
+- `tests/worker_read_connector_eval.py`
+- `tests/worker_read_connector_package_contract.py`
+- `tests/worker_read_connector_provider_request.py`
+- `tests/worker_read_connector_provider_transport.py`
+- `tests/worker_read_connector_registration_hardening.py`
+- `tests/worker_read_connector_runtime.py`
 - `tests/worker_read_scope.py`
 - `tests/worker_read_scope_windows_aliases.py`
 - `tests/worker_research_claim_evidence.py`
@@ -248,6 +281,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_research_sharing_boundary_consistency.py`
 - `tests/worker_research_sharing_execution.py`
 - `tests/worker_research_sharing_execution_async_contract.py`
+- `tests/worker_riggate_v1_contract.py`
 - `tests/worker_schedule_admin_persistence_time.py`
 - `tests/worker_schedule_admin_preview_time.py`
 - `tests/worker_schedule_api.py`
@@ -255,6 +289,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_schedule_api_time.py`
 - `tests/worker_schedule_approval.py`
 - `tests/worker_schedule_approval_time.py`
+- `tests/worker_schedule_label.py`
 - `tests/worker_schedule_lease.py`
 - `tests/worker_schedule_post_execution.py`
 - `tests/worker_schedule_revoke.py`
@@ -278,6 +313,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_voice_stream.py`
 - `tests/worker_voice_strip.py`
 - `tests/worker_voice_tts_empty_synthesis.py`
+- `tests/worker_voice_tts_voicerig_provider.py`
 - `tests/worker_web_fetch_adapter.py`
 - `tests/worker_web_research_capability.py`
 - `tests/worker_web_research_fetch.py`
@@ -286,11 +322,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_web_research_tool.py`
 - `tests/workflow_access_derivation_parity.py`
 - `tests/workflow_action_pins.py`
+- `tests/workflow_activation_flip_guard.py`
 - `tests/workflow_activation_readiness.py`
 - `tests/workflow_agent3_android_termination_ui.py`
 - `tests/workflow_agent3_dormant.py`
 - `tests/workflow_agent3_memory_protected_backup_physical.py`
 - `tests/workflow_agent3_readonly_pilot_one_click.py`
+- `tests/workflow_agent3_t023_task_ui_enable.py`
 - `tests/workflow_agent3_termination_physical_campaign.py`
 - `tests/workflow_agent3_termination_ui_physical_operator.py`
 - `tests/workflow_agent3_write_pilot_collect_operator.py`
@@ -301,22 +339,37 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent3_write_pilot_preflight.py`
 - `tests/workflow_agent3_write_pilot_recorder.py`
 - `tests/workflow_agent3_write_pilot_report.py`
+- `tests/workflow_agent4_a4_18r_audit.py`
+- `tests/workflow_agent4_a4_18r_fixture.py`
+- `tests/workflow_agent4_a4_18r_operator_contract.py`
+- `tests/workflow_agent4_a4_22_single_writer_pairing.py`
+- `tests/workflow_agent4_a4_25f_audit.py`
+- `tests/workflow_agent4_a4_25f_evidence_completion.py`
+- `tests/workflow_agent4_a4_25f_operator_contract.py`
+- `tests/workflow_agent4_a4_25f_physical_snapshot_harness.py`
+- `tests/workflow_agent4_campaign_list_paging.py`
 - `tests/workflow_agent4_dormant_runtime.py`
 - `tests/workflow_agent4_evidence_records.py`
 - `tests/workflow_agent4_foundation.py`
 - `tests/workflow_agent4_pr_description.py`
+- `tests/workflow_agent4_read_product_integration.py`
 - `tests/workflow_agent4_storage_boundary.py`
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_android_palette_divergence.py`
 - `tests/workflow_android_scheduler_picker.py`
+- `tests/workflow_app_backend_route_contract.py`
 - `tests/workflow_appliance_lifecycle_updater_chain.py`
 - `tests/workflow_baseline_one_click.py`
+- `tests/workflow_bodyrig_contracts.py`
+- `tests/workflow_bodyrig_demo_body.py`
 - `tests/workflow_brand_no_token_duplicates.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`
 - `tests/workflow_candidate_campaign.py`
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
+- `tests/workflow_chain_argument_check.py`
+- `tests/workflow_client_capability_gates.py`
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
 - `tests/workflow_contract_adapter.py`
@@ -327,12 +380,24 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_design_tokens.py`
 - `tests/workflow_desktop_agent3_termination_ui_contract.py`
 - `tests/workflow_doc_authority.py`
+- `tests/workflow_doc_candidate_freshness.py`
+- `tests/workflow_era_pins.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_kaliv_env_parser.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
+- `tests/workflow_pairing_link_parity.py`
+- `tests/workflow_person_create.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`
+- `tests/workflow_proof_campaign_gate_receipt_rule_matrix.py`
+- `tests/workflow_proof_campaign_gate_receipt_unknown_gate.py`
+- `tests/workflow_proof_campaign_outputs_ignored.py`
+- `tests/workflow_proof_campaign_owned_pairing.py`
+- `tests/workflow_proof_campaign_skip_fail_closed.py`
+- `tests/workflow_proof_scope_git_fail_closed.py`
+- `tests/workflow_ps1_encoding.py`
 - `tests/workflow_release.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_rig_preflight.py`
@@ -342,7 +407,9 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_scheduler_pilot_evidence.py`
 - `tests/workflow_scheduler_pilot_operator.py`
 - `tests/workflow_scheduler_pilot_wizard.py`
+- `tests/workflow_screen_insets.py`
 - `tests/workflow_spec_contract.py`
+- `tests/workflow_stack_starter_scheduler_env.py`
 - `tests/workflow_stage_a_checkpoint.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
@@ -358,6 +425,9 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_stale_check.py`
 - `tests/workflow_success_harness.py`
+- `tests/workflow_t037_provider_request_boundary.py`
+- `tests/workflow_t037_read_connector_boundary.py`
 - `tests/workflow_test_coverage.py`
+- `tests/workflow_updater_status_consistency.py`
 - `tests/workflow_web_research_parity.py`
 - `tests/workflow_worker_entrypoints.py`

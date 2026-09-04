@@ -14,6 +14,19 @@ import dk.ternedal.modelrig.logic.StoredCredentialReader
 class TokenStore(context: Context) {
     private val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
 
+    /** Denne enheds id fra parringssvaret — bruges til at markere "Denne enhed". */
+    var deviceId: String?
+        get() = prefs.getString("device_id", null)
+        set(v) { prefs.edit().putString("device_id", v).apply() }
+
+    // ---- in-app-opdatering ----
+    var lastUpdateCheckAt: Long
+        get() = prefs.getLong("last_update_check_at", 0L)
+        set(v) { prefs.edit().putLong("last_update_check_at", v).apply() }
+    var dismissedUpdateVersion: String?
+        get() = prefs.getString("dismissed_update_version", null)
+        set(v) { prefs.edit().putString("dismissed_update_version", v).apply() }
+
     // ---- rig (backend) ----
     var baseUrl: String?
         get() = prefs.getString("base_url", null)
@@ -228,6 +241,14 @@ class TokenStore(context: Context) {
      * so it stays put when Android auto-switches at sunset. Defaults to dark:
      * that is what every build before light mode looked like.
      */
+    /**
+     * Har velkomsten været vist? Sættes når den lukkes — også hvis man går
+     * direkte til opsætningen. Den skal introducere én gang, ikke stå i vejen.
+     */
+    var onboardingSeen: Boolean
+        get() = prefs.getBoolean("onboarding_seen", false)
+        set(v) { prefs.edit().putBoolean("onboarding_seen", v).apply() }
+
     var darkMode: Boolean
         get() = prefs.getBoolean("dark_mode", true)
         set(v) { prefs.edit().putBoolean("dark_mode", v).apply() }

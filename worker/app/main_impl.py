@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from . import ollama_client as oc
 from . import rag
 from .env_compat import legacy_names_in_use
+from . import body_session, person_runtime
 from .store import DocStore
 
 VERSION = "1.58.143"
@@ -175,24 +176,38 @@ def _build_identity() -> dict:
 
 def _capabilities() -> dict:
     """What this worker can actually do, by whether each optional dependency is
-    installed. The published core worker ships WITHOUT ASR/TTS/PDF/DOCX, so this
-    lets a client enable or explain features rather than advertising a capability
-    the connected worker doesn't have. cuda reflects real GPU availability."""
-    from . import voice_asr, voice_tts, rag_pdf, rag_docx
+    installed. The published core worker ships WITHOUT ASR/TTS/PDF/DOCX/PPTX, so
+    this lets a client enable or explain features rather than advertising a
+    capability the connected worker doesn't have. cuda reflects real GPU
+    availability.
+
+    Every RAG loader that exists reports here. pptx and html were missing until
+    17/8 even though both had an is_available() written to this exact contract,
+    which left a client able to gate PDF and DOCX but forced to guess about
+    PPTX -- the situation this endpoint exists to prevent. html is always True
+    (html.parser ships with Python); it is reported anyway, because a client
+    that has to special-case which loaders are listed is back to guessing."""
+    from . import voice_asr, voice_tts, rag_pdf, rag_docx, rag_pptx, rag_html
     return {
         "asr": voice_asr.is_available(),
         "tts": voice_tts.is_available(),
         "pdf": rag_pdf.is_available(),
         "docx": rag_docx.is_available(),
+        "pptx": rag_pptx.is_available(),
+        "html": rag_html.is_available(),
         "cuda": voice_asr.cuda_available(),
     }
 
 
 @app.get("/capabilities")
 def capabilities() -> dict:
-    """Lightweight capability probe: {asr, tts, pdf, docx, cuda} booleans. Cheap
-    (import checks only), so a client can call it on connect and gate its UI on
-    the answer. The same object is included in /health/full."""
+    """Lightweight capability probe: {asr, tts, pdf, docx, pptx, html, cuda}
+    booleans. Cheap (import checks only), so a client can call it on connect and
+    gate its UI on the answer. The same object is included in /health/full.
+
+    Adding a key is backwards compatible -- older clients read the keys they know
+    -- but REMOVING or renaming one is not. tests/worker_unit.py pins the exact
+    set for that reason."""
     return _capabilities()
 
 
@@ -687,7 +702,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                          cloud_base_url: "str | None", cloud_key: "str | None",
                          conversation_id: "str | None", origin: str,
                          sources: list, tools_used: list,
-                         on_phase=None) -> dict:
+                         on_phase=None, context: "list | None" = None) -> dict:
     """One agent turn's tool loop. The model may chain READ tools -- each result
     fed back -- until it answers or the step budget runs out. A WRITE stops the
     loop and returns a confirmation card; the invariant never moves. Reused by
@@ -700,6 +715,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
 
+    _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
+
     async def _phase(name: str) -> None:
         """Udsend en fase, hvis kalderen lytter.
 
@@ -708,6 +725,10 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         streamende sender en callback ind. Loopets logik er den samme i begge
         tilfaelde -- fasen er observation, ikke kontrol.
         """
+        # The body follows the turn (Unity renderer roadmap, slice B): the
+        # same phase names the client sees drive the embodiment state.
+        if name in _BODY_STATES:
+            body_session.note_state(_BODY_STATES[name])
         if on_phase is not None:
             await on_phase(name)
 
@@ -723,7 +744,13 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         if not calls:
             return {"status": "answered", "answer": msg.get("content", ""),
                     "tool": tools_used[-1] if tools_used else None,
-                    "tools_used": tools_used, "sources": sources, "origin": origin}
+                    "tools_used": tools_used, "sources": sources,
+                    # De udsnit der FAKTISK laa i konteksten. "sources" er
+                    # navnene; dette er hvad der blev laest. Vi paastaar IKKE
+                    # hvilken saetning i svaret der brugte hvilket udsnit --
+                    # det ved ingen her, og et gaet ville se ud som et bevis.
+                    "context": context or [],
+                    "origin": origin}
         fn = (calls[0] or {}).get("function", {}) or {}
         name = fn.get("name", "")
         args = fn.get("arguments") or {}
@@ -754,7 +781,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             raise HTTPException(status_code=503, detail=str(e))
         if result["status"] == "confirmation_required":
             return {**result, "extra_tool_calls_ignored": len(calls) - 1,
-                    "tools_used": tools_used, "sources": sources}
+                    "tools_used": tools_used, "sources": sources,
+                    "context": context or []}
         tools_used.append(name)
         last_result = result["result"]
         messages.append({"role": "tool", "content": result["result"]})
@@ -801,8 +829,12 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         "action. If no tool fits, answer normally."
     )
     messages.append({"role": "system", "content": _tool_nudge})
-    if req.system:
-        messages.append({"role": "system", "content": req.system})
+    # Person Profile binding (#752): a selected person's active personality
+    # takes precedence over the client's persona text; with no person
+    # selected the client's prompt is used exactly as before.
+    system_text, person = person_runtime.resolve_system_prompt(req.system)
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
     trimmed = _trim_history(req.history)
     # A system message may only ever be first. One appearing mid-conversation is
     # a client bug at best, and at worst a replayed turn trying to speak with
@@ -810,12 +842,14 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     for i, m in enumerate(trimmed):
         if m.role == "system" and i > 0:
             m.role = "user"
-    if req.system:
-        # The caller passed it explicitly: drop any duplicate from history.
+    if system_text:
+        # A system prompt is in force (the caller's, or the registry's): drop
+        # any duplicate -- or a client-side legacy persona -- from history.
         trimmed = [m for m in trimmed if m.role != "system"]
     messages.extend(m.model_dump() for m in trimmed)
 
     sources: list[str] = []
+    context_used: list[dict] = []
     if req.rag:
         # Retrieval only -- no synthesis. The tool-calling turn below does the
         # answering, and asking a second model to summarise first would hide
@@ -827,6 +861,18 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
             raise HTTPException(status_code=502, detail=str(e))
         matches = res.get("matches", [])
         sources = sorted({m["source"] or str(m["id"]) for m in matches})
+        # Citat-grundlaget: hvilke udsnit blev hentet, hvor godt matchede de,
+        # og hvad stod der. Uddraget klippes -- det skal kunne genkendes, ikke
+        # erstatte dokumentet.
+        context_used = [
+            {
+                "source": m["source"] or str(m["id"]),
+                "chunk_index": m.get("chunk_index"),
+                "score": round(float(m.get("score", 0.0)), 4),
+                "excerpt": (m.get("text") or "")[:240],
+            }
+            for m in matches
+        ]
         # PRIVACY (D4): the retrieved chunks are the content of your own
         # documents. If the answering model is in the cloud, that content would
         # leave the rig. Retrieval is local, so nothing has left yet -- we simply
@@ -863,10 +909,16 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     messages.append(user_msg)
 
     origin = "cloud" if req.cloud_key else "local"
-    return await _run_tool_loop(
+    result = await _run_tool_loop(
         messages, req.model, req.cloud_base_url, req.cloud_key,
         req.conversation_id, origin, sources, [], on_phase=on_phase,
+        context=context_used,
     )
+    if person is not None and isinstance(result, dict):
+        # Which person answered -- additive, so older clients ignore it and a
+        # newer one can show it. Absent means "no person selected".
+        result["person"] = person
+    return result
 
 
 @app.post("/tools/chat")
@@ -1130,10 +1182,31 @@ async def rag_chat(req: QueryReq):
 
 @app.get("/rag/sources")
 def sources() -> dict:
+    off = store.disabled_sources()
     return {"sources": [
-        {"source": s, "chunks": n, "last_ingested_at": ts}
+        {"source": s, "chunks": n, "last_ingested_at": ts, "enabled": s not in off}
         for (s, n, ts) in store.sources()
     ]}
+
+
+class RagSourceEnabledReq(BaseModel):
+    source: str
+    enabled: bool
+
+
+@app.post("/rag/source/enabled")
+def set_source_enabled(req: RagSourceEnabledReq) -> dict:
+    """Switch retrieval for one source on or off.
+
+    Nothing is deleted: the chunks stay, and the switch can be flipped back.
+    The response reports the state the rig actually holds afterwards, so the
+    client never has to assume its own write succeeded.
+    """
+    src = req.source.strip()
+    if not src:
+        raise HTTPException(status_code=400, detail="source is required")
+    state = store.set_source_enabled(src, req.enabled)
+    return {"source": src, "enabled": state}
 
 
 @app.get("/rag/stats")
@@ -1528,6 +1601,9 @@ async def voice_converse_stream(req: ConverseUploadReq):
             "type": "chunk", "index": chunk["index"], "text": chunk["text"],
             "audio_base64": audio_b64, "synth_s": chunk.get("synth_s"),
             "ttfa_s": round(_time.time() - t_start, 2),
+            # The body's utterance for this sentence: the phone reports
+            # playback start/end against it so the mouth follows the speaker.
+            "utterance_id": chunk.get("utterance_id"),
         })
 
     async def run() -> None:

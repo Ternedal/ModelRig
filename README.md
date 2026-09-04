@@ -10,25 +10,47 @@ name; everything user-facing is Kaliv.
 Current version: see `VERSION`. For what actually exists right now — tools with their
 risk/sensitivity, the dormant switches and their defaults, design-doc status — see
 **CURRENT_STATE.md**, which is GENERATED from the code and CI-checked for drift.
-Recent lines: streaming voice, a self-supervising appliance mode (autostart +
-crash-restart + update-with-rollback), and a multi-step agent with human-gated writes.
+
+**The 2.0 line (August 2026)** rebuilt the Android client against a design
+authority (`docs/design/DDR-001`, tokens generated from a single JSON source)
+and added the things a phone-first client actually needs:
+
+- **QR pairing** — the rig draws the code, the phone scans it. The link never
+  carries a token and never pairs by itself: it shows you the host, and only
+  then do you connect.
+- **In-app updates** — the app reads the `releases/latest` redirect and offers
+  `kaliv-latest.apk`. No API, no token, strict semver.
+- **Share to Kaliv** — a share lands in a choice, not an action. Nothing is
+  indexed because you tapped Share.
+- **Answer citations** — "show what was read" lists the retrieved chunks with
+  their match scores. It deliberately does NOT claim which sentence used which
+  chunk; that link does not exist in the model, so asserting it would be a guess
+  dressed as evidence.
+- **Offline queue** — write while the rig is away. A queued message is never
+  sent by itself when the rig returns.
+- **Per-source on/off** in Knowledge, plus first-run onboarding that says out
+  loud that the models run on your own machine.
+
+Earlier lines: streaming voice, a self-supervising appliance mode (autostart +
+crash-restart + update-with-rollback), and a multi-step agent with human-gated
+writes.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    Desktop["Kaliv Desktop<br/>Compose JVM · Windows"]
-    Kaliv["Kaliv (Android)<br/>chat · streaming voice · tools · RAG · foto→RAG"]
+    Desktop["Kaliv Desktop<br/>Compose JVM · Windows<br/>draws the pairing QR (code is minted, not claimed)"]
+    Kaliv["Kaliv (Android)<br/>chat · streaming voice · tools · RAG · foto→RAG<br/>QR pairing · share-in · answer citations<br/>offline queue (never auto-sends) · in-app updates"]
 
     subgraph Appliance["Appliance layer — the rig stays up without a person watching"]
         Sup["modelrig-supervisor<br/>starts worker, then server<br/>supplies MODELRIG_HOST=0.0.0.0<br/>restarts either on exit or hang"]
         Upd["modelrig-updater<br/>newer release? swap exes<br/>verify /healthz reports the new version<br/>restore backup if it does not"]
     end
 
-    Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy ONLY<br/>flushes streams chunk-by-chunk"]
+    Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy<br/>flushes streams chunk-by-chunk<br/>own endpoints (stdlib only, fail-soft):<br/>/api/v1/system/status · /api/v1/models/unload"]
 
     subgraph Worker["Worker (Python) :8099 — mounted from app.entrypoint"]
-        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>ingest is atomic: embed all → BEGIN IMMEDIATE → replace<br/>corpus bound to the model that built it; mismatch fails closed<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
+        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>ingest is atomic: embed all → BEGIN IMMEDIATE → replace<br/>corpus bound to the model that built it; mismatch fails closed<br/>per-source on/off: absence = enabled, survives re-ingest<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
         Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam<br/>web_research: risk=read + network=public<br/>gated KALIV_WEB_RESEARCH_ENABLED"]
         Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
         A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
@@ -41,6 +63,7 @@ flowchart TB
     Ollama["Ollama :11434<br/>local — ALWAYS for embeddings"]
     DB[("SQLite<br/>RAG (documents + corpus_meta) · audit · schedules")]
     Cloud["Ollama Cloud<br/>(optional)<br/>text model ≠ voice model<br/>(cloudModel / voiceCloudModel)"]
+    GH["GitHub Releases<br/>kaliv-latest.apk (stable asset URL)<br/>no API, no token"]
 
     Sup -- "supervises" --> Go
     Sup -- "supervises" --> Worker
@@ -49,8 +72,9 @@ flowchart TB
     Desktop -- "local-first, cloud fallback" --> Go
     Kaliv -- "pair + bearer token" --> Go
     Kaliv -. "direct cloud chat: rig not involved,<br/>NO tools exist on this road" .-> Cloud
+    Kaliv -. "in-app update: reads the releases/latest redirect,<br/>fetches kaliv-latest.apk — rig not involved" .-> GH
     Go -- "/api/chat · /api/tags" --> Ollama
-    Go -- "/rag/* · /voice/* · /tools/* · /schedules/*" --> Worker
+    Go -- "/rag/* · /voice/* · /tools/* · /schedules/*<br/>Agent 4 operator reads: proxied ONLY, per-device grant" --> Worker
     Human == "approves every write" ==> Tools
     Human == "approves every scheduled write too" ==> Sched
     Sched -- "runs through the same gate" --> Tools
@@ -60,6 +84,7 @@ flowchart TB
 
     classDef ext stroke-dasharray: 6 4;
     class Cloud ext;
+    class GH ext;
     classDef dormant stroke-dasharray: 4 3;
     class A3 dormant;
     class A4 dormant;
@@ -205,6 +230,14 @@ MODELRIG_HOST=0.0.0.0 ./modelrig-server      # LAN
 ```
 The backend logs this warning at startup; the Android pairing screen repeats it.
 
+## Udviklingskanalen: appliancen fra checkouten
+
+Så længe intet er i produktion, kører riggen den kode checkouten holder.
+`START_DEV_APPLIANCE.cmd` bygger backend fra HEAD og starter backend + worker
+med appliancens egne data og env; `STOP_DEV_APPLIANCE.cmd` bringer den
+signerede release tilbage. Ny kode = `git pull` + dobbeltklik. Det er ikke
+bevis, og det rører ikke `production_activation` — se `DEV_APPLIANCE.md`.
+
 ## Run order (local dev)
 
 **The easy way:** `scripts\start-kaliv.bat` starts all three processes correctly
@@ -250,7 +283,7 @@ sh tests/run_tests.sh
 
 | Module   | State                                        | Verified by                          |
 |----------|-----------------------------------------------|--------------------------------------|
-| backend  | Go server, pairing + reverse proxy            | ✅ `go build` + `go test` (config, httpapi) in CI |
+| backend  | Go server: pairing, tokens, reverse proxy — plus its own `/api/v1/system/status` and `/api/v1/models/unload` (stdlib only, fail-soft) | ✅ `go build` + `go test` (config, httpapi) in CI |
 | worker   | FastAPI: RAG, voice, tools, jobs, isolation   | ✅ full suite in CI — `tests/worker_*.py` + `tests/workflow_*.py`, auto-globbed (live counts in the CI log; this file does not keep score) |
 | android  | Kaliv APK (minSdk 26)                         | ✅ built in CI, `kaliv-latest.apk` on every release |
 | desktop  | Kaliv Windows JAR (Compose JVM)               | ✅ built in CI, `Kaliv-windows-x64-X.Y.Z.jar` |

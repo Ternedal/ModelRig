@@ -12,6 +12,7 @@ import os
 from .agent3.cancellation_status import install_termination_contract
 from .agent3.production_mount import mount_agent3
 from .control_center_api import build_control_center_router
+from .file_capabilities_mount import mount_file_capabilities
 from .hardening import harden
 from .main import app as fastapi_app
 from .schedule_api import build_schedule_router
@@ -28,6 +29,26 @@ fastapi_app.include_router(build_schedule_router())
 # collection until called and exposes no permission or activation write surface.
 fastapi_app.include_router(build_control_center_router())
 
+# Person Profile registry (#752). Route construction opens nothing; the
+# store is read on the first call. The route set is the contract: the only
+# activation route takes an approved Person Revision -- body, voice and
+# personality cannot be switched one at a time through any path here.
+from .person_api import build_person_router  # noqa: E402
+fastapi_app.include_router(build_person_router())
+
+# Body assets (Unity renderer roadmap, slice A): the active body's validated
+# avatar/thumbnail/motions over HTTP for phone and headset clients. Reads
+# only through BodyRig's store and current-selection paths; the store is
+# opened per request, so mounting touches nothing.
+from .body_assets import build_body_router  # noqa: E402
+fastapi_app.include_router(build_body_router())
+
+# Live render frames (slice B): /body/state, /body/frames (SSE 20 fps),
+# /body/interrupt, /body/state/{name}. The session is created on first
+# use for the active body; without one every route answers 404.
+from .body_session import build_body_session_router  # noqa: E402
+fastapi_app.include_router(build_body_session_router())
+
 # Middleware must be registered before the first ASGI request. It is inert when
 # no Agent 3 response exists: it only decorates JSON payloads under the dormant
 # /experimental/agent3 prefix and cannot mount or activate a route.
@@ -38,22 +59,29 @@ install_termination_contract(fastapi_app)
 # production surface; launchers do not add parallel routers.
 mount_agent3(fastapi_app)
 
-# Agent 4 must remain absent from a standard worker boot, including Python's
-# imported-module inventory. Only exact opt-in imports the mount implementation;
-# that implementation then requires the host's already composed A4-09 context
-# and fails closed rather than creating a parallel reader or dataroot.
+# Agent 4 remains absent from a standard worker boot, including Python's imported
+# module inventory. Exact opt-in imports the production read bootstrap, composes
+# only canonical campaign/timeline/evidence read facades from
+# KALIV_AGENT4_DATA_ROOT and injects them into the existing GET-only mount. The
+# read context constructs no lifecycle scheduler, resource admission, handoff,
+# recovery or background-work authority.
 if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
+    from .agent4.production_bootstrap import (
+        compose_agent4_operator_context_from_environment,
+    )
     from .agent4.production_mount import mount_agent4_operator
 
     mount_agent4_operator(
         fastapi_app,
-        getattr(fastapi_app.state, "agent4_runtime_context", None),
+        compose_agent4_operator_context_from_environment(),
     )
 
-# Web-research selvvagter paa KALIV_WEB_RESEARCH_ENABLED (default off) paa samme
-# maade. Flaget er en SEPARAT beslutning fra D6: D6 fastlagde politikken for
-# hvornaar noget maa sendes udad, ikke hvilken flade der aabnes.
+# Web research and scoped file access are separate opt-in capabilities. Each
+# mount owns its own default-off guard. T-035 additionally refuses registration
+# unless the trusted workspace is explicit and ToolHost process isolation is on;
+# no file route is added here and no absolute path becomes model-controlled.
 mount_web_research(fastapi_app)
+mount_file_capabilities(fastapi_app)
 
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle, and the hook itself creates no scheduler

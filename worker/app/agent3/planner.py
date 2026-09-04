@@ -33,6 +33,10 @@ class PlannerError(RuntimeError):
     pass
 
 
+class _DuplicateJsonKeyError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class PlanProposal:
     calls: list[PlannedToolCall]
@@ -61,6 +65,16 @@ def _strip_code_fence(text: str) -> str:
     value = text.strip()
     match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else value
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous model-owned JSON at every object depth."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKeyError("duplicate JSON key in planner output")
+        result[key] = value
+    return result
 
 
 def _clone_steps(run: AgentRun) -> list[AgentStep]:
@@ -149,8 +163,11 @@ class TypedPlanner:
             model,
         )
         try:
-            payload = json.loads(_strip_code_fence(raw))
-        except (json.JSONDecodeError, TypeError) as exc:
+            payload = json.loads(
+                _strip_code_fence(raw),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except (json.JSONDecodeError, TypeError, _DuplicateJsonKeyError) as exc:
             raise PlannerError("planner did not return valid JSON") from exc
         if not isinstance(payload, dict) or set(payload) - {"steps", "rationale"}:
             raise PlannerError("planner response has unsupported top-level fields")
@@ -312,6 +329,15 @@ def build_planner_router(
             steps = adapter.build_steps(proposal.calls, route, req.conversation_id)
         except (PlannerError, Agent3PlanError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except oc.OllamaError as exc:
+            # The model backend failing is NOT a planning contract error: it
+            # used to escape unhandled and reach the operator as a bare 500
+            # with no text, which cost two rig days of guesswork on 29-30/08.
+            # 502 says plainly that the upstream model call failed, and the
+            # message travels with it.
+            raise HTTPException(
+                status_code=502, detail=f"planner model call failed: {exc}"
+            ) from exc
 
         plan_id: str | None = None
         expires_in_seconds: int | None = None

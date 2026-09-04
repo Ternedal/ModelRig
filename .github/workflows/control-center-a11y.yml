@@ -1,0 +1,126 @@
+name: control-center-a11y
+
+# T-044 automated UI/accessibility evidence. Compose Accessibility Test
+# Framework checks require API 34+ and do not run on Robolectric, so this gate
+# boots a real headless Android emulator and executes the Control Center
+# instrumentation tests against the actual semantics tree.
+on:
+  pull_request:
+    paths:
+      - "android/app/build.gradle.kts"
+      - "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenter*.kt"
+      - "android/app/src/main/java/dk/ternedal/modelrig/ui/theme/Theme.kt"
+      - "android/app/src/androidTest/**"
+      - ".github/workflows/control-center-a11y.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-control-center-a11y:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Enable KVM access
+        shell: bash
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
+      - name: Install API 35 emulator image
+        shell: bash
+        run: |
+          avd_home="$RUNNER_TEMP/android-avd"
+          mkdir -p "$avd_home"
+          export ANDROID_AVD_HOME="$avd_home"
+          echo "ANDROID_AVD_HOME=$avd_home" >> "$GITHUB_ENV"
+
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
+            "platform-tools" \
+            "emulator" \
+            "system-images;android-35;google_apis;x86_64"
+          echo "no" | avdmanager create avd \
+            --force \
+            --name modelrig-control-center \
+            --package "system-images;android-35;google_apis;x86_64" \
+            --device "pixel_6"
+
+          emulator_bin="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/emulator/emulator"
+          echo "Created AVDs:"
+          "$emulator_bin" -list-avds
+          test -f "$ANDROID_AVD_HOME/modelrig-control-center.ini"
+
+      - name: Boot headless emulator
+        shell: bash
+        run: |
+          emulator_log="$RUNNER_TEMP/modelrig-control-center-emulator.log"
+          emulator_bin="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/emulator/emulator"
+
+          echo "AVD home: $ANDROID_AVD_HOME"
+          echo "Available AVDs:"
+          "$emulator_bin" -list-avds
+
+          nohup "$emulator_bin" \
+            -avd modelrig-control-center \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -no-snapshot-load \
+            -no-snapshot-save \
+            -gpu swiftshader_indirect \
+            >"$emulator_log" 2>&1 &
+          emulator_pid=$!
+
+          if ! timeout 120 adb wait-for-device; then
+            echo "Emulator never became visible to ADB" >&2
+            cat "$emulator_log" >&2 || true
+            ps -p "$emulator_pid" -f >&2 || true
+            exit 1
+          fi
+
+          if ! timeout 180 bash -c '
+            until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do
+              sleep 2
+            done
+          '; then
+            echo "Emulator did not complete Android boot" >&2
+            cat "$emulator_log" >&2 || true
+            adb devices -l >&2 || true
+            exit 1
+          fi
+
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb shell input keyevent 82 || true
+          adb shell getprop ro.build.version.sdk
+
+      - name: Run Control Center UI and accessibility checks
+        working-directory: android
+        shell: bash
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:connectedDebugAndroidTest --no-daemon --console=plain
+
+      - name: Upload accessibility failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: control-center-a11y-failure
+          path: |
+            ${{ runner.temp }}/modelrig-control-center-emulator.log
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: warn
+          retention-days: 7

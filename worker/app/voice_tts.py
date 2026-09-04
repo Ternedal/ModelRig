@@ -1,34 +1,23 @@
-"""Kaliv Voice — TTS (text-to-speech) module.
+"""Kaliv Voice — TTS provider facade.
 
-Phase 2 of the Kaliv Voice MVP (see ALVA_VOICE_ROADMAP_DELTA.md). Built on Piper
-for the MVP:
-  - CPU-only, real-time (~10x real-time on a modern desktop CPU), tiny voices
-    (~tens of MB). Frees the GPU entirely for ASR + the LLM. Verified via web
-    2026-07-08.
-  - VITS architecture exported to ONNX, embedded espeak-ng phonemization.
+Default behavior is `TTS_PROVIDER=auto`:
+  1. Prefer a local VoiceRig `.mrvoice` profile when one is installed and the
+     VoiceRig sidecar is healthy.
+  2. Fall back to Piper unchanged.
 
-LICENSE NOTE (corrected from the delta doc's "free"): the old MIT rhasspy/piper
-repo is archived read-only (Oct 2025). The active, maintained project is
-OHF-Voice/piper1-gpl and is **GPL-3.0** (v1.4.2, April 2026). Fine for Anders'
-private/personal use; flagged here because it's NOT permissive -- matters only
-if this is ever shipped/redistributed. Individual VOICE models carry their own
-MODEL_CARD license -- the Danish voice's card must be checked before shipping.
-
-Like the ASR module, this is OPTIONAL. piper-tts is NOT a hard worker
-dependency (keeps the base "download exe" rig light). Imported lazily; if it
-isn't installed, the TTS endpoint returns a clean 501 with instructions and the
-rest of the worker is unaffected.
-
-NOT YET TESTED ON HARDWARE. Code + a test recipe (tools/alva_voice_tts_test.py).
-Whether the Danish voice sounds good, and the real synth latency, can only be
-confirmed on Anders' machine.
+The public contract stays `synthesize_to_wav(text, out_path)`, so the rest of
+ModelRig's sentence-streaming voice pipeline does not need to know which TTS
+engine produced the WAV.
 """
 from __future__ import annotations
 
+import json
 import logging
-
 import os
+import tempfile
 import threading
+import urllib.error
+import urllib.request
 import wave
 from typing import Optional
 
@@ -38,21 +27,37 @@ _voice = None
 _voice_lock = threading.Lock()
 _load_error: Optional[str] = None
 
+_VALID_PROVIDERS = {"auto", "piper", "voicerig"}
+
+
+def _integration_env(name: str, default: str | None = None) -> str | None:
+    """Read an integration-level env var without mangling its public name.
+
+    ModelRig's env_compat helper deliberately maps Voice-era suffixes to
+    KALIV_*/ALVA_* names. Integration knobs such as MODELRIG_VOICES_DIR and
+    VOICERIG_TTS_URL are already fully-qualified names and must be read
+    literally. For new TTS knobs we additionally accept the Kaliv/Alva aliases
+    so existing environment conventions remain usable.
+    """
+    direct = os.environ.get(name)
+    if direct is not None:
+        return direct
+    return env(name, default)
+
+
+def _provider_setting() -> str:
+    value = str(_integration_env("TTS_PROVIDER", "auto")).strip().lower()
+    return value if value in _VALID_PROVIDERS else "auto"
+
 
 def _voice_name() -> str:
-    # Danish medium voice (22.05 kHz). Overridable; x_low/low are 16 kHz and
-    # faster/smaller if latency matters more than quality.
     return env("TTS_VOICE", "da_DK-talesyntese-medium")
 
 
 def _voices_dir() -> str:
-    # Where the .onnx + .onnx.json voice files live on the rig. Piper downloads
-    # them here on first use (or the user pre-downloads them).
     explicit = env("TTS_VOICES_DIR")
     if explicit:
         return explicit
-    # Default moved ~/.alva -> ~/.kaliv. Anders' voice files already live in
-    # the old dir; keep using it if it exists so nothing breaks on rename.
     new = os.path.expanduser("~/.kaliv/piper-voices")
     old = os.path.expanduser("~/.alva/piper-voices")
     if not os.path.isdir(new) and os.path.isdir(old):
@@ -60,42 +65,107 @@ def _voices_dir() -> str:
     return new
 
 
-def is_available() -> bool:
-    """True if piper-tts can be imported (installed)."""
+def _mrvoice_dir() -> str:
+    # MODELRIG_* names belong to the engine and do not pass through env_compat.
+    return os.path.expanduser(os.environ.get("MODELRIG_VOICES_DIR", "~/.kaliv/voices"))
+
+
+def _has_mrvoice() -> bool:
+    root = _mrvoice_dir()
     try:
-        import piper  # noqa: F401  (the piper-tts package)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        # Fail-closed is right: no piper-tts, no tale-syntese. Silence is not.
-        #
-        # This swallows more than ImportError, and on the rig it will: a broken
-        # piper-tts wheel, a missing DLL, a CUDA mismatch. All of them arrive here
-        # as "unavailable" with no reason, and the person reading the
-        # capability list has to guess. F-501 was this exact shape -- an
-        # `except Exception` hid an ImportError from a wrong class name for
-        # eight releases, and the test passed because it asserted the failing
-        # value and got it.
-        logging.getLogger(__name__).info(
-            "piper-tts er ikke tilgængelig (tale-syntese slået fra): %r", exc)
+        return os.path.isdir(root) and any(name.endswith(".mrvoice") for name in os.listdir(root))
+    except OSError:
         return False
 
 
-def status() -> dict:
-    """Cheap public health contract for the optional TTS subsystem.
+def _voicerig_base_url() -> str:
+    return str(_integration_env("VOICERIG_TTS_URL", "http://127.0.0.1:8765")).rstrip("/")
 
-    Availability and configured voice belong to this module; callers should not
-    reach through to private environment helpers. This does not load the voice.
-    """
-    available = is_available()
+
+def _voicerig_timeout() -> float:
+    try:
+        return max(1.0, float(str(_integration_env("VOICERIG_TTS_TIMEOUT_SECONDS", "180"))))
+    except ValueError:
+        return 180.0
+
+
+def _voicerig_status(timeout: float = 1.5) -> dict:
+    req = urllib.request.Request(
+        _voicerig_base_url() + "/api/tts/status",
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(body, dict):
+            raise ValueError("status payload is not an object")
+        return body
+    except Exception as exc:  # noqa: BLE001 - health probe must be fail-soft
+        return {"ok": False, "detail": f"VoiceRig unavailable: {exc}"}
+
+
+def _piper_available() -> bool:
+    if _voice is not None:
+        return True
+    try:
+        import piper  # noqa: F401
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "piper-tts er ikke tilgængelig (tale-syntese slået fra): %r", exc
+        )
+        return False
+
+
+def _select_provider() -> tuple[str, dict | None]:
+    setting = _provider_setting()
+    if setting == "piper":
+        return "piper", None
+    if setting == "voicerig":
+        return "voicerig", _voicerig_status()
+    if _has_mrvoice():
+        vr = _voicerig_status()
+        if vr.get("ok") is True:
+            return "voicerig", vr
+    return "piper", None
+
+
+def is_available() -> bool:
+    return bool(status().get("ok"))
+
+
+def status() -> dict:
+    provider, vr = _select_provider()
+    if provider == "voicerig":
+        ok = bool(vr and vr.get("ok"))
+        return {
+            "ok": ok,
+            "provider": "voicerig",
+            "voice": (vr or {}).get("voice"),
+            "package": (vr or {}).get("package"),
+            "device": (vr or {}).get("device"),
+            "detail": None if ok else (vr or {}).get("detail", "VoiceRig unavailable"),
+        }
+
+    available = _piper_available()
+    detail = None if available else "piper not installed"
+    if _provider_setting() == "auto" and _has_mrvoice() and not available:
+        vr = _voicerig_status()
+        detail = (
+            "VoiceRig profile is installed but sidecar is unavailable; "
+            + str(vr.get("detail") or "unknown VoiceRig error")
+            + "; Piper is also unavailable"
+        )
     return {
         "ok": available,
+        "provider": "piper",
         "voice": _voice_name() if available else None,
-        "detail": None if available else "piper not installed",
+        "detail": detail,
     }
 
 
 def _get_voice():
-    """Load (once) and return the Piper voice, or raise with a clear message."""
     global _voice, _load_error
     if _voice is not None:
         return _voice
@@ -118,7 +188,7 @@ def _get_voice():
             _load_error = (
                 f"Piper voice '{_voice_name()}' not found in {vdir}. Download it once with:\n"
                 f"  python -m piper.download_voices {_voice_name()}\n"
-                f"(run from {vdir}, or set ALVA_TTS_VOICES_DIR)"
+                f"(run from {vdir}, or set TTS_VOICES_DIR)"
             )
             raise RuntimeError(_load_error)
         try:
@@ -129,13 +199,7 @@ def _get_voice():
         return _voice
 
 
-def synthesize_to_wav(text: str, out_path: str) -> dict:
-    """Synthesize Danish text to a WAV file at out_path.
-
-    Returns {out_path, sample_rate, duration, voice}. Whole-utterance synth for
-    the MVP; sentence-by-sentence streaming (for time-to-first-audio) is a later
-    phase that lives in the audio-queue layer, not here.
-    """
+def _synthesize_piper(text: str, out_path: str) -> dict:
     voice = _get_voice()
     with wave.open(out_path, "wb") as wav_file:
         voice.synthesize_wav(text, wav_file)
@@ -143,18 +207,6 @@ def synthesize_to_wav(text: str, out_path: str) -> dict:
             sr = wav_file.getframerate() or 22050
             frames = wav_file.getnframes()
         except wave.Error:
-            # Piper produced nothing for this text -- it happens when a
-            # "sentence" survives markdown stripping but has no words in it, a
-            # lone em-dash or "...". Nothing was written, so the file has no
-            # header, and the failure used to arrive doubly disguised: first
-            # "frame rate not set" here, then "# channels not specified" from
-            # close() while that exception unwound. The second one surfaced and
-            # named neither the cause nor the sentence.
-            #
-            # One unspeakable sentence in a forty-turn baseline was enough to
-            # fail a rig day (26/07). Silence is a legitimate outcome, so give
-            # the file a valid empty header and report zero frames; the caller
-            # decides whether a chunk with no audio is worth emitting.
             wav_file.setnchannels(1)
             wav_file.setsampwidth(2)
             wav_file.setframerate(22050)
@@ -165,4 +217,112 @@ def synthesize_to_wav(text: str, out_path: str) -> dict:
         "sample_rate": sr,
         "duration": duration,
         "voice": _voice_name(),
+        "provider": "piper",
     }
+
+
+def _voicerig_request(text: str, voice_package: "str | None"):
+    payload = {"text": text}
+    if voice_package:
+        # Person Profile binding (#752): ask for the selected person's voice
+        # using VoiceRig's own contract -- voice_package is the .mrvoice file
+        # name in its voices directory (SynthesizeRequest.voice_package).
+        # An unknown field would be dropped silently by its pydantic model,
+        # which is exactly what the first cut of this got wrong.
+        payload["voice_package"] = voice_package
+    req = urllib.request.Request(
+        _voicerig_base_url() + "/api/tts/synthesize",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "audio/wav",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=_voicerig_timeout()) as resp:
+        return resp.read(), resp.headers
+
+
+def _synthesize_voicerig(text: str, out_path: str) -> dict:
+    from . import person_runtime
+
+    requested = person_runtime.active_voice_source()
+    try:
+        try:
+            raw, headers = _voicerig_request(text, requested)
+        except urllib.error.HTTPError as exc:
+            if requested and 400 <= exc.code < 500:
+                # VoiceRig answers 404 when the named .mrvoice is not installed
+                # (and 422 for a malformed name). That must not silence Kaliv:
+                # speak with its current profile and report the binding as not
+                # honoured instead of failing the turn.
+                raw, headers = _voicerig_request(text, None)
+            else:
+                raise
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:500]
+        raise RuntimeError(f"VoiceRig TTS failed: HTTP {exc.code}: {detail}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError(f"VoiceRig TTS is unavailable: {exc}") from exc
+
+    if len(raw) < 44:
+        raise RuntimeError("VoiceRig returned an empty or invalid WAV")
+
+    out_dir = os.path.dirname(os.path.abspath(out_path)) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".voicerig-", suffix=".wav", dir=out_dir)
+    os.close(fd)
+    try:
+        with open(temp_path, "wb") as fh:
+            fh.write(raw)
+        try:
+            with wave.open(temp_path, "rb") as wav_file:
+                sr = wav_file.getframerate()
+                frames = wav_file.getnframes()
+        except (wave.Error, EOFError) as exc:
+            raise RuntimeError("VoiceRig returned a malformed WAV") from exc
+        os.replace(temp_path, out_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+    duration = round(frames / sr, 2) if sr else 0.0
+    return {
+        "out_path": out_path,
+        "sample_rate": sr,
+        "duration": duration,
+        "voice": headers.get("X-VoiceRig-Voice", "VoiceRig"),
+        "voice_id": headers.get("X-VoiceRig-Voice-ID"),
+        "package": headers.get("X-VoiceRig-Package"),
+        "device": headers.get("X-VoiceRig-Device"),
+        "provider": "voicerig",
+        # Person Profile binding (#752). None: no person voice requested.
+        # True: VoiceRig spoke with the person's package. False: it spoke with
+        # another profile -- audible truth over a quiet mismatch.
+        "requested_voice_package": requested,
+        "voice_bound": (
+            None if not requested
+            else headers.get("X-VoiceRig-Package") == requested
+        ),
+    }
+
+
+def synthesize_to_wav(text: str, out_path: str) -> dict:
+    """Synthesize text while preserving the historic ModelRig TTS contract.
+
+    `auto` prefers an installed `.mrvoice` profile when VoiceRig is healthy.
+    If VoiceRig is down, Piper remains the compatibility fallback.
+    """
+    provider, vr = _select_provider()
+    if provider == "voicerig":
+        if _provider_setting() == "voicerig" and not (vr or {}).get("ok"):
+            raise RuntimeError((vr or {}).get("detail") or "VoiceRig TTS is unavailable")
+        try:
+            return _synthesize_voicerig(text, out_path)
+        except RuntimeError:
+            if _provider_setting() != "auto" or not _piper_available():
+                raise
+            logging.getLogger(__name__).warning(
+                "VoiceRig synthesis failed; falling back to Piper", exc_info=True
+            )
+    return _synthesize_piper(text, out_path)

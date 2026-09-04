@@ -37,9 +37,14 @@ AA_UI = 3.0     # stor tekst, ikoner og UI-komponenter
 # 3,51 paa canvas, 3,89 paa elevated.
 # De TO der staar tilbage ER brandfarver. Beslutningen 29/07 er at de BLIVER
 # staaende, og at guidens egen regel baerer dem: "Farve er aldrig eneste signal."
+# gold.fill paa lys canvas er tilfoejet 12/08-2026 med DDR-001: 2,92:1 mod
+# graensen 3,0 for non-text. Knappen identificeres af sin TEKST (gold.on paa
+# gold.fill, 5,15:1 — maalt som par herunder), ikke af fladens kant mod canvas.
+# De to brand-poster er deprecated med DDR-001 og udgaar naar Brand.kt migreres.
 KNOWN_BELOW_AA = {
     "brand.gold on light.surface",
     "brand.highlight on light.surface",
+    "gold.fill on light.canvas",
 }
 
 passed = failed = 0
@@ -78,9 +83,21 @@ def pairs(color: dict) -> list[tuple[str, str, str, float]]:
         for bg in ("canvas", "surface", "elevated"):
             for fg in ("text", "muted"):
                 out.append((f"{theme}.{fg} on {theme}.{bg}", t[fg], t[bg], AA_TEXT))
+        # DDR-001: nye tekstroller maales HVOR DE BRUGES (svag/caps/accent staar
+        # paa canvas; statusfarver paa surface). Roller med egen alpha (scrim,
+        # gold.tint) kan ikke maales uden kompositering og indgaar ikke.
+        for fg in ("faint", "caps", "accent", "accentSoft"):
+            out.append((f"{theme}.{fg} on {theme}.canvas", t[fg], t["canvas"], AA_TEXT))
+        out.append((f"{theme}.textSoft on {theme}.surfaceDim", t["textSoft"], t["surfaceDim"], AA_TEXT))
+        out.append((f"{theme}.textBody on {theme}.canvas", t["textBody"], t["canvas"], AA_TEXT))
+        out.append((f"{theme}.userBubbleText on {theme}.userBubble", t["userBubbleText"], t["userBubble"], AA_TEXT))
+        for fg in ("ok", "warn", "danger"):
+            out.append((f"{theme}.{fg} on {theme}.surface", t[fg], t["surface"], AA_UI))
+        out.append((f"gold.fill on {theme}.canvas", color["gold"]["fill"], t["canvas"], AA_UI))
         for group in ("brand", "semantic"):
             for name, hexv in color[group].items():
                 out.append((f"{group}.{name} on {theme}.surface", hexv, t["surface"], AA_UI))
+    out.append(("gold.on on gold.fill", color["gold"]["on"], color["gold"]["fill"], AA_TEXT))
     return out
 
 

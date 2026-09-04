@@ -23,27 +23,58 @@ Each individual file keeps its own env override (MODELRIG_DB, KALIV_AUDIT_DB,
 KALIV_TOOLS_STATE) for people who set absolute paths already; those are honoured
 untouched. Only the RELATIVE defaults get anchored -- so this is backwards
 compatible: anyone already passing an absolute path sees no change.
+
+Control Center read projections are different: observing a stopped/empty rig must
+not create the data root merely by asking where a database would live. For that
+case ``peek_data_root`` / ``peek_resolve`` compute the exact same path WITHOUT
+mkdir or migration side effects. Writer code should keep using ``data_root`` /
+``resolve``.
 """
 from __future__ import annotations
 
 import os
 
 
-def data_root() -> str:
-    """The stable directory all relative data files are anchored under."""
+def peek_data_root() -> str:
+    """Return the stable data-root path without creating it."""
     explicit = os.getenv("KALIV_DATA_DIR")
     if explicit:
-        root = explicit
-    elif os.name == "nt":
+        return explicit
+    if os.name == "nt":
         base = os.getenv("LOCALAPPDATA") or os.path.join(
             os.path.expanduser("~"), "AppData", "Local")
-        root = os.path.join(base, "Kaliv")
-    else:
-        base = os.getenv("XDG_DATA_HOME") or os.path.join(
-            os.path.expanduser("~"), ".local", "share")
-        root = os.path.join(base, "kaliv")
+        return os.path.join(base, "Kaliv")
+    base = os.getenv("XDG_DATA_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "kaliv")
+
+
+def data_root() -> str:
+    """The stable directory all relative data files are anchored under."""
+    root = peek_data_root()
     os.makedirs(root, exist_ok=True)
     return root
+
+
+def peek_resolve(
+    path: str,
+    *,
+    env: str | None = None,
+    default_name: str | None = None,
+) -> str:
+    """Resolve the same persistent path as :func:`resolve`, without mutation.
+
+    Explicit env overrides and absolute paths preserve the existing semantics.
+    Only a relative default needs the computed (but uncreated) data root.
+    """
+    if env:
+        value = os.getenv(env)
+        if value:
+            return value
+    if os.path.isabs(path):
+        return path
+    name = default_name or os.path.basename(path)
+    return os.path.join(peek_data_root(), name)
 
 
 def resolve(path: str, *, env: str | None = None, default_name: str | None = None) -> str:
@@ -59,9 +90,9 @@ def resolve(path: str, *, env: str | None = None, default_name: str | None = Non
     the relative default's spelling.
     """
     if env:
-        v = os.getenv(env)
-        if v:
-            return v
+        value = os.getenv(env)
+        if value:
+            return value
     if os.path.isabs(path):
         return path
     name = default_name or os.path.basename(path)

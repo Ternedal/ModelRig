@@ -1,6 +1,11 @@
 name: agent3-full-diagnostics
 
+# candidate_freeze_check.py requires this exact-head gate too. Run it on every
+# PR and every push to main so the merged SHA gets automatic freeze provenance;
+# keep workflow_dispatch as recovery for an already-existing head.
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -12,6 +17,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA" || {
+            echo "checkout authority mismatch: expected $EXPECTED_SHA, got $actual" >&2
+            exit 1
+          }
+          echo "exact checkout authority: $actual"
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

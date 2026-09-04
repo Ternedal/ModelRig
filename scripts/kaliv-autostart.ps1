@@ -1,40 +1,76 @@
-# Register the Kaliv supervisor to start automatically at logon (this is the
-# "survives a reboot" half of the appliance goal). Run once, elevated:
+# Register Kaliv's recovery-first appliance startup. Run once, elevated:
 #   powershell -ExecutionPolicy Bypass -File kaliv-autostart.ps1
 #
-# Creates a Scheduled Task "KalivSupervisor" that launches
-# modelrig-supervisor-windows-x64.exe at logon. The supervisor then starts the
-# worker + server and restarts either one if it exits or stops answering
-# /healthz -- so you never open three terminals again. Mirrors the pattern in
-# kaliv-backup-scheduled.ps1.
+# Two tasks are deliberately registered:
 #
-# NOT YET RUN ON THE RIG -- after registering, reboot (or Start-ScheduledTask)
-# and confirm both processes come up before trusting it.
+# - KalivBootstrap runs at logon and executes kaliv-bootstrap.ps1.
+# - KalivSupervisor is an on-demand task that launches the supervisor.
+#
+# The bootstrap runs `modelrig-updater-windows-x64.exe -recover` before it starts
+# KalivSupervisor. A crashed or ambiguous update therefore fails closed instead
+# of starting a potentially mixed-version appliance.
+#
+# NOT YET RUN ON THE RIG -- after registering, reboot (or start KalivBootstrap)
+# and confirm recovery completes before the supervisor and children start.
 
-$repo = Split-Path -Parent $PSScriptRoot   # the ModelRig root; the exes live here
-$exe  = Join-Path $repo "modelrig-supervisor-windows-x64.exe"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
-if (-not (Test-Path $exe)) {
-    throw "Supervisor exe not found at $exe. Download modelrig-supervisor-windows-x64.exe from the release into the ModelRig root first."
+$repo       = Split-Path -Parent $PSScriptRoot
+$supervisor = Join-Path $repo "modelrig-supervisor-windows-x64.exe"
+$updater    = Join-Path $repo "modelrig-updater-windows-x64.exe"
+$bootstrap  = Join-Path $PSScriptRoot "kaliv-bootstrap.ps1"
+
+foreach ($required in @($supervisor, $updater, $bootstrap)) {
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "Required startup file not found at $required."
+    }
 }
 
-$action  = New-ScheduledTaskAction -Execute $exe -WorkingDirectory $repo
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-
-# Keep the supervisor itself resilient: if IT exits, Task Scheduler brings it
-# back, and an always-on task must never be killed for "running too long".
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable `
-    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+# KalivSupervisor intentionally has no logon trigger. It is started only by the
+# bootstrap after updater recovery succeeds, or by the updater itself after a
+# proven recovery/update transition.
+$supervisorAction = New-ScheduledTaskAction `
+    -Execute $supervisor `
+    -WorkingDirectory $repo
+$supervisorSettings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -RestartCount 999 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
 
-Register-ScheduledTask -TaskName "KalivSupervisor" -Action $action -Trigger $trigger `
-    -Settings $settings -Description "Starts and supervises the Kaliv worker + server; restarts them on crash." -Force
+Register-ScheduledTask `
+    -TaskName "KalivSupervisor" `
+    -Action $supervisorAction `
+    -Settings $supervisorSettings `
+    -Description "Runs and supervises the Kaliv worker + server. Started only after recovery succeeds." `
+    -Force
 
-Write-Host "Registered 'KalivSupervisor' (runs at logon)."
-Write-Host "Start it now without rebooting:  Start-ScheduledTask -TaskName KalivSupervisor"
-Write-Host "Check it:                         Get-ScheduledTask -TaskName KalivSupervisor"
-Write-Host "Stop the appliance:              Stop-ScheduledTask -TaskName KalivSupervisor  (then it won't restart until next logon)"
-Write-Host "Child logs land in:              $repo\logs\worker.log and server.log"
+$bootstrapArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$bootstrap`" -RepoRoot `"$repo`" -SupervisorTaskName `"KalivSupervisor`""
+$bootstrapAction = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument $bootstrapArguments `
+    -WorkingDirectory $repo
+$bootstrapTrigger = New-ScheduledTaskTrigger -AtLogOn
+$bootstrapSettings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+
+Register-ScheduledTask `
+    -TaskName "KalivBootstrap" `
+    -Action $bootstrapAction `
+    -Trigger $bootstrapTrigger `
+    -Settings $bootstrapSettings `
+    -Description "Recovers an interrupted ModelRig update before starting KalivSupervisor." `
+    -Force
+
+Write-Host "Registered 'KalivBootstrap' (runs at logon and recovers first)."
+Write-Host "Registered 'KalivSupervisor' (on-demand; no direct logon trigger)."
+Write-Host "Start safely now:                  Start-ScheduledTask -TaskName KalivBootstrap"
+Write-Host "Check bootstrap:                   Get-ScheduledTask -TaskName KalivBootstrap"
+Write-Host "Check supervisor:                  Get-ScheduledTask -TaskName KalivSupervisor"
+Write-Host "Stop the appliance:                Stop-ScheduledTask -TaskName KalivSupervisor"
+Write-Host "Child logs land in:                $repo\logs\worker.log and server.log"
 Write-Host ""
-Write-Host "NOTE: -AtLogOn starts it when you log in. For a headless box that reboots"
-Write-Host "without a login, re-register with -AtStartup and a SYSTEM/service account."
+Write-Host "NOTE: -AtLogOn requires a login. For a headless box, replace the bootstrap"
+Write-Host "trigger with -AtStartup and register it under a suitable service account."

@@ -426,7 +426,84 @@ class AgentRunStore:
                 )
                 self._conn.commit()
             except Exception:
-                # Neither half, rather than half a truth.
+                self._conn.rollback()
+                raise
+
+    def save_with_event_if_unchanged(
+        self,
+        run: AgentRun,
+        *,
+        expected_state: RunState,
+        expected_payload: str,
+        kind: str,
+        payload: Any,
+    ) -> bool:
+        """Atomically write state+event only if nobody changed the run first."""
+        run.updated_at = time.time()
+        encoded = payload if isinstance(payload, str) else json.dumps(
+            payload, ensure_ascii=False, sort_keys=True)
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                changed = self._conn.execute(
+                    "UPDATE agent_runs SET state=?,payload=?,updated_at=? "
+                    "WHERE id=? AND state=? AND payload=?",
+                    (
+                        run.state.value,
+                        run.to_json(),
+                        run.updated_at,
+                        run.id,
+                        expected_state.value,
+                        expected_payload,
+                    ),
+                ).rowcount
+                if changed != 1:
+                    self._conn.rollback()
+                    return False
+                self._conn.execute(
+                    "INSERT INTO agent_events(run_id,ts,kind,payload) VALUES(?,?,?,?)",
+                    (run.id, time.time(), kind, encoded[:8000]),
+                )
+                self._conn.commit()
+                return True
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def save_if_unchanged(
+        self,
+        run: AgentRun,
+        *,
+        expected_state: RunState,
+        expected_payload: str,
+    ) -> bool:
+        """Compare-and-swap a run when the transition has no journal event.
+
+        Step-index progression is state, not a new event. It still must not
+        overwrite a cancellation that lands after the preceding step outcome.
+        """
+        run.updated_at = time.time()
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                changed = self._conn.execute(
+                    "UPDATE agent_runs SET state=?,payload=?,updated_at=? "
+                    "WHERE id=? AND state=? AND payload=?",
+                    (
+                        run.state.value,
+                        run.to_json(),
+                        run.updated_at,
+                        run.id,
+                        expected_state.value,
+                        expected_payload,
+                    ),
+                ).rowcount
+                if changed != 1:
+                    self._conn.rollback()
+                    return False
+                self._conn.commit()
+                return True
+            except Exception:
                 self._conn.rollback()
                 raise
 
@@ -547,11 +624,6 @@ class Agent3Orchestrator:
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
-        # One transaction, not two (F-712). Creating the run and the
-        # run_created event as separate commits leaves a crash-window where the
-        # run exists with nothing in the journal explaining where it came from
-        # -- the same disagreement F-309 closed for cancellation, reappearing at
-        # birth. save_with_event commits before advance() reads the run back.
         self.store.save_with_event(
             run, "run_created", {"route": route.kind.value, "steps": len(steps)})
         return self.advance(run.id)
@@ -574,9 +646,6 @@ class Agent3Orchestrator:
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
-        # Atomic for the same reason as creation (F-712): a blocked run with no
-        # run_blocked event is a run that halted for a reason the journal does
-        # not record, and "why did this never execute?" then has no answer.
         self.store.save_with_event(run, "run_blocked", {"reason": reason})
         return run
 
@@ -591,19 +660,11 @@ class Agent3Orchestrator:
             step = run.steps[run.current_step]
 
             if step.state == StepState.SUCCEEDED:
-                run.current_step += 1
-                self.store.save(run)
+                conflict = self._advance_succeeded_step(run)
+                if conflict is not None:
+                    return conflict
                 continue
             if step.state == StepState.EXECUTING:
-                # We do not know whether a side effect completed before a crash.
-                # Never blindly replay a possibly non-idempotent action.
-                #
-                # This used to block EVERY interrupted step, which is safe and
-                # was also close to useless: five of nine tools are reads, and
-                # telling a person to "verify the side effect manually" for a
-                # rig_status that has no side effect is how a recovery path
-                # teaches people to click past it. The step now says whether it
-                # can be replayed, decided by the registry when it was built.
                 if step.idempotent:
                     step.state = StepState.PENDING
                     step.error = None
@@ -633,14 +694,6 @@ class Agent3Orchestrator:
                 proactive=run.proactive,
                 allow_private_cloud=run.allow_private_cloud,
             )
-            # policy_decision is an audit trace logged on every path. For the
-            # block path it is ALSO the event that explains the state change, so
-            # the state and the event must land together (F-712): otherwise a
-            # crash between them leaves a journal saying "blocked" against a run
-            # still reading RUNNING, or the reverse. For allow/confirm the trace
-            # is not state-bearing on its own -- allow proceeds to execution
-            # which saves, confirm uses save_with_event below -- so it stays a
-            # plain event there.
             if decision.action == "block":
                 step.state = StepState.BLOCKED
                 step.error = decision.reason
@@ -676,15 +729,27 @@ class Agent3Orchestrator:
                 return run
 
             self._execute(run, step)
-            if run.state == RunState.FAILED:
+            if run.state in {RunState.FAILED, RunState.CANCELLED, RunState.BLOCKED}:
                 return run
-            run.current_step += 1
-            run.state = RunState.RUNNING
-            self.store.save(run)
+            conflict = self._advance_succeeded_step(run)
+            if conflict is not None:
+                return conflict
 
+        expected_payload = run.to_json()
+        answer = self.answerer(run)
         run.state = RunState.COMPLETED
-        run.answer = self.answerer(run)
-        self.store.save_with_event(run, "run_completed", {"steps": len(run.steps)})
+        run.answer = answer
+        if not self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.RUNNING,
+            expected_payload=expected_payload,
+            kind="run_completed",
+            payload={"steps": len(run.steps)},
+        ):
+            fresh = self._require(run.id)
+            if fresh.state == RunState.CANCELLED:
+                return fresh
+            raise RunConflict("run changed while final completion was being committed")
         return run
 
     def confirm(self, run_id: str, step_id: str, decision: str, digest: str) -> AgentRun:
@@ -697,12 +762,20 @@ class Agent3Orchestrator:
         expected = self._digest(step)
         if step.id != step_id or digest != expected or step.confirmation_digest != expected:
             raise ConfirmationError("confirmation no longer matches the immutable step")
+        expected_payload = run.to_json()
         if step.confirmation_expires_at is None or time.time() > step.confirmation_expires_at:
             step.state = StepState.DENIED
             step.error = "Confirmation expired"
             run.state = RunState.CANCELLED
             run.error = step.error
-            self.store.save_with_event(run, "confirmation_expired", {"step_id": step.id})
+            if not self.store.save_with_event_if_unchanged(
+                run,
+                expected_state=RunState.WAITING_CONFIRMATION,
+                expected_payload=expected_payload,
+                kind="confirmation_expired",
+                payload={"step_id": step.id},
+            ):
+                raise ConfirmationError("run changed while confirmation was being decided")
             raise ConfirmationError("confirmation expired")
         if decision not in {"approve", "deny"}:
             raise ConfirmationError("decision must be approve or deny")
@@ -712,20 +785,27 @@ class Agent3Orchestrator:
             run.state = RunState.CANCELLED
             run.error = step.error
             step.confirmation_digest = None
-            self.store.save_with_event(run, "confirmation_denied", {"step_id": step.id})
+            if not self.store.save_with_event_if_unchanged(
+                run,
+                expected_state=RunState.WAITING_CONFIRMATION,
+                expected_payload=expected_payload,
+                kind="confirmation_denied",
+                payload={"step_id": step.id},
+            ):
+                raise ConfirmationError("run changed while confirmation was being decided")
             return run
 
-        # Persist approval before executing. If the process dies after this write,
-        # the run can resume without asking again; if it dies during execution,
-        # the EXECUTING state fails closed rather than replaying the side effect.
         step.state = StepState.APPROVED
         step.confirmation_digest = None
         run.state = RunState.RUNNING
-        # The most consequential pair in the file: this is the record that a
-        # human said yes. State without the event is an approval nobody can
-        # attribute; the event without the state is a yes the run never heard.
-        self.store.save_with_event(
-            run, "confirmation_approved", {"step_id": step.id, "tool": step.tool})
+        if not self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.WAITING_CONFIRMATION,
+            expected_payload=expected_payload,
+            kind="confirmation_approved",
+            payload={"step_id": step.id, "tool": step.tool},
+        ):
+            raise ConfirmationError("run changed while confirmation was being decided")
         return self.advance(run.id)
 
     def cancel(self, run_id: str) -> AgentRun:
@@ -733,82 +813,147 @@ class Agent3Orchestrator:
         if run.state not in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}:
             run.state = RunState.CANCELLED
             run.error = "Cancelled by user"
-            # Atomic (F-309): a run that is cancelled with no run_cancelled
-            # event is a stop nobody can account for.
             self.store.save_with_event(run, "run_cancelled", {})
         return run
 
     def _execute(self, run: AgentRun, step: AgentStep) -> None:
+        expected_payload = run.to_json()
         step.state = StepState.EXECUTING
-        # EXECUTING is the state that makes a resume fail closed rather than
-        # replay a side effect. If it lands without its event, the timeline
-        # cannot say what the rig was doing when it died.
-        self.store.save_with_event(
-            run, "step_started", {"step_id": step.id, "tool": step.tool})
-        try:
-            step.result = self.executor(step)
-            # The executor is synchronous and has no cancellation handle, so a
-            # cancel() that arrives while a slow write is in flight cannot stop
-            # it (F-308). Two things follow, and only one of them is obvious.
-            #
-            # The obvious one: the side effect happened. You cannot un-append a
-            # note. Reporting "cancelled" alone would describe a rig that does
-            # not exist.
-            #
-            # The one that actually bites: cancel() loads its OWN copy of the
-            # run, sets CANCELLED and saves it. This method is holding a copy
-            # from before that, still saying RUNNING -- so the save below used
-            # to write the cancellation straight back out of existence. The
-            # user pressed stop, the record forgot, and the step said
-            # "succeeded". Re-read the state we might be about to clobber.
-            if self._cancelled_since(run.id):
-                step.state = StepState.COMPLETED_AFTER_CANCEL
-                step.error = None
+        if not self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.RUNNING,
+            expected_payload=expected_payload,
+            kind="step_started",
+            payload={"step_id": step.id, "tool": step.tool},
+        ):
+            fresh = self.store.load(run.id)
+            if fresh is not None and fresh.state == RunState.CANCELLED:
                 run.state = RunState.CANCELLED
-                if not run.error:
-                    run.error = "Cancelled by user"
-                # Atomic: the side effect happened, and the record of it must
-                # not be able to survive without the state that explains it.
-                self.store.save_with_event(
-                    run, "step_completed_after_cancel",
-                    {"step_id": step.id, "tool": step.tool})
+                run.error = fresh.error or "Cancelled by user"
+                step.state = StepState.APPROVED
                 return
-            step.state = StepState.SUCCEEDED
-            step.error = None
-            # These two had the event BEFORE the trailing save -- the opposite
-            # order from everything else in this class, and the same lie
-            # mirrored: a crash in the gap leaves "step_succeeded" in the
-            # timeline against a state still saying EXECUTING, or a run marked
-            # FAILED that the journal never explains. One commit, either way.
-            self.store.save_with_event(
-                run, "step_succeeded", {"step_id": step.id, "tool": step.tool})
+            run.state = RunState.BLOCKED
+            run.error = "Run changed before execution could start"
+            step.state = StepState.BLOCKED
+            step.error = run.error
+            return
+
+        # This is the exact persisted EXECUTING snapshot. Every outcome below
+        # must CAS against it; a read-then-save cancellation check has another
+        # race between the read and the save.
+        execution_payload = run.to_json()
+        try:
+            result = self.executor(step)
         except Exception as exc:
             step.state = StepState.FAILED
             step.error = str(exc)
             run.state = RunState.FAILED
             run.error = f"{step.tool} failed: {exc}"
-            self.store.save_with_event(
+            if self.store.save_with_event_if_unchanged(
                 run,
-                "step_failed",
-                {"step_id": step.id, "tool": step.tool, "error": str(exc)},
-            )
+                expected_state=RunState.RUNNING,
+                expected_payload=execution_payload,
+                kind="step_failed",
+                payload={"step_id": step.id, "tool": step.tool, "error": str(exc)},
+            ):
+                return
+            if self._merge_cancelled_step_outcome(
+                run,
+                step,
+                state=StepState.FAILED,
+                result=None,
+                error=str(exc),
+                kind="step_failed_after_cancel",
+                payload={"step_id": step.id, "tool": step.tool, "error": str(exc)},
+            ):
+                return
+            raise RunConflict("run changed while executor failure was being committed")
 
-    def _cancelled_since(self, run_id: str) -> bool:
-        """Did someone cancel while we were inside the executor?
+        step.result = result
+        step.state = StepState.SUCCEEDED
+        step.error = None
+        if self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.RUNNING,
+            expected_payload=execution_payload,
+            kind="step_succeeded",
+            payload={"step_id": step.id, "tool": step.tool},
+        ):
+            return
+        if self._merge_cancelled_step_outcome(
+            run,
+            step,
+            state=StepState.COMPLETED_AFTER_CANCEL,
+            result=result,
+            error=None,
+            kind="step_completed_after_cancel",
+            payload={"step_id": step.id, "tool": step.tool},
+        ):
+            return
+        raise RunConflict("run changed while executor result was being committed")
 
-        Reads the STORE, not our in-memory copy: the whole problem is that the
-        copy in hand is stale by definition -- it was loaded before the call
-        that just took several seconds.
+    def _advance_succeeded_step(self, run: AgentRun) -> AgentRun | None:
+        """Advance current_step without overwriting a concurrent cancellation."""
+        expected_payload = run.to_json()
+        run.current_step += 1
+        run.state = RunState.RUNNING
+        if self.store.save_if_unchanged(
+            run,
+            expected_state=RunState.RUNNING,
+            expected_payload=expected_payload,
+        ):
+            return None
+        fresh = self._require(run.id)
+        if fresh.state == RunState.CANCELLED:
+            return fresh
+        raise RunConflict("run changed while step progression was being committed")
+
+    def _merge_cancelled_step_outcome(
+        self,
+        run: AgentRun,
+        step: AgentStep,
+        *,
+        state: StepState,
+        result: Any,
+        error: str | None,
+        kind: str,
+        payload: Any,
+    ) -> bool:
+        """Record an already-real executor outcome without resurrecting stop.
+
+        If the outcome CAS lost specifically because cancel committed first,
+        take the CANCELLED payload as authority and merge only the current
+        step's observed outcome into it. The second CAS prevents this repair
+        from overwriting any later mutation.
         """
-        fresh = self.store.load(run_id)
-        return fresh is not None and fresh.state == RunState.CANCELLED
-
-    def _preserve_cancellation(self, run: AgentRun) -> None:
-        """Save the step's outcome WITHOUT resurrecting a cancelled run."""
+        fresh = self.store.load(run.id)
+        if fresh is None or fresh.state != RunState.CANCELLED:
+            return False
+        if fresh.current_step >= len(fresh.steps):
+            return False
+        fresh_step = fresh.steps[fresh.current_step]
+        if fresh_step.id != step.id:
+            return False
+        expected_payload = fresh.to_json()
+        fresh_step.state = state
+        fresh_step.result = result
+        fresh_step.error = error
+        if not self.store.save_with_event_if_unchanged(
+            fresh,
+            expected_state=RunState.CANCELLED,
+            expected_payload=expected_payload,
+            kind=kind,
+            payload=payload,
+        ):
+            return False
         run.state = RunState.CANCELLED
-        if not run.error:
-            run.error = "Cancelled by user"
-        self.store.save(run)
+        run.error = fresh.error or "Cancelled by user"
+        run.current_step = fresh.current_step
+        run.updated_at = fresh.updated_at
+        step.state = state
+        step.result = result
+        step.error = error
+        return True
 
     def _require(self, run_id: str) -> AgentRun:
         run = self.store.load(run_id)
@@ -827,12 +972,6 @@ class Agent3Orchestrator:
                 "sensitivity": step.sensitivity.value,
                 "egress": step.egress.value,
                 "origin": step.origin,
-                # What the person confirmed must include the recovery
-                # properties, or the immutable-step contract does not cover them
-                # (F-716): a confirmed step could come back from a crash with a
-                # different idempotency than the one that was approved. Same
-                # hand-listed-fields hazard as the cloners -- when a new axis is
-                # added, this dict is one of the places that has to learn it.
                 "idempotent": step.idempotent,
                 "conversation_id": step.conversation_id,
                 "summary": step.summary,

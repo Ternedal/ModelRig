@@ -1,7 +1,7 @@
 {
   "meta": {
     "name": "Kaliv UI",
-    "version": "1.0",
+    "version": "2.0",
     "baseGrid": 8
   },
   "color": {
@@ -9,17 +9,51 @@
       "canvas": "#0B0A09",
       "surface": "#171411",
       "elevated": "#211B16",
-      "border": "#4B3925",
+      "border": "#2A2521",
       "text": "#F3EFE6",
-      "muted": "#A89D90"
+      "muted": "#A89D90",
+      "surfaceDim": "#14110E",
+      "sheet": "#120E0A",
+      "divider": "#1C1611",
+      "userBubble": "#211D18",
+      "userBubbleBorder": "#2F2A24",
+      "faint": "#8A8073",
+      "caps": "#857A6C",
+      "accent": "#D4AB52",
+      "ok": "#77836D",
+      "warn": "#A08050",
+      "danger": "#C96B5D",
+      "scrim": "#A3050403",
+      "textSoft": "#E9DFCA",
+      "textBody": "#EEE6D8",
+      "userBubbleText": "#ECE3D5",
+      "accentSoft": "#E2C06A",
+      "selectedTint": "#191410"
     },
     "light": {
       "canvas": "#F7F3EC",
-      "surface": "#EDE5D8",
-      "elevated": "#FFFDF9",
+      "surface": "#FFFDF9",
+      "elevated": "#EDE5D8",
       "border": "#D7C9B4",
       "text": "#231E19",
-      "muted": "#6F665C"
+      "muted": "#6F665C",
+      "surfaceDim": "#EFE8DB",
+      "sheet": "#FFFDF9",
+      "divider": "#E3DACB",
+      "userBubble": "#EDE5D8",
+      "userBubbleBorder": "#DCD2C2",
+      "faint": "#776D62",
+      "caps": "#776D62",
+      "accent": "#7E621C",
+      "ok": "#5F6B52",
+      "warn": "#957620",
+      "danger": "#A8503F",
+      "scrim": "#52231E19",
+      "textSoft": "#231E19",
+      "textBody": "#231E19",
+      "userBubbleText": "#231E19",
+      "accentSoft": "#7E621C",
+      "selectedTint": "#F5EFE4"
     },
     "brand": {
       "bronze": "#9A7136",
@@ -30,6 +64,11 @@
       "success": "#6F8A63",
       "warning": "#AA773A",
       "danger": "#9C564C"
+    },
+    "gold": {
+      "fill": "#B08A3E",
+      "on": "#2B1C05",
+      "tint": "#29D4AB52"
     }
   },
   "spacing": {
@@ -48,7 +87,12 @@
     "button": 16,
     "bubble": 16,
     "panel": 20,
-    "round": 999
+    "round": 999,
+    "card": 15,
+    "popover": 16,
+    "bubbleUser": 17,
+    "composer": 20,
+    "sheet": 22
   },
   "typography": {
     "body": {
@@ -70,6 +114,62 @@
       "family": "EB Garamond",
       "size": 30,
       "trackingEm": 0.22
+    },
+    "title": {
+      "family": "EB Garamond",
+      "weight": 500,
+      "size": 26,
+      "trackingEm": 0.01
+    },
+    "sheetTitle": {
+      "family": "EB Garamond",
+      "weight": 500,
+      "size": 24,
+      "trackingEm": 0.01
+    },
+    "rowTitle": {
+      "family": "Inter",
+      "weight": 600,
+      "size": 16.5
+    },
+    "secondary": {
+      "family": "Inter",
+      "weight": 400,
+      "size": 13.5
+    },
+    "sub": {
+      "family": "Inter",
+      "weight": 400,
+      "size": 13
+    },
+    "capsLabel": {
+      "family": "Inter",
+      "weight": 700,
+      "size": 11.5,
+      "trackingEm": 0.18
+    },
+    "brandLine": {
+      "family": "Inter",
+      "weight": 700,
+      "size": 12,
+      "trackingEm": 0.2
+    },
+    "emptyTitle": {
+      "family": "EB Garamond",
+      "weight": 600,
+      "size": 30.5,
+      "lineHeightSp": 38
+    },
+    "wordmarkMobile": {
+      "family": "EB Garamond",
+      "weight": 600,
+      "size": 23,
+      "trackingEm": 0.22
+    },
+    "chip": {
+      "family": "Inter",
+      "weight": 500,
+      "size": 15
     }
   },
   "motion": {
@@ -84,20 +184,31 @@
     "controlHeight": 40,
     "composerMinHeight": 88,
     "assistantMaxWidth": 780,
-    "userMaxWidth": 620
+    "userMaxWidth": 620,
+    "fabSend": 46,
+    "micButton": 90,
+    "ankhEmpty": 78,
+    "ankhTopbar": 40,
+    "switchTrackWidth": 51,
+    "switchTrackHeight": 29,
+    "switchKnob": 24,
+    "dragHandleWidth": 46,
+    "dragHandleHeight": 5,
+    "cursorWidth": 8.5,
+    "cursorHeight": 18,
+    "hairline": 1,
+    "minTouch": 48
   },
   "platformOverrides": {
-    "_note": "Bevidste platform-afvigelser fra tokenet ovenfor. En afvigelse der IKKE staar her er en fejl; en der staar her er en beslutning. Generatoren laeser kun 'color', 'spacing', 'radius' og 'layout', saa denne blok aendrer ingen genereret kode -- den dokumenterer, og tests/workflow_android_palette_divergence.py haandhaever.",
-    "android": {
-      "color.light.muted": {
-        "value": "#5A4831",
-        "tokenValue": "#6F665C",
-        "decidedBy": "Anders",
-        "decidedOn": "2026-07-30",
-        "reason": "Maalt 30/07-2026: Androids vaerdi giver 7,96:1 mod appens lyse baggrund (#F7F4EF); tokenets vaerdi ville give 5,13:1 paa samme baggrund. Begge bestaar AA (4,5), men kun den foerste bestaar AAA (7,0). Telefonen laeses i dagslys, desktoppen sjaeldent. At 'loefte' Android til tokenet er derfor ikke en oprydning men en maalbar tilbagegang i laesbarhed netop der hvor den betyder mest.",
-        "revisit": "Rig-dagen, med begge apps foran sig: loeft tokenet, saenk Android, eller behold divergensen permanent. Indtil da er den en truffet beslutning, ikke et aabent spoergsmaal.",
-        "precedent": "Tokenets egen vaerdi er ikke tilfaeldig: den blev moerknet 27/07-2026 netop for at naa WCAG AA (commit 52769855, 'darken light.muted to reach WCAG AA'). Et loeft til Androids vaerdi ville derfor vaere den ANDEN moerkning i samme retning -- en fortsaettelse af tokenets egen historie, ikke en kursaendring. Det er den oplysning rig-dagens valg mangler, hvis man kun ser de to tal."
-      }
-    }
+    "_note": "Bevidste platform-afvigelser fra tokenet ovenfor. En afvigelse der IKKE staar her er en fejl; en der staar her er en beslutning — dokumentér her FOER en platform afviger, saa haandhaever tests/workflow_android_palette_divergence.py den. Historik: android color.light.muted var pinnet til #5A4831 (Anders 30/07-2026, AAA i dagslys); pinnen blev afloest af DDR-001 13/08-2026 da Theme.kt migrerede til tokens, og listen er tom."
+  },
+  "conversion": {
+    "_note": "DDR-001/B2: mockuppen er tegnet i 322px-bredde ~ 393dp-reference. Alle px-maal i handoffen skaleres uniformt x393/322 (~1,2205) foer de bliver dp/sp: tekst rundes til naermeste 0,5sp, maal til naermeste hele dp. 1px-hairlines skaleres IKKE (forbliver 1dp). Geometri i Compose gaar via navngivne konstanter, aldrig inline.",
+    "mockupPx": 322,
+    "referenceDp": 393,
+    "factor": 1.2205
+  },
+  "deprecations": {
+    "_note": "DDR-001: brand.bronze/gold/highlight og semantic.* er deprecated — nye flader bruger gold.* og de tematiserede ok/warn/danger. Noeglerne bevares til desktop Brand.kt er migreret; derefter fjernes de og gate-listerne opdateres i samme PR."
   }
 }

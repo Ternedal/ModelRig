@@ -58,16 +58,26 @@ func (s *server) routes() {
 	s.mux.HandleFunc("POST /api/v1/pair/start", s.handlePairStart)
 	s.mux.HandleFunc("POST /api/v1/pair/claim", s.handlePairClaim)
 
+	// A4-16 grant administration is not a paired-device capability. Exact opt-in
+	// exposes only one fixed grant on a loopback + separate-admin-key boundary.
+	if os.Getenv(agent4GrantAdminFlag) == "1" {
+		s.mux.HandleFunc("PUT /api/v1/admin/devices/{id}/grants/agent4-read", s.handleAgent4ReadGrantAdmin)
+		s.mux.HandleFunc("DELETE /api/v1/admin/devices/{id}/grants/agent4-read", s.handleAgent4ReadGrantAdmin)
+	}
+
 	// Protected (Bearer token required)
 	s.mux.Handle("GET /api/v1/status", s.authMW(http.HandlerFunc(s.handleStatus)))
 	s.mux.Handle("GET /api/v1/health/deep", s.authMW(http.HandlerFunc(s.handleHealthDeep)))
 	s.mux.Handle("GET /api/v1/health/full", s.authMW(http.HandlerFunc(s.handleHealthFull)))
 	s.mux.Handle("GET /api/v1/control-center/status", s.authMW(http.HandlerFunc(s.handleControlCenterStatus)))
+	s.mux.Handle("GET /api/v1/control-center/schedules", s.authMW(http.HandlerFunc(s.handleControlCenterScheduleHistory)))
 	s.mux.Handle("GET /api/v1/devices", s.authMW(http.HandlerFunc(s.handleDevicesList)))
 	s.mux.Handle("DELETE /api/v1/devices/{id}", s.authMW(http.HandlerFunc(s.handleDeviceRevoke)))
 	s.mux.Handle("POST /api/v1/token/rotate", s.authMW(http.HandlerFunc(s.handleTokenRotate)))
 	s.mux.Handle("GET /api/v1/models", s.authMW(http.HandlerFunc(s.handleModels)))
 	s.mux.Handle("GET /api/v1/models/running", s.authMW(http.HandlerFunc(s.handleModelsRunning)))
+	s.mux.Handle("GET /api/v1/system/status", s.authMW(http.HandlerFunc(s.handleSystemStatus)))
+	s.mux.Handle("POST /api/v1/models/unload", s.authMW(http.HandlerFunc(s.handleModelsUnload)))
 	s.mux.Handle("POST /api/v1/models/pull", s.authMW(http.HandlerFunc(s.handleModelsPull)))
 	s.mux.Handle("DELETE /api/v1/models/delete", s.authMW(http.HandlerFunc(s.handleModelsDelete)))
 	s.mux.Handle("POST /api/v1/chat", s.authMW(http.HandlerFunc(s.handleChat)))
@@ -78,13 +88,52 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/rag/ingest/docx", s.authMW(http.HandlerFunc(s.handleRagIngestDocx)))
 	s.mux.Handle("GET /api/v1/tools", s.authMW(http.HandlerFunc(s.handleToolsList)))
 	s.mux.Handle("POST /api/v1/tools/chat", s.authMW(http.HandlerFunc(s.handleToolsChat)))
+	s.mux.Handle("POST /api/v1/tools/chat/stream", s.authMW(http.HandlerFunc(s.handleToolsChatStream)))
 	s.mux.Handle("POST /api/v1/tools/confirm", s.authMW(http.HandlerFunc(s.handleToolsConfirm)))
 	s.mux.Handle("GET /api/v1/tools/audit", s.authMW(http.HandlerFunc(s.handleToolsAudit)))
 	s.mux.Handle("POST /api/v1/tools/enabled", s.authMW(http.HandlerFunc(s.handleToolsEnabled)))
 
+	// T-036/T-044 GitHub connector pilot. One default-off switch mounts both
+	// worker + backend surfaces. Every backend route remains Bearer-authenticated,
+	// while github_connector.go additionally refuses a non-loopback worker before
+	// forwarding either an observability read or a standing-grant mutation.
+	if githubConnectorPilotEnabled() {
+		s.mux.Handle("GET /api/v1/github-connector/grants", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrants)))
+		s.mux.Handle("POST /api/v1/github-connector/grants/preview", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrantPreview)))
+		s.mux.Handle("POST /api/v1/github-connector/grants", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrants)))
+		s.mux.Handle("POST /api/v1/github-connector/grants/{id}/revoke", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrantRevoke)))
+		s.mux.Handle("GET /api/v1/github-connector/audit", s.authMW(http.HandlerFunc(s.handleGitHubConnectorAudit)))
+	}
+
 	// Standing grants are a stronger capability than one-shot tool calls. Starting
 	// the local scheduler therefore does not automatically expose administration
 	// to every paired device; the backend boundary has its own explicit opt-in.
+	// Person Profile registry (#752): read and administer persons and their
+	// revisions. The worker enforces atomic activation; the backend forwards a
+	// closed allowlist behind the device token. Selecting a person is a
+	// runtime choice, not a capability grant, so no separate opt-in flag.
+	s.mux.Handle("GET /api/v1/persons", s.authMW(http.HandlerFunc(s.handlePersonsCollection)))
+	s.mux.Handle("POST /api/v1/persons", s.authMW(http.HandlerFunc(s.handlePersonsCollection)))
+	s.mux.Handle("GET /api/v1/persons/active", s.authMW(http.HandlerFunc(s.handlePersonsActive)))
+	s.mux.Handle("POST /api/v1/persons/select", s.authMW(http.HandlerFunc(s.handlePersonsSelect)))
+	s.mux.Handle("GET /api/v1/persons/{id}", s.authMW(http.HandlerFunc(s.handlePersonGet)))
+	s.mux.Handle("POST /api/v1/persons/{id}/{action}", s.authMW(http.HandlerFunc(s.handlePersonAction)))
+
+	// Body assets (renderer roadmap, slice A): the active body's validated
+	// avatar, thumbnail and motions for phone/headset renderers. GET only.
+	s.mux.Handle("GET /api/v1/body/active", s.authMW(http.HandlerFunc(s.handleBodyActive)))
+	s.mux.Handle("GET /api/v1/body/active/avatar.vrm", s.authMW(http.HandlerFunc(s.handleBodyAvatar)))
+	s.mux.Handle("GET /api/v1/body/active/thumbnail.png", s.authMW(http.HandlerFunc(s.handleBodyThumbnail)))
+	// ServeMux wildcards must be whole segments: the ".vrma" suffix is part of
+	// the {file} value and is validated in the handler.
+	s.mux.Handle("GET /api/v1/body/active/motions/{file}", s.authMW(http.HandlerFunc(s.handleBodyMotion)))
+	// Live frames (slice B).
+	s.mux.Handle("GET /api/v1/body/state", s.authMW(http.HandlerFunc(s.handleBodyState)))
+	s.mux.Handle("GET /api/v1/body/frames", s.authMW(http.HandlerFunc(s.handleBodyFrames)))
+	s.mux.Handle("POST /api/v1/body/interrupt", s.authMW(http.HandlerFunc(s.handleBodyInterrupt)))
+	s.mux.Handle("POST /api/v1/body/state/{name}", s.authMW(http.HandlerFunc(s.handleBodySetState)))
+	s.mux.Handle("POST /api/v1/body/speech/{utterance}/{event}", s.authMW(http.HandlerFunc(s.handleBodySpeech)))
+
 	if os.Getenv("KALIV_SCHEDULER_API") == "1" {
 		// Human schedule administration. The Bearer-authenticated backend is the
 		// remote boundary; schedules.go additionally refuses a non-loopback worker
@@ -106,6 +155,7 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/rag/ingest/html", s.authMW(http.HandlerFunc(s.handleRagIngestHtml)))
 	s.mux.Handle("POST /api/v1/rag/chat", s.authMW(http.HandlerFunc(s.handleRagChat)))
 	s.mux.Handle("GET /api/v1/rag/sources", s.authMW(http.HandlerFunc(s.handleRagSources)))
+	s.mux.Handle("POST /api/v1/rag/source/enabled", s.authMW(http.HandlerFunc(s.handleRagSourceEnabled)))
 	s.mux.Handle("GET /api/v1/rag/stats", s.authMW(http.HandlerFunc(s.handleRagStats)))
 	s.mux.Handle("DELETE /api/v1/rag/source", s.authMW(http.HandlerFunc(s.handleRagSourceDelete)))
 	s.mux.Handle("GET /api/v1/voice/status", s.authMW(http.HandlerFunc(s.handleVoiceStatus)))

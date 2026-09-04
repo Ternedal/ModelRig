@@ -5,7 +5,7 @@
 <resources>
     <color name="kaliv_splash_bg">#0B0A09</color>
     <color name="kaliv_charred_black">#0B0A09</color>
-    <color name="kaliv_dark_walnut">#1B1612</color>
-    <color name="kaliv_ember_bronze">#8B6B3D</color>
+    <color name="kaliv_dark_walnut">#171411</color>
+    <color name="kaliv_ember_bronze">#B08A3E</color>
     <color name="kaliv_muted_ivory">#F3EFE6</color>
 </resources>

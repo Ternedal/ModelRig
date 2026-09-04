@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
@@ -28,7 +28,8 @@ param(
 
     [switch]$HeadlessWorker,
 
-    [switch]$WorkerOnly
+    [switch]$WorkerOnly,
+    [switch]$EnableTaskUi
 )
 
 $ErrorActionPreference = "Stop"
@@ -165,6 +166,14 @@ $escapedSecret = Escape-CmdValue ([string]$SchedulerApprovalSecret)
 $schedulerValue = if ($EnableScheduler) { "1" } else { "0" }
 $schedulerApiValue = if ($EnableSchedulerApi) { "1" } else { "0" }
 $schedulerEnv = ""
+# T-023's task-UI qualification only: the flag is default-off by design, and
+# the generated cmd files build an explicit env, so process inheritance never
+# reaches the worker (#753 -- the campaign's T-023 died on operator_disabled).
+# Defined HERE, outside both scheduler branches: an earlier version of this
+# line was spliced into the middle of the scheduler here-string assignment,
+# which silently dropped KALIV_SCHEDULER, the DB paths and the approval
+# secret from the worker cmd whenever -EnableScheduler was set (#785).
+$taskUiEnv = if ($EnableTaskUi) { 'set "KALIV_AGENT3_TASK_UI=1"' } else { '' }
 $workerCommand = 'python -u -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099'
 $resolvedWorkerLog = $null
 $resolvedSchedulerDir = $null
@@ -202,6 +211,7 @@ cd /d "$escapedRepo"
 set "PYTHONPATH=$escapedRepo\worker"
 set "PYTHONDONTWRITEBYTECODE=1"
 set "KALIV_AGENT3_ENABLED=1"
+$taskUiEnv
 set "KALIV_TOOLS_ENABLED=1"
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
@@ -250,6 +260,7 @@ set "MODELRIG_HOST=$escapedHost"
 set "MODELRIG_PORT=8080"
 set "MODELRIG_DATA=$escapedData"
 set "KALIV_AGENT3_ENABLED=1"
+$taskUiEnv
 set "KALIV_SCHEDULER_API=$schedulerApiValue"
 set "KALIV_SCHEDULER_APPROVAL_SECRET=$escapedSecret"
 "$backendExe"

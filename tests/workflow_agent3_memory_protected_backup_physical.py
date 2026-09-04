@@ -5,6 +5,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,13 +13,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 GATE_PATH = ROOT / "scripts" / "agent3_memory_protected_backup_physical_gate.py"
 OPERATOR_PATH = ROOT / "scripts" / "agent3_memory_protected_backup_physical.py"
+ADAPTER_PATH = ROOT / "scripts" / "proof_t033_current.py"
 LAUNCHER_PATH = ROOT / "START_AGENT3_MEMORY_BACKUP_PHYSICAL.cmd"
 DOC_PATH = ROOT / "AGENT3_MEMORY_PROTECTED_BACKUP_PHYSICAL.md"
 
-spec = importlib.util.spec_from_file_location("t033_backup_physical_gate_test", GATE_PATH)
-assert spec is not None and spec.loader is not None
-gate = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(gate)
+gate_spec = importlib.util.spec_from_file_location("t033_backup_physical_gate_test", GATE_PATH)
+assert gate_spec is not None and gate_spec.loader is not None
+gate = importlib.util.module_from_spec(gate_spec)
+gate_spec.loader.exec_module(gate)
+
+adapter_spec = importlib.util.spec_from_file_location("t033_campaign_id_adapter_test", ADAPTER_PATH)
+assert adapter_spec is not None and adapter_spec.loader is not None
+adapter = importlib.util.module_from_spec(adapter_spec)
+adapter_spec.loader.exec_module(adapter)
 
 NOW = datetime(2026, 7, 29, 8, 0, tzinfo=timezone.utc)
 CANDIDATE = {
@@ -36,6 +43,14 @@ checks: list[tuple[str, bool]] = []
 
 def check(label: str, condition: object) -> None:
     checks.append((label, bool(condition)))
+
+
+def raises_runtime(fn) -> bool:
+    try:
+        fn()
+    except RuntimeError:
+        return True
+    return False
 
 
 def sha(raw: bytes) -> str:
@@ -220,10 +235,99 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-physical-") as tmp:
         any("activated production" in error for error in judge(root, changed, probe)),
     )
 
+check("canonical campaign id is accepted", adapter._validated_campaign_id(CAMPAIGN_ID) == CAMPAIGN_ID)
+bad_ids = (
+    "",
+    "t033-20260729-080000-ABCDEF12",
+    "t033-20260729-080000-abc123",
+    "../" + CAMPAIGN_ID,
+    CAMPAIGN_ID + "/probe",
+    CAMPAIGN_ID + "\\probe",
+)
+check(
+    "campaign-id path addressing fails closed on malformed values",
+    all(raises_runtime(lambda value=value: adapter._validated_campaign_id(value)) for value in bad_ids),
+)
+
+original_public = os.environ.get("PUBLIC")
+with tempfile.TemporaryDirectory(prefix="t033-public-") as tmp:
+    os.environ["PUBLIC"] = tmp
+    paths = adapter._campaign_paths(CAMPAIGN_ID)
+    expected_public = Path(tmp) / "Documents" / "Kaliv-T033" / CAMPAIGN_ID
+    expected_state = (
+        ROOT
+        / "validation"
+        / "agent3-memory-protected-backup-physical"
+        / CAMPAIGN_ID
+        / "state.json"
+    )
+    check("campaign id derives canonical public request", paths["request"] == expected_public / "request.json")
+    check("campaign id derives canonical public probe", paths["probe"] == expected_public / "probe.json")
+    check("campaign id derives canonical repository state", paths["state"] == expected_state)
+    check(
+        "probe campaign-id expands to existing physical operator args",
+        adapter._expand_campaign_args(["probe", "--campaign-id", CAMPAIGN_ID])
+        == [
+            "probe",
+            "--request",
+            str(expected_public / "request.json"),
+            "--output",
+            str(expected_public / "probe.json"),
+        ],
+    )
+    check(
+        "collect campaign-id expands to existing physical operator args",
+        adapter._expand_campaign_args(["collect", "--campaign-id", CAMPAIGN_ID])
+        == ["collect", "--state", str(expected_state), "--probe", str(expected_public / "probe.json")],
+    )
+
+if original_public is None:
+    os.environ.pop("PUBLIC", None)
+else:
+    os.environ["PUBLIC"] = original_public
+
+legacy = ["probe", "--request", "request.json", "--output", "probe.json"]
+check("legacy explicit-path mode is unchanged", adapter._expand_campaign_args(legacy) == legacy)
+check(
+    "campaign-id cannot be mixed with explicit paths",
+    raises_runtime(
+        lambda: adapter._expand_campaign_args(
+            ["probe", "--campaign-id", CAMPAIGN_ID, "--output", "elsewhere.json"]
+        )
+    ),
+)
+check(
+    "campaign-id is restricted to probe or collect",
+    raises_runtime(lambda: adapter._expand_campaign_args(["prepare", "--campaign-id", CAMPAIGN_ID])),
+)
+
+with tempfile.TemporaryDirectory(prefix="t033-campaign-state-") as tmp:
+    original_campaign_root = adapter.CAMPAIGN_ROOT
+    adapter.CAMPAIGN_ROOT = Path(tmp)
+    try:
+        campaign = adapter.CAMPAIGN_ROOT / CAMPAIGN_ID
+        campaign.mkdir(parents=True)
+        (campaign / "state.json").write_text(
+            json.dumps({"campaign_id": CAMPAIGN_ID, "candidate": {"git_sha": CANDIDATE["git_sha"]}}),
+            encoding="utf-8",
+        )
+        check(
+            "prepare hint resolves state bound to exact candidate",
+            adapter._latest_campaign_id(CANDIDATE["git_sha"]) == CAMPAIGN_ID,
+        )
+        check(
+            "state from another candidate cannot become hint authority",
+            adapter._latest_campaign_id("b" * 40) is None,
+        )
+    finally:
+        adapter.CAMPAIGN_ROOT = original_campaign_root
+
 operator_text = OPERATOR_PATH.read_text(encoding="utf-8")
+adapter_text = ADAPTER_PATH.read_text(encoding="utf-8")
 gate_text = GATE_PATH.read_text(encoding="utf-8")
 launcher_text = LAUNCHER_PATH.read_text(encoding="utf-8")
 doc_text = DOC_PATH.read_text(encoding="utf-8")
+doc_lower = doc_text.lower()
 
 check(
     "operator is three-phase and Windows-only",
@@ -268,6 +372,23 @@ check(
     "gate is independent and always non-activating",
     "The gate never decrypts memory" in gate_text
     and '"production_activation": False' in gate_text,
+)
+check(
+    "adapter delegates translated args to unchanged physical operator",
+    "expanded = _expand_campaign_args(values)" in adapter_text
+    and "result = int(op.main(expanded))" in adapter_text,
+)
+check(
+    "adapter prints short runas campaign-id probe after prepare",
+    "runas /user:<ANDEN-BRUGER>" in adapter_text
+    and "probe --campaign-id {campaign_id}" in adapter_text,
+)
+check(
+    "runbook binds campaign-id to ergonomics only",
+    "--campaign-id" in doc_text
+    and "operator ergonomics only" in doc_lower
+    and "same physical windows" in doc_lower
+    and "dpapi" in doc_lower,
 )
 check(
     "runbook states CI is not physical rig proof",

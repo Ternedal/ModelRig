@@ -36,6 +36,7 @@ import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /** Developer-only Memory 3.0 UI. No memory is sent to a model from this screen. */
 @Composable
@@ -182,6 +183,7 @@ fun Agent3MemoryScreen(store: TokenStore, onClose: () -> Unit) {
         Column(
             Modifier
                 .fillMaxSize()
+                .kalivScreenInsets()
                 .padding(horizontal = 18.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
         ) {

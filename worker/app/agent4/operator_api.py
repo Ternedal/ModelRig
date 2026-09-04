@@ -14,6 +14,10 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from .campaign_list_query import (
+    CampaignListQueryCursor,
+    CampaignListQueryError,
+)
 from .domain import CampaignStatus, CampaignValidationError
 from .operator import Agent4CampaignOverview, Agent4OperatorReadService
 from .operator_evidence import (
@@ -36,6 +40,17 @@ from .timeline_query import (
 OPERATOR_API_SCHEMA = "modelrig-agent4/operator-api/v1"
 OPERATOR_MEDIA_TYPE = "application/vnd.modelrig.agent4.operator+json"
 MAX_CURSOR_QUERY_BYTES = 16_384
+
+CursorValue = (
+    CampaignListQueryCursor
+    | CampaignTimelineQueryCursor
+    | CampaignEvidenceQueryCursor
+)
+CursorType = (
+    type[CampaignListQueryCursor]
+    | type[CampaignTimelineQueryCursor]
+    | type[CampaignEvidenceQueryCursor]
+)
 
 
 class Agent4OperatorApiRequestError(ValueError):
@@ -63,9 +78,7 @@ def _limit(request: Request, *, default: int = 100) -> int:
     if raw is None:
         return default
     if not raw or raw.strip() != raw or not raw.isascii() or not raw.isdecimal():
-        raise Agent4OperatorApiRequestError(
-            "agent4 operator limit is invalid"
-        )
+        raise Agent4OperatorApiRequestError("agent4 operator limit is invalid")
     try:
         return int(raw, 10)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -93,9 +106,8 @@ def _statuses(request: Request) -> tuple[CampaignStatus, ...] | None:
 def _cursor(
     request: Request,
     name: str,
-    cursor_type: type[CampaignTimelineQueryCursor]
-    | type[CampaignEvidenceQueryCursor],
-) -> CampaignTimelineQueryCursor | CampaignEvidenceQueryCursor | None:
+    cursor_type: CursorType,
+) -> CursorValue | None:
     raw = _single_query(request, name)
     if raw is None:
         return None
@@ -186,6 +198,7 @@ def _raise_public(exc: Exception) -> NoReturn:
         (
             Agent4OperatorApiRequestError,
             CampaignValidationError,
+            CampaignListQueryError,
             CampaignTimelineQueryError,
             CampaignEvidenceQueryError,
         ),
@@ -232,11 +245,30 @@ def build_agent4_operator_router(
     @router.get("/campaigns")
     def list_campaigns(request: Request) -> JSONResponse:
         try:
-            values = operator.list_campaigns(
-                statuses=_statuses(request),
-                limit=_limit(request),
+            after = _cursor(request, "after", CampaignListQueryCursor)
+            snapshot_head = _cursor(
+                request,
+                "snapshot_head",
+                CampaignListQueryCursor,
             )
-            return _response(campaigns=[_overview(value) for value in values])
+            assert after is None or isinstance(after, CampaignListQueryCursor)
+            assert snapshot_head is None or isinstance(
+                snapshot_head,
+                CampaignListQueryCursor,
+            )
+            page = operator.campaign_page(
+                statuses=_statuses(request),
+                after=after,
+                limit=_limit(request),
+                snapshot_head=snapshot_head,
+            )
+            return _response(
+                campaigns=[_overview(value) for value in page.campaigns],
+                start_cursor=page.start_cursor.to_dict(),
+                next_cursor=page.next_cursor.to_dict(),
+                head_cursor=page.head_cursor.to_dict(),
+                has_more=page.has_more,
+            )
         except Exception as exc:
             _raise_public(exc)
 

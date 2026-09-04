@@ -28,6 +28,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.desktop.net.ControlCenterCapabilitiesClient
+import dk.ternedal.modelrig.desktop.net.ControlCenterCapability
+import dk.ternedal.modelrig.desktop.net.ControlCenterCapabilityInventory
 import dk.ternedal.modelrig.desktop.net.ControlCenterClient
 import dk.ternedal.modelrig.desktop.net.ControlCenterComponent
 import dk.ternedal.modelrig.desktop.net.ControlCenterRouting
@@ -74,6 +77,20 @@ internal fun desktopControlCenterAge(ageSeconds: Double?): String? {
     }
 }
 
+internal fun desktopControlCenterAccessLabel(access: String): String = when (access) {
+    "read" -> "læse"
+    "write" -> "skrive"
+    "desktop" -> "desktop"
+    else -> access
+}
+
+internal fun desktopControlCenterTerminationLabel(mode: String): String = when (mode) {
+    "none" -> "ikke direkte afbrydelig"
+    "cooperative" -> "kooperativ stop"
+    "forceable" -> "runtime-stop"
+    else -> mode
+}
+
 internal fun desktopControlCenterError(raw: String?): String {
     val message = raw.orEmpty()
     return when {
@@ -92,6 +109,22 @@ internal fun desktopControlCenterError(raw: String?): String {
     }
 }
 
+internal fun desktopControlCenterCapabilityError(raw: String?): String {
+    val message = raw.orEmpty()
+    return when {
+        message.contains("(401)") ->
+            "Ikke godkendt. Parringen mangler eller er udløbet."
+        message.contains("timed out", ignoreCase = true) ||
+            message.contains("HttpTimeout", ignoreCase = true) ->
+            "Capability-kaldet fik tidsudløb. Prøv igen."
+        message.contains("Connection refused", ignoreCase = true) ||
+            message.contains("ConnectException") ->
+            "Kan ikke nå riggen for capability-metadata."
+        message.isBlank() -> "Capabilities kunne ikke hentes."
+        else -> message.take(300)
+    }
+}
+
 @Composable
 fun DesktopControlCenterDialog(
     baseUrl: String,
@@ -102,25 +135,41 @@ fun DesktopControlCenterDialog(
     var loading by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<ControlCenterStatus?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var capabilityInventory by remember { mutableStateOf<ControlCenterCapabilityInventory?>(null) }
+    var capabilityError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(baseUrl, token, refreshGeneration) {
         if (baseUrl.isBlank() || token.isBlank()) {
             status = null
+            capabilityInventory = null
             error = "Rig-adgangen mangler. Par desktop-appen med ModelRig i Indstillinger først."
+            capabilityError = null
             loading = false
             return@LaunchedEffect
         }
         loading = true
         error = null
-        val result = withContext(Dispatchers.IO) {
-            runCatching { ControlCenterClient(baseUrl, token).status() }
+        capabilityError = null
+        val results = withContext(Dispatchers.IO) {
+            val statusResult = runCatching { ControlCenterClient(baseUrl, token).status() }
+            val capabilityResult = runCatching {
+                ControlCenterCapabilitiesClient(baseUrl, token).inventory()
+            }
+            statusResult to capabilityResult
         }
-        result.onSuccess {
+        results.first.onSuccess {
             status = it
             error = null
         }.onFailure {
             status = null
             error = desktopControlCenterError(it.message)
+        }
+        results.second.onSuccess {
+            capabilityInventory = it
+            capabilityError = null
+        }.onFailure {
+            capabilityInventory = null
+            capabilityError = desktopControlCenterCapabilityError(it.message)
         }
         loading = false
     }
@@ -184,12 +233,23 @@ fun DesktopControlCenterDialog(
                         title = desktopControlCenterOverallLabel(current.overall),
                         state = current.overall,
                     ) {
+                        // Name the culprits: a status card that says "attention"
+                        // without saying WHAT is unreadable (#779 item 7).
+                        val notHealthy = current.components.values
+                            .filter { it.state != "healthy" }
+                            .joinToString { desktopControlCenterTitle(it.name) }
                         Text(
                             when (current.overall) {
                                 "healthy" -> "Alle påkrævede kilder er friske og klar."
-                                "attention" -> "Riggen svarer, men en valgfri del eller routing kræver opmærksomhed."
-                                "unavailable" -> "Mindst én påkrævet del rapporterer utilgængelig."
-                                else -> "Der mangler frisk eller entydig serverevidens."
+                                "attention" ->
+                                    if (notHealthy.isNotBlank()) "Riggen svarer, men kræver opmærksomhed: $notHealthy."
+                                    else "Riggen svarer, men en valgfri del eller routing kræver opmærksomhed."
+                                "unavailable" ->
+                                    if (notHealthy.isNotBlank()) "Utilgængelig eller degraderet: $notHealthy."
+                                    else "Mindst én påkrævet del rapporterer utilgængelig."
+                                else ->
+                                    if (notHealthy.isNotBlank()) "Mangler frisk eller entydig evidens fra: $notHealthy."
+                                    else "Der mangler frisk eller entydig serverevidens."
                             },
                             color = KalivTheme.colors.TextMuted,
                             fontSize = 12.sp,
@@ -219,6 +279,28 @@ fun DesktopControlCenterDialog(
                         }
                     }
                 }
+
+                DesktopControlCenterSectionHeading(
+                    "Capabilities",
+                    "Canonical T-030 metadata · kun læsning",
+                )
+                capabilityError?.let {
+                    DesktopControlCenterCard("Capabilities kunne ikke hentes", "unavailable") {
+                        Text(it, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                    }
+                }
+                capabilityInventory?.let { inventory ->
+                    DesktopCapabilityLayerCard(inventory)
+                    inventory.capabilities.forEach { capability ->
+                        DesktopCapabilityCard(capability)
+                    }
+                }
+
+                DesktopControlCenterScheduleHistorySection(
+                    baseUrl = baseUrl,
+                    token = token,
+                    refreshGeneration = refreshGeneration,
+                )
             }
         },
         confirmButton = {
@@ -280,6 +362,98 @@ private fun DesktopControlCenterRoutingCard(routing: ControlCenterRouting) {
                 fontSize = 11.sp,
             )
         }
+    }
+}
+
+@Composable
+private fun DesktopControlCenterSectionHeading(title: String, subtitle: String) {
+    Column(Modifier.padding(top = 8.dp, bottom = 2.dp)) {
+        Text(title, color = KalivTheme.colors.TextHigh, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Text(subtitle, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun DesktopCapabilityLayerCard(inventory: ControlCenterCapabilityInventory) {
+    DesktopControlCenterNeutralCard {
+        Text(
+            "Tool-lag: ${if (inventory.toolLayerEnabled) "aktiveret" else "slået fra"}",
+            color = KalivTheme.colors.TextHigh,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "${inventory.capabilities.size} capabilities · runtime-status er adskilt fra descriptoren",
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
+        Text(
+            "Denne visning kan ikke ændre ToolGate eller aktivere en capability.",
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
+    }
+}
+
+@Composable
+private fun DesktopCapabilityCard(capability: ControlCenterCapability) {
+    DesktopControlCenterNeutralCard {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    capability.name,
+                    color = KalivTheme.colors.TextHigh,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(capability.capabilityId, color = KalivTheme.colors.TextMuted, fontSize = 9.sp)
+            }
+            Text(
+                if (capability.enabled) "runtime: aktiveret" else "runtime: slået fra",
+                color = KalivTheme.colors.TextMuted,
+                fontSize = 10.sp,
+            )
+        }
+        Text(capability.description, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+        Text(
+            "Adgang: ${desktopControlCenterAccessLabel(capability.access)} · konsekvens: ${capability.impact} · data: ${capability.dataClass}",
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
+        Text(
+            "Isolation: ${capability.isolationMode} · stop: ${desktopControlCenterTerminationLabel(capability.terminationMode)}",
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
+        Text(
+            "Scheduling: ${if (capability.schedulable) "tilladt" else "ikke tilladt"}" +
+                (capability.schedulingReason?.let { " · $it" } ?: ""),
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
+        Text(
+            "Confirmation: ${capability.confirmationMode} · replay: ${if (capability.idempotent) "idempotent" else "ikke idempotent"}",
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
+        Text(
+            "Netværk: ${capability.networkMode}" +
+                (if (capability.networkDestinations.isEmpty()) "" else " · ${capability.networkDestinations.joinToString()}"),
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
+    }
+}
+
+@Composable
+private fun DesktopControlCenterNeutralCard(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(KalivTheme.colors.Surface, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        content()
     }
 }
 

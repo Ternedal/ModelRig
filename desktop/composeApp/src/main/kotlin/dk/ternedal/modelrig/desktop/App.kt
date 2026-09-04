@@ -64,6 +64,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
@@ -84,6 +86,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.graphics.toComposeImageBitmap
 
 private object KalivStatus {
     const val THINKING = "Kaliv tænker …"
@@ -441,6 +444,10 @@ fun App() {
                         KalivScreen.MODELS -> { showModels = true; showConvos = false; showSettings = false; activeScreen = KalivScreen.CHAT }
                         KalivScreen.DOCS -> { ragMode = true; loadRagSources(); activeScreen = KalivScreen.CHAT }
                         KalivScreen.SETTINGS -> { showSettings = true; showModels = false; showConvos = false; activeScreen = KalivScreen.CHAT }
+                        // Chat must always be reachable: close every panel. Without
+                        // this case the panels never closed and the chat surface was
+                        // unreachable from the sidebar (#779 item 1).
+                        KalivScreen.CHAT -> { showSettings = false; showModels = false; showConvos = false }
                         else -> {}
                     }
                 },
@@ -460,6 +467,7 @@ fun App() {
                         when (screen) {
                             KalivScreen.MODELS -> { showModels = true; activeScreen = KalivScreen.CHAT }
                             KalivScreen.SETTINGS -> { showSettings = true; activeScreen = KalivScreen.CHAT }
+                            KalivScreen.CHAT -> { showSettings = false; showModels = false; showConvos = false }
                             else -> {}
                         }
                     },
@@ -844,13 +852,25 @@ fun App() {
                         if (auditRows.isEmpty() && auditError == null)
                             Text("(ingen handlinger endnu)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
                         auditRows.forEach { e ->
-                            Text(
-                                "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
-                                    (if (e.origin != "local") "  ·  ${e.origin}" else "") +
-                                    (if (e.result_summary.isNotBlank()) "\n    ${e.result_summary}" else ""),
-                                color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
-                                modifier = Modifier.padding(vertical = 4.dp),
-                            )
+                            // Header and payload are separate texts: the summary is a
+                            // multi-line value dump, and inlining it after "\n    " only
+                            // indented its FIRST line (#779 item 6). Block padding
+                            // indents every line; monospace keeps key=value columns.
+                            Column(Modifier.padding(vertical = 4.dp)) {
+                                Text(
+                                    "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
+                                        (if (e.origin != "local") "  ·  ${e.origin}" else ""),
+                                    color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
+                                )
+                                if (e.result_summary.isNotBlank()) {
+                                    Text(
+                                        e.result_summary.trimEnd(),
+                                        color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 },
@@ -1221,11 +1241,13 @@ private fun SettingsCard(
             Field("Base-URL (Ollama direkte, eller rig'ens backend :8080)", localUrl, onLocalUrl)
             Field("Lokal chat-sti (/api/chat direkte · /api/v1/chat via backend)", localPath, onLocalPath)
             Field("Lokal model", localModel, onLocalModel)
-            Field("Enhedstoken (kun ved brug af backenden)", token, onToken)
+            SecretField("Enhedstoken (kun ved brug af backenden)", token, onToken)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onPair) { Text("Par med rig (dev-mode)", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                 pairStatus?.let { Spacer(Modifier.width(8.dp)); Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
             }
+            Spacer(Modifier.height(8.dp))
+            PhonePairingQrRow(localUrl)
             Field("System-instruktion, lokal (valgfri)", localSystem, onLocalSystem)
             PresetRow(db, "rig", localSystem, onLocalSystem)
             Spacer(Modifier.height(8.dp))
@@ -1503,6 +1525,96 @@ private fun ModelsPanel(baseUrl: String, isBackend: Boolean, bearer: String?, on
     }
 }
 
+/**
+ * QR til telefonen. Riggen minter EN kode og tegner den; telefonen laeser den
+ * og faar felterne udfyldt — men parrer stadig ikke af sig selv.
+ *
+ * Adressen er det svaere: desktop'ens egen base-URL er tit 127.0.0.1, og den
+ * kan telefonen ALDRIG naa. Derfor foreslaas maskinens LAN-adresser, og
+ * loopback/link-local sorteres fra frem for at havne i en QR der sender
+ * telefonen ingen steder.
+ */
+@Composable
+private fun PhonePairingQrRow(localUrl: String) {
+    val scope = rememberCoroutineScope()
+    val port = remember(localUrl) {
+        runCatching { java.net.URI(localUrl.trim()).port.takeIf { it > 0 } }.getOrNull() ?: 8080
+    }
+    val hosts = remember { PairingQr.localAddresses() }
+    var host by remember { mutableStateOf(hosts.firstOrNull() ?: "") }
+    var link by remember { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    Column {
+        Text("Par en telefon", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        if (hosts.isEmpty()) {
+            Text(
+                "Fandt ingen netvaerksadresse telefonen kan naa. Kun loopback er tilgaengelig \u2014 " +
+                    "indtast koden i haanden i stedet.",
+                color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+            )
+            return
+        }
+        Text(
+            "Telefonen skal bruge en adresse den kan naa \u2014 ikke 127.0.0.1.",
+            color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            hosts.forEach { h ->
+                // PillToggle's label is accessibility-only; without visible
+                // text the address choices were three blank pills (#779 item 3).
+                PillToggle(h == host, label = "$h:$port") { host = h; link = null }
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "$h:$port",
+                    color = if (h == host) KalivTheme.colors.TextHigh else KalivTheme.colors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.clickable { host = h; link = null },
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = {
+                    if (busy) return@TextButton
+                    busy = true
+                    status = null
+                    scope.launch {
+                        val res = withContext(Dispatchers.IO) {
+                            runCatching { ToolsClient(localUrl, null).mintPairingCode() }
+                        }
+                        busy = false
+                        res.onSuccess { code ->
+                            link = PairingQr.buildLink("http://$host:$port", code)
+                            status = "Kode: $code \u2014 engangsbrug, udloeber af sig selv"
+                        }.onFailure { status = "Kunne ikke lave kode: ${apiErrorHint(it.message)}" }
+                    }
+                },
+            ) {
+                Text(
+                    if (busy) "Laver kode\u2026" else "Vis QR til telefonen",
+                    color = KalivTheme.colors.Signal, fontSize = 12.sp,
+                )
+            }
+            status?.let { Spacer(Modifier.width(8.dp)); Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
+        }
+        link?.let { text ->
+            Spacer(Modifier.height(8.dp))
+            val bitmap = remember(text) { PairingQr.image(text, 320).toComposeImageBitmap() }
+            Image(bitmap = bitmap, contentDescription = "QR til parring", modifier = Modifier.size(200.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Skan i Kaliv > Par med rig > Skan QR fra riggen. Telefonen viser vaerten og venter paa dit tryk.",
+                color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
+            )
+        }
+    }
+}
+
 @Composable
 private fun Field(label: String, value: String, onChange: (String) -> Unit) {
     OutlinedTextField(
@@ -1510,6 +1622,26 @@ private fun Field(label: String, value: String, onChange: (String) -> Unit) {
         onValueChange = onChange,
         label = { Text(label, fontSize = 12.sp) },
         singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
+    // Tokens are credentials: masked by default, revealed only on explicit
+    // request (#779 item 4 -- the device token was readable on screen).
+    var reveal by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label, fontSize = 12.sp) },
+        singleLine = true,
+        visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            TextButton(onClick = { reveal = !reveal }) {
+                Text(if (reveal) "Skjul" else "Vis", fontSize = 11.sp)
+            }
+        },
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
     )
 }

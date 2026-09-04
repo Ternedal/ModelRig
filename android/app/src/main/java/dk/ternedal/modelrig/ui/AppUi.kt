@@ -45,6 +45,9 @@ import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.logic.TurnStatus
+import dk.ternedal.modelrig.net.VoiceCapability
+import dk.ternedal.modelrig.net.WorkerCapabilities
+import dk.ternedal.modelrig.net.IngestCapability
 import dk.ternedal.modelrig.net.ModelRigClient
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -58,11 +61,35 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import dk.ternedal.modelrig.ui.chat.ChatComposer
+import dk.ternedal.modelrig.ui.chat.ChatContextChip
+import dk.ternedal.modelrig.ui.chat.ChatEmptyState
+import dk.ternedal.modelrig.ui.chat.ChatTopBar
+import dk.ternedal.modelrig.ui.components.ChipRow
+import dk.ternedal.modelrig.ui.theme.KalivType
+import dk.ternedal.modelrig.ui.chat.AssistantMessage
+import dk.ternedal.modelrig.ui.chat.ChatConversationTopBar
+import dk.ternedal.modelrig.ui.chat.ChatMessageUi
+import dk.ternedal.modelrig.ui.chat.UserMessage
+import dk.ternedal.modelrig.ui.chat.SourceModelSheet
+import dk.ternedal.modelrig.ui.chat.ModelRowUi
+import dk.ternedal.modelrig.ui.chat.paramsLabelFor
+import dk.ternedal.modelrig.ui.chat.CapabilitiesSheet
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.graphicsLayer
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
-private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, ControlCenter, CloudPicker, VoiceCloudPicker }
+private enum class Screen { Splash, Setup, Chat, Convos, Models, Knowledge, Schedules, Audit, ControlCenter, CloudPicker, VoiceCloudPicker, RigStatus, Devices, QrScan, Onboarding }
 
 @Composable
-fun AppUi() {
+fun AppUi(
+    pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+    shared: dk.ternedal.modelrig.net.SharedPayload? = null,
+    sharedTruncated: Boolean = false,
+) {
     val context = LocalContext.current
     val store = remember { TokenStore(context) }
     val db = remember { ChatDb(context) }
@@ -76,6 +103,9 @@ fun AppUi() {
         var screen by remember { mutableStateOf(Screen.Splash) }
         // conversation to open in ChatScreen; null = start fresh / latest
         var openConvId by remember { mutableStateOf(db.latestConversationId()) }
+        // Et scannet link lever her, så det overlever navigationen tilbage
+        // fra skanneren til parringskortet.
+        var scannedLink by remember { mutableStateOf<dk.ternedal.modelrig.net.PairingLink?>(null) }
         // bumped when the cloud model is changed elsewhere (picker), so
         // ChatScreen re-reads store.cloudModel when it comes back into view.
         var cloudModelTick by remember { mutableStateOf(0) }
@@ -83,22 +113,54 @@ fun AppUi() {
         Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
             when (screen) {
                 Screen.Splash -> SplashScreen(onDone = {
-                    screen = if (store.hasRig || store.hasCloud) Screen.Chat else Screen.Setup
+                    // Velkomsten vises KUN første gang og kun når der hverken
+                    // er rig eller cloud. Har man allerede en kilde, er den
+                    // en forhindring frem for en introduktion.
+                    screen = when {
+                        store.hasRig || store.hasCloud -> Screen.Chat
+                        !store.onboardingSeen -> Screen.Onboarding
+                        else -> Screen.Setup
+                    }
                 })
+                Screen.Onboarding -> Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(KalivTheme.colors.background)
+                        .kalivScreenInsets()
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                ) {
+                    dk.ternedal.modelrig.ui.chat.OnboardingCard(
+                        onScanQr = { store.onboardingSeen = true; screen = Screen.QrScan },
+                        onEnterCode = { store.onboardingSeen = true; screen = Screen.Setup },
+                        onSkip = { store.onboardingSeen = true; screen = Screen.Setup },
+                    )
+                }
+                Screen.QrScan -> QrScanScreen(
+                    onBack = { screen = Screen.Setup },
+                    onLink = { link -> scannedLink = link; screen = Screen.Setup },
+                )
                 Screen.Setup -> SetupScreen(
                     store,
                     db,
+                    pairingLink = scannedLink ?: pairingLink,
+                    onScanQr = { screen = Screen.QrScan },
                     onDone = { screen = Screen.Chat },
                     onOpenControlCenter = { screen = Screen.ControlCenter },
                 )
                 Screen.Chat -> ChatScreen(
-                    store, db, openConvId, cloudModelTick,
+                    store, db, openConvId,
+                    shared = shared,
+                    sharedTruncated = sharedTruncated,
+                    cloudModelTick = cloudModelTick,
                     darkMode = darkMode,
                     onToggleDark = { store.darkMode = it; darkMode = it },
                     onOpenSettings = { screen = Screen.Setup },
                     onOpenConversations = { screen = Screen.Convos },
                     onOpenModels = { screen = Screen.Models },
+                    onOpenRigStatus = { screen = Screen.RigStatus },
+                    onOpenDevices = { screen = Screen.Devices },
                     onOpenKnowledge = { screen = Screen.Knowledge },
+                    onOpenAudit = { screen = Screen.Audit },
                     onOpenSchedules = { screen = Screen.Schedules },
                     onOpenCloudPicker = { screen = Screen.CloudPicker },
                     onOpenVoiceCloudPicker = { screen = Screen.VoiceCloudPicker },
@@ -113,7 +175,19 @@ fun AppUi() {
                     onBack = { screen = Screen.Chat },
                 )
                 Screen.Models -> ModelsScreen(store, onBack = { screen = Screen.Chat })
+                Screen.RigStatus -> RigStatusScreen(store, onBack = { screen = Screen.Chat })
+                Screen.Devices -> DevicesScreen(
+                    store,
+                    onBack = { screen = Screen.Chat },
+                    onSelfRevoked = {
+                        // Denne telefons adgang er væk — tilbage til parring.
+                        store.clearRig()
+                        store.deviceId = null
+                        screen = Screen.Setup
+                    },
+                )
                 Screen.Knowledge -> KnowledgeScreen(store, onBack = { screen = Screen.Chat })
+                Screen.Audit -> AuditScreen(store, onBack = { screen = Screen.Chat })
                 Screen.Schedules -> ScheduleScreen(store = store, onClose = { screen = Screen.Chat })
                 Screen.ControlCenter -> ControlCenterScreen(
                     store = store,
@@ -147,6 +221,8 @@ private fun SetupScreen(
     db: ChatDb,
     onDone: () -> Unit,
     onOpenControlCenter: () -> Unit,
+    pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+    onScanQr: (() -> Unit)? = null,
 ) {
     var refresh by remember { mutableStateOf(0) }
     val canChat = remember(refresh) { store.hasRig || store.hasCloud }
@@ -159,34 +235,26 @@ private fun SetupScreen(
             .verticalScroll(rememberScrollState()),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Kaliv",
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                fontSize = 28.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh,
-                letterSpacing = 2.sp,
+            dk.ternedal.modelrig.ui.chat.PairingHeader(
+                subtitle = "Vælg mindst én kilde for at starte",
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
             if (canChat) TextButton(onClick = onDone) { Text("Til chat →", color = KalivTheme.colors.signal) }
         }
-        Text("Vælg mindst én kilde", fontSize = 14.sp, color = KalivTheme.colors.textMuted)
+        Spacer(Modifier.height(22.dp))
+        RigCard(store, db, onConnected = { refresh++; onDone() }, pairingLink = pairingLink, onScanQr = onScanQr)
+        Spacer(Modifier.height(13.dp))
+        CloudCard(store, db) { refresh++; onDone() }
         if (store.hasRig) {
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = onOpenControlCenter,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Åbn Control Center")
-            }
+            Spacer(Modifier.height(13.dp))
+            dk.ternedal.modelrig.ui.chat.KalivOutlineActionCard("Åbn Control Center", onOpenControlCenter)
             Text(
                 "Read-only drift, routing og freshness fra riggen.",
                 color = KalivTheme.colors.textMuted,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 6.dp, start = 4.dp),
             )
         }
-        Spacer(Modifier.height(16.dp))
-        CloudCard(store, db) { refresh++; onDone() }
-        Spacer(Modifier.height(16.dp))
-        RigCard(store, db) { refresh++; onDone() }
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -199,11 +267,34 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
     var configured by remember { mutableStateOf(store.hasCloud) }
     var msg by remember { mutableStateOf<String?>(null) }
 
-    Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Ollama Cloud", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-            Text("Chat uden at rig'en kører. Modeller i skyen.", fontSize = 12.sp, color = KalivTheme.colors.textMuted)
-            if (configured) { Spacer(Modifier.height(4.dp)); Text("✓ konfigureret", color = KalivTheme.colors.signal, fontSize = 13.sp) }
+    var expanded by remember { mutableStateOf(false) }
+    Surface(
+        color = KalivTheme.colors.surface,
+        shape = RoundedCornerShape(17.dp),
+        border = androidx.compose.foundation.BorderStroke(KalivTokens.Layout.hairline, KalivTheme.colors.hairline),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            // Kollapset som mockuppen: hoved m. status-sub; indholdet foldes ud.
+            Box(Modifier.clickable(onClickLabel = if (expanded) "Fold sammen" else "Fold ud") { expanded = !expanded }) {
+                dk.ternedal.modelrig.ui.chat.PairingCardHeader(
+                    icon = R.drawable.ic_kaliv_cloud,
+                    iconTint = KalivTheme.colors.textMuted,
+                    title = "Ollama Cloud",
+                    subtitle = if (configured) "${store.cloudModel} · ingen rig påkrævet"
+                               else "Chat uden rig · kræver API-nøgle",
+                    trailing = {
+                        Icon(
+                            painterResource(if (expanded) R.drawable.ic_kaliv_chevron_down else R.drawable.ic_kaliv_chevron_right),
+                            contentDescription = null,
+                            tint = KalivTheme.colors.faint,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                )
+            }
+            if (expanded) {
+            Spacer(Modifier.height(12.dp))
+            if (configured) { Text("✓ konfigureret", color = KalivTheme.colors.signal, fontSize = 13.sp); Spacer(Modifier.height(4.dp)) }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = key, onValueChange = { key = it },
@@ -264,14 +355,24 @@ private fun CloudCard(store: TokenStore, db: ChatDb, onSaved: () -> Unit) {
                 }
             }
             msg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp) }
+            }
         }
     }
 }
 
 @Composable
-private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
-    var baseUrl by remember { mutableStateOf(store.baseUrl ?: "http://192.168.1.10:8080") }
-    var code by remember { mutableStateOf("") }
+private fun RigCard(
+    store: TokenStore,
+    db: ChatDb,
+    onConnected: () -> Unit,
+    pairingLink: dk.ternedal.modelrig.net.PairingLink? = null,
+    onScanQr: (() -> Unit)? = null,
+) {
+    // Et parringslink UDFYLDER felterne — det parrer ikke. Kortet nedenfor
+    // viser værten, og først et tryk bruger koden.
+    var baseUrl by remember { mutableStateOf(pairingLink?.baseUrl ?: store.baseUrl ?: "http://192.168.1.10:8080") }
+    var code by remember { mutableStateOf(pairingLink?.code ?: "") }
+    var linkNotice by remember { mutableStateOf(pairingLink) }
     var deviceName by remember { mutableStateOf(android.os.Build.MODEL ?: "android") }
     // "connected" = a pairing is stored. That is NOT the same as the rig being
     // reachable -- Anders' rig changed IP and the app still claimed "forbundet"
@@ -294,10 +395,19 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
         }
     }
 
-    Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Din rig (backend)", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-            Text("Lokale modeller + RAG. Kræver at rig'en kører.", fontSize = 12.sp, color = KalivTheme.colors.textMuted)
+    Surface(
+        color = KalivTheme.colors.surface,
+        shape = RoundedCornerShape(17.dp),
+        border = androidx.compose.foundation.BorderStroke(2.dp, KalivTheme.colors.hairline),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            dk.ternedal.modelrig.ui.chat.PairingCardHeader(
+                icon = R.drawable.ic_kaliv_rig,
+                iconTint = KalivTheme.colors.accent,
+                title = "Din rig",
+                subtitle = "Lokale modeller + Viden (RAG)",
+                modifier = Modifier.padding(bottom = 14.dp),
+            )
             if (connected) {
                 Spacer(Modifier.height(4.dp))
                 when (reachable) {
@@ -326,12 +436,24 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 },
             )
             Spacer(Modifier.height(8.dp))
-            Field("Server-URL", baseUrl) { baseUrl = it }
-            Field("Parringskode (XXXX-XXXX)", code) { code = it }
-            Field("Enhedsnavn", deviceName) { deviceName = it }
-            Text("Serveren skal binde 0.0.0.0 / Tailscale-IP — ikke 127.0.0.1. Brug LAN-IP.",
-                color = KalivTheme.colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
-            Spacer(Modifier.height(8.dp))
+            linkNotice?.let { link ->
+                dk.ternedal.modelrig.ui.chat.PairingLinkNotice(
+                    host = link.host,
+                    onDismiss = { linkNotice = null; code = "" },
+                    modifier = Modifier.padding(bottom = 9.dp),
+                )
+            }
+            dk.ternedal.modelrig.ui.chat.PairingField("Server-URL", baseUrl, { baseUrl = it })
+            dk.ternedal.modelrig.ui.chat.PairingField(
+                "Parringskode", code, { code = it },
+                letterSpacingEm = 0.16f, placeholder = "XXXX-XXXX",
+            )
+            dk.ternedal.modelrig.ui.chat.PairingField("Enhedsnavn", deviceName, { deviceName = it })
+            onScanQr?.let { scan ->
+                Spacer(Modifier.height(9.dp))
+                dk.ternedal.modelrig.ui.chat.KalivOutlineActionCard("Skan QR fra riggen", scan)
+            }
+            dk.ternedal.modelrig.ui.chat.PairingBindNote()
             OutlinedTextField(
                 value = system, onValueChange = { system = it; store.rigSystem = it },
                 label = { Text("System-instruktion (valgfri)", fontSize = 12.sp) },
@@ -347,7 +469,9 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                 // this on 2026-07-09: the button stayed disabled with an empty
                 // code, forcing an unnecessary re-pair.
                 val hasToken = store.token != null
-                Button(
+                dk.ternedal.modelrig.ui.components.KalivPrimaryButton(
+                    text = if (busy) "Forbinder\u2026" else "Forbind",
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !busy && baseUrl.isNotBlank() && (code.isNotBlank() || hasToken),
                     onClick = {
                         busy = true; msg = null
@@ -374,7 +498,10 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                                 }
                             } else {
                                 val res = withContext(Dispatchers.IO) { runCatching { ModelRigClient(url).claimPairing(n, c) } }
-                                res.onSuccess { claimedToken ->
+                                res.onSuccess { pairing ->
+                                    val claimedToken = pairing.token
+                                    // Enhedens id gemmes, så enhedslisten kan markere DENNE enhed.
+                                    store.deviceId = pairing.deviceId
                                     val saved = store.saveRigConnection(url, claimedToken)
                                     busy = false
                                     if (saved) {
@@ -387,7 +514,7 @@ private fun RigCard(store: TokenStore, db: ChatDb, onConnected: () -> Unit) {
                             }
                         }
                     },
-                ) { Text(if (busy) "Forbinder…" else "Forbind") }
+                )
                 if (connected) {
                     Spacer(Modifier.width(8.dp))
                     TextButton(
@@ -577,12 +704,20 @@ private data class Msg(
     val status: String = TurnStatus.THINKING,
     val error: Boolean = false, // shown in UI, but never persisted or sent as history
     val sources: List<String> = emptyList(), // RAG source names, if this reply used RAG
+    // De udsnit riggen FAKTISK hentede til svaret. Tom på ældre rigge —
+    // så viser fladen kun kildechips, som hidtil.
+    val context: List<dk.ternedal.modelrig.net.UsedChunk> = emptyList(),
     val fellBackToCloud: Boolean = false, // rig was unreachable -> answered via cloud
     // For a spoken turn: which model answered, and whether it was a cloud model.
     // Deliberately separate from fellBackToCloud -- using cloud for voice is a
     // deliberate choice, not a fallback, and conflating them would mislead.
     val voiceModel: String? = null,
+    // Hvem der svarede (#752): sat fra riggens person-deskriptor, aldrig gaettet.
+    val personLabel: String? = null,
     val voiceViaCloud: Boolean = false,
+    // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
+    // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
+    val at: Long? = System.currentTimeMillis(),
 )
 
 /**
@@ -686,13 +821,18 @@ private fun ChatScreen(
     store: TokenStore,
     db: ChatDb,
     openConvId: Long?,
+    shared: dk.ternedal.modelrig.net.SharedPayload? = null,
+    sharedTruncated: Boolean = false,
     cloudModelTick: Int,
     darkMode: Boolean,
     onToggleDark: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenConversations: () -> Unit,
     onOpenModels: () -> Unit,
+    onOpenRigStatus: () -> Unit,
+    onOpenDevices: () -> Unit,
     onOpenKnowledge: () -> Unit,
+    onOpenAudit: () -> Unit,
     onOpenSchedules: () -> Unit,
     onOpenCloudPicker: () -> Unit,
     onOpenVoiceCloudPicker: () -> Unit,
@@ -717,7 +857,9 @@ private fun ChatScreen(
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
-    var modelMenu by remember { mutableStateOf(false) }
+    var showSourceSheet by remember { mutableStateOf(false) }
+    var showCapSheet by remember { mutableStateOf(false) }
+    var runningModels by remember { mutableStateOf(setOf<String>()) }
     var cloudModel by remember { mutableStateOf(store.cloudModel) }
     var ragMode by remember { mutableStateOf(false) }
     // D4 consent, persisted (2a trin 1): may RAG document content be sent to
@@ -729,9 +871,31 @@ private fun ChatScreen(
     var ragSourceFilter by remember { mutableStateOf<String?>(null) }
     var ragSourceMenu by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
+    // Beskeden der er valgt til en agent-plan (null = ingen). Saettes KUN af
+    // et tryk i Kapaciteter; intet i send-stien roerer den.
+    var agentPlanFor by remember { mutableStateOf<String?>(null) }
+    // Del til Kaliv: hvad en anden app sendte. Kortet nedenfor er det ENESTE
+    // sted der handler på det — intet indekseres eller sendes af sig selv.
+    var sharePayload by remember { mutableStateOf(shared) }
+    var shareBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
+    // regnskab — riggen kender den ikke, og INTET herfra sendes af sig selv.
+    val queueStore = remember {
+        dk.ternedal.modelrig.data.OfflineQueue(
+            context.getSharedPreferences("kaliv_queue", android.content.Context.MODE_PRIVATE),
+        )
+    }
+    var queued by remember { mutableStateOf(queueStore.all()) }
+    // Én vej til godkendelsesfladen, saa baade panelet og plan-kortet lander
+    // samme sted (ADR-A3-001 D4: godkendelser bor paa agent-skaermen).
+    val openAgentCheckpoint = {
+        val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+        i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_REVIEW, true)
+        context.startActivity(i)
+    }
 
     var ingesting by remember { mutableStateOf(false) }
     var ingestStatus by remember { mutableStateOf<String?>(null) }
@@ -752,6 +916,40 @@ private fun ChatScreen(
     var recording by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+
+    // Rigens EGNE evner (GET /capabilities), hentet en gang pr. forbindelse.
+    // Skal ligge i tilstand frem for at blive hentet paa stedet: onOpenVoice
+    // koerer paa main-traaden, og et netvaerkskald derfra ville kaste.
+    // UNKNOWN indtil svaret er inde -- og UNKNOWN betyder ALT TILLADT, saa
+    // ingen funktion er blokeret imens.
+    var workerCaps by remember { mutableStateOf(WorkerCapabilities.UNKNOWN) }
+
+    /**
+     * ENESTE indgang til mikrofonen.
+     *
+     * Optagelsen blev tidligere startet fire uafhaengige steder — composerens
+     * mic-tap, overlayets knap, Kapaciteter-arket og permission-fortsaettelsen.
+     * En gate der kun daekkede det ene lod de tre andre staa aabne, og det var
+     * netop det den strukturelle gate fangede. Derfor er der nu eet sted, og
+     * gaten kraever at `voiceCapture.start()` KUN staar her.
+     *
+     * Returnerer true hvis optagelsen faktisk koerer.
+     */
+    fun startVoiceCaptureGuarded(): Boolean {
+        val verdict = VoiceCapability.check(workerCaps)
+        if (verdict is VoiceCapability.Verdict.Blocked) {
+            voiceError = verdict.reason
+            return false
+        }
+        return try {
+            voiceCapture.start()
+            recording = true
+            true
+        } catch (e: Exception) {
+            voiceError = "Optagelse fejlede: ${e.message}"
+            false
+        }
+    }
     // Tap-to-stop (v1.13.0). Until now a voice turn could not be interrupted
     // at all: barge-in is off by default and uncalibrated. Two mechanisms,
     // because a turn has two phases with different escape routes:
@@ -763,6 +961,109 @@ private fun ChatScreen(
     var voiceJob by remember { mutableStateOf<Job?>(null) }
     val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var speaking by remember { mutableStateOf(false) }
+    var showVoice by remember { mutableStateOf(false) }
+    // Skaerm 13: rig-liveness. null = ukendt endnu; loekken auto-retry'er
+    // (hurtigere naar offline) og driver banner, sheet-prik og composer.
+    var rigOnline by remember { mutableStateOf<Boolean?>(null) }
+    var lastOnlineAt by remember { mutableStateOf<Long?>(null) }
+    var pingBusy by remember { mutableStateOf(false) }
+    // Cloud-tilbuddet stilles én gang pr. session. Riggen kan være nede i
+    // lang tid, og banneret dukkede op igen hver gang man skiftede tilbage
+    // til rig-mode -- altså samme spørgsmål igen og igen efter man havde
+    // svaret. Selve offline-beskeden bliver (den er sand og styrer køen),
+    // men knappen forsvinder: valget er truffet og kendt.
+    var cloudOfferTaken by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<String?>(null) }
+    var updDownloading by remember { mutableStateOf(false) }
+    var updProgress by remember { mutableStateOf(0) }
+    var voiceTranscript by remember { mutableStateOf("") }
+    LaunchedEffect(mode, store.hasRig) {
+        while (true) {
+            if (mode == "rig" && store.hasRig) {
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).ping() }.getOrDefault(false)
+                }
+                rigOnline = ok
+                if (ok) lastOnlineAt = System.currentTimeMillis()
+                kotlinx.coroutines.delay(if (ok) 30_000 else 12_000)
+            } else {
+                rigOnline = null
+                kotlinx.coroutines.delay(30_000)
+            }
+        }
+    }
+    fun checkForUpdate(manual: Boolean) {
+        scope.launch {
+            val latest = withContext(Dispatchers.IO) { dk.ternedal.modelrig.net.UpdateChecker.latestVersion() }
+            val cur = dk.ternedal.modelrig.BuildConfig.VERSION_NAME
+            when {
+                latest == null -> if (manual) {
+                    android.widget.Toast.makeText(context, "Kunne ikke tjekke for opdatering", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                dk.ternedal.modelrig.net.UpdateChecker.isNewer(cur, latest) -> {
+                    if (manual || latest != store.dismissedUpdateVersion) {
+                        if (manual) store.dismissedUpdateVersion = null
+                        availableUpdate = latest
+                    }
+                }
+                else -> if (manual) {
+                    android.widget.Toast.makeText(context, "Du k\u00f8rer nyeste ($cur)", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    fun startUpdateDownload() {
+        updDownloading = true; updProgress = 0
+        val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        val dest = java.io.File(context.getExternalFilesDir(null), "kaliv-latest.apk")
+        if (dest.exists()) dest.delete()
+        val req = android.app.DownloadManager.Request(android.net.Uri.parse(dk.ternedal.modelrig.net.UpdateChecker.APK_URL))
+            .setTitle("Kaliv-opdatering")
+            .setDestinationInExternalFilesDir(context, null, "kaliv-latest.apk")
+            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE)
+        val id = dm.enqueue(req)
+        scope.launch {
+            var running = true
+            while (running) {
+                kotlinx.coroutines.delay(500)
+                val cur = dm.query(android.app.DownloadManager.Query().setFilterById(id))
+                if (cur == null || !cur.moveToFirst()) { running = false; updDownloading = false; cur?.close(); break }
+                val status = cur.getInt(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+                val done = cur.getLong(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                val total = cur.getLong(cur.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                cur.close()
+                if (total > 0) updProgress = ((done * 100) / total).toInt()
+                when (status) {
+                    android.app.DownloadManager.STATUS_SUCCESSFUL -> {
+                        running = false
+                        updDownloading = false
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            context, context.packageName + ".fileprovider", dest,
+                        )
+                        val i = Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { context.startActivity(i) }
+                            .onFailure {
+                                android.widget.Toast.makeText(context, "Kunne ikke starte installationen", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                    android.app.DownloadManager.STATUS_FAILED -> {
+                        running = false
+                        updDownloading = false
+                        android.widget.Toast.makeText(context, "Hentning fejlede \u2014 pr\u00f8v igen", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        val now = System.currentTimeMillis()
+        if (now - store.lastUpdateCheckAt > 12 * 3_600_000L) {
+            store.lastUpdateCheckAt = now
+            checkForUpdate(manual = false)
+        }
+    }
     // Model-list load failures used to be swallowed silently: "Genindlæs
     // modeller" looked dead when the rig was unreachable. Surface the reason.
     var modelError by remember { mutableStateOf<String?>(null) }
@@ -791,9 +1092,6 @@ private fun ChatScreen(
     var toolBusy by remember { mutableStateOf(false) }
     // Audit log viewer. An append-only log nobody can read is only half a
     // safeguard: the point is to SEE what was proposed, approved and refused.
-    var showAudit by remember { mutableStateOf(false) }
-    var auditRows by remember { mutableStateOf<List<dk.ternedal.modelrig.net.AuditEntry>>(emptyList()) }
-    var auditError by remember { mutableStateOf<String?>(null) }
     // Rig-side tool control. The kill switch used to be an env var only, so
     // stopping a misbehaving tool meant restarting the worker. Now it is a tap.
     var showToolCtl by remember { mutableStateOf(false) }
@@ -837,7 +1135,15 @@ private fun ChatScreen(
     }
     val micPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { granted -> hasMicPermission = granted; if (!granted) voiceError = "Mikrofon-adgang nægtet" }
+    ) { granted ->
+        hasMicPermission = granted
+        if (!granted) {
+            voiceError = "Mikrofon-adgang nægtet"
+        } else if (showVoice && !recording && !voiceBusy) {
+            // Fortsaettelse: overlayet blev aabnet uden permission — start nu.
+            startVoiceCaptureGuarded()
+        }
+    }
 
     // One spoken turn, STREAMING: stop recording -> upload WAV -> the rig streams
     // back the transcript, then each sentence's audio as it's synthesized. We play
@@ -852,7 +1158,10 @@ private fun ChatScreen(
             // Audio chunks flow from the network reader (producer) to the player
             // (consumer) through this channel. Unlimited: sentences are small and
             // we never want the reader to block on a slow player.
-            val audioChan = Channel<ByteArray>(Channel.UNLIMITED)
+            val audioChan = Channel<Pair<ByteArray, String?>>(Channel.UNLIMITED)
+            // The rig's body follows what the phone plays: report start and end
+            // of each sentence against its utterance id (slice B sync).
+            val bodyReporter = dk.ternedal.modelrig.net.BodyPlaybackReporter(store.baseUrl.orEmpty(), store.token.orEmpty())
             var transcriptText = ""
             var transcriptShown = false
             var replyIdx = -1
@@ -867,10 +1176,12 @@ private fun ChatScreen(
                 dk.ternedal.modelrig.voice.BargeInDetector(rmsThreshold = bargeInThreshold.toDouble())
             } else null
             val player = launch(Dispatchers.IO) {
-                for (bytes in audioChan) {
+                for ((bytes, utteranceId) in audioChan) {
                     if (playbackStop.get()) break
                     speaking = true
+                    bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
+                    bodyReporter.report(utteranceId, "ended")
                     if (cut) { wasInterrupted = true; playbackStop.set(true); break }
                 }
                 speaking = false
@@ -904,6 +1215,7 @@ private fun ChatScreen(
                             if (tt.isNotEmpty() && !transcriptShown) {
                                 transcriptShown = true
                                 transcriptText = tt
+                                voiceTranscript = tt
                                 // messages is a SnapshotStateList -- safe to mutate
                                 // from this IO thread; the recomposer picks it up.
                                 // Set replyIdx synchronously (the callbacks run in
@@ -915,7 +1227,7 @@ private fun ChatScreen(
                                 messages.add(Msg("assistant", "", streaming = true))
                             }
                         },
-                        onChunk = { _, text, chunkB64 ->
+                        onChunk = { _, text, chunkB64, utteranceId ->
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
                             if (replyIdx in messages.indices) {
@@ -923,7 +1235,7 @@ private fun ChatScreen(
                             }
                             if (chunkB64.isNotEmpty() && !playbackStop.get()) {
                                 val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
-                                audioChan.trySend(bytes)
+                                audioChan.trySend(bytes to utteranceId)
                             }
                         },
                         onDone = { reply, m, cloud ->
@@ -1044,6 +1356,25 @@ private fun ChatScreen(
                         ?: throw RuntimeException("kunne ikke læse filen")
                     if (bytes.isEmpty()) throw RuntimeException("filen er tom")
                     val client = ModelRigClient(store.baseUrl ?: "", store.token)
+
+                    // Spoerg riggen FOER filen sendes. Den udgivne core-worker
+                    // sendes uden PyMuPDF/python-docx/python-pptx, og uden det
+                    // her bruger brugeren et filvalg, en upload og en ventetid
+                    // paa at faa rigens raa fejl. Blokerer kun paa et
+                    // UDTRYKKELIGT nej -- aeldre rig eller mislykket probe
+                    // sender som hidtil.
+                    val format = when {
+                        isPdf -> IngestCapability.Format.PDF
+                        isDocx -> IngestCapability.Format.DOCX
+                        isPptx -> IngestCapability.Format.PPTX
+                        isHtml -> IngestCapability.Format.HTML
+                        else -> IngestCapability.Format.TEXT
+                    }
+                    val verdict = IngestCapability.check(format, client.workerCapabilities())
+                    if (verdict is IngestCapability.Verdict.Blocked) {
+                        throw RuntimeException(verdict.reason)
+                    }
+
                     when {
                         isPdf -> name to client.ingestPdf(name, bytes)
                         isDocx -> name to client.ingestDocx(name, bytes)
@@ -1072,16 +1403,35 @@ private fun ChatScreen(
     // Load the requested conversation (or none). Restores source/model from its
     // metadata when that source is still configured.
     // Re-read the persisted cloud model when the picker changed it.
+    // Hent rigens evner naar forbindelsen skifter. Fejler den, forbliver
+    // workerCaps UNKNOWN og alt er tilladt -- et mislykket probe maa ikke
+    // amputere en app der virker.
+    LaunchedEffect(store.baseUrl, store.token) {
+        val b = store.baseUrl
+        workerCaps = if (b.isNullOrBlank()) WorkerCapabilities.UNKNOWN
+        else withContext(Dispatchers.IO) {
+            ModelRigClient(b, store.token).workerCapabilities()
+        }
+    }
+
     LaunchedEffect(cloudModelTick) { cloudModel = store.cloudModel }
 
     LaunchedEffect(openConvId) {
+        // The send path creates the conversation lazily and reports its id
+        // through onConvChanged -- which lands right here, while the first
+        // reply is still streaming. Clearing and reloading on THAT change
+        // replaced the list under the stream's feet: the first delta then
+        // indexed past the reloaded [user] and killed the app (#789: crash on
+        // the first send after a fresh pairing, never after a restart, where
+        // convId already exists). Only a switch to a DIFFERENT conversation
+        // reloads; the id this screen just minted is already on screen.
+        if (openConvId != null && openConvId == convId) return@LaunchedEffect
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
         // wrong context -- the confirmation_id still points at the old thread.
         // The rig would happily execute it: it parked the arguments, not the UI.
         pendingTool = null
-        showAudit = false
         showToolCtl = false
         convId = openConvId
         if (openConvId != null) {
@@ -1093,7 +1443,7 @@ private fun ChatScreen(
             // strip only cleans new replies; without this, opening a conversation
             // made before the persona/strip landed still shows the old 🌟✨ filler.
             msgs.forEach { (role, content) ->
-                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content))
+                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content, at = null))
             }
             if (meta != null) {
                 // NB: for cloud we deliberately do NOT restore the model from
@@ -1154,14 +1504,29 @@ private fun ChatScreen(
 
             val onDelta: (String) -> Unit = { delta ->
                 scope.launch {
-                    val cur = messages[idx]
+                    // Nested launch: an exception here is NOT caught by the
+                    // runCatching around the stream -- it is an app crash. Guard
+                    // the index; a replaced list means the user moved on.
+                    val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(text = cur.text + delta)
+                }
+            }
+            val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
+                scope.launch {
+                    val i = messages.lastIndex
+                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch {
-                    val cur = messages[idx]
+                    val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(sources = srcs)
+                }
+            }
+            val onPerson: (String) -> Unit = { label ->
+                scope.launch {
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    messages[idx] = cur.copy(personLabel = label)
                 }
             }
             // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
@@ -1170,7 +1535,7 @@ private fun ChatScreen(
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
-                        val cur = messages[idx]
+                        val cur = messages.getOrNull(idx) ?: return@launch
                         if (cur.streaming) messages[idx] = cur.copy(status = label)
                     }
                 }
@@ -1242,6 +1607,10 @@ private fun ChatScreen(
                                     onPhase = onPhase,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
+                            if (turn.context.isNotEmpty()) onContext(turn.context)
+                            turn.personName?.let { name ->
+                                onPerson(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
+                            }
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -1286,7 +1655,11 @@ private fun ChatScreen(
             activeCall = null
             // A parked write proposal: surface the card. Nothing has executed.
             proposal?.let { pendingTool = it }
-            val cur = messages[idx]
+            // The list can have been replaced mid-stream (a real conversation
+            // switch). Then there is nothing on screen to finish; bail rather
+            // than index past the end. The reply is not persisted in that
+            // case -- a loss, but a bounded one, where before it was a crash.
+            val cur = messages.getOrNull(idx) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text), fellBackToCloud = didFallback)
@@ -1338,10 +1711,19 @@ private fun ChatScreen(
         var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
             val onDelta: (String) -> Unit = { delta ->
-                scope.launch { val cur = messages[i]; messages[i] = cur.copy(text = cur.text + delta) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(text = cur.text + delta) }
+            }
+            val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
+                scope.launch {
+                    val i = messages.lastIndex
+                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
+                }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
-                scope.launch { val cur = messages[i]; messages[i] = cur.copy(sources = srcs) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(sources = srcs) }
+            }
+            val onPersonRetry: (String) -> Unit = { label ->
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
@@ -1377,6 +1759,10 @@ private fun ChatScreen(
                                     onPhase = onPhase,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
+                            if (turn.context.isNotEmpty()) onContext(turn.context)
+                            turn.personName?.let { name ->
+                                onPersonRetry(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
+                            }
                             if (turn.status == "confirmation_required") {
                                 proposal = turn
                             } else {
@@ -1414,7 +1800,7 @@ private fun ChatScreen(
             activeCall = null
             // Same as the main path: a parked write proposal surfaces the card.
             proposal?.let { pendingTool = it }
-            val cur = messages[i]
+            val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text))
@@ -1433,322 +1819,117 @@ private fun ChatScreen(
 
     Column(Modifier.fillMaxSize()) {
         // top bar
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
+        Surface(color = KalivTheme.colors.background) {
             Column {
-            Row(
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Kaliv wordmark in the header (design guide). Art swaps with the
-                // palette so it reads on both backgrounds.
-                Image(
-                    painter = painterResource(
-                        if (KalivTheme.colors.isDark) R.drawable.kaliv_wordmark_dark
-                        else R.drawable.kaliv_wordmark_light,
-                    ),
-                    contentDescription = "Kaliv",
-                    modifier = Modifier.height(26.dp).padding(end = 10.dp),
-                )
-                // The model + mode controls live in a weighted, horizontally
-                // scrollable strip. Non-weighted siblings (source badge, Skift,
-                // the overflow menu) are measured first, so this strip only gets
-                // the LEFTOVER width and shrinks/scrolls -- it can never push the
-                // overflow button (which holds Settings) off the right edge, the
-                // way a plain Row of six items did on a phone-width screen.
-                Row(
-                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                if (mode == "cloud") {
-                    ModelChip("☁  $cloudModel  ▾", onClick = { onOpenCloudPicker() })
-                } else {
-                    Box {
-                        ModelChip("$currentModel  ▾", onClick = { modelMenu = true })
-                        // Auto-load the installed rig models the first time the menu
-                        // opens (and whenever it reopens empty), so there's an actual
-                        // list to pick from -- previously the list only appeared after
-                        // tapping "Genindlæs modeller", so rig mode looked like it had
-                        // no model switcher at all.
-                        LaunchedEffect(modelMenu) {
-                            if (modelMenu && models.isEmpty() && store.baseUrl != null) {
-                                val res = withContext(Dispatchers.IO) {
-                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
-                                }
-                                res.onSuccess { models = it }
-                                    .onFailure { modelError = "Kan ikke hente modeller: rig'en svarer ikke" }
-                            }
-                        }
-                        DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                            // The installed rig models, at the TOP where a model
-                            // picker belongs. Tap one to switch the rig model.
-                            if (models.isEmpty()) {
-                                DropdownMenuItem(
-                                    enabled = false,
-                                    text = { Text("Henter modeller…", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
-                                    onClick = {},
-                                )
-                            } else {
-                                models.forEach { m ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                (if (m == currentModel) "◈  " else "     ") + m,
-                                                color = if (m == currentModel) KalivTheme.colors.signal else KalivTheme.colors.textHigh,
-                                                fontSize = 14.sp,
-                                            )
-                                        },
-                                        onClick = { currentModel = m; store.model = m; modelMenu = false },
-                                    )
-                                }
-                            }
-                            HorizontalDivider()
-                            // Voice: ASR/TTS always run on the rig, but the LLM
-                            // step can go to a big cloud model. Only meaningful
-                            // in rig mode with a cloud key configured.
-                            if (mode == "rig" && store.cloudKey != null) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            (if (voiceUsesCloud) "☁ " else "◇ ") +
-                                                "Stemme svarer via cloud",
-                                            color = if (voiceUsesCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        voiceUsesCloud = !voiceUsesCloud
-                                        store.voiceUsesCloud = voiceUsesCloud
-                                        modelMenu = false
-                                    },
-                                )
-                                // Pick WHICH cloud model the voice chain uses --
-                                // separate from the text cloud model, reachable from
-                                // rig mode (where voice lives). Only useful when the
-                                // toggle above is on.
-                                if (voiceUsesCloud) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "     ☁ Cloud-model til tale: ${store.voiceCloudModel}",
-                                                color = KalivTheme.colors.amber,
-                                                fontSize = 12.sp,
-                                            )
-                                        },
-                                        onClick = { modelMenu = false; onOpenVoiceCloudPicker() },
-                                    )
-                                }
-                            }
-                            // Barge-in: speak to cut Kaliv off mid-reply. Needs the
-                            // mic while she talks, hence the permission check.
-                            if (mode == "rig") {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            (if (bargeInEnabled) "✋ " else "◇ ") +
-                                                "Afbryd Kaliv ved at tale",
-                                            color = if (bargeInEnabled) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        bargeInEnabled = !bargeInEnabled
-                                        store.bargeInEnabled = bargeInEnabled
-                                        modelMenu = false
-                                    },
-                                )
-                                // RAG: a capability toggle, grouped here with
-                                // Tools and Voice (all "what can this model do")
-                                // rather than crammed into the header, where it
-                                // did not fit on a phone and got scrolled out of
-                                // sight. Rig mode only -- cloud has no RAG.
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (ragMode) "⌕ RAG: til" else "⌕ RAG: fra",
-                                            color = if (ragMode) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        val on = !ragMode
-                                        ragMode = on
-                                        if (on) scope.launch {
-                                            val res = withContext(Dispatchers.IO) {
-                                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
-                                            }
-                                            res.onSuccess { ragSources = it }
-                                        }
-                                        modelMenu = false
-                                    },
-                                )
-                                // D4 consent: allow RAG document content to reach a
-                                // CLOUD model this session. Shown in cloud mode, where
-                                // the choice applies; default is blocked (kept local).
-                                if (mode == "cloud") {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                if (allowRagCloud) "☁ RAG→cloud: tilladt" else "☁ RAG→cloud: blokeret",
-                                                color = if (allowRagCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                                fontSize = 13.sp,
-                                            )
-                                        },
-                                        onClick = {
-                                            allowRagCloud = !allowRagCloud
-                                            modelMenu = false
-                                        },
-                                    )
-                                }
-                                // Source filter + add-document, shown only when RAG
-                                // is on. Opens the same source menu the header chip
-                                // used to.
-                                if (ragMode) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                ragSourceFilter?.let { "⌕ Kilde: $it" } ?: "⌕ Kilder: alle",
-                                                color = KalivTheme.colors.textMuted, fontSize = 13.sp,
-                                            )
-                                        },
-                                        onClick = { modelMenu = false; ragSourceMenu = true },
-                                    )
-                                }
-                                // Kaliv Tools. Off by default, and the rig has its
-                                // own kill switch on top: two locks, both opt-in.
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            if (toolsMode) "🛠 Tools: til" else "🛠 Tools: fra",
-                                            color = if (toolsMode) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                            fontSize = 13.sp,
-                                        )
-                                    },
-                                    onClick = {
-                                        toolsMode = !toolsMode
-                                        store.toolsMode = toolsMode
-                                        if (!toolsMode) pendingTool = null
-                                        modelMenu = false
-                                    },
-                                )
-                                // Audit log: readable whether or not tools mode is
-                                // currently on -- past actions matter regardless.
-                                DropdownMenuItem(
-                                    text = { Text("⚙ Tool-styring", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
-                                    onClick = {
-                                        modelMenu = false
-                                        registryError = null
-                                        showToolCtl = true
-                                        loadRegistry()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("📜 Handlingslog", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
-                                    onClick = {
-                                        modelMenu = false
-                                        auditError = null
-                                        showAudit = true
-                                        scope.launch {
-                                            val r = withContext(Dispatchers.IO) {
-                                                runCatching {
-                                                    ModelRigClient(store.baseUrl ?: "", store.token).toolsAudit(50)
-                                                }
-                                            }
-                                            auditRows = r.getOrDefault(emptyList())
-                                            auditError = r.exceptionOrNull()?.let { friendlyError(it) }
-                                        }
-                                    },
-                                )
-                                if (bargeInEnabled) {
-                                    // Step through sensible thresholds rather than
-                                    // a slider: this is a calibration dial used a
-                                    // handful of times, not a daily control.
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                "Barge-in følsomhed: $bargeInThreshold" +
-                                                    if (peakRms > 0) "  (sidste top ${peakRms.toInt()})" else "",
-                                                color = KalivTheme.colors.textMuted,
-                                                fontSize = 13.sp,
-                                            )
-                                        },
-                                        onClick = {
-                                            val steps = listOf(500, 800, 1200, 1500, 2000, 3000, 4500)
-                                            val next = steps.firstOrNull { it > bargeInThreshold } ?: steps.first()
-                                            bargeInThreshold = next
-                                            store.bargeInThreshold = next
-                                        },
-                                    )
-                                }
-                            }
-                            if (mode == "rig") HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("↻  Genindlæs modeller", color = KalivTheme.colors.signal) },
-                                onClick = {
-                                    modelMenu = false
-                                    scope.launch {
-                                        modelError = null
-                                        val res = withContext(Dispatchers.IO) {
-                                            runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
-                                        }
-                                        res.onSuccess {
-                                            models = it
-                                            if (it.isEmpty()) modelError = "Rig'en svarede, men har ingen modeller"
-                                        }.onFailure {
-                                            // Don't fail silently -- the user just
-                                            // sees a dead button otherwise.
-                                            modelError = "Kan ikke hente modeller: rig'en svarer ikke"
-                                        }
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-                // RAG moved into the model menu (above). The source menu still
-                // needs an anchor in the tree; hang it off a zero-size Box here so
-                // "Kilder" in the model menu can open it.
-                Box {
-                    DropdownMenu(expanded = ragSourceMenu, onDismissRequest = { ragSourceMenu = false }) {
-                        DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenu = false })
-                        if (ragSources.isNotEmpty()) HorizontalDivider()
-                        ragSources.forEach { src ->
-                            DropdownMenuItem(text = { Text(src) }, onClick = { ragSourceFilter = src; ragSourceMenu = false })
-                        }
-                        if (ragSources.isEmpty()) {
-                            HorizontalDivider()
-                            DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = KalivTheme.colors.textMuted) }, onClick = { ragSourceMenu = false })
-                        }
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument…", color = if (ingesting) KalivTheme.colors.textMuted else KalivTheme.colors.signal) },
-                            enabled = !ingesting,
-                            onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "text/html", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream")) },
-                        )
-                    }
-                }
-                }  // end scrollable model/mode strip
-                Spacer(Modifier.width(8.dp))
-                SourceBadge(mode)
-                if (hasRig && hasCloud) {
-                    TextButton(
-                        onClick = { val m = if (mode == "cloud") "rig" else "cloud"; mode = m; store.chatMode = m; if (m == "cloud") ragMode = false },
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("Skift", color = KalivTheme.colors.signal, fontSize = 13.sp) }
-                }
-                Box {
-                    TextButton(onClick = { overflow = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Text("⋮", color = KalivTheme.colors.textHigh, fontSize = 20.sp)
-                    }
-                    DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+            // Redesignets topbar (DDR-001 fase 2). Tom samtale = brand-baren;
+            // aaben samtale = titel-baren m. tilbage-pil (skaerm 2). Overflow-
+            // menuen deles og ankres ved prik-knappen i begge varianter.
+            val chatOverflowMenu: @Composable () -> Unit = {
+                DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
                             overflow = false; messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
+                        DropdownMenuItem(text = { Text("Rig-status") }, onClick = { overflow = false; onOpenRigStatus() })
+                        DropdownMenuItem(text = { Text("Enheder") }, onClick = { overflow = false; onOpenDevices() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
+                        if (mode == "rig" && store.hasRig) {
+                            // Operatør-skærmen for Agent 3-opgaver fandtes kun bag
+                            // kaliv://tasks -- ingen vej ind fra UI'et. Den er
+                            // read-only og serverstyret, så et menupunkt er
+                            // ufarligt; ligesom Planer giver den kun mening med
+                            // en parret rig.
+                            DropdownMenuItem(text = { Text("Opgaver") }, onClick = {
+                                overflow = false
+                                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+                                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_AGENT3_TASK, true)
+                                context.startActivity(i)
+                            })
+                            // Hvem Kaliv er (#752): vælg person; aktivering af
+                            // revisioner er en operatørhandling på riggen.
+                            DropdownMenuItem(text = { Text("Personer") }, onClick = {
+                                overflow = false
+                                val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
+                                i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_PERSONS, true)
+                                context.startActivity(i)
+                            })
+                            // Kroppen (slice D): Kaliv Body er en separat Unity-app.
+                            // Kaliv giver den riggen og sit token som intent-extras,
+                            // saa den ikke skal parres igen -- kun til DEN pakke.
+                            DropdownMenuItem(text = { Text("Krop") }, onClick = {
+                                overflow = false
+                                val launch = dk.ternedal.modelrig.KalivBodyBridge.launchIntent(
+                                    context, store.baseUrl.orEmpty(), store.token.orEmpty(),
+                                )
+                                if (launch != null) context.startActivity(launch)
+                                else android.widget.Toast.makeText(
+                                    context,
+                                    "Kaliv Body er ikke installeret (${dk.ternedal.modelrig.KalivBodyBridge.PACKAGE}).",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            })
+                        }
+                        if (mode == "rig" && store.cloudKey != null) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        (if (voiceUsesCloud) "\u2601 " else "\u25c7 ") + "Stemme svarer via cloud",
+                                        color = if (voiceUsesCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
+                                        fontSize = 13.sp,
+                                    )
+                                },
+                                onClick = {
+                                    voiceUsesCloud = !voiceUsesCloud
+                                    store.voiceUsesCloud = voiceUsesCloud
+                                },
+                            )
+                        }
+                        if (ragMode) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        ragSourceFilter?.let { "\u2315 Kilde: $it" } ?: "\u2315 Kilder: alle",
+                                        color = KalivTheme.colors.textMuted, fontSize = 13.sp,
+                                    )
+                                },
+                                onClick = { overflow = false; ragSourceMenu = true },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("\u2699 Tool-styring", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
+                            onClick = {
+                                overflow = false
+                                registryError = null
+                                showToolCtl = true
+                                loadRegistry()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("\ud83d\udcdc Handlingslog", color = KalivTheme.colors.textMuted, fontSize = 13.sp) },
+                            onClick = { overflow = false; onOpenAudit() },
+                        )
+                        if (bargeInEnabled) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Barge-in f\u00f8lsomhed: $bargeInThreshold" +
+                                            if (peakRms > 0) "  (sidste top ${peakRms.toInt()})" else "",
+                                        color = KalivTheme.colors.textMuted,
+                                        fontSize = 13.sp,
+                                    )
+                                },
+                                onClick = {
+                                    val steps = listOf(500, 800, 1200, 1500, 2000, 3000, 4500)
+                                    val next = steps.firstOrNull { it > bargeInThreshold } ?: steps.first()
+                                    bargeInThreshold = next
+                                    store.bargeInThreshold = next
+                                },
+                            )
+                        }
+                        DropdownMenuItem(text = { Text("S\u00f8g efter opdatering") }, onClick = { overflow = false; checkForUpdate(manual = true) })
+                        DropdownMenuItem(text = { Text("Kapaciteter") }, onClick = { overflow = false; showCapSheet = true })
                         DropdownMenuItem(text = { Text("Indstillinger") }, onClick = { overflow = false; onOpenSettings() })
                         HorizontalDivider(color = KalivTheme.colors.hairline)
                         // Light / dark. A manual choice (TokenStore.darkMode), so it
@@ -1787,8 +1968,299 @@ private fun ChatScreen(
                             },
                         )
                     }
+            }
+            if (messages.isEmpty()) {
+                ChatTopBar(
+                    dark = darkMode,
+                    onToggleDark = { onToggleDark(!darkMode) },
+                    onOverflow = { overflow = true },
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                    overflowContent = chatOverflowMenu,
+                )
+            } else {
+                val convTitle = remember(convId, messages.size) {
+                    convId?.let { id -> db.listConversations().firstOrNull { it.id == id }?.title }
+                        ?: messages.firstOrNull { it.role == "user" }?.text?.take(28)
+                        ?: "Samtale"
+                }
+                ChatConversationTopBar(
+                    title = convTitle,
+                    onBack = { onOpenConversations() },
+                    onOverflow = { overflow = true },
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                    overflowContent = chatOverflowMenu,
+                )
+            }
+            // Kontekst-chips: model (+menuen som er appens capability-hub),
+            // RAG- og Tools-tilstand. Kilde-badge/Skift-knappen er afloest af
+            // routing-strippen nedenfor + Skift-punktet i overflow-menuen.
+            ChipRow(
+                background = KalivTheme.colors.background,
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, bottom = 10.dp),
+            ) {
+                if (mode == "cloud") {
+                    ChatContextChip(
+                        text = cloudModel,
+                        emphasized = true,
+                        leadingIcon = painterResource(R.drawable.ic_kaliv_model),
+                        leadingTint = KalivTheme.colors.accent,
+                        trailingIcon = painterResource(R.drawable.ic_kaliv_chevron_down),
+                        onClick = { showSourceSheet = true },
+                    )
+                } else {
+                    Box {
+                        ChatContextChip(
+                            text = currentModel,
+                            emphasized = true,
+                            leadingIcon = painterResource(R.drawable.ic_kaliv_model),
+                            leadingTint = KalivTheme.colors.accent,
+                            trailingIcon = painterResource(R.drawable.ic_kaliv_chevron_down),
+                            onClick = { showSourceSheet = true },
+                        )
+                        // Auto-load the installed rig models the first time the menu
+                        // opens (and whenever it reopens empty), so there's an actual
+                        // list to pick from -- previously the list only appeared after
+                        // tapping "Genindlæs modeller", so rig mode looked like it had
+                        // no model switcher at all.
+                        LaunchedEffect(showSourceSheet) {
+                            if (showSourceSheet && store.baseUrl != null) {
+                                val res = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
+                                }
+                                if (models.isEmpty()) {
+                                    res.onSuccess { models = it }
+                                        .onFailure { modelError = "Kan ikke hente modeller: rig'en svarer ikke" }
+                                }
+                                val run = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRunningModels() }
+                                }
+                                run.onSuccess { rm -> runningModels = rm.map { it.name }.toSet() }
+                            }
+                        }
+                        // Model-/kildevalg bor nu i Kilde & model-sheetet (skaerm 3);
+                        // resten af den gamle menu er flyttet til \u22ee-menuen.
+                    }
+                }
+                // RAG moved into the model menu (above). The source menu still
+                // needs an anchor in the tree; hang it off a zero-size Box here so
+                // "Kilder" in the model menu can open it.
+                Box {
+                    DropdownMenu(expanded = ragSourceMenu, onDismissRequest = { ragSourceMenu = false }) {
+                        DropdownMenuItem(text = { Text("Alle kilder") }, onClick = { ragSourceFilter = null; ragSourceMenu = false })
+                        if (ragSources.isNotEmpty()) HorizontalDivider()
+                        ragSources.forEach { src ->
+                            DropdownMenuItem(text = { Text(src) }, onClick = { ragSourceFilter = src; ragSourceMenu = false })
+                        }
+                        if (ragSources.isEmpty()) {
+                            HorizontalDivider()
+                            DropdownMenuItem(text = { Text("Ingen kilder ingesteret endnu", color = KalivTheme.colors.textMuted) }, onClick = { ragSourceMenu = false })
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(if (ingesting) "Ingesterer…" else "+ Tilføj dokument…", color = if (ingesting) KalivTheme.colors.textMuted else KalivTheme.colors.signal) },
+                            enabled = !ingesting,
+                            onClick = { ragSourceMenu = false; pickDocument.launch(arrayOf("text/plain", "text/markdown", "text/html", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream")) },
+                        )
+                    }
+                }
+                if (mode == "rig") {
+                    ChatContextChip(
+                        text = if (ragMode) "RAG \u00b7 Til" else "RAG",
+                        active = ragMode,
+                        leadingIcon = painterResource(R.drawable.ic_kaliv_search),
+                        onClick = {
+                            val on = !ragMode
+                            ragMode = on
+                            if (on) scope.launch {
+                                val res = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                                }
+                                res.onSuccess { ragSources = it }
+                            }
+                        },
+                    )
+                }
+                ChatContextChip(
+                    text = "Tools",
+                    active = toolsMode,
+                    leadingIcon = painterResource(R.drawable.ic_kaliv_tools),
+                    onClick = {
+                        toolsMode = !toolsMode
+                        store.toolsMode = toolsMode
+                        if (!toolsMode) pendingTool = null
+                    },
+                )
+            }
+            if (showSourceSheet) {
+                val host = store.baseUrl?.removePrefix("https://")?.removePrefix("http://")?.trimEnd('/')
+                SourceModelSheet(
+                    rigSelected = mode == "rig",
+                    rigStatus = when {
+                        host == null -> "Ikke parret"
+                        rigOnline == true -> "Forbundet \u00b7 $host"
+                        rigOnline == false -> "Svarer ikke \u00b7 $host"
+                        else -> "Parret \u00b7 $host"
+                    },
+                    rigConnected = rigOnline ?: store.hasRig,
+                    cloudAvailable = hasCloud,
+                    cloudStatus = if (hasCloud) "$cloudModel \u00b7 forlader enheden" else "Ingen n\u00f8gle",
+                    models = models.map {
+                        ModelRowUi(
+                            name = it,
+                            selected = it == currentModel,
+                            loaded = it in runningModels,
+                            paramsLabel = paramsLabelFor(it),
+                        )
+                    },
+                    onSelectRig = { mode = "rig"; store.chatMode = "rig" },
+                    onSelectCloud = {
+                        if (mode == "cloud") {
+                            showSourceSheet = false
+                            onOpenCloudPicker()
+                        } else {
+                            mode = "cloud"; store.chatMode = "cloud"; ragMode = false
+                        }
+                    },
+                    onSelectModel = { currentModel = it; store.model = it },
+                    onReload = {
+                        scope.launch {
+                            modelError = null
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listModels() }
+                            }
+                            res.onSuccess {
+                                models = it
+                                if (it.isEmpty()) modelError = "Rig'en svarede, men har ingen modeller"
+                            }.onFailure { modelError = "Kan ikke hente modeller: rig'en svarer ikke" }
+                            val run = withContext(Dispatchers.IO) {
+                                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRunningModels() }
+                            }
+                            run.onSuccess { rm -> runningModels = rm.map { it.name }.toSet() }
+                        }
+                    },
+                    onDismiss = { showSourceSheet = false },
+                )
+            }
+            if (showCapSheet) {
+                CapabilitiesSheet(
+                    onRunAsAgent = if (mode == "rig" && store.hasRig && input.isNotBlank()) ({
+                        agentPlanFor = input
+                        showCapSheet = false
+                    }) else null,
+                    ragOn = ragMode,
+                    ragSubtitle = if (ragMode && ragSources.isNotEmpty())
+                        "${ragSources.size} dokument" + (if (ragSources.size == 1) "" else "er") + " \u00b7 svarer med kilder"
+                    else "Svarer med kilder fra dine dokumenter",
+                    ragSourceLabel = ragSourceFilter?.let { "Kilder: $it" } ?: "Kilder: Alle",
+                    onToggleRag = { on ->
+                        if (mode == "rig") {
+                            ragMode = on
+                            if (on) scope.launch {
+                                val res = withContext(Dispatchers.IO) {
+                                    runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                                }
+                                res.onSuccess { ragSources = it }
+                            }
+                        }
+                    },
+                    onSources = { showCapSheet = false; ragSourceMenu = true },
+                    toolsOn = toolsMode,
+                    onToggleTools = { on ->
+                        toolsMode = on
+                        store.toolsMode = on
+                        if (!on) pendingTool = null
+                    },
+                    voiceCloudAvailable = mode == "rig" && store.cloudKey != null,
+                    voiceViaCloud = voiceUsesCloud,
+                    onToggleVoiceCloud = { on ->
+                        voiceUsesCloud = on
+                        store.voiceUsesCloud = on
+                    },
+                    onOpenVoice = {
+                        showCapSheet = false
+                        showVoice = true
+                        voiceError = null
+                        // Spoerg FOER mikrofonen aabnes. Uden det taler
+                        // brugeren faerdig, uploader, og faar saa rigens 501.
+                        if (!recording && !voiceBusy) {
+                            if (hasMicPermission) {
+                                startVoiceCaptureGuarded()
+                            } else {
+                                micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
+                    },
+                    onDismiss = { showCapSheet = false },
+                )
+            }
+            if (showVoice) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = {
+                        if (recording) { runCatching { voiceCapture.stopToWav() } }
+                        recording = false
+                        stopVoiceTurn()
+                        showVoice = false
+                    },
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+                ) {
+                    // Pixel-feedback 14/08: Dialog-vinduet skal SELV fylde skaermen —
+                    // ellers staar overlayet som en svaevende boks med dim omkring
+                    // (indholdets fillMaxSize kan ikke straekke vinduet).
+                    val dialogWindow = (androidx.compose.ui.platform.LocalView.current.parent
+                        as? androidx.compose.ui.window.DialogWindowProvider)?.window
+                    androidx.compose.runtime.SideEffect {
+                        dialogWindow?.setLayout(
+                            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                        )
+                        dialogWindow?.setBackgroundDrawable(
+                            android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT),
+                        )
+                        dialogWindow?.setDimAmount(0f)
+                    }
+                    dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
+                        modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
+                        pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",
+                        pillDot = if (voiceUsesCloud && store.cloudKey != null) KalivTheme.colors.signal else KalivTheme.colors.success,
+                        stateText = when {
+                            recording -> "Lytter \u2026"
+                            voiceBusy && !speaking -> "T\u00e6nker \u2026"
+                            speaking -> "Taler \u2026"
+                            else -> "Klar"
+                        },
+                        transcript = voiceTranscript,
+                        buttonLabel = when {
+                            recording -> "Tryk for at sende"
+                            voiceBusy || speaking -> "Tryk for at afbryde"
+                            else -> "Tryk for at tale"
+                        },
+                        onMainTap = {
+                            when {
+                                recording -> {
+                                    recording = false
+                                    val wav = voiceCapture.stopToWav()
+                                    if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
+                                }
+                                voiceBusy || speaking -> stopVoiceTurn()
+                                else -> {
+                                    voiceTranscript = ""
+                                    if (hasMicPermission) {
+                                        startVoiceCaptureGuarded()
+                                    } else {
+                                        micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    }
+                                }
+                            }
+                        },
+                        onClose = {
+                            if (recording) { runCatching { voiceCapture.stopToWav() }; recording = false }
+                            stopVoiceTurn()
+                            showVoice = false
+                        },
+                    )
                 }
             }
+
             // Persistent routing strip: always shows, at a glance, WHICH model
             // answers text and WHICH answers voice (and whether voice uses cloud).
             // Before this, the voice-cloud state was buried in the model menu and
@@ -1802,15 +2274,22 @@ private fun ChatScreen(
                     else -> "◈ tekst: $currentModel"
                 }
                 Text(textLabel, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-                Spacer(Modifier.width(10.dp))
-                // Voice routing: cloud only when the toggle is on AND a key exists.
-                val voiceCloud = voiceUsesCloud && store.cloudKey != null
-                val voiceLabel = if (voiceCloud) "☁ tale: ${store.voiceCloudModel}" else "🎙 tale: $currentModel"
-                Text(
-                    voiceLabel,
-                    color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
-                    fontSize = 11.sp,
-                )
+                // Tale-etiketten følger mikrofonen: den vises kun i rig-mode,
+                // hvor mic-knappen findes. I cloud-mode er knappen væk (ASR
+                // kører rig-side), så en "🎙 tale: …"-linje dér lovede en
+                // kapabilitet man ikke kunne starte -- samme slags falske
+                // signal som en Stop-knap uden handle bag.
+                if (mode == "rig") {
+                    Spacer(Modifier.width(10.dp))
+                    // Voice routing: cloud only when the toggle is on AND a key exists.
+                    val voiceCloud = voiceUsesCloud && store.cloudKey != null
+                    val voiceLabel = if (voiceCloud) "☁ tale: ${store.voiceCloudModel}" else "🎙 tale: $currentModel"
+                    Text(
+                        voiceLabel,
+                        color = if (voiceCloud) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                }
             }
             if (ingesting || ingestStatus != null || ingestError != null) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
@@ -1824,57 +2303,244 @@ private fun ChatScreen(
             }
         }
 
+        val rigOffline = mode == "rig" && store.hasRig && rigOnline == false
+        if (rigOffline) {
+            dk.ternedal.modelrig.ui.chat.RigOfflineBanner(
+                lastSeenLabel = lastOnlineAt?.let {
+                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))
+                },
+                showCloudSwitch = hasCloud && !cloudOfferTaken,
+                retryBusy = pingBusy,
+                onRetry = {
+                    pingBusy = true
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            runCatching { ModelRigClient(store.baseUrl ?: "", store.token).ping() }.getOrDefault(false)
+                        }
+                        rigOnline = ok
+                        if (ok) lastOnlineAt = System.currentTimeMillis()
+                        pingBusy = false
+                    }
+                },
+                onSwitchCloud = {
+                    cloudOfferTaken = true
+                    mode = "cloud"; store.chatMode = "cloud"; ragMode = false
+                },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
+        availableUpdate?.let { v ->
+            dk.ternedal.modelrig.ui.chat.UpdateCard(
+                newVersion = v,
+                currentVersion = dk.ternedal.modelrig.BuildConfig.VERSION_NAME,
+                downloading = updDownloading,
+                progressPct = updProgress,
+                onInstall = { startUpdateDownload() },
+                onLater = {
+                    store.dismissedUpdateVersion = v
+                    availableUpdate = null
+                },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
+        if (queued.isNotEmpty()) {
+            dk.ternedal.modelrig.ui.chat.OfflineQueueCard(
+                items = queued,
+                nowMillis = System.currentTimeMillis(),
+                rigBack = !rigOffline,
+                onSend = { item ->
+                    // Ét tryk = én besked. Vi tømmer ALDRIG køen i ét hug,
+                    // og vi sender kun den du valgte.
+                    queued = queueStore.remove(item)
+                    input = item.text
+                    onSend()
+                },
+                onEdit = { item ->
+                    queued = queueStore.remove(item)
+                    input = if (input.isBlank()) item.text else input + "\n" + item.text
+                },
+                onDiscard = { item -> queued = queueStore.remove(item) },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
+        sharePayload?.let { payload ->
+            val isDoc = payload is dk.ternedal.modelrig.net.SharedPayload.Document
+            val title = when (payload) {
+                is dk.ternedal.modelrig.net.SharedPayload.Text -> payload.suggestedName
+                is dk.ternedal.modelrig.net.SharedPayload.Document -> payload.suggestedName
+            }
+            val preview = when (payload) {
+                is dk.ternedal.modelrig.net.SharedPayload.Text -> payload.text.take(300)
+                is dk.ternedal.modelrig.net.SharedPayload.Document ->
+                    payload.mimeType ?: "Filen læses først når du vælger noget"
+            }
+            dk.ternedal.modelrig.ui.chat.ShareLandingCard(
+                title = title,
+                preview = preview,
+                isDocument = isDoc,
+                truncated = sharedTruncated,
+                rigAvailable = store.hasRig,
+                busy = shareBusy,
+                onDismiss = { sharePayload = null },
+                onAsk = {
+                    when (payload) {
+                        is dk.ternedal.modelrig.net.SharedPayload.Text -> {
+                            // Teksten lander i composeren — den sendes IKKE
+                            // automatisk. Du skriver selv hvad du vil vide.
+                            input = if (input.isBlank()) payload.text else input + "\n\n" + payload.text
+                            sharePayload = null
+                        }
+                        is dk.ternedal.modelrig.net.SharedPayload.Document -> {
+                            input = if (input.isBlank()) {
+                                "Om dokumentet \u201c${payload.suggestedName}\u201d: "
+                            } else {
+                                input
+                            }
+                            sharePayload = null
+                        }
+                    }
+                },
+                onSaveToKnowledge = {
+                    val base = store.baseUrl
+                    val tok = store.token
+                    if (base != null && tok != null) {
+                        shareBusy = true
+                        scope.launch {
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val c = ModelRigClient(base, tok)
+                                    when (payload) {
+                                        is dk.ternedal.modelrig.net.SharedPayload.Text ->
+                                            c.ingestText(payload.suggestedName, payload.text)
+                                        is dk.ternedal.modelrig.net.SharedPayload.Document -> {
+                                            // Samme veje som filvælgeren bruger — delt fil og
+                                            // valgt fil skal indekseres ens, ellers får man to
+                                            // forskellige korpusser af samme dokument.
+                                            val u = android.net.Uri.parse(payload.uri)
+                                            val bytes = context.contentResolver.openInputStream(u)?.use { it.readBytes() }
+                                                ?: throw IllegalStateException("kunne ikke laese filen")
+                                            val n = payload.suggestedName
+                                            val mime = payload.mimeType.orEmpty().lowercase()
+                                            when {
+                                                mime.contains("pdf") -> c.ingestPdf(n, bytes)
+                                                mime.contains("wordprocessingml") -> c.ingestDocx(n, bytes)
+                                                mime.contains("presentationml") -> c.ingestPptx(n, bytes)
+                                                mime.contains("html") -> c.ingestHtml(n, bytes)
+                                                else -> c.ingestText(n, String(bytes, Charsets.UTF_8))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            shareBusy = false
+                            res.onSuccess { r ->
+                                sharePayload = null
+                                // Rigens EGET tal, ikke vores forventning.
+                                ingestStatus = "Gemt i Viden \u00b7 ${r.chunksAdded} udsnit"
+                            }.onFailure {
+                                ingestError = "Kunne ikke gemme i Viden."
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
+        agentPlanFor?.let { msg ->
+            dk.ternedal.modelrig.ui.agent.AgentStartHost(
+                baseUrl = store.baseUrl,
+                token = store.token,
+                conversationId = openConvId?.toString(),
+                message = msg,
+                // KILDEN er hele pointen: kun en eksplicit handling kommer hertil.
+                source = dk.ternedal.modelrig.ui.agent.AgentStartPolicy.Source.ExplicitUserAction,
+                onOpenApproval = { openAgentCheckpoint() },
+                onDismiss = { agentPlanFor = null },
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+            )
+        }
+        // Agent-panelet (ADR-A3-001). Chatten kender ÉN neutral indgang og
+        // ved ellers intet om agenten; alt hvad der taler med riggen bor i
+        // ui/agent-pakken, og dvale-gaten haandhaever den arbejdsdeling.
+        dk.ternedal.modelrig.ui.agent.AgentRunPanelHost(
+            baseUrl = store.baseUrl,
+            token = store.token,
+            conversationId = openConvId?.toString(),
+            onOpenCheckpoint = { openAgentCheckpoint() },
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 6.dp),
+        )
         // messages
         if (messages.isEmpty()) {
             Column(
-                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // The empty state is the welcome screen: the mark, the wordmark,
-                // then the mode. The ankh is the launcher foreground -- one
-                // asset, one identity, no second copy to drift out of sync.
-                Image(
-                    painter = painterResource(R.drawable.ic_launcher_foreground),
-                    contentDescription = null,
-                    modifier = Modifier.size(140.dp),
-                )
-                Text(
-                    "KALIV",
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
-                    fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                    color = KalivTheme.colors.textHigh, letterSpacing = 8.sp,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Lokal intelligens. Privat.",
-                    color = KalivTheme.colors.textMuted, fontSize = 13.sp, letterSpacing = 1.sp,
-                )
-                Spacer(Modifier.height(28.dp))
-                // KalivTheme.colors.hairline divider: the branded-seal feel is quiet structure,
-                // not more colour.
-                androidx.compose.foundation.layout.Box(
-                    Modifier.width(48.dp).height(1.dp)
-                        .background(KalivTheme.colors.hairline),
-                )
-                Spacer(Modifier.height(20.dp))
-                Text(
-                    when { mode == "cloud" -> "Cloud-tilstand"; ragMode -> "RAG-tilstand"; else -> "Rig-tilstand" },
-                    color = if (mode == "cloud") KalivTheme.colors.amber else KalivTheme.colors.signal,
-                    fontSize = 14.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (ragMode) "Spørg om dine ingesterede dokumenter" else "Skriv en besked for at starte",
-                    color = KalivTheme.colors.textMuted, fontSize = 13.sp,
+                // Tom-tilstanden 1:1 (skaerm 1). Tilstandsteksterne fra den gamle
+                // velkomst baeres nu af routing-strippen + RAG-/Tools-chipsene.
+                ChatEmptyState(
+                    suggestions = listOf(
+                        "Opsummér et dokument",
+                        "Forklar en fejl i min kode",
+                        "Udkast til en e-mail",
+                    ),
+                    onSuggestion = { input = it },
                 )
             }
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.weight(1f).fillMaxWidth()
+                    .graphicsLayer { alpha = if (rigOffline) 0.45f else 1f },
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            ) { itemsIndexed(messages) { i, m -> Bubble(m, onRetry = { retry(i) }) } }
+            ) {
+                itemsIndexed(messages) { i, m ->
+                    if (m.role == "user") {
+                        UserMessage(m.text)
+                    } else {
+                        val pills = buildList {
+                            if (m.voiceModel != null) {
+                                add((if (m.voiceViaCloud) "\u2601 " else "\u25c8 ") + "\ud83c\udf99 ${m.voiceModel}")
+                            }
+                            if (m.fellBackToCloud) add("\u2601 via cloud (rig utilg\u00e6ngelig)")
+                            // Hvem der svarede (#752) -- kun naar riggen sagde det.
+                            if (m.personLabel != null) add("\u25c8 ${m.personLabel}")
+                        }
+                        AssistantMessage(
+                            m = ChatMessageUi(
+                                isUser = false,
+                                text = m.text,
+                                streaming = m.streaming,
+                                atMillis = m.at,
+                                sources = m.sources,
+                                error = m.error,
+                                pills = pills,
+                            ),
+                            thinking = { ThinkingIndicator(m.status) },
+                            body = { MarkdownText(m.text, color = KalivTheme.colors.textBody) },
+                            onRetry = if (m.error) ({ retry(i) }) else null,
+                        )
+                        if (m.context.isNotEmpty() && !m.streaming) {
+                            var showCitations by remember(m.at) { mutableStateOf(false) }
+                            Text(
+                                if (showCitations) "Skjul hvad der blev l\u00e6st"
+                                else "Vis hvad der blev l\u00e6st (${m.context.size})",
+                                color = KalivTheme.colors.textMuted,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .padding(start = 15.dp, top = 4.dp, bottom = 4.dp)
+                                    .clickable { showCitations = !showCitations },
+                            )
+                            if (showCitations) {
+                                dk.ternedal.modelrig.ui.chat.CitationsList(
+                                    chunks = m.context,
+                                    modifier = Modifier.padding(horizontal = 15.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // input bar — adjustResize + edge-to-edge: the keyboard arrives as the ime
@@ -2019,55 +2685,6 @@ private fun ChatScreen(
                     )
                 }
 
-                if (showAudit) {
-                    AlertDialog(
-                        onDismissRequest = { showAudit = false },
-                        confirmButton = {
-                            TextButton(onClick = { showAudit = false }) {
-                                Text("Luk", color = KalivTheme.colors.signal)
-                            }
-                        },
-                        title = { Text("Handlingslog", color = KalivTheme.colors.textHigh, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) },
-                        text = {
-                            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                                auditError?.let {
-                                    Text(it, color = KalivTheme.colors.danger, fontSize = 13.sp)
-                                }
-                                if (auditError == null && auditRows.isEmpty()) {
-                                    Text("Ingen handlinger registreret endnu.", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
-                                }
-                                auditRows.forEach { e ->
-                                    // Colour by outcome: a refusal or a failure should
-                                    // catch the eye, an ordinary success should not.
-                                    val c = when (e.outcome) {
-                                        "executed" -> KalivTheme.colors.success
-                                        "denied", "expired", "blocked" -> KalivTheme.colors.amber
-                                        "error" -> KalivTheme.colors.danger
-                                        else -> KalivTheme.colors.textMuted
-                                    }
-                                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                        Row {
-                                            Text(e.outcome.uppercase(), color = c, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(e.tool, color = KalivTheme.colors.textHigh, fontSize = 12.sp)
-                                            if (e.origin == "cloud") {
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("☁", fontSize = 12.sp)
-                                            }
-                                        }
-                                        Text(
-                                            "${e.ts} · ${e.risk}" + if (e.summary.isNotBlank()) " · ${e.summary.take(80)}" else "",
-                                            color = KalivTheme.colors.textMuted, fontSize = 11.sp, lineHeight = 15.sp,
-                                        )
-                                    }
-                                    HorizontalDivider(color = KalivTheme.colors.hairline)
-                                }
-                            }
-                        },
-                        containerColor = KalivTheme.colors.surfaceHigh,
-                    )
-                }
-
                 pendingTool?.let { prop ->
                     Surface(
                         color = KalivTheme.colors.surfaceHigh,
@@ -2182,138 +2799,121 @@ private fun ChatScreen(
                 // status skal kunne vises som separat card/state"), not a bare
                 // line of text. The card colour signals the state: an error is
                 // danger-tinted, an active turn is bronze.
-                if (recording || voiceBusy || voiceError != null) {
-                    val isError = voiceError != null && !recording && !voiceBusy
-                    val vt = when {
-                        recording -> "🎙  Optager… tryk igen for at sende"
-                        speaking && bargeInEnabled && hasMicPermission ->
-                            "🔊  Kaliv taler… ⏹ afbryder · mik %.0f (top %.0f, grænse %d)"
-                                .format(liveRms, peakRms, bargeInThreshold)
-                        speaking -> "🔊  Kaliv taler… tryk ⏹ for at afbryde"
-                        voiceBusy -> "🔊  Kaliv lytter og svarer… tryk ⏹ for at afbryde"
-                        else -> "Stemme-fejl: ${voiceError.orEmpty()}"
-                    }
-                    val accent = if (isError) KalivTheme.colors.danger else KalivTheme.colors.signal
-                    Surface(
-                        color = KalivTheme.colors.surfaceHigh,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
-                            .padding(bottom = 8.dp),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // a small state dot in the accent colour
-                            Box(
-                                Modifier.size(8.dp)
-                                    .background(accent, RoundedCornerShape(4.dp)),
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(vt, color = accent, fontSize = 16.sp, lineHeight = 22.sp)
-                        }
-                    }
+                voiceError?.takeIf { !recording && !voiceBusy }?.let { err ->
+                    Text(
+                        "Stemme-fejl: $err",
+                        color = KalivTheme.colors.danger,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 6.dp),
+                    )
                 }
                 modelError?.let {
                     Text(it, color = KalivTheme.colors.danger, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
                 }
                 if (wasInterrupted && !voiceBusy && !recording) {
                     Text(
-                        "✋ Du afbrød Kaliv — tryk 🎙 for at sige noget",
+                        "Du afbrød Kaliv — tryk på mikrofonen for at sige noget",
                         color = KalivTheme.colors.textMuted, fontSize = 12.sp,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Vision is chat-only (cloud/rig), not RAG. Requires a
-                    // vision-capable model; the button just attaches — the
-                    // model choice is the user's.
-                    if (mode != "rig" || !ragMode) {
+                val canSendNow = input.isNotBlank() || pendingImageB64 != null
+                ChatComposer(
+                    text = input,
+                    placeholder = if (rigOffline) "Skriv — den lægges i kø" else "Skriv til Kaliv …",
+                    onAttach = if (mode != "rig" || !ragMode) ({
+                        if (!busy) {
+                            pendingImageError = null
+                            pickImage.launch(arrayOf("image/*"))
+                        }
+                    }) else null,
+                    onMic = null,
+                    micSlot = if (mode == "rig") ({
                         Box(
-                            Modifier.size(48.dp).clickable(
-                                enabled = !busy,
-                                onClickLabel = "Vedhæft fil", role = Role.Button,
-                                onClick = {
-                                pendingImageError = null
-                                pickImage.launch(arrayOf("image/*"))
-                            }),
-                            contentAlignment = Alignment.Center,
-                        ) { Text("📎", fontSize = 20.sp) }
-                        Spacer(Modifier.width(2.dp))
-                    }
-                    // Kaliv Voice mic button: rig mode only (voice runs on the
-                    // rig). Tap to start recording, tap again to send. Disabled
-                    // while a voice turn is in flight.
-                    if (mode == "rig") {
-                        // One button, three jobs. While a turn is in flight it
-                        // becomes ⏹: the mic is busy anyway, so a separate stop
-                        // button would just be another thing to aim at.
-                        Box(
-                            Modifier.size(48.dp).clickable(
-                                enabled = !busy || voiceBusy,
-                                // Labelet foelger tilstanden: en skaermlaeser skal
-                                // kunne hoere FORSKEL paa at starte og stoppe.
+                            Modifier.size(37.dp).clickable(
+                                // Stemme kraever riggen: ASR koerer rig-side, ogsaa
+                                // naar svaret gaar via cloud (voiceConverseStream
+                                // rammer altid store.baseUrl).
+                                enabled = (!busy || voiceBusy) && !rigOffline,
                                 onClickLabel = if (recording) "Stop optagelse" else "Optag tale",
                                 role = Role.Button,
                                 onClick = {
-                                voiceError = null
-                                if (voiceBusy) {
-                                    stopVoiceTurn()
-                                } else if (!hasMicPermission) {
-                                    micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                } else if (recording) {
-                                    recording = false
-                                    val wav = voiceCapture.stopToWav()
-                                    if (wav != null) runVoiceTurn(wav) else voiceError = "ingen lyd optaget"
-                                } else {
-                                    wasInterrupted = false
-                                    try { voiceCapture.start(); recording = true }
-                                    catch (e: Exception) { voiceError = e.message ?: "kunne ikke optage" }
-                                }
-                            }),
+                                    // Al stemmeinteraktion bor i skaerm 6-overlayet;
+                                    // mic-tap aabner det (og starter optagelsen naar
+                                    // mikrofonen er givet). Under en igangvaerende
+                                    // tur aabnes overlayet i Taenker/Taler-tilstand.
+                                    voiceError = null
+                                    showVoice = true
+                                    if (!voiceBusy && !recording) {
+                                        if (hasMicPermission) {
+                                            wasInterrupted = false
+                                            startVoiceCaptureGuarded()
+                                        } else {
+                                            micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    }
+                                },
+                            ),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                when {
-                                    voiceBusy -> "⏹"
-                                    recording -> "⏺"
-                                    else -> "🎙"
-                                },
-                                fontSize = 20.sp,
-                            )
+                            if (voiceBusy) {
+                                Box(
+                                    Modifier.size(14.dp)
+                                        .background(KalivTheme.colors.danger, RoundedCornerShape(3.dp)),
+                                )
+                            } else {
+                                Icon(
+                                    painterResource(R.drawable.ic_kaliv_mic),
+                                    contentDescription = null,
+                                    tint = if (recording) KalivTheme.colors.accent else KalivTheme.colors.textMuted,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
                         }
-                        Spacer(Modifier.width(2.dp))
-                    }
-                    OutlinedTextField(
-                        value = input, onValueChange = { input = it },
-                        modifier = Modifier.weight(1f), enabled = !busy, maxLines = 5,
-                        placeholder = { Text("Skriv til Kaliv …") },
-                        shape = RoundedCornerShape(24.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    if (busy) {
-                        Box(
-                            Modifier.size(48.dp).clickable(
-                                onClickLabel = "Stop svaret", role = Role.Button,
-                                onClick = { activeCall?.cancel() },
+                    }) else null,
+                    onSend = {
+                        if (rigOffline) {
+                            // Riggen er væk: beskeden LÆGGES i kø. Den sendes
+                            // først når du selv trykker Send nu bagefter —
+                            // se OfflineQueueCard for hvorfor.
+                            queued = queueStore.add(input, System.currentTimeMillis())
+                            input = ""
+                        } else {
+                            onSend()
+                        }
+                    },
+                    sendEnabled = canSendNow && !busy,
+                    busy = busy,
+                    onStop = { activeCall?.cancel() },
+                    inputField = {
+                        BasicTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !busy,
+                            maxLines = 5,
+                            textStyle = TextStyle(
+                                fontFamily = KalivType.Inter,
+                                fontSize = 17.sp,
+                                color = KalivTheme.colors.textHigh,
                             ),
-                            contentAlignment = Alignment.Center,
-                        ) { StopGlyph(color = KalivTheme.colors.danger, modifier = Modifier.size(20.dp)) }
-                    } else {
-                        // Can send with text OR just an image (vision prompts
-                        // are often "what's in this?" with an image and no text).
-                        val canSend = input.isNotBlank() || pendingImageB64 != null
-                        Box(
-                            Modifier.size(48.dp).clickable(
-                                enabled = canSend, onClickLabel = "Send", role = Role.Button,
-                                onClick = onSend,
-                            ),
-                            contentAlignment = Alignment.Center,
-                        ) { SendGlyph(color = if (canSend) KalivTheme.colors.signal else KalivTheme.colors.textMuted, modifier = Modifier.size(26.dp)) }
-                    }
-                }
+                            cursorBrush = SolidColor(KalivTheme.colors.accent),
+                            decorationBox = { inner ->
+                                if (input.isEmpty()) {
+                                    Text(
+                                        // Skal spejle placeholder-param'en — den custom
+                                        // inputField forbigaar ChatComposers default
+                                        // (fund B fra Anders' screenshot 14/08).
+                                        if (rigOffline) "Skriv — den lægges i kø" else "Skriv til Kaliv …",
+                                        style = TextStyle(fontFamily = KalivType.Inter, fontSize = 17.sp),
+                                        color = KalivTheme.colors.faint,
+                                    )
+                                }
+                                inner()
+                            },
+                        )
+                    },
+                )
             }
         }
     }
@@ -2430,140 +3030,180 @@ private fun ConversationsScreen(
         if (query.isBlank()) convos else convos.filter { it.title.contains(query, ignoreCase = true) }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
-                    Text("Samtaler", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onNew) { Text("+ Ny", color = KalivTheme.colors.signal) }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = {
-                        val d = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(java.util.Date())
-                        exportLauncher.launch("kaliv-samtaler-$d.json")
-                    }) { Text("⬇ Eksportér alt", color = KalivTheme.colors.signal, fontSize = 12.sp) }
-                    TextButton(onClick = { importLauncher.launch(arrayOf("application/json")) }) {
-                        Text("⬆ Importér", color = KalivTheme.colors.signal, fontSize = 12.sp)
+    // -- Skaerm 7-hjaelpere: preview pr. samtale + tidsmaerker + grupper -----
+    var previews by remember { mutableStateOf(mapOf<Long, String>()) }
+    LaunchedEffect(convos) {
+        val snap = convos
+        val loaded = withContext(Dispatchers.IO) {
+            snap.associate { meta ->
+                val last = runCatching { db.loadMessages(meta.id).lastOrNull()?.second }.getOrNull()
+                meta.id to (last?.let { dk.ternedal.modelrig.ui.chat.previewFromMarkdown(it).take(90) } ?: "")
+            }
+        }
+        previews = loaded
+    }
+    fun timeLabel(ts: Long): String {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfToday = cal.timeInMillis
+        return when {
+            ts >= startOfToday -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
+            ts >= startOfToday - 86_400_000L -> "i g\u00e5r"
+            ts >= startOfToday - 6 * 86_400_000L ->
+                SimpleDateFormat("EEE", Locale.getDefault()).format(Date(ts)).trimEnd('.')
+            else -> fmt.format(Date(ts)).substringBefore(' ')
+        }
+    }
+    fun rowOf(c: ChatDb.ConvMeta): dk.ternedal.modelrig.ui.chat.ConvRowUi =
+        dk.ternedal.modelrig.ui.chat.ConvRowUi(
+            id = c.id,
+            title = c.title,
+            preview = previews[c.id] ?: "",
+            timeLabel = timeLabel(c.updatedAt),
+            cloud = c.source == "cloud",
+            active = c.id == activeConvId,
+        )
+    val startOfTodayMs = remember(convos) {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
+    var topMenu by remember { mutableStateOf(false) }
+    var rowMenuFor by remember { mutableStateOf<Long?>(null) }
+
+    Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        Column(
+            Modifier.fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 8.dp),
+        ) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                onBack = onBack,
+                onNew = onNew,
+                onMenu = { topMenu = true },
+                menuContent = {
+                    DropdownMenu(expanded = topMenu, onDismissRequest = { topMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("\u2b07 Eksport\u00e9r alt", fontSize = 13.sp) },
+                            onClick = {
+                                topMenu = false
+                                val d = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(java.util.Date())
+                                exportLauncher.launch("kaliv-samtaler-$d.json")
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("\u2b06 Import\u00e9r", fontSize = 13.sp) },
+                            onClick = { topMenu = false; importLauncher.launch(arrayOf("application/json")) },
+                        )
                     }
-                    ioStatus?.let {
-                        Spacer(Modifier.width(6.dp))
-                        Text(it,
-                            color = if (it.startsWith("✓")) KalivTheme.colors.success
-                                    else if (it.endsWith("…")) KalivTheme.colors.textMuted
-                                    else KalivTheme.colors.danger,
-                            fontSize = 11.sp)
-                    }
-                }
-                OutlinedTextField(
-                    value = query, onValueChange = { query = it },
-                    placeholder = { Text("Søg i titler…", fontSize = 13.sp) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                },
+            )
+            dk.ternedal.modelrig.ui.chat.ConversationsSearchField(
+                query = query,
+                onQuery = { query = it },
+                modifier = Modifier.padding(horizontal = 7.dp),
+            )
+            ioStatus?.let {
+                Text(
+                    it,
+                    color = if (it.startsWith("\u2713")) KalivTheme.colors.success
+                    else if (it.endsWith("\u2026")) KalivTheme.colors.textMuted
+                    else KalivTheme.colors.danger,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 9.dp, top = 6.dp),
                 )
+            }
+            // Inline-omdoebning (aabnes fra raekkens langtryks-menu)
+            renamingId?.let { rid ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 8.dp)
+                        .background(KalivTheme.colors.surface, RoundedCornerShape(KalivTokens.Radius.card))
+                        .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(KalivTokens.Radius.card))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = renameText, onValueChange = { renameText = it },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp, color = KalivTheme.colors.textHigh),
+                        cursorBrush = SolidColor(KalivTheme.colors.accent),
+                    )
+                    TextButton(
+                        enabled = renameText.isNotBlank(),
+                        onClick = {
+                            db.renameConversation(rid, renameText.trim())
+                            convos = db.listConversations()
+                            renamingId = null
+                        },
+                    ) { Text("Gem", color = if (renameText.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted) }
+                    TextButton(onClick = { renamingId = null }) { Text("\u2715", color = KalivTheme.colors.textMuted) }
+                }
             }
         }
         if (visible.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
-                    if (convos.isEmpty()) "Ingen samtaler endnu" else "Ingen match på \"$query\"",
+                    if (convos.isEmpty()) "Ingen samtaler endnu" else "Ingen match p\u00e5 \"$query\"",
                     color = KalivTheme.colors.textMuted, fontSize = 14.sp,
                 )
             }
         } else {
-            LazyColumn(
-                Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                items(visible, key = { it.id }) { c ->
-                    Surface(
-                        color = KalivTheme.colors.surface,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    ) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            if (renamingId == c.id) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    OutlinedTextField(
-                                        value = renameText, onValueChange = { renameText = it },
-                                        singleLine = true, modifier = Modifier.weight(1f),
-                                    )
-                                    TextButton(
-                                        enabled = renameText.isNotBlank(),
-                                        onClick = {
-                                            db.renameConversation(c.id, renameText.trim())
-                                            convos = db.listConversations()
-                                            renamingId = null
-                                        },
-                                    ) { Text("Gem", color = if (renameText.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted) }
-                                    TextButton(onClick = { renamingId = null }) { Text("✕", color = KalivTheme.colors.textMuted) }
-                                }
-                            } else {
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { onOpen(c.id) },
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            c.title.ifBlank { "(uden titel)" },
-                                            color = KalivTheme.colors.textHigh, fontSize = 14.sp,
-                                            maxLines = 1,
-                                        )
-                                        Spacer(Modifier.height(2.dp))
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            SourceBadge(c.source)
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(fmt.format(Date(c.updatedAt)), color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-                                        }
+            dk.ternedal.modelrig.ui.chat.ConversationsList(
+                today = visible.filter { it.updatedAt >= startOfTodayMs }.map { rowOf(it) },
+                earlier = visible.filter { it.updatedAt < startOfTodayMs }.map { rowOf(it) },
+                onOpen = { onOpen(it) },
+                onLongPress = { rowMenuFor = it },
+                modifier = Modifier.weight(1f).padding(horizontal = 15.dp),
+                rowMenu = { id ->
+                    DropdownMenu(expanded = rowMenuFor == id, onDismissRequest = { rowMenuFor = null }) {
+                        DropdownMenuItem(
+                            text = { Text("\u270e Omd\u00f8b", fontSize = 13.sp) },
+                            onClick = {
+                                rowMenuFor = null
+                                val c = convos.firstOrNull { it.id == id } ?: return@DropdownMenuItem
+                                renamingId = id; renameText = c.title
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Del", fontSize = 13.sp) },
+                            onClick = {
+                                rowMenuFor = null
+                                val c = convos.firstOrNull { it.id == id } ?: return@DropdownMenuItem
+                                val md = buildString {
+                                    appendLine("# ${c.title.ifBlank { "Kaliv-samtale" }}")
+                                    appendLine()
+                                    db.loadMessages(c.id).forEach { (role, content) ->
+                                        appendLine(if (role == "user") "**Du:**" else "**Assistent:**")
+                                        appendLine(content)
+                                        appendLine()
                                     }
                                 }
-                                Row {
-                                    TextButton(onClick = {
-                                        renamingId = c.id
-                                        renameText = c.title
-                                    }) { Text("✎", color = KalivTheme.colors.textMuted, fontSize = 13.sp) }
-                                    TextButton(onClick = {
-                                        val md = buildString {
-                                            appendLine("# ${c.title.ifBlank { "Kaliv-samtale" }}")
-                                            appendLine()
-                                            db.loadMessages(c.id).forEach { (role, content) ->
-                                                appendLine(if (role == "user") "**Du:**" else "**Assistent:**")
-                                                appendLine(content)
-                                                appendLine()
-                                            }
-                                        }
-                                        val intent = Intent(Intent.ACTION_SEND).apply {
-                                            type = "text/plain"
-                                            putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "Kaliv-samtale" })
-                                            putExtra(Intent.EXTRA_TEXT, md)
-                                        }
-                                        context.startActivity(Intent.createChooser(intent, "Del samtale"))
-                                    }) { Text("Del", color = KalivTheme.colors.signal, fontSize = 12.sp) }
-                                    TextButton(onClick = {
-                                        db.deleteConversation(c.id)
-                                        // Deleting the conversation we're in would
-                                        // leave the active convId dangling, so the
-                                        // next send / streaming finalize writes to a
-                                        // gone conversation -> FOREIGN KEY crash
-                                        // (seen on desktop 12/7; same bug here).
-                                        if (activeConvId == c.id) onActiveDeleted()
-                                        convos = db.listConversations()
-                                    }) { Text("Slet", color = KalivTheme.colors.danger, fontSize = 12.sp) }
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, c.title.ifBlank { "Kaliv-samtale" })
+                                    putExtra(Intent.EXTRA_TEXT, md)
                                 }
-                            }
-                        }
+                                context.startActivity(Intent.createChooser(intent, "Del samtale"))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Slet", color = KalivTheme.colors.danger, fontSize = 13.sp) },
+                            onClick = {
+                                rowMenuFor = null
+                                db.deleteConversation(id)
+                                if (id == activeConvId) onActiveDeleted()
+                                convos = db.listConversations()
+                            },
+                        )
                     }
-                }
-            }
+                },
+            )
         }
-        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
     }
 }
+
 
 /**
  * Model administration: installed models (with size + delete), currently
@@ -2626,19 +3266,21 @@ private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
     // with the same ingest contract the chat composer uses.
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var sources by remember { mutableStateOf<List<String>>(emptyList()) }
+    var details by remember { mutableStateOf<List<ModelRigClient.RagSource>>(emptyList()) }
+    val sources = details.map { it.name }
     var loading by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf<ModelRigClient.RagSource?>(null) }
 
     fun refresh() {
         loading = true
         scope.launch {
             val r = withContext(Dispatchers.IO) {
-                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSources() }
+                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).listRagSourceDetails() }
             }
             loading = false
-            sources = r.getOrDefault(emptyList())
+            details = r.getOrDefault(emptyList())
             error = r.exceptionOrNull()?.let { friendlyError(it) }
         }
     }
@@ -2677,59 +3319,228 @@ private fun KnowledgeScreen(store: TokenStore, onBack: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
-            Row(
-                Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 48dp touch target (design guide minimum)
-                TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text("‹ Tilbage", color = KalivTheme.colors.signal, fontSize = 16.sp)
-                }
-                Spacer(Modifier.weight(1f))
-                Text("Viden", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-                Spacer(Modifier.weight(1f))
-                TextButton(
-                    onClick = { pick.launch(arrayOf("*/*")) },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text("+ Tilføj", color = KalivTheme.colors.signal, fontSize = 16.sp) }
-            }
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 8.dp)) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                title = "Viden",
+                onBack = onBack,
+                onNew = { pick.launch(arrayOf("*/*")) },
+            )
+            dk.ternedal.modelrig.ui.chat.KnowledgeIntroNote(Modifier.padding(bottom = 15.dp))
         }
         status?.let {
             Text(it, color = KalivTheme.colors.signal, fontSize = 14.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         }
         error?.let {
             Text(it, color = KalivTheme.colors.danger, fontSize = 14.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         }
         when {
-            loading -> Text("Henter…", color = KalivTheme.colors.textMuted, fontSize = 16.sp,
-                modifier = Modifier.padding(16.dp))
-            sources.isEmpty() -> Column(Modifier.fillMaxWidth().padding(32.dp),
+            loading -> Text("Henter\u2026", color = KalivTheme.colors.textMuted, fontSize = 16.sp,
+                modifier = Modifier.padding(20.dp))
+            sources.isEmpty() -> Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Ingen dokumenter endnu.", color = KalivTheme.colors.textHigh, fontSize = 16.sp)
                 Spacer(Modifier.height(6.dp))
-                Text("Tilføj PDF, DOCX, PPTX, HTML eller tekst, så kan Kaliv trække på dem.",
+                Text("Tilf\u00f8j PDF, DOCX, PPTX, HTML eller tekst, s\u00e5 kan Kaliv tr\u00e6kke p\u00e5 dem.",
                     color = KalivTheme.colors.textMuted, fontSize = 16.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(Modifier.height(20.dp))
+                dk.ternedal.modelrig.ui.chat.KnowledgeList(
+                    docs = emptyList(),
+                    onAdd = { pick.launch(arrayOf("*/*")) },
+                )
             }
-            else -> androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
-                items(sources.size) { i ->
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("📄", fontSize = 18.sp)
-                        Spacer(Modifier.width(12.dp))
-                        Text(sources[i], color = KalivTheme.colors.textHigh, fontSize = 16.sp)
+            else -> dk.ternedal.modelrig.ui.chat.KnowledgeList(
+                docs = details.map {
+                    dk.ternedal.modelrig.ui.chat.KnowledgeDocUi(
+                        name = it.name,
+                        badge = dk.ternedal.modelrig.ui.chat.knowledgeBadgeFor(it.name),
+                        statsLine = dk.ternedal.modelrig.ui.chat.knowledgeStatsLine(it.chunks, it.lastIngestedAt),
+                        enabled = it.enabled,
+                    )
+                },
+                onAdd = { pick.launch(arrayOf("*/*")) },
+                onDelete = { doc -> deleting = details.firstOrNull { it.name == doc.name } },
+                onToggle = { doc, want ->
+                    val base = store.baseUrl
+                    val tok = store.token
+                    if (base != null && tok != null) {
+                        scope.launch {
+                            val res = withContext(Dispatchers.IO) {
+                                runCatching { ModelRigClient(base, tok).setRagSourceEnabled(doc.name, want) }
+                            }
+                            res.onSuccess { actual ->
+                                // RIGGENS svar vinder — ikke det vi håbede på.
+                                details = details.map { d ->
+                                    if (d.name == doc.name) d.copy(enabled = actual) else d
+                                }
+                                status = if (actual) "\u201c${doc.name}\u201d bruges igen"
+                                         else "\u201c${doc.name}\u201d bruges ikke l\u00e6ngere \u2014 teksten er der stadig"
+                            }.onFailure { error = "Kunne ikke \u00e6ndre kilden." }
+                        }
                     }
-                    HorizontalDivider(color = KalivTheme.colors.hairline)
-                }
-            }
+                },
+                modifier = Modifier.weight(1f).padding(horizontal = 17.dp),
+            )
         }
+        deleting?.let { target ->
+            dk.ternedal.modelrig.ui.chat.KnowledgeDeleteConfirm(
+                name = target.name,
+                chunks = target.chunks,
+                busy = loading,
+                onConfirm = {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) {
+                            runCatching {
+                                ModelRigClient(store.baseUrl ?: "", store.token).deleteRagSource(target.name)
+                            }
+                        }
+                        deleting = null
+                        r.onSuccess { removed ->
+                            status = "Fjernet \u00b7 $removed udsnit slettet"
+                            error = null
+                            refresh()
+                        }.onFailure { error = friendlyError(it) }
+                    }
+                },
+                onCancel = { deleting = null },
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = 8.dp),
+            )
+        }
+        if (details.isNotEmpty()) {
+            dk.ternedal.modelrig.ui.chat.KnowledgeCorpusFooter(
+                sourceCount = details.size,
+                chunkCount = details.sumOf { it.chunks },
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = 6.dp),
+            )
+        }
+        dk.ternedal.modelrig.ui.chat.KnowledgeFooterNote(
+            Modifier.padding(horizontal = 17.dp, vertical = 10.dp),
+        )
+    }
+}
+
+
+@Composable
+private fun AuditScreen(store: TokenStore, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var rows by remember { mutableStateOf<List<dk.ternedal.modelrig.net.AuditEntry>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var filter by remember { mutableStateOf<String?>(null) }  // null = alle
+    var filterMenu by remember { mutableStateOf(false) }
+
+    fun refresh() {
+        loading = true; error = null
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { ModelRigClient(store.baseUrl ?: "", store.token).toolsAudit(100) }
+            }
+            rows = r.getOrDefault(emptyList())
+            error = r.exceptionOrNull()?.let { friendlyError(it) }
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { refresh() }
+
+    fun parseTs(ts: String): Long =
+        runCatching { java.time.OffsetDateTime.parse(ts).toInstant().toEpochMilli() }
+            .getOrElse {
+                runCatching {
+                    java.time.LocalDateTime.parse(ts.replace(" ", "T"))
+                        .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }.getOrElse { 0L }
+            }
+    fun badgeFor(outcome: String): Pair<String, dk.ternedal.modelrig.ui.chat.AuditBadgeKind> = when (outcome) {
+        "executed" -> "Udf\u00f8rt" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Ok
+        "denied" -> "Afvist" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Warn
+        "blocked" -> "Blokeret" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Warn
+        "expired" -> "Udl\u00f8bet" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Warn
+        "error" -> "Fejl" to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Error
+        else -> outcome to dk.ternedal.modelrig.ui.chat.AuditBadgeKind.Neutral
+    }
+    fun rowOf(e: dk.ternedal.modelrig.net.AuditEntry): dk.ternedal.modelrig.ui.chat.AuditRowUi {
+        val ms = parseTs(e.ts)
+        val time = if (ms > 0L) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms)) else e.ts
+        val (b, k) = badgeFor(e.outcome)
+        return dk.ternedal.modelrig.ui.chat.AuditRowUi(
+            title = e.summary.ifBlank { e.tool },
+            sub = buildString {
+                append("V\u00e6rkt\u00f8j: ${e.tool} \u00b7 $time")
+                if (e.risk.isNotBlank()) append(" \u00b7 ${e.risk}")
+            },
+            badge = b,
+            kind = k,
+            cloud = e.origin == "cloud",
+            tool = e.tool,
+        )
+    }
+
+    val startOfToday = remember {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
+    val visible = rows.filter { e ->
+        when (filter) {
+            "ok" -> e.outcome == "executed"
+            "warn" -> e.outcome in setOf("denied", "blocked", "expired")
+            "error" -> e.outcome == "error"
+            else -> true
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 8.dp)) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                title = "Handlingslog",
+                onBack = onBack,
+                onMenu = { filterMenu = true },
+                menuIcon = R.drawable.ic_kaliv_filter,
+                menuContent = {
+                    DropdownMenu(expanded = filterMenu, onDismissRequest = { filterMenu = false }) {
+                        listOf(
+                            null to "Alle",
+                            "ok" to "Udf\u00f8rt",
+                            "warn" to "Afvist / blokeret / udl\u00f8bet",
+                            "error" to "Fejl",
+                        ).forEach { (key, label) ->
+                            DropdownMenuItem(
+                                text = { Text(if (filter == key) "\u2713 $label" else label, fontSize = 13.sp) },
+                                onClick = { filter = key; filterMenu = false },
+                            )
+                        }
+                    }
+                },
+            )
+            dk.ternedal.modelrig.ui.chat.KnowledgeIntroNote(
+                Modifier.padding(bottom = 13.dp),
+                text = "Alt hvad v\u00e6rkt\u00f8jer og agent udf\u00f8rer, logges her. Kun p\u00e5 din rig.",
+            )
+        }
+        error?.let {
+            Text(it, color = KalivTheme.colors.danger, fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        }
+        when {
+            loading -> Text("Henter\u2026", color = KalivTheme.colors.textMuted, fontSize = 16.sp,
+                modifier = Modifier.padding(20.dp))
+            visible.isEmpty() -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (rows.isEmpty()) "Ingen handlinger registreret endnu"
+                    else "Ingen handlinger matcher filtret",
+                    color = KalivTheme.colors.textMuted, fontSize = 14.sp,
+                )
+            }
+            else -> dk.ternedal.modelrig.ui.chat.AuditGroupedList(
+                today = visible.filter { parseTs(it.ts) >= startOfToday }.map { rowOf(it) },
+                earlier = visible.filter { parseTs(it.ts) < startOfToday }.map { rowOf(it) },
+                modifier = Modifier.weight(1f).padding(horizontal = 20.dp),
+            )
+        }
+        Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars))
     }
 }
 
@@ -2763,122 +3574,140 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
     }
     LaunchedEffect(Unit) { refresh() }
 
-    Column(Modifier.fillMaxSize()) {
-        Surface(color = KalivTheme.colors.surface, tonalElevation = 2.dp) {
-            Row(
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onBack) { Text("←", color = KalivTheme.colors.textHigh, fontSize = 18.sp) }
-                Text("Modeller", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { refresh() }) { Text(if (loading) "…" else "Genindlæs", color = KalivTheme.colors.signal) }
-            }
+    var pullDone by remember { mutableStateOf(0L) }
+    var pullTotal by remember { mutableStateOf(0L) }
+    var showPull by remember { mutableStateOf(false) }
+    var rowMenuFor by remember { mutableStateOf<String?>(null) }
+
+    Column(Modifier.fillMaxSize().background(KalivTheme.colors.background)) {
+        Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 8.dp)) {
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                title = "Modeller",
+                onBack = onBack,
+                onNew = { showPull = true },
+            )
+            val vramInUse = running.sumOf { it.sizeVramBytes }
+            dk.ternedal.modelrig.ui.chat.ModelsVramLine(
+                text = if (vramInUse > 0)
+                    "Din rig \u00b7 %.1f GB VRAM i brug".format(vramInUse / 1_000_000_000.0)
+                else "Din rig \u00b7 ingen modeller i hukommelsen",
+                onReload = { refresh() },
+                modifier = Modifier.padding(bottom = 13.dp),
+            )
         }
 
         if (!store.hasRig) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Kræver rig-forbindelse", color = KalivTheme.colors.textMuted, fontSize = 14.sp)
+                Text("Kr\u00e6ver rig-forbindelse", color = KalivTheme.colors.textMuted, fontSize = 14.sp)
             }
-            return@Column
-        }
-
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
-            // ---- pull new model ----
-            Text("Hent ny model", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = pullName, onValueChange = { pullName = it },
-                    placeholder = { Text("fx llama3.2:3b", fontSize = 13.sp) },
-                    singleLine = true, enabled = !pulling,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    enabled = !pulling && pullName.isNotBlank(),
-                    onClick = {
-                        val name = pullName.trim()
-                        pulling = true; pullError = null; pullStatus = "Starter…"
-                        scope.launch {
-                            val err = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    client.pullModel(name) { status, completed, total ->
-                                        scope.launch {
-                                            pullStatus = if (total > 0) {
-                                                val pct = (completed * 100 / total)
-                                                "$status ($pct% — ${completed / 1_000_000}MB/${total / 1_000_000}MB)"
-                                            } else status
+        } else {
+            loadError?.let {
+                Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            pullError?.let {
+                Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            pullStatus?.let {
+                if (!pulling) Text(it, color = KalivTheme.colors.signal, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
+            if (showPull && !pulling) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 17.dp, vertical = 6.dp)
+                        .background(KalivTheme.colors.surface, RoundedCornerShape(KalivTokens.Radius.card))
+                        .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, RoundedCornerShape(KalivTokens.Radius.card))
+                        .padding(horizontal = 15.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicTextField(
+                        value = pullName, onValueChange = { pullName = it },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                        textStyle = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp, color = KalivTheme.colors.textHigh),
+                        cursorBrush = SolidColor(KalivTheme.colors.accent),
+                        decorationBox = { inner ->
+                            if (pullName.isEmpty()) Text("fx llama3.2:3b",
+                                style = TextStyle(fontFamily = KalivType.Inter, fontSize = 16.sp),
+                                color = KalivTheme.colors.faint)
+                            inner()
+                        },
+                    )
+                    TextButton(
+                        enabled = pullName.isNotBlank(),
+                        onClick = {
+                            val name = pullName.trim()
+                            pulling = true; pullError = null; pullStatus = null
+                            pullDone = 0L; pullTotal = 0L
+                            scope.launch {
+                                val err = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        client.pullModel(name) { _, completed, total ->
+                                            scope.launch { pullDone = completed; pullTotal = total }
                                         }
-                                    }
-                                }.exceptionOrNull()
+                                    }.exceptionOrNull()
+                                }
+                                pulling = false
+                                if (err != null) { pullError = err.message }
+                                else {
+                                    pullStatus = "F\u00e6rdig og verificeret: $name"
+                                    pullName = ""; showPull = false
+                                    refresh()
+                                }
                             }
-                            pulling = false
-                            if (err != null) {
-                                pullError = err.message; pullStatus = null
-                            } else {
-                                pullStatus = "Færdig og verificeret: $name"; pullName = ""
-                                refresh()
-                            }
-                        }
-                    },
-                ) { Text(if (pulling) "Henter…" else "Hent") }
+                        },
+                    ) { Text("Hent", color = if (pullName.isNotBlank()) KalivTheme.colors.signal else KalivTheme.colors.textMuted) }
+                }
             }
-            pullStatus?.let { Spacer(Modifier.height(6.dp)); Text(it, color = KalivTheme.colors.signal, fontSize = 12.sp) }
-            pullError?.let { Spacer(Modifier.height(6.dp)); Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 12.sp) }
-
-            Spacer(Modifier.height(20.dp))
-
-            // ---- running now ----
-            Text("Kører nu", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            if (running.isEmpty()) {
-                Text("Ingen modeller indlæst i hukommelsen lige nu", color = KalivTheme.colors.textMuted, fontSize = 13.sp)
-            } else {
-                running.forEach { m ->
-                    Surface(
-                        color = KalivTheme.colors.surface, shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(m.name, color = KalivTheme.colors.textHigh, fontSize = 13.sp)
-                                Text(
-                                    "${m.sizeVramBytes / 1_000_000_000.0} GB VRAM",
-                                    color = KalivTheme.colors.textMuted, fontSize = 11.sp,
+            androidx.compose.foundation.lazy.LazyColumn(
+                Modifier.weight(1f).padding(horizontal = 17.dp),
+                verticalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                if (pulling) {
+                    item {
+                        dk.ternedal.modelrig.ui.chat.PullProgressCard(
+                            name = pullName.trim().ifEmpty { "model" },
+                            progressText = if (pullTotal > 0)
+                                "Henter \u00b7 %.1f af %.1f GB".format(pullDone / 1e9, pullTotal / 1e9)
+                            else "Henter \u2026",
+                            fraction = if (pullTotal > 0) pullDone.toFloat() / pullTotal else 0f,
+                        )
+                    }
+                }
+                items(installed.size, key = { installed[it].name }) { i ->
+                    val m = installed[i]
+                    val loadedVram = running.firstOrNull { it.name == m.name }?.sizeVramBytes
+                    androidx.compose.foundation.layout.Box {
+                        dk.ternedal.modelrig.ui.chat.InstalledModelCard(
+                            m = dk.ternedal.modelrig.ui.chat.InstalledModelUi(
+                                name = m.name,
+                                standard = m.name == store.model,
+                                loaded = loadedVram != null,
+                                metaLabel = buildString {
+                                    append("%.1f GB".format(m.sizeBytes / 1e9))
+                                    val p = dk.ternedal.modelrig.ui.chat.paramsLabelFor(m.name)
+                                    if (p.isNotEmpty()) append(" \u00b7 $p")
+                                    if (loadedVram != null) append(" \u00b7 %.1f GB VRAM".format(loadedVram / 1e9))
+                                },
+                            ),
+                            onLongPress = { rowMenuFor = m.name },
+                        )
+                        DropdownMenu(expanded = rowMenuFor == m.name, onDismissRequest = { rowMenuFor = null }) {
+                            if (m.name != store.model) {
+                                DropdownMenuItem(
+                                    text = { Text("S\u00e6t som standard", fontSize = 13.sp) },
+                                    onClick = { rowMenuFor = null; store.model = m.name },
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text("Slet", color = KalivTheme.colors.danger, fontSize = 13.sp) },
+                                onClick = { rowMenuFor = null; confirmDelete = m.name },
+                            )
                         }
                     }
                 }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            // ---- installed ----
-            Text("Installeret", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            Spacer(Modifier.height(8.dp))
-            loadError?.let { Text("Fejl: ${friendlyError(it)}", color = KalivTheme.colors.danger, fontSize = 12.sp); Spacer(Modifier.height(6.dp)) }
-            installed.forEach { m ->
-                Surface(
-                    color = KalivTheme.colors.surface, shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(m.name, color = KalivTheme.colors.textHigh, fontSize = 13.sp)
-                            Text("${m.sizeBytes / 1_000_000_000.0} GB", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-                        }
-                        TextButton(onClick = { confirmDelete = m.name }) { Text("Slet", color = KalivTheme.colors.danger, fontSize = 12.sp) }
-                    }
+                item {
+                    dk.ternedal.modelrig.ui.chat.KalivOutlineActionCard("Hent ny model", { showPull = true })
                 }
             }
         }
@@ -2889,7 +3718,7 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Slet $name?") },
-            text = { Text("Dette kan ikke fortrydes — modellen skal hentes igen for at bruges.", fontSize = 13.sp) },
+            text = { Text("Dette kan ikke fortrydes \u2014 modellen skal hentes igen for at bruges.", fontSize = 13.sp) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = null
@@ -2899,10 +3728,11 @@ private fun ModelsScreen(store: TokenStore, onBack: () -> Unit) {
                     }
                 }) { Text("Slet", color = KalivTheme.colors.danger) }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annullér", color = KalivTheme.colors.textMuted) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Annull\u00e9r", color = KalivTheme.colors.textMuted) } },
         )
     }
 }
+
 
 /**
  * Fullscreen cloud model picker -- replaces the old cramped dropdown that
@@ -3011,25 +3841,6 @@ private fun CloudModelPickerScreen(store: TokenStore, forVoice: Boolean = false,
 }
 
 @Composable
-private fun ModelChip(label: String, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = KalivTheme.colors.surfaceHigh,
-        // 48dp touch target (design guide). heightIn on the Surface gives the
-        // height; the inner Box centres the label WITHOUT fillMaxHeight -- that
-        // was filling the parent Row's unbounded height and stretching the whole
-        // header down the screen (v1.34.0 regression).
-        modifier = Modifier.heightIn(min = 48.dp).clickable(onClick = onClick),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(label, color = KalivTheme.colors.textHigh, fontSize = 15.sp,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
-        }
-    }
-}
-
-@Composable
 private fun SourceBadge(mode: String) {
     val (label, color, onColor) = when (mode) {
         "cloud" -> Triple("☁ Cloud", KalivTheme.colors.amber, KalivTheme.colors.onSignal)
@@ -3042,29 +3853,6 @@ private fun SourceBadge(mode: String) {
             fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
-    }
-}
-
-
-@Composable
-private fun SendGlyph(color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        val w = size.width; val h = size.height
-        val p = Path().apply {
-            moveTo(w * 0.08f, h * 0.12f)
-            lineTo(w * 0.92f, h * 0.5f)
-            lineTo(w * 0.08f, h * 0.88f)
-            lineTo(w * 0.30f, h * 0.5f)
-            close()
-        }
-        drawPath(p, color)
-    }
-}
-
-@Composable
-private fun StopGlyph(color: Color, modifier: Modifier) {
-    Canvas(modifier) {
-        drawRoundRect(color = color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.18f))
     }
 }
 
@@ -3093,93 +3881,6 @@ private fun ThinkingIndicator(status: String = TurnStatus.THINKING) {
         )
     } else {
         Text(status, color = KalivTheme.colors.textMuted, fontSize = 15.sp, lineHeight = 21.sp)
-    }
-}
-
-@Composable
-private fun Bubble(m: Msg, onRetry: (() -> Unit)? = null) {
-    val isUser = m.role == "user"
-    val maxW = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Surface(
-            color = if (isUser) KalivTheme.colors.signal else KalivTheme.colors.surfaceHigh,
-            shape = RoundedCornerShape(
-                topStart = 16.dp, topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp,
-            ),
-            modifier = Modifier.widthIn(max = maxW),
-        ) {
-            Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Column {
-                    // Spoken replies say which brain answered -- otherwise it's
-                    // invisible whether the rig or a cloud model did the thinking.
-                    if (!isUser && m.voiceModel != null) {
-                        Row(Modifier.padding(bottom = 6.dp)) {
-                            Surface(shape = RoundedCornerShape(999.dp), color = KalivTheme.colors.surfaceHigh) {
-                                Text(
-                                    (if (m.voiceViaCloud) "☁ " else "◈ ") + "🎙 ${m.voiceModel}",
-                                    fontSize = 10.sp,
-                                    color = if (m.voiceViaCloud) KalivTheme.colors.signal else KalivTheme.colors.textMuted,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                )
-                            }
-                        }
-                    }
-                    if (!isUser && m.fellBackToCloud) {
-                        Row(Modifier.padding(bottom = 6.dp)) {
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = KalivTheme.colors.surfaceHigh,
-                            ) {
-                                Text(
-                                    "☁ via cloud (rig utilgængelig)",
-                                    fontSize = 10.sp, color = KalivTheme.colors.textMuted,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                )
-                            }
-                        }
-                    }
-                    if (!isUser && m.sources.isNotEmpty()) {
-                        Row(Modifier.padding(bottom = 6.dp)) {
-                            // distinct(): a source split into several chunks is
-                            // still one source -- the RAG answer returns one
-                            // chip per matched chunk, so without this a single
-                            // file cited twice showed as two identical chips
-                            // (seen on-device 7/7: "test" appeared twice).
-                            m.sources.distinct().take(4).forEach { s ->
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = KalivTheme.colors.surfaceHigh,
-                                    modifier = Modifier.padding(end = 4.dp),
-                                ) {
-                                    Text(
-                                        s, fontSize = 10.sp, color = KalivTheme.colors.textMuted,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    when {
-                        isUser -> Text(m.text, color = KalivTheme.colors.onSignal, fontSize = 15.sp, lineHeight = 21.sp)
-                        m.error -> Text(m.text, color = KalivTheme.colors.danger, fontSize = 14.sp, lineHeight = 20.sp)
-                        m.streaming && m.text.isEmpty() -> ThinkingIndicator(m.status)
-                        m.streaming -> Text(m.text + "▍", color = KalivTheme.colors.textHigh, fontSize = 15.sp, lineHeight = 21.sp)
-                        else -> MarkdownText(m.text, color = KalivTheme.colors.textHigh)
-                    }
-                    if (m.error && onRetry != null) {
-                        Spacer(Modifier.height(6.dp))
-                        TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) {
-                            Text("↻ Prøv igen", color = KalivTheme.colors.signal, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

@@ -1,6 +1,11 @@
 package proxy
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -151,6 +156,18 @@ func (c *Client) forward(
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
+	// Integrity attestations for renderer clients (body id, package and
+	// member digests) ride on X-BodyRig-* and are meaningless without a way
+	// to reach the client. A prefix, not a blanket copy: upstream internals
+	// still stop here.
+	for name, values := range resp.Header {
+		if !strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bodyrig-") {
+			continue
+		}
+		for _, v := range values {
+			w.Header().Add(name, v)
+		}
+	}
 	w.WriteHeader(resp.StatusCode)
 
 	flusher, _ := w.(http.Flusher)
@@ -172,6 +189,55 @@ func (c *Client) forward(
 }
 
 // Reachable does a short GET against HealthPath to check upstream availability.
+// GetJSON reads an upstream endpoint into out. Unlike Forward it does not
+// touch the caller's ResponseWriter — the backend needs the DATA when it acts
+// on the upstream's behalf (e.g. unloading models) rather than relaying.
+func (c *Client) GetJSON(ctx context.Context, upstreamPath string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+upstreamPath, nil)
+	if err != nil {
+		return err
+	}
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("upstream %s returned %d", upstreamPath, resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// PostJSON sends body as JSON and discards the response body, returning an
+// error for any non-2xx status so callers cannot mistake a refusal for success.
+func (c *Client) PostJSON(ctx context.Context, upstreamPath string, body any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+upstreamPath, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("upstream %s returned %d", upstreamPath, resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *Client) Reachable() bool {
 	client := &http.Client{Timeout: 3 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, c.BaseURL+c.HealthPath, nil)

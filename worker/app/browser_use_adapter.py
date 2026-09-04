@@ -36,7 +36,7 @@ from .browser_use_network_guard import (
 from .research_contract import ResearchContractError, ResearchRequest, SourceReceipt
 from .web_fetch import FetchTrace, WebFetchError
 
-SUPPORTED_BROWSER_USE_VERSION = "0.13.7"
+SUPPORTED_BROWSER_USE_VERSION = "0.13.8"
 VERIFIED_SOURCE_MEDIA_TYPE = "application/vnd.modelrig.verified-source+json"
 READ_ONLY_EXCLUDED_ACTIONS = (
     "click",

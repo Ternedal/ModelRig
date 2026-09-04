@@ -1,9 +1,10 @@
-"""Loopback-only read surface for the T-044 Control Center status contract.
+"""Loopback-only read surfaces for the T-044 Control Center contracts.
 
-The worker owns normalization because it already owns worker/model readiness and
-Agent 3 validation.  A remote client never calls this route directly: the
-Bearer-authenticated Go backend will be the only remote boundary in the next
-isolated layer.  Missing backend observation headers fail closed as ``unknown``.
+The worker owns normalization because it already owns worker/model readiness,
+Agent 3 validation and the durable scheduler stores. A remote client never calls
+these routes directly: the Bearer-authenticated Go backend is the only remote
+boundary. The schedule-history route is deliberately observation-only and uses
+a separate read projection that never instantiates the writer stores.
 """
 from __future__ import annotations
 
@@ -15,12 +16,17 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from .control_center_privacy import SCHEMA as PRIVACY_SCHEMA
+from .control_center_privacy import build_control_center_privacy
+from .control_center_schedule_history import build_control_center_schedule_history
 from .control_center_status import build_control_center_status
 from .netguard import is_loopback
 
 HealthProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
 Agent3Provider = Callable[[], Mapping[str, Any]]
 RoutingProvider = Callable[[], Mapping[str, Any]]
+ScheduleHistoryProvider = Callable[[], Mapping[str, Any]]
+PrivacyProvider = Callable[[], Mapping[str, Any]]
 
 
 def _loopback_allowed(request: Request) -> bool:
@@ -111,7 +117,7 @@ def _default_agent3_provider() -> Mapping[str, Any]:
 
 
 def _default_routing_provider() -> Mapping[str, Any]:
-    # Normal chat is still Agent v2.  Agent 3 is an explicit developer surface,
+    # Normal chat is still Agent v2. Agent 3 is an explicit developer surface,
     # represented by its own component readiness instead of a fake fallback.
     return {
         "configured_surface": "agent_v2",
@@ -180,11 +186,35 @@ def _health_components(
     }
 
 
+def _privacy_failure(exc: Exception) -> dict[str, Any]:
+    """Fail closed without leaking provider messages or inventing permissions."""
+    return {
+        "schema": PRIVACY_SCHEMA,
+        "evidence_state": "unknown",
+        "reason": f"provider_error:{type(exc).__name__}",
+        "tool_result_egress": None,
+        "common_data_sharing": {
+            "state": "unknown",
+            "runtime_integrated": False,
+            "reason": "privacy_provider_unavailable",
+        },
+        "scoped_permissions": {
+            "state": "unknown",
+            "count": None,
+            "revocation_supported": False,
+            "reason": "privacy_provider_unavailable",
+        },
+        "production_activation": False,
+    }
+
+
 def build_control_center_router(
     *,
     health_provider: HealthProvider = _default_health_provider,
     agent3_provider: Agent3Provider = _default_agent3_provider,
     routing_provider: RoutingProvider = _default_routing_provider,
+    schedule_history_provider: ScheduleHistoryProvider = build_control_center_schedule_history,
+    privacy_provider: PrivacyProvider = build_control_center_privacy,
     loopback_allowed: Callable[[Request], bool] = _loopback_allowed,
     clock: Callable[[], float] = time.time,
 ) -> APIRouter:
@@ -217,16 +247,45 @@ def build_control_center_router(
             routing = routing_provider()
         except Exception as exc:
             routing = {"detail": f"provider_error:{type(exc).__name__}"}
+        try:
+            privacy_raw = privacy_provider()
+            if not isinstance(privacy_raw, Mapping):
+                raise TypeError("privacy provider returned a non-object")
+            privacy = dict(privacy_raw)
+        except Exception as exc:
+            privacy = _privacy_failure(exc)
 
         components: dict[str, Any] = {
             "backend": _backend_component(request),
             **_health_components(health, observed_at=now),
             "agent3": agent3,
         }
-        return build_control_center_status(
+        payload = build_control_center_status(
             components,
             routing,
             now=now,
         )
+        # Additive v1 field. Backend forwards the versioned object unchanged;
+        # older clients ignore it, while Control Center clients can adopt it
+        # without a second remote authority or a duplicated policy route.
+        payload["privacy"] = privacy
+        return payload
+
+    @router.get("/schedules")
+    def control_center_schedules(request: Request) -> dict[str, Any]:
+        _require_loopback(request, loopback_allowed)
+        try:
+            payload = schedule_history_provider()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"control center schedule history unavailable:{type(exc).__name__}",
+            ) from None
+        if not isinstance(payload, Mapping):
+            raise HTTPException(
+                status_code=503,
+                detail="control center schedule history unavailable:TypeError",
+            )
+        return dict(payload)
 
     return router

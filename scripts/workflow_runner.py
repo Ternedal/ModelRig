@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -95,9 +96,20 @@ def run_workflow(
             else:
                 decision = spec.get("decision", "approve")
                 events.append({"type": "decision", "decision": decision})
-                d2 = post("/tools/confirm", {
+                # Workflow specs use the human-facing word "reject" because the
+                # evaluator must preserve what the scenario asked us to do. The
+                # worker wire contract deliberately uses approve|deny. Translate
+                # only at the boundary; never rewrite the recorded evidence.
+                wire_decision = "deny" if decision == "reject" else decision
+                # This confirmation belongs to /tools/chat, so use the chat-aware
+                # continuation endpoint. The generic /tools/confirm executes the
+                # write but returns only {status, tool, result}; that made a real
+                # note_append invisible to record_turn() and also discarded the
+                # model's post-write answer. /tools/confirm/chat surfaces the
+                # executed_write marker and continues the parked turn.
+                d2 = post("/tools/confirm/chat", {
                     "confirmation_id": d.get("confirmation_id"),
-                    "decision": decision,
+                    "decision": wire_decision,
                 })
                 record_turn(d2)
                 status = d2.get("status") or "ok"
@@ -108,6 +120,32 @@ def run_workflow(
     except Exception as e:  # a transport failure is a real outcome, not a crash
         status = "error"
         error = f"{type(e).__name__}: {e}"
+        # EN UDLOEBET BEKRAEFTELSE ER IKKE EN TRANSPORTFEJL. Bekraeftelsen
+        # lever CONFIRM_TTL_SECONDS = 60s; modellen brugte 20/8 op til 38s pr.
+        # tur. Loeb den forbi, svarede workeren 410, og ALT hvad denne except
+        # fangede blev til det samme "error".
+        #
+        # Konsekvens: W-11 kunne ikke skelne "afvisningen virkede" fra
+        # "kortet naaede at udloebe", og fejlede i alle 22 runder uden at
+        # nogen kunne se hvorfor. Scoringen sagde "status='error', forventet
+        # 'denied'" -- hvilket lyder som en modelfejl og ikke er det.
+        #
+        # Statuskoden ER svaret. Den skal med i transskriptionen.
+        # httpx names it status_code; urllib-style clients say code/status.
+        # Reading only .status left today's 422 unmapped -- the transcript
+        # said bare "error" while the exception text carried the real code.
+        resp = getattr(e, "response", None)
+        kode = (
+            getattr(e, "code", None)
+            or getattr(resp, "status_code", None)
+            or getattr(resp, "status", None)
+        )
+        if kode:
+            error = f"HTTP {kode}: {error}"
+            if int(kode) == 410:
+                status = "expired"
+            elif int(kode) == 409:
+                status = "already-used"
 
     return {
         "events": events,
@@ -144,7 +182,25 @@ def main() -> int:
         return r.json()
 
     doc = json.loads(args.spec.read_text(encoding="utf-8"))
+    # STIEN SKAL VAERE DEN VAERKTOEJET FAKTISK SKRIVER TIL.
+    #
+    # Spec'en pegede paa ~/kaliv/workflow-eval-scratch.md. note_append skriver
+    # til <tools_dir>/notes.md, hvor tools_dir er KALIV_TOOLS_DIR eller
+    # ~/Documents/Kaliv. To forskellige filer -- saa scratch_note_grew kunne
+    # ALDRIG blive sandt, og W-08 og W-09 var doemt til at fejle uanset hvor
+    # godt modellen opfoerte sig. 20/8 fejlede de i alle 22 runder, og det saa
+    # ud som om modellen ikke kaldte note_append.
+    #
+    # Vi udleder stien praecis som workeren goer, saa de to ikke kan glide fra
+    # hinanden igen. Spec'ens vaerdi bruges kun hvis miljoeet ikke siger noget.
     scratch = doc.get("scratch_note_path")
+    _tools_dir = os.environ.get("KALIV_TOOLS_DIR") or os.path.join(
+        os.path.expanduser("~"), "Documents", "Kaliv")
+    _faktisk = os.path.join(_tools_dir, "notes.md")
+    if scratch and os.path.expanduser(scratch) != _faktisk:
+        print(f"scratch_note_path: bruger {_faktisk} (spec sagde {scratch})",
+              file=sys.stderr)
+    scratch = _faktisk
     # Stamp the tree the run is measuring. Gitless rigs (ZIP deploys) have no
     # git binary at all -- subprocess.run RAISES FileNotFoundError there rather
     # than returning non-zero, which is exactly the bug that broke 1.58.142 --

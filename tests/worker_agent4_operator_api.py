@@ -38,6 +38,10 @@ from app.agent4.handoff import (  # noqa: E402
 from app.agent4.operator_api import (  # noqa: E402
     OPERATOR_API_SCHEMA,
     OPERATOR_MEDIA_TYPE,
+    build_agent4_operator_router,
+)
+from app.agent4.operator_read_context import (  # noqa: E402
+    compose_agent4_operator_read_context,
 )
 from app.agent4.production_mount import mount_agent4_operator  # noqa: E402
 
@@ -156,7 +160,9 @@ class Agent4OperatorApiTests(unittest.TestCase):
 
     def test_flag_is_exact_default_off_and_missing_context_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            context = _compose(Path(directory) / "runtime")
+            context = compose_agent4_operator_read_context(
+                Path(directory) / "runtime"
+            )
             for value in (None, "", "0", "true", "on", " 1 "):
                 app = FastAPI()
                 environment = {}
@@ -182,7 +188,7 @@ class Agent4OperatorApiTests(unittest.TestCase):
     def test_enabled_mount_is_additive_get_only_dormant_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "runtime"
-            context = _compose(root)
+            context = compose_agent4_operator_read_context(root)
             app = FastAPI()
             before_threads = {(item.ident, item.name) for item in threading.enumerate()}
             with patch.dict(
@@ -218,12 +224,15 @@ class Agent4OperatorApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             context = _compose(Path(directory) / "runtime")
             app = FastAPI()
-            with patch.dict(
-                os.environ,
-                {"KALIV_AGENT4_OPERATOR_API": "1"},
-                clear=False,
-            ):
-                mount_agent4_operator(app, context)
+            # This test intentionally mutates the full runtime to build canonical
+            # campaign/timeline/evidence fixtures. Exercise the transport adapter
+            # directly; production_mount is restricted to the narrow read context.
+            app.include_router(
+                build_agent4_operator_router(
+                    context.operator,
+                    context.evidence_operator,
+                )
+            )
 
             campaign_id = "a4-14-read"
             submitted = context.scheduler.submit(

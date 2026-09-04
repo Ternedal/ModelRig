@@ -51,23 +51,57 @@ python tools/modelrig-cli.py status
 python tools/modelrig-cli.py chat "hello"
 ```
 
-## Appliance mode: autostart + supervisor (v1.58.8)
+## Appliance mode: recovery-first autostart + supervisor (v1.58.8+)
 
 The launcher (`run-windows.ps1` / `start-kaliv.bat`) runs in the foreground and
 stops when you close it or reboot. For a rig that just stays up:
 
-1. Put `modelrig-supervisor-windows-x64.exe` (from the release) in the ModelRig
-   root, next to `modelrig-server-windows-x64.exe`, with the worker exe in `worker/`.
-2. Run once, elevated:
+1. Put all four release executables in their installed locations before task
+   registration:
+   - `modelrig-server-windows-x64.exe` in the ModelRig root;
+   - `modelrig-supervisor-windows-x64.exe` in the ModelRig root;
+   - `modelrig-updater-windows-x64.exe` in the ModelRig root; and
+   - `modelrig-worker-windows-x64.exe` in `worker/`.
+2. Keep `scripts\kaliv-bootstrap.ps1` and `scripts\kaliv-autostart.ps1` from the
+   same checkout/release beside the installation.
+3. Run elevated:
    `powershell -ExecutionPolicy Bypass -File scripts\kaliv-autostart.ps1`
 
-The supervisor starts the worker + server at logon and restarts either one if it
-exits or stops answering `/healthz`. Child output goes to `logs\worker.log` and
-`logs\server.log` (rotated at 20 MB). Manage it with:
+The registration creates two tasks:
 
-- `Start-ScheduledTask -TaskName KalivSupervisor` (start now, no reboot)
-- `Stop-ScheduledTask  -TaskName KalivSupervisor` (stop; no restart until next logon)
-- `Get-ScheduledTask   -TaskName KalivSupervisor` (status)
+- `KalivBootstrap` owns the logon trigger, runs updater recovery, and only then
+  starts the appliance; and
+- `KalivSupervisor` has no direct trigger and remains an on-demand task.
+
+### Mandatory migration for an existing appliance
+
+Older installations registered `KalivSupervisor` directly at logon. A normal
+binary update does **not** rewrite Windows Task Scheduler definitions. Before the
+next reboot or appliance start after installing this recovery-first layout, rerun
+`kaliv-autostart.ps1` elevated using the command above. This one-time migration is
+mandatory: `-Force` replaces the old direct-trigger task with the triggerless
+`KalivSupervisor` definition and registers `KalivBootstrap` as the only logon
+entrypoint.
+
+Verify the migration before treating the rig as safe:
+
+```powershell
+(Get-ScheduledTask -TaskName KalivSupervisor).Triggers.Count  # must be 0
+Get-ScheduledTask -TaskName KalivBootstrap                    # must exist
+```
+
+The supervisor starts the worker + server and restarts either one if it exits or
+stops answering `/healthz`. Child output goes to `logs\worker.log` and
+`logs\server.log` (rotated at 20 MB). Manage the recovery-first appliance with:
+
+- `Start-ScheduledTask -TaskName KalivBootstrap` (safe start now; always recovers first)
+- `Stop-ScheduledTask  -TaskName KalivSupervisor` (stop the running appliance)
+- `Get-ScheduledTask   -TaskName KalivBootstrap` (bootstrap status)
+- `Get-ScheduledTask   -TaskName KalivSupervisor` (supervisor status)
+
+Do not start `KalivSupervisor` directly as an operator command. That bypasses the
+recovery gate and is reserved for the bootstrap/updater after they have proved a
+safe state.
 
 Tunables are flags on the exe (`-interval`, `-max-fails`, `-log-max-mb`, exe/health
 paths); run `modelrig-supervisor-windows-x64.exe -h` for all of them.

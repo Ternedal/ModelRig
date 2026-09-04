@@ -34,6 +34,7 @@ import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /** Developer-only reviewed-read UI. It never resumes or replans automatically. */
 @Composable
@@ -46,6 +47,8 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var review by remember { mutableStateOf<Agent3Client.ReadReview?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var resultBody by remember { mutableStateOf<String?>(null) }
+    var replanPreview by remember { mutableStateOf<dk.ternedal.modelrig.net.Agent3ReplanClient.Preview?>(null) }
 
     fun client(): Agent3Client {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
@@ -99,6 +102,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         Column(
             Modifier
                 .fillMaxSize()
+                .kalivScreenInsets()
                 .padding(horizontal = 18.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
@@ -188,37 +192,127 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             }
 
             run?.let { current ->
-                Spacer(Modifier.height(12.dp))
-                ReviewSurface {
-                    Text("Run checkpoint", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold)
+                val checkpoint = review
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        "state=${current.state} · current_step=${current.currentStep}",
-                        color = KalivTheme.colors.textMuted,
-                        fontSize = 12.sp,
+                        "Agent 3 \u00b7 run",
+                        color = KalivTheme.colors.textHigh,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 20.sp,
+                        modifier = Modifier.weight(1f),
                     )
-                    val checkpoint = review
-                    Text(
-                        "review enabled=${checkpoint?.enabled == true} · waiting=${checkpoint?.waiting == true}",
-                        color = if (checkpoint?.waiting == true) KalivTheme.colors.amber else KalivTheme.colors.textMuted,
-                        fontSize = 12.sp,
-                    )
-                    if (checkpoint?.waiting == true) {
-                        Text(
-                            "completed=${checkpoint.completedTool ?: "ukendt"} · window=${checkpoint.windowStart}..${checkpoint.windowEnd}",
-                            color = KalivTheme.colors.textHigh,
-                            fontSize = 12.sp,
-                        )
-                        Text(
-                            "removable ids: ${checkpoint.removableStepIds.joinToString(", ")}",
-                            color = KalivTheme.colors.textMuted,
-                            fontSize = 10.sp,
-                        )
+                    if (checkpoint?.enabled == true) {
+                        dk.ternedal.modelrig.ui.chat.Agent3ReviewBadge()
                     }
+                }
+                Spacer(Modifier.height(10.dp))
+                dk.ternedal.modelrig.ui.chat.Agent3RunHeader(
+                    task = message.ifBlank { "Kørsel ${current.id}" },
+                    waitingLine = when {
+                        checkpoint?.waiting == true && checkpoint.completedTool != null ->
+                            "Checkpoint efter ${checkpoint.completedTool} \u00b7 venter på dig"
+                        checkpoint?.waiting == true -> "Checkpoint \u00b7 venter på dig"
+                        else -> "Tilstand: ${current.state} \u00b7 trin ${current.currentStep}"
+                    },
+                    modifier = Modifier.padding(horizontal = 0.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                current.steps.forEachIndexed { index, step ->
+                    val stepNo = index + 1
+                    val isWrite = step.risk.lowercase().contains("write") ||
+                        step.tool.lowercase().startsWith("write") ||
+                        step.egress.lowercase() == "write"
+                    val done = step.state?.lowercase() in setOf("done", "completed", "succeeded")
+                    val active = checkpoint?.waiting == true && step.id != null &&
+                        step.id == checkpoint.completedStepId
+                    val kind = when {
+                        active || done -> dk.ternedal.modelrig.ui.chat.Agent3StepKind.Done
+                        isWrite -> dk.ternedal.modelrig.ui.chat.Agent3StepKind.WriteLocked
+                        stepNo == current.currentStep -> dk.ternedal.modelrig.ui.chat.Agent3StepKind.Active
+                        else -> dk.ternedal.modelrig.ui.chat.Agent3StepKind.Pending
+                    }
+                    dk.ternedal.modelrig.ui.chat.Agent3StepRow(
+                        kind = kind,
+                        title = (if (isWrite) "Write \u00b7 " else "Read \u00b7 ") + step.tool,
+                        sub = when {
+                            active -> "Udført \u00b7 resultat klar til gennemsyn"
+                            done -> "Udført"
+                            isWrite -> "Immutabel write-tail \u00b7 kræver separat bekræftelse"
+                            else -> "Pending"
+                        },
+                        removable = step.id != null && checkpoint?.removableStepIds?.contains(step.id) == true,
+                    )
+                }
+                if (checkpoint?.waiting == true && checkpoint.windowStart != null && checkpoint.windowEnd != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Skærmen genoptager eller replanner ikke automatisk.",
-                        color = KalivTheme.colors.textMuted,
-                        fontSize = 11.sp,
+                        "Read-window \u00b7 trin ${checkpoint.windowStart}\u2013${checkpoint.windowEnd} \u00b7 runnet er pauset her",
+                        color = KalivTheme.colors.caps,
+                        fontSize = 13.sp,
+                    )
+                }
+                resultBody?.let { body ->
+                    Spacer(Modifier.height(13.dp))
+                    dk.ternedal.modelrig.ui.chat.Agent3ResultCard(
+                        toolCaps = (checkpoint?.completedTool ?: "read").uppercase(),
+                        body = body,
+                    )
+                }
+                replanPreview?.let { rp ->
+                    Spacer(Modifier.height(13.dp))
+                    dk.ternedal.modelrig.ui.chat.Agent3ResultCard(
+                        toolCaps = "REPLAN-PREVIEW",
+                        body = "${rp.plan.size} trin foreslået \u00b7 vindue ${rp.window.start}\u2013${rp.window.end} " +
+                            "\u00b7 udløber om ${rp.expiresInSeconds}s\n${rp.rationale}\n" +
+                            "Anvend sker på replan-skærmen \u2014 kræver separat bekræftelse.",
+                    )
+                }
+                if (checkpoint?.waiting == true) {
+                    Spacer(Modifier.height(14.dp))
+                    dk.ternedal.modelrig.ui.chat.Agent3CheckpointActions(
+                        busy = busy,
+                        onContinue = {
+                            busy = true
+                            scope.launch {
+                                val res = withContext(Dispatchers.IO) { runCatching { client().resume(current.id) } }
+                                res.onSuccess {
+                                    run = it
+                                    resultBody = null
+                                    replanPreview = null
+                                    error = null
+                                }.onFailure { error = it.message }
+                                val fresh = withContext(Dispatchers.IO) { runCatching { client().getRun(current.id) } }
+                                fresh.onSuccess { run = it }
+                                busy = false
+                            }
+                        },
+                        onReplan = {
+                            busy = true
+                            scope.launch {
+                                val res = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        dk.ternedal.modelrig.net.Agent3ReplanClient(
+                                            store.baseUrl.orEmpty(), store.token.orEmpty(),
+                                        ).preview(current.id)
+                                    }
+                                }
+                                res.onSuccess { replanPreview = it; error = null }
+                                    .onFailure { error = it.message }
+                                busy = false
+                            }
+                        },
+                        onStop = {
+                            busy = true
+                            scope.launch {
+                                val res = withContext(Dispatchers.IO) { runCatching { client().cancel(current.id) } }
+                                res.onSuccess { run = it; error = null }.onFailure { error = it.message }
+                                busy = false
+                            }
+                        },
                     )
                 }
             }

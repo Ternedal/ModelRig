@@ -36,7 +36,13 @@ sealed class StreamEvent {
     data class Transcript(val text: String) : StreamEvent()
 
     /** Voice: one spoken sentence, text + audio, in order. */
-    data class Chunk(val index: Int, val text: String, val audioB64: String) : StreamEvent()
+    data class Chunk(
+        val index: Int,
+        val text: String,
+        val audioB64: String,
+        /** The rig's body utterance for this sentence; null from an older rig. */
+        val utteranceId: String? = null,
+    ) : StreamEvent()
 
     /**
      * The stream said it finished. [trailingDelta] carries content that rode
@@ -82,6 +88,7 @@ object StreamContract {
             "transcript" -> return StreamEvent.Transcript(o.optString("text"))
             "chunk" -> return StreamEvent.Chunk(
                 o.optInt("index"), o.optString("text"), o.optString("audio_base64"),
+                utteranceId = o.optString("utterance_id").ifBlank { null },
             )
             "done" -> return StreamEvent.Done(
                 reply = o.optString("reply"),

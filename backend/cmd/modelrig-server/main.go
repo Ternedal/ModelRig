@@ -7,21 +7,23 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"modelrig/internal/config"
 	"modelrig/internal/httpapi"
-	"modelrig/internal/pairing"
 	"modelrig/internal/proxy"
 	"modelrig/internal/store"
 )
 
 func main() {
-	pairFlag := flag.Bool("pair", false, "mint a pairing code and exit")
+	pairFlag := flag.Bool("pair", false, "mint a pairing code through the running server and exit")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -29,11 +31,9 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	// Resolve the store path before EVERY execution mode. Previously this only
-	// happened on normal server startup, so `modelrig-server -pair` with the
-	// server stopped wrote a relative modelrig-data.json in the caller's working
-	// directory while the later server opened the exe-anchored store. The CLI
-	// printed a valid-looking code that the running server could never claim.
+	// Keep the server's store path stable across launch directories. Pair mode no
+	// longer opens this path at all: the running backend is the sole supported
+	// writer for pairing, device and grant state.
 	cfg.ResolveDataPath()
 
 	if *pairFlag {
@@ -83,7 +83,7 @@ func main() {
 			log.Printf("         Set MODELRIG_HOST=0.0.0.0 or a Tailscale IP, then restart.")
 		}
 		if os.Getenv("MODELRIG_ADMIN_KEY") == "" {
-			log.Printf("NOTE: MODELRIG_ADMIN_KEY unset - POST /api/v1/pair/start accepts loopback callers only (the -pair CLI). Set MODELRIG_ADMIN_KEY to allow remote pairing.")
+			log.Printf("NOTE: MODELRIG_ADMIN_KEY unset - POST /api/v1/pair/start accepts loopback callers only (the -pair CLI). Set MODELRIG_ADMIN_KEY to allow pairing through a concrete LAN/Tailscale bind.")
 		}
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %v", err)
@@ -113,49 +113,45 @@ func purgeLoop(st *store.Store, stop <-chan struct{}) {
 	}
 }
 
-// pairCLI mints a pairing code. It prefers talking to a already-running server
-// on localhost (so the code lands in the live in-memory store — no dual-writer
-// corruption). Only if no server answers does it fall back to writing the store
-// file directly.
+// pairCLI mints a pairing code exclusively through the running backend. The CLI
+// never opens cfg.DataPath: pairing, device and agent4:read grant mutations must
+// share the backend's single Store instance so one process cannot overwrite
+// another process's newer security state.
 func pairCLI(cfg config.Config) error {
-	localURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.ServerPort)
-
-	// Any HTTP response proves a server owns the port/store. Do not fall back to
-	// direct file writes merely because /healthz returns a non-2xx response: that
-	// would create a second writer precisely while the live process is unhealthy.
-	if serverReachable(localURL) {
-		code, err := requestPairStart(localURL)
-		if err != nil {
-			return fmt.Errorf("server is reachable but pair/start failed: %w", err)
-		}
-		printCode(code, cfg.PairingTTL, "issued by the running server")
-		return nil
-	}
-
-	// Fallback: no server running → write straight to the store file.
-	st, err := store.Open(cfg.DataPath)
+	baseURL, err := pairServerBaseURL(cfg)
 	if err != nil {
 		return err
 	}
-	code, err := pairing.Code()
+	code, err := requestPairStart(baseURL)
 	if err != nil {
-		return err
+		return fmt.Errorf(
+			"running ModelRig server at %s is required for pairing: %w",
+			baseURL,
+			err,
+		)
 	}
-	if err := st.PutPairing(store.Pairing{Code: code, ExpiresAt: time.Now().Add(cfg.PairingTTL)}); err != nil {
-		return err
-	}
-	printCode(code, cfg.PairingTTL, "written to store — start the server to use it")
+	printCode(code, cfg.PairingTTL, "issued by the running server")
 	return nil
 }
 
-func serverReachable(baseURL string) bool {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(baseURL + "/healthz")
-	if err != nil {
-		return false
+// pairServerBaseURL resolves the local process address that corresponds to the
+// configured listener. Wildcard binds are reached over loopback; a concrete
+// LAN/Tailscale bind is reached through that exact configured address. This
+// avoids mistaking an unrelated loopback listener for the live store owner.
+func pairServerBaseURL(cfg config.Config) (string, error) {
+	host := strings.TrimSpace(cfg.ServerHost)
+	switch host {
+	case "":
+		return "", fmt.Errorf("MODELRIG_HOST/server.host is required for pairing")
+	case "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
 	}
-	defer resp.Body.Close()
-	return true
+	if cfg.ServerPort <= 0 || cfg.ServerPort > 65535 {
+		return "", fmt.Errorf("invalid ModelRig server port %d", cfg.ServerPort)
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.ServerPort)), nil
 }
 
 func requestPairStart(baseURL string) (string, error) {
@@ -166,13 +162,18 @@ func requestPairStart(baseURL string) (string, error) {
 	if key := os.Getenv("MODELRIG_ADMIN_KEY"); key != "" {
 		req.Header.Set("X-Admin-Key", key)
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}

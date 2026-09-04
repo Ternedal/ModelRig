@@ -48,6 +48,10 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 /**
  * Human-only schedule administration.
@@ -68,6 +72,8 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     var notice by remember { mutableStateOf<String?>(null) }
 
     var tool by remember { mutableStateOf("") }
+    // Menneskenavnet. Frivilligt: uden navn hedder planen sit tool, som før.
+    var label by remember { mutableStateOf("") }
     var argsJson by remember { mutableStateOf("{}") }
     var cadence by remember { mutableStateOf("daily:08:00") }
     var timezone by remember { mutableStateOf(ScheduleClient.DEFAULT_TIMEZONE) }
@@ -80,6 +86,10 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     var renewalMaxRuns by remember { mutableStateOf("0") }
     var renewalMode by remember { mutableStateOf("preserve") }
     var renewalPreview by remember { mutableStateOf<SchedulePreview?>(null) }
+    var showCreate by remember { mutableStateOf(false) }
+    var dismissedExpiry by remember { mutableStateOf(setOf<String>()) }
+    var expandedId by remember { mutableStateOf<String?>(null) }
+    var rowMenuFor by remember { mutableStateOf<String?>(null) }
 
     fun connection(): Pair<String, String> {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
@@ -187,10 +197,11 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
     fun createFromPreview() {
         val approved = preview ?: return
         execute(
-            action = { client().create(approved) },
+            action = { client().create(approved, label) },
             success = {
                 schedules = listOf(it) + schedules.filterNot { row -> row.id == it.id }
                 preview = null
+                label = ""
                 notice = "Planen er gemt. Der er ikke kørt noget nu."
             },
             fallback = "Planen kunne ikke oprettes",
@@ -266,42 +277,19 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
         Column(
             Modifier
                 .fillMaxSize()
+                .kalivScreenInsets()
                 .padding(horizontal = 18.dp, vertical = 14.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Planer", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-                    Text(
-                        "Menneskestyret scheduler · intet modelværktøj",
-                        fontSize = 12.sp,
-                        color = KalivTheme.colors.textMuted,
-                    )
-                }
-                TextButton(onClick = onClose) { Text("Luk", color = KalivTheme.colors.signal) }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            ScheduleCard {
-                Text("Scheduler-status", fontWeight = FontWeight.SemiBold, color = KalivTheme.colors.textHigh)
-                val state = runtime
-                when {
-                    state == null -> Text("Henter status…", color = KalivTheme.colors.textMuted)
-                    state.running -> Text("Kører", color = KalivTheme.colors.signal, fontWeight = FontWeight.Bold)
-                    state.configured -> Text("Konfigureret, men ikke startet", color = KalivTheme.colors.danger)
-                    else -> Text("Slået fra på riggen", color = KalivTheme.colors.textMuted)
-                }
-                Text(
-                    if (state?.running == true) "Nye planer kan blive kørt ved næste forfald."
-                    else "Planer kan gemmes, men kører ikke før KALIV_SCHEDULER=1 og workeren er genstartet.",
-                    color = KalivTheme.colors.textMuted,
-                    fontSize = 11.sp,
-                )
-                state?.lastError?.let { Text(it, color = KalivTheme.colors.danger, fontSize = 11.sp) }
-                Spacer(Modifier.height(6.dp))
-                OutlinedButton(enabled = !busy, onClick = ::load) { Text("Genindlæs") }
-            }
-
+            dk.ternedal.modelrig.ui.chat.ConversationsTopBar(
+                title = "Scheduler",
+                onBack = onClose,
+            )
+            dk.ternedal.modelrig.ui.chat.KnowledgeIntroNote(
+                Modifier.padding(bottom = 13.dp),
+                text = "Kører kun på din rig. Oprettelse og fornyelse kræver din godkendelse — hver gang.",
+            )
+            if (showCreate || preview != null) {
             Spacer(Modifier.height(12.dp))
             ScheduleCard {
                 Text("Opret plan", fontWeight = FontWeight.SemiBold, color = KalivTheme.colors.textHigh)
@@ -346,6 +334,15 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                                 ?: "Vælg et aktiveret tool ovenfor; fri tekst er bevidst slået fra.",
                         )
                     },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(7.dp))
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it.take(80) },
+                    label = { Text("Navn (valgfrit)") },
+                    supportingText = { Text("Uden navn hedder planen sit tool. Navnet ændrer ikke hvad der godkendes.") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -416,6 +413,7 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                 )
             }
 
+            }
             renewalTarget?.let { target ->
                 Spacer(Modifier.height(12.dp))
                 ScheduleCard {
@@ -482,73 +480,99 @@ fun ScheduleScreen(store: TokenStore, onClose: () -> Unit) {
                 Text(it, color = KalivTheme.colors.signal, fontSize = 12.sp)
             }
 
-            Spacer(Modifier.height(18.dp))
-            Text("Gemte planer", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
-            Text("Der findes bevidst ingen slet-knap. Pause stopper fremtidige claims.", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(14.dp))
             if (schedules.isEmpty()) {
-                Text("Ingen planer endnu.", color = KalivTheme.colors.textMuted)
-            }
-            schedules.forEach { schedule ->
-                ScheduleRow(
-                    schedule = schedule,
-                    busy = busy,
-                    onToggle = { toggle(schedule) },
-                    onRenew = { beginRenewal(schedule) },
-                )
+                Text("Ingen planer endnu.", color = KalivTheme.colors.textMuted, fontSize = 14.sp)
                 Spacer(Modifier.height(9.dp))
             }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-}
-
-@Composable
-private fun ScheduleRow(
-    schedule: ScheduleItem,
-    busy: Boolean,
-    onToggle: () -> Unit,
-    onRenew: () -> Unit,
-) {
-    ScheduleCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(schedule.tool, fontWeight = FontWeight.SemiBold, color = KalivTheme.colors.textHigh)
-                Text(schedule.id, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+            val nowMs = System.currentTimeMillis()
+            schedules.forEach { schedule ->
+                val expiresMs = (schedule.expiresAt * 1000.0).toLong()
+                val daysLeft = ((expiresMs - nowMs) / 86_400_000.0)
+                val expiringSoon = !schedule.expired && daysLeft <= 7.0 &&
+                    schedule.id !in dismissedExpiry
+                val runsLabel = "${schedule.runsUsed} af ${if (schedule.maxRuns == 0) "∞ (TTL)" else schedule.maxRuns}"
+                val expiresLabel = formatEpochShort(schedule.expiresAt)
+                val badge = when {
+                    schedule.expired -> "UDLØBET"
+                    daysLeft < 1.0 -> "UDLØBER I DAG"
+                    daysLeft <= 7.0 -> "UDLØBER OM ${kotlin.math.ceil(daysLeft).toInt()} DAGE"
+                    else -> null
+                }
+                val ui = dk.ternedal.modelrig.ui.chat.ScheduleCardUi(
+                    id = schedule.id,
+                    title = schedule.tool,
+                    sub = buildString {
+                        // Står navnet øverst, skal værktøjet stadig kunne læses:
+                        // det er DET der kører.
+                        if (schedule.label != null) append("${schedule.tool} · ")
+                        append(schedule.cadence)
+                        if (expiringSoon) append(" · $runsLabel kørsler brugt")
+                    },
+                    nextLabel = if (schedule.enabled) "Næste: ${authoritativeScheduleTime(schedule.dueAtLocal, schedule.timezone)}" else null,
+                    pausedLine = if (!schedule.enabled) "På pause · fornyelse bevarer pausen" else null,
+                    runsLabel = runsLabel,
+                    expiresLabel = expiresLabel,
+                    expiresBadge = badge,
+                    approvedLine = if (schedule.approvalValid) "Godkendt fra denne enhed" else null,
+                    blockedLine = schedule.blockedReason,
+                    enabled = schedule.enabled,
+                )
+                if (expiringSoon) {
+                    dk.ternedal.modelrig.ui.chat.ExpiringScheduleCard(
+                        ui = ui,
+                        busy = busy,
+                        onRenew = { beginRenewal(schedule) },
+                        onDismiss = { dismissedExpiry = dismissedExpiry + schedule.id },
+                    )
+                } else {
+                    Box {
+                        dk.ternedal.modelrig.ui.chat.NormalScheduleCard(
+                            ui = ui,
+                            busy = busy,
+                            expanded = expandedId == schedule.id,
+                            onToggle = { toggle(schedule) },
+                            onClick = { expandedId = if (expandedId == schedule.id) null else schedule.id },
+                            onLongPress = { rowMenuFor = schedule.id },
+                            detailContent = {
+                                Column {
+                                    ApprovalLine("Plan", schedule.id)
+                                    ApprovalLine("Argumenter", schedule.argsJson)
+                                    ApprovalLine("Timezone", schedule.timezone)
+                                    ApprovalLine("Misfire", scheduleMisfireLabel(schedule.misfirePolicy))
+                                    ApprovalLine("Udløb", formatEpoch(schedule.expiresAt))
+                                    if (schedule.missed > 0) ApprovalLine("Missed", schedule.missed.toString())
+                                }
+                            },
+                        )
+                        DropdownMenu(expanded = rowMenuFor == schedule.id, onDismissRequest = { rowMenuFor = null }) {
+                            DropdownMenuItem(
+                                text = { Text("Forny (preview)", fontSize = 13.sp) },
+                                onClick = { rowMenuFor = null; beginRenewal(schedule) },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(11.dp))
             }
-            val label = when {
-                schedule.eligible -> "klar"
-                schedule.enabled -> "blokeret"
-                else -> "pause"
-            }
-            Text(
-                label,
-                color = if (schedule.eligible) KalivTheme.colors.signal else if (schedule.enabled) KalivTheme.colors.danger else KalivTheme.colors.textMuted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
+            dk.ternedal.modelrig.ui.chat.KalivOutlineActionCard(
+                "Ny planlagt kørsel (preview)",
+                { showCreate = true },
             )
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(schedule.argsJson, color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-        Text("Kadence: ${schedule.cadence}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-        Text("Timezone: ${schedule.timezone}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-        Text("Misfire: ${scheduleMisfireLabel(schedule.misfirePolicy)}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-        Text("Næste: ${authoritativeScheduleTime(schedule.dueAtLocal, schedule.timezone)}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-        Text("Udløb: ${formatEpoch(schedule.expiresAt)}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
-        Text(
-            "Kørsler: ${schedule.runsUsed}/${if (schedule.maxRuns == 0) "∞ (TTL)" else schedule.maxRuns}",
-            color = KalivTheme.colors.textMuted,
-            fontSize = 11.sp,
-        )
-        schedule.blockedReason?.let { Text(it, color = KalivTheme.colors.danger, fontSize = 11.sp) }
-        Spacer(Modifier.height(8.dp))
-        HorizontalDivider(color = KalivTheme.colors.hairline)
-        Spacer(Modifier.height(7.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(enabled = !busy, onClick = onToggle) {
-                Text(if (schedule.enabled) "Sæt på pause" else "Genoptag")
-            }
-            OutlinedButton(enabled = !busy, onClick = onRenew) { Text("Forny") }
+            Spacer(Modifier.height(11.dp))
+            val rt = runtime
+            dk.ternedal.modelrig.ui.chat.SchedulesFooterStatus(
+                statusText = when {
+                    rt == null -> "Henter status …"
+                    rt.running -> "Runtime kører · ${schedules.count { it.enabled && !it.expired }} aktive"
+                    rt.configured -> "Konfigureret, men ikke startet"
+                    else -> "Slået fra på riggen"
+                },
+                ok = rt?.running == true,
+                errorText = rt?.lastError,
+                onReload = ::load,
+            )
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -628,6 +652,11 @@ internal fun authoritativeScheduleTime(dueAtLocal: String, timezone: String): St
 internal fun scheduleMisfireLabel(policy: String): String = when (policy) {
     ScheduleClient.RUN_ONCE_MISFIRE_POLICY -> "Kør én gang; ældre forfald registreres som missed"
     else -> policy.ifBlank { "ukendt" }
+}
+
+private fun formatEpochShort(seconds: Double): String {
+    if (!seconds.isFinite() || seconds <= 0.0) return "ukendt"
+    return SimpleDateFormat("d/M", Locale("da", "DK")).format(Date((seconds * 1000.0).toLong()))
 }
 
 private fun formatEpoch(seconds: Double): String {

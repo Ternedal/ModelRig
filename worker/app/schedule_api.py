@@ -48,6 +48,9 @@ class PreviewScheduleReq(BaseModel):
 
 class CreateScheduleReq(PreviewScheduleReq):
     model_config = ConfigDict(extra="forbid")
+    # Menneskenavnet. Bevidst KUN paa create -- preview'et beskriver hvad der
+    # koerer, og navnet indgaar aldrig i det godkendte fingerprint.
+    label: str | None = Field(default=None, max_length=80)
     approval_token: str | None = Field(default=None, min_length=40, max_length=60000)
     # Readiness deliberately probes the retired bypass end to end. Keeping this
     # tombstone in the schema makes that probe run; any non-null legacy value is
@@ -255,6 +258,7 @@ def build_schedule_router(
                 misfire_policy=req.misfire_policy,
                 approved_fingerprint=approved_fingerprint,
                 receipt=receipt,
+                label=req.label,
             )
         except (
             ScheduleAdminError,

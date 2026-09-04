@@ -148,6 +148,38 @@ def check_worker(base_url: str, token: str) -> None:
         raise Blocked(f"{base_url}/healthz svarede HTTP {status}, forventet 200")
     ok(f"worker: {base_url} svarer")
 
+    # W-13 ERKLAERER requires: ["documents_loaded"] -- OG INGEN TJEKKEDE DET.
+    # Er RAG-indekset tomt, kan svaret umuligt baere kilder, og scoringen
+    # melder "svaret bar ingen kilder" som om modellen fejlede. 20/8 fejlede
+    # W-13 i alle 22 runder paa netop det, og fejlen saa ud som modelkvalitet.
+    #
+    # Workeren rapporterer selv tallet i /healthz. Saa spoerg den.
+    try:
+        _spec = json.loads(SPEC.read_text(encoding="utf-8"))
+    except Exception:
+        _spec = {}
+    kraever_dokumenter = {
+        w["id"] for w in _spec.get("workflows", [])
+        if "documents_loaded" in (w.get("requires") or [])
+    }
+    if kraever_dokumenter:
+        try:
+            _, krop = _get(f"{base_url}/healthz")
+            antal = int(json.loads(krop).get("documents", 0))
+        except Exception:
+            antal = -1
+        if antal == 0:
+            raise Blocked(
+                f"RAG-indekset er TOMT, men {sorted(kraever_dokumenter)} kraever\n"
+                "         dokumenter. Uden dem kan svaret ikke baere kilder, og\n"
+                "         workflowet fejler paa noget der ikke er modellens skyld.\n"
+                "         Indlaes mindst eet dokument foer koerslen."
+            )
+        if antal > 0:
+            ok(f"dokumenter: {antal} i indekset ({len(kraever_dokumenter)} workflow(s) kraever dem)")
+        else:
+            note("kunne ikke laese dokumenttallet; fortsaetter")
+
     try:
         status, _ = _get(f"{base_url}/api/v1/health",
                          headers={"Authorization": f"Bearer {token}"})

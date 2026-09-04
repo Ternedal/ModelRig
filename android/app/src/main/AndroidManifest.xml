@@ -4,6 +4,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Kaliv Voice: microphone capture for push-to-talk. Requested at runtime. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- QR-parring: kameraet bruges KUN paa skanne-skaermen. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- In-app-opdatering: installer-intent for hentet APK (sideload-flowet). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!--
       usesCleartextTraffic=true because the ModelRig backend is plain HTTP over
@@ -28,11 +33,46 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Del til Kaliv. Vi tager de typer riggen FAKTISK kan laese
+                 (tekst + de dokumentformater Viden indekserer) — ikke */*,
+                 som ville stille Kaliv frem som modtager for alt muligt den
+                 ikke kan goere noget ved. En deling starter intet af sig
+                 selv; den lander i et kort hvor mennesket vaelger. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+            </intent-filter>
+            <!-- Parringslink (og senere QR): kaliv://pair?url=...&code=...
+                 Linket PARRER ALDRIG af sig selv — det udfylder felterne og
+                 beder om en bekraeftelse med vaerten skrevet ud. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="kaliv" android:host="pair" />
+            </intent-filter>
             <!-- Long-press Kaliv's launcher icon -> Opgaver or Planer. Each
                  explicit shortcut lands in MainActivity's authenticated rig UI. -->
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/kaliv_file_paths" />
+        </provider>
     </application>
 </manifest>

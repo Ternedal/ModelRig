@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/bodyrig/checksums-v1.schema.json",
+  "title": "ModelRig Body Package Checksums v1",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 4,
+  "maxProperties": 10,
+  "required": ["avatar.vrm", "bodyprint.json", "provenance.json", "thumbnail.png"],
+  "properties": {
+    "avatar.vrm": {"$ref": "#/$defs/sha256"},
+    "bodyprint.json": {"$ref": "#/$defs/sha256"},
+    "provenance.json": {"$ref": "#/$defs/sha256"},
+    "thumbnail.png": {"$ref": "#/$defs/sha256"}
+  },
+  "patternProperties": {
+    "^motions/(idle|walk|talk|gesture_0[1-3])\\.vrma$": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

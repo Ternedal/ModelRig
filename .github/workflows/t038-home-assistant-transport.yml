@@ -1,0 +1,355 @@
+name: t038-home-assistant-transport
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_assistant_provider_transport.py"
+      - "worker/app/home_assistant_state_contract.py"
+      - "worker/app/home_rig_provider_gate.py"
+      - "worker/app/home_rig_read_boundary.py"
+      - "worker/app/home_rig_connector_contract.py"
+      - "worker/app/data_sharing.py"
+      - ".github/workflows/t038-home-assistant-transport.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify concrete Home Assistant read transport
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import io
+          import json
+          import os
+          import tempfile
+          from pathlib import Path
+
+          from app.data_sharing import DataSharingLedger
+          from app.home_assistant_provider_transport import (
+              HomeAssistantConnection,
+              HomeAssistantTransportError,
+              PinnedHomeAssistantTransport,
+              execute_home_assistant_state_read,
+          )
+          from app.home_rig_connector_contract import HomeRigDenied, HomeRigGrantStore, HomeRigScope
+          from app.home_rig_provider_gate import authorize_home_assistant_state_request
+          from app.home_rig_read_boundary import prepare_read
+          from app.web_fetch import TransportResponse
+
+          source = Path("worker/app/home_assistant_provider_transport.py").read_text(encoding="utf-8")
+          ast.parse(source)
+          assert "PRODUCTION_ACTIVATION = False" in source
+          for forbidden in (
+              "FastAPI(", "APIRouter(", "include_router(", "REGISTRY[",
+              "os.getenv(", "os.environ", "subprocess", "requests.", "httpx.",
+              "wake(", "turn_on(", "turn_off(", "toggle(",
+          ):
+              assert forbidden not in source, forbidden
+
+          class UUIDs:
+              def __init__(self, start=0):
+                  self.value = start
+              def __call__(self):
+                  import uuid
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          def authorized(grants, ledger, *, base):
+              grant = grants.create(
+                  HomeRigScope(
+                      entity_ids=("sensor.gpu_temp",),
+                      operations=("entity_state",),
+                  ),
+                  actor="operator",
+                  now=base,
+              )
+              claim = prepare_read(
+                  grants,
+                  grant.grant_id,
+                  target_kind="entity",
+                  target_id="sensor.gpu_temp",
+                  operation="entity_state",
+                  now=base + 1,
+              )
+              auth = authorize_home_assistant_state_request(
+                  grants,
+                  ledger,
+                  claim,
+                  data_category="public",
+                  purpose_code="status_brief",
+                  purpose="Read one explicitly scoped Home Assistant sensor state.",
+                  summary="Scoped Home Assistant state",
+                  now=base + 2,
+              )
+              return grant, auth
+
+          class CaptureTransport:
+              def __init__(self, response):
+                  self.response = response
+                  self.calls = []
+              def request(self, url, **kwargs):
+                  self.calls.append((url, kwargs))
+                  return self.response
+
+          def state_body(entity="sensor.gpu_temp", state="61"):
+              return json.dumps({
+                  "entity_id": entity,
+                  "state": state,
+                  "attributes": {"unit_of_measurement": "C", "friendly_name": "secret-ish label"},
+                  "last_changed": "1970-01-01T00:16:35Z",
+                  "last_updated": "1970-01-01T00:16:36Z",
+                  "context": {"id": "must-not-escape"},
+              }).encode()
+
+          with tempfile.TemporaryDirectory(prefix="modelrig-t038-ha-") as td:
+              root = Path(td)
+              token = "ha_fixture_bearer_12345678901234567890"
+              token_file = root / "ha.token"
+              token_file.write_text(token + "\n", encoding="ascii")
+              if os.name == "posix":
+                  token_file.chmod(0o600)
+
+              # Happy path: exact authority -> private pinned peer -> strict state projection.
+              grants = HomeRigGrantStore(uuid_factory=UUIDs())
+              ledger = DataSharingLedger(uuid_factory=UUIDs(100))
+              grant, auth = authorized(grants, ledger, base=990)
+              capture = CaptureTransport(
+                  TransportResponse(
+                      200,
+                      {"content-type": "application/json"},
+                      state_body(),
+                      "10.0.0.2",
+                  )
+              )
+              connection = HomeAssistantConnection(
+                  origin="http://ha.internal:8123/",
+                  token_file=token_file,
+                  allow_insecure_http=True,
+              )
+              evidence = execute_home_assistant_state_read(
+                  grants,
+                  ledger,
+                  auth,
+                  connection,
+                  now=1000,
+                  resolver=lambda host, port: ("192.168.1.50", "10.0.0.2"),
+                  transport=capture,
+              )
+              assert evidence.entity_id == "sensor.gpu_temp"
+              assert evidence.state == "61"
+              assert evidence.observed_at == 1000
+              assert "attributes" not in evidence.to_dict()
+              assert "context" not in evidence.to_dict()
+              assert len(capture.calls) == 1
+              url, call = capture.calls[0]
+              assert url == "http://ha.internal:8123/api/states/sensor.gpu_temp"
+              assert call["connect_address"] == "10.0.0.2"
+              assert call["allow_insecure_http"] is True
+              assert call["bearer_token"] == token
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "completed"
+              grants.close()
+              ledger.close()
+
+              # Plaintext bearer is opt-in and cannot resolve to any public peer.
+              try:
+                  HomeAssistantConnection(origin="http://ha.internal:8123", token_file=token_file)
+              except HomeAssistantTransportError as exc:
+                  assert "opt-in" in str(exc)
+              else:
+                  raise AssertionError("plaintext Home Assistant origin bypassed explicit opt-in")
+
+              grants = HomeRigGrantStore(uuid_factory=UUIDs(200))
+              ledger = DataSharingLedger(uuid_factory=UUIDs(300))
+              _, auth = authorized(grants, ledger, base=1100)
+              never = CaptureTransport(
+                  TransportResponse(200, {"content-type": "application/json"}, state_body(), "8.8.8.8")
+              )
+              try:
+                  execute_home_assistant_state_read(
+                      grants,
+                      ledger,
+                      auth,
+                      connection,
+                      now=1110,
+                      resolver=lambda host, port: ("8.8.8.8",),
+                      transport=never,
+                  )
+              except HomeAssistantTransportError as exc:
+                  assert "global peer" in str(exc)
+              else:
+                  raise AssertionError("plaintext bearer reached a global Home Assistant peer")
+              assert never.calls == []
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "failed"
+              grants.close()
+              ledger.close()
+
+              # Revoke after provider-plan creation blocks before DNS, file read and transport.
+              grants = HomeRigGrantStore(uuid_factory=UUIDs(400))
+              ledger = DataSharingLedger(uuid_factory=UUIDs(500))
+              grant, auth = authorized(grants, ledger, base=1200)
+              grants.revoke(
+                  grant.grant_id,
+                  expected_scope_sha256=grant.scope.digest,
+                  actor="operator",
+                  now=1203,
+              )
+              missing_connection = HomeAssistantConnection(
+                  origin="https://ha.example.invalid",
+                  token_file=root / "missing.token",
+              )
+              resolver_calls = []
+              never = CaptureTransport(
+                  TransportResponse(200, {"content-type": "application/json"}, state_body(), "10.0.0.2")
+              )
+              try:
+                  execute_home_assistant_state_read(
+                      grants,
+                      ledger,
+                      auth,
+                      missing_connection,
+                      now=1210,
+                      resolver=lambda host, port: resolver_calls.append((host, port)) or ("10.0.0.2",),
+                      transport=never,
+                  )
+              except HomeRigDenied:
+                  pass
+              else:
+                  raise AssertionError("revoked T-038 grant reached Home Assistant execution")
+              assert resolver_calls == [] and never.calls == []
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "blocked"
+              assert finished[0]["error_code"] == "authority_revoked_execute"
+              grants.close()
+              ledger.close()
+
+              # Entity substitution from Home Assistant fails closed and finishes receipt as failed.
+              grants = HomeRigGrantStore(uuid_factory=UUIDs(600))
+              ledger = DataSharingLedger(uuid_factory=UUIDs(700))
+              _, auth = authorized(grants, ledger, base=1300)
+              wrong = CaptureTransport(
+                  TransportResponse(
+                      200,
+                      {"content-type": "application/json"},
+                      state_body(entity="sensor.other"),
+                      "10.0.0.2",
+                  )
+              )
+              try:
+                  execute_home_assistant_state_read(
+                      grants,
+                      ledger,
+                      auth,
+                      connection,
+                      now=1310,
+                      resolver=lambda host, port: ("10.0.0.2",),
+                      transport=wrong,
+                  )
+              except Exception as exc:
+                  assert "does not match" in str(exc)
+              else:
+                  raise AssertionError("substituted Home Assistant entity was accepted")
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "failed"
+              grants.close()
+              ledger.close()
+
+              # Concrete stdlib transport: exact private HTTP socket, exact Host/path,
+              # bearer injected only inside transport, one response, socket closed.
+              class FakeSocket:
+                  def __init__(self):
+                      self.sockaddr = None
+                      self.sent = b""
+                      self.closed = False
+                      self.timeout = None
+                  def settimeout(self, value):
+                      self.timeout = value
+                  def connect(self, sockaddr):
+                      self.sockaddr = sockaddr
+                  def getpeername(self):
+                      return ("10.0.0.2", self.sockaddr[1])
+                  def sendall(self, data):
+                      self.sent += data
+                  def close(self):
+                      self.closed = True
+
+              class FakeResponse:
+                  status = 200
+                  def __init__(self, sock, method=None):
+                      self.body = io.BytesIO(state_body())
+                      self.closed = False
+                  def begin(self):
+                      return None
+                  def getheaders(self):
+                      return [
+                          ("Content-Type", "application/json"),
+                          ("Content-Length", str(len(state_body()))),
+                      ]
+                  def read(self, amount):
+                      return self.body.read(amount)
+                  def close(self):
+                      self.closed = True
+
+              sock = FakeSocket()
+              concrete = PinnedHomeAssistantTransport(
+                  socket_factory=lambda family, kind: sock,
+                  response_factory=FakeResponse,
+              )
+              result = concrete.request(
+                  "http://ha.internal:8123/api/states/sensor.gpu_temp",
+                  connect_address="10.0.0.2",
+                  bearer_token=token,
+                  allow_insecure_http=True,
+                  timeout_seconds=2,
+                  max_wire_bytes=128 * 1024,
+              )
+              assert result.status == 200 and result.connected_address == "10.0.0.2"
+              assert sock.sockaddr == ("10.0.0.2", 8123)
+              assert sock.sent.startswith(b"GET /api/states/sensor.gpu_temp HTTP/1.1\r\n")
+              assert b"Host: ha.internal:8123\r\n" in sock.sent
+              assert f"Authorization: Bearer {token}\r\n".encode() in sock.sent
+              assert b"Accept-Encoding: identity\r\n" in sock.sent
+              assert sock.closed is True
+
+              socket_calls = []
+              blocked = PinnedHomeAssistantTransport(
+                  socket_factory=lambda *args: socket_calls.append(args),
+              )
+              try:
+                  blocked.request(
+                      "http://ha.internal:8123/api/states/sensor.gpu_temp",
+                      connect_address="8.8.8.8",
+                      bearer_token=token,
+                      allow_insecure_http=True,
+                      timeout_seconds=2,
+                      max_wire_bytes=128 * 1024,
+                  )
+              except HomeAssistantTransportError as exc:
+                  assert "global peer" in str(exc)
+              else:
+                  raise AssertionError("concrete HTTP bearer transport opened a public peer")
+              assert socket_calls == []
+
+          print("===== T-038 HOME ASSISTANT TRANSPORT: PASS =====")
+          PY

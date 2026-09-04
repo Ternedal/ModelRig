@@ -1,0 +1,289 @@
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib
+import json
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+_swap_passed = _swap_failed = 0
+
+
+def _swap_check(condition: bool, message: str) -> None:
+    global _swap_passed, _swap_failed
+    if condition:
+        _swap_passed += 1
+        print(f"  PASS: {message}")
+    else:
+        _swap_failed += 1
+        print(f"  FAIL: {message}")
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write(path: Path, text: str) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return _sha(path)
+
+
+_strict = importlib.import_module("stage_b_strict_contract")
+_root = Path(tempfile.mkdtemp(prefix="stage-b-swap-binding-"))
+_candidate = {
+    "version": "1.58.151",
+    "git_sha": "a" * 40,
+    "code_sha256": "b" * 64,
+    "identity_source": "git",
+    "working_tree_clean": True,
+    "version_stamps_consistent": True,
+}
+_updater_hash = "c" * 64
+_bootstrap = (
+    _root
+    / "validation"
+    / "appliance-lifecycle-evidence"
+    / "updater_binary_check.log"
+)
+_bootstrap_digest = _write(
+    _bootstrap,
+    "\n".join(
+        (
+            "release_version=1.58.151",
+            f"release_git_sha={_candidate['git_sha']}",
+            "asset_name=modelrig-updater-windows-x64.exe",
+            f"expected_sha256={_updater_hash}",
+            f"actual_sha256={_updater_hash}",
+            f"source_digest={_candidate['git_sha']}",
+            "source_ref=refs/tags/v1.58.151",
+            "signer_workflow=Ternedal/ModelRig/.github/workflows/build-and-release.yml",
+            "provenance_verified=true",
+        )
+    )
+    + "\n",
+)
+_interruption = (
+    _root
+    / "validation"
+    / "appliance-lifecycle-evidence"
+    / "appliance_interruption.log"
+)
+
+
+def _interruption_text(count: int, assets: str) -> str:
+    return (
+        "\n".join(
+            (
+                "observed_transaction_id=tx-new",
+                "observed_revision=3",
+                "observed_journal_from=1.58.149",
+                "observed_journal_to=v1.58.151",
+                "observed_journal_state=swapping",
+                f"observed_swapped_count={count}",
+                f"observed_swapped_assets={assets}",
+                "updater_process_pid=4321",
+                "updater_process_killed=true",
+                "recovery_exit_code=0",
+                "recovery_succeeded=true",
+                "live_executables_present=true",
+                "journal_absent=true",
+            )
+        )
+        + "\n"
+    )
+
+
+_interruption_digest = _write(
+    _interruption,
+    _interruption_text(1, "modelrig-server-windows-x64.exe"),
+)
+_lifecycle = {
+    "schema": "kaliv-appliance-lifecycle-observations/v1",
+    "candidate": {
+        "version": _candidate["version"],
+        "git_sha": _candidate["git_sha"],
+        "code_sha256": _candidate["code_sha256"],
+    },
+    "trials": {
+        "good_update": {
+            "source_version": "1.58.149",
+            "source_git_sha": "d" * 40,
+            "target_version": "1.58.151",
+            "target_git_sha": _candidate["git_sha"],
+        },
+        "updater_bootstrap": {
+            "performed": True,
+            "release_version": "1.58.151",
+            "release_git_sha": _candidate["git_sha"],
+            "asset_name": "modelrig-updater-windows-x64.exe",
+            "expected_sha256": _updater_hash,
+            "actual_sha256": _updater_hash,
+            "source_digest": _candidate["git_sha"],
+            "source_ref": "refs/tags/v1.58.151",
+            "signer_workflow": "Ternedal/ModelRig/.github/workflows/build-and-release.yml",
+            "provenance_verified": True,
+            "evidence_path": str(_bootstrap.relative_to(_root)),
+            "evidence_sha256": _bootstrap_digest,
+        },
+        "appliance_interruption": {
+            "performed": True,
+            "source_version": "1.58.149",
+            "observed_transaction_id": "tx-new",
+            "observed_revision": 3,
+            "observed_journal_from": "1.58.149",
+            "observed_journal_to": "v1.58.151",
+            "observed_journal_state": "swapping",
+            "observed_swapped_count": 1,
+            "observed_swapped_assets": ["modelrig-server-windows-x64.exe"],
+            "updater_process_pid": 4321,
+            "updater_process_killed": True,
+            "recovery_exit_code": 0,
+            "recovery_succeeded": True,
+            "live_executables_present": True,
+            "journal_absent": True,
+            "ready": True,
+            "backend_version": "1.58.149",
+            "worker_version": "1.58.149",
+            "evidence_path": str(_interruption.relative_to(_root)),
+            "evidence_sha256": _interruption_digest,
+        },
+    },
+}
+_lifecycle_path = _root / "validation" / "appliance-lifecycle-observations.json"
+_state_path = _root / "validation" / "stage-b-easy-state.json"
+
+
+def _write_state(done: bool) -> None:
+    _state_path.write_text(
+        json.dumps({"updater_bootstrap_done": done}), encoding="utf-8"
+    )
+
+
+_write_state(True)
+
+
+def _evaluate(value: dict) -> tuple[dict, int]:
+    _lifecycle_path.write_text(json.dumps(value), encoding="utf-8")
+    return _strict.evaluate(
+        _root,
+        Path("validation/appliance-lifecycle-observations.json"),
+        candidate=_candidate,
+        now=datetime(2026, 8, 8, tzinfo=timezone.utc),
+    )
+
+
+_valid, _valid_code = _evaluate(_lifecycle)
+_swap_check(
+    _valid_code == 0 and _valid["gate"]["passed"] is True,
+    "matching swap count, asset list and true bootstrap checkpoint pass",
+)
+_swap_check(
+    _valid["source"]["bootstrap_state"]["sha256"] == _sha(_state_path)
+    and _valid["source"]["bootstrap_state"]["updater_bootstrap_done"] is True,
+    "strict report hash-binds the authoritative bootstrap checkpoint",
+)
+
+_write_state(False)
+_blocked_tombstone, _blocked_tombstone_code = _evaluate(_lifecycle)
+_swap_check(
+    _blocked_tombstone_code != 0
+    and _blocked_tombstone["gate"]["passed"] is False,
+    "false checkpoint blocks stale lifecycle trial and log proof",
+)
+
+_state_path.write_text(
+    '{"updater_bootstrap_done": false, "updater_bootstrap_done": true}',
+    encoding="utf-8",
+)
+_blocked_duplicate_state, _blocked_duplicate_state_code = _evaluate(_lifecycle)
+_swap_check(
+    _blocked_duplicate_state_code != 0
+    and _blocked_duplicate_state["gate"]["passed"] is False,
+    "duplicate contradictory bootstrap checkpoint key blocks",
+)
+_write_state(True)
+
+_log_zero = copy.deepcopy(_lifecycle)
+_log_zero["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(0, "modelrig-server-windows-x64.exe"),
+)
+_blocked_log, _blocked_log_code = _evaluate(_log_zero)
+_swap_check(
+    _blocked_log_code != 0 and _blocked_log["gate"]["passed"] is False,
+    "self-hashed log count zero cannot accompany JSON count one",
+)
+
+_log_ten = copy.deepcopy(_lifecycle)
+_log_ten["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(10, "modelrig-server-windows-x64.exe"),
+)
+_blocked_ten, _blocked_ten_code = _evaluate(_log_ten)
+_swap_check(
+    _blocked_ten_code != 0 and _blocked_ten["gate"]["passed"] is False,
+    "full-line binding rejects JSON count one with log count ten",
+)
+
+_duplicate_count = copy.deepcopy(_lifecycle)
+_duplicate_count["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(1, "modelrig-server-windows-x64.exe")
+    + "observed_swapped_count=10\n",
+)
+_blocked_duplicate_count, _blocked_duplicate_count_code = _evaluate(_duplicate_count)
+_swap_check(
+    _blocked_duplicate_count_code != 0
+    and _blocked_duplicate_count["gate"]["passed"] is False,
+    "duplicate contradictory swap-count key blocks",
+)
+
+_duplicate_assets = copy.deepcopy(_lifecycle)
+_duplicate_assets["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(1, "modelrig-server-windows-x64.exe")
+    + "observed_swapped_assets="
+    + "modelrig-server-windows-x64.exe,modelrig-worker-windows-x64.exe\n",
+)
+_blocked_duplicate_assets, _blocked_duplicate_assets_code = _evaluate(_duplicate_assets)
+_swap_check(
+    _blocked_duplicate_assets_code != 0
+    and _blocked_duplicate_assets["gate"]["passed"] is False,
+    "duplicate contradictory swapped-assets key blocks",
+)
+
+_log_extra_asset = copy.deepcopy(_lifecycle)
+_log_extra_asset["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(
+        1,
+        "modelrig-server-windows-x64.exe,modelrig-worker-windows-x64.exe",
+    ),
+)
+_blocked_assets, _blocked_assets_code = _evaluate(_log_extra_asset)
+_swap_check(
+    _blocked_assets_code != 0 and _blocked_assets["gate"]["passed"] is False,
+    "full-line binding rejects a logged asset-list extension",
+)
+
+_count_mismatch = copy.deepcopy(_lifecycle)
+_count_mismatch["trials"]["appliance_interruption"]["observed_swapped_count"] = 2
+_count_mismatch["trials"]["appliance_interruption"]["evidence_sha256"] = _write(
+    _interruption,
+    _interruption_text(2, "modelrig-server-windows-x64.exe"),
+)
+_blocked_count, _blocked_count_code = _evaluate(_count_mismatch)
+_swap_check(
+    _blocked_count_code != 0 and _blocked_count["gate"]["passed"] is False,
+    "JSON swap count must equal asset-list length",
+)
+
+print(
+    f"Stage B swap binding contracts: {_swap_passed} passed, "
+    f"{_swap_failed} failed"
+)
+if _swap_failed:
+    raise SystemExit(1)

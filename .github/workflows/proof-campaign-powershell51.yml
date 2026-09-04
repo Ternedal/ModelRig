@@ -1,0 +1,39 @@
+name: proof-campaign-powershell51
+
+on:
+  pull_request:
+    paths:
+      - "scripts/run-proof-campaign.ps1"
+      - "scripts/proof_campaign_gate_receipt.py"
+      - "scripts/proof_scope.py"
+      - "tests/workflow_proof_campaign_skip_fail_closed.py"
+      - ".github/workflows/proof-campaign-powershell51.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verdict-and-reuse-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Show Windows PowerShell authority
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Windows PowerShell: $($PSVersionTable.PSVersion)"
+          if ($PSVersionTable.PSVersion.Major -ne 5) {
+            throw "Expected Windows PowerShell 5.1, got $($PSVersionTable.PSVersion)"
+          }
+
+      - name: Proof campaign fail-closed regression on Windows
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          python tests/workflow_proof_campaign_skip_fail_closed.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

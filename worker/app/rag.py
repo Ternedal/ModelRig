@@ -176,13 +176,17 @@ async def query(
     instead of correctly saying it doesn't know. Filtering happens before the
     top_k cut, not after, so a good min_score can return fewer than top_k
     matches (including zero) rather than padding with irrelevant ones.
+
+    Sources the user switched off are excluded here, at retrieval — not by
+    deleting anything. A switched-off source therefore cannot reach the model
+    through RAG, but its chunks survive and the switch is reversible.
     """
     q_emb = await oc.embed(q)
     assert_corpus_matches_active_model(store, len(q_emb))
     scored = [
         {"id": doc_id, "text": text, "source": src,
          "chunk_index": chunk_index, "score": cosine(q_emb, emb)}
-        for doc_id, text, src, chunk_index, emb in store.all(source=source)
+        for doc_id, text, src, chunk_index, emb in store.all(source=source, include_disabled=False)
     ]
     scored = [m for m in scored if m["score"] >= min_score]
     scored.sort(key=lambda x: x["score"], reverse=True)

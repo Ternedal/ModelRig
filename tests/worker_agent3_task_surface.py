@@ -361,9 +361,22 @@ check(busy.status_code == 503, "busy task workers reject instead of queueing hid
 fixture.client.post(f"/experimental/agent3/task/runs/{first_run}/cancel")
 gate.slow_release.set()
 wait_terminal(fixture, first_run)
+# A terminal run is persisted inside execute_task(); the worker semaphore is
+# released immediately afterwards by TaskExecutionPool's executor wrapper. A
+# client can therefore observe terminal state during that tiny hand-off and
+# legitimately receive another 503. The API contract says that busy rejection
+# preserves the plan token, so retry that same token within a bounded window.
+deadline = time.time() + 2.0
 second = fixture.client.post(f"/experimental/agent3/task/plans/{second_plan}/start")
-check(second.status_code == 202, "busy rejection preserves the single-use task token")
-wait_terminal(fixture, second.json()["run"]["id"])
+while second.status_code == 503 and time.time() < deadline:
+    time.sleep(0.01)
+    second = fixture.client.post(f"/experimental/agent3/task/plans/{second_plan}/start")
+check(
+    second.status_code == 202,
+    "busy rejection preserves the single-use task token until worker capacity returns",
+)
+if second.status_code == 202:
+    wait_terminal(fixture, second.json()["run"]["id"])
 fixture.close()
 
 

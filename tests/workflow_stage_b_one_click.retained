@@ -1,0 +1,453 @@
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib.util
+import json
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+WIZARD = SCRIPTS / "stage_b_one_click.py"
+STRICT_WIZARD = SCRIPTS / "stage_b_one_click_v2.py"
+STRICT_GATE = SCRIPTS / "stage_b_strict_evidence.py"
+STRICT_FINAL = SCRIPTS / "stage_b_physical_gate_v2.py"
+LAUNCHER = ROOT / "START_STAGE_B_TEST.cmd"
+VERIFY_LAUNCHER = ROOT / "VERIFY_STAGE_B_EVIDENCE.cmd"
+RUNBOOK = ROOT / "STAGE_B_UPDATER_EVIDENCE.md"
+EXAMPLE = ROOT / "eval" / "appliance_lifecycle_observations.example.json"
+
+passed = failed = 0
+
+
+def check(condition: bool, message: str) -> None:
+    global passed, failed
+    if condition:
+        passed += 1
+        print(f"  PASS: {message}")
+    else:
+        failed += 1
+        print(f"  FAIL: {message}")
+
+
+def expect_raises(exc_type: type[BaseException], callback, message: str) -> None:
+    try:
+        callback()
+    except exc_type:
+        check(True, message)
+    except BaseException as exc:
+        check(False, f"{message} (wrong exception: {type(exc).__name__})")
+    else:
+        check(False, message)
+
+
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+legacy = load_module("stage_b_one_click", WIZARD)
+collector = load_module("stage_b_one_click_v2_contract", STRICT_WIZARD)
+strict = load_module("stage_b_strict_contract", STRICT_GATE)
+final_gate = load_module("stage_b_final_contract", STRICT_FINAL)
+
+for path, label in (
+    (WIZARD, "legacy lifecycle engine"),
+    (STRICT_WIZARD, "strict collector"),
+    (STRICT_GATE, "strict semantic gate"),
+    (STRICT_FINAL, "strict final gate"),
+    (LAUNCHER, "Stage B launcher"),
+    (VERIFY_LAUNCHER, "Stage B verifier"),
+    (RUNBOOK, "Stage B runbook"),
+    (EXAMPLE, "lifecycle observation template"),
+):
+    check(path.is_file(), f"{label} exists")
+
+legacy_source = WIZARD.read_text(encoding="utf-8")
+collector_source = STRICT_WIZARD.read_text(encoding="utf-8")
+strict_source = STRICT_GATE.read_text(encoding="utf-8")
+final_source = STRICT_FINAL.read_text(encoding="utf-8")
+launcher_source = LAUNCHER.read_text(encoding="utf-8").lower()
+verify_source = VERIFY_LAUNCHER.read_text(encoding="utf-8").lower()
+runbook = RUNBOOK.read_text(encoding="utf-8")
+example = EXAMPLE.read_text(encoding="utf-8")
+
+flow = (
+    "trial_good_update(observations, state)",
+    "trial_reboot(observations, state)",
+    'trial_supervisor(observations, state, "backend", 8080)',
+    'trial_supervisor(observations, state, "worker", 8099)',
+    "trial_bad_update(observations, state)",
+)
+check("candidate_git_sha" in legacy_source, "state checkpoints are bound to the candidate git sha")
+check("_archive_stale_state" in legacy_source, "a stale state is archived, never trusted")
+check("Observationsfil fra anden kandidat" in legacy_source, "another era's observations are archived before fresh ones are built")
+check(all(item in legacy_source for item in flow), "legacy engine still drives all five lifecycle trials")
+check(
+    [legacy_source.index(item) for item in flow]
+    == sorted(legacy_source.index(item) for item in flow),
+    "good update precedes target-version lifecycle trials",
+)
+check("stage_b_one_click_v2.py" in launcher_source, "advertised launcher uses strict collector")
+check("stage_b_physical_gate_v2.py" in verify_source, "advertised verifier uses strict final gate")
+check('EXPECTED_SOURCE_VERSION = "1.58.149"' in collector_source, "collector pins source 1.58.149")
+check('EXPECTED_TARGET_VERSION = "1.58.151"' in collector_source, "collector pins target 1.58.151")
+check('"--source-digest"' in collector_source, "collector constrains provenance source digest")
+check('"--source-ref"' in collector_source, "collector constrains provenance source ref")
+check('"--signer-workflow"' in collector_source, "collector constrains signer workflow")
+check("_require_no_active_journal(root)" in collector_source, "collector rejects pre-existing main/tmp journals")
+check("observed_transaction_id" in collector_source, "collector records transaction identity")
+check("verification_in_progress" in final_source, "final gate invalidates old receipt before verification")
+check("strict_evidence_complete" in final_source, "final receipt includes strict evidence state")
+check('"source_digest"' in example and '"observed_transaction_id"' in example, "template carries new strict evidence fields")
+
+for text, label in (
+    (legacy_source.lower(), "legacy lifecycle engine"),
+    (collector_source.lower(), "strict collector"),
+    (strict_source.lower(), "strict semantic gate"),
+    (final_source.lower(), "strict final gate"),
+    (launcher_source, "start launcher"),
+    (verify_source, "verify launcher"),
+):
+    for forbidden in ("git push", "git tag", "gh release create", "merge_pull_request", "production_activation=true"):
+        check(forbidden not in text, f"{label} has no forbidden authority: {forbidden}")
+
+check("1.58.149" in runbook and "1.58.151" in runbook, "runbook names exact source and target")
+check("#401" in runbook and "blokerer ikke promotion" in runbook, "runbook defers signed-to-signed proof")
+check("strict_evidence_complete=true" in runbook, "runbook requires strict final evidence")
+
+
+def file_sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+# Collector-level bootstrap test: a resumed run must remeasure the live file and
+# bind the attestation to the candidate commit, tag ref and release workflow.
+bootstrap_root = Path(tempfile.mkdtemp(prefix="stage-b-bootstrap-"))
+bootstrap_updater = bootstrap_root / collector.UPDATER_ASSET
+bootstrap_updater.write_bytes(b"verified updater bytes")
+bootstrap_evidence = bootstrap_root / "validation" / "appliance-lifecycle-evidence"
+bootstrap_candidate = {
+    "version": collector.EXPECTED_TARGET_VERSION,
+    "git_sha": "a" * 40,
+    "code_sha256": "b" * 64,
+}
+bootstrap_observations = {"trials": {"updater_bootstrap": {"old": True}}}
+bootstrap_state = {"updater_bootstrap_done": True}
+commands: list[list[str]] = []
+
+
+def attestation_success(command, **_kwargs):
+    commands.append(list(command))
+    return SimpleNamespace(returncode=0, stdout="verified", stderr="")
+
+
+with (
+    mock.patch.object(collector, "_release_asset_sha256", return_value=file_sha(bootstrap_updater)),
+    mock.patch.object(collector.legacy, "ROOT", bootstrap_root),
+    mock.patch.object(collector.legacy, "EVIDENCE", bootstrap_evidence),
+    mock.patch.object(collector.legacy, "appliance_root", return_value=bootstrap_root),
+    mock.patch.object(collector.legacy, "sha256_file", side_effect=file_sha),
+    mock.patch.object(collector.legacy, "save_observations"),
+    mock.patch.object(collector.legacy, "save_state"),
+    mock.patch.object(collector.legacy, "heading"),
+    mock.patch.object(collector.legacy, "ok"),
+    mock.patch.object(collector.subprocess, "run", side_effect=attestation_success),
+):
+    collector._verify_bootstrap(bootstrap_candidate, bootstrap_observations, bootstrap_state)
+
+command = commands[-1] if commands else []
+check(command.count("--source-digest") == 1 and command[command.index("--source-digest") + 1] == bootstrap_candidate["git_sha"], "collector binds source digest")
+check(command.count("--source-ref") == 1 and command[command.index("--source-ref") + 1] == collector.SOURCE_REF, "collector binds source tag ref")
+check(command.count("--signer-workflow") == 1 and command[command.index("--signer-workflow") + 1] == collector.SIGNER_WORKFLOW, "collector binds release workflow")
+check(len(commands) == 1, "saved bootstrap checkpoint still triggers live provenance verification")
+check(bootstrap_observations["trials"]["updater_bootstrap"]["source_digest"] == bootstrap_candidate["git_sha"], "collector records provenance digest")
+check(bootstrap_observations["trials"]["updater_bootstrap"]["source_ref"] == collector.SOURCE_REF, "collector records provenance ref")
+
+
+def provenance_failure() -> None:
+    observations = {"trials": {}}
+    state: dict = {}
+    with (
+        mock.patch.object(collector, "_release_asset_sha256", return_value=file_sha(bootstrap_updater)),
+        mock.patch.object(collector.legacy, "ROOT", bootstrap_root),
+        mock.patch.object(collector.legacy, "EVIDENCE", bootstrap_evidence),
+        mock.patch.object(collector.legacy, "appliance_root", return_value=bootstrap_root),
+        mock.patch.object(collector.legacy, "sha256_file", side_effect=file_sha),
+        mock.patch.object(collector.legacy, "heading"),
+        mock.patch.object(collector.legacy, "ok"),
+        mock.patch.object(
+            collector.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=1, stdout="", stderr="wrong source"),
+        ),
+    ):
+        collector._verify_bootstrap(bootstrap_candidate, observations, state)
+
+
+expect_raises(legacy.StageBError, provenance_failure, "collector blocks wrong-release provenance")
+
+
+class FakeProcess:
+    def __init__(self, stdout=None):
+        self.pid = 4321
+        self.returncode = None
+        self.killed = False
+        if stdout is not None:
+            stdout.write(b"updater launched\n")
+            stdout.flush()
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def source_versions() -> dict[str, str]:
+    return {"backend_version": "1.58.149", "worker_version": "1.58.149"}
+
+
+def run_interruption(snapshots: list[dict], *, stale_tmp: bool = False):
+    root = Path(tempfile.mkdtemp(prefix="stage-b-interruption-"))
+    (root / collector.UPDATER_ASSET).write_bytes(b"updater")
+    if stale_tmp:
+        (root / "update-transaction.json.tmp").write_text("{}", encoding="utf-8")
+    evidence = root / "validation" / "appliance-lifecycle-evidence"
+    observations = {"trials": {}}
+    state: dict = {}
+    process = FakeProcess()
+    popen_mock = mock.Mock(return_value=process)
+    with (
+        mock.patch.object(collector.legacy, "EVIDENCE", evidence),
+        mock.patch.object(collector.legacy, "appliance_root", return_value=root),
+        mock.patch.object(collector.legacy, "live_versions", side_effect=[source_versions(), source_versions()]),
+        mock.patch.object(collector.legacy, "wait_ready", return_value=5),
+        mock.patch.object(collector.legacy, "sha256_file", side_effect=file_sha),
+        mock.patch.object(collector.legacy, "save_observations"),
+        mock.patch.object(collector.legacy, "save_state"),
+        mock.patch.object(collector.legacy, "heading"),
+        mock.patch.object(collector.legacy, "ok"),
+        mock.patch.object(collector, "_all_live_executables_present", return_value=True),
+        mock.patch.object(collector, "_journal_snapshot", side_effect=snapshots),
+        mock.patch.object(collector.subprocess, "Popen", popen_mock),
+        mock.patch.object(
+            collector.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="recovered", stderr=""),
+        ),
+        mock.patch.object(collector.time, "sleep"),
+    ):
+        collector._run_interruption(bootstrap_candidate, observations, state)
+    return observations, state, process, popen_mock
+
+
+valid_snapshots = [
+    {"id": "tx-new", "revision": 1, "state": "prepared", "swapped": [], "from": "1.58.149", "to": "v1.58.151"},
+    {"id": "tx-new", "revision": 3, "state": "swapping", "swapped": ["modelrig-server-windows-x64.exe"], "from": "1.58.149", "to": "v1.58.151"},
+]
+observations, state, process, _ = run_interruption(valid_snapshots)
+trial = observations["trials"]["appliance_interruption"]
+check(trial["observed_transaction_id"] == "tx-new" and trial["observed_revision"] == 3, "collector binds the newly observed transaction and revision")
+check(trial["updater_process_pid"] == 4321 and process.killed, "collector binds and kills the launched updater process")
+check(state.get("appliance_interruption_done") is True, "collector checkpoints only a recovered interruption")
+
+
+def stale_tmp_failure() -> None:
+    run_interruption(valid_snapshots, stale_tmp=True)
+
+
+expect_raises(legacy.StageBError, stale_tmp_failure, "collector rejects a pre-existing .tmp journal before Popen")
+
+
+def transaction_drift_failure() -> None:
+    run_interruption([
+        {"id": "tx-one", "revision": 1, "state": "prepared", "swapped": [], "from": "1.58.149", "to": "v1.58.151"},
+        {"id": "tx-two", "revision": 2, "state": "swapping", "swapped": ["x"], "from": "1.58.149", "to": "v1.58.151"},
+    ])
+
+
+expect_raises(legacy.StageBError, transaction_drift_failure, "collector rejects transaction-id drift")
+
+
+# Strict semantic gate fixture, including release-bound provenance and journal identity.
+def write_log(root: Path, name: str, text: str) -> tuple[str, str]:
+    path = root / "validation" / "appliance-lifecycle-evidence" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return str(path.relative_to(root)), file_sha(path)
+
+
+strict_root = Path(tempfile.mkdtemp(prefix="strict-stage-b-"))
+strict_state = strict_root / "validation" / "stage-b-easy-state.json"
+strict_state.parent.mkdir(parents=True, exist_ok=True)
+strict_state.write_text(
+    json.dumps({"updater_bootstrap_done": True}), encoding="utf-8"
+)
+strict_candidate = {
+    "version": "1.58.151",
+    "git_sha": "a" * 40,
+    "code_sha256": "b" * 64,
+    "identity_source": "git",
+    "working_tree_clean": True,
+    "version_stamps_consistent": True,
+}
+updater_hash = "c" * 64
+bootstrap_path, bootstrap_digest = write_log(
+    strict_root,
+    "updater_binary_check.log",
+    "\n".join((
+        "release_version=1.58.151",
+        f"release_git_sha={strict_candidate['git_sha']}",
+        "asset_name=modelrig-updater-windows-x64.exe",
+        f"expected_sha256={updater_hash}",
+        f"actual_sha256={updater_hash}",
+        f"source_digest={strict_candidate['git_sha']}",
+        "source_ref=refs/tags/v1.58.151",
+        "signer_workflow=Ternedal/ModelRig/.github/workflows/build-and-release.yml",
+        "provenance_verified=true",
+    )) + "\n",
+)
+interruption_path, interruption_digest = write_log(
+    strict_root,
+    "appliance_interruption.log",
+    "\n".join((
+        "observed_transaction_id=tx-new",
+        "observed_revision=3",
+        "observed_journal_from=1.58.149",
+        "observed_journal_to=v1.58.151",
+        "observed_journal_state=swapping",
+        "observed_swapped_count=1",
+        "updater_process_pid=4321",
+        "updater_process_killed=true",
+        "recovery_exit_code=0",
+        "recovery_succeeded=true",
+        "live_executables_present=true",
+        "journal_absent=true",
+    )) + "\n",
+)
+strict_lifecycle = {
+    "schema": "kaliv-appliance-lifecycle-observations/v1",
+    "candidate": {
+        "version": strict_candidate["version"],
+        "git_sha": strict_candidate["git_sha"],
+        "code_sha256": strict_candidate["code_sha256"],
+    },
+    "trials": {
+        "good_update": {
+            "source_version": "1.58.149",
+            "source_git_sha": "d" * 40,
+            "target_version": "1.58.151",
+            "target_git_sha": strict_candidate["git_sha"],
+        },
+        "updater_bootstrap": {
+            "performed": True,
+            "release_version": "1.58.151",
+            "release_git_sha": strict_candidate["git_sha"],
+            "asset_name": "modelrig-updater-windows-x64.exe",
+            "expected_sha256": updater_hash,
+            "actual_sha256": updater_hash,
+            "source_digest": strict_candidate["git_sha"],
+            "source_ref": "refs/tags/v1.58.151",
+            "signer_workflow": "Ternedal/ModelRig/.github/workflows/build-and-release.yml",
+            "provenance_verified": True,
+            "evidence_path": bootstrap_path,
+            "evidence_sha256": bootstrap_digest,
+        },
+        "appliance_interruption": {
+            "performed": True,
+            "source_version": "1.58.149",
+            "observed_transaction_id": "tx-new",
+            "observed_revision": 3,
+            "observed_journal_from": "1.58.149",
+            "observed_journal_to": "v1.58.151",
+            "observed_journal_state": "swapping",
+            "observed_swapped_count": 1,
+            "updater_process_pid": 4321,
+            "updater_process_killed": True,
+            "recovery_exit_code": 0,
+            "recovery_succeeded": True,
+            "live_executables_present": True,
+            "journal_absent": True,
+            "ready": True,
+            "backend_version": "1.58.149",
+            "worker_version": "1.58.149",
+            "evidence_path": interruption_path,
+            "evidence_sha256": interruption_digest,
+        },
+    },
+}
+strict_path = strict_root / "validation" / "appliance-lifecycle-observations.json"
+
+
+def evaluate_strict(value: dict) -> tuple[dict, int]:
+    strict_path.write_text(json.dumps(value), encoding="utf-8")
+    return strict.evaluate(
+        strict_root,
+        Path("validation/appliance-lifecycle-observations.json"),
+        candidate=strict_candidate,
+        now=datetime(2026, 8, 8, tzinfo=timezone.utc),
+    )
+
+
+strict_report, strict_code = evaluate_strict(strict_lifecycle)
+check(strict_code == 0 and strict_report["gate"]["strict_evidence_complete"] is True, "valid strict bundle passes")
+check(strict_report["gate"]["production_activation"] is False, "strict gate cannot activate production")
+for label, mutate in (
+    # Must be a version that is NOT the expected source. This case used to say
+    # 1.58.149 back when the source was 1.58.150; once the source became
+    # 1.58.149 the "drift" it injected was the correct value, and the test
+    # passed while proving nothing.
+    ("source version drift", lambda value: value["trials"]["good_update"].update(source_version="1.58.148")),
+    ("provenance digest drift", lambda value: value["trials"]["updater_bootstrap"].update(source_digest="e" * 40)),
+    ("provenance ref drift", lambda value: value["trials"]["updater_bootstrap"].update(source_ref="refs/tags/v1.58.149")),
+    ("signer workflow drift", lambda value: value["trials"]["updater_bootstrap"].update(signer_workflow="other/repo/.github/workflows/release.yml")),
+    ("bootstrap hash mismatch", lambda value: value["trials"]["updater_bootstrap"].update(actual_sha256="d" * 64)),
+    ("missing transaction identity", lambda value: value["trials"]["appliance_interruption"].update(observed_transaction_id="")),
+    ("interruption before any swap", lambda value: value["trials"]["appliance_interruption"].update(observed_swapped_count=0)),
+    ("interruption recovery failed", lambda value: value["trials"]["appliance_interruption"].update(recovery_succeeded=False)),
+    ("journal left active", lambda value: value["trials"]["appliance_interruption"].update(journal_absent=False)),
+):
+    changed = copy.deepcopy(strict_lifecycle)
+    mutate(changed)
+    blocked, blocked_code = evaluate_strict(changed)
+    check(blocked_code != 0 and blocked["gate"]["passed"] is False, label + " blocks")
+
+
+# Killing the final verifier before the strict subprocess finishes must leave an
+# explicit blocked receipt, never the previous green JSON.
+final_root = Path(tempfile.mkdtemp(prefix="stage-b-final-"))
+(final_root / "validation").mkdir(parents=True)
+final_path = final_root / "validation" / "stage-b-physical-final-latest.json"
+final_path.write_text(json.dumps({"gate": {"passed": True, "all_physical_evidence_complete": True}}), encoding="utf-8")
+with (
+    mock.patch.object(final_gate, "ROOT", final_root),
+    mock.patch.object(final_gate, "_run", side_effect=KeyboardInterrupt()),
+):
+    try:
+        final_gate.main([])
+    except KeyboardInterrupt:
+        pass
+current_final = json.loads(final_path.read_text(encoding="utf-8"))
+check(current_final.get("status") == "verification_in_progress", "final gate invalidates old receipt before subprocesses")
+check(current_final.get("gate", {}).get("passed") is False, "interrupted verifier leaves official receipt blocked")
+check(current_final.get("gate", {}).get("all_physical_evidence_complete") is False, "interrupted verifier cannot preserve complete evidence")
+
+print(f"Stage B one-click contracts: {passed} passed, {failed} failed")
+if failed:
+    raise SystemExit(1)

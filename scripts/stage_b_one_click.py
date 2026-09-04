@@ -133,16 +133,55 @@ def get_json(url: str, *, timeout: float = 5.0, token: str | None = None) -> Any
         return json.load(response)
 
 
+def _github_token() -> str | None:
+    """The rig's PAT when the session carries one, else None.
+
+    Unauthenticated GitHub API calls share a 60/hour per-IP budget that a
+    single rig day exhausts (#753 item 9); authenticated calls do not.
+    """
+    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or None
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_state() -> dict[str, Any]:
+def _archive_stale_state(state: dict[str, Any], reason: str) -> None:
+    archive = VALIDATION / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = archive / f"stage-b-easy-state-stale-{stamp}.json"
+    target.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"  ->    Gemt checkpoint hoerer ikke til denne kandidat ({reason}).")
+    print(f"        Arkiveret til {target}; kaeden koerer forfra paa aegte fysik.")
+
+
+def load_state(expected_git_sha: str | None = None) -> dict[str, Any]:
+    """Checkpoints are only authority for the candidate that wrote them.
+
+    A state file without a candidate binding, or bound to another git sha,
+    is archived and ignored -- twice now (1.58->2.0.11 and 2.0.11->2.0.12) a
+    surviving state let the engine skip the real transition on a new era's
+    rig day (#753 items 3 and 8). Fail closed: no binding, no trust.
+    """
     try:
         value = json.loads(STATE_PATH.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    if expected_git_sha:
+        bound = value.get("candidate_git_sha")
+        if bound != expected_git_sha:
+            if value:
+                reason = f"bundet til {bound or 'ingen sha'}"
+                _archive_stale_state(value, reason)
+            value = {}
+        value["candidate_git_sha"] = expected_git_sha
+    return value
 
 
 def save_state(state: dict[str, Any]) -> None:
@@ -204,20 +243,26 @@ def remote_release_identity(repo: str) -> tuple[str, str]:
     """
     try:
         release = get_json(
-            f"https://api.github.com/repos/{repo}/releases/latest", timeout=15.0
+            f"https://api.github.com/repos/{repo}/releases/latest",
+            timeout=15.0,
+            token=_github_token(),
         )
         tag = str(release.get("tag_name") or "")
         if not tag:
             return "", ""
         ref = get_json(
-            f"https://api.github.com/repos/{repo}/git/ref/tags/{tag}", timeout=15.0
+            f"https://api.github.com/repos/{repo}/git/ref/tags/{tag}",
+            timeout=15.0,
+            token=_github_token(),
         )
         obj = ref.get("object") if isinstance(ref, dict) else None
         sha = str(obj.get("sha") or "") if isinstance(obj, dict) else ""
         # An annotated tag points at a tag object; dereference it to the commit.
         if isinstance(obj, dict) and obj.get("type") == "tag" and _SHA40.fullmatch(sha):
             tag_obj = get_json(
-                f"https://api.github.com/repos/{repo}/git/tags/{sha}", timeout=15.0
+                f"https://api.github.com/repos/{repo}/git/tags/{sha}",
+                timeout=15.0,
+                token=_github_token(),
             )
             inner = tag_obj.get("object") if isinstance(tag_obj, dict) else None
             if isinstance(inner, dict):
@@ -255,6 +300,7 @@ def released_worker_exe_sha256(version: str) -> str:
         release = get_json(
             f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}",
             timeout=15.0,
+            token=_github_token(),
         )
         assets = release.get("assets") if isinstance(release, dict) else None
         url = ""
@@ -796,7 +842,19 @@ def build_observations(candidate: dict[str, Any]) -> dict[str, Any]:
         try:
             existing = json.loads(OBSERVATIONS.read_text(encoding="utf-8-sig"))
             if isinstance(existing, dict) and existing.get("schema") == LIFECYCLE_SCHEMA:
-                return existing
+                held = (existing.get("candidate") or {}).get("git_sha")
+                if held == candidate.get("git_sha"):
+                    return existing
+                # Another era's observations are evidence for THAT era; keep
+                # them aside and build fresh ones for this candidate (#753
+                # item 8 -- yesterday's file merging into today's run cost a
+                # full morning of false mismatches).
+                archive = VALIDATION / "archive"
+                archive.mkdir(parents=True, exist_ok=True)
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                target = archive / f"appliance-lifecycle-observations-{stamp}.json"
+                OBSERVATIONS.replace(target)
+                print(f"  ->    Observationsfil fra anden kandidat ({held or 'ukendt'}) arkiveret til {target}")
         except (OSError, json.JSONDecodeError):
             pass
     observations = json.loads(EXAMPLE.read_text(encoding="utf-8"))
@@ -853,7 +911,7 @@ def main(argv: list[str] | None = None) -> int:
     print("  Den kan ikke merge, pushe, tagge, release eller aktivere produktion.")
 
     candidate = preflight()
-    state = load_state()
+    state = load_state(str(candidate.get("git_sha") or "") or None)
     observations = build_observations(candidate)
     EVIDENCE.mkdir(parents=True, exist_ok=True)
 

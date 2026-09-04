@@ -29,6 +29,10 @@ from app.agent4.handoff import (  # noqa: E402
     DispatchOutcomeKind,
 )
 from app.agent4.operator import Agent4OperatorReadService  # noqa: E402
+from app.agent4.operator_api import build_agent4_operator_router  # noqa: E402
+from app.agent4.operator_read_context import (  # noqa: E402
+    compose_agent4_operator_read_context,
+)
 from app.agent4.production_mount import mount_agent4_operator  # noqa: E402
 from app.agent4.repository import CampaignRepositoryError  # noqa: E402
 from app.agent4.timeline import JsonCampaignTimelineStore  # noqa: E402
@@ -91,7 +95,7 @@ class Agent4OperatorApiReviewTests(unittest.TestCase):
     def test_mount_rejects_parallel_timeline_and_query_services(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            context = _compose(root / "runtime")
+            context = compose_agent4_operator_read_context(root / "runtime")
             parallel_timeline = JsonCampaignTimelineStore(root / "parallel-timeline")
             mismatched_contexts = {
                 "timeline": replace(
@@ -132,12 +136,15 @@ class Agent4OperatorApiReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             context = _compose(Path(directory) / "runtime")
             app = FastAPI()
-            with patch.dict(
-                os.environ,
-                {"KALIV_AGENT4_OPERATOR_API": "1"},
-                clear=False,
-            ):
-                self.assertTrue(mount_agent4_operator(app, context))
+            # Repository fault injection needs the mutable full runtime. Exercise
+            # the transport adapter directly; production_mount accepts only the
+            # narrow read-only context after A4-25a.
+            app.include_router(
+                build_agent4_operator_router(
+                    context.operator,
+                    context.evidence_operator,
+                )
+            )
             client = TestClient(app)
             internal_message = "corrupt envelope at private filesystem path"
 

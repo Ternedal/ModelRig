@@ -17,12 +17,16 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    // QR-parring, rig-siden. SAMME artefakt som Android-appen bruger til at
+    // LAESE koden — her bruges den til at SKRIVE den. Ren Java, ingen
+    // Android/Play Services-binding.
+    implementation("com.google.zxing:core:3.5.4")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     // SQLite-first, per project convention. Android uses its built-in SQLite;
     // plain JVM needs an explicit embedded driver -- this is that driver, not a
     // server (no network, single file, no separate process). Version verified
     // against Maven Central 2026-07-04.
-    implementation("org.xerial:sqlite-jdbc:3.53.2.0")
+    implementation("org.xerial:sqlite-jdbc:3.53.4.0")
     // Windows DPAPI bridge. jna-platform brings the matching core JNA artifact;
     // no secret or encryption key is implemented in application code.
     implementation("net.java.dev.jna:jna-platform:5.19.1")
@@ -43,7 +47,7 @@ compose.desktop {
             // lets packageVersion tell the truth.
             targetFormats(TargetFormat.Deb)
             packageName = "Kaliv"
-            packageVersion = "1.58.150"
+            packageVersion = "2.0.13"
         }
     }
 }

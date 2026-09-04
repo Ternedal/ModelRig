@@ -17,6 +17,14 @@ freeze = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = freeze
 SPEC.loader.exec_module(freeze)
 
+ANCHOR_SPEC = importlib.util.spec_from_file_location(
+    "anchor_and_freeze_test", ROOT / "scripts" / "anchor_and_freeze.py"
+)
+assert ANCHOR_SPEC and ANCHOR_SPEC.loader
+anchor = importlib.util.module_from_spec(ANCHOR_SPEC)
+sys.modules[ANCHOR_SPEC.name] = anchor
+ANCHOR_SPEC.loader.exec_module(anchor)
+
 passed = failed = 0
 
 
@@ -96,6 +104,49 @@ def free_tag_api(tag_sha=None):
     return api
 
 
+# The re-freeze helper must wait on exactly the same authority set as the
+# receipt gate. Otherwise it can start a freeze while one required check (the
+# historical gap was CodeQL) is still missing or in progress.
+check(
+    set(anchor.VENTER_PAA) == set(freeze.REQUIRED_WORKFLOWS),
+    "anchor helper waits on exactly all candidate-freeze software gates",
+)
+check(
+    set(anchor.DISPATCH_FALLBACKS)
+    == {"agent3-diagnostics", "agent3-full-diagnostics"},
+    "only Agent 3 workflows are manual-dispatch fallbacks",
+)
+
+for label, workflow_path in (
+    ("Agent 3 diagnostics", ROOT / ".github" / "workflows" / "agent3-diagnostics.yml"),
+    (
+        "Agent 3 full diagnostics",
+        ROOT / ".github" / "workflows" / "agent3-full-diagnostics.yml",
+    ),
+):
+    workflow = workflow_path.read_text(encoding="utf-8")
+    check(
+        "push:\n    branches: [main]" in workflow,
+        f"{label} automatically produces exact-main freeze provenance",
+    )
+    check(
+        "workflow_dispatch:" in workflow,
+        f"{label} retains manual recovery dispatch",
+    )
+
+newest = {"name": "ci", "head_sha": "a" * 40, "status": "in_progress", "id": 2}
+older = {
+    "name": "ci",
+    "head_sha": "a" * 40,
+    "status": "completed",
+    "conclusion": "success",
+    "id": 1,
+}
+check(
+    anchor._latest_by_name([newest, older])["ci"]["id"] == 2,
+    "newer incomplete run cannot be hidden by an older green run",
+)
+
 repo, main_sha, candidate_sha = fixture()
 now = datetime(2026, 7, 20, 20, 0, tzinfo=timezone.utc)
 receipt = freeze.create_receipt(
@@ -119,7 +170,7 @@ check(
     "freeze cannot claim release completion or activation",
 )
 freeze.load_receipt(repo, now=now)
-check(True, "strict receipt reader accepts unchanged checkout")
+check(True, "strict receipt reader accepts unchanged checkout and current main")
 
 try:
     freeze.create_receipt(
@@ -146,8 +197,10 @@ try:
     )
     check(False, "a VERSION already tagged elsewhere must fail the freeze")
 except freeze.CandidateFreezeError as exc:
-    check("already tagged" in str(exc) and "bump VERSION" in str(exc),
-          "a taken VERSION fails closed and names the fix")
+    check(
+        "already tagged" in str(exc) and "bump VERSION" in str(exc),
+        "a taken VERSION fails closed and names the fix",
+    )
 
 # The same tag pointing AT this candidate is the post-promotion state, not a clash.
 receipt_after_tag = freeze.create_receipt(
@@ -157,8 +210,10 @@ receipt_after_tag = freeze.create_receipt(
     api=free_tag_api(tag_sha=candidate_sha),
     now=now,
 )
-check(receipt_after_tag["gate"]["passed"] is True,
-      "a tag pointing at this same candidate is not a conflict")
+check(
+    receipt_after_tag["gate"]["passed"] is True,
+    "a tag pointing at this same candidate is not a conflict",
+)
 
 missing = green_runs()["workflow_runs"][:-1]
 try:
@@ -173,6 +228,28 @@ try:
     check(False, "post-freeze edit must fail")
 except freeze.CandidateFreezeError:
     check(True, "post-freeze edit is detected")
+
+# A receipt is not a permanent permission slip. Every consumer must refetch
+# origin/main; otherwise a campaign can continue after main advances and the
+# candidate is no longer the current release boundary.
+stale_repo, stale_main_sha, stale_candidate_sha = fixture()
+freeze.create_receipt(
+    stale_candidate_sha,
+    root=stale_repo,
+    token="test-token",
+    api=free_tag_api(),
+    now=now,
+)
+git(stale_repo, "branch", "advanced-main", stale_candidate_sha)
+git(stale_repo, "push", "-q", "origin", "advanced-main:main")
+try:
+    freeze.load_receipt(stale_repo, now=now)
+    check(False, "receipt must fail after origin/main advances")
+except freeze.CandidateFreezeError as exc:
+    check(
+        "origin/main moved" in str(exc) and "rerun candidate freeze" in str(exc),
+        "receipt consumption refetches main and names the required re-freeze",
+    )
 
 print(f"candidate freeze contracts: {passed} passed, {failed} failed")
 if failed:

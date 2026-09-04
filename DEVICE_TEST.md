@@ -363,3 +363,77 @@ netværket der læser videre? Skærmbillede af tilstanden hjælper.
 besked, uden emojis (strip ved indlæsning), med 🎙-model-chip.
 **Hvis fejl →** var svaret tomt/kun markup? (så skal assistent-rækken
 mangle med vilje — det er korrekt adfærd, ikke en fejl).
+
+---
+
+## 17/8 — 2.0-runden (v2.0.9)
+
+Seks funktioner der aldrig har været i en device-test. Alt herunder er
+CI-grønt og læst i koden; **intet af det er kørt på hardware.** Forventningerne
+nedenfor er invarianter fra kildekoden, ikke fra en tidligere kørsel.
+
+**Riggen skal opdateres FØRST.** To af testene kræver den nye worker:
+`POST /rag/source/enabled` og turens `context`-felt findes ikke i en 2.0.8-rig.
+Kører du dem mod en gammel rig, tester du ingenting.
+
+### K1. QR-parring
+
+**Gør:** start desktop-appen, find parringskoden, scan den med telefonen.
+**Bør se:** desktop **tegner** koden (den er udstedt, ikke indløst); telefonen
+viser hvilken host den er ved at forbinde til, og forbinder først på et tryk.
+Koden bærer intet token.
+**Hvis fejl →** noter om det er skanningen (kamera/format) eller forbindelsen
+bagefter — det er to forskellige lag.
+
+### K2. Per-kilde til/fra i Viden
+
+**Gør:** sluk en kilde. Stil et spørgsmål den kilde ville have besvaret.
+Ingestér **samme kilde igen**. Genstart appen.
+**Bør se:** kilden bliver slukket, ikke slettet — den står der stadig med sit
+chunk-antal. Svar bruger den ikke. **Den forbliver slukket efter en ny ingest
+af samme kilde**, og efter genstart.
+**Hvis fejl →** afgørende: blev den *tændt* af en ny ingest, eller *slettet*?
+Fravær i `disabled_sources` betyder TÆNDT, så en tabt tilstand ser ud som en
+tændt kilde — ikke som en fejlmelding.
+
+### K3. Svar-citater
+
+**Gør:** stil et RAG-spørgsmål, tryk "vis hvad der blev læst".
+**Bør se:** en liste af **udsnit** — kilde, chunk-indeks, match-score og selve
+udsnittet. Den viser IKKE hvilken sætning i svaret der brugte hvilket udsnit;
+den kobling findes ikke i modellen, og det er med vilje at den ikke påstås.
+**Hvis fejl →** tom liste mod en opdateret rig betyder at turens `context`-felt
+ikke kom med — det er worker-siden, ikke appen.
+
+### K4. Del til Kaliv
+
+**Gør:** del en PDF til Kaliv fra en anden app.
+**Bør se:** delingen lander i et **valg**, ikke i en handling. Intet er
+indekseret, før du har valgt det.
+**Hvis fejl →** blev noget indekseret af sig selv, er det den vigtigste fejl i
+hele runden — noter den før du tester videre.
+
+### K5. Offline-kø
+
+**Gør:** sluk riggen. Skriv to beskeder. Tænd riggen igen og vent.
+**Bør se:** beskederne lægges i kø. Når riggen kommer tilbage, **vises køen og
+der ventes på et tryk** — der sendes ALDRIG noget af sig selv. Køen er
+telefonens eget regnskab; riggen ved intet om den.
+**Hvis fejl →** en besked der afsendes automatisk er en regressionsfejl i
+`OfflineQueue`, ikke en indstilling.
+
+### K6. Onboarding
+
+**Gør:** ryd appdata (eller frisk installation), åbn appen uden rig og uden
+cloud.
+**Bør se:** tre trin første gang, som siger højt at modellerne kører på din
+egen maskine. Den skal kunne gennemføres uden nogen af delene konfigureret.
+**Hvis fejl →** noter hvilket trin der kræver en forbindelse — onboarding må
+ikke kunne gå i stå på en rig der ikke er sat op endnu.
+
+### K7. In-app-opdatering (kun hvis du tagger v2.0.9)
+
+**Gør:** kør en telefon på 2.0.8 og lad den tjekke for opdatering.
+**Bør se:** 2.0.9 tilbydes; hentningen kommer fra `kaliv-latest.apk`.
+**Hvis fejl →** tjek om `/releases/latest`-redirectens `Location`-header peger
+på den forventede tag — updateren læser den, ikke API'et.

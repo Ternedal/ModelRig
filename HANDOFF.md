@@ -101,6 +101,35 @@ når du skal LÆSE tool-output** — ellers redigerer du din egen evidens væk.
 
 ---
 
+**Truffet af Anders 1.–16./8 — genåbn dem ikke.** ADR'erne er autoritet;
+de gengives IKKE her (A4-005's stopregel gælder ogsaa for denne fil):
+
+11. **ADR-A4-007** (1/8, #319) — Agent 4's operator-read: worker-hostet,
+    KUN backend-proxied, paired-device Bearer + eksplicit `agent4:read`-grant
+    pr. enhed, fraværende by default. Implementeret i baade worker og backend.
+12. **ADR-A4-008** (1/8, #324, præciseret i #329/#330) — side-effect handoff.
+    Fuldt implementeret 2/8 i fem slices (#331–335), alt fortsat DORMANT.
+13. **ADR-DC-001** (5/8, #349) — DevControl: fail-closed autoritetskæde for
+    kontrolleret selvudvikling. Menneskelig terminal autoritet kan ikke
+    delegeres; dvale BEVISES af gate; aktiveringsport kræver sin egen ADR.
+    **Sol ejer `devcontrol/`** (5/8, #350).
+14. **ADR-A3-001** (15/8, #598, `docs/agent3/`) — chattens adgang til Agent 3.
+    Smal åbning: kun eksplicit igangsættelse, kun READ-planer, godkendelser
+    og checkpoints bliver paa den dedikerede skærm. Aktiverer ingenting.
+15. **Redesign-rammen** (12/8, issue #518) — fire kontrastroller til AA;
+    px→dp uniform x1,2205; `GET /api/v1/system/status` i Go-backenden;
+    2.0.0 tagges når fase 3 er komplet; M3-komponenter med tokens.
+    DDR-001 i `docs/design/` er designautoritet efter ADR-mønsteret.
+16. **1.0.0 er udelukket som version** — updaterens `isNewer` afviser et fald
+    fra 1.58.x. Derfor gik vejen til 2.0.0.
+17. **De ti "designforslag"-skærme er vurderet** (16/8). Bygget: Del til
+    Kaliv, Svar-citater, Onboarding, Offline-kø. Droppet: Splash,
+    Model-hurtigskift, Tænke-tilstand (riggen har FASER, ikke modellens
+    tanker — en tankestrøm ville være attrap). Afventer: Eksport & backup,
+    KalivDev.
+
+---
+
 ## 1. Hvad projektet er
 
 Anders' personlige, selv-hostede AI-platform ("Local AI Control Surface"):
@@ -271,16 +300,41 @@ matchede nogen fil).
 tom release som CI derefter fyldte progressivt: hvis noget fejlede, stod der en
 halv release og lignede en hel. Flowet nu:
 
+0. **FØR noget som helst: tjek om arbejdet allerede er gjort.**
+   `git reflog` + `git ls-remote --tags origin`. FEM af 2.0.x-releasene var
+   allerede fuldført af et timeout't tvillingeforsøg da en session begyndte
+   paa dem. Der er EEN session — uventet arbejde er typisk dit eget.
 1. `git fetch` FØRST og vælg version over origins `VERSION` (parallelle
-   sessioner!) → `python3 scripts/version_tool.py set X.Y.Z` (synker alle fire
-   sites) → **`versionCode` = origins + 1** (slå det op i origins
+   sessioner!) → `python3 scripts/version_tool.py set X.Y.Z` (synker de fire
+   KODE-sites) → **`versionCode` = origins + 1** (slå det op i origins
    build.gradle.kts — skriv ALDRIG et fast tal her, F-008) →
    `python3 scripts/version_tool.py check`.
+   **`version_tool.py` er ikke hele bumpet.** Versionen står OGSAA i
+   `CURRENT_STATE.md`, `ACTIVATION_READINESS.md`,
+   `scripts/agent3_write_pilot_current_main.py` og
+   `AGENT3_WRITE_PILOT_CURRENT_MAIN.md`. Regenerér med
+   `python3 scripts/current_state.py`, `scripts/activation_readiness.py` og
+   `scripts/route_inventory.py` (sidstnævnte prober WORKERENS OpenAPI — nye
+   backend-ruter alene drifter den ikke). Springes de over, står bumpet rødt
+   paa test/exact-head, ikke paa selve versionen.
 2. Kør ALT lokalt: `(cd worker && PYTHONPATH=. python3 ../tests/worker_*.py)` ·
    `(cd backend && go build ./... && go vet ./... && go test ./...)` ·
    `python3 tests/workflow_*.py` · `ruff check --select E9,F63,F7,F82`.
    **Kotlin kan IKKE kompileres her — CI er den eneste verifikation.**
-3. `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
+3. **Alt landes gennem CI — ikke ved push til main.** Arbejdet ligger paa
+   en gren, får sin PR, og landingen er et fast-forward af
+   `refs/heads/main` EFTER grønt run paa den NYESTE sha. Verdiktet er en
+   HAARD betingelse INDE i landingsscriptet: check-runs paa præcis den sha,
+   alle `completed`, nul `failure` — ellers exit FØR patch. Verdikter
+   håndhæves, aldrig kun rapporteres (#315 landede paa rød CI med en falsk
+   grøn kommentar). **CHECK-RUNS ≠ WORKFLOW-RUNS:** fire grønne workflows
+   kan staa ved siden af et rødt CodeQL-check-run. Gate paa BEGGE.
+   Bekræft ad TO veje (`ls-remote` + REST med retry) FØR PR'en lukkes, og
+   lad lukningen ligge INDE i den bekræftede gren af scriptet — en
+   ';'-kædet lukning fyrer på falsk bekræftelse. `scripts/stale_check.py`
+   før enhver merge. Først når main står paa din sha gælder resten:
+
+   `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
    `git fetch -q origin main && git rebase origin/main` → **STRAM PROTOKOL
    (indført 18/7 efter to fejlplacerede tags):** tjek
    `[ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]` — står rebasen åben,
@@ -309,15 +363,37 @@ halv release og lignede en hel. Flowet nu:
 8. **Docs/CI-only = commit uden bump/tag/release.**
 9. **Efter hver release: post status til Notion** (side
    `389e6b11-bf7b-812f-89ba-fc17e3c2dcda`, dateret entry + Version-property).
-   Stående ordre, spørg ikke først. **Connectoren har været nede siden 16/7;
-   genbekræftet 19/7 (tool_search finder ingen Notion-tools i sessionen).
-   UDESTÅENDE (genbekræftet 4× d. 19/7 — tool_search finder fortsat ingen
-   Notion-tools): samlet status for 1.58.116→130 (durability-kæden
-   T-010→T-015 + T-014, to analyse-drops lukket samme dag inkl. Gate A
-   F-1202→F-1206, forensic pilot-slot, generalprøven af §1.6-kæden +
-   logging-fixet i 130) — post den som det FØRSTE når connectoren er
-   tilbage. Ét-tryks-artifact med den fulde tekst (→130) ligger hos
-   Anders.**
+   Stående ordre, spørg ikke først. *(Rettelse 17/8: den tidligere note her
+   sagde at connectoren havde været nede siden 16/7 og bad en fremtidig
+   session om at poste en samlet 1.58.116→130-status "som det første".
+   Connectoren virker, og den backlog er for længst overhalet af 2.0.x.
+   Noten er fjernet frem for at staa og pege paa et arbejde ingen skal lave.)*
+10. **En dårlig release når telefonen af sig selv nu.** Fra v2.0.2 har
+    appen en in-app-updater: den læser `/releases/latest`-redirectens
+    `Location`-header (ingen API, intet token), henter `kaliv-latest.apk`,
+    sammenligner strengt semver og tilbyder opdateringen.
+    Publicér derfor aldrig en release du ikke har verificeret — der er ikke
+    længere et manuelt sideload-trin imellem dig og enheden.
+11. **Æra-skiftet er STØRRE end version_tool + generatorerne.** Lært den
+    hårde vej ved 2.0.12 (#757, fire identiske rig-blokeringer): udover
+    punkterne ovenfor bærer disse steder æraen og skal rykkes manuelt i
+    samme bump —
+    wizard/pilot-`BRANCH`-pins (`stage_a_one_click.py`,
+    `agent3_readonly_pilot_one_click.py`, `scheduler_pilot_wizard.py` —
+    wizarden `git switch`'er selv til pinnen ved start, så en glemt pin
+    trækker riggen tilbage til den gamle kandidat);
+    operator-stemplerne `EXPECTED_VERSION` (`stage_a_physical_operator.py`
+    m.fl.) og `EXPECTED_SOURCE_VERSION` (`stage_b_one_click_v2.py`,
+    `stage_b_strict_evidence.py` — kilden er den NETOP udgivne version);
+    loader-substitutionsparrene i `tests/workflow_*`-loaderne (kilde- og
+    målversion rykker begge ét hak);
+    kontraktfixtures i `tests/workflow_stage_b*`;
+    og de tre gate-læste runbooks `RIGDAG_SIMPEL.md`,
+    `STAGED_PHYSICAL_PROMOTION.md`, `STAGE_B_UPDATER_EVIDENCE.md`
+    (kilde-versionen skal FORBLIVE eksplicit — kontrakterne kræver både
+    kilde og mål nævnt).
+    Det strukturelle fix er en udledt gate over æra-pins (#753); indtil
+    den findes, er denne liste bump-proceduren.
 
 ---
 
@@ -668,7 +744,523 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     `#250`/`#251` (blot gamle, gik rigtigt af sig selv) — samme syv filer,
     modsat udfald. Kør tjekket; gæt det ikke.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 30/7)
+37. **En generator i et halvt miljø fejler ikke — den skriver fejlen ind i
+    dokumentet.** 17/8 under 2.0.9-bumpet kørte `activation_readiness.py`
+    uden `fastapi`/`pydantic` installeret. Den returnerede exit 0, skrev
+    "skrev ACTIVATION_READINESS.md (111 linjer)" og erstattede linjen *"Ingen
+    blokerende fund specifikke for scheduleren"* med *"kunne ikke læse
+    schedule-godkendelsen: No module named 'fastapi'"*. Havde den commit fået
+    lov at lande, stod der nu en påstand på main om at scheduleren fejler —
+    fordi en sandkasse manglede en pakke. Fanget kun fordi diffen blev læst
+    linje for linje.
+
+    Reglen: **installér workerens afhængigheder FØR generatorerne køres**
+    (`pip install --break-system-packages -r worker/requirements.txt`), og
+    læs derefter deres diff. En generator hvis output er *degraderet* ser
+    ud præcis som en generator hvis output er *opdateret* — begge giver
+    exit 0 og en ændret fil. Grep efter `No module named`, `Traceback` og
+    `kunne ikke` i de genererede filer før commit.
+
+38. **`git add -A` er ikke en beskrivelse af dit arbejde.** Samme bump fejede
+    `validation/stage-b-easy-state.json` med — en tilstandsfil som
+    testkørslerne selv havde skabt, aldrig sporet før. Den nåede en commit og
+    blev først opdaget i diffstat'en bagefter.
+
+    Reglen: **sammenlign diffstat'en med den liste filer du HAVDE til hensigt
+    at røre**, hver gang. Et bump rører ni navngivne filer; ser du ti, er den
+    tiende ikke dit arbejde. `git status --short` før `git add`, og vær
+    særligt mistroisk efter en testkørsel — suiter skriver tilstand.
+
+## 9. Kø — hvem har bolden (16/7, opdateret 3/9)
+
+**[3/9 kl. 07:00 UTC — status. main = `#844`-landing, VERSION 2.0.13. Frosset
+kandidat uændret (`4f80693f`). 2/9-aftenblokken nedenfor er historik.]**
+
+### Beslutning 2/9 aften: den rigtige løsning til kroppen er Unity/UniVRM
+
+Anders: Kaliv skal kunne **vise, afspille og afvikle** `.mrbody` — AR-agtigt.
+Ikke en web-renderer; Unity/UniVRM-sporet fra `BODYRIG_V1.md`. Roadmap:
+`docs/bodyrig/UNITY_RENDERER_ROADMAP.md` (#832).
+
+### Hvad der skete 2/9 aften – 3/9 morgen
+
+- **#720 (Unity/VRM-proof) ajour og grøn:** merget 71 commits fra main uden
+  konflikter; 32/33/11 kontrakter + 14/14 CI på ny head. Forbliver draft
+  efter sin egen regel — kun den fysiske gate mangler. Riggens forudsætninger
+  står på PR'en: Unity `6000.3.21f1` i Hub, en rigtig VRM 1.0-avatar (VRoid
+  Studio), en `.mrbody` bygget/installeret/valgt.
+- **Slice A — assets (#842):** `GET /body/active` + `avatar.vrm`, thumbnail,
+  motions, læst kun gennem BodyRigs validerede veje, sha256 pr. medlem,
+  `X-BodyRig-*`-headers som proxyen nu lader passere. `KALIV_BODY_STORE` i env.
+- **Slice B — live frames (#843):** én embodiment-session pr. worker
+  (`BodyRigRuntime` + `EmbodimentScheduler` + `wav_envelope_track` + wire v0.1),
+  drevet af chat-faser og TTS-sætninger; `GET /body/frames` (SSE 20 fps),
+  `/body/state`, `POST /body/interrupt`, `POST /body/state/{navn}`.
+- **Afspilningssync (#844):** telefonen melder start/slut pr. sætning
+  (`POST /body/speech/{utterance}/started|ended`), munden forankres til det,
+  der faktisk høres. Gamle klienter uændrede.
+- Fund undervejs: Go ServeMux tillader ikke `{name}.vrma` (ville have væltet
+  backend ved opstart; test fangede det); proxyen lod kun `Content-Type`
+  passere (nu præfiks-allowlist for `X-BodyRig-*`).
+- **Slice C — Unity frame-kilde (#846, DRAFT mod `agent/bodyrig-unity-renderer`):**
+  `BodyRigFrameSource` læser `/api/v1/body/frames` bag device-token gennem
+  samme `Apply` som fixturen; bootstrappen vælger den kun når `BODYRIG_RIG_URL`
+  + `BODYRIG_RIG_TOKEN` er sat. **Kompilerer kun i Unity** — verificeres af den
+  fysiske gate. Rækkefølge: #720's gate → #720 lander → #846 merges.
+- **Første krop fra en VRM alene (#847):** `scripts\bodyrig_demo_body.py --vrm
+  … --name … --store …` bygger/installerer/vælger en `.mrbody` med
+  demo-identitet (fixture, siger det selv). Rig-runbook:
+  `docs/bodyrig/FIRST_LIVE_BODY.md` — fra Unity i Hub til krop der følger chatten.
+- **Cues (#848), default fra:** `KALIV_BODY_CUES=1` → `explain` ved lange
+  sætninger, `curious` under thinking, `concerned` ved fejl; intet udledt af ordene.
+- **Driftsfund ved gennemlæsning af egen kode (3/9 middag):** frame-streamen
+  re-validerede hele `.mrbody` 20×/s (#850 — nu cache med markør-mtime i
+  nøglen, 13 ms → 8 µs); proxyens 10-min timeout ville have klippet streamen
+  på klokken (#851 — frames forwardes uden timeout; klientens context lukker);
+  `/body/state/{navn}` tager nu kun `listening`/`idle` fra klienten (#852).
+- Proces-fejl, min: landings-scriptet slettede en gren FØR mergen var
+  bekræftet, da et Windows-job flakede (#848). Gendannet uden tab; mønstret
+  rettet — sletning kun i samme program som en bekræftet merge.
+
+Core er urørt i hver regel: workeren sekvenserer kun. Alt en Unity-klient på
+telefon/Quest skal hente fra riggen, findes nu bag device-token.
+
+### Stående instruks (Anders, 3/9): hold git opdateret
+
+Hver session: triagér dependabot (CI-grønne patch/minor-bumps landes; CodeQL-
+trinnene flyttes samlet; majors og governance-gates går til Anders), luk
+overhalede PRs, og hold draft-grene (#720, #846) merget med main, så den
+fysiske gate beviser nutidens kode. Gjort 3/9: 8 landet (#833–#836, #838,
+#839, #759, #853), 3 lukket (#840, #841, #775), #837 forklaret (Ed25519-
+review-pin), #720/#846 ajour med main (kontrakter 39/33/11 grønne).
+
+### Rigdag 3/9 aften — bekræftet med Anders' øjne
+
+- **Dev-kanalen virker ende til ende, første kørsel.** Én ægte fejl: workeren
+  fejlede lukket, fordi `KALIV_AGENT4_OPERATOR_API=1` stod uden
+  `KALIV_AGENT4_DATA_ROOT` (min aktiveringsblok 30/8 manglede den; kravet
+  findes i 2.0.12 siden 12/8, så release-workeren KUNNE ikke starte med den
+  env fra lørdag til torsdag). Rettet i env; dokumenteret;
+  start-scriptet preflighter det nu. Anden "fejl" var kold worker-start > 90 s.
+- Fire efterladte Python-workere fra 2/9 og 3/9 holdt scheduler-lease'en, så
+  dev-workeren sprang hvert tick over. Dræbt manuelt; stop-scriptet dræber
+  nu også workere uden port.
+- **#789 bekræftet død** — frisk parring (adb reverse + `127.0.0.1:8080`),
+  flere beskeder, ingen crash. Lukket.
+- **#752 bekræftet fysisk** — `person_create.py` → Kaliv `person-r0001`;
+  `/tools/chat` svarer i hendes stil med `person`; Personer-skærmen viser
+  *"Taler lige nu som Kaliv"*. Body/voice `unbound` indtil VRM/.mrvoice.
+- Mikrofonen forsvinder i cloud-mode — bekræftet som ønsket adfærd (ASR kunne
+  teknisk køre via riggen i cloud-mode; produktvalg, ikke ændret).
+- Smoke fra riggen: healthz 2.0.13, schedules 200, agent4 403 uden
+  `agent4:read`-grant (korrekt), body 503 uden `KALIV_BODY_STORE` (korrekt).
+
+### Rettelse 4/9: #720 har været på main siden 2/9 21:13
+
+Den parallelle session mergede Unity-proofen via en base-gren
+(`feat/bodyrig-unity-renderer-base`) 2/9 kl. 21:13 UTC — **uden den fysiske
+gate** og tretten minutter før jeg skrev "ajour, venter på gaten" på den. Mine
+noter 2/9–3/9 om "#720 draft, venter på gate" var derfor forkerte. Sandheden:
+rendereren er på main; beviset (proof → visuel accept → gate) mangler stadig og
+køres mod main's head. #846 er retargetet til main. `agent/bodyrig-unity-
+renderer` er en død gren.
+
+### I luften 4/9 — læs FØR du bygger noget på kroppen (to sessioner kører)
+
+To sessioner har i dag landet identisk kode uafhængigt af hinanden (#861 og
+min lokale bro var tegn for tegn ens) og kostet tre README-konflikter. Tjek
+PR-listen, ikke kun denne fil, før du skriver:
+
+| # | Hvad | Status |
+|---|---|---|
+| #846 | `BodyRigFrameSource` — live frames fra riggen | draft mod main, ajour |
+| #858 | `BodyRigArPlacement` — kroppen i rummet, bag `BODYRIG_AR` | draft stablet på #846 |
+| #860 | `BodyRigRigLink` — env / intent-extras / PlayerPrefs / parringsformular | draft stablet på #858 |
+| #861 | Kaliv ⋮ → Krop → Kaliv Body med token som intent-extras | **landet** |
+
+Kontrakten mellem #861 og #860: extras `bodyrig_rig_url`/`bodyrig_rig_token`,
+pakke `dk.ternedal.kalivbody`. Alle tre drafts kompilerer kun i Unity og
+verificeres af første import på riggen; de lander i rækkefølge 846 → 858 → 860.
+`origin/agent/bodyrig-unity-renderer` er en død gren (#720 er på main), som
+en session har genskabt — slet den ikke, mens den anden session muligvis
+bruger den; den bærer intet, main ikke har.
+
+Værtsvalget er taget (separat Kaliv Body-app; UaaL som V2) — byg ikke UaaL.
+
+### Bolden ligger hos Anders
+
+0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
+1. **Den fysiske Unity-gate mod main** (Unity i Hub, VRM fra VRoid, `.mrbody`
+   i store + valgt, proof → visuel accept → gate). Derefter #846 (Slice C),
+   der kun kan verificeres ved at kompilere i Unity.
+2. Dev-kanalen, #789-bekræftelse, `person_create.py` — uændret fra 2/9.
+3. `KALIV_BODY_STORE` sættes i appliancens env, når en profil-store findes.
+
+**[2/9 kl. 20:30 UTC — status. main = `#827`-landing, VERSION 2.0.13. Frosset
+kandidat uændret (`4f80693f`). 2/9-middagsblokken nedenfor er historik.]**
+
+### Eftermiddag 2/9: #752 Person Profile — hele featuren landet
+
+Kaliv kan være flere personer. Syv PRs, alle CI-grønne:
+
+- **Registry** (#821): `worker/app/person_registry.py` — stabilt
+  `person-<32 hex>`, komponentrevisioner som kandidater, uforanderlige
+  Person Revisions gated af det fulde compatibility-review, **én**
+  aktiveringsvej (`active_person_revision`). Rutesættet er kontrakten; en
+  test over ruteinventaret beviser at ingen sti kan aktivere én komponent.
+- **Backend** (#822): `/api/v1/persons` bag device-token, lukket allowlist,
+  404 før worker-hit for ugyldige id'er og enkeltkomponent-forsøg.
+- **Runtime** (#823): en valgt persons aktive personality ER system-prompten
+  på `tools/chat`; svaret bærer `person`. Uden valgt person: uændret.
+- **Skærm** (#824): ⋮ → **Personer** / launcher-genvej / `kaliv://persons`.
+  Viser hvem Kaliv taler som, lister, vælger. Ingen aktiveringsknap med
+  vilje — review er en operatørhandling.
+- **Værktøj** (#825): `scripts\person_create.py` — én kommando fra intet
+  til en person der taler; nægter uden `--reviewed`.
+- **Stemme** (#826 + rettelse #827): workeren sender `voice_package` (VoiceRigs
+  eget felt; `.mrvoice`-filnavn) og verificerer `X-VoiceRig-Package` →
+  `voice_bound`. Virker mod VoiceRig som den er i dag. #826 brugte et
+  opfundet `voice_id`, som pydantic droppede stille — læs den andens kode
+  først.
+
+Kontrakten: `docs/PERSON_PROFILE.md`. Kendte huller dér: plain
+`/api/v1/chat` (uden om workeren) er ikke bundet; body-binding er BodyRigs
+spor.
+
+### Bolden ligger hos Anders
+
+1. **Dev-kanalen, første kørsel** (tre kommandoer i `DEV_APPLIANCE.md`).
+2. **Bekræft #789 død** — frisk parring, ét send.
+3. **Opret Kaliv som person** — `person_create.py` (`--voice-source
+   <navn>.mrvoice` hvis en profil er installeret), åbn Personer, send én
+   besked, se `person` i svaret og hør stemmen.
+4. Uændret: #763, workflow-tærsklen, de tre gamle feature-spor.
+
+**[2/9 kl. 12:00 UTC — status. main = `b4bb1ed2`, VERSION 2.0.13. Frosset
+kandidat uændret = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`.
+30/8-blokken nedenfor er historik.]**
+
+### Beslutning 2/9: udviklingskanalen
+
+Anders: *så længe intet er i produktion, udvikles der så hurtigt som muligt.*
+Den fysiske promotion-vej (Stage A → kampagne → Stage B) er IKKE længere
+forudsætningen for at riggen kører ny kode; den er baren for produktion,
+den dag den bliver virkelig. `production_activation` er urørt overalt.
+
+Ny kode hele vejen rundt er nu tre kommandoer — se `DEV_APPLIANCE.md`:
+
+    git pull --ff-only
+    START_DEV_APPLIANCE.cmd     # backend+worker fra HEAD, egne data og env, LAN-bundet
+    INSTALL_DEV_APK.cmd         # CI's kandidat-APK over release-appen, parring bevaret
+
+`STOP_DEV_APPLIANCE.cmd` bringer den signerede release tilbage. UI-ændringer
+der rammer golden-screenshots optages af workflowet **record-goldens** på
+PR-grenen (#816) — første ægte brug var #817.
+
+### Hvad der skete 31/8-2/9
+
+- **#789 (crash ved første send efter frisk parring) — rodårsag fundet i
+  koden og fixet (#818):** `LaunchedEffect(openConvId)` ryddede og
+  genindlæste listen på det id, sendevejen selv lige havde udstedt, mens
+  første svar streamede; første delta indekserede forbi en ét-elements
+  liste fra en indlejret launch uden for `runCatching`. Effekten ignorerer
+  nu sit eget id, og alle stream-skrivninger bruger `getOrNull`. Fysisk
+  bekræftelse: ét parret send på dev-kanalen.
+- **Regression fra #785 fundet og rettet (#812):** task-ui-linjen var splejset
+  ind midt i scheduler-here-stringen, så `-EnableScheduler` stille mistede
+  `KALIV_SCHEDULER`, DB-stierne og secreten. Form-gate tilføjet.
+- **Rig-rapporterede UI-fejl fikset samme dag:** tale-etiketten i cloud-mode
+  (#809), cloud-tilbuddet stillet én gang pr. session (#810), Agent-rækkens
+  undertitel forklarer nu betingelsen (#817), og **Opgaver** i chattens
+  ⋮-menu åbner Agent 3-opgaveskærmen (#815) — den skærm der bærer alle
+  tretten task-UI-checks og før kun fandtes bag `kaliv://tasks`.
+- **Æra-drift lukket for prosa:** gate for kandidat-referencer i operative
+  runbooks (#807/#808); den fangede `PHYSICAL_VALIDATION_CAMPAIGN.md` på
+  2.0.11 i første kørsel. Tre issues (#69, #72, #401) rettet manuelt.
+- **Vedligehold:** dependabot-puljen ryddet, `compileSdk` 37 (#803), CodeQL
+  samlet til v4.37.8 (#804). T-033's krav om en anden Windows-konto og den
+  kandidatbundne a425f-APK dokumenteret (#811).
+
+### Bolden ligger hos Anders
+
+1. **Første kørsel af dev-kanalen** — tre kommandoer ovenfor. Nye scripts på
+   en maskine, de aldrig har kørt på: send outputtet, uanset hvad.
+2. **Bekræft #789 død** — fjern parring, par igen, send én besked.
+3. **task_ui-beviset** — ⋮ → Opgaver, følg tabellen i
+   `STAGED_PHYSICAL_PROMOTION.md`, sæt krydserne. Kun relevant hvis den
+   fysiske vej stadig skal lukkes for 2.0.13; ellers venter den.
+4. **Beslutninger uændret:** #763 (gradle-major), workflow-tærsklen, de tre
+   gamle feature-spor. Kandidat A (2.0.13 skiber som frosset; UI-fixes i
+   2.0.14) er valgt.
+
+**[30/8 kl. 21:00 UTC — status. main = `05e6b93d`+, VERSION 2.0.13. Frosset
+kandidat = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`
+(`anchor_and_freeze`, alle fire exact-SHA-gates grønne). 27/8-blokken nedenfor
+er historik.]**
+
+### Hvad der skete 29-30/8
+
+- **Agent 4 er kvalificeret, godkendt og aktiveret.** A4-25f kørt fysisk
+  igennem for første gang: `physical_qualification_evidence_complete: true`,
+  14/14 HTTP-trials, cursor-matrix, mutationskæde og cleanup verificeret,
+  root-kæde `47529c6f…` → `e70a781f…`. Menneskelig GO registreret (Anders,
+  30/8 18:10Z), og `KALIV_AGENT4_OPERATOR_API=1` sat på appliancen —
+  operator-fladen svarer 401, altså live og token-vogtet.
+  `production_activation` er fortsat false. Sporing: #474, #731.
+- **Scheduleren og Agent 3-readiness aktiveret** 29/8 (Fase 2 + Fase 3's
+  developer-flade): `/api/v1/schedules` svarer 401, og workerens
+  task-readiness siger `agent3_readonly` efter en fejlfri 20/20-pilot.
+- **Tre fejl blokerede A4-kæden i to æraer** — #797 (snapshot-operatorens
+  fejlsvar bar `application/json`; fixture-hosten bygger sin egen app, så
+  #794's mount-handler nåede den aldrig), #794 (`-W` bandt som
+  PowerShell-parameternavn; `pm path` exit 1 tolket som værktøjsfejl) og
+  #798 (`rm -rf` i `anchor_and_freeze` på en Windows-only rig).
+- **Rodårsag fundet for tre døgns spøgelser:** en env-spejling tog
+  `# kommentaren` med ind i variablens VÆRDI, så `MODELRIG_OLLAMA_URL` pegede
+  på en ødelagt URL. Det forklarede `bad upstream request`, embeddings-405 og
+  T-023's `plan → 500` på én gang. Env-filer må kun parses med kommentar-strip.
+- **Task-UI: tidligere konklusion var forkert.** Fladen findes — som den
+  dedikerede skærm `Agent3TaskScreen` (`kaliv://tasks`), ikke i chat-panelet.
+  Runbooken mapper nu alle tretten checks til deres plads på den skærm.
+  Chattens Agent-række er kun klikbar med parret rig, `rig`-mode OG tekst i
+  feltet. Panelet fik surface/reason/fallback (#799), replans (#800),
+  terminal-udfald (#801) og serverautoritativt Stop (#805, ægte T-023-brud).
+- **Vedligehold:** dependabot-puljen ryddet (#760, #761, #762, #764, #767).
+  `compileSdk` hævet til 37 (#803) — det blokerede både okhttp- og
+  compose-bom-linjen. CodeQL-trinnene flyttet samlet til v4.37.8 (#804);
+  dependabots enkeltvise PRs kunne aldrig bestå.
+
+### Bolden ligger hos Anders
+
+1. **2.0.13 på appliancen** — den kører stadig 2.0.12-binærer, mens
+   kvalifikationen er bundet til 2.0.13-koden. Stage B-updater-runde.
+2. **task_ui-beviset** — åbn `kaliv://tasks`, følg runbookens tabel,
+   sæt krydserne, kør valideringen. Estimeret et kvarter.
+3. **Beslutninger:** gradle-wrapper-majoren (#763), tærskeldommen på
+   workflow-tallene (de rene 2.0.13-tal mangler), og hvad der skal ske med
+   de tre gamle feature-spor (#720, #395, #338).
+4. **#789** (crash ved første send efter frisk parring) mangler en
+   `adb logcat -b crash -d` — kodelæsning fandt ingen usikre kald.
+
+**[27/8 kl. 21:30 UTC — status. main = `178a352f`, VERSION 2.0.12, seneste tag
+v2.0.12 (shipped 26/8 på én dag: bump #756 → æra-pakke #757 → Stage A 7/7 →
+tag → release 9 assets verificeret). Kandidat = `origin/physical-proof/2.0.12`
+= `76fc3fa2` (post-tag; main er foran, hvilket er korrekt efter promovering).
+23/8-blokken nedenfor er historik.]**
+
+### Hvad der skete 24-27/8
+
+- 24/8: #747-planen afstemt med Sol (færdig = M1+M2+M3; "shipped" = M1) og
+  beslutning B truffet. v2.0.11 shipped 24-25/8 med fuld Stage A+B-kæde.
+- 25/8: task_ui-gaten fangede en ÆGTE 2.0.11-defekt: appen kalder
+  `/api/v1/tools/chat/stream`, backend manglede ruten (#754). Fixet + udledt
+  app↔backend-rutekontraktgate landet som #755. Stage B 2.0.11 bestod.
+- 26/8: 2.0.12 shipped. Æra-skiftet afslørede den udokumenterede pin-pakke
+  (#757, nu §4.11). Kanonisering #750, token-selv-mint #768 og
+  release-opslag-token #770 landet.
+- 27/8: Stage B-kæden BESTÅET på 2.0.12 (strict PASS: interruption, ægte
+  opdatering gennem updateren, reboot, checksum-afvisning). Appens tools-chat
+  bekræftet fysisk mod 2.0.12. Udestående: task_ui-bogføringen (begge
+  klienter + evidensnoter — fulde krav nu i STAGED_PHYSICAL_PROMOTION §task_ui)
+  og lifecycle-verify-genkørsel. Dagens fund: #753 pkt. 8-12.
+
+### Bolden nu
+
+- **Anders:** task_ui-sessionen (én kort seance, proceduren står i runbooken)
+  → verify 8/8 → M2-kampagnen for tærskeltal → ROADMAP-beslutning om 2.0.13
+  (anbefaling: M3-lukning).
+- **Claude:** state/observations-kandidatbinding (#753 pkt. 3+8, fixet er
+  næste kodede opgave), udledt gate over æra-pins (#753), M2-kampagneblokke.
+- **Sol:** T-033-kontrakten (aftalt, afventes).
+
+
+**[23/8 kl. 21:30 UTC — status. main = `274c8f60`, VERSION 2.0.11, seneste tag
+v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig
+`origin/main` (#731). Ingen `validation/` på main. Åbne PRs: 3 (#338, #395,
+#720). Åbne issues: 33. 18/8-blokken længere nede er historik.]**
+
+### FREEZE-VINDUE — læs før enhver landing på main
+
+Fra det øjeblik riggen har produceret et grønt `candidate_freeze_check.py`-
+receipt på en exact SHA (meldt som kommentar på #731 / #58), og indtil den SHA
+enten er promoveret (fast-forward + tag `v2.0.11` + release) eller eksplicit
+opgivet, må INTET lande på `main`. Hver landing flytter `main` væk fra
+kandidaten, og efter #731 §A/§E/§F.1 er freeze og al fysisk evidens derefter
+ugyldig — `main` kan ikke flyttes tilbage.
+
+Det skete 23/8: freeze PASS på `c45d97ed` kl. 20:23 UTC; #732, #734, #736 og
+#738 landede 20:28–21:20 UTC. Kandidaten stod 4 bagud, og Stage A-evidens på
+den SHA kunne ikke promoveres. Ingen af de fire PR'er var forkerte — det var
+tidspunktet.
+
+Regel for enhver session (Claude, Sol eller andre) før merge/fast-forward af
+`main`:
+
+1. Læs seneste kommentar på #731. Står der et freeze PASS uden efterfølgende
+   promotion/abandonment: **land ikke**. Kommentér på #731 at PR'en venter.
+2. Er der intet aktivt freeze: land, og forvent at kandidaten re-ankres
+   bagefter (`scripts/anchor_and_freeze.py`).
+3. Rig-dagens rækkefølge er derfor: alle ventende landinger FØRST → anchor +
+   qualification → freeze på riggen → Stage A → beslutning → tag → Stage B →
+   landinger genoptages.
+
+### Hvad der skete 20-23/8 (siden 18/8-blokken nedenfor)
+
+- 20/8: Stage A bestod 7/7 + T-006 på `bf505800`. Den evidens er historik —
+  hovedet er flyttet flere gange siden, og RIGDAG_SIMPEL forbyder genbrug af
+  evidens fra en ugyldiggjort head. Apparatet er dermed bevist at virke; beviset
+  skal indsamles igen på den frosne SHA.
+- 20/8: ti måleapparat-defekter fundet og lukket (#650–#667). Vigtigst #662
+  (W-11 var CONFIRM_TTL, ikke modelkvalitet) og #667 (T-023 uden retry). Det
+  reelle workflow-tal er stadig ukendt — kør `-WorkflowRounds 3` med
+  #667-retryet før tærsklerne diskuteres.
+- 21-23/8: proof-kæden gjort fail-closed (#670, #673, #675, `fec2e514`, #700 —
+  regelmatricer 41→111 checks, kandidat-gate 9→26). Eneste produktændring i
+  perioden er #668 (Computer Use-bro).
+- 22/8: authority-kontrakterne pinnet (#693–#696): kandidat = `origin/
+  physical-proof/2.0.11`, aldrig en gammel SHA. Rig-stien i alle docs er nu
+  `C:\Users\admin\Desktop\ModelRig-git`.
+- 23/8: flåden ryddet (~50 → 3 åbne PRs). Afhængigheder kvalificeret på exact
+  head (#705–#712: AGP 9.3.1, Gradle 9.6.1, Compose MP 1.11.1, uvicorn 0.52.3,
+  cryptography 50.0.0 m.fl.). T-035 scoped read-only file capabilities (#716).
+  T-044 fysisk review bundet til én kandidat (#714).
+- 23/8: NYT SPOR — BodyRig (embodiment, `.mrbody`): kontrakter #702,
+  runtime-kerne #715, M1.1–M2.5 (#721–#738), `docs/BODYRIG_V1.md`,
+  aktiveringsgate #704 (dormant/off indtil fysiske beviser i `Ternedal/BodyRig`
+  findes). #720 (M0.3 Unity/VRM-renderer) er åben draft.
+
+### Hvem har bolden
+
+**Anders:**
+
+- Tokenrotation (P0, uændret siden 19/8): GitHub-PAT'er med admin på et
+  offentligt repo ligger i klartekst på Notion, én i en sidetitel. Rotér til
+  fine-grained med Contents/PRs/Actions/Issues. Ingen tokenværdier i dette repo.
+- Rig-dagen efter #731: re-anchor + freeze på current main → Stage A →
+  beslutning → tag `v2.0.11` → Stage B. Samme session, hvis muligt: rent
+  workflow-tal (`-WorkflowRounds 3`, qwen3:14b, ≥1 dokument i indekset) og
+  Agent 4-APK (`MODELRIG_TOKEN` sat i miljøet FØR kommandoen).
+- Beslutninger: tærskler for T-023 (20/20) og workflow-gaten (0,95) på baggrund
+  af rene tal; T-033-metode; containment (AppContainer + Job Object vs.
+  kravspec V5's separate Windows-konto) → låser MCP; ADR-MCP-001; ROADMAP.md
+  efter 2.0.11.
+- Efter tag: bump main til 2.0.12 (otte kilder, §4) — ikke før.
+
+**Sol:** T-033-probe med eksplicit campaign-id (ét brugerskift i stedet for
+fire, jf. 20/8) — Anders afgør om den accepteres som evidens; DevControl-
+opdeling mod ADR-DC-001 (#338/#395); egne #296-fund.
+
+**Claude:** intet der kan landes under et freeze-vindue. Denne §9-opdatering
+lander FØR næste freeze. Ikke nu: MCP (park til containment-beslutningen),
+DevControl trin C, nye gate-matricer.
+
+---
+
+**[18/8 — status. main = `45d39b13`, VERSION 2.0.9, seneste tag v2.0.8.
+`v2.0.9` er IKKE sat. Se rig-dagsnoten nedenfor FØR du rører riggen.]**
+
+### Rig-dagen: kandidaten er ikke det main ville udsende
+
+`#614` er den gældende 2.0.9-kandidat (`84ee1ca2`, 16/8). **`#605` er afløst af
+den** — de ligger 50 mod 3 commits fra hinanden. Køres begge, bevises to
+forskellige ting under samme versionsnavn.
+
+Kandidaten bærer korrekt VERSION 2.0.9, har alle fem 16/8-landinger og er
+internt konsistent. Men den er 13 commits bagud, og fem af dem er produktkode
+fra 18/8: `WorkerCapabilities.kt`, `IngestCapability.kt`, `VoiceCapability.kt`,
+`ModelRigClient.workerCapabilities()`, `AppUi`-wiringen og `/capabilities`'
+pptx/html. Konkret: **kandidatens `/capabilities` returnerer fem nøgler, mains
+returnerer syv.**
+
+**Anbefaling: bevis og tag kandidaten som den står; 18/8-arbejdet går i 2.0.10.**
+Frysningen findes præcis for at evidens binder til én eksakt SHA, og intet fra
+18/8 retter noget der er i stykker — capability-gatingen fjerner knapper der
+fejler, pptx/html er additivt. Et recut ville gøre al evidens på `84ee1ca2`
+værdiløs og kræve hele kørslen om.
+
+**Rækkefølgen holder uanset valget:** klientens `supports()` blokerer kun på et
+UDTRYKKELIGT `false`, så en fem-nøgle-rig ser ud som "pptx ukendt" = tilladt.
+Worker-ændring og klient-gating kan derfor udsendes i hver sin release i
+vilkårlig rækkefølge. Det var derfor defaulten blev valgt sådan.
+
+### Flåden driver — mål den før du rydder op
+
+`scripts/pr_drift_report.py` (#628) besvarer lektie 36 for ALLE åbne PR'er, ikke
+kun den man har i hånden. Måling 18/8: **9 af 50 har revert-risiko.** De
+stablede agent4-baser er **151 commits bagud main** — det er ikke risiko i sig
+selv, men det er dér den materialiserer sig den dag stakken rebases.
+
+Anledningen var dependabot `#359`: 23 commits bagud, rørte
+`desktop/composeApp/build.gradle.kts` og bar `packageVersion = "2.0.7"`. Et
+merge ville have rullet desktop to bump tilbage i stilhed. Fanget i hånden,
+lukket uden merge; bumpet taget alene i `#627`.
+
+**Fem landinger står paa main uden at være udsendt:** per-kilde til/fra
+(#604), Del til Kaliv (#606), Svar-citater (#607), Onboarding (#608),
+Offline-kø (#609). Næste naturlige skridt er **2.0.9** — se §4 for hvad et
+bump rent faktisk rører.
+
+**Landet 17/8, efter denne blok blev skrevet:** #615 (denne fils §0/§4/§9/§10
++ READMEs 2.0-afsnit og arkitekturdiagram), #616 (bump til 2.0.9), #617 (§8
+lektie 37-38 + READMEs backend-linje), #618 (CAPABILITIES-hullet + DEVICE_TESTs
+2.0-runde K1-K7), #619 (`/capabilities` rapporterer pptx og html).
+
+**Hos Claude: intet.** Docs-arbejdet er kørt til bunds på nær tre ting, og alle
+tre venter på Anders — ikke på arbejde:
+
+- **§2's hardware-liste** (12/7) kan ikke skrives herfra. Hardware-bekræftelse
+  er en observation, ikke noget der kan udledes af repoet. Skriver en session
+  "QR-parring hardware-bekræftet" på hukommelsen, er det opdigt med en dato på.
+- **`ROADMAP.md`** skrives ikke om uden en retningsbeslutning fra Anders — det
+  er hans dokument at disponere.
+- **`v2.0.9`-tagget.** Se advarslen nedenfor.
+
+**TAGGET ER IKKE SAT, OG DET ER MED VILJE.** 2.0.9 er en TOSIDET release:
+per-kilde til/fra og svar-citater kræver også den opdaterede worker
+(`POST /rag/source/enabled` og turens `context`-felt findes ikke i en
+2.0.8-rig). Tagges den før riggen er opdateret, tilbyder in-app-updateren den
+til telefonen af sig selv, og to funktioner står og svarer ikke. Betingelsen er
+**at riggen er opdateret** — ikke at nogen har sagt god for det. En besked der
+blot lyder "kør" er ikke den betingelse.
+
+**`STATUS.md` skrives ikke om.** Den er en log der vokser, ikke et dokument der
+holdes ajour. **`TESTGUIDE.md` heller ikke** — den bærer sit eget
+HISTORISK-banner fra 9/7 og peger videre; et arkiv der opdateres holder op med
+at være evidens.
+
+**Hos Sol:** v2-analysens tre #296-fund (grant delvist request-bound,
+query-validation uden om faste fejlbodyer, write-modeller ikke strict);
+protected writer accepterer ikke-finite timestamps; weak-reference
+ownership-lifecycle; attempt-semantik + timeline-metrics; agent3-flaken i
+`worker_agent3_task_surface.py` (KeyError 'run' — grøn lokalt med
+`PYTHONPATH=.` fra `worker/`). Dertil opdelingen af #338 i slices mod
+ADR-DC-001.
+
+**Kræver riggen:** #230's okhttp-major (een chat-tur + een stemme-tur fra
+Pixel'en), T-016's Pixel-bekræftelse + første workflow-baseline, og
+bekræftelse af CodeQL-alertens lukning i code-scanning-visningen (PAT-scopet
+kan ikke læse alerts-API'et).
+
+**Aabent æstetisk valg:** paletten (#6F665C mod #5A4831) står stadig
+tosidet gated og træffes med begge apps foran sig.
+
+**MCP-adapter — bolden er hos Anders, ikke hos nogen af os.** Oplæg leveret
+18/8: serverretningen (Kaliv udstiller read-flader) først, klientretningen
+(Kaliv forbruger fremmede MCP-servere) udskudt. Sol har svaret teknisk i
+`SOL-CLAUDE-SAMARBEJDE.md` og er enig i retningen.
+
+**Stopregel i kraft — ingen containment-kode før Anders har afgjort:**
+(a) om AppContainer + Job Object må erstatte kravspec'ens krav om separat
+Windows-konto med NTFS-ACL (Sol: de er IKKE kontraktmæssigt ækvivalente, og
+Tier-A er desuden bygget til én reviewet kommando uden netværk og uden
+bidirektionel kanal — en MCP-host kræver en ny containment-kontrakt);
+(b) hvilken neutral containment-grænse der i så fald er autoritativ, så
+workeren ikke importerer `kaliv_dev_control` og bryder DevControls isolation.
+
+Sols paritetskrav er accepteret som bindende: OpenAPI-overfladen skal bevise at
+Agent 3/4-ruter og kontraktmarkører er uændrede med et MCP-mount til OG fra.
+Importgraf alene er ikke nok.
+
 
 **[30/7, aften — Android-palettens divergens PINNET. claim: Claude 30/7
 23:20 — scope: token-JSON'ens `platformOverrides`, `Theme.kt`-kommentar,
@@ -1251,3 +1843,23 @@ preflight alene · `brand/05_handoff-docs/` = **OVERHALET**, ModelRig-era med
 safirblå; læs den ikke som gældende · Historiske (bannered): TESTGUIDE,
 PLAN_v1.13.0,
 ALVA_VOICE_ROADMAP_DELTA, CLIENT_BUILD_AND_TEST, KRAVSPEC_V5 (leveret).
+
+**Tilføjet i 2.0-æraen:** `docs/design/DDR-001*` = designbeslutning efter
+ADR-mønsteret, og `assets/design/kaliv-ui-tokens.json` er fortsat eneste
+tokenkilde · `docs/agent3/ADR-A3-001_CHAT_AGENT_SURFACE.md` = chattens
+adgang til Agent 3 · `AGENT_4_ARCHITECTURE_DECISIONS.md` = det KOMPLETTE
+ADR-indeks for Agent 4 · `ROUTE_INVENTORY.md` = genereret ruteliste (prober
+workerens OpenAPI) · `docs/devcontrol/dc-l*/` = evidens pr. DevControl-slice.
+**Advarsel, præciseret 17/8** (den tidligere udgave slog fire dokumenter
+sammen og var upræcis om alle fire):
+
+- `CAPABILITIES.md` — **aktuel.** Opdateret 17/8; capability-tabellen har alle
+  syv nøgler efter #619.
+- `DEVICE_TEST.md` — **aktuel** og den levende testrunbook. 2.0-runden K1-K7
+  dækker QR, per-kilde, citater, deling, offline-kø og onboarding.
+- `TESTGUIDE.md` og `HISTORY.md` — **arkiver med eget banner.** De er
+  optegnelser, ikke gældende. Opdatér dem ikke; de mister deres værdi som
+  evidens i samme øjeblik.
+- `ROADMAP.md` (31/7) og `STATUS.md` (28/7) — **før 2.0-æraen.** ROADMAP venter
+  på en retningsbeslutning fra Anders; STATUS er en log der vokser og skal ikke
+  skrives om. Læs begge som historik.

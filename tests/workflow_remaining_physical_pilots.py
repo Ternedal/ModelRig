@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Run the retained combined-pilots contract against candidate 1.58.150."""
+"""Run the retained combined-pilots contract against candidate 2.0.13."""
 from pathlib import Path
 
 _source_path = Path(__file__).with_name("workflow_remaining_physical_pilots.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "agent/unified-candidate-1.58.150"),
-    ("1.58.143", "1.58.150"),
-    ("1.58.142", "1.58.144"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.13"),
+    ("1.58.143", "2.0.13"),
+    ("1.58.142", "2.0.12"),
     ("#150", "#161"),
 ):
     _source = _source.replace(_old, _new)
@@ -88,6 +88,24 @@ _source = _source.replace(
     '    < source.index("for label, path in PILOTS"),\n'
     '    "Stage A is verified before either remaining pilot",\n'
     ')',
+)
+
+_source = _source.replace(
+    'for forbidden in (\n',
+    'rigdag = (ROOT / "RIGDAG_SIMPEL.md").read_text(encoding="utf-8")\n'
+    'check(\n'
+    '    "origin/physical-proof/2.0.13" in rigdag,\n'
+    '    "rig-day authority is the fetched remote 2.0.13 candidate branch",\n'
+    ')\n'
+    'check(\n'
+    '    "candidate_freeze_check.py --expected-sha $CandidateSha" in rigdag,\n'
+    '    "rig-day preflight revalidates the exact candidate SHA",\n'
+    ')\n'
+    'check(\n'
+    '    "PR #412" not in rigdag,\n'
+    '    "rig-day authority no longer points at the historical 1.58.151 freeze PR",\n'
+    ')\n\n'
+    'for forbidden in (\n',
 )
 
 exec(compile(_source, str(_source_path), "exec"), globals(), globals())

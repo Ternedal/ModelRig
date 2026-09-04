@@ -1,0 +1,359 @@
+name: t038-riggate-transport
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/riggate_provider_transport.py"
+      - "worker/app/riggate_v1_contract.py"
+      - "worker/app/home_rig_read_boundary.py"
+      - "worker/app/home_rig_connector_contract.py"
+      - "worker/app/data_sharing.py"
+      - ".github/workflows/t038-riggate-transport.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Qualify concrete RigGate read transport
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: |
+          python3 - <<'PY'
+          import ast
+          import io
+          import json
+          import os
+          import tempfile
+          from pathlib import Path
+
+          from app.data_sharing import DataSharingLedger
+          from app.home_rig_connector_contract import HomeRigDenied, HomeRigGrantStore, HomeRigScope
+          from app.home_rig_read_boundary import prepare_read
+          from app.riggate_provider_transport import (
+              PinnedRigGateTransport,
+              RigGateConnection,
+              RigGateTransportError,
+              execute_riggate_status_read,
+          )
+          from app.riggate_v1_contract import authorize_riggate_request
+          from app.web_fetch import TransportResponse
+
+          source = Path("worker/app/riggate_provider_transport.py").read_text(encoding="utf-8")
+          ast.parse(source)
+          assert "PRODUCTION_ACTIVATION = False" in source
+          for forbidden in (
+              "FastAPI(", "APIRouter(", "include_router(", "REGISTRY[",
+              "os.getenv(", "os.environ", "subprocess", "requests.", "httpx.",
+              "wake(", "turn_on(", "turn_off(", "toggle(",
+          ):
+              assert forbidden not in source, forbidden
+
+          class UUIDs:
+              def __init__(self, start=0):
+                  self.value = start
+              def __call__(self):
+                  import uuid
+                  self.value += 1
+                  return uuid.UUID(int=self.value)
+
+          def authorize(grants, ledger, *, base, operation="rig_health"):
+              grant = grants.create(
+                  HomeRigScope(
+                      rig_ids=("render-rig-1",),
+                      operations=("rig_health", "rig_power_readiness"),
+                  ),
+                  actor="operator",
+                  now=base,
+              )
+              claim = prepare_read(
+                  grants,
+                  grant.grant_id,
+                  target_kind="rig",
+                  target_id="render-rig-1",
+                  operation=operation,
+                  now=base + 1,
+              )
+              auth = authorize_riggate_request(
+                  grants,
+                  ledger,
+                  claim,
+                  data_category="public",
+                  purpose_code="status_brief",
+                  purpose="Read one explicitly scoped RigGate status.",
+                  summary="Scoped RigGate status",
+                  now=base + 2,
+              )
+              return grant, auth
+
+          def status_body(operation="rig_health", state="ready", rig_id="render-rig-1", observed_at=1000):
+              return json.dumps({
+                  "schema": "kaliv-riggate-status/v1",
+                  "rig_id": rig_id,
+                  "operation": operation,
+                  "state": state,
+                  "observed_at": observed_at,
+              }, separators=(",", ":")).encode()
+
+          class CaptureTransport:
+              def __init__(self, response):
+                  self.response = response
+                  self.calls = []
+              def request(self, url, **kwargs):
+                  self.calls.append((url, kwargs))
+                  return self.response
+
+          with tempfile.TemporaryDirectory(prefix="modelrig-t038-riggate-") as td:
+              root = Path(td)
+              token = "riggate_fixture_bearer_123456789012345"
+              token_file = root / "riggate.token"
+              token_file.write_text(token + "\n", encoding="ascii")
+              if os.name == "posix":
+                  token_file.chmod(0o600)
+
+              connection = RigGateConnection(
+                  origin="http://riggate.internal:8765/",
+                  token_file=token_file,
+                  allow_insecure_http=True,
+              )
+
+              # Exact authority -> deterministic private peer -> exact wire evidence.
+              grants = HomeRigGrantStore(uuid_factory=UUIDs())
+              ledger = DataSharingLedger(uuid_factory=UUIDs(100))
+              _, auth = authorize(grants, ledger, base=990)
+              capture = CaptureTransport(
+                  TransportResponse(
+                      200,
+                      {"content-type": "application/json"},
+                      status_body(observed_at=999),
+                      "10.0.0.2",
+                  )
+              )
+              evidence = execute_riggate_status_read(
+                  grants,
+                  ledger,
+                  auth,
+                  connection,
+                  now=1000,
+                  resolver=lambda host, port: ("192.168.1.50", "10.0.0.2"),
+                  transport=capture,
+              )
+              assert evidence.rig_id == "render-rig-1"
+              assert evidence.operation == "rig_health"
+              assert evidence.state == "ready"
+              assert evidence.observed_at == 999
+              assert evidence.production_activation is False
+              assert len(capture.calls) == 1
+              url, call = capture.calls[0]
+              assert url == "http://riggate.internal:8765/v1/rigs/render-rig-1/health"
+              assert call["connect_address"] == "10.0.0.2"
+              assert call["allow_insecure_http"] is True
+              assert call["bearer_token"] == token
+              assert token not in repr(evidence.to_dict())
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "completed"
+              grants.close()
+              ledger.close()
+
+              # Both v1 operations retain their fixed wire paths.
+              grants = HomeRigGrantStore(uuid_factory=UUIDs(200))
+              ledger = DataSharingLedger(uuid_factory=UUIDs(300))
+              _, power = authorize(grants, ledger, base=1050, operation="rig_power_readiness")
+              capture = CaptureTransport(
+                  TransportResponse(
+                      200,
+                      {"content-type": "application/json; charset=utf-8"},
+                      status_body(operation="rig_power_readiness", state="on", observed_at=1059),
+                      "10.0.0.2",
+                  )
+              )
+              evidence = execute_riggate_status_read(
+                  grants, ledger, power, connection, now=1060,
+                  resolver=lambda host, port: ("10.0.0.2",), transport=capture,
+              )
+              assert evidence.operation == "rig_power_readiness"
+              assert capture.calls[0][0].endswith("/v1/rigs/render-rig-1/power-readiness")
+              grants.close()
+              ledger.close()
+
+              # Plaintext bearer is opt-in and cannot resolve to a public peer.
+              try:
+                  RigGateConnection(origin="http://riggate.internal:8765", token_file=token_file)
+              except RigGateTransportError as exc:
+                  assert "opt-in" in str(exc)
+              else:
+                  raise AssertionError("plaintext RigGate origin bypassed explicit opt-in")
+
+              grants = HomeRigGrantStore(uuid_factory=UUIDs(400))
+              ledger = DataSharingLedger(uuid_factory=UUIDs(500))
+              _, auth = authorize(grants, ledger, base=1100)
+              never = CaptureTransport(
+                  TransportResponse(200, {"content-type": "application/json"}, status_body(), "8.8.8.8")
+              )
+              try:
+                  execute_riggate_status_read(
+                      grants, ledger, auth, connection, now=1110,
+                      resolver=lambda host, port: ("8.8.8.8",), transport=never,
+                  )
+              except RigGateTransportError as exc:
+                  assert "global peer" in str(exc)
+              else:
+                  raise AssertionError("plaintext bearer reached a global RigGate peer")
+              assert never.calls == []
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "failed"
+              grants.close()
+              ledger.close()
+
+              # Revoke after plan creation blocks before DNS, credential file and transport.
+              grants = HomeRigGrantStore(uuid_factory=UUIDs(600))
+              ledger = DataSharingLedger(uuid_factory=UUIDs(700))
+              grant, auth = authorize(grants, ledger, base=1200)
+              grants.revoke(
+                  grant.grant_id,
+                  expected_scope_sha256=grant.scope.digest,
+                  actor="operator",
+                  now=1203,
+              )
+              missing_connection = RigGateConnection(
+                  origin="https://riggate.example.invalid",
+                  token_file=root / "missing.token",
+              )
+              resolver_calls = []
+              never = CaptureTransport(
+                  TransportResponse(200, {"content-type": "application/json"}, status_body(), "10.0.0.2")
+              )
+              try:
+                  execute_riggate_status_read(
+                      grants, ledger, auth, missing_connection, now=1210,
+                      resolver=lambda host, port: resolver_calls.append((host, port)) or ("10.0.0.2",),
+                      transport=never,
+                  )
+              except HomeRigDenied:
+                  pass
+              else:
+                  raise AssertionError("revoked T-038 grant reached RigGate execution")
+              assert resolver_calls == [] and never.calls == []
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "blocked"
+              assert finished[0]["error_code"] == "authority_revoked_execute"
+              grants.close()
+              ledger.close()
+
+              # Rig substitution fails and closes the one-use receipt as failed.
+              grants = HomeRigGrantStore(uuid_factory=UUIDs(800))
+              ledger = DataSharingLedger(uuid_factory=UUIDs(900))
+              _, auth = authorize(grants, ledger, base=1300)
+              wrong = CaptureTransport(
+                  TransportResponse(
+                      200,
+                      {"content-type": "application/json"},
+                      status_body(rig_id="other-rig"),
+                      "10.0.0.2",
+                  )
+              )
+              try:
+                  execute_riggate_status_read(
+                      grants, ledger, auth, connection, now=1310,
+                      resolver=lambda host, port: ("10.0.0.2",), transport=wrong,
+                  )
+              except Exception as exc:
+                  assert "does not match" in str(exc)
+              else:
+                  raise AssertionError("substituted RigGate rig was accepted")
+              finished = [row for row in ledger.recent_events() if row["event_type"] == "finished"]
+              assert finished and finished[0]["outcome"] == "failed"
+              grants.close()
+              ledger.close()
+
+              # Concrete stdlib transport: exact socket, Host/path and bearer; socket closes.
+              class FakeSocket:
+                  def __init__(self):
+                      self.sockaddr = None
+                      self.sent = b""
+                      self.closed = False
+                      self.timeout = None
+                  def settimeout(self, value):
+                      self.timeout = value
+                  def connect(self, sockaddr):
+                      self.sockaddr = sockaddr
+                  def getpeername(self):
+                      return ("10.0.0.2", self.sockaddr[1])
+                  def sendall(self, data):
+                      self.sent += data
+                  def close(self):
+                      self.closed = True
+
+              class FakeResponse:
+                  status = 200
+                  def __init__(self, sock, method=None):
+                      self.body = io.BytesIO(status_body())
+                      self.closed = False
+                  def begin(self):
+                      return None
+                  def getheaders(self):
+                      return [
+                          ("Content-Type", "application/json"),
+                          ("Content-Length", str(len(status_body()))),
+                      ]
+                  def read(self, amount):
+                      return self.body.read(amount)
+                  def close(self):
+                      self.closed = True
+
+              sock = FakeSocket()
+              concrete = PinnedRigGateTransport(
+                  socket_factory=lambda family, kind: sock,
+                  response_factory=FakeResponse,
+              )
+              result = concrete.request(
+                  "http://riggate.internal:8765/v1/rigs/render-rig-1/health",
+                  connect_address="10.0.0.2",
+                  bearer_token=token,
+                  allow_insecure_http=True,
+                  timeout_seconds=2,
+                  max_wire_bytes=64 * 1024,
+              )
+              assert result.status == 200 and result.connected_address == "10.0.0.2"
+              assert sock.sockaddr == ("10.0.0.2", 8765)
+              assert sock.sent.startswith(b"GET /v1/rigs/render-rig-1/health HTTP/1.1\r\n")
+              assert b"Host: riggate.internal:8765\r\n" in sock.sent
+              assert f"Authorization: Bearer {token}\r\n".encode() in sock.sent
+              assert b"Accept-Encoding: identity\r\n" in sock.sent
+              assert sock.closed is True
+
+              socket_calls = []
+              blocked = PinnedRigGateTransport(socket_factory=lambda *args: socket_calls.append(args))
+              try:
+                  blocked.request(
+                      "http://riggate.internal:8765/v1/rigs/render-rig-1/control",
+                      connect_address="10.0.0.2",
+                      bearer_token=token,
+                      allow_insecure_http=True,
+                      timeout_seconds=2,
+                      max_wire_bytes=64 * 1024,
+                  )
+              except RigGateTransportError as exc:
+                  assert "allowed status operation" in str(exc)
+              else:
+                  raise AssertionError("non-status RigGate path reached concrete transport")
+              assert socket_calls == []
+
+          print("===== T-038 RIGGATE TRANSPORT: PASS =====")
+          PY

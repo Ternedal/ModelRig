@@ -274,27 +274,12 @@ fun KalivTitleBar(
             }
         }
         Spacer(Modifier.weight(1f))
-        TitleCap("\u2500", null)
-        TitleCap("\u25FB", null)
-        TitleCap("\u2715", onClose, danger = true)
+        // No window controls here: the OS titlebar already owns minimise/
+        // maximise/close, and drawing a second (mostly dead) set doubled the
+        // chrome (#779 item 2).
     }
 }
 
-@Composable
-private fun TitleCap(glyph: String, onClick: (() -> Unit)?, danger: Boolean = false) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .width(44.dp).height(40.dp)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
-    ) {
-        Text(
-            glyph,
-            fontSize = 11.sp,
-            color = if (danger) Color(0xFFC47B70) else Color(0xFF8B8177),
-        )
-    }
-}
 
 /**
  * The 70dp icon-only rail the mockup uses for 1b (and, as a small documented

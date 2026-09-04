@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from .. import ollama_client as oc
 from .core import AgentRun, RunState
@@ -12,6 +12,10 @@ from .outcome_context import OutcomeContext, OutcomeContextCompiler, OutcomeTarg
 
 
 class OutcomeAnswerError(RuntimeError):
+    pass
+
+
+class _DuplicateJsonKeyError(ValueError):
     pass
 
 
@@ -31,6 +35,16 @@ def _strip_code_fence(text: str) -> str:
     value = text.strip()
     match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", value, flags=re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else value
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous model-owned JSON at every object depth."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKeyError("duplicate JSON key in answerer output")
+        result[key] = value
+    return result
 
 
 class TypedOutcomeAnswerer:
@@ -113,8 +127,11 @@ class TypedOutcomeAnswerer:
 
         raw = await self.chat_fn(messages, model)
         try:
-            payload = json.loads(_strip_code_fence(raw))
-        except (json.JSONDecodeError, TypeError) as exc:
+            payload = json.loads(
+                _strip_code_fence(raw),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except (json.JSONDecodeError, TypeError, _DuplicateJsonKeyError) as exc:
             raise OutcomeAnswerError("answerer did not return valid JSON") from exc
         if not isinstance(payload, dict) or set(payload) != {"answer", "limitations"}:
             raise OutcomeAnswerError("answerer response must contain exactly answer and limitations")

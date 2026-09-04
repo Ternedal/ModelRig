@@ -1,0 +1,272 @@
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import importlib
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+_resume_passed = _resume_failed = 0
+
+
+def _resume_check(condition: bool, message: str) -> None:
+    global _resume_passed, _resume_failed
+    if condition:
+        _resume_passed += 1
+        print(f"  PASS: {message}")
+    else:
+        _resume_failed += 1
+        print(f"  FAIL: {message}")
+
+
+_collector = importlib.import_module("stage_b_one_click_v2_contract")
+_legacy = _collector.legacy
+_root = Path(tempfile.mkdtemp(prefix="stage-b-resume-invalidation-"))
+_updater = _root / _collector.UPDATER_ASSET
+_updater.write_bytes(b"live updater")
+_evidence = _root / "validation" / "appliance-lifecycle-evidence"
+_evidence.mkdir(parents=True)
+_old_log = _evidence / "updater_binary_check.log"
+_old_log.write_text("old green proof\n", encoding="utf-8")
+_final_report = _root / "validation" / "stage-b-physical-final-latest.json"
+
+
+def _write_green_final() -> None:
+    _final_report.parent.mkdir(parents=True, exist_ok=True)
+    _final_report.write_text(
+        json.dumps(
+            {
+                "schema": "kaliv-stage-b-physical-final/v1",
+                "status": "passed",
+                "gate": {
+                    "passed": True,
+                    "all_physical_evidence_complete": True,
+                    "production_activation": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+_write_green_final()
+_candidate = {
+    "version": "1.58.151",
+    "git_sha": "a" * 40,
+    "code_sha256": "b" * 64,
+}
+_observations = {
+    "trials": {"updater_bootstrap": {"performed": True, "old": True}}
+}
+_state = {"updater_bootstrap_done": True}
+_events: list[tuple[str, object]] = []
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _save_observations(value) -> None:
+    _events.append(
+        ("save_observations", "updater_bootstrap" in value.get("trials", {}))
+    )
+
+
+def _save_state(value) -> None:
+    _events.append(("save_state", value.get("updater_bootstrap_done")))
+
+
+def _failed_attestation(command, **_kwargs):
+    _events.append(("attestation", list(command)))
+    return SimpleNamespace(returncode=1, stdout="", stderr="wrong release")
+
+
+_original_final_write = _collector.final_gate._write
+
+
+def _write_final(path, value) -> None:
+    _events.append(("final_receipt", value.get("gate", {}).get("passed")))
+    _original_final_write(path, value)
+
+
+try:
+    with (
+        mock.patch.object(
+            _collector,
+            "_release_asset_sha256",
+            return_value=_sha(_updater),
+        ),
+        mock.patch.object(_legacy, "ROOT", _root),
+        mock.patch.object(_legacy, "EVIDENCE", _evidence),
+        mock.patch.object(_legacy, "appliance_root", return_value=_root),
+        mock.patch.object(_legacy, "sha256_file", side_effect=_sha),
+        mock.patch.object(
+            _legacy,
+            "save_observations",
+            side_effect=_save_observations,
+        ),
+        mock.patch.object(_legacy, "save_state", side_effect=_save_state),
+        mock.patch.object(
+            _collector.final_gate,
+            "_write",
+            side_effect=_write_final,
+        ),
+        mock.patch.object(_legacy, "heading"),
+        mock.patch.object(_legacy, "ok"),
+        mock.patch.object(
+            _collector.subprocess,
+            "run",
+            side_effect=_failed_attestation,
+        ),
+    ):
+        _collector._verify_bootstrap(_candidate, _observations, _state)
+except _legacy.StageBError:
+    _resume_check(True, "failed resumed attestation stops the collector")
+else:
+    _resume_check(False, "failed resumed attestation stops the collector")
+
+_resume_check(
+    _state.get("updater_bootstrap_done") is False,
+    "resume failure leaves checkpoint false",
+)
+_resume_check(
+    "updater_bootstrap" not in _observations["trials"],
+    "resume failure removes cached trial",
+)
+_resume_check(
+    not _old_log.exists(),
+    "resume failure removes cached bootstrap log",
+)
+_resume_check(
+    _events[:3]
+    == [
+        ("final_receipt", False),
+        ("save_state", False),
+        ("save_observations", False),
+    ],
+    "final receipt is blocked before false checkpoint and cached trial removal",
+)
+_resume_check(
+    len(_events) >= 4 and _events[3][0] == "attestation",
+    "attestation runs only after receipt and evidence invalidation are saved",
+)
+_resume_check(
+    json.loads(_final_report.read_text(encoding="utf-8"))["gate"]["passed"] is False,
+    "failed resumed verification leaves the official final receipt blocked",
+)
+
+
+class _SimulatedStop(RuntimeError):
+    pass
+
+
+_original_invalidate_final_receipt = _collector._invalidate_final_receipt
+
+
+def _run_interrupted_invalidation(stop_after: str):
+    _write_green_final()
+    observations = {
+        "trials": {"updater_bootstrap": {"performed": True, "old": True}}
+    }
+    state = {"updater_bootstrap_done": True}
+    events: list[tuple[str, object]] = []
+
+    def invalidate_final_receipt() -> None:
+        _original_invalidate_final_receipt()
+        events.append(("final_receipt", False))
+        if stop_after == "receipt":
+            raise _SimulatedStop("stop after final receipt invalidation")
+
+    def save_state(value) -> None:
+        events.append(("save_state", value.get("updater_bootstrap_done")))
+        if stop_after == "state":
+            raise _SimulatedStop("stop after checkpoint persistence")
+
+    def save_observations(value) -> None:
+        events.append(
+            (
+                "save_observations",
+                "updater_bootstrap" in value.get("trials", {}),
+            )
+        )
+        if stop_after == "observations":
+            raise _SimulatedStop("stop after trial removal persistence")
+
+    try:
+        with (
+            mock.patch.object(_legacy, "ROOT", _root),
+            mock.patch.object(_legacy, "EVIDENCE", _evidence),
+            mock.patch.object(_legacy, "appliance_root", return_value=_root),
+            mock.patch.object(
+                _collector,
+                "_invalidate_final_receipt",
+                side_effect=invalidate_final_receipt,
+            ),
+            mock.patch.object(_legacy, "save_state", side_effect=save_state),
+            mock.patch.object(
+                _legacy,
+                "save_observations",
+                side_effect=save_observations,
+            ),
+            mock.patch.object(_legacy, "heading"),
+            mock.patch.object(_legacy, "ok"),
+        ):
+            _collector._verify_bootstrap(
+                _candidate,
+                observations,
+                state,
+            )
+    except _SimulatedStop:
+        pass
+    receipt = json.loads(_final_report.read_text(encoding="utf-8"))
+    return observations, state, events, receipt
+
+
+_after_receipt_obs, _after_receipt_state, _after_receipt_events, _after_receipt = (
+    _run_interrupted_invalidation("receipt")
+)
+_resume_check(
+    _after_receipt_state.get("updater_bootstrap_done") is True
+    and "updater_bootstrap" in _after_receipt_obs["trials"]
+    and _after_receipt_events == [("final_receipt", False)]
+    and _after_receipt["gate"]["passed"] is False,
+    "interruption after receipt invalidation cannot leave an old green final receipt",
+)
+
+_after_state_obs, _after_state_state, _after_state_events, _after_state = (
+    _run_interrupted_invalidation("state")
+)
+_resume_check(
+    _after_state_state.get("updater_bootstrap_done") is False
+    and "updater_bootstrap" in _after_state_obs["trials"]
+    and _after_state_events
+    == [("final_receipt", False), ("save_state", False)]
+    and _after_state["gate"]["passed"] is False,
+    "interruption after checkpoint persistence leaves stale trial harmless and receipt blocked",
+)
+
+_after_obs_obs, _after_obs_state, _after_obs_events, _after_obs = (
+    _run_interrupted_invalidation("observations")
+)
+_resume_check(
+    _after_obs_state.get("updater_bootstrap_done") is False
+    and "updater_bootstrap" not in _after_obs_obs["trials"]
+    and _after_obs_events
+    == [
+        ("final_receipt", False),
+        ("save_state", False),
+        ("save_observations", False),
+    ]
+    and _after_obs["gate"]["passed"] is False,
+    "interruption after trial removal keeps false checkpoint and blocked receipt",
+)
+
+print(
+    f"Stage B resume invalidation contracts: {_resume_passed} passed, "
+    f"{_resume_failed} failed"
+)
+if _resume_failed:
+    raise SystemExit(1)
