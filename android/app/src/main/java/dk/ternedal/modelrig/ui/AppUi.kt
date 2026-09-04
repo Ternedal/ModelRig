@@ -1855,6 +1855,21 @@ private fun ChatScreen(
                                 i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_PERSONS, true)
                                 context.startActivity(i)
                             })
+                            // Kroppen (slice D): Kaliv Body er en separat Unity-app.
+                            // Kaliv giver den riggen og sit token som intent-extras,
+                            // saa den ikke skal parres igen -- kun til DEN pakke.
+                            DropdownMenuItem(text = { Text("Krop") }, onClick = {
+                                overflow = false
+                                val launch = dk.ternedal.modelrig.KalivBodyBridge.launchIntent(
+                                    context, store.baseUrl.orEmpty(), store.token.orEmpty(),
+                                )
+                                if (launch != null) context.startActivity(launch)
+                                else android.widget.Toast.makeText(
+                                    context,
+                                    "Kaliv Body er ikke installeret (${dk.ternedal.modelrig.KalivBodyBridge.PACKAGE}).",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            })
                         }
                         if (mode == "rig" && store.cloudKey != null) {
                             DropdownMenuItem(

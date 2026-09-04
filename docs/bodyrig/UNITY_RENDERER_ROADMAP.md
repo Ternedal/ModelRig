@@ -70,7 +70,7 @@ kan læse frames fra fixturen (som nu) ELLER fra `/body/frames` (UnityWebRequest
 SSE). Fixturen bliver ved at være den deterministiske testkilde. C#-ændringen
 er lille; den verificeres af den fysiske gate, ikke af CI.
 
-**Slice D — Android-host + AR.** Kaliv Body som separat Unity Android-app
+**Slice D — Android-host + AR. Skrevet 4/9 som drafts stablet på #846: AR-placering (#858), rig-link (#860); værtsvalg taget: separat Kaliv Body-app startet fra Kalivs ⋮ → Krop med token som intent-extras (#861).** Kaliv Body som separat Unity Android-app
 først (parring som enhver anden klient; asset + frames fra rig), ARFoundation
 for kamera-passthrough og plan-forankring. Unity as a Library ind i Kaliv-appen
 er V2-spørgsmålet — det koster build-kompleksitet, og en separat app beviser
