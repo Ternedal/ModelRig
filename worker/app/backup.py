@@ -20,6 +20,11 @@ WHAT IS NOT INCLUDED: model weights (re-pullable via Ollama), Piper voices,
 repository files, modelrig.env, API keys, approval secrets or other credentials.
 Those are installation/configuration inputs, not portable data archives.
 
+Schema 1 is the original V7 inventory. Schema 2 is the current 2.x inventory.
+New code accepts both so old backups remain restorable; new archives use schema
+2 so old code fails closed instead of accepting an archive whose newer keys it
+would silently skip.
+
 The manifest records a schema version and every stored file's sha256, so a
 restore can refuse a corrupt or truncated archive instead of writing half of one
 over live data. For a cross-machine migration, stop the appliance first; the
@@ -44,7 +49,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-BACKUP_SCHEMA = 1
+BACKUP_SCHEMA = 2
+SUPPORTED_BACKUP_SCHEMAS = frozenset({1, BACKUP_SCHEMA})
 
 # Resolve paths exactly like the worker. Relative defaults are anchored under
 # the stable Kaliv data root; explicit env overrides continue to win.
@@ -210,7 +216,7 @@ def _read_manifest(archive: str) -> dict:
 def verify(archive: str) -> dict:
     """Check every stored file against its recorded hash WITHOUT extracting."""
     manifest = _read_manifest(archive)
-    if manifest.get("schema") != BACKUP_SCHEMA:
+    if manifest.get("schema") not in SUPPORTED_BACKUP_SCHEMAS:
         raise ValueError(f"unsupported backup schema: {manifest.get('schema')}")
 
     problems: list[str] = []
@@ -280,7 +286,7 @@ def restore(archive: str, force: bool = False) -> dict:
         for key, meta in manifest["files"].items():
             it = targets.get(key)
             if it is None:
-                continue  # old/new archive key unknown to this version; skip
+                continue  # schema-1 archives may contain keys not known here
             if meta["kind"] == "file":
                 _extract_to(tar, f"data/{key}", it.path)
                 restored.append(it.path)
