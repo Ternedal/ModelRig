@@ -68,6 +68,16 @@ physical proof is unchanged. The rig side (slices A and B of
 and drives the frames from the chat: thinking, waiting for a tool, speaking
 with the phone's actual playback timing, interrupted.
 
+## Android host: the Kaliv Body app
+
+Host choice taken 4/9 (reversible): a standalone Unity build of this project,
+package name **`dk.ternedal.kalivbody`**. Kaliv's ⋮ → **Krop** launches exactly
+that package and hands it the rig address and Kaliv's own device token as
+intent extras (`bodyrig_rig_url`, `bodyrig_rig_token`), which `BodyRigRigLink`
+reads first -- so the body app never pairs on its own. Unity as a Library
+inside Kaliv stays the V2 path if one app is wanted; everything below the
+host is identical. Set the package name in Player Settings → Android.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
