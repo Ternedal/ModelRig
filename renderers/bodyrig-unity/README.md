@@ -49,6 +49,16 @@ The staged path is content-addressed by canonical body id + exact selected `.mrb
 
 `Assets/BodyRig/Resources/bodyrig-demo.json` covers idle, listening, thinking, `audio_envelope` speaking with `explain`, timed-viseme speaking, interruption, listening recovery and idle. The fixture clock starts only after asynchronous VRM binding completes.
 
+## Android host: the Kaliv Body app
+
+Host choice taken 4/9 (reversible): a standalone Unity build of this project,
+package name **`dk.ternedal.kalivbody`**. Kaliv's ⋮ → **Krop** launches exactly
+that package and hands it the rig address and Kaliv's own device token as
+intent extras (`bodyrig_rig_url`, `bodyrig_rig_token`), which `BodyRigRigLink`
+reads first -- so the body app never pairs on its own. Unity as a Library
+inside Kaliv stays the V2 path if one app is wanted; everything below the
+host is identical. Set the package name in Player Settings → Android.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
