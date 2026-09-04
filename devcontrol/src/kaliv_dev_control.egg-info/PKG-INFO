@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: kaliv-dev-control
+Version: 0.1.0
+Summary: Fail-closed DC-L01–L14 primitives for controlled self-development
+Requires-Python: >=3.11
