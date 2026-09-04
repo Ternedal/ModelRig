@@ -36,6 +36,9 @@ local.properties
 .DS_Store
 Thumbs.db
 
+# New-rig bootstrap: per-machine paths/assets stay local.
+/scripts/bootstrap-new-rig.config.psd1
+
 # Kaliv Tools: kill-switch state (per-rig, never committed)
 kaliv-tools-state.json
 kaliv-tools-state.json.tmp
