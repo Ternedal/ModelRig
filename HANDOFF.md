@@ -887,6 +887,32 @@ bruger den; den bærer intet, main ikke har.
 
 Værtsvalget er taget (separat Kaliv Body-app; UaaL som V2) — byg ikke UaaL.
 
+### 4/9 aften — puljen ryddet med Anders' accept ("kør det færdigt")
+
+- **#863** cryptography 50.0.0 → 50.0.1 landet med Ed25519-reviewet
+  (byte-identisk `ed25519.rs`/`.py`; eneste reelle ændring OpenSSL 4.0.2 i
+  wheels). #837 lukket som overhalet.
+- **#763** gradle-wrapper 8.14.4 → 9.7.1 (desktop) landet efter dependabot-
+  rebase mod dagens main; hele matrixen grøn. Revert er ét commit, hvis et
+  lokalt byg protesterer.
+- **#395** DC-L14 (devcontrol-slutstykket) landet: rebaset 439 commits uden
+  konflikter; én ægte fejl — `exact-head-core` manglede den pinnede
+  packaging-toolchain (`setuptools==75.8.2`) som `test / test` havde — rettet
+  i workflowet. **#338** lukket som overhalet (200/219 filer var på main; de
+  sidste 19 kom med #395).
+- Person-værktøjer: `person_bind.py` (#859) binder bodyid/.mrvoice som NY
+  reviewet revision. Runbook-kapitler for stemme og rigtig krop.
+
+**Åbent i git nu: kun #846 → #858 → #860 (Unity-drafts).** Alt andet er landet
+eller lukket. Ingen gren bag main.
+
+Parallelt landede den anden session samme aften ny-rig-bootstrap og komplet
+ModelRig+VoiceRig-migration (`scripts/NEW_RIG_BOOTSTRAP.md`,
+`scripts/COMPLETE_RIG_MIGRATION.md`, `migrate-complete-rig.ps1`). Kropssporets
+env-krav flytter med: en ny rig skal have `KALIV_BODY_STORE` og
+`KALIV_AGENT4_DATA_ROOT` sat, ellers svarer body-fladen 503 og workeren
+fejler lukket — se `docs/bodyrig/FIRST_LIVE_BODY.md` afsnit 1.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
@@ -934,7 +960,7 @@ spor.
 3. **Opret Kaliv som person** — `person_create.py` (`--voice-source
    <navn>.mrvoice` hvis en profil er installeret), åbn Personer, send én
    besked, se `person` i svaret og hør stemmen.
-4. Uændret: #763, workflow-tærsklen, de tre gamle feature-spor.
+4. Workflow-tærsklen (W-12/W-14-fraselister) — den eneste beslutning tilbage.
 
 **[2/9 kl. 12:00 UTC — status. main = `b4bb1ed2`, VERSION 2.0.13. Frosset
 kandidat uændret = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`.
