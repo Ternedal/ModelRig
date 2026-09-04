@@ -240,5 +240,67 @@ empty = backup.create(os.path.join(_root, "empty"))
 check(backup.verify(empty)["ok"], "create: an empty rig produces a valid empty backup")
 check(backup._read_manifest(empty)["schema"] == 2, "create: empty rig still emits current schema 2")
 
+# --- complete-rig orchestration contract -----------------------------------
+# Keep this in the existing backup test instead of adding a new tests/*.py file:
+# generated CURRENT_STATE inventory is itself a drift gate. The repository-wide
+# PowerShell syntax gate parses the operator; these checks lock the sequencing
+# choices that make the two independently tested child migrations coherent.
+repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+complete_operator = os.path.join(repo_root, "scripts", "migrate-complete-rig.ps1")
+check(os.path.isfile(complete_operator), "complete migration: top-level operator exists")
+if os.path.isfile(complete_operator):
+    complete_text = open(complete_operator, "r", encoding="utf-8-sig").read()
+    import_region = complete_text[complete_text.index("$modelImported = $false") :]
+    check(
+        '"complete-rig-migration/v1"' in complete_text,
+        "complete migration: bundle schema is explicit",
+    )
+    check(
+        '"-SkipRestart"' in complete_text
+        and "holding ModelRig stopped" in complete_text
+        and "while ModelRig remains stopped" in complete_text,
+        "complete migration: ModelRig stays down across the VoiceRig snapshot boundary",
+    )
+    check(
+        "ModelRig state export" in complete_text
+        and "VoiceRig state export" in complete_text
+        and complete_text.index("ModelRig state export") < complete_text.index("VoiceRig state export"),
+        "complete migration: ModelRig snapshot precedes VoiceRig shared-voice snapshot",
+    )
+    check(
+        '"-SkipValidation",\n        "-SkipRestart"' in import_region
+        and "Assert-ModelRigStopped" in import_region
+        and "VoiceRig state import" in import_region,
+        "complete migration: ModelRig child import stays stopped through VoiceRig restore",
+    )
+    check(
+        "$voiceImported = $true\n    Assert-ModelRigStopped\n\n    Write-Step \"Starting restored ModelRig through recovery-first bootstrap\"\n    Resume-HeldModelRig"
+        in import_region,
+        "complete migration: recovery-first ModelRig restart happens only after VoiceRig restore",
+    )
+    check(
+        "Assert-CanonicalModelRigRuntime" in complete_text
+        and "requires ModelRigRuntimeRoot to equal InstallRoot" in complete_text
+        and "standalone ModelRig migration operator for non-canonical layouts" in complete_text,
+        "complete migration: custom runtime cannot make final validation inspect another appliance",
+    )
+    check(
+        "VoiceRig state import" in import_region
+        and "Final new-rig validation" in import_region
+        and '"-SkipBodyRig"' in import_region
+        and import_region.index("VoiceRig state import") < import_region.index("Final new-rig validation"),
+        "complete migration: one core validation runs after both child imports",
+    )
+    check(
+        "manual_inputs_not_bundled" in complete_text
+        and "ModelRig/VoiceRig secret values and credentials" in complete_text
+        and "BodyRig licensed SMPL/SMPL-X assets" in complete_text,
+        "complete migration: secrets and licensed BodyRig assets stay explicit manual inputs",
+    )
+    check(
+        "Complete import is PARTIAL" in complete_text,
+        "complete migration: partial child success is never called cutover-ready",
+    )
+
 print(f"\n===== BACKUP: {passed} passed, {failed} failed =====")
 sys.exit(0 if failed == 0 else 1)

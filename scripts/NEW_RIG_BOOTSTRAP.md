@@ -16,6 +16,8 @@ floating branch.
 
 Keep the old rig intact, including the RTX 3060 that will be moved later.
 
+### 1. Bootstrap the new machine
+
 On the new rig, clone ModelRig and open an elevated PowerShell:
 
 ```powershell
@@ -26,46 +28,100 @@ powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-new-rig.ps1 `
 ```
 
 This brings up the base machine, ModelRig and VoiceRig without requiring the
-second GPU or BodyRig's licensed/model assets.
+additional GPU or BodyRig's licensed/model assets. A reboot/WSL initialization
+can legitimately block the first run; resolve the reported prerequisite and
+rerun the same command.
 
-Next, export the portable ModelRig/Kaliv state from the old rig. The migration
-operator stops the appliance before reading databases and restarts the old rig
-when the export is complete:
+### 2. Export one complete state bundle from the old rig
+
+The preferred migration operator now combines the independently verified
+ModelRig/Kaliv and VoiceRig state migrations:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\migrate-new-rig-state.ps1 `
+powershell -ExecutionPolicy Bypass -File .\scripts\migrate-complete-rig.ps1 `
   -Action Export `
-  -RuntimeRoot C:\Rig\ModelRig `
-  -OutDir D:\ModelRigMigration
+  -OutDir D:\RigMigration
 ```
 
+On an old rig where VoiceRig is not at `C:\Rig\src\VoiceRig` or in a sibling
+checkout, pass its repository explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\migrate-complete-rig.ps1 `
+  -Action Export `
+  -VoiceRigRepo C:\path\to\VoiceRig `
+  -OutDir D:\RigMigration
+```
+
+The complete operator creates one unique bundle directory containing:
+
+- ModelRig/Kaliv archive + SHA-bound sidecar;
+- VoiceRig archive + SHA-bound sidecar;
+- `rig-migration.json`, which binds all four files by SHA-256.
+
+ModelRig is held stopped after its DB snapshot while VoiceRig snapshots the
+shared local voice/default files, removing the cross-system voice race. The old
+ModelRig runtime is then restarted through recovery-first `KalivBootstrap` if it
+was running before export.
+
 If Agent 3 protected memory is active (`KALIV_AGENT3_MEMORY_STORE=protected`) and
-a protected memory database exists, this generic export deliberately stops with
-a blocker. Windows DPAPI current-user storage does not yet have a proven
+a protected memory database exists, ModelRig export deliberately stops with a
+blocker. Windows DPAPI current-user storage does not yet have a proven
 cross-machine restore contract in ModelRig; use the dedicated T-033 physical
 path when that proof exists rather than silently copying machine-bound
 ciphertext.
 
-Copy the generated `.tar.gz` archive and its `.migration.json` sidecar to the
-new rig. Configure any secrets that the sidecar names but deliberately does not
-export, then import the archive:
+Copy the **entire bundle directory** to the new machine. A directory without a
+successfully written/verified `rig-migration.json` is diagnostic evidence only
+and is not a cutover authority.
+
+### 3. Configure non-portable inputs
+
+The bundle never contains secret values. Configure required ModelRig/VoiceRig
+credentials on the new machine separately before cutover.
+
+BodyRig licensed/private assets are also deliberately not bundled. Keep their
+paths in the local bootstrap config and run BodyRig only after the base machine
+and final GPU topology are stable.
+
+### 4. Verify the copied bundle
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\migrate-new-rig-state.ps1 `
+powershell -ExecutionPolicy Bypass -File .\scripts\migrate-complete-rig.ps1 `
+  -Action Verify `
+  -InstallRoot C:\Rig `
+  -Bundle D:\RigMigration\rig-migration-YYYYMMDD-HHMMSS-xxxxxxxx
+```
+
+Verification checks the complete bundle hashes and then delegates to both child
+operators for their full internal archive/sidecar verification. It does not stop
+services.
+
+### 5. Import both state domains
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\migrate-complete-rig.ps1 `
   -Action Import `
-  -RuntimeRoot C:\Rig\ModelRig `
-  -Archive D:\ModelRigMigration\kaliv-backup-YYYYMMDD-HHMMSS.tar.gz `
+  -InstallRoot C:\Rig `
+  -Bundle D:\RigMigration\rig-migration-YYYYMMDD-HHMMSS-xxxxxxxx `
   -MinimumGpuCount 1
 ```
 
-Import requires the sidecar, checks its archive SHA-256, verifies every archived
-file before writing, refuses to clobber an already-used new rig unless
-`-ForceRestore` is explicit, starts through `KalivBootstrap` only after a
-complete restore, and runs the normal `Validate` phase afterwards. A failed or
-partial import leaves the appliance stopped for diagnosis.
+The order is intentional: ModelRig/Kaliv state restores first, VoiceRig
+profiles/jobs/default voice restore second, and one final
+`bootstrap-new-rig.ps1 -Phase Validate` runs only after both have succeeded.
+Existing target state is not overwritten unless `-ForceRestore` is explicit.
+If one child import succeeds and the next fails, the complete operator reports a
+**PARTIAL** import and does not claim cutover readiness.
 
-After the extra RTX 3060 has been moved, validate the final GPU count and
-services again:
+See `scripts/COMPLETE_RIG_MIGRATION.md` for the full operator contract and
+failure semantics. The lower-level `migrate-new-rig-state.ps1` and VoiceRig's
+`migrate-state-windows.ps1` remain available for isolated diagnosis.
+
+### 6. Move the additional GPU and validate again
+
+After the state restore is green, move the planned RTX 3060 from the old rig to
+the new machine. Validate the final GPU count and services again:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-new-rig.ps1 `
@@ -75,6 +131,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap-new-rig.ps1 `
 
 Use the actual expected NVIDIA GPU count if the final machine should contain a
 different number.
+
+Do not decommission the old rig until a real Kaliv client connection and an
+audible VoiceRig TTS request have also passed on the physical new machine.
 
 ## Configuration
 
@@ -169,25 +228,23 @@ GitHub is sufficient to reconstruct code and declared dependencies, but it is
 not the source of truth for machine-local state. The bootstrap itself therefore
 does not copy or invent:
 
-- ModelRig pairing/device tokens, admin keys, scheduler/Agent approval secrets
-  or other secrets;
-- an existing RAG database/corpus or other mutable ModelRig/Kaliv data;
-- private VoiceRig user data;
+- ModelRig/Kaliv mutable state;
+- VoiceRig profiles/jobs/private resumable-job inputs;
+- ModelRig/VoiceRig admin keys, tokens, approval secrets or other credentials;
 - licensed SMPL/SMPL-X assets;
 - a private/local SiTH diffusion model;
 - arbitrary Ollama blobs that are not listed in the bootstrap model manifest;
 - Stash API tokens or other credentials.
 
-Portable ModelRig/Kaliv state has an explicit separate migration path in
-`scripts/migrate-new-rig-state.ps1`. Its verified archive covers the current RAG,
-pairing, tool/audit, scheduler/jobs, legacy/portable Agent 3, home-rig and notes
-stores, while **never exporting secret values from `modelrig.env`**. Protected
-Agent 3 memory is intentionally blocked from generic cross-machine export until
-its Windows DPAPI restore is physically proven. Private VoiceRig data and
-licensed BodyRig assets remain separate operator inputs.
+Portable ModelRig/Kaliv + VoiceRig state is handled by
+`scripts/migrate-complete-rig.ps1`. The complete bundle composes the two
+repository-owned archive formats rather than teaching the bootstrap to copy live
+data. It never exports secret values. Protected Agent 3 memory remains blocked
+from generic cross-machine export until its Windows DPAPI restore is physically
+proven.
 
-Keep the old rig untouched until the new rig has passed post-restore validation
-and a real client connection has been proven.
+Keep the old rig untouched until the new rig has passed post-restore validation,
+a real client connection and an audible VoiceRig TTS proof.
 
 ## BodyRig and Unity
 
