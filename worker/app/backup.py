@@ -1,30 +1,30 @@
 """Kaliv backup & restore.
 
-Bundles everything on the rig that cannot be rebuilt from the repo into one
-timestamped archive, and restores it. Roadmap V7.3 -- and V7's exit criterion
-says a restore must be proven once, so this ships with a test that does a full
-round trip (backup -> wipe -> restore -> verify byte-for-byte).
+Bundles the persistent rig state that cannot be rebuilt from the repo into one
+timestamped archive, and restores it. The archive deliberately contains data,
+not installation artifacts or operator secrets.
 
-WHAT IS IN A BACKUP, and why each one hurts to lose:
+The backup inventory follows the current 2.x persistent stores:
 
-  rag.db          the embedding index. Losing it means re-ingesting every
-                  document by hand.
-  data.json       the Go server's pairing state and device tokens. Losing it
-                  means re-pairing every device.
-  audit.db        the append-only tool audit log. It is a security record;
-                  losing it is losing the answer to "what did Kaliv do".
-  tools-state     the kill-switch decision (v1.28.0). Losing it re-arms the
-                  layer from the env default -- exactly the surprise that
-                  persistence was added to prevent.
-  notes/          what note_append wrote. The user's own words.
+  rag.db                       embedding index
+  data.json                    Go backend pairing/device-token state
+  audit.db                     append-only tool audit log
+  tools-state.json             persisted tool kill-switch state
+  jobs.db                      async job state
+  schedules.db                 schedules + scheduler approval-use state
+  agent3-*.db                  Agent 3 runs/reviews/replans/memory/plans/approvals
+  home-rig-*.db/data-sharing   home-rig pilot authorization/audit state
+  notes/                       what note_append wrote
 
-WHAT IS NOT: model weights (re-pullable via Ollama), Piper voices (re-
-downloadable), anything under the repo. A backup is for the irreplaceable, not
-the merely large.
+WHAT IS NOT INCLUDED: model weights (re-pullable via Ollama), Piper voices,
+repository files, modelrig.env, API keys, approval secrets or other credentials.
+Those are installation/configuration inputs, not portable data archives.
 
-The manifest records a schema version and each file's sha256, so a restore can
-refuse a corrupt or truncated archive instead of writing half of one over live
-data -- the failure mode that turns a backup into an outage.
+The manifest records a schema version and every stored file's sha256, so a
+restore can refuse a corrupt or truncated archive instead of writing half of one
+over live data. For a cross-machine migration, stop the appliance first; the
+Windows migration wrapper in scripts/migrate-new-rig-state.ps1 does that and
+fails closed if ModelRig processes remain alive.
 
 Usage:
     python -m worker.app.backup create  [--out DIR]
@@ -46,8 +46,9 @@ from typing import Optional
 
 BACKUP_SCHEMA = 1
 
-# Resolved the same way the worker resolves them, so a backup captures the live
-# locations rather than a guessed default.
+# Resolve paths exactly like the worker. Relative defaults are anchored under
+# the stable Kaliv data root; explicit env overrides continue to win.
+from . import paths as _paths  # noqa: E402
 from . import tools as _tools  # noqa: E402
 
 
@@ -59,35 +60,81 @@ class Item:
     required: bool    # a missing required item aborts restore; optional is fine
 
 
-def _rag_db() -> str:
-    from . import paths as _paths
-    return _paths.resolve("./modelrig-rag.db", env="MODELRIG_DB")
+def _resolved(default: str, env: str) -> str:
+    return _paths.resolve(default, env=env)
 
 
 def _backend_data() -> str:
-    # The Go server reads its device-token file from MODELRIG_DATA (NOT
-    # MODELRIG_DATA_PATH -- that was a name mismatch, so backup looked in the
-    # wrong place), and anchors a relative default on the exe dir. Backup cannot
-    # see the exe dir, so it honours MODELRIG_DATA if set and otherwise falls
-    # back to the conventional data root. Either way it must match where the
-    # server actually writes, or a restore would not restore the pairing.
-    from . import paths as _paths
-    v = os.getenv("MODELRIG_DATA")
-    if v:
-        return v
+    # The Go server reads its device-token file from MODELRIG_DATA. Honour an
+    # explicit value verbatim; otherwise use the conventional stable data root.
+    value = os.getenv("MODELRIG_DATA")
+    if value:
+        return value
     return _paths.resolve("./modelrig-data.json")
 
 
 def items() -> list[Item]:
-    """The manifest of what a backup covers. One place, so create and restore
-    can never disagree about the set."""
-    return [
-        Item("rag.db", _rag_db(), "file", required=False),
-        Item("data.json", _backend_data(), "file", required=False),
-        Item("audit.db", __import__("app.paths", fromlist=["resolve"]).resolve("./kaliv-audit.db", env="KALIV_AUDIT_DB"), "file", required=False),
-        Item("tools-state.json", __import__("app.paths", fromlist=["resolve"]).resolve("./kaliv-tools-state.json", env="KALIV_TOOLS_STATE"), "file", required=False),
-        Item("notes", _tools.tools_dir(), "dir", required=False),
+    """Return the authoritative portable-state inventory.
+
+    Keep create and restore on one list so they cannot disagree. All stores are
+    optional because a feature that has never been used legitimately has no file
+    yet. Once present, however, it is part of the migration archive.
+    """
+    files = [
+        ("rag.db", "./modelrig-rag.db", "MODELRIG_DB"),
+        ("audit.db", "./kaliv-audit.db", "KALIV_AUDIT_DB"),
+        ("tools-state.json", "./kaliv-tools-state.json", "KALIV_TOOLS_STATE"),
+        ("jobs.db", "./modelrig-jobs.db", "MODELRIG_JOBS_DB"),
+        ("schedules.db", "./kaliv-schedules.db", "KALIV_SCHEDULES_DB"),
+        ("agent3-runs.db", "./kaliv-agent3.db", "KALIV_AGENT3_DB"),
+        (
+            "agent3-read-reviews.db",
+            "./kaliv-agent3-read-reviews.db",
+            "KALIV_AGENT3_REVIEW_DB",
+        ),
+        ("agent3-replans.db", "./kaliv-agent3-replans.db", "KALIV_AGENT3_REPLAN_DB"),
+        (
+            "agent3-replan-previews.db",
+            "./kaliv-agent3-replan-previews.db",
+            "KALIV_AGENT3_REPLAN_PREVIEW_DB",
+        ),
+        ("agent3-memory.db", "./kaliv-agent3-memory.db", "KALIV_AGENT3_MEMORY_DB"),
+        (
+            "agent3-memory-grants.db",
+            "./kaliv-agent3-memory-grants.db",
+            "KALIV_AGENT3_MEMORY_GRANT_DB",
+        ),
+        ("agent3-plans.db", "./kaliv-agent3-plans.db", "KALIV_AGENT3_PLAN_DB"),
+        (
+            "agent3-task-plans.db",
+            "./kaliv-agent3-task-plans.db",
+            "KALIV_AGENT3_TASK_PLAN_DB",
+        ),
+        (
+            "agent3-approvals.db",
+            "./kaliv-agent3-approvals.db",
+            "KALIV_AGENT3_APPROVAL_DB",
+        ),
+        (
+            "home-rig-grants.db",
+            "./kaliv-home-rig-grants.db",
+            "KALIV_HOME_RIG_GRANTS_DB",
+        ),
+        (
+            "home-rig-audit.db",
+            "./kaliv-home-rig-audit.db",
+            "KALIV_HOME_RIG_AUDIT_DB",
+        ),
+        (
+            "data-sharing.db",
+            "./kaliv-data-sharing.db",
+            "KALIV_DATA_SHARING_DB",
+        ),
     ]
+    out = [Item(key, _resolved(default, env), "file", required=False) for key, default, env in files]
+    out.insert(1, Item("data.json", _backend_data(), "file", required=False))
+    out.append(Item("notes", _tools.tools_dir(), "dir", required=False))
+    return out
 
 
 def _sha256_file(path: str) -> str:
@@ -161,9 +208,7 @@ def _read_manifest(archive: str) -> dict:
 
 
 def verify(archive: str) -> dict:
-    """Check every stored file against its recorded hash WITHOUT extracting to
-    disk. A backup you cannot verify is a backup you cannot trust in the one
-    moment you need it."""
+    """Check every stored file against its recorded hash WITHOUT extracting."""
     manifest = _read_manifest(archive)
     if manifest.get("schema") != BACKUP_SCHEMA:
         raise ValueError(f"unsupported backup schema: {manifest.get('schema')}")
@@ -207,10 +252,9 @@ def _member_sha(tar: tarfile.TarFile, name: str) -> Optional[str]:
 def restore(archive: str, force: bool = False) -> dict:
     """Restore an archive over the live locations.
 
-    Verifies the whole archive FIRST and refuses if anything fails: restoring
-    half a corrupt backup over live data is worse than not restoring at all.
-    Without --force, refuses to overwrite existing files, so a restore cannot
-    silently clobber a rig that already has data.
+    Verifies the whole archive FIRST and refuses if anything fails. Without
+    --force, refuses to overwrite existing files, so a restore cannot silently
+    clobber a rig that already has data.
     """
     check = verify(archive)
     if not check["ok"]:
@@ -228,14 +272,15 @@ def restore(archive: str, force: bool = False) -> dict:
                 clashes.append(it.path)
         if clashes:
             raise FileExistsError(
-                "these already exist (use --force to overwrite): " + ", ".join(clashes))
+                "these already exist (use --force to overwrite): " + ", ".join(clashes)
+            )
 
     restored: list[str] = []
     with tarfile.open(archive, "r:gz") as tar:
         for key, meta in manifest["files"].items():
             it = targets.get(key)
             if it is None:
-                continue  # archive has something this version doesn't know; skip
+                continue  # old/new archive key unknown to this version; skip
             if meta["kind"] == "file":
                 _extract_to(tar, f"data/{key}", it.path)
                 restored.append(it.path)
