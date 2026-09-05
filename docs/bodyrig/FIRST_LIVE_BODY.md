@@ -11,7 +11,16 @@ Unity. Den fysiske gate er ikke kørt endnu — det er dét, afsnit 2 gør.
    `v0.131.2` trækkes af projektet selv.
 2. **En VRM 1.0-avatar** — VRoid Studio → eksportér som VRM 1.0. Gem fx som
    `C:\Users\admin\Desktop\Kaliv.vrm`.
-3. **Kroppen i storen**, fra kun VRM'en (demo-identitet — ikke en person):
+3. **Kroppen i storen — én kommando.** `PREPARE_FIRST_BODY.cmd` gør trin 3–5
+   under ét: bygger, installerer og vælger kroppen, sætter `KALIV_BODY_STORE`
+   hvis den mangler, og **verificerer mod riggen** (parrer en engangsenhed,
+   læser `/body/active` og tre frames), så et 503 fanges her og ikke i Unity:
+
+       PREPARE_FIRST_BODY.cmd C:\Users\admin\Desktop\Kaliv.vrm Kaliv
+
+   Blev env ændret, siger scriptet det: genstart dev-appliancen og kør igen.
+   Til sidst udskriver det de to `BODYRIG_RIG_*`-linjer til afsnit 3.
+   Resten af dette afsnit er de samme trin manuelt:
 
        cd C:\Users\admin\Desktop\ModelRig-git
        python scripts\bodyrig_demo_body.py --vrm C:\Users\admin\Desktop\Kaliv.vrm --name Kaliv --store C:\Users\admin\Desktop\ModelRig-appliance\bodyrig-profiles

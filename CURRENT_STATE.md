@@ -391,6 +391,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`
+- `tests/workflow_prepare_first_body.py`
 - `tests/workflow_proof_campaign_gate_receipt_rule_matrix.py`
 - `tests/workflow_proof_campaign_gate_receipt_unknown_gate.py`
 - `tests/workflow_proof_campaign_outputs_ignored.py`
