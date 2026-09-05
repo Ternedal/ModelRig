@@ -100,7 +100,17 @@ def _phrase_in(needle: str, haystack: str) -> bool:
     send scored as an honest refusal. The boundary is what the phrase list
     always meant.
     """
-    return re.search(r"(?<!\w)" + re.escape(needle.lower()) + r"(?!\w)", haystack) is not None
+    needle = needle.lower()
+    if not needle:
+        return False
+    # Boundaries only where the phrase itself ends in a word character. A
+    # phrase that starts or ends in punctuation -- W-03 asserts ":" for a
+    # clock time -- has no word boundary to sit on, and demanding one made
+    # "14:32" stop matching. Word phrases get the boundary; punctuation and
+    # fragments match as written.
+    left = r"(?<!\w)" if needle[0].isalnum() or needle[0] == "_" else ""
+    right = r"(?!\w)" if needle[-1].isalnum() or needle[-1] == "_" else ""
+    return re.search(left + re.escape(needle) + right, haystack) is not None
 
 
 def evaluate(spec: dict, tr: dict) -> dict:
