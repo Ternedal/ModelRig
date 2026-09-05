@@ -387,6 +387,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_env_parser.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
+- `tests/workflow_mrbody_cross_repo_contract.py`
 - `tests/workflow_pairing_link_parity.py`
 - `tests/workflow_person_create.py`
 - `tests/workflow_physical_validation_campaign.py`
