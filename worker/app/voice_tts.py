@@ -11,6 +11,7 @@ engine produced the WAV.
 """
 from __future__ import annotations
 
+from urllib.parse import unquote as _unquote
 import json
 import logging
 import os
@@ -221,6 +222,21 @@ def _synthesize_piper(text: str, out_path: str) -> dict:
     }
 
 
+def _decoded_package(headers) -> "str | None":
+    """The package VoiceRig actually used, in the form we asked for it.
+
+    VoiceRig percent-encodes its header values (`quote(value, safe="._-")`)
+    so they stay ASCII, and its own tests unquote before comparing. We did
+    not: a Danish voice name -- "søren-stemme.mrvoice", VoiceRig's own test
+    case -- came back as "s%C3%B8ren-stemme.mrvoice" and the raw comparison
+    reported voice_bound: false while VoiceRig had used exactly the right
+    package. The person surface would have called Kaliv's own voice a
+    mismatch, and only for Danish names.
+    """
+    raw = headers.get("X-VoiceRig-Package")
+    return None if raw is None else _unquote(raw)
+
+
 def _voicerig_request(text: str, voice_package: "str | None"):
     payload = {"text": text}
     if voice_package:
@@ -293,7 +309,7 @@ def _synthesize_voicerig(text: str, out_path: str) -> dict:
         "duration": duration,
         "voice": headers.get("X-VoiceRig-Voice", "VoiceRig"),
         "voice_id": headers.get("X-VoiceRig-Voice-ID"),
-        "package": headers.get("X-VoiceRig-Package"),
+        "package": _decoded_package(headers),
         "device": headers.get("X-VoiceRig-Device"),
         "provider": "voicerig",
         # Person Profile binding (#752). None: no person voice requested.
@@ -302,7 +318,7 @@ def _synthesize_voicerig(text: str, out_path: str) -> dict:
         "requested_voice_package": requested,
         "voice_bound": (
             None if not requested
-            else headers.get("X-VoiceRig-Package") == requested
+            else _decoded_package(headers) == requested
         ),
     }
 
