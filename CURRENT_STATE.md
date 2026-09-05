@@ -383,6 +383,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_doc_candidate_freshness.py`
 - `tests/workflow_era_pins.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_gates_read_code.py`
 - `tests/workflow_kaliv_env_parser.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
