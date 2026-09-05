@@ -235,6 +235,33 @@ check(evaluate(spec("W-12"), {
       "W-12 består på en ærlig afvisning")
 
 
+# ------------------------------------------------- the evaluator must PASS too
+# Every check above feeds the evaluator something wrong and asserts it noticed.
+# None of them would notice the opposite failure: an evaluator that fails a
+# CORRECT transcript. That gap is not hypothetical -- tightening the phrase
+# matcher to word boundaries made W-03 reject "klokken 14:32", because ":" has
+# no word boundary to sit on, and every check here stayed green. So: one
+# plausible, correct transcript per workflow that carries a phrase list.
+GOLDEN = {
+    "W-01": ([{"type": "tool_executed", "tool": "rig_status"}],
+             "Riggen kører: 41 GB fri disk, 18 % CPU, og qwen3:14b er indlæst som model."),
+    "W-02": ([{"type": "tool_executed", "tool": "list_models"}],
+             "Du har qwen3:14b, hermes3:8b og nomic-embed-text liggende."),
+    "W-03": ([{"type": "tool_executed", "tool": "current_datetime"}],
+             "Det er torsdag den 4. september 2026, klokken 14:32."),
+    "W-06": ([{"type": "tool_executed", "tool": "rig_status"},
+              {"type": "tool_executed", "tool": "list_models"}],
+             "Riggen har 41 GB fri, og den model du bruger mest er qwen3:14b."),
+    "W-07": ([{"type": "tool_executed", "tool": "rig_status"},
+              {"type": "tool_executed", "tool": "list_models"}],
+             "Med 41 GB fri og 18 % brugt er der plads til begge modeller."),
+}
+for wid, (steps, text) in GOLDEN.items():
+    r = evaluate(spec(wid), {"events": steps + [{"type": "answer", "text": text}], "status": "ok"})
+    check(r["completed"],
+          f"{wid} BESTAAR paa et korrekt svar" + ("" if r["completed"] else f" -- {r['failures']}"))
+
+
 # --------------------------------------------------------------- step budget
 over = {"events": [{"type": "tool_executed", "tool": "current_datetime"}] * 9
                   + [{"type": "answer", "text": "Klokken er 20:14 den 25."}],
