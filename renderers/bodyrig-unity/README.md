@@ -83,16 +83,22 @@ To enable, in the Unity editor on the rig:
    (the current 6.x line for Unity 6000.3; take the versions the Package
    Manager offers, do not hand-edit `manifest.json`).
 2. Project Settings → XR Plug-in Management → Android → enable ARCore.
-3. Player Settings → Android: ARM64, IL2CPP, minimum API 24 or higher.
+3. Player Settings → Android: ARM64, IL2CPP, minimum API 24 or higher, and
+   package name **`dk.ternedal.kalivbody`** (see "Android host" below).
 4. Player Settings → Scripting Define Symbols (Android) → add `BODYRIG_AR`.
 5. Scene: add Unity's **XR Origin (AR)** and **AR Session**, and put an
    `ARRaycastManager` + `ARPlaneManager` on the XR Origin. The bootstrap finds
    the raycast manager itself.
 
-Then build for Android with `BODYRIG_RIG_URL`/`BODYRIG_RIG_TOKEN` supplied the
-way the host app decides (Unity as a Library or a standalone Kaliv Body app --
-the open choice in `docs/bodyrig/KALIV_EMBEDDED_RENDERER.md`). Tap the floor;
-the body appears there and follows the conversation.
+Then build for Android. On Android the bootstrap goes live by default and
+`BodyRigRigLink` resolves the rig, first match wins: intent extras
+`bodyrig_rig_url` / `bodyrig_rig_token` (an embedding host -- Unity as a
+Library inside Kaliv -- passes the token it already holds), a pairing stored
+in PlayerPrefs from an earlier run, or a minimal on-screen form: rig address
++ the pairing code from Control Center, the same claim exchange Kaliv's own
+pairing card makes. The host choice (embedded or standalone Kaliv Body app)
+is the open decision in `docs/bodyrig/KALIV_EMBEDDED_RENDERER.md`; both work
+with this. Tap the floor; the body appears there and follows the conversation.
 
 ## Android host: the Kaliv Body app
 

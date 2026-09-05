@@ -189,6 +189,7 @@ required_sources = {
     "BodyRigDemoBootstrap.cs",
     "BodyRigFrameSource.cs",
     "BodyRigArPlacement.cs",
+    "BodyRigRigLink.cs",
 }
 check(
     required_sources.issubset({path.name for path in runtime_dir.glob("*.cs")}),
@@ -321,7 +322,41 @@ check(
     "AR placement hides the body until the user has chosen a spot",
 )
 
+# Rig link (slice D, common to both hosts): how the client gets (url, token).
+link_source = (runtime_dir / "BodyRigRigLink.cs").read_text(encoding="utf-8")
+_code = link_source[link_source.index("private void Start()"):]  # skip the doc comment
+order = [_code.index(s) for s in (
+    'GetEnvironmentVariable("BODYRIG_RIG_URL")',
+    'ReadIntentExtras(out url, out token)',
+    'PlayerPrefs.GetString(PrefUrl',
+    'private void OnGUI()',
+)]
+check(order == sorted(order), "rig link resolves in order: environment, intent extras, PlayerPrefs, then the pairing form")
+check(
+    '"/api/v1/pair/claim"' in link_source and 'device_name' in link_source
+    and 'PlayerPrefs.SetString(PrefToken' in link_source,
+    "rig link pairs through the same claim exchange as Kaliv and keeps the token in PlayerPrefs",
+)
+check(
+    "public void Forget()" in link_source and "PlayerPrefs.DeleteKey(PrefToken)" in link_source,
+    "rig link can forget a pairing",
+)
+check(
+    "HumanBodyBones" not in link_source and "VRM10" not in link_source and "renderer.Apply" not in link_source,
+    "rig link renders nothing: it resolves an address and a token, no more",
+)
+
 bootstrap_source = (runtime_dir / "BodyRigDemoBootstrap.cs").read_text(encoding="utf-8")
+check(
+    "BodyRigRigLink" in bootstrap_source
+    and "link.Resolved +=" in bootstrap_source
+    and bootstrap_source.index("link.Resolved +=") < bootstrap_source.index("root.AddComponent<BodyRigFrameSource>()"),
+    "bootstrap starts the live source only once the rig link has resolved",
+)
+check(
+    "RuntimePlatform.Android" in bootstrap_source,
+    "bootstrap goes live by default on Android, where there is no fixture to prove",
+)
 check(
     'GetEnvironmentVariable("BODYRIG_RIG_URL")' in bootstrap_source
     and 'GetEnvironmentVariable("BODYRIG_RIG_TOKEN")' in bootstrap_source
