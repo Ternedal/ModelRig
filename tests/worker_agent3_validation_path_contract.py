@@ -4,6 +4,9 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -48,13 +51,13 @@ finally:
     if saved is not None:
         os.environ["KALIV_AGENT3_VALIDATION_REPORT"] = saved
 
-ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+ignore = code_of(ROOT / ".gitignore")
 check(
     f"/{DEFAULT_REPORT_TEXT}" in ignore,
     "the rolling host-bound report remains git-ignored",
 )
 
-wrapper = (ROOT / "scripts" / "run-agent3-rig-validation.ps1").read_text(encoding="utf-8")
+wrapper = code_of(ROOT / "scripts" / "run-agent3-rig-validation.ps1")
 check(
     DEFAULT_REPORT_TEXT in wrapper,
     "the PowerShell operator command uses the shared report location",
@@ -76,7 +79,7 @@ check(
     "the operator command keeps the paired token out of command history",
 )
 
-doc = (ROOT / "AGENT3_RIG_VALIDATION.md").read_text(encoding="utf-8")
+doc = code_of(ROOT / "AGENT3_RIG_VALIDATION.md")
 check(
     "agent/agent3-integration-draft-v2" not in doc
     and "run-agent3-rig-validation.ps1" in doc,

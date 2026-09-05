@@ -26,6 +26,9 @@ from __future__ import annotations
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
@@ -180,9 +183,9 @@ check(sum(c.startswith("boundary.complete") for c in calls) == 1,
       "failure also completes exactly once")
 
 # --- Step 2 flipped: semantic source-evidence convergence ------------------
-fetch_source = (ROOT / "worker" / "app" / "web_research_fetch.py").read_text(encoding="utf-8")
-tool_source = (ROOT / "worker" / "app" / "web_research_tool.py").read_text(encoding="utf-8")
-runtime_source = (ROOT / "worker" / "app" / "browser_peer_runtime.py").read_text(encoding="utf-8")
+fetch_source = code_of(ROOT / "worker" / "app" / "web_research_fetch.py")
+tool_source = code_of(ROOT / "worker" / "app" / "web_research_tool.py")
+runtime_source = code_of(ROOT / "worker" / "app" / "browser_peer_runtime.py")
 
 for marker in (
     "SourceReceipt",

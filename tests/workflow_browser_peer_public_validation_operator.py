@@ -6,6 +6,9 @@ import importlib.util
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "browser_peer_public_validation_operator.py"
 LAUNCHER = ROOT / "scripts" / "run-browser-peer-public-validation.ps1"
@@ -98,8 +101,8 @@ def expect_blocked(module, result: dict) -> None:
 
 
 def main() -> None:
-    source = SCRIPT.read_text(encoding="utf-8")
-    launcher = LAUNCHER.read_text(encoding="utf-8")
+    source = code_of(SCRIPT)
+    launcher = code_of(LAUNCHER)
     assert "https://example.com" not in source
     assert "https://example.com" not in launcher
     assert "GITHUB_ACTIONS" in source and 'system_name != "Windows"' in source

@@ -10,17 +10,20 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE_PATH = ROOT / "scripts" / "agent3_write_pilot_final_gate.py"
 ENTRY_PATH = ROOT / "scripts" / "agent3_write_pilot_final_gate_operator.py"
 LAUNCHER = ROOT / "START_AGENT3_WRITE_PILOT.cmd"
 RUNBOOK = ROOT / "AGENT3_WRITE_PILOT_FINAL_GATE.md"
 WORKFLOW = ROOT / ".github" / "workflows" / "agent3-write-pilot-final-gate.yml"
-CORE_SOURCE = CORE_PATH.read_text(encoding="utf-8")
-ENTRY_SOURCE = ENTRY_PATH.read_text(encoding="utf-8")
-LAUNCHER_SOURCE = LAUNCHER.read_text(encoding="utf-8")
-RUNBOOK_SOURCE = RUNBOOK.read_text(encoding="utf-8")
-WORKFLOW_SOURCE = WORKFLOW.read_text(encoding="utf-8")
+CORE_SOURCE = code_of(CORE_PATH)
+ENTRY_SOURCE = code_of(ENTRY_PATH)
+LAUNCHER_SOURCE = code_of(LAUNCHER)
+RUNBOOK_SOURCE = code_of(RUNBOOK)
+WORKFLOW_SOURCE = code_of(WORKFLOW)
 
 spec = importlib.util.spec_from_file_location("t022_final_gate_test", ENTRY_PATH)
 assert spec is not None and spec.loader is not None

@@ -24,7 +24,11 @@ Run: python3 tests/workflow_client_capability_gates.py
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import strip_comments  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 INGEST_GATE = ROOT / "android/app/src/main/java/dk/ternedal/modelrig/net/IngestCapability.kt"
@@ -55,11 +59,13 @@ def check(condition: bool, message: str) -> None:
 
 
 def kode(text: str) -> str:
-    """Kildelinjer uden kommentarer -- en omtale i en doc-kommentar er ikke et kald."""
-    return "\n".join(
-        line for line in text.splitlines()
-        if not line.lstrip().startswith(("*", "//", "/*"))
-    )
+    """Kildelinjer uden kommentarer -- en omtale i en doc-kommentar er ikke et kald.
+
+    Den gamle udgave strippede kun linjer der BEGYNDER med // eller *, saa en
+    halv linje ("foo(); // vaek") slap igennem. Maalt 4/9: caps.supports(
+    udkommenteret i VoiceCapability.kt lod gaten forblive groen.
+    """
+    return strip_comments(text, ".kt")
 
 
 def kt_filer():

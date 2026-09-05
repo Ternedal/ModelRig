@@ -39,6 +39,12 @@ jobs:
 
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
+      - name: Install exact DevControl packaging toolchain
+        # DC-L14's reproducible-packaging test builds with --no-isolation, so
+        # the pinned build tools must already be present -- the same line the
+        # test workflow carries. Without it the runner's own setuptools fails
+        # the pin and the build exits 1.
+        run: pip install --quiet build==1.3.0 wheel==0.46.2 setuptools==75.8.2 --break-system-packages
 
       - name: Build backend
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server

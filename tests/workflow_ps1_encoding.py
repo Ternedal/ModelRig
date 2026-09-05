@@ -10,6 +10,9 @@ files at all. Two deterministic rules close the class:
    that is the documented signal that makes 5.1 read UTF-8 instead of ANSI.
 2. Every .ps1 must parse cleanly (pwsh AST parser), catching plain syntax
    errors the same way.
+
+This gate also carries a small static contract for migration PowerShell that is
+safety-critical but should not create another tests/*.py inventory entry.
 """
 
 from __future__ import annotations
@@ -66,6 +69,40 @@ def main() -> int:
         if "|" in line:
             print(f"  FAIL: parse: {line.split('|',1)[0]}: {line.split('|',1)[1][:100]}")
     check(proc.returncode == 0, f"all {len(files)} ps1 files parse cleanly (pwsh AST)")
+
+    # BodyRig private assets must remain evidence-only. The parity operator hashes
+    # the installed/runtime copies rather than trusting stale source paths, and it
+    # must rehash the live SiTH model before accepting the setup report evidence.
+    bodyrig_inventory = ROOT / "scripts" / "bodyrig-private-input-inventory.ps1"
+    check(bodyrig_inventory.is_file(), "BodyRig migration: private-input inventory operator exists")
+    if bodyrig_inventory.is_file():
+        text = bodyrig_inventory.read_text(encoding="utf-8-sig")
+        check(
+            '"bodyrig-private-input-inventory/v1"' in text,
+            "BodyRig migration: evidence schema is explicit",
+        )
+        check(
+            "payload_bytes_included = $false" in text
+            and "Licensed/private BodyRig model bytes are not included" in text,
+            "BodyRig migration: inventory cannot claim or carry private payload bytes",
+        )
+        check(
+            '"-m", "bodyrig.wsl_tree_digest"' in text
+            and '"$sithRepo/data/body_models/smplx"' in text,
+            "BodyRig migration: installed SMPL-X runtime tree is byte-bound",
+        )
+        check(
+            '"-m", "bodyrig.sith_model"' in text
+            and "Live SiTH diffusion model digest no longer matches" in text,
+            "BodyRig migration: live diffusion bytes are rehashed and setup-report drift fails closed",
+        )
+        check(
+            "Get-FileHash -LiteralPath $smplPath -Algorithm SHA256" in text
+            and "Assert-AssetParity" in text
+            and 'Name "SMPL-X" -Tree' in text
+            and 'Name "SiTH diffusion model" -Tree' in text,
+            "BodyRig migration: SMPL, SMPL-X and diffusion parity are all enforced",
+        )
 
     print(f"ps1 encoding gate: {'GREEN' if not FAILED else 'DRIFT DETECTED'} across {len(files)} files")
     return FAILED

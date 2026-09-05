@@ -4,11 +4,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import tempfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "milestone3_current_main.py"
-SOURCE = SCRIPT.read_text(encoding="utf-8")
+SOURCE = code_of(SCRIPT)
 spec = importlib.util.spec_from_file_location("milestone3_current_main", SCRIPT)
 assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)

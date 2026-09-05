@@ -19,6 +19,9 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of, strip_comments  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run-proof-campaign.ps1"
 RECEIPT_MODULE = ROOT / "scripts" / "proof_campaign_gate_receipt.py"
@@ -104,7 +107,11 @@ def run_verdict_matrix(shell: str, function_text: str) -> tuple[subprocess.Compl
     return result, observed
 
 
-source = SCRIPT.read_text(encoding="utf-8")
+source = code_of(SCRIPT)
+# The script marks a section with a comment ("# BEGIN PROOF VERDICT FUNCTION"),
+# which is a legitimate use of one -- and code_of removes it. Slice on the raw
+# text, then judge the slice as code, so both facts stay true.
+_raw = SCRIPT.read_text(encoding="utf-8")
 
 print("source-level fail-closed markers:")
 for unsafe in (
@@ -123,7 +130,8 @@ check("$a4lan = $null" in source, "Agent4 LAN summary variable is defined even w
 for gate in ("stage_a", "forced_recovery", "workflows", "t023", "t033"):
     check(f"Try-ReuseGate '{gate}'" in source, f"{gate} skip path must validate a receipt")
 check(
-    "passed = $false" in source[source.index("function New-ProofGate"):source.index("# BEGIN PROOF VERDICT FUNCTION")],
+    "passed = $false" in strip_comments(
+        _raw[_raw.index("function New-ProofGate"):_raw.index("# BEGIN PROOF VERDICT FUNCTION")], ".ps1"),
     "new gates start red",
 )
 for marker, message in (
@@ -142,7 +150,7 @@ for marker, message in (
 print("\nactual PowerShell verdict over all 32 skip subsets:")
 match = re.search(
     r"# BEGIN PROOF VERDICT FUNCTION\s*(function Get-ProofCampaignPassed[\s\S]*?)\s*# END PROOF VERDICT FUNCTION",
-    source,
+    _raw,
 )
 check(match is not None, "production verdict function can be extracted")
 if match is not None:
@@ -180,7 +188,7 @@ if match is not None:
 print("\nmeasured workflow transcript count:")
 count_match = re.search(
     r"# BEGIN WORKFLOW TRANSCRIPT COUNT FUNCTION\s*(function Get-WorkflowTranscriptCount[\s\S]*?)\s*# END WORKFLOW TRANSCRIPT COUNT FUNCTION",
-    source,
+    _raw,
 )
 check(count_match is not None, "production transcript counter can be extracted")
 if count_match is not None:
@@ -221,7 +229,7 @@ if count_match is not None:
 print("\nworkflow runner-failure classification:")
 evidence_match = re.search(
     r"# BEGIN WORKFLOW ROUND EVIDENCE FUNCTION\s*(function Test-WorkflowRoundExecutionEvidence[\s\S]*?)\s*# END WORKFLOW ROUND EVIDENCE FUNCTION",
-    source,
+    _raw,
 )
 check(evidence_match is not None, "production workflow round evidence function can be extracted")
 if evidence_match is not None:

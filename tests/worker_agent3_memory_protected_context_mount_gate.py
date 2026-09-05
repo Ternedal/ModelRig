@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import tempfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTEXT_FILE = "worker/app/agent3/memory_protected_context.py"
@@ -50,9 +54,9 @@ def check(label: str, condition: object) -> None:
 
 
 def findings(root: Path) -> list[str]:
-    context = (root / CONTEXT_FILE).read_text(encoding="utf-8")
-    adapter = (root / ADAPTER_FILE).read_text(encoding="utf-8")
-    mount = (root / MOUNT_FILE).read_text(encoding="utf-8")
+    context = code_of(root / CONTEXT_FILE)
+    adapter = code_of(root / ADAPTER_FILE)
+    mount = code_of(root / MOUNT_FILE)
     result = [f"context-missing:{marker}" for marker in CONTEXT_MARKERS if marker not in context]
     result.extend(
         f"context-forbidden:{marker}"
@@ -72,7 +76,7 @@ def findings(root: Path) -> list[str]:
     if "ProtectedMemoryContextCompiler" in mount:
         result.append("mount-bypasses-adapter")
     for relative in FORBIDDEN_IMPORTERS:
-        text = (root / relative).read_text(encoding="utf-8")
+        text = code_of(root / relative)
         if "memory_protected_context" in text or "ProtectedMemoryContextCompiler" in text:
             result.append(f"direct-context-import:{relative}")
         if "memory_protected_planner" in text or "ProtectedPlannerMemoryContextProvider" in text:
