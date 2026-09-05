@@ -12,8 +12,11 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 root = Path(__file__).resolve().parents[1]
-workflow = (root / ".github/workflows/_tests.yml").read_text(encoding="utf-8")
+workflow = code_of(root / ".github/workflows/_tests.yml")
 sys.path.insert(0, str(root / "devcontrol/src"))
 
 from kaliv_dev_control.catalog import (
@@ -138,8 +141,8 @@ check(
     f"the fifty-seven DC-L01–L14 test modules are present: {sorted(observed_modules)}",
 )
 
-worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
-pyproject = (root / "devcontrol/pyproject.toml").read_text(encoding="utf-8")
+worker_requirements = code_of(root / "worker/requirements.txt")
+pyproject = code_of(root / "devcontrol/pyproject.toml")
 check(
     # Reviewed 4/9/2026 for the 50.0.0 -> 50.0.1 move: src/rust/src/backend/ed25519.rs
     # and hazmat/primitives/asymmetric/ed25519.py are byte-identical between the
@@ -346,19 +349,13 @@ check(
 )
 
 bundle_lock = json.loads(
-    (root / "devcontrol/TIER_A_BUNDLE_INVENTORY.json").read_text(encoding="utf-8")
+    code_of(root / "devcontrol/TIER_A_BUNDLE_INVENTORY.json")
 )
 split_contract = json.loads(
-    (root / "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json").read_text(
-        encoding="utf-8"
-    )
+    code_of(root / "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json")
 )
-build_script = (root / "scripts/build_devcontrol_artifacts.py").read_text(
-    encoding="utf-8"
-)
-protocol_inventory = (root / "devcontrol/PUBLISHER_PROTOCOL_INVENTORY.md").read_text(
-    encoding="utf-8"
-)
+build_script = code_of(root / "scripts/build_devcontrol_artifacts.py")
+protocol_inventory = code_of(root / "devcontrol/PUBLISHER_PROTOCOL_INVENTORY.md")
 check(
     "Install exact DevControl packaging toolchain" in workflow
     and "build==1.3.0 wheel==0.46.2 setuptools==75.8.2" in workflow,
@@ -397,7 +394,7 @@ check(
 )
 
 receipt_schema = json.loads(
-    (root / "devcontrol/schemas/development-github-read-receipt-v1.schema.json").read_text(encoding="utf-8")
+    code_of(root / "devcontrol/schemas/development-github-read-receipt-v1.schema.json")
 )
 repository_pattern = re.compile(receipt_schema["properties"]["repository"]["pattern"])
 check(repository_pattern.fullmatch("Ternedal/ModelRig") is not None, "receipt schema accepts canonical ModelRig repository")
@@ -599,7 +596,7 @@ check(
 )
 
 allowlist = json.loads(
-    (root / "docs/devcontrol/dc-l03/exact-path-allowlist.json").read_text(encoding="utf-8")
+    code_of(root / "docs/devcontrol/dc-l03/exact-path-allowlist.json")
 )
 paths = allowlist.get("paths") or allowlist.get("allowed_paths")
 check(isinstance(paths, list) and len(paths) == 16 and len(set(paths)) == 16, "DC-L03 exact path allowlist contains 16 unique paths")
