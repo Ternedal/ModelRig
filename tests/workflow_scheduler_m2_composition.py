@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Cross-branch composition contract for the Scheduler M2 software candidate."""
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 passed = failed = 0
@@ -16,10 +20,10 @@ def check(condition: bool, message: str) -> None:
         print(f"  FAIL: {message}")
 
 
-screen = (ROOT / "android/app/src/main/java/dk/ternedal/modelrig/ui/ScheduleScreen.kt").read_text(encoding="utf-8")
-client = (ROOT / "android/app/src/main/java/dk/ternedal/modelrig/net/ScheduleClient.kt").read_text(encoding="utf-8")
-api = (ROOT / "worker/app/schedule_api.py").read_text(encoding="utf-8")
-runner = (ROOT / "worker/app/schedule_runner.py").read_text(encoding="utf-8")
+screen = code_of(ROOT / "android/app/src/main/java/dk/ternedal/modelrig/ui/ScheduleScreen.kt")
+client = code_of(ROOT / "android/app/src/main/java/dk/ternedal/modelrig/net/ScheduleClient.kt")
+api = code_of(ROOT / "worker/app/schedule_api.py")
+runner = code_of(ROOT / "worker/app/schedule_runner.py")
 
 check("SchedulerToolCatalogLoader" in screen, "Android uses the authoritative scheduler tool catalog")
 check("selectedTool?.selectable == true" in screen, "preview remains fail-closed on schedulability")
