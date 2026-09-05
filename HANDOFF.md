@@ -964,6 +964,30 @@ markører lagt der for at holde substring-gates grønne efter en refaktorering.
 Gaterne læser nu koden i stedet. Hvis du flytter kode og fristes til samme
 løsning: lad være, og ret gaten.
 
+### Repo-grænserne er læst og pinnet (5/9)
+
+Kroppen og stemmen krydser tre grænser mellem tre repoer, som hver havde
+sin egen implementering af den samme kontrakt — og intet der holdt dem
+sammen ud over at være skrevet efter samme spec (BodyRigs `MRBODY_SPEC.md`
+er 36 linjer, ModelRigs 218).
+
+| Grænse | Tilstand | Pinnet af |
+|---|---|---|
+| `.mrbody`-manifest + payload | stemte præcist | `tests/workflow_mrbody_cross_repo_contract.py` (#889) |
+| identitetsbinding i provenance | stemte præcist — men brud er **stille** | samme test (#891) |
+| VoiceRigs pakke-header | **var i stykker** | `tests/workflow_voicerig_cross_repo_contract.py` (#890) |
+
+**Stemme-fejlen, værd at huske:** VoiceRig procent-koder sine headere
+(`quote(v, safe="._-")`) og afkoder i sine egne tests. ModelRig
+sammenlignede råt, så `søren-stemme.mrvoice` kom tilbage som
+`s%C3%B8ren-stemme.mrvoice` og `voice_bound` sagde false, mens den rigtige
+stemme blev brugt. Kun danske navne ramtes — altså alle relevante.
+
+Skemaerne er kopieret ind i `contracts/` med den BodyRig-commit de kom fra
+(`4c42aa04`); VoiceRig verificeret mod `03f41c1c`. **Ændrer et af de andre
+repoer sin kontrakt, kopiér skemaet ind igen og lad gaten svare** — den er
+afhængighedsfri og kører hvor testene kører.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
