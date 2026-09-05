@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "backend" / "cmd" / "modelrig-server" / "main.go"
@@ -23,9 +27,9 @@ def require(condition: bool, message: str) -> None:
 
 
 def main() -> None:
-    source = MAIN.read_text(encoding="utf-8")
-    tests = TEST.read_text(encoding="utf-8")
-    grant_cli = GRANT_CLI.read_text(encoding="utf-8")
+    source = code_of(MAIN)
+    tests = code_of(TEST)
+    grant_cli = code_of(GRANT_CLI)
     pair_cli = function_body(source, "pairCLI", "pairServerBaseURL")
 
     for forbidden in (

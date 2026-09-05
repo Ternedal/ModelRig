@@ -12,8 +12,11 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 root = Path(__file__).resolve().parents[1]
-workflow = (root / ".github/workflows/_tests.yml").read_text(encoding="utf-8")
+workflow = code_of(root / ".github/workflows/_tests.yml")
 sys.path.insert(0, str(root / "devcontrol/src"))
 
 from kaliv_dev_control.catalog import (
@@ -95,6 +98,12 @@ expected_modules = {
     "test_publisher_recovery_receipt_v3_h7.py",
     "test_publisher_recovery_signature_window_h6.py",
     "test_dc_l13_local_candidate_boundary.py",
+    "test_dc_l14_reproducible_packaging.py",
+    "test_h10i_tier_a_bundle_inventory.py",
+    "test_h10j_tier_a_execution_core_split_contract.py",
+    "test_h10p_tier_a_legacy_toolhost_extraction.py",
+    "test_publisher_protocol_inventory_h10f.py",
+    "test_tier_a_authority_bundle_closure.py",
     "test_slice10k_publisher_authorization.py",
     "test_slice10l_local_candidate_materialization.py",
     "test_physical_isolation_durable_publication_h10b.py",
@@ -129,17 +138,21 @@ observed_modules = {
 }
 check(
     observed_modules == expected_modules,
-    f"the fifty-one DC-L01–L13 test modules are present: {sorted(observed_modules)}",
+    f"the fifty-seven DC-L01–L14 test modules are present: {sorted(observed_modules)}",
 )
 
-worker_requirements = (root / "worker/requirements.txt").read_text(encoding="utf-8")
-pyproject = (root / "devcontrol/pyproject.toml").read_text(encoding="utf-8")
+worker_requirements = code_of(root / "worker/requirements.txt")
+pyproject = code_of(root / "devcontrol/pyproject.toml")
 check(
-    worker_requirements.count("cryptography==50.0.0") == 1,
+    # Reviewed 4/9/2026 for the 50.0.0 -> 50.0.1 move: src/rust/src/backend/ed25519.rs
+    # and hazmat/primitives/asymmetric/ed25519.py are byte-identical between the
+    # sdists; the only source change is a clippy allow in serialization.rs, and
+    # the changelog's only entry is wheels rebuilt with OpenSSL 4.0.2.
+    worker_requirements.count("cryptography==50.0.1") == 1,
     "the CI/runtime environment pins the reviewed Ed25519 implementation exactly once",
 )
 check(
-    pyproject.count('"cryptography==50.0.0"') == 1,
+    pyproject.count('"cryptography==50.0.1"') == 1,
     "the DevControl package metadata pins the same Ed25519 implementation",
 )
 
@@ -335,8 +348,53 @@ check(
     "rollback-safe keyring state cannot be sourced from a local file",
 )
 
+bundle_lock = json.loads(
+    code_of(root / "devcontrol/TIER_A_BUNDLE_INVENTORY.json")
+)
+split_contract = json.loads(
+    code_of(root / "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json")
+)
+build_script = code_of(root / "scripts/build_devcontrol_artifacts.py")
+protocol_inventory = code_of(root / "devcontrol/PUBLISHER_PROTOCOL_INVENTORY.md")
+check(
+    "Install exact DevControl packaging toolchain" in workflow
+    and "build==1.3.0 wheel==0.46.2 setuptools==75.8.2" in workflow,
+    "DC-L14 CI installs the exact local packaging toolchain",
+)
+check(
+    "DevControl DC-L14 final authority closure and reproducible packaging boundary"
+    in workflow,
+    "DC-L14 has an explicit final authority and packaging boundary gate",
+)
+check(
+    bundle_lock.get("file_count") == 50,
+    "DC-L14 locks the complete fifty-file Tier-A authority bundle",
+)
+check(
+    split_contract.get("schema")
+    == "kaliv-tier-a-execution-core-split-contract/v10"
+    and split_contract.get("import_only") is True,
+    "DC-L14 records the final import-only core split contract",
+)
+check(
+    "_normalize_sdist" in build_script
+    and "SOURCE_DATE_EPOCH" in build_script
+    and all(
+        token not in build_script.lower()
+        for token in ("twine", "repository-url", "api-token")
+    ),
+    "DC-L14 builds deterministic local artifacts without upload authority",
+)
+check(
+    "physically excluded from wheel and sdist artifacts" in protocol_inventory
+    and not (
+        root / "devcontrol/src/kaliv_dev_control/_compatibility_v1"
+    ).exists(),
+    "DC-L14 physically excludes rejected compatibility code from supported artifacts",
+)
+
 receipt_schema = json.loads(
-    (root / "devcontrol/schemas/development-github-read-receipt-v1.schema.json").read_text(encoding="utf-8")
+    code_of(root / "devcontrol/schemas/development-github-read-receipt-v1.schema.json")
 )
 repository_pattern = re.compile(receipt_schema["properties"]["repository"]["pattern"])
 check(repository_pattern.fullmatch("Ternedal/ModelRig") is not None, "receipt schema accepts canonical ModelRig repository")
@@ -538,7 +596,7 @@ check(
 )
 
 allowlist = json.loads(
-    (root / "docs/devcontrol/dc-l03/exact-path-allowlist.json").read_text(encoding="utf-8")
+    code_of(root / "docs/devcontrol/dc-l03/exact-path-allowlist.json")
 )
 paths = allowlist.get("paths") or allowlist.get("allowed_paths")
 check(isinstance(paths, list) and len(paths) == 16 and len(set(paths)) == 16, "DC-L03 exact path allowlist contains 16 unique paths")

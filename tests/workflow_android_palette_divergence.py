@@ -22,6 +22,9 @@ import json
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TOKENS = ROOT / "assets" / "design" / "kaliv-ui-guide" / "kaliv-ui-tokens.json"
 THEME = ROOT / "android/app/src/main/java/dk/ternedal/modelrig/ui/theme/Theme.kt"
@@ -41,13 +44,13 @@ def check(condition: bool, message: str) -> None:
         print(f"  FAIL: {message}")
 
 
-overrides = json.loads(TOKENS.read_text(encoding="utf-8")).get("platformOverrides", {})
+overrides = json.loads(code_of(TOKENS)).get("platformOverrides", {})
 android = {k: v for k, v in overrides.items() if k != "_note" and k == "android"}
 check(not android,
       "platformOverrides har ingen aktive android-divergenser "
       f"(fandt: {sorted(android) or 'ingen'})")
 
-src = THEME.read_text(encoding="utf-8")
+src = code_of(THEME)
 check(LEGACY_PIN not in src,
       f"Theme.kt baerer ikke laengere pin-literalen {LEGACY_PIN} (afloest af DDR-001)")
 check("KalivTokens.Light.muted" in src,

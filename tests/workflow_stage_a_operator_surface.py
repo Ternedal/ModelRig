@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
 """Static surface contract for Stage A operator and runbook."""
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of, strip_comments  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
-PY = (ROOT / "scripts/stage_a_physical_operator.py").read_text(encoding="utf-8")
-PS = (ROOT / "scripts/run-stage-a-physical-validation.ps1").read_text(encoding="utf-8")
-DOC = (ROOT / "STAGED_PHYSICAL_PROMOTION.md").read_text(encoding="utf-8")
+# The .py file is a thin shim that exec()s stage_a_physical_operator.retained,
+# and it carries a comment block labelled "static surface markers retained by
+# tests" -- markers added so this gate would keep passing after the code moved.
+# Reading only the shim, "_require_physical_operator()" was satisfied by that
+# comment. The code itself lives in the retained file: read both, as code.
+_SHIM = ROOT / "scripts/stage_a_physical_operator.py"
+_RETAINED = ROOT / "scripts/stage_a_physical_operator.retained"
+PY = code_of(_SHIM) + "\n" + strip_comments(
+    _RETAINED.read_text(encoding="utf-8"), ".py")
+PS = code_of(ROOT / "scripts/run-stage-a-physical-validation.ps1")
+DOC = code_of(ROOT / "STAGED_PHYSICAL_PROMOTION.md")
 
 passed = failed = 0
 
@@ -20,7 +32,13 @@ def check(condition, message):
         print(f"  FAIL: {message}")
 
 
-check("_require_physical_operator()" in PY, "Windows, TTY and non-CI guard is enforced")
+# "_require_physical_operator()" appearing somewhere is not the claim; the
+# def line contains it too, so the check passed with the call commented out.
+# The claim is that the guard is DEFINED and CALLED.
+_guard_lines = [l.strip() for l in PY.splitlines() if "_require_physical_operator()" in l]
+check(any(l.startswith("def _require_physical_operator()") for l in _guard_lines)
+      and any(not l.startswith("def ") for l in _guard_lines),
+      "Windows, TTY and non-CI guard is defined and called")
 check("candidate_freeze_check.py" in PY, "exact-SHA freeze is invoked")
 check("physical_validation_candidate_campaign.py" in PY, "candidate campaign is invoked")
 check("run-browser-peer-public-validation.ps1" in PY, "interactive browser launcher is reused")

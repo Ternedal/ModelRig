@@ -33,7 +33,11 @@ Run: python3 tests/workflow_agent4_storage_boundary.py
 from __future__ import annotations
 
 import ast
+import sys
 import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 AGENT4 = ROOT / "worker" / "app" / "agent4"
@@ -230,7 +234,9 @@ else:
         if "__pycache__" in str(path):
             continue
         scanned += 1
-        source = path.read_text(encoding="utf-8")
+        # Comments are not code: a module that mentions os.replace in a note
+        # is not writing anything, and the gate should not say it is.
+        source = code_of(path)
         repo_problems.extend(
             violations(str(path.relative_to(ROOT)), source)
         )

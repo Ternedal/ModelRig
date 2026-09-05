@@ -1,0 +1,55 @@
+{
+  "constraints": {
+    "all_production_extractions_complete": true,
+    "core_owns_no_classes_or_functions": true,
+    "future_physical_change_requires_fresh_contract": true,
+    "private_executor_remains_absent": true,
+    "reexports_preserve_object_identity": true
+  },
+  "direct_imports": {
+    "_tier_a_environment": [
+      "TIER_A_APPLICATION_ENVIRONMENT",
+      "_validated_application_env"
+    ],
+    "_tier_a_lease": [
+      "LEASE_SCHEMA",
+      "TierAExecutionError",
+      "TierAExecutionLease",
+      "_HEX40",
+      "_HEX64",
+      "_TASK_ID",
+      "_canonical",
+      "_sha256",
+      "_task_sha"
+    ],
+    "_tier_a_legacy_plan": [
+      "PLAN_SCHEMA",
+      "_COMMAND_ID",
+      "TierALaunchPlan",
+      "build_tier_a_launch_plan"
+    ],
+    "_tier_a_legacy_toolhost": [
+      "_TIER_A_BUNDLE_FILES",
+      "tier_a_toolhost_sha256"
+    ],
+    "_tier_a_materialization": [
+      "_LeaseCapturingVerifier",
+      "LeasedCommandRegistry",
+      "LeasedCatalogMaterializer"
+    ],
+    "_tier_a_path_authority": [
+      "_canonical_directory",
+      "_has_symlink_component",
+      "_regular_file_hash",
+      "workspace_root_authority_sha256"
+    ]
+  },
+  "forbidden_exports": [
+    "_run_tier_a_launch_plan",
+    "run_verified_tier_a_command"
+  ],
+  "import_only": true,
+  "schema": "kaliv-tier-a-execution-core-split-contract/v10",
+  "source": "devcontrol/src/kaliv_dev_control/_tier_a_execution_core.py",
+  "source_git_blob_sha1": "4765ed7f05eba18d0ac96e052367455bad5af846"
+}

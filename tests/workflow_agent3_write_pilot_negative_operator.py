@@ -8,15 +8,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE_PATH = ROOT / "scripts" / "agent3_write_pilot_negative_one_click.py"
 ENTRY_PATH = ROOT / "scripts" / "agent3_write_pilot_negative_operator.py"
 LAUNCHER = ROOT / "START_AGENT3_WRITE_PILOT_NEGATIVE.cmd"
 RUNBOOK = ROOT / "AGENT3_WRITE_PILOT_NEGATIVE.md"
-CORE_SOURCE = CORE_PATH.read_text(encoding="utf-8")
-ENTRY_SOURCE = ENTRY_PATH.read_text(encoding="utf-8")
-LAUNCHER_SOURCE = LAUNCHER.read_text(encoding="utf-8")
-RUNBOOK_SOURCE = RUNBOOK.read_text(encoding="utf-8")
+CORE_SOURCE = code_of(CORE_PATH)
+ENTRY_SOURCE = code_of(ENTRY_PATH)
+LAUNCHER_SOURCE = code_of(LAUNCHER)
+RUNBOOK_SOURCE = code_of(RUNBOOK)
 
 spec = importlib.util.spec_from_file_location("t022_negative_operator_test", ENTRY_PATH)
 assert spec is not None and spec.loader is not None

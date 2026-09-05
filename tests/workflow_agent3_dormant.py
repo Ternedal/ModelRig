@@ -23,6 +23,7 @@ Run: python3 tests/workflow_agent3_dormant.py
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 FLAG = "KALIV_AGENT3_ENABLED"
@@ -192,12 +193,22 @@ check(production_activation_is_off('production_activation = False  # never autom
 
 print("\nrepo invariants:")
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 root = Path(__file__).resolve().parents[1]
 
 
 def read(rel: str) -> str:
+    """Source with comments stripped.
+
+    Every check below is a substring test, and a commented-out line is still
+    in the file. Measured 4/9: commenting out the verdictForPlan call in
+    AgentStartGuard.kt left this gate green at 41/41 with the start
+    unguarded. Comments cannot satisfy a claim about code.
+    """
     p = root / rel
-    return p.read_text(encoding="utf-8") if p.exists() else ""
+    return code_of(p) if p.exists() else ""
 
 
 check(routing_is_agent3_free(read("android/app/src/main/java/dk/ternedal/modelrig/logic/TurnRouter.kt")),
@@ -218,9 +229,9 @@ check(not any(p.name.startswith("AgentRun") for p in
 # ADR-A3-001 kontrakttest 6 + D2: panelet genoptager aldrig, og enhver start
 # i agent-fladen gaar gennem politikken.
 for f in sorted(agent_dir.glob("*.kt")):
-    check(panel_never_resumes(f.read_text(encoding="utf-8")),
+    check(panel_never_resumes(code_of(f)),
           f"the chat agent surface never resumes a run: {f.name}")
-    check(start_goes_through_the_policy(f.name, f.read_text(encoding="utf-8")),
+    check(start_goes_through_the_policy(f.name, code_of(f)),
           f"every start in the chat agent surface is gated by the policy: {f.name}")
 
 check(go_routes_are_flag_gated(read("backend/internal/httpapi/server.go")),

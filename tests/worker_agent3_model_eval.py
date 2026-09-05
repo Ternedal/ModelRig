@@ -10,6 +10,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "agent3_model_eval.py"
 SPEC = importlib.util.spec_from_file_location("agent3_model_eval", SCRIPT)
@@ -229,7 +232,7 @@ def test_stage_a_overrides_match_current_risk_contract() -> None:
 
 
 def test_stage_a_loader_uses_overlay_and_keeps_checkout_clean() -> None:
-    source = (ROOT / "scripts" / "stage_a_one_click.py").read_text(encoding="utf-8")
+    source = code_of(ROOT / "scripts" / "stage_a_one_click.py")
     assert "stage_a_agent3_model_eval.py" in source
     assert "-SkipReadinessRegeneration" in source
     assert "refusing an ambiguous replacement" in source

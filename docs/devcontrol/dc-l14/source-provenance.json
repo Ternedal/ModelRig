@@ -1,0 +1,22 @@
+{
+  "base_head": "151efaa605709020ee09c1a3001204042d16d98b",
+  "locked_source_blobs": {
+    "devcontrol/PUBLISHER_PROTOCOL_INVENTORY.md": "cc5f1d4f95cad84f9a14df142609cfb7149ca05c",
+    "devcontrol/TIER_A_BUNDLE_INVENTORY.json": "f54259498d859b7c637b8f4074425cb0340e7e46",
+    "devcontrol/TIER_A_BUNDLE_INVENTORY.md": "1f011b81b242a02acbc70235d5b816acb30f987b",
+    "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.json": "744768b781a7c9742c8deec3a8f34add024ba306",
+    "devcontrol/TIER_A_EXECUTION_CORE_SPLIT_CONTRACT.md": "d628b666a688824b9a56a4e834f363320cc20723",
+    "devcontrol/tests/test_h10i_tier_a_bundle_inventory.py": "ce32e2e18f2b670284648f729c25afe68641387e",
+    "devcontrol/tests/test_h10j_tier_a_execution_core_split_contract.py": "2e7ae970845bbe20f01a380fdbc96e3c0be6554a",
+    "devcontrol/tests/test_h10p_tier_a_legacy_toolhost_extraction.py": "9187f7cbf4cc359323657eecafbb5d83e0a009bf",
+    "devcontrol/tests/test_publisher_protocol_inventory_h10f.py": "22558bea6c5097c6225ddd9ab950901e0c6f25fc",
+    "devcontrol/tests/test_tier_a_authority_bundle_closure.py": "78b020f79dedf4199870ac385d87cc304a215e06",
+    "scripts/tier_a_bundle_inventory.py": "aa1c0ccd9273a46465a4e47b2e27cf3da3b88082"
+  },
+  "projection_note": "All source blobs were imported atomically. Final inventory, contract, protocol and packaging projections are recorded separately; the source JSON contract blob contained Python facade text and is not claimed as valid JSON evidence.",
+  "raw_import_head": "cab3004a3fc2bae6588113179e20647ceb3a86c2",
+  "schema": "modelrig-devcontrol-source-provenance/v1",
+  "slice": "DC-L14",
+  "source_head": "07dd596bd4fef6bdc8fecf0a327b28c1c66d9d3f",
+  "source_pr": 338
+}
