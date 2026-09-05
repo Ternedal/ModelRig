@@ -8,6 +8,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
     "scheduler_pilot_evidence_tested",
@@ -377,7 +380,7 @@ with tempfile.TemporaryDirectory(prefix="scheduler-pilot-evidence-") as temp_dir
     check(not list(report_path.parent.glob(report_path.name + ".*.tmp")),
           "atomic writer leaves no partial file")
 
-source = (ROOT / "scripts" / "scheduler_pilot_evidence.py").read_text(encoding="utf-8")
+source = code_of(ROOT / "scripts" / "scheduler_pilot_evidence.py")
 check("mode=ro" in source and "PRAGMA query_only=ON" in source,
       "collector opens SQLite sources read-only")
 check("production_activation\": False" in source,

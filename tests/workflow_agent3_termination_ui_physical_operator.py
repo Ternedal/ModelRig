@@ -6,11 +6,15 @@ import hashlib
 import importlib.util
 import json
 import tempfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "agent3_termination_ui_physical_one_click.py"
-SOURCE = SCRIPT.read_text(encoding="utf-8")
+SOURCE = code_of(SCRIPT)
 spec = importlib.util.spec_from_file_location("t023_physical_operator", SCRIPT)
 assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)

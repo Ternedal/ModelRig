@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PHONE = ROOT / "scripts" / "stage-a-phone-test.ps1"
@@ -29,21 +33,21 @@ def check(condition: bool, message: str) -> None:
         print(f"  FAIL: {message}")
 
 
-phone = PHONE.read_text(encoding="utf-8")
+phone = code_of(PHONE)
 phone_lower = phone.lower()
-stack = STACK.read_text(encoding="utf-8")
-read_helper = READ_HELPER.read_text(encoding="utf-8")
+stack = code_of(STACK)
+read_helper = code_of(READ_HELPER)
 read_helper_lower = read_helper.lower()
-revocation_helper = REVOCATION_HELPER.read_text(encoding="utf-8")
+revocation_helper = code_of(REVOCATION_HELPER)
 revocation_helper_lower = revocation_helper.lower()
-crash_helper = CRASH_HELPER.read_text(encoding="utf-8")
+crash_helper = code_of(CRASH_HELPER)
 crash_helper_lower = crash_helper.lower()
-start = START.read_text(encoding="utf-8")
-scheduler_start = SCHEDULER_START.read_text(encoding="utf-8")
-read_start = READ_START.read_text(encoding="utf-8")
-revocation_start = REVOCATION_START.read_text(encoding="utf-8")
-crash_start = CRASH_START.read_text(encoding="utf-8")
-stop = STOP.read_text(encoding="utf-8")
+start = code_of(START)
+scheduler_start = code_of(SCHEDULER_START)
+read_start = code_of(READ_START)
+revocation_start = code_of(REVOCATION_START)
+crash_start = code_of(CRASH_START)
+stop = code_of(STOP)
 
 check('string]$BackendHost = $(if ($env:MODELRIG_HOST) { $env:MODELRIG_HOST } else { "127.0.0.1" })' in stack,
       "the shared stack remains loopback-only by default (LAN needs explicit -BackendHost or MODELRIG_HOST)")

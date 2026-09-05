@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 root = Path(__file__).resolve().parents[1]
-screen = (root / "android/app/src/main/java/dk/ternedal/modelrig/ui/ScheduleScreen.kt").read_text(encoding="utf-8")
-contract = (root / "android/app/src/main/java/dk/ternedal/modelrig/net/SchedulerToolCatalog.kt").read_text(encoding="utf-8")
-loader = (root / "android/app/src/main/java/dk/ternedal/modelrig/net/SchedulerToolCatalogLoader.kt").read_text(encoding="utf-8")
+screen = code_of(root / "android/app/src/main/java/dk/ternedal/modelrig/ui/ScheduleScreen.kt")
+contract = code_of(root / "android/app/src/main/java/dk/ternedal/modelrig/net/SchedulerToolCatalog.kt")
+loader = code_of(root / "android/app/src/main/java/dk/ternedal/modelrig/net/SchedulerToolCatalogLoader.kt")
 
 checks = {
     "screen uses authoritative scheduler catalog": "SchedulerToolCatalogLoader(base, token).load()" in screen,

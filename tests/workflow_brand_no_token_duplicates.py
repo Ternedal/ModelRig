@@ -19,7 +19,11 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS = ROOT / "assets" / "design" / "kaliv-ui-guide" / "kaliv-ui-tokens.json"
@@ -39,7 +43,7 @@ def check(condition: bool, message: str) -> None:
 
 
 def token_hexes() -> dict[str, str]:
-    color = json.loads(TOKENS.read_text(encoding="utf-8"))["color"]
+    color = json.loads(code_of(TOKENS))["color"]
     return {h.lstrip("#").upper(): f"{g}.{n}"
             for g, entries in color.items() for n, h in entries.items()}
 
@@ -49,7 +53,7 @@ def literals(src: str) -> list[str]:
 
 
 tokens = token_hexes()
-src = BRAND.read_text(encoding="utf-8")
+src = code_of(BRAND)
 
 check(bool(tokens), f"tokensaettet kunne laeses ({len(tokens)} unikke farver)")
 check("KalivTokens." in src, "Brand.kt refererer KalivTokens")

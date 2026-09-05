@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -25,6 +26,9 @@ from app.read_connector_provider_transport import (
 )
 
 passed = failed = 0
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 TOOL_NAMES = {
     "google_calendar": "google_calendar_read",
@@ -74,7 +78,7 @@ class FakeCredential:
 # The normal worker must not gain these network capabilities unless the literal
 # default-off switch is explicitly enabled. Keep the literal in main.py so both
 # generated readiness pages discover it from source.
-main_source = (ROOT / "worker" / "app" / "main.py").read_text(encoding="utf-8")
+main_source = code_of(ROOT / "worker" / "app" / "main.py")
 check(
     'getenv("KALIV_READ_CONNECTOR_PILOT", "0")' in main_source,
     "worker entrypoint declares T-037 pilot default-off",

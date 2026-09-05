@@ -8,6 +8,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 OBSERVATIONS = ROOT / "scripts" / "stage_a_voice_observations.py"
 ORCHESTRATOR = ROOT / "scripts" / "stage-a-voice-test.ps1"
@@ -128,7 +131,7 @@ try:
 finally:
     shutil.rmtree(temp, ignore_errors=True)
 
-observation_source = OBSERVATIONS.read_text(encoding="utf-8")
+observation_source = code_of(OBSERVATIONS)
 observation_lower = observation_source.lower()
 check("_write_json_atomic(resume_path, state)" in observation_source,
       "each completed trial is saved to the resume receipt")
@@ -141,7 +144,7 @@ check("app_version != candidate[\"version\"]" in observation_source,
 check("return 0 if summary[\"passed\"] else 1" in observation_source,
       "failed physical observations cannot produce a green exit")
 
-orchestrator = ORCHESTRATOR.read_text(encoding="utf-8")
+orchestrator = code_of(ORCHESTRATOR)
 order = [
     orchestrator.index("& $phoneScript -PlannerModel $model"),
     orchestrator.index("stage_a_voice_observations.py"),
@@ -161,7 +164,7 @@ check("--repetitions 2" in orchestrator and "--cancellation-probes 4" in orchest
 check("--manual-observations $manualPath" in orchestrator and "--require-manual" in orchestrator,
       "the generated matrix remains mandatory for the final voice gate")
 
-launcher = LAUNCHER.read_text(encoding="utf-8")
+launcher = code_of(LAUNCHER)
 check("stage-a-voice-test.ps1" in launcher,
       "one Windows launcher owns the complete guided flow")
 check("pause" in launcher.lower(),

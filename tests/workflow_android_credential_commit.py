@@ -2,11 +2,15 @@
 
 Run: python tests/workflow_android_credential_commit.py
 """
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 root = Path(__file__).resolve().parents[1]
-store = (root / "android/app/src/main/java/dk/ternedal/modelrig/data/TokenStore.kt").read_text(encoding="utf-8")
-ui = (root / "android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt").read_text(encoding="utf-8")
+store = code_of(root / "android/app/src/main/java/dk/ternedal/modelrig/data/TokenStore.kt")
+ui = code_of(root / "android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt")
 
 checks = {
     "rig connection has an explicit commit result": "fun saveRigConnection" in store,

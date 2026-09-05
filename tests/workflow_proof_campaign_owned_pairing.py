@@ -11,6 +11,9 @@ from __future__ import annotations
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "START_PROOF_CAMPAIGN.cmd"
 WRAPPER = ROOT / "scripts" / "run-proof-campaign-owned-pairing.ps1"
@@ -39,14 +42,14 @@ def main() -> int:
     if missing:
         return 1
 
-    launcher = LAUNCHER.read_text(encoding="utf-8")
+    launcher = code_of(LAUNCHER)
     launcher_commands = "\n".join(
         line for line in launcher.splitlines()
         if not line.lstrip().lower().startswith("rem ")
     )
-    wrapper = WRAPPER.read_text(encoding="utf-8")
-    core = CORE.read_text(encoding="utf-8")
-    gitignore = GITIGNORE.read_text(encoding="utf-8")
+    wrapper = code_of(WRAPPER)
+    core = code_of(CORE)
+    gitignore = code_of(GITIGNORE)
     lower = wrapper.lower()
     core_lower = core.lower()
 
