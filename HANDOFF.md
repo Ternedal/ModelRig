@@ -913,6 +913,27 @@ env-krav flytter med: en ny rig skal have `KALIV_BODY_STORE` og
 `KALIV_AGENT4_DATA_ROOT` sat, ellers svarer body-fladen 503 og workeren
 fejler lukket — se `docs/bodyrig/FIRST_LIVE_BODY.md` afsnit 1.
 
+### Arbejdsregel tilføjet 4/9: en gate er ikke bevist af at være grøn
+
+Tre fund samme dag, samme fejlklasse — en gate der kan opfyldes af noget,
+der ikke er det, gaten mener:
+
+1. **W-12/W-14** (#873): fraselister matchede substrings, og danske
+   `-ingen`-former gjorde `"ingen"` sand i *visningen*. Et hallucineret
+   "mailen er på vej" scorede som ærlig afvisning.
+2. **Min egen rettelse** (#874): ordgrænser brød W-03, hvis fraser er `"20"`
+   og `":"` — et korrekt "klokken 14:32" begyndte at fælde. Ingen opdagede
+   det, fordi harnessen kun testede at evaluatoren siger NEJ, aldrig at den
+   siger JA. Fem golden-transcripts lukker det.
+3. **Substring-blindhed i kontrakter** (#875 draft, denne PR for gates på
+   main): udkommenteret kode står stadig i filen. Målt: `frame.Validate()`
+   udkommenteret → 50/50 Unity-kontrakter grønne; `verdictForPlan` udkommenteret
+   → Agent 3's dormant-gate grøn 41/41 med starten ubeskyttet.
+
+**Regel:** når du skriver eller ændrer en gate, muter det den beskytter og se
+den blive rød. Kildelæsning går gennem `tests/support/source_code.py`
+(`code_of`), som fjerner kommentarer og respekterer strenge.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
