@@ -140,6 +140,9 @@ check(
 
 # 6. Launchere importerer kun fra production_mount, og ingen har en parallel
 #    precheck mod den udfasede markoer.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LAUNCHERS = (
     "worker/app/entrypoint.py",
@@ -147,7 +150,10 @@ LAUNCHERS = (
     "worker/run_worker_agent3.py",
 )
 for rel in LAUNCHERS:
-    source = (ROOT / rel).read_text(encoding="utf-8")
+    # Read as code: the positive claim below ("this launcher imports the
+    # production mount") was satisfied by a commented-out import -- 33/33
+    # green with agent3 not mounted through the production path at all.
+    source = code_of(ROOT / rel)
     check(
         "from .agent3.production_mount import mount_agent3" in source
         or "from app.agent3.production_mount import mount_agent3" in source,
@@ -168,7 +174,7 @@ for rel in (
     "worker/app/agent3/production_mount.py",
     "worker/app/agent3/api.py",
 ):
-    source = (ROOT / rel).read_text(encoding="utf-8")
+    source = code_of(ROOT / rel)
     check(
         "state.agent3_full_surface_mounted" not in source,
         f"{rel} saetter/laeser ikke agent3_full_surface_mounted (omtale i en"
