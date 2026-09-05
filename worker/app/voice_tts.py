@@ -222,19 +222,29 @@ def _synthesize_piper(text: str, out_path: str) -> dict:
     }
 
 
-def _decoded_package(headers) -> "str | None":
-    """The package VoiceRig actually used, in the form we asked for it.
+def _decoded_header(headers, name: str) -> "str | None":
+    """One VoiceRig header, in the form it was before encoding.
 
-    VoiceRig percent-encodes its header values (`quote(value, safe="._-")`)
+    VoiceRig percent-encodes every header value (`quote(value, safe="._-")`)
     so they stay ASCII, and its own tests unquote before comparing. We did
-    not: a Danish voice name -- "søren-stemme.mrvoice", VoiceRig's own test
-    case -- came back as "s%C3%B8ren-stemme.mrvoice" and the raw comparison
-    reported voice_bound: false while VoiceRig had used exactly the right
-    package. The person surface would have called Kaliv's own voice a
-    mismatch, and only for Danish names.
+    not, and for X-VoiceRig-Package that was a bug: "søren-stemme.mrvoice"
+    came back "s%C3%B8ren-stemme.mrvoice" and voice_bound reported false
+    while VoiceRig had used exactly the right package.
+
+    The same encoder produces X-VoiceRig-Voice and -Voice-ID, whose values
+    VoiceRig's own test pins as "Søren Æblegrød" and "søren-æøå". Nothing
+    reads those two downstream today, so this is not a second bug -- but
+    they came from one encoder and only one of them was decoded, and the
+    next surface to show a voice name should get the name rather than its
+    escaping.
     """
-    raw = headers.get("X-VoiceRig-Package")
+    raw = headers.get(name)
     return None if raw is None else _unquote(raw)
+
+
+def _decoded_package(headers) -> "str | None":
+    """Kept for the person binding's comparison; see _decoded_header."""
+    return _decoded_header(headers, "X-VoiceRig-Package")
 
 
 def _voicerig_request(text: str, voice_package: "str | None"):
@@ -307,9 +317,9 @@ def _synthesize_voicerig(text: str, out_path: str) -> dict:
         "out_path": out_path,
         "sample_rate": sr,
         "duration": duration,
-        "voice": headers.get("X-VoiceRig-Voice", "VoiceRig"),
-        "voice_id": headers.get("X-VoiceRig-Voice-ID"),
-        "package": _decoded_package(headers),
+        "voice": _decoded_header(headers, "X-VoiceRig-Voice") or "VoiceRig",
+        "voice_id": _decoded_header(headers, "X-VoiceRig-Voice-ID"),
+        "package": _decoded_header(headers, "X-VoiceRig-Package"),
         "device": headers.get("X-VoiceRig-Device"),
         "provider": "voicerig",
         # Person Profile binding (#752). None: no person voice requested.
