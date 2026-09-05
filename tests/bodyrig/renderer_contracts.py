@@ -11,6 +11,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"))
+from source_code import code_of  # noqa: E402
+
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
 
@@ -21,79 +24,6 @@ from bodyrig import (  # noqa: E402
 )
 
 passed = failed = 0
-
-
-def code_of(path) -> str:
-    """C# source with comments removed, so a contract cannot be satisfied by a
-    line that is commented out.
-
-    Every source check below is a substring test. Commenting out
-    `frame.Validate();` leaves the substring in the file, so the contract
-    passed while the renderer applied unvalidated frames -- measured, not
-    imagined: three of four mutations went undetected. String literals are
-    respected, because "http://..." is not a comment.
-    """
-    text = path.read_text(encoding="utf-8")
-    out = []
-    i, n = 0, len(text)
-    in_str = in_char = in_verbatim = False
-    while i < n:
-        c = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
-        if in_str:
-            out.append(c)
-            if c == "\\" and not in_verbatim:
-                if i + 1 < n:
-                    out.append(nxt)
-                i += 2
-                continue
-            if c == '"':
-                if in_verbatim and nxt == '"':
-                    out.append(nxt)
-                    i += 2
-                    continue
-                in_str = in_verbatim = False
-            i += 1
-            continue
-        if in_char:
-            out.append(c)
-            if c == "\\" and i + 1 < n:
-                out.append(nxt)
-                i += 2
-                continue
-            if c == "'":
-                in_char = False
-            i += 1
-            continue
-        if c == "@" and nxt == '"':
-            in_str = in_verbatim = True
-            out.append(c)
-            out.append(nxt)
-            i += 2
-            continue
-        if c == '"':
-            in_str = True
-            out.append(c)
-            i += 1
-            continue
-        if c == "'":
-            in_char = True
-            out.append(c)
-            i += 1
-            continue
-        if c == "/" and nxt == "/":
-            while i < n and text[i] != "\n":
-                i += 1
-            continue
-        if c == "/" and nxt == "*":
-            i += 2
-            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
-                i += 1
-            i += 2
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out)
 
 
 def check(condition: bool, message: str) -> None:
