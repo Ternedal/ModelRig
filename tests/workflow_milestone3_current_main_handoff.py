@@ -4,7 +4,11 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 import zipfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "milestone3_current_main_handoff.py"
@@ -17,10 +21,10 @@ assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
-source = SCRIPT.read_text(encoding="utf-8")
-core_source = CORE.read_text(encoding="utf-8")
-launcher = LAUNCHER.read_text(encoding="utf-8")
-runbook = RUNBOOK.read_text(encoding="utf-8")
+source = code_of(SCRIPT)
+core_source = code_of(CORE)
+launcher = code_of(LAUNCHER)
+runbook = code_of(RUNBOOK)
 checks: list[tuple[str, bool]] = []
 
 

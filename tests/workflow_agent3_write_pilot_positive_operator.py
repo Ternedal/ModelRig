@@ -4,17 +4,21 @@ from __future__ import annotations
 import builtins
 import importlib.util
 import json
+import pathlib
 import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "agent3_write_pilot_positive_one_click.py"
 LAUNCHER = ROOT / "START_AGENT3_WRITE_PILOT_POSITIVE.cmd"
 RUNBOOK = ROOT / "AGENT3_WRITE_PILOT_POSITIVE.md"
-SOURCE = SCRIPT.read_text(encoding="utf-8")
-LAUNCHER_SOURCE = LAUNCHER.read_text(encoding="utf-8")
-RUNBOOK_SOURCE = RUNBOOK.read_text(encoding="utf-8")
+SOURCE = code_of(SCRIPT)
+LAUNCHER_SOURCE = code_of(LAUNCHER)
+RUNBOOK_SOURCE = code_of(RUNBOOK)
 
 spec = importlib.util.spec_from_file_location("t022_positive_operator_test", SCRIPT)
 assert spec is not None and spec.loader is not None
