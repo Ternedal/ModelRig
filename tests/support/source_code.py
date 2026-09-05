@@ -24,9 +24,57 @@ def strip_comments(text: str, suffix: str) -> str:
     """Source with comments removed. Unknown suffixes are returned unchanged."""
     if suffix in _C_LIKE:
         return _strip(text, line_marks=("//",), block=("/*", "*/"), verbatim=True)
-    if suffix in _HASH:
+    if suffix == ".py":
         return _strip(text, line_marks=("#",), block=None, verbatim=False)
+    if suffix in _HASH:
+        return _strip_hash_line_local(text)
     return text
+
+
+def _strip_hash_line_local(text: str) -> str:
+    """Hash comments, tracked per line, with here-strings left whole.
+
+    File-global quote tracking is wrong for PowerShell and YAML: one
+    apostrophe in prose ("don't") opens a string that never closes, and every
+    # after it stops being a comment. Measured on run-proof-campaign.ps1,
+    where that hid a commented-out `$a4lan = $null` from the gate that
+    asserts it. Quotes reset at each newline; a here-string (@" ... "@ or
+    @' ... '@) is data and is copied through untouched.
+    """
+    out: list[str] = []
+    lines = text.splitlines(keepends=True)
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped.endswith('@"') or stripped.endswith("@'"):
+            closer = '"@' if stripped.endswith('@"') else "'@"
+            out.append(lines[i])
+            i += 1
+            while i < len(lines) and lines[i].strip() != closer:
+                out.append(lines[i])
+                i += 1
+            if i < len(lines):
+                out.append(lines[i])
+                i += 1
+            continue
+        out.append(_strip_hash_in_line(lines[i]))
+        i += 1
+    return "".join(out)
+
+
+def _strip_hash_in_line(line: str) -> str:
+    quote = ""
+    for j, c in enumerate(line):
+        if quote:
+            if c == quote:
+                quote = ""
+            continue
+        if c in ("'", '"'):
+            quote = c
+            continue
+        if c == "#":
+            return line[:j].rstrip() + "\n" if line.endswith("\n") else line[:j].rstrip()
+    return line
 
 
 def code_of(path: Path) -> str:
