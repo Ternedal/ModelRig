@@ -5,7 +5,6 @@
   "tests/worker_agent3_model_eval.py": 3,
   "tests/worker_agent3_rig_validation_cli.py": 3,
   "tests/worker_agent3_risk_parity.py": 1,
-  "tests/worker_agent3_validation_path_contract.py": 12,
   "tests/worker_build_identity.py": 3,
   "tests/worker_desktop_physical_gate.py": 3,
   "tests/worker_rag_benchmark.py": 5,
@@ -16,7 +15,6 @@
   "tests/workflow_activation_readiness.py": 11,
   "tests/workflow_agent3_t023_task_ui_enable.py": 3,
   "tests/workflow_agent3_write_pilot_current_main_binding.py": 6,
-  "tests/workflow_agent4_a4_22_single_writer_pairing.py": 10,
   "tests/workflow_android_palette_divergence.py": 2,
   "tests/workflow_brand_no_token_duplicates.py": 1,
   "tests/workflow_browser_peer_public_validation.py": 9,
@@ -34,7 +32,6 @@
   "tests/workflow_scheduler_pilot_evidence.py": 3,
   "tests/workflow_screen_insets.py": 4,
   "tests/workflow_stage_a_one_click.py": 3,
-  "tests/workflow_stage_a_scheduler_publish.py": 13,
   "tests/workflow_test_coverage.py": 3,
   "tests/workflow_web_research_parity.py": 7,
   "tests/workflow_worker_entrypoints.py": 1
