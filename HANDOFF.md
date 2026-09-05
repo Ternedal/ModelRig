@@ -934,6 +934,36 @@ der ikke er det, gaten mener:
 den blive rød. Kildelæsning går gennem `tests/support/source_code.py`
 (`code_of`), som fjerner kommentarer og respekterer strenge.
 
+**Værktøj:** `python3 scripts/gate_mutation_probe.py tests/<gate>.py` gør det
+automatisk — den binder variabel til fil via gatens AST, udkommenterer hver
+forekomst af en påstået literal, og melder gaten grøn bagefter som en miss.
+Skralden `tests/workflow_gates_read_code.py` holder gælden fra at vokse
+(`--update` KUN efter nedbetaling, aldrig for at hæve loftet).
+
+**Auditens facit (4/9, afsluttet):** 786 rå-kilde-tjek fundet, 150 tilbage i
+27 filer prøven ikke kan binde (løkkevariabler, hjælpefunktioner, stier bygget
+ved kørsel) — uspurgte, ikke bevist forkerte. **Seks ægte huller fundet og
+lukket:**
+
+| Gate | Var blind for |
+|---|---|
+| W-12 / W-14 (`workflow_eval`) | fraselister matchede substrings; `"ingen"` inde i *visningen* |
+| `workflow_android_credential_commit` | `fun saveRigConnection` — den holdbare commit |
+| `workflow_android_scheduler_picker` | `schedulable == true` — uplanlægbare værktøjer |
+| Agent 3 termination-UI (Android + desktop) | `canStopPlan` — fladen til at stoppe en plan |
+| `workflow_milestone3_current_main_handoff` | `"production_activation": False` i manifestet |
+| `worker_agent3_validation_path_contract` | samme flag i valideringswrapperen |
+
+**Tre slags falske meldinger fra prøven** (en grøn gate er dér det RIGTIGE
+svar, fordi et foranstillet `#` ikke deaktiverer noget): PowerShell
+here-strings, Python-docstrings, og strengkonstanter der bærer kode som data.
+
+**Bemærk også:** `stage_a_physical_operator.py` og `stage_a_one_click.py` har
+kommentarblokke med overskriften *"static surface markers retained by tests"* —
+markører lagt der for at holde substring-gates grønne efter en refaktorering.
+Gaterne læser nu koden i stedet. Hvis du flytter kode og fristes til samme
+løsning: lad være, og ret gaten.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
