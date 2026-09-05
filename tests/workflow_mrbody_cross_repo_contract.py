@@ -119,6 +119,38 @@ check(validate({**manifest, "unexpected": 1}, schema),
 check(validate({**manifest, "name": 7}, schema),
       "the validator rejects a field of the wrong type")
 
+# --- the identity binding, which fails SILENTLY when it drifts ------------
+# validate_mrbody cross-checks manifest.id against the provenance stage that
+# claims authorship of the identity. If BodyRig ever renamed the stage or the
+# adapter, _identity_from_provenance would simply return None and the check
+# would be skipped -- no error, no signal, manifest.id trusted unverified.
+# These three strings are the whole agreement. From BodyRig
+# bodyrig/portable_identity.py at the verified commit.
+BODYRIG_STAGE = "identity_content"
+BODYRIG_AUTHORITY = "bodyrig.portable_identity"
+BODYRIG_REVISION_RE = r"[0-9a-f]{24}"   # body_id.removeprefix("bodyid-")
+
+from bodyrig.mrbody import IDENTITY_CONTENT_AUTHORITIES, _identity_from_provenance  # noqa: E402
+
+check(BODYRIG_AUTHORITY in IDENTITY_CONTENT_AUTHORITIES,
+      "BodyRig's identity authority is one ModelRig honours")
+
+_bodyid = "bodyid-" + "ab12cd34ef56ab12cd34ef56"
+_stage = {"stage": BODYRIG_STAGE, "adapter": BODYRIG_AUTHORITY,
+          "revision": _bodyid.removeprefix("bodyid-")}
+check(_identity_from_provenance({"pipeline": [_stage]}) == _bodyid,
+      "a provenance stage exactly as BodyRig writes it binds the identity")
+
+# The silent-skip cases, named so a rename is visible rather than quiet.
+check(_identity_from_provenance({"pipeline": [{**_stage, "stage": "identity"}]}) is None,
+      "a renamed stage yields no binding -- the case that would go unnoticed")
+check(_identity_from_provenance({"pipeline": [{**_stage, "adapter": "bodyrig.identity"}]}) is None,
+      "a renamed authority yields no binding -- likewise")
+
+import re as _re  # noqa: E402
+check(_re.fullmatch(BODYRIG_REVISION_RE, _stage["revision"]) is not None,
+      "BodyRig's revision is the 24 hex characters ModelRig requires")
+
 print(f"\n===== MRBODY CROSS-REPO CONTRACT: {passed} passed, {failed} failed =====")
 if failed:
     raise SystemExit(1)
