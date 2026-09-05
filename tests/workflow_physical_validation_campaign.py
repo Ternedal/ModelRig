@@ -11,6 +11,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -65,7 +68,7 @@ CANDIDATE = {
 }
 
 
-RUNBOOK = (ROOT / "PHYSICAL_VALIDATION_CAMPAIGN.md").read_text(encoding="utf-8")
+RUNBOOK = code_of(ROOT / "PHYSICAL_VALIDATION_CAMPAIGN.md")
 check(campaign.CAMPAIGN_PROOF_COUNT == 7,
       "campaign proof count is structurally seven")
 check("alle syv fysiske beviser" in RUNBOOK
@@ -1111,7 +1114,7 @@ check(_rep["pilot"]["passed"] is True
       "the producer's report carries the schema, the receipt attribution and "
       "its own verdict")
 
-source = (SCRIPTS / "physical_validation_campaign.py").read_text(encoding="utf-8")
+source = code_of(SCRIPTS / "physical_validation_campaign.py")
 check("urllib" not in source and "http.client" not in source,
       "campaign aggregator performs no network requests")
 check("production_activation\": False" in source,
