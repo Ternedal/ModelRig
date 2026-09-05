@@ -23,6 +23,79 @@ from bodyrig import (  # noqa: E402
 passed = failed = 0
 
 
+def code_of(path) -> str:
+    """C# source with comments removed, so a contract cannot be satisfied by a
+    line that is commented out.
+
+    Every source check below is a substring test. Commenting out
+    `frame.Validate();` leaves the substring in the file, so the contract
+    passed while the renderer applied unvalidated frames -- measured, not
+    imagined: three of four mutations went undetected. String literals are
+    respected, because "http://..." is not a comment.
+    """
+    text = path.read_text(encoding="utf-8")
+    out = []
+    i, n = 0, len(text)
+    in_str = in_char = in_verbatim = False
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if in_str:
+            out.append(c)
+            if c == "\\" and not in_verbatim:
+                if i + 1 < n:
+                    out.append(nxt)
+                i += 2
+                continue
+            if c == '"':
+                if in_verbatim and nxt == '"':
+                    out.append(nxt)
+                    i += 2
+                    continue
+                in_str = in_verbatim = False
+            i += 1
+            continue
+        if in_char:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(nxt)
+                i += 2
+                continue
+            if c == "'":
+                in_char = False
+            i += 1
+            continue
+        if c == "@" and nxt == '"':
+            in_str = in_verbatim = True
+            out.append(c)
+            out.append(nxt)
+            i += 2
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "'":
+            in_char = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and nxt == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and nxt == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def check(condition: bool, message: str) -> None:
     global passed, failed
     if condition:
@@ -196,7 +269,7 @@ check(
     "Unity proof contains wire, loader, renderer, gesture, fixture, live-source and bootstrap components",
 )
 
-wire_source = (runtime_dir / "BodyRigRenderFrame.cs").read_text(encoding="utf-8")
+wire_source = code_of(runtime_dir / "BodyRigRenderFrame.cs")
 check(
     all(
         token in wire_source
@@ -217,7 +290,7 @@ check(
     "Unity wire validation preserves channel/source and unknown-vs-zero boundaries",
 )
 
-renderer_source = (runtime_dir / "BodyRigVrmRenderer.cs").read_text(encoding="utf-8")
+renderer_source = code_of(runtime_dir / "BodyRigVrmRenderer.cs")
 check(
     "ExpressionPreset.blink" in renderer_source
     and "ExpressionPreset.aa" in renderer_source
@@ -246,7 +319,7 @@ check(
     "draft Unity renderer does not reinterpret bodyprint replay ids as Animator or VRMA controls",
 )
 
-loader_source = (runtime_dir / "BodyRigVrmLoader.cs").read_text(encoding="utf-8")
+loader_source = code_of(runtime_dir / "BodyRigVrmLoader.cs")
 check(
     "Vrm10.LoadPathAsync" in loader_source
     and "canLoadVrm0X: false" in loader_source
@@ -254,7 +327,7 @@ check(
     "loader is explicitly VRM 1.0-only and performs UniVRM first-person setup",
 )
 
-player_source = (runtime_dir / "BodyRigFixturePlayer.cs").read_text(encoding="utf-8")
+player_source = code_of(runtime_dir / "BodyRigFixturePlayer.cs")
 check(
     "if (!renderer.IsBound)" in player_source
     and player_source.index("if (!renderer.IsBound)") < player_source.index("var elapsedMs"),
@@ -267,7 +340,7 @@ check(
 
 # Live frame source (Unity renderer roadmap, slice C): the product path beside
 # the fixture. Same renderer contract, same guards, plus reconnect.
-source_source = (runtime_dir / "BodyRigFrameSource.cs").read_text(encoding="utf-8")
+source_source = code_of(runtime_dir / "BodyRigFrameSource.cs")
 check(
     "/api/v1/body/frames" in source_source
     and 'SetRequestHeader("Authorization", "Bearer " + token)' in source_source
@@ -298,7 +371,7 @@ check(
 )
 # AR placement (slice D): compiled only behind BODYRIG_AR so no package
 # version is pinned blind; moves the avatar root only.
-ar_source = (runtime_dir / "BodyRigArPlacement.cs").read_text(encoding="utf-8")
+ar_source = code_of(runtime_dir / "BodyRigArPlacement.cs")
 check(
     ar_source.lstrip("/\n ").find("#if BODYRIG_AR") >= 0
     and ar_source.rstrip().endswith("#endif")
@@ -323,7 +396,7 @@ check(
 )
 
 # Rig link (slice D, common to both hosts): how the client gets (url, token).
-link_source = (runtime_dir / "BodyRigRigLink.cs").read_text(encoding="utf-8")
+link_source = code_of(runtime_dir / "BodyRigRigLink.cs")
 _code = link_source[link_source.index("private void Start()"):]  # skip the doc comment
 order = [_code.index(s) for s in (
     'GetEnvironmentVariable("BODYRIG_RIG_URL")',
@@ -346,7 +419,7 @@ check(
     "rig link renders nothing: it resolves an address and a token, no more",
 )
 
-bootstrap_source = (runtime_dir / "BodyRigDemoBootstrap.cs").read_text(encoding="utf-8")
+bootstrap_source = code_of(runtime_dir / "BodyRigDemoBootstrap.cs")
 check(
     "BodyRigRigLink" in bootstrap_source
     and "link.Resolved +=" in bootstrap_source
@@ -371,7 +444,7 @@ check(
     "bootstrap adds AR placement only behind BODYRIG_AR; frames sources are chosen independently of it",
 )
 
-router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
+router_source = code_of(runtime_dir / "BodyRigGestureRouter.cs")
 check(
     "public void Cancel()" in router_source
     and "cancelTrigger" in router_source
