@@ -8,7 +8,11 @@ import json
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 GATE_PATH = ROOT / "scripts" / "agent3_memory_protected_backup_physical_gate.py"
@@ -322,11 +326,11 @@ with tempfile.TemporaryDirectory(prefix="t033-campaign-state-") as tmp:
     finally:
         adapter.CAMPAIGN_ROOT = original_campaign_root
 
-operator_text = OPERATOR_PATH.read_text(encoding="utf-8")
-adapter_text = ADAPTER_PATH.read_text(encoding="utf-8")
-gate_text = GATE_PATH.read_text(encoding="utf-8")
-launcher_text = LAUNCHER_PATH.read_text(encoding="utf-8")
-doc_text = DOC_PATH.read_text(encoding="utf-8")
+operator_text = code_of(OPERATOR_PATH)
+adapter_text = code_of(ADAPTER_PATH)
+gate_text = code_of(GATE_PATH)
+launcher_text = code_of(LAUNCHER_PATH)
+doc_text = code_of(DOC_PATH)
 doc_lower = doc_text.lower()
 
 check(

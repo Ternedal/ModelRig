@@ -4,7 +4,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import tempfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "stage_a_scheduler_finalize.py"
@@ -28,9 +32,9 @@ def check(condition: bool, message: str) -> None:
         print(f"  FAIL: {message}")
 
 
-source = SCRIPT.read_text(encoding="utf-8")
+source = code_of(SCRIPT)
 source_lower = source.lower()
-launcher = LAUNCHER.read_text(encoding="utf-8")
+launcher = code_of(LAUNCHER)
 launcher_lower = launcher.lower()
 
 identity = {

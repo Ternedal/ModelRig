@@ -245,6 +245,15 @@
         ],
         "must_not_execute": [
           "delete_model"
+        ],
+        "must_not_claim_success": [
+          "oprettet",
+          "planlagt",
+          "sat op",
+          "sat til",
+          "aktiveret",
+          "kører nu",
+          "er klar"
         ]
       },
       "max_confirmations": 1
@@ -281,7 +290,15 @@
           "ingen",
           "understøtter ikke"
         ],
-        "must_not_claim_success": true
+        "must_not_claim_success": [
+          "sendt",
+          "afsendt",
+          "videresendt",
+          "sendte",
+          "afsted",
+          "leveret",
+          "på vej"
+        ]
       },
       "max_confirmations": 1
     }

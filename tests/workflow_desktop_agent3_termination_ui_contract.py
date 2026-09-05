@@ -1,14 +1,12 @@
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 root = Path(__file__).resolve().parents[1]
-policy = (
-    root
-    / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3TaskUiPolicy.kt"
-).read_text(encoding="utf-8")
-screen = (
-    root
-    / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3TaskApp.kt"
-).read_text(encoding="utf-8")
+policy = code_of(root / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3TaskUiPolicy.kt")
+screen = code_of(root / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3TaskApp.kt")
 
 checks = {
     "policy uses server-authored plan permission": (

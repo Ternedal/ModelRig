@@ -865,6 +865,105 @@ rendereren er på main; beviset (proof → visuel accept → gate) mangler stadi
 køres mod main's head. #846 er retargetet til main. `agent/bodyrig-unity-
 renderer` er en død gren.
 
+### I luften 4/9 — læs FØR du bygger noget på kroppen (to sessioner kører)
+
+To sessioner har i dag landet identisk kode uafhængigt af hinanden (#861 og
+min lokale bro var tegn for tegn ens) og kostet tre README-konflikter. Tjek
+PR-listen, ikke kun denne fil, før du skriver:
+
+| # | Hvad | Status |
+|---|---|---|
+| #846 | `BodyRigFrameSource` — live frames fra riggen | draft mod main, ajour |
+| #858 | `BodyRigArPlacement` — kroppen i rummet, bag `BODYRIG_AR` | draft stablet på #846 |
+| #860 | `BodyRigRigLink` — env / intent-extras / PlayerPrefs / parringsformular | draft stablet på #858 |
+| #861 | Kaliv ⋮ → Krop → Kaliv Body med token som intent-extras | **landet** |
+
+Kontrakten mellem #861 og #860: extras `bodyrig_rig_url`/`bodyrig_rig_token`,
+pakke `dk.ternedal.kalivbody`. Alle tre drafts kompilerer kun i Unity og
+verificeres af første import på riggen; de lander i rækkefølge 846 → 858 → 860.
+`origin/agent/bodyrig-unity-renderer` er en død gren (#720 er på main), som
+en session har genskabt — slet den ikke, mens den anden session muligvis
+bruger den; den bærer intet, main ikke har.
+
+Værtsvalget er taget (separat Kaliv Body-app; UaaL som V2) — byg ikke UaaL.
+
+### 4/9 aften — puljen ryddet med Anders' accept ("kør det færdigt")
+
+- **#863** cryptography 50.0.0 → 50.0.1 landet med Ed25519-reviewet
+  (byte-identisk `ed25519.rs`/`.py`; eneste reelle ændring OpenSSL 4.0.2 i
+  wheels). #837 lukket som overhalet.
+- **#763** gradle-wrapper 8.14.4 → 9.7.1 (desktop) landet efter dependabot-
+  rebase mod dagens main; hele matrixen grøn. Revert er ét commit, hvis et
+  lokalt byg protesterer.
+- **#395** DC-L14 (devcontrol-slutstykket) landet: rebaset 439 commits uden
+  konflikter; én ægte fejl — `exact-head-core` manglede den pinnede
+  packaging-toolchain (`setuptools==75.8.2`) som `test / test` havde — rettet
+  i workflowet. **#338** lukket som overhalet (200/219 filer var på main; de
+  sidste 19 kom med #395).
+- Person-værktøjer: `person_bind.py` (#859) binder bodyid/.mrvoice som NY
+  reviewet revision. Runbook-kapitler for stemme og rigtig krop.
+
+**Åbent i git nu: kun #846 → #858 → #860 (Unity-drafts).** Alt andet er landet
+eller lukket. Ingen gren bag main.
+
+Parallelt landede den anden session samme aften ny-rig-bootstrap og komplet
+ModelRig+VoiceRig-migration (`scripts/NEW_RIG_BOOTSTRAP.md`,
+`scripts/COMPLETE_RIG_MIGRATION.md`, `migrate-complete-rig.ps1`). Kropssporets
+env-krav flytter med: en ny rig skal have `KALIV_BODY_STORE` og
+`KALIV_AGENT4_DATA_ROOT` sat, ellers svarer body-fladen 503 og workeren
+fejler lukket — se `docs/bodyrig/FIRST_LIVE_BODY.md` afsnit 1.
+
+### Arbejdsregel tilføjet 4/9: en gate er ikke bevist af at være grøn
+
+Tre fund samme dag, samme fejlklasse — en gate der kan opfyldes af noget,
+der ikke er det, gaten mener:
+
+1. **W-12/W-14** (#873): fraselister matchede substrings, og danske
+   `-ingen`-former gjorde `"ingen"` sand i *visningen*. Et hallucineret
+   "mailen er på vej" scorede som ærlig afvisning.
+2. **Min egen rettelse** (#874): ordgrænser brød W-03, hvis fraser er `"20"`
+   og `":"` — et korrekt "klokken 14:32" begyndte at fælde. Ingen opdagede
+   det, fordi harnessen kun testede at evaluatoren siger NEJ, aldrig at den
+   siger JA. Fem golden-transcripts lukker det.
+3. **Substring-blindhed i kontrakter** (#875 draft, denne PR for gates på
+   main): udkommenteret kode står stadig i filen. Målt: `frame.Validate()`
+   udkommenteret → 50/50 Unity-kontrakter grønne; `verdictForPlan` udkommenteret
+   → Agent 3's dormant-gate grøn 41/41 med starten ubeskyttet.
+
+**Regel:** når du skriver eller ændrer en gate, muter det den beskytter og se
+den blive rød. Kildelæsning går gennem `tests/support/source_code.py`
+(`code_of`), som fjerner kommentarer og respekterer strenge.
+
+**Værktøj:** `python3 scripts/gate_mutation_probe.py tests/<gate>.py` gør det
+automatisk — den binder variabel til fil via gatens AST, udkommenterer hver
+forekomst af en påstået literal, og melder gaten grøn bagefter som en miss.
+Skralden `tests/workflow_gates_read_code.py` holder gælden fra at vokse
+(`--update` KUN efter nedbetaling, aldrig for at hæve loftet).
+
+**Auditens facit (4/9, afsluttet):** 786 rå-kilde-tjek fundet, 150 tilbage i
+27 filer prøven ikke kan binde (løkkevariabler, hjælpefunktioner, stier bygget
+ved kørsel) — uspurgte, ikke bevist forkerte. **Seks ægte huller fundet og
+lukket:**
+
+| Gate | Var blind for |
+|---|---|
+| W-12 / W-14 (`workflow_eval`) | fraselister matchede substrings; `"ingen"` inde i *visningen* |
+| `workflow_android_credential_commit` | `fun saveRigConnection` — den holdbare commit |
+| `workflow_android_scheduler_picker` | `schedulable == true` — uplanlægbare værktøjer |
+| Agent 3 termination-UI (Android + desktop) | `canStopPlan` — fladen til at stoppe en plan |
+| `workflow_milestone3_current_main_handoff` | `"production_activation": False` i manifestet |
+| `worker_agent3_validation_path_contract` | samme flag i valideringswrapperen |
+
+**Tre slags falske meldinger fra prøven** (en grøn gate er dér det RIGTIGE
+svar, fordi et foranstillet `#` ikke deaktiverer noget): PowerShell
+here-strings, Python-docstrings, og strengkonstanter der bærer kode som data.
+
+**Bemærk også:** `stage_a_physical_operator.py` og `stage_a_one_click.py` har
+kommentarblokke med overskriften *"static surface markers retained by tests"* —
+markører lagt der for at holde substring-gates grønne efter en refaktorering.
+Gaterne læser nu koden i stedet. Hvis du flytter kode og fristes til samme
+løsning: lad være, og ret gaten.
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
@@ -912,7 +1011,7 @@ spor.
 3. **Opret Kaliv som person** — `person_create.py` (`--voice-source
    <navn>.mrvoice` hvis en profil er installeret), åbn Personer, send én
    besked, se `person` i svaret og hør stemmen.
-4. Uændret: #763, workflow-tærsklen, de tre gamle feature-spor.
+4. Workflow-tærsklen (W-12/W-14-fraselister) — den eneste beslutning tilbage.
 
 **[2/9 kl. 12:00 UTC — status. main = `b4bb1ed2`, VERSION 2.0.13. Frosset
 kandidat uændret = `physical-proof/2.0.13` = `4f80693fd60de5ece483d25f5e622c771b81a9c2`.
