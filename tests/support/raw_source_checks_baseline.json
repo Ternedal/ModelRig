@@ -2,7 +2,6 @@
   "scripts/bodyrig_unity_physical_gate_contract.py": 3,
   "tests/bodyrig/renderer_contracts.py": 34,
   "tests/worker_agent3_memory_protected_api.py": 2,
-  "tests/worker_agent3_model_eval.py": 3,
   "tests/worker_agent3_rig_validation_cli.py": 3,
   "tests/worker_agent3_risk_parity.py": 1,
   "tests/worker_build_identity.py": 3,
@@ -30,6 +29,5 @@
   "tests/workflow_screen_insets.py": 4,
   "tests/workflow_stage_a_one_click.py": 3,
   "tests/workflow_test_coverage.py": 3,
-  "tests/workflow_web_research_parity.py": 7,
   "tests/workflow_worker_entrypoints.py": 1
 }
