@@ -68,6 +68,32 @@ physical proof is unchanged. The rig side (slices A and B of
 and drives the frames from the chat: thinking, waiting for a tool, speaking
 with the phone's actual playback timing, interrupted.
 
+## Android + AR (slice D building block)
+
+The body in the room. `BodyRigArPlacement` places the avatar root on a
+detected plane where the user taps and keeps it facing the camera; frames
+keep arriving through the same sources as on Windows, so placement and
+animation are independent. It compiles only behind the `BODYRIG_AR`
+scripting define, so nothing here pins an AR Foundation version blind and
+the Windows proof builds unchanged.
+
+To enable, in the Unity editor on the rig:
+
+1. Package Manager → install **AR Foundation** and **Google ARCore XR Plugin**
+   (the current 6.x line for Unity 6000.3; take the versions the Package
+   Manager offers, do not hand-edit `manifest.json`).
+2. Project Settings → XR Plug-in Management → Android → enable ARCore.
+3. Player Settings → Android: ARM64, IL2CPP, minimum API 24 or higher.
+4. Player Settings → Scripting Define Symbols (Android) → add `BODYRIG_AR`.
+5. Scene: add Unity's **XR Origin (AR)** and **AR Session**, and put an
+   `ARRaycastManager` + `ARPlaneManager` on the XR Origin. The bootstrap finds
+   the raycast manager itself.
+
+Then build for Android with `BODYRIG_RIG_URL`/`BODYRIG_RIG_TOKEN` supplied the
+way the host app decides (Unity as a Library or a standalone Kaliv Body app --
+the open choice in `docs/bodyrig/KALIV_EMBEDDED_RENDERER.md`). Tap the floor;
+the body appears there and follows the conversation.
+
 ## Android host: the Kaliv Body app
 
 Host choice taken 4/9 (reversible): a standalone Unity build of this project,

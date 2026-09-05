@@ -29,6 +29,15 @@ namespace ModelRig.BodyRig.UnityRenderer
             // Frame source: the rig's live stream when a rig is named, otherwise
             // the deterministic fixture -- the physical proof runs unchanged
             // with both env vars unset.
+#if BODYRIG_AR
+            // In the room (slice D): the avatar root is placed on a tapped
+            // plane by BodyRigArPlacement; the AR session, XR origin and
+            // managers come from the scene. Frames still arrive through
+            // exactly the sources below -- placement and animation are
+            // independent.
+            var placement = root.AddComponent<BodyRigArPlacement>();
+            placement.AvatarRoot = root.transform;
+#endif
             var rigUrl = Environment.GetEnvironmentVariable("BODYRIG_RIG_URL");
             var rigToken = Environment.GetEnvironmentVariable("BODYRIG_RIG_TOKEN");
             if (!string.IsNullOrWhiteSpace(rigUrl) && !string.IsNullOrWhiteSpace(rigToken))
