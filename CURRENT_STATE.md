@@ -432,5 +432,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_t037_read_connector_boundary.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_updater_status_consistency.py`
+- `tests/workflow_voicerig_cross_repo_contract.py`
 - `tests/workflow_web_research_parity.py`
 - `tests/workflow_worker_entrypoints.py`
