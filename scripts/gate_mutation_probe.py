@@ -48,12 +48,16 @@ class GateModel(ast.NodeVisitor):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return node.value
         if isinstance(node, ast.Name):
+            if node.id in ("ROOT", "root", "REPO", "repo", "repo_root"):
+                return ""      # the repository itself: contributes no segment
             return self.consts.get(node.id)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             left, right = self._path_of(node.left), self._path_of(node.right)
             if right is None:
                 return None
-            return right if left is None else f"{left.rstrip('/')}/{right}"
+            if left is None:
+                return None
+            return right if left == "" else f"{left.rstrip('/')}/{right}"
         return None
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -81,13 +85,31 @@ class GateModel(ast.NodeVisitor):
 
 
 def module_constants(tree: ast.Module) -> dict[str, str]:
+    """String constants AND path constants built from them.
+
+    The common shape in this repo is `PHONE = ROOT / "scripts" / "x.ps1"`
+    followed by `phone = PHONE.read_text(...)`. Resolving only bare string
+    constants left the probe unable to bind a single file in the eight
+    heaviest gates -- it reported "0 mutations", which reads like a pass and
+    is not one. Two passes, because a path constant may be built from another.
+    """
     out: dict[str, str] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) \
-           and isinstance(node.value.value, str):
-            for t in node.targets:
-                if isinstance(t, ast.Name):
-                    out[t.id] = node.value.value
+    for _ in range(2):
+        helper = GateModel(out)
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if not names:
+                continue
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                for n in names:
+                    out[n] = node.value.value
+                continue
+            resolved = helper._path_of(node.value)
+            if resolved:
+                for n in names:
+                    out[n] = resolved
     return out
 
 
