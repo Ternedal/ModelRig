@@ -160,3 +160,10 @@ worker/app/_build_stamp.py
 /validation/stage-b-easy-state.json
 persons-registry.json
 *.egg-info/
+
+# The Unity proof creates Assets/BodyRig/Scenes/BodyRigDemo.unity at build time
+# and deletes it again when it finishes (BodyRigBuild.cs). Committing it makes
+# the next proof run see a deletion and refuse to start -- the clean-tree rule
+# is right, the file simply is not source.
+renderers/bodyrig-unity/Assets/BodyRig/Scenes/
+renderers/bodyrig-unity/Assets/BodyRig/Scenes.meta

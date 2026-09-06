@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "worker"))
 
-from app.voice_tts import _decoded_package  # noqa: E402
+from app.voice_tts import _decoded_header, _decoded_package  # noqa: E402
 
 # Exactly VoiceRig's own _ascii_header (voicerig/app/tts_api.py).
 def voicerig_header(value: str) -> str:
@@ -57,6 +57,14 @@ check(_decoded_package({"X-VoiceRig-Package": voicerig_header("anden.mrvoice")})
 # ASCII names must be unaffected: quote() leaves them alone, and so must we.
 check(voicerig_header("voice.mrvoice") == "voice.mrvoice",
       "VoiceRig leaves ASCII names untouched, so nothing changes for them")
+
+# All three headers come from one encoder, so all three are decoded. VoiceRig's
+# own test (tests/test_tts_header_safety.py) pins these exact values.
+for header, value in (("X-VoiceRig-Voice", "Søren Æblegrød"),
+                      ("X-VoiceRig-Voice-ID", "søren-æøå"),
+                      ("X-VoiceRig-Package", "søren-stemme.mrvoice")):
+    check(_decoded_header({header: voicerig_header(value)}, header) == value,
+          f"{header} decodes to what VoiceRig meant: {value!r}")
 
 print(f"\n===== VOICERIG CROSS-REPO CONTRACT: {passed} passed, {failed} failed =====")
 if failed:

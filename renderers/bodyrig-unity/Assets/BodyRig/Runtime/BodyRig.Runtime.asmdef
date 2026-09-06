@@ -1,0 +1,21 @@
+{
+  "name": "BodyRig.Runtime",
+  "rootNamespace": "ModelRig.BodyRig.UnityRenderer",
+  "references": [
+    "UniGLTF",
+    "UniGLTF.Utils",
+    "VRM10",
+    "UniHumanoid",
+    "SpringBoneJobs",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

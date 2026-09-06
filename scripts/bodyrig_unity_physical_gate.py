@@ -211,8 +211,19 @@ def _validate_project_pins(repo_root: Path) -> None:
         )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PhysicalRendererGateError("cannot read renderer project pins") from exc
-    if project_version != f"m_EditorVersion: {EXPECTED_UNITY}":
+    # Unity rewrites ProjectVersion.txt on first import and adds
+    # m_EditorVersionWithRevision. Comparing the whole file to one line made
+    # the editor's own bookkeeping look like a moved pin, which blocked the
+    # first physical proof this project has ever had. The pin is the version:
+    # it must be named, and no line may name a different one.
+    pin_lines = [line.strip() for line in project_version.splitlines() if line.strip()]
+    if f"m_EditorVersion: {EXPECTED_UNITY}" not in pin_lines:
         raise PhysicalRendererGateError("Unity project version pin changed")
+    if any(EXPECTED_UNITY not in line for line in pin_lines):
+        raise PhysicalRendererGateError("Unity project version pin changed")
+    if any(not line.startswith(("m_EditorVersion:", "m_EditorVersionWithRevision:"))
+           for line in pin_lines):
+        raise PhysicalRendererGateError("Unity project version pin file has unexpected content")
     if not isinstance(manifest, dict) or manifest.get("dependencies") != EXPECTED_DEPS:
         raise PhysicalRendererGateError("UniVRM dependency pins changed")
 
@@ -306,8 +317,14 @@ def validate_evidence(
     if candidate_sha != expected_sha:
         raise PhysicalRendererGateError("physical build candidate differs from expected SHA")
     branch = candidate.get("branch")
-    if not isinstance(branch, str) or not branch or branch == "main":
-        raise PhysicalRendererGateError("physical proof must run from draft, not main")
+    # The proof once had to run from the #720 draft, because that is where the
+    # renderer lived. #720 was merged on 2/9 and the branch is gone; the proof
+    # script dropped this refusal in #894, and the gate kept it -- so a run
+    # that was correct in every other respect failed on the only branch it
+    # could legitimately have come from. The evidence rests on the SHA, which
+    # is checked above; the branch is recorded, not judged.
+    if not isinstance(branch, str) or not branch:
+        raise PhysicalRendererGateError("physical proof recorded no branch")
     _require_git_sha(candidate.get("origin_main_sha"), label="candidate.origin_main_sha")
     for key in (
         "origin_main_stable_during_build",

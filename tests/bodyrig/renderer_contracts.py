@@ -7,9 +7,13 @@ Unity build, a real VRM load, visual quality or physical acceptance.
 """
 from __future__ import annotations
 
+import subprocess
 import json
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"))
+from source_code import code_of, strip_comments  # noqa: E402
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
@@ -34,11 +38,19 @@ def check(condition: bool, message: str) -> None:
 
 
 unity = root / "renderers" / "bodyrig-unity"
-project_version = (
-    unity / "ProjectSettings" / "ProjectVersion.txt"
-).read_text(encoding="utf-8").strip()
+project_version_lines = [
+    line.strip() for line in
+    (unity / "ProjectSettings" / "ProjectVersion.txt").read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+# Unity rewrites this file on first import and adds m_EditorVersionWithRevision.
+# The pin is the editor version; an exact whole-file match called the editor's
+# own bookkeeping a violation.
 check(
-    project_version == "m_EditorVersion: 6000.3.21f1",
+    "m_EditorVersion: 6000.3.21f1" in project_version_lines
+    and all(line.startswith(("m_EditorVersion:", "m_EditorVersionWithRevision:"))
+            for line in project_version_lines)
+    and all("6000.3.21f1" in line for line in project_version_lines),
     "Unity renderer is pinned to 6000.3.21f1",
 )
 
@@ -194,7 +206,7 @@ check(
     "Unity proof contains wire, loader, renderer, gesture, fixture, live-source and bootstrap components",
 )
 
-wire_source = (runtime_dir / "BodyRigRenderFrame.cs").read_text(encoding="utf-8")
+wire_source = code_of(runtime_dir / "BodyRigRenderFrame.cs")
 check(
     all(
         token in wire_source
@@ -215,7 +227,7 @@ check(
     "Unity wire validation preserves channel/source and unknown-vs-zero boundaries",
 )
 
-renderer_source = (runtime_dir / "BodyRigVrmRenderer.cs").read_text(encoding="utf-8")
+renderer_source = code_of(runtime_dir / "BodyRigVrmRenderer.cs")
 check(
     "ExpressionPreset.blink" in renderer_source
     and "ExpressionPreset.aa" in renderer_source
@@ -244,7 +256,7 @@ check(
     "draft Unity renderer does not reinterpret bodyprint replay ids as Animator or VRMA controls",
 )
 
-loader_source = (runtime_dir / "BodyRigVrmLoader.cs").read_text(encoding="utf-8")
+loader_source = code_of(runtime_dir / "BodyRigVrmLoader.cs")
 check(
     "Vrm10.LoadPathAsync" in loader_source
     and "canLoadVrm0X: false" in loader_source
@@ -252,7 +264,7 @@ check(
     "loader is explicitly VRM 1.0-only and performs UniVRM first-person setup",
 )
 
-player_source = (runtime_dir / "BodyRigFixturePlayer.cs").read_text(encoding="utf-8")
+player_source = code_of(runtime_dir / "BodyRigFixturePlayer.cs")
 check(
     "if (!renderer.IsBound)" in player_source
     and player_source.index("if (!renderer.IsBound)") < player_source.index("var elapsedMs"),
@@ -263,9 +275,45 @@ check(
     "looping demo keeps the final fixture pose reachable before rewind",
 )
 
+# The runtime needs an assembly definition. Without one the code lands in
+# Assembly-CSharp, which references UniGLTF and VRM10 but NOT UniGLTF.Utils
+# -- UniVRM marks that one not auto-referenced. Measured on the rig 6/9:
+# IAwaitCaller is defined in UniGLTF.Utils, and the first compilation any of
+# this code ever saw failed on exactly that (CS0012).
+import json as _json  # noqa: E402
+_asmdef = _json.loads((runtime_dir / "BodyRig.Runtime.asmdef").read_text(encoding="utf-8"))
+check("UniGLTF.Utils" in _asmdef["references"],
+      "the runtime assembly references UniGLTF.Utils, where IAwaitCaller lives")
+check({"UniGLTF", "VRM10"} <= set(_asmdef["references"]),
+      "the runtime assembly references the UniVRM assemblies it loads through")
+check(_asmdef.get("autoReferenced") is True,
+      "the editor build assembly can still see the runtime")
+
+# The proof scene is generated build input. BodyRigBuild deletes it in its
+# finally block, so if it is ever tracked the next proof run starts with a
+# dirty tree and refuses -- which is what happened on the rig 6/9.
+_tracked = subprocess.run(
+    ["git", "ls-files", "renderers/bodyrig-unity/Assets/BodyRig/Scenes"],
+    cwd=root, capture_output=True, text=True).stdout.split()
+check(not _tracked, f"the generated proof scene is not tracked {_tracked or ''}")
+
+# UniVRM finds its shaders by name at load time, and a player build strips
+# what no scene references. The first run of the built proof died on
+# "ArgumentNullException: Parameter name: Shader" inside MaterialFactory,
+# after a successful build and a successful VRM parse.
+_build_source = strip_comments(
+    (runtime_dir.parent / "Editor" / "BodyRigBuild.cs").read_text(encoding="utf-8"), ".cs")
+for _shader in ("VRM10/MToon10", "UniGLTF/UniUnlit"):
+    check(_shader in _build_source, f"the build pins the shader UniVRM loads by name: {_shader}")
+check("m_AlwaysIncludedShaders" in _build_source,
+      "the shaders are pinned through Always Included Shaders, which is what a player build honours")
+check(_build_source.index("restoreShaders") < _build_source.index("IncludeRequiredShaders()")
+      or "restoreShaders()" in _build_source,
+      "the graphics settings change is restored, so the repository stays clean for the next proof")
+
 # Live frame source (Unity renderer roadmap, slice C): the product path beside
 # the fixture. Same renderer contract, same guards, plus reconnect.
-source_source = (runtime_dir / "BodyRigFrameSource.cs").read_text(encoding="utf-8")
+source_source = code_of(runtime_dir / "BodyRigFrameSource.cs")
 check(
     "/api/v1/body/frames" in source_source
     and 'SetRequestHeader("Authorization", "Bearer " + token)' in source_source
@@ -294,7 +342,7 @@ check(
     "HumanBodyBones" not in source_source and "VRM10" not in source_source,
     "live source stays at the wire: no bones, no VRM types",
 )
-bootstrap_source = (runtime_dir / "BodyRigDemoBootstrap.cs").read_text(encoding="utf-8")
+bootstrap_source = code_of(runtime_dir / "BodyRigDemoBootstrap.cs")
 check(
     'GetEnvironmentVariable("BODYRIG_RIG_URL")' in bootstrap_source
     and 'GetEnvironmentVariable("BODYRIG_RIG_TOKEN")' in bootstrap_source
@@ -303,7 +351,7 @@ check(
     "bootstrap picks the live source only when a rig is named; the fixture proof path is unchanged",
 )
 
-router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
+router_source = code_of(runtime_dir / "BodyRigGestureRouter.cs")
 check(
     "public void Cancel()" in router_source
     and "cancelTrigger" in router_source

@@ -80,9 +80,11 @@ try {
         throw "current HEAD is not a canonical git SHA"
     }
     $branch = Invoke-Git @("branch", "--show-current")
-    if ($branch -eq "main") {
-        throw "physical renderer proof must run from the #720 draft, not main"
-    }
+    # This once refused to run on main, because the renderer only existed on
+    # the #720 draft and evidence had to attest the draft. #720 was merged on
+    # 2/9 and the branch is gone, so the refusal now forbids exactly the right
+    # thing. The substantive rule -- HEAD must not be behind origin/main --
+    # is checked below and is what the evidence actually rests on.
     if ([string]::IsNullOrWhiteSpace($branch)) {
         $branch = "detached"
     }
@@ -94,7 +96,7 @@ try {
     }
     $behind = [int](Invoke-Git @("rev-list", "--count", ($head + "..origin/main")))
     if ($behind -ne 0) {
-        throw "#720 draft is behind origin/main; rebind before collecting physical evidence"
+        throw "HEAD is behind origin/main; pull before collecting physical evidence"
     }
 
     $prepareScript = Join-Path $RepoRoot "scripts\bodyrig_prepare_renderer_profile.py"
@@ -126,9 +128,25 @@ try {
 
     $projectDir = [IO.Path]::GetFullPath((Join-Path $RepoRoot "renderers\bodyrig-unity"))
     $projectVersionPath = Join-Path $projectDir "ProjectSettings\ProjectVersion.txt"
-    $projectVersion = (Get-Content -LiteralPath $projectVersionPath -Raw).Trim()
-    if ($projectVersion -ne ("m_EditorVersion: " + $ExpectedUnity)) {
+    # Unity's first import adds m_EditorVersionWithRevision beside the pin.
+    # Comparing the whole file to a single line made the editor's own
+    # bookkeeping look like a moved pin. #896 taught the gate and the contract
+    # this; the proof was left comparing the old way, and it blocked the first
+    # physical run right after the tree finally came clean. Same rule as the
+    # gate: the version must be named, and no line may name a different one.
+    $pinLines = @((Get-Content -LiteralPath $projectVersionPath) |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($pinLines -notcontains ("m_EditorVersion: " + $ExpectedUnity)) {
         throw "Unity project version pin is not $ExpectedUnity"
+    }
+    foreach ($line in $pinLines) {
+        if ($line -notlike ("*" + $ExpectedUnity + "*")) {
+            throw "Unity project version pin is not $ExpectedUnity"
+        }
+        if (-not ($line.StartsWith("m_EditorVersion:") -or
+                  $line.StartsWith("m_EditorVersionWithRevision:"))) {
+            throw "Unity project version file has unexpected content"
+        }
     }
 
     $manifestPath = Join-Path $projectDir "Packages\manifest.json"
@@ -189,8 +207,18 @@ try {
     }
 
     $exePath = Join-Path $buildDir "BodyRigRendererProof.exe"
+    # Unity exits before Windows makes the player visible. Measured on the rig
+    # 6/9: the build log said "Build Finished, Result: Success", Test-Path said
+    # missing, and a listing seconds later showed the same 667 KB exe sitting
+    # there. Defender scans a fresh unsigned binary and a 36 MB UnityPlayer.dll
+    # before releasing them. Judging on the first attempt turned a good build
+    # into a failed proof; wait for it, and still fail if it never arrives.
+    $exeDeadline = (Get-Date).AddSeconds(90)
+    while (-not (Test-Path -LiteralPath $exePath -PathType Leaf) -and (Get-Date) -lt $exeDeadline) {
+        Start-Sleep -Milliseconds 500
+    }
     if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
-        throw "Unity reported success but BodyRigRendererProof.exe is missing"
+        throw "Unity reported success but BodyRigRendererProof.exe never appeared in $buildDir"
     }
     $exeInfo = Get-Item -LiteralPath $exePath
     if ($exeInfo.Length -le 0) { throw "built renderer executable is empty" }
