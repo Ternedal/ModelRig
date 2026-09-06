@@ -988,6 +988,30 @@ Skemaerne er kopieret ind i `contracts/` med den BodyRig-commit de kom fra
 repoer sin kontrakt, kopiér skemaet ind igen og lad gaten svare** — den er
 afhængighedsfri og kører hvor testene kører.
 
+### 6/9: Unity-rendereren er FYSISK BEVIST
+
+`BODYRIG UNITY PHYSICAL GATE: PASS` mod `49206522`. Kvitteringen binder
+avatar-sha256, `bodyid-cc640e75d6d348b166f9b5b7`, kandidat-sha, playerens
+egen hash, `runtime_vrm_loaded: true`, `runtime_renderer_bound: true`,
+Anders' visuelle attestation — og `production_activation: false`.
+Beviset ligger i `%LOCALAPPDATA%\ModelRig\BodyRigEvidence\run7`.
+
+Kroppen er en VRoid-avatar med demo-identitet (fixture). Bevægelsen kom fra
+den canned fixture, ikke fra riggen — blink og gaze var synlige.
+
+**Otte ting blev fundet, som ingen test her kunne se**, alle fordi #720
+landede 2/9 uden nogensinde at køre sin gate: forældet gren-guard i proofen
+(#894) og i gaten (#902); manglende `BodyRig.Runtime.asmdef` så
+`UniGLTF.Utils` ikke var refereret (#895); Unity-genererede meta-filer og
+ProjectSettings aldrig committet; den genererede proof-scene sporet (#896,
+#897); to-linjers `ProjectVersion.txt` (#898); exe-tjek der dømte før
+Windows frigav filen (#899); UniVRM-shaders strippet ud af player-buildet
+(#900, #901).
+
+**Næste:** #846 (frame-kilde) kan nu importeres i Unity og prøves mod
+riggens `/body/frames` — kroppen følger så samtalen i stedet for fixturen.
+
+
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
