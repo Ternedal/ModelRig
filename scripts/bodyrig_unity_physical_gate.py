@@ -211,8 +211,19 @@ def _validate_project_pins(repo_root: Path) -> None:
         )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PhysicalRendererGateError("cannot read renderer project pins") from exc
-    if project_version != f"m_EditorVersion: {EXPECTED_UNITY}":
+    # Unity rewrites ProjectVersion.txt on first import and adds
+    # m_EditorVersionWithRevision. Comparing the whole file to one line made
+    # the editor's own bookkeeping look like a moved pin, which blocked the
+    # first physical proof this project has ever had. The pin is the version:
+    # it must be named, and no line may name a different one.
+    pin_lines = [line.strip() for line in project_version.splitlines() if line.strip()]
+    if f"m_EditorVersion: {EXPECTED_UNITY}" not in pin_lines:
         raise PhysicalRendererGateError("Unity project version pin changed")
+    if any(EXPECTED_UNITY not in line for line in pin_lines):
+        raise PhysicalRendererGateError("Unity project version pin changed")
+    if any(not line.startswith(("m_EditorVersion:", "m_EditorVersionWithRevision:"))
+           for line in pin_lines):
+        raise PhysicalRendererGateError("Unity project version pin file has unexpected content")
     if not isinstance(manifest, dict) or manifest.get("dependencies") != EXPECTED_DEPS:
         raise PhysicalRendererGateError("UniVRM dependency pins changed")
 
