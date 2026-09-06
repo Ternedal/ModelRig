@@ -293,6 +293,19 @@ _tracked = subprocess.run(
     cwd=root, capture_output=True, text=True).stdout.split()
 check(not _tracked, f"the generated proof scene is not tracked {_tracked or ''}")
 
+# UniVRM finds its shaders by name at load time, and a player build strips
+# what no scene references. The first run of the built proof died on
+# "ArgumentNullException: Parameter name: Shader" inside MaterialFactory,
+# after a successful build and a successful VRM parse.
+_build_source = (runtime_dir.parent / "Editor" / "BodyRigBuild.cs").read_text(encoding="utf-8")
+for _shader in ("VRM10/MToon10", "UniGLTF/UniUnlit"):
+    check(_shader in _build_source, f"the build pins the shader UniVRM loads by name: {_shader}")
+check("m_AlwaysIncludedShaders" in _build_source,
+      "the shaders are pinned through Always Included Shaders, which is what a player build honours")
+check(_build_source.index("restoreShaders") < _build_source.index("IncludeRequiredShaders()")
+      or "restoreShaders()" in _build_source,
+      "the graphics settings change is restored, so the repository stays clean for the next proof")
+
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
 check(
     "public void Cancel()" in router_source
