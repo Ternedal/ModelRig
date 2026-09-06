@@ -34,11 +34,19 @@ def check(condition: bool, message: str) -> None:
 
 
 unity = root / "renderers" / "bodyrig-unity"
-project_version = (
-    unity / "ProjectSettings" / "ProjectVersion.txt"
-).read_text(encoding="utf-8").strip()
+project_version_lines = [
+    line.strip() for line in
+    (unity / "ProjectSettings" / "ProjectVersion.txt").read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+# Unity rewrites this file on first import and adds m_EditorVersionWithRevision.
+# The pin is the editor version; an exact whole-file match called the editor's
+# own bookkeeping a violation.
 check(
-    project_version == "m_EditorVersion: 6000.3.21f1",
+    "m_EditorVersion: 6000.3.21f1" in project_version_lines
+    and all(line.startswith(("m_EditorVersion:", "m_EditorVersionWithRevision:"))
+            for line in project_version_lines)
+    and all("6000.3.21f1" in line for line in project_version_lines),
     "Unity renderer is pinned to 6000.3.21f1",
 )
 
