@@ -128,9 +128,25 @@ try {
 
     $projectDir = [IO.Path]::GetFullPath((Join-Path $RepoRoot "renderers\bodyrig-unity"))
     $projectVersionPath = Join-Path $projectDir "ProjectSettings\ProjectVersion.txt"
-    $projectVersion = (Get-Content -LiteralPath $projectVersionPath -Raw).Trim()
-    if ($projectVersion -ne ("m_EditorVersion: " + $ExpectedUnity)) {
+    # Unity's first import adds m_EditorVersionWithRevision beside the pin.
+    # Comparing the whole file to a single line made the editor's own
+    # bookkeeping look like a moved pin. #896 taught the gate and the contract
+    # this; the proof was left comparing the old way, and it blocked the first
+    # physical run right after the tree finally came clean. Same rule as the
+    # gate: the version must be named, and no line may name a different one.
+    $pinLines = @((Get-Content -LiteralPath $projectVersionPath) |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($pinLines -notcontains ("m_EditorVersion: " + $ExpectedUnity)) {
         throw "Unity project version pin is not $ExpectedUnity"
+    }
+    foreach ($line in $pinLines) {
+        if ($line -notlike ("*" + $ExpectedUnity + "*")) {
+            throw "Unity project version pin is not $ExpectedUnity"
+        }
+        if (-not ($line.StartsWith("m_EditorVersion:") -or
+                  $line.StartsWith("m_EditorVersionWithRevision:"))) {
+            throw "Unity project version file has unexpected content"
+        }
     }
 
     $manifestPath = Join-Path $projectDir "Packages\manifest.json"

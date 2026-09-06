@@ -7,6 +7,7 @@ Unity build, a real VRM load, visual quality or physical acceptance.
 """
 from __future__ import annotations
 
+import subprocess
 import json
 import sys
 from pathlib import Path
@@ -283,6 +284,14 @@ check({"UniGLTF", "VRM10"} <= set(_asmdef["references"]),
       "the runtime assembly references the UniVRM assemblies it loads through")
 check(_asmdef.get("autoReferenced") is True,
       "the editor build assembly can still see the runtime")
+
+# The proof scene is generated build input. BodyRigBuild deletes it in its
+# finally block, so if it is ever tracked the next proof run starts with a
+# dirty tree and refuses -- which is what happened on the rig 6/9.
+_tracked = subprocess.run(
+    ["git", "ls-files", "renderers/bodyrig-unity/Assets/BodyRig/Scenes"],
+    cwd=root, capture_output=True, text=True).stdout.split()
+check(not _tracked, f"the generated proof scene is not tracked {_tracked or ''}")
 
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
 check(
