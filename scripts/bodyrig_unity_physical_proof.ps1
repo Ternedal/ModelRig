@@ -80,9 +80,11 @@ try {
         throw "current HEAD is not a canonical git SHA"
     }
     $branch = Invoke-Git @("branch", "--show-current")
-    if ($branch -eq "main") {
-        throw "physical renderer proof must run from the #720 draft, not main"
-    }
+    # This once refused to run on main, because the renderer only existed on
+    # the #720 draft and evidence had to attest the draft. #720 was merged on
+    # 2/9 and the branch is gone, so the refusal now forbids exactly the right
+    # thing. The substantive rule -- HEAD must not be behind origin/main --
+    # is checked below and is what the evidence actually rests on.
     if ([string]::IsNullOrWhiteSpace($branch)) {
         $branch = "detached"
     }
@@ -94,7 +96,7 @@ try {
     }
     $behind = [int](Invoke-Git @("rev-list", "--count", ($head + "..origin/main")))
     if ($behind -ne 0) {
-        throw "#720 draft is behind origin/main; rebind before collecting physical evidence"
+        throw "HEAD is behind origin/main; pull before collecting physical evidence"
     }
 
     $prepareScript = Join-Path $RepoRoot "scripts\bodyrig_prepare_renderer_profile.py"
