@@ -262,6 +262,20 @@ check(
     "looping demo keeps the final fixture pose reachable before rewind",
 )
 
+# The runtime needs an assembly definition. Without one the code lands in
+# Assembly-CSharp, which references UniGLTF and VRM10 but NOT UniGLTF.Utils
+# -- UniVRM marks that one not auto-referenced. Measured on the rig 6/9:
+# IAwaitCaller is defined in UniGLTF.Utils, and the first compilation any of
+# this code ever saw failed on exactly that (CS0012).
+import json as _json  # noqa: E402
+_asmdef = _json.loads((runtime_dir / "BodyRig.Runtime.asmdef").read_text(encoding="utf-8"))
+check("UniGLTF.Utils" in _asmdef["references"],
+      "the runtime assembly references UniGLTF.Utils, where IAwaitCaller lives")
+check({"UniGLTF", "VRM10"} <= set(_asmdef["references"]),
+      "the runtime assembly references the UniVRM assemblies it loads through")
+check(_asmdef.get("autoReferenced") is True,
+      "the editor build assembly can still see the runtime")
+
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
 check(
     "public void Cancel()" in router_source
