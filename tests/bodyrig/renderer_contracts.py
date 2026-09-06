@@ -12,6 +12,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"))
+from source_code import strip_comments  # noqa: E402
+
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
 
@@ -292,6 +295,20 @@ _tracked = subprocess.run(
     ["git", "ls-files", "renderers/bodyrig-unity/Assets/BodyRig/Scenes"],
     cwd=root, capture_output=True, text=True).stdout.split()
 check(not _tracked, f"the generated proof scene is not tracked {_tracked or ''}")
+
+# UniVRM finds its shaders by name at load time, and a player build strips
+# what no scene references. The first run of the built proof died on
+# "ArgumentNullException: Parameter name: Shader" inside MaterialFactory,
+# after a successful build and a successful VRM parse.
+_build_source = strip_comments(
+    (runtime_dir.parent / "Editor" / "BodyRigBuild.cs").read_text(encoding="utf-8"), ".cs")
+for _shader in ("VRM10/MToon10", "UniGLTF/UniUnlit"):
+    check(_shader in _build_source, f"the build pins the shader UniVRM loads by name: {_shader}")
+check("m_AlwaysIncludedShaders" in _build_source,
+      "the shaders are pinned through Always Included Shaders, which is what a player build honours")
+check(_build_source.index("restoreShaders") < _build_source.index("IncludeRequiredShaders()")
+      or "restoreShaders()" in _build_source,
+      "the graphics settings change is restored, so the repository stays clean for the next proof")
 
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
 check(
