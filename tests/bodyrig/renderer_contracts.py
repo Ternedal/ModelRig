@@ -306,9 +306,8 @@ for _shader in ("VRM10/MToon10", "UniGLTF/UniUnlit"):
     check(_shader in _build_source, f"the build pins the shader UniVRM loads by name: {_shader}")
 check("m_AlwaysIncludedShaders" in _build_source,
       "the shaders are pinned through Always Included Shaders, which is what a player build honours")
-check(_build_source.index("restoreShaders") < _build_source.index("IncludeRequiredShaders()")
-      or "restoreShaders()" in _build_source,
-      "the graphics settings change is restored, so the repository stays clean for the next proof")
+check("restoreShaders" in _build_source and "if (!added)" in _build_source,
+      "nothing is touched when the shaders are already pinned, and a change is restored when it is not")
 
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
 check(

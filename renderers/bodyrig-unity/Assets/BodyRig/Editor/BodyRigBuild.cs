@@ -110,6 +110,7 @@ namespace ModelRig.BodyRig.UnityRenderer.Editor
                 return null;
             }
 
+            var added = false;
             var original = new UnityEngine.Object[list.arraySize];
             for (var i = 0; i < list.arraySize; i++)
             {
@@ -142,6 +143,16 @@ namespace ModelRig.BodyRig.UnityRenderer.Editor
 
                 list.InsertArrayElementAtIndex(list.arraySize);
                 list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = shader;
+                added = true;
+            }
+
+            if (!added)
+            {
+                // Everything was already pinned in the committed project
+                // settings, which is where these belong: the project genuinely
+                // requires them. Touch nothing, so the proof's clean-tree check
+                // has nothing to object to.
+                return null;
             }
 
             serialized.ApplyModifiedPropertiesWithoutUndo();
