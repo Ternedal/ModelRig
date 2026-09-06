@@ -207,8 +207,18 @@ try {
     }
 
     $exePath = Join-Path $buildDir "BodyRigRendererProof.exe"
+    # Unity exits before Windows makes the player visible. Measured on the rig
+    # 6/9: the build log said "Build Finished, Result: Success", Test-Path said
+    # missing, and a listing seconds later showed the same 667 KB exe sitting
+    # there. Defender scans a fresh unsigned binary and a 36 MB UnityPlayer.dll
+    # before releasing them. Judging on the first attempt turned a good build
+    # into a failed proof; wait for it, and still fail if it never arrives.
+    $exeDeadline = (Get-Date).AddSeconds(90)
+    while (-not (Test-Path -LiteralPath $exePath -PathType Leaf) -and (Get-Date) -lt $exeDeadline) {
+        Start-Sleep -Milliseconds 500
+    }
     if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
-        throw "Unity reported success but BodyRigRendererProof.exe is missing"
+        throw "Unity reported success but BodyRigRendererProof.exe never appeared in $buildDir"
     }
     $exeInfo = Get-Item -LiteralPath $exePath
     if ($exeInfo.Length -le 0) { throw "built renderer executable is empty" }
