@@ -49,6 +49,25 @@ The staged path is content-addressed by canonical body id + exact selected `.mrb
 
 `Assets/BodyRig/Resources/bodyrig-demo.json` covers idle, listening, thinking, `audio_envelope` speaking with `explain`, timed-viseme speaking, interruption, listening recovery and idle. The fixture clock starts only after asynchronous VRM binding completes.
 
+## Live frames from the rig (product path)
+
+The fixture is the proof. The product reads the rig: `BodyRigFrameSource`
+opens `GET <rig>/api/v1/body/frames` (server-sent events, one v0.1 frame per
+`data:` line, 20 fps) behind the device token and applies each frame through
+the same `BodyRigVrmRenderer.Apply` the fixture player uses. Every frame is
+validated first, none is applied before the VRM is bound, timestamps must
+advance within a stream, and a dropped connection reconnects after a delay
+instead of failing. The bootstrap picks it only when both are set:
+
+    BODYRIG_RIG_URL=http://192.168.1.33:8080
+    BODYRIG_RIG_TOKEN=<device token from pairing>
+
+With either unset the bootstrap runs the fixture exactly as before, so the
+physical proof is unchanged. The rig side (slices A and B of
+`docs/bodyrig/UNITY_RENDERER_ROADMAP.md`) serves the active body's assets
+and drives the frames from the chat: thinking, waiting for a tool, speaking
+with the phone's actual playback timing, interrupted.
+
 ## Android host: the Kaliv Body app
 
 Host choice taken 4/9 (reversible): a standalone Unity build of this project,
