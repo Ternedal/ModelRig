@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"))
-from source_code import strip_comments  # noqa: E402
+from source_code import code_of, strip_comments  # noqa: E402
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
@@ -199,13 +199,14 @@ required_sources = {
     "BodyRigGestureRouter.cs",
     "BodyRigProceduralGestureDriver.cs",
     "BodyRigDemoBootstrap.cs",
+    "BodyRigFrameSource.cs",
 }
 check(
     required_sources.issubset({path.name for path in runtime_dir.glob("*.cs")}),
-    "Unity proof contains wire, loader, renderer, gesture, fixture and bootstrap components",
+    "Unity proof contains wire, loader, renderer, gesture, fixture, live-source and bootstrap components",
 )
 
-wire_source = (runtime_dir / "BodyRigRenderFrame.cs").read_text(encoding="utf-8")
+wire_source = code_of(runtime_dir / "BodyRigRenderFrame.cs")
 check(
     all(
         token in wire_source
@@ -226,7 +227,7 @@ check(
     "Unity wire validation preserves channel/source and unknown-vs-zero boundaries",
 )
 
-renderer_source = (runtime_dir / "BodyRigVrmRenderer.cs").read_text(encoding="utf-8")
+renderer_source = code_of(runtime_dir / "BodyRigVrmRenderer.cs")
 check(
     "ExpressionPreset.blink" in renderer_source
     and "ExpressionPreset.aa" in renderer_source
@@ -255,7 +256,7 @@ check(
     "draft Unity renderer does not reinterpret bodyprint replay ids as Animator or VRMA controls",
 )
 
-loader_source = (runtime_dir / "BodyRigVrmLoader.cs").read_text(encoding="utf-8")
+loader_source = code_of(runtime_dir / "BodyRigVrmLoader.cs")
 check(
     "Vrm10.LoadPathAsync" in loader_source
     and "canLoadVrm0X: false" in loader_source
@@ -263,7 +264,7 @@ check(
     "loader is explicitly VRM 1.0-only and performs UniVRM first-person setup",
 )
 
-player_source = (runtime_dir / "BodyRigFixturePlayer.cs").read_text(encoding="utf-8")
+player_source = code_of(runtime_dir / "BodyRigFixturePlayer.cs")
 check(
     "if (!renderer.IsBound)" in player_source
     and player_source.index("if (!renderer.IsBound)") < player_source.index("var elapsedMs"),
@@ -310,7 +311,47 @@ check(_build_source.index("restoreShaders") < _build_source.index("IncludeRequir
       or "restoreShaders()" in _build_source,
       "the graphics settings change is restored, so the repository stays clean for the next proof")
 
-router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
+# Live frame source (Unity renderer roadmap, slice C): the product path beside
+# the fixture. Same renderer contract, same guards, plus reconnect.
+source_source = code_of(runtime_dir / "BodyRigFrameSource.cs")
+check(
+    "/api/v1/body/frames" in source_source
+    and 'SetRequestHeader("Authorization", "Bearer " + token)' in source_source
+    and "DownloadHandlerScript" in source_source,
+    "live source reads the rig's SSE frame stream behind the device token",
+)
+check(
+    "frame.Validate();" in source_source
+    and source_source.index("frame.Validate();") < source_source.index("renderer.Apply(frame);"),
+    "live source validates every frame before applying it",
+)
+check(
+    "!renderer.IsBound" in source_source
+    and source_source.index("!renderer.IsBound") < source_source.index("renderer.Apply(frame);"),
+    "live source cannot apply frames before async VRM binding completes",
+)
+check(
+    "lastTimestampMs" in source_source and "WaitForSecondsRealtime(reconnectDelaySeconds)" in source_source,
+    "live source keeps timestamps monotonic within a stream and reconnects after a drop",
+)
+check(
+    "renderer.Apply(" in source_source and source_source.count("renderer.Apply(") == 1,
+    "live source feeds the renderer through Apply and nothing else",
+)
+check(
+    "HumanBodyBones" not in source_source and "VRM10" not in source_source,
+    "live source stays at the wire: no bones, no VRM types",
+)
+bootstrap_source = code_of(runtime_dir / "BodyRigDemoBootstrap.cs")
+check(
+    'GetEnvironmentVariable("BODYRIG_RIG_URL")' in bootstrap_source
+    and 'GetEnvironmentVariable("BODYRIG_RIG_TOKEN")' in bootstrap_source
+    and 'player.ResourceName = "bodyrig-demo";' in bootstrap_source
+    and bootstrap_source.index("BodyRigFrameSource") < bootstrap_source.index("BodyRigFixturePlayer"),
+    "bootstrap picks the live source only when a rig is named; the fixture proof path is unchanged",
+)
+
+router_source = code_of(runtime_dir / "BodyRigGestureRouter.cs")
 check(
     "public void Cancel()" in router_source
     and "cancelTrigger" in router_source
