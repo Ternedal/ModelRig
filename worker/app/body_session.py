@@ -41,6 +41,7 @@ from bodyrig.scheduler import EmbodimentScheduler, SchedulerError  # noqa: E402
 from bodyrig.voicerig_adapter import VoiceRigContractError, wav_envelope_track  # noqa: E402
 
 from . import body_cues  # noqa: E402
+from .bodyrig_activation import bodyrig_enabled  # noqa: E402
 
 FRAME_INTERVAL_S = 1 / 20
 CLIENT_REPORTABLE_STATES = frozenset({"listening", "idle"})
@@ -241,6 +242,11 @@ def _session_headers(session: BodySession) -> dict[str, str]:
 # ---- hooks used by the chat and voice paths (never raise into them) --------
 
 def note_state(state: str) -> None:
+    # Production chat phases call this unconditionally. Default-off must mean
+    # they cannot create/touch BodyRig state until the operator explicitly
+    # enables the integration.
+    if not bodyrig_enabled():
+        return
     try:
         session = current_session(create=True)
         if session is not None:
@@ -251,6 +257,10 @@ def note_state(state: str) -> None:
 
 def note_speech(*, utterance_id: str, wav_path: str, headers: dict[str, Any] | None = None,
                 sentence: str = "") -> None:
+    # VoiceRig likewise calls this for every synthesized chunk. Check authority
+    # before opening the WAV or resolving an active body.
+    if not bodyrig_enabled():
+        return
     try:
         session = current_session(create=True)
         if session is None:
