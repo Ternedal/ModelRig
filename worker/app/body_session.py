@@ -7,8 +7,8 @@ the WAV; the turn ends -> idle; the client interrupts -> interrupted.
 Core owns every rule: BodyRigRuntime enforces state and sequence,
 EmbodimentScheduler turns snapshots into frames (blink, breath, procedural
 motion, mouth), voicerig_adapter derives the mouth track, and
-render_frame_to_mapping writes the v0.1 wire. This module only sequences
-events and hands frames out.
+render_frame_to_mapping writes the v0.1 wire. Session/body identity is HTTP
+metadata, not part of that closed render-frame payload.
 
 Honest limits, on purpose: with no active body the session is a no-op and
 /body/frames answers 404; speech timing is synthesis time on the rig, not
@@ -194,10 +194,7 @@ class BodySession:
                     except EventRejected:
                         pass
             frame = self._scheduler.render(self._runtime.snapshot, timestamp_ms=now)
-            payload = render_frame_to_mapping(frame)
-            payload["session_id"] = self.session_id
-            payload["body_id"] = self.body_id
-            return payload
+            return render_frame_to_mapping(frame)
 
 
 _session: BodySession | None = None
@@ -255,6 +252,14 @@ def note_speech(*, utterance_id: str, wav_path: str, headers: dict[str, Any] | N
 
 # ---- HTTP -----------------------------------------------------------------
 
+def _session_headers(session: BodySession) -> dict[str, str]:
+    """Identity belongs beside the closed render-frame wire, never inside it."""
+    return {
+        "X-BodyRig-Session-ID": session.session_id,
+        "X-BodyRig-Body-ID": session.body_id,
+    }
+
+
 def build_body_session_router() -> APIRouter:
     router = APIRouter(prefix="/body", tags=["body"])
 
@@ -263,7 +268,7 @@ def build_body_session_router() -> APIRouter:
         session = current_session(create=True)
         if session is None:
             raise HTTPException(status_code=404, detail="no active body")
-        return JSONResponse(session.frame())
+        return JSONResponse(session.frame(), headers=_session_headers(session))
 
     @router.post("/interrupt")
     def interrupt() -> JSONResponse:
@@ -326,7 +331,11 @@ def build_body_session_router() -> APIRouter:
                     break
                 await asyncio.sleep(FRAME_INTERVAL_S)
 
-        return StreamingResponse(generate(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+        headers = {
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+            **_session_headers(session),
+        }
+        return StreamingResponse(generate(), media_type="text/event-stream", headers=headers)
 
     return router
