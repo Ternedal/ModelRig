@@ -20,6 +20,7 @@ SHA = "a" * 40
 MAIN_SHA = "e" * 40
 BODY = "bodyid-" + "b" * 24
 PACKAGE = "c" * 64
+SESSION = "body-0123456789ab"
 RIG = "http://127.0.0.1:8080"
 NOW = "2026-09-07T08:00:00+00:00"
 LATER = "2026-09-07T08:05:00+00:00"
@@ -111,11 +112,11 @@ class LivePhysicalGateTests(unittest.TestCase):
             "token_source": "environment",
             "active_body_id": BODY,
             "active_package_sha256": PACKAGE,
+            "frame_identity": {"body_id": BODY, "session_id": SESSION},
             "frame_count": 5,
             "first_timestamp_ms": 1000,
             "last_timestamp_ms": 1200,
             "states_observed": ["idle"],
-            "slice_b_compatibility_extras": ["body_id", "session_id"],
             "canonical_frame_validation": True,
         }
         write_json(preflight_path, preflight)
@@ -203,6 +204,18 @@ class LivePhysicalGateTests(unittest.TestCase):
             require_git_state=False,
         )
 
+    def rebind_preflight(self) -> None:
+        preflight_path = self.evidence / "live-preflight-receipt.json"
+        run_path = self.evidence / "live-run-receipt.json"
+        run = json.loads(run_path.read_text(encoding="utf-8"))
+        run["receipts"]["preflight"]["sha256"] = sha(preflight_path)
+        write_json(run_path, run)
+        visual_path = self.evidence / "live-visual-receipt.json"
+        visual = json.loads(visual_path.read_text(encoding="utf-8"))
+        visual["evidence_sha256"]["preflight"] = sha(preflight_path)
+        visual["evidence_sha256"]["live_run"] = sha(run_path)
+        write_json(visual_path, visual)
+
     def test_complete_chain_passes(self) -> None:
         result = self.validate()
         self.assertEqual(result["candidate_git_sha"], SHA)
@@ -225,6 +238,24 @@ class LivePhysicalGateTests(unittest.TestCase):
         visual["evidence_sha256"]["live_run"] = sha(path)
         write_json(visual_path, visual)
         with self.assertRaisesRegex(LivePhysicalGateError, "authority is missing"):
+            self.validate()
+
+    def test_preflight_frame_identity_is_required(self) -> None:
+        path = self.evidence / "live-preflight-receipt.json"
+        value = json.loads(path.read_text(encoding="utf-8"))
+        del value["frame_identity"]
+        write_json(path, value)
+        self.rebind_preflight()
+        with self.assertRaisesRegex(LivePhysicalGateError, "frame identity is missing"):
+            self.validate()
+
+    def test_preflight_frame_session_identity_is_validated(self) -> None:
+        path = self.evidence / "live-preflight-receipt.json"
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["frame_identity"]["session_id"] = "not-a-session"
+        write_json(path, value)
+        self.rebind_preflight()
+        with self.assertRaisesRegex(LivePhysicalGateError, "session identity is invalid"):
             self.validate()
 
     def test_tampered_preflight_is_rejected_by_digest_binding(self) -> None:
