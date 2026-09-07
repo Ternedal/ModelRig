@@ -19,11 +19,13 @@ on:
       - "tests/bodyrig/ar_placement_contract.py"
       - "tests/bodyrig/rig_link_contract.py"
       - "tests/bodyrig/activation_contract.py"
+      - "tests/bodyrig/upstream_release_binding.py"
       - "tests/bodyrig/live_frame_source_contract.py"
       - "tests/bodyrig/live_stream_probe.py"
       - "tests/bodyrig/live_physical_gate.py"
       - "tests/worker_body_session.py"
       - "tests/worker_bodyrig_activation.py"
+      - "scripts/bodyrig_bind_upstream_release.py"
       - "scripts/bodyrig_live_stream_probe.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
@@ -45,11 +47,13 @@ on:
       - "tests/bodyrig/ar_placement_contract.py"
       - "tests/bodyrig/rig_link_contract.py"
       - "tests/bodyrig/activation_contract.py"
+      - "tests/bodyrig/upstream_release_binding.py"
       - "tests/bodyrig/live_frame_source_contract.py"
       - "tests/bodyrig/live_stream_probe.py"
       - "tests/bodyrig/live_physical_gate.py"
       - "tests/worker_body_session.py"
       - "tests/worker_bodyrig_activation.py"
+      - "scripts/bodyrig_bind_upstream_release.py"
       - "scripts/bodyrig_live_stream_probe.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
@@ -98,6 +102,14 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/bodyrig/activation_contract.py
+      - name: Validate #704 upstream BodyRig release binding contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/upstream_release_binding.py
+      - name: Validate upstream BodyRig release binding CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 scripts/bodyrig_bind_upstream_release.py --help
       - name: Validate live BodyRig frame source contract
         env:
           PYTHONDONTWRITEBYTECODE: "1"
