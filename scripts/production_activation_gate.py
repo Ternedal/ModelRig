@@ -354,7 +354,7 @@ def _canonical_loopback_url(value: str, *, label: str) -> str:
         raise ProductionActivationError(f"{label} must be an explicit loopback http(s) URL")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ProductionActivationError(f"{label} URL must not contain credentials/query/fragment")
-    path = parsed.path.rstrip("")
+    path = parsed.path
     if path not in {"", "/"}:
         raise ProductionActivationError(f"{label} URL must not contain a path")
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", "")).rstrip("/")
