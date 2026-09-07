@@ -139,6 +139,11 @@ If the store is not exposed through `KALIV_BODY_STORE`, pass its real path to
 `-Store` instead. Do not invent a replacement store merely to make the gate
 pass.
 
+The live launcher reuses the physically proven batch-build substrate and invokes
+the exact Unity entrypoint
+`ModelRig.BodyRig.UnityRenderer.Editor.BodyRigBuild.BuildWindows` before it
+launches the resulting player.
+
 The machine gate writes evidence outside the repository under
 `%LOCALAPPDATA%\ModelRig\BodyRigLiveEvidence\<exact-sha>\` by default:
 
