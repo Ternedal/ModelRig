@@ -11,6 +11,7 @@ import os
 
 from .agent3.cancellation_status import install_termination_contract
 from .agent3.production_mount import mount_agent3
+from .bodyrig_mount import mount_bodyrig
 from .control_center_api import build_control_center_router
 from .file_capabilities_mount import mount_file_capabilities
 from .hardening import harden
@@ -36,18 +37,12 @@ fastapi_app.include_router(build_control_center_router())
 from .person_api import build_person_router  # noqa: E402
 fastapi_app.include_router(build_person_router())
 
-# Body assets (Unity renderer roadmap, slice A): the active body's validated
-# avatar/thumbnail/motions over HTTP for phone and headset clients. Reads
-# only through BodyRig's store and current-selection paths; the store is
-# opened per request, so mounting touches nothing.
-from .body_assets import build_body_router  # noqa: E402
-fastapi_app.include_router(build_body_router())
-
-# Live render frames (slice B): /body/state, /body/frames (SSE 20 fps),
-# /body/interrupt, /body/state/{name}. The session is created on first
-# use for the active body; without one every route answers 404.
-from .body_session import build_body_session_router  # noqa: E402
-fastapi_app.include_router(build_body_session_router())
+# BodyRig is a separate default-off production capability. The self-guarded
+# mount owns BOTH validated body assets and the live session/frame surface; a
+# standard worker boot neither composes those routes nor imports their runtime
+# modules. KALIV_BODYRIG_ENABLED=1 is explicit opt-in and does not widen the
+# worker's independent host/network policy.
+mount_bodyrig(fastapi_app)
 
 # Middleware must be registered before the first ASGI request. It is inert when
 # no Agent 3 response exists: it only decorates JSON payloads under the dormant

@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 19 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 20 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -79,6 +79,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_AGENT3_TASK_WORKERS` | `2` | indstilling |
 | `KALIV_AGENT4_OPERATOR_API` | `0` | slukket |
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
+| `KALIV_BODYRIG_ENABLED` | `0` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
 | `KALIV_COMPUTER_USE` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | slukket |

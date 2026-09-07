@@ -36,6 +36,7 @@ from bodyrig_fixtures import png_fixture, tracking_fixture, vrm_fixture  # noqa:
 from app import body_session  # noqa: E402
 from app.body_assets import BODY_STORE_ENV  # noqa: E402
 from app.body_session import build_body_session_router  # noqa: E402
+from app.bodyrig_activation import BODYRIG_FLAG  # noqa: E402
 
 RENDER_FRAME_SCHEMA = ROOT / "docs" / "bodyrig" / "schemas" / "render-frame.schema.json"
 
@@ -70,6 +71,8 @@ class BodySessionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
         self.store_root = Path(self.dir.name) / "bodyrig-profiles"
+        self.previous_bodyrig_flag = os.environ.get(BODYRIG_FLAG)
+        os.environ[BODYRIG_FLAG] = "1"
         os.environ[BODY_STORE_ENV] = str(self.store_root)
         os.environ.pop("KALIV_PERSONS_STORE", None)
         body_session._session = None
@@ -86,6 +89,10 @@ class BodySessionTests(unittest.TestCase):
     def tearDown(self) -> None:
         body_session._session = None
         os.environ.pop(BODY_STORE_ENV, None)
+        if self.previous_bodyrig_flag is None:
+            os.environ.pop(BODYRIG_FLAG, None)
+        else:
+            os.environ[BODYRIG_FLAG] = self.previous_bodyrig_flag
         self.dir.cleanup()
 
     def _select(self) -> None:
