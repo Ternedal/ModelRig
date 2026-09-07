@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import json
-import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
-import tempfile
 import threading
 import unittest
 
@@ -22,16 +20,29 @@ TOKEN = "probe-token-not-written-to-receipt"
 
 class RigHandler(BaseHTTPRequestHandler):
     extra_unknown = False
+    redirect_active = False
+    redirect_followed = False
 
     def log_message(self, format: str, *args: object) -> None:
         return
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/redirect-target":
+            RigHandler.redirect_followed = True
+            self.send_response(200)
+            self.end_headers()
+            return
         if self.headers.get("Authorization") != "Bearer " + TOKEN:
             self.send_response(401)
             self.end_headers()
             return
         if self.path == "/api/v1/body/active":
+            if self.redirect_active:
+                host, port = self.server.server_address
+                self.send_response(302)
+                self.send_header("Location", f"http://{host}:{port}/redirect-target")
+                self.end_headers()
+                return
             payload = {
                 "schema": "modelrig-body-assets/v1",
                 "body_id": BODY_ID,
@@ -85,6 +96,8 @@ class RigHandler(BaseHTTPRequestHandler):
 class LiveStreamProbeTests(unittest.TestCase):
     def setUp(self) -> None:
         RigHandler.extra_unknown = False
+        RigHandler.redirect_active = False
+        RigHandler.redirect_followed = False
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), RigHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -125,6 +138,19 @@ class LiveStreamProbeTests(unittest.TestCase):
                 timeout=3,
             )
         self.assertNotIn("secret-that-must-not-be-echoed", str(caught.exception))
+
+    def test_redirect_is_rejected_before_bearer_can_be_replayed(self) -> None:
+        RigHandler.redirect_active = True
+        with self.assertRaisesRegex(ProbeError, r"HTTP 302"):
+            run_probe(
+                base_url=self.base,
+                token=TOKEN,
+                expected_body_id=BODY_ID,
+                expected_package_sha256=PACKAGE_SHA,
+                frame_count=2,
+                timeout=3,
+            )
+        self.assertFalse(RigHandler.redirect_followed)
 
     def test_unknown_wire_field_fails_closed(self) -> None:
         RigHandler.extra_unknown = True
