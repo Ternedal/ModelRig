@@ -24,6 +24,13 @@ namespace ModelRig.BodyRig.UnityRenderer
     {
         private const string LiveReceiptSchema = "bodyrig.unity_live_stream/v0.1";
 
+        /// <summary>
+        /// Emitted only after a frame has passed validation, timestamp ordering,
+        /// renderer binding and renderer.Apply(). Machine evidence may observe
+        /// this event; it must never be used as an alternate render path.
+        /// </summary>
+        public static event Action<BodyRigRenderFrame> FrameApplied;
+
         [Serializable]
         private sealed class LiveReceipt
         {
@@ -151,6 +158,7 @@ namespace ModelRig.BodyRig.UnityRenderer
             }
             lastTimestampMs = frame.timestamp_ms;
             renderer.Apply(frame);
+            FrameApplied?.Invoke(frame);
             WriteLiveReceiptIfRequested(frame);
         }
 
