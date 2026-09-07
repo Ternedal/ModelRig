@@ -299,15 +299,37 @@ check(not _tracked, f"the generated proof scene is not tracked {_tracked or ''}"
 # UniVRM finds its shaders by name at load time, and a player build strips
 # what no scene references. The first run of the built proof died on
 # "ArgumentNullException: Parameter name: Shader" inside MaterialFactory,
-# after a successful build and a successful VRM parse.
+# after a successful build and a successful VRM parse. Shader inclusion is
+# committed project authority; the physical proof only validates it and must
+# never mutate GraphicsSettings.asset.
 _build_source = strip_comments(
     (runtime_dir.parent / "Editor" / "BodyRigBuild.cs").read_text(encoding="utf-8"), ".cs")
-for _shader in ("VRM10/MToon10", "UniGLTF/UniUnlit"):
-    check(_shader in _build_source, f"the build pins the shader UniVRM loads by name: {_shader}")
-check("m_AlwaysIncludedShaders" in _build_source,
-      "the shaders are pinned through Always Included Shaders, which is what a player build honours")
-check("restoreShaders" in _build_source and "if (!added)" in _build_source,
-      "nothing is touched when the shaders are already pinned, and a change is restored when it is not")
+_graphics_source = (
+    unity / "ProjectSettings" / "GraphicsSettings.asset"
+).read_text(encoding="utf-8")
+_required_shader_refs = {
+    "VRM10/MToon10": "{fileID: 4800000, guid: e0edbf68d81d1f340ae8b110086b7063, type: 3}",
+    "UniGLTF/UniUnlit": "{fileID: 4800000, guid: 8c17b56f4bf084c47872edcb95237e4a, type: 3}",
+    "Standard": "{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}",
+}
+for _shader, _reference in _required_shader_refs.items():
+    check(_shader in _build_source,
+          f"the build validates the shader UniVRM may load by name: {_shader}")
+    check(_reference in _graphics_source,
+          f"the committed GraphicsSettings pins the exact shader authority: {_shader}")
+check("ValidateRequiredShadersPinned()" in _build_source
+      and "m_AlwaysIncludedShaders" in _build_source,
+      "the build fails closed unless committed Always Included Shader pins are present")
+for _mutation_api in (
+    "InsertArrayElementAtIndex",
+    "ClearArray",
+    "ApplyModifiedProperties",
+    "AssetDatabase.SaveAssets",
+):
+    check(_mutation_api not in _build_source,
+          f"physical proof does not mutate GraphicsSettings via {_mutation_api}")
+check("MToon10Outline" not in _build_source,
+      "outline is not modeled as a non-existent separate UniVRM shader")
 
 router_source = (runtime_dir / "BodyRigGestureRouter.cs").read_text(encoding="utf-8")
 check(
