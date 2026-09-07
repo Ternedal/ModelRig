@@ -24,7 +24,7 @@ import sys
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -41,6 +41,16 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 class ProbeError(RuntimeError):
     pass
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Fail closed before a Bearer token can be replayed to another URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+_NO_REDIRECT_OPENER = build_opener(_NoRedirect)
 
 
 def _canonical_base_url(raw: str) -> str:
@@ -60,7 +70,10 @@ def _request(url: str, token: str, *, accept: str, timeout: float) -> bytes:
         headers={"Authorization": "Bearer " + token, "Accept": accept},
     )
     try:
-        with urlopen(req, timeout=timeout) as response:  # noqa: S310 - operator-selected rig URL
+        # Redirects are intentionally disabled. A rig endpoint that redirects
+        # is a configuration error; following it could replay the device token
+        # to a different origin before we had a chance to inspect the target.
+        with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as response:  # noqa: S310 - operator-selected rig URL
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except HTTPError as exc:
         raise ProbeError(f"rig returned HTTP {exc.code}") from exc
@@ -98,21 +111,15 @@ def _parse_sse(raw: bytes, *, expected_count: int) -> tuple[list[dict[str, Any]]
         if not isinstance(value, dict):
             raise ProbeError("frame SSE data must be a JSON object")
         extras = set(value) & KNOWN_SLICE_B_EXTRAS
-        unknown = set(value) - KNOWN_SLICE_B_EXTRAS
-        # Canonical parsing below catches unknown canonical fields by rebuilding
-        # from the schema-owned mapping. First remove only the two documented
-        # pre-existing Slice-B metadata keys; #904 removes this compatibility
-        # bridge when they move to headers.
+        # First remove only the two documented pre-existing Slice-B metadata
+        # keys. #904 removes this compatibility bridge when they move outside
+        # the canonical payload. The canonical parser remains fail-closed for
+        # every other unknown top-level field.
         wire = {key: item for key, item in value.items() if key not in KNOWN_SLICE_B_EXTRAS}
         try:
-            frame = render_frame_from_mapping(wire)
+            render_frame_from_mapping(wire)
         except Exception as exc:
             raise ProbeError("frame stream violates canonical render_frame v0.1") from exc
-        # render_frame_from_mapping is fail-closed for unknown wire keys. The
-        # set below exists only to make accidental metadata growth explicit.
-        canonical_keys = set(wire)
-        if unknown != canonical_keys:
-            raise ProbeError("internal frame-key accounting failed")
         if "body_id" in value and not BODY_ID_RE.fullmatch(str(value["body_id"])):
             raise ProbeError("frame body_id metadata is invalid")
         payloads.append(value)
