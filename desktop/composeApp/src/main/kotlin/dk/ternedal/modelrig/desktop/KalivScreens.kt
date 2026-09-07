@@ -353,10 +353,8 @@ private fun IconRailItem(destination: KalivNavDestination, on: Boolean, onClick:
 fun KalivNavRail(
     active: KalivScreen,
     onSelect: (KalivScreen) -> Unit,
-    modelName: String,
-    vramUsedGb: Double,
-    vramTotalGb: Double,
-    modelBackend: String,
+    status: KalivSidebarStatus,
+    vram: KalivVramTelemetry,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -380,10 +378,10 @@ fun KalivNavRail(
 
         Spacer(Modifier.weight(1f))
 
-        // Active-model card
-        ActiveModelCard(modelName, vramUsedGb, vramTotalGb, modelBackend)
+        // Model/routing authority comes from explicit configured state.
+        ActiveModelCard(status = status, vram = vram)
         Spacer(Modifier.height(12.dp))
-        PrivacySeal()
+        PrivacySeal(status)
     }
 }
 
@@ -423,29 +421,34 @@ private fun NavRow(destination: KalivNavDestination, active: Boolean, onClick: (
 }
 
 @Composable
-private fun ActiveModelCard(modelName: String, usedGb: Double, totalGb: Double, backend: String) {
+private fun ActiveModelCard(status: KalivSidebarStatus, vram: KalivVramTelemetry) {
     val shape = RoundedCornerShape(11.dp)
+    val vramPresentation = presentVram(vram)
     Column(
         Modifier.fillMaxWidth().clip(shape)
             .background(KalivTheme.colors.SurfaceHigh)
             .border(1.dp, Color(0x33785A37), shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
     ) {
-        SectionLabel("Aktiv model")
+        SectionLabel("Primær model")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Success))
+            Box(
+                Modifier.size(7.dp).clip(RoundedCornerShape(999.dp))
+                    .background(if (status.localOnly) KalivTheme.colors.Success else KalivTheme.colors.Amber),
+            )
             Spacer(Modifier.width(7.dp))
-            Text(modelName, color = KalivTheme.colors.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(status.modelName, color = KalivTheme.colors.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
-        Spacer(Modifier.height(9.dp))
-        val frac = if (totalGb > 0) (usedGb / totalGb).toFloat() else 0f
-        MetaBar(frac)
+        Text(status.modelAuthority, color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+        vramPresentation.fraction?.let { fraction ->
+            Spacer(Modifier.height(9.dp))
+            MetaBar(fraction)
+        }
         Spacer(Modifier.height(5.dp))
         Text(
-            "VRAM ${fmtGb(usedGb)} / ${fmtGb(totalGb)} GB",
+            vramPresentation.label,
             color = KalivTheme.colors.TextMuted,
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
@@ -454,7 +457,7 @@ private fun ActiveModelCard(modelName: String, usedGb: Double, totalGb: Double, 
 }
 
 @Composable
-private fun PrivacySeal() {
+private fun PrivacySeal(status: KalivSidebarStatus) {
     val shape = RoundedCornerShape(11.dp)
     Row(
         Modifier.fillMaxWidth().clip(shape)
@@ -463,19 +466,13 @@ private fun PrivacySeal() {
             .padding(horizontal = 13.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("\uD83D\uDD12", color = KalivTheme.colors.Highlight, fontSize = 15.sp) // 🔒
+        Text(if (status.localOnly) "🔒" else "↗", color = KalivTheme.colors.Highlight, fontSize = 15.sp)
         Spacer(Modifier.width(9.dp))
         Column {
-            Text("100 % lokal", color = KalivTheme.colors.ShellTitleText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-            Text("Intet forlader maskinen", color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp)
+            Text(status.privacyTitle, color = KalivTheme.colors.ShellTitleText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text(status.privacyDetail, color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp)
         }
     }
-}
-
-private fun fmtGb(v: Double): String {
-    // Danish decimal comma, one decimal (handoff copy: "6,2 / 12 GB").
-    val s = String.format(java.util.Locale.US, "%.1f", v)
-    return (if (s.endsWith(".0")) s.dropLast(2) else s).replace('.', ',')
 }
 
 // ---------------------------------------------------------------------------
