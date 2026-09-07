@@ -10,6 +10,7 @@ on:
       - "docs/bodyrig/**"
       - "renderers/bodyrig-unity/**"
       - "tests/bodyrig/renderer_contracts.py"
+      - "tests/bodyrig/live_frame_source_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
@@ -20,6 +21,7 @@ on:
       - "docs/bodyrig/**"
       - "renderers/bodyrig-unity/**"
       - "tests/bodyrig/renderer_contracts.py"
+      - "tests/bodyrig/live_frame_source_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
@@ -54,6 +56,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/bodyrig/renderer_contracts.py
+      - name: Validate live BodyRig frame stream contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/live_frame_source_contract.py
       - name: Validate BodyRig M2.8 digest-bound renderer handoff
         env:
           PYTHONDONTWRITEBYTECODE: "1"
