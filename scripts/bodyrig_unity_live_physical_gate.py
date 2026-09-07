@@ -14,6 +14,7 @@ import sys
 from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
+CANDIDATE_BRANCH = "feat/unity-frame-source"
 
 RUN_SCHEMA = "bodyrig.unity_live_run/v0.1"
 PREFLIGHT_SCHEMA = "bodyrig.live_stream_probe/v0.1"
@@ -251,6 +252,38 @@ def validate_evidence(
     for name, value in sha_values.items():
         if _require_git_sha(value, label=f"{name}.candidate_git_sha") != expected_sha:
             raise LivePhysicalGateError(f"{name} candidate SHA mismatch")
+
+    authority = run.get("authority")
+    if not isinstance(authority, Mapping):
+        raise LivePhysicalGateError("machine live run authority is missing")
+    if authority.get("remote_branch") != CANDIDATE_BRANCH:
+        raise LivePhysicalGateError("machine live run remote branch mismatch")
+    recorded_remote_head = _require_git_sha(
+        authority.get("remote_pr_head_sha"), label="run.authority.remote_pr_head_sha"
+    )
+    recorded_main = _require_git_sha(
+        authority.get("origin_main_sha"), label="run.authority.origin_main_sha"
+    )
+    if recorded_remote_head != expected_sha:
+        raise LivePhysicalGateError("machine live run was not bound to expected remote PR head")
+    if authority.get("remote_pr_head_verified") is not True:
+        raise LivePhysicalGateError("machine live run did not verify remote PR head")
+    if authority.get("origin_main_stable_during_run") is not True:
+        raise LivePhysicalGateError("machine live run did not prove stable origin/main")
+    if authority.get("clean_checkout") is not True:
+        raise LivePhysicalGateError("machine live run did not start/end from a clean checkout")
+
+    if require_git_state:
+        _git("fetch", "--quiet", "origin", "main", CANDIDATE_BRANCH, root=repo_root)
+        current_remote_head = _git("rev-parse", f"origin/{CANDIDATE_BRANCH}", root=repo_root)
+        current_main = _git("rev-parse", "origin/main", root=repo_root)
+        if current_remote_head != expected_sha:
+            raise LivePhysicalGateError("remote #846 head moved after machine evidence was collected")
+        if current_main != recorded_main:
+            raise LivePhysicalGateError("origin/main moved after machine evidence was collected")
+        behind = _git("rev-list", "--count", f"{expected_sha}..origin/main", root=repo_root)
+        if behind != "0":
+            raise LivePhysicalGateError("#846 candidate is behind current origin/main")
 
     profile = run.get("profile")
     if not isinstance(profile, Mapping):
