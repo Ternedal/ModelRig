@@ -52,9 +52,8 @@ def _write_create_only(path: Path, value: Mapping[str, Any]) -> None:
         if path.exists():
             raise LivePhysicalGateError("final receipt destination appeared before commit")
         temporary.replace(path)
-        temporary = Path()
     finally:
-        if temporary and temporary.exists():
+        if temporary.exists():
             temporary.unlink(missing_ok=True)
 
 
