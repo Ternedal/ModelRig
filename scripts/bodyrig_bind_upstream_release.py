@@ -356,17 +356,21 @@ def build_binding(
             expected_remote_suffix="Ternedal/ModelRig",
             label="ModelRig",
         )
+        bodyrig_verified = bodyrig_head == upstream_revision
+        modelrig_verified = bool(SHA40.fullmatch(modelrig_head))
     else:
         bodyrig_head = upstream_revision
         modelrig_head = "0" * 40
+        bodyrig_verified = False
+        modelrig_verified = False
 
     return {
         "schema": BINDING_SCHEMA,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "modelrig_candidate_git_sha": modelrig_head,
         "production_activation": False,
-        "bodyrig_checkout_verified": bodyrig_head == upstream_revision,
-        "modelrig_checkout_verified": bool(SHA40.fullmatch(modelrig_head)),
+        "bodyrig_checkout_verified": bodyrig_verified,
+        "modelrig_checkout_verified": modelrig_verified,
         "installed_package_verified": True,
         "upstream": core,
     }
