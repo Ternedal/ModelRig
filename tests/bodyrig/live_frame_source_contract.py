@@ -28,6 +28,7 @@ send_marker = "yield return request.SendWebRequest();"
 strict_guard = "if (frame.timestamp_ms <= lastTimestampMs)"
 apply_marker = "renderer.Apply(frame);"
 receipt_marker = "WriteLiveReceiptIfRequested(frame);"
+redirect_marker = "request.redirectLimit = 0;"
 
 assert source.count(reset_marker) >= 2, (
     "timestamp authority must be reset for each new HTTP/SSE stream, not only "
@@ -36,6 +37,9 @@ assert source.count(reset_marker) >= 2, (
 stream_reset = source.find(reset_marker, source.find("while (enabled)"))
 assert stream_reset >= 0 and stream_reset < source.index(send_marker), (
     "the per-stream timestamp reset must happen before the request starts"
+)
+assert redirect_marker in source and source.index(redirect_marker) < source.index(send_marker), (
+    "Bearer-authenticated Unity requests must refuse redirects before the request starts"
 )
 assert strict_guard in source and source.index(strict_guard) < source.index(apply_marker), (
     "non-increasing timestamps must be rejected before renderer.Apply"

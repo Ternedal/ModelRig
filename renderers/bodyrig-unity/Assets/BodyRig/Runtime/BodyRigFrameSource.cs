@@ -88,6 +88,10 @@ namespace ModelRig.BodyRig.UnityRenderer
             {
                 using (var request = UnityWebRequest.Get(url))
                 {
+                    // The paired device token is origin-bound proof material.
+                    // A rig endpoint that redirects is a configuration error;
+                    // do not let Unity replay Bearer credentials to a redirect.
+                    request.redirectLimit = 0;
                     request.SetRequestHeader("Authorization", "Bearer " + token);
                     request.SetRequestHeader("Accept", "text/event-stream");
                     request.downloadHandler = new SseFrameHandler(this);
