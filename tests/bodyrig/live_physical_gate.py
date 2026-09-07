@@ -17,6 +17,7 @@ from scripts.bodyrig_unity_live_physical_gate import (  # noqa: E402
 )
 
 SHA = "a" * 40
+MAIN_SHA = "e" * 40
 BODY = "bodyid-" + "b" * 24
 PACKAGE = "c" * 64
 RIG = "http://127.0.0.1:8080"
@@ -145,6 +146,14 @@ class LivePhysicalGateTests(unittest.TestCase):
             "pr_number": 846,
             "candidate_git_sha": SHA,
             "rig_url": RIG,
+            "authority": {
+                "remote_branch": "feat/unity-frame-source",
+                "remote_pr_head_sha": SHA,
+                "origin_main_sha": MAIN_SHA,
+                "remote_pr_head_verified": True,
+                "origin_main_stable_during_run": True,
+                "clean_checkout": True,
+            },
             "profile": {"body_id": BODY, "package_sha256": PACKAGE},
             "receipts": {
                 "preflight": {"path": str(preflight_path), "sha256": sha(preflight_path)},
@@ -205,6 +214,18 @@ class LivePhysicalGateTests(unittest.TestCase):
     def test_expected_sha_is_exact_authority(self) -> None:
         with self.assertRaisesRegex(LivePhysicalGateError, "candidate SHA mismatch"):
             self.validate("f" * 40)
+
+    def test_machine_authority_is_required(self) -> None:
+        path = self.evidence / "live-run-receipt.json"
+        run = json.loads(path.read_text(encoding="utf-8"))
+        del run["authority"]
+        write_json(path, run)
+        visual_path = self.evidence / "live-visual-receipt.json"
+        visual = json.loads(visual_path.read_text(encoding="utf-8"))
+        visual["evidence_sha256"]["live_run"] = sha(path)
+        write_json(visual_path, visual)
+        with self.assertRaisesRegex(LivePhysicalGateError, "authority is missing"):
+            self.validate()
 
     def test_tampered_preflight_is_rejected_by_digest_binding(self) -> None:
         path = self.evidence / "live-preflight-receipt.json"
