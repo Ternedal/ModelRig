@@ -51,13 +51,6 @@ def tone_wav(duration_ms: int = 400, sr: int = 16000) -> bytes:
 
 
 def assert_canonical_frame(test: unittest.TestCase, payload: dict[str, object]) -> None:
-    """Bind the HTTP payload to the canonical schema and the executable parser.
-
-    The schema owns the allowed/required top-level wire shape; the parser owns
-    the full v0.1 value semantics. Together they catch both the #904 regression
-    (extra metadata fields) and malformed canonical fields without a second
-    hand-maintained schema implementation in the test suite.
-    """
     schema = json.loads(RENDER_FRAME_SCHEMA.read_text(encoding="utf-8"))
     test.assertIs(schema["additionalProperties"], False)
     required = set(schema["required"])
@@ -101,7 +94,7 @@ class BodySessionTests(unittest.TestCase):
     def test_no_active_body_is_404_and_hooks_are_noops(self) -> None:
         self.assertEqual(self.c.get("/body/state").status_code, 404)
         self.assertEqual(self.c.post("/body/interrupt").status_code, 404)
-        body_session.note_state("thinking")  # must not raise
+        body_session.note_state("thinking")
         self.assertIsNone(body_session._session)
 
     def test_frames_are_v01_wire_and_follow_the_turn(self) -> None:
@@ -120,7 +113,6 @@ class BodySessionTests(unittest.TestCase):
         self.assertEqual(self.c.post("/body/state/listening").json()["state"], "listening")
         self.assertEqual(self.c.post("/body/state/idle").json()["state"], "idle")
         self.assertEqual(self.c.post("/body/state/dancing").status_code, 422)
-        # States the client does not own are refused, even though the runtime knows them.
         for owned_elsewhere in ("speaking", "thinking", "waiting_for_tool", "interrupted", "error"):
             self.assertEqual(self.c.post(f"/body/state/{owned_elsewhere}").status_code, 422, owned_elsewhere)
 
@@ -179,14 +171,11 @@ class BodySessionTests(unittest.TestCase):
         session = body_session.current_session()
         duration = session.speak(utterance_id="s1", wav_bytes=tone_wav(400))
         synth_now = body_session._now_ms()
-        # Synthesis-time approximation: the utterance would end at synth_now + duration.
-        # The phone starts playing 5 s later and says so.
         import time as _t
         _t.sleep(0.05)
         r = self.c.post("/body/speech/s1/started")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["state"], "speaking")
-        # Re-anchored: still speaking well past the synthesis-time end.
         frame = session.frame(timestamp_ms=synth_now + duration + 20)
         self.assertEqual(frame["state"], "speaking")
         self.assertGreater(frame["mouth_open"], 0.0)
@@ -206,34 +195,82 @@ class BodySessionTests(unittest.TestCase):
         self._select()
         os.environ.pop("KALIV_BODY_CUES", None)
         session = body_session.current_session()
-        session.set_state("thinking")
+        session.set_state("thinking", utterance_id="c-off-thinking")
         f = session.frame()
         self.assertEqual((f["state"], f["emotion"], f["gesture"]), ("thinking", "neutral", None))
         session.speak(utterance_id="c0", wav_bytes=tone_wav(300), sentence="x" * 200)
         self.assertIsNone(session.frame()["gesture"])
+        self.assertIsNone(session.last_body_cue)
 
-    def test_cues_when_enabled_are_the_documented_policy_and_nothing_more(self) -> None:
+    def test_cues_when_enabled_are_versioned_and_utterance_bound(self) -> None:
         self._select()
         os.environ["KALIV_BODY_CUES"] = "1"
         try:
             session = body_session.current_session()
-            session.set_state("thinking")
+            session.set_state("thinking", utterance_id="c-thinking")
             f = session.frame()
             self.assertEqual((f["state"], f["emotion"]), ("thinking", "curious"))
-            # A short sentence: speaking, no gesture. A long one: explain.
+            thinking_cue = session.last_body_cue
+            self.assertEqual((thinking_cue["type"], thinking_cue["version"], thinking_cue["utterance_id"]),
+                             ("modelrig-body-cue", 1, "c-thinking"))
+
             session.speak(utterance_id="c1", wav_bytes=tone_wav(300), sentence="Ja.")
             f = session.frame()
             self.assertEqual((f["state"], f["gesture"], f["emotion"]), ("speaking", None, "neutral"))
+            self.assertEqual(session.last_body_cue["utterance_id"], "c1")
             session.end_speech("c1")
-            session.speak(utterance_id="c2", wav_bytes=tone_wav(300), sentence="Det er fordi " + "forklaring " * 8)
+
+            duration_c2 = session.speak(utterance_id="c2", wav_bytes=tone_wav(300), sentence="Det er fordi " + "forklaring " * 8)
             f = session.frame()
             self.assertEqual((f["state"], f["gesture"]), ("speaking", "explain"))
-            # Back to idle clears everything: no lingering gesture or emotion.
+            cue = session.last_body_cue
+            self.assertEqual((cue["type"], cue["version"], cue["utterance_id"], cue["body_id"]),
+                             ("modelrig-body-cue", 1, "c2", self.body_id))
+            self.assertEqual(cue["duration_ms"], duration_c2)
+            self.assertTrue(set(cue).isdisjoint({"bone", "bones", "joint", "joints", "transform", "transforms"}))
+
+            before = session.frame()
+            stale = dict(cue)
+            stale["utterance_id"] = "older-utterance"
+            self.assertFalse(session.apply_body_cue(
+                stale,
+                state="speaking",
+                expected_utterance_id="c2",
+                expected_duration_ms=duration_c2,
+            ))
+            after = session.frame()
+            self.assertEqual((after["state"], after["gesture"], after["emotion"]),
+                             (before["state"], before["gesture"], before["emotion"]))
+
+            malformed = dict(cue)
+            malformed["joint_rotation"] = [1, 2, 3]
+            self.assertFalse(session.apply_body_cue(
+                malformed,
+                state="speaking",
+                expected_utterance_id="c2",
+                expected_duration_ms=duration_c2,
+            ))
+
+            with self.assertRaises(TypeError):
+                session.apply_body_cue(cue, state="speaking")  # type: ignore[call-arg]
+            self.assertFalse(session.apply_body_cue(
+                cue,
+                state="speaking",
+                expected_utterance_id="c2",
+            ))
+            wrong_duration = dict(cue)
+            wrong_duration["duration_ms"] = duration_c2 + 1
+            self.assertFalse(session.apply_body_cue(
+                wrong_duration,
+                state="speaking",
+                expected_utterance_id="c2",
+                expected_duration_ms=duration_c2,
+            ))
+
             session.end_speech("c2")
-            session.set_state("idle")
+            session.set_state("idle", utterance_id="c2")
             f = session.frame()
             self.assertEqual((f["state"], f["gesture"], f["emotion"]), ("idle", None, "neutral"))
-            # Interrupt is neutral too -- the interruption rule.
             session.speak(utterance_id="c3", wav_bytes=tone_wav(500), sentence="x" * 100)
             session.interrupt()
             f = session.frame()

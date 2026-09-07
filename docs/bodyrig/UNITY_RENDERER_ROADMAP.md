@@ -47,11 +47,14 @@ person, drevet af det der allerede sker i chatten: turn-start → `thinking`,
 tool-kald → `waiting_for_tool`, TTS-sætning → `speaking` med `audio_envelope`
 fra voice-pipelinen (visemes når VoiceRig leverer timing), stop → `interrupted`
 → `listening`. Udstillet som `GET /body/frames` (SSE: én v0.1-frame pr. linje)
-bag samme forwarding. BodyCue-mapning (emotion/gesture fra svaret) er en
-separat, lille slice ovenpå — landet 3/9 som `body_cues.py`, **default fra**
-(`KALIV_BODY_CUES=1`): `explain` for lange sætninger, `curious` under
-thinking, `concerned` ved fejl, nulstilling ved idle/listening/interrupted.
-Ingen sentiment-udledning fra ordene.
+bag samme forwarding. BodyCue-mapning er en separat, lille slice ovenpå og er
+**default fra** (`KALIV_BODY_CUES=1`). Production-grænsen er nu canonical
+BodyCue v1: speech-cues kopierer VoiceRigs eksakte `utterance_id`, valideres
+fail-closed og matches mod aktiv body/utterance før semantikken oversættes til
+BodyRigs interne renderer-neutrale plan. Lange sætninger får semantisk
+`gesture=explain`. State-only faser opfinder ikke et `utterance_id`; optional
+state emotion/energy-cues kræver en allerede legitim utterance-authority. Ingen
+sentiment-udledning fra ordene. Se `BODYCUE_V1_RUNTIME.md`.
 Som landet: `GET /body/state` (én frame), `GET /body/frames` (SSE, 20 fps,
 valgfrit `?limit=N`), `POST /body/interrupt` (hård afbrydelse: alle
 utterances annulleres, mund nulstilles, `interrupted`), `POST /body/state/{navn}`

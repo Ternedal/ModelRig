@@ -104,10 +104,13 @@ hendes krop, ikke demo-identitetens. MediaPipe-kravene står i
 
 ## Hvad der ikke virker endnu, og hvorfor
 
-- **Emotion og gestik** er `neutral`/ingen som standard. Sæt
-  `KALIV_BODY_CUES=1` i appliancens env for den lille, eksplicitte politik:
-  lange sætninger får `explain`-gestik under tale, thinking er `curious`
-  (lavt), fejl er `concerned`; idle/listening/interrupted nulstiller. Intet
-  udledes af ordene selv — ingen sentiment-gætteri. Se `worker/app/body_cues.py`.
+- **Emotion og gestik** er `neutral`/ingen som standard. `KALIV_BODY_CUES=1`
+  aktiverer den lille eksplicitte **BodyCue v1**-politik. Speech-cues bruger
+  VoiceRigs eksakte `utterance_id`; lange sætninger får semantisk
+  `gesture=explain`. State-only faser opfinder ikke et `utterance_id`, så
+  `thinking/error` får kun optional emotion/energy-cue, når en caller allerede
+  har legitim utterance-authority. Intet udledes af ordene selv — ingen
+  sentiment-gætteri. Se `worker/app/body_cues.py` og
+  `docs/bodyrig/BODYCUE_V1_RUNTIME.md`.
 - **Telefon/Quest**: Unity-projektet bygger endnu ikke til Android; slice D.
 - **Demo-identiteten** er en fixture. Den rigtige krop: afsnit 5.
