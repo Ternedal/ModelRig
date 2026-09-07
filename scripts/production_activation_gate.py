@@ -57,6 +57,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 ALLOWED_PROMOTION_PATHS = frozenset(
     {
+        "CURRENT_STATE.md",
         "scripts/production_activation_gate.py",
         "scripts/production_activation_promote.ps1",
         "tests/workflow_production_activation_promotion.py",
