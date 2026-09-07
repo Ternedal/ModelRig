@@ -54,12 +54,12 @@ def sha(char: str) -> str:
     return char * 64
 
 
-def renderer(*, platform: str, revision: str, salt: str) -> dict:
+def renderer(*, platform: str, revision: str, digests: tuple[str, str, str]) -> dict:
     return {
         "bodyrig_revision": revision,
-        "probe_report_sha256": sha(salt),
-        "deformation_report_sha256": sha(chr(ord(salt) + 1)),
-        "quality_report_sha256": sha(chr(ord(salt) + 2)),
+        "probe_report_sha256": sha(digests[0]),
+        "deformation_report_sha256": sha(digests[1]),
+        "quality_report_sha256": sha(digests[2]),
         "deformation_sequence_revision": "humanoid-muscle-sweep-v1",
         "machine_quality_revision": "skinned-mesh-geometry-v1",
         "machine_quality_pass": True,
@@ -98,8 +98,12 @@ def release_fixture(*, body_id: str, package_sha: str) -> dict:
             "skin_qa_assessment": "low-risk",
         },
         "renderer_acceptance": {
-            "windows_unity_univrm": renderer(platform="WindowsPlayer", revision=revision, salt="8"),
-            "android_quest_class": renderer(platform="Android", revision=revision, salt="b"),
+            "windows_unity_univrm": renderer(
+                platform="WindowsPlayer", revision=revision, digests=("8", "9", "a")
+            ),
+            "android_quest_class": renderer(
+                platform="Android", revision=revision, digests=("b", "c", "d")
+            ),
         },
         "release_gate_pass": True,
         "production_activation": True,
@@ -150,7 +154,7 @@ expect_error(
 )
 
 cross_platform_drift = copy.deepcopy(release)
-cross_platform_drift["renderer_acceptance"]["android_quest_class"]["avatar_sha256"] = sha("d")
+cross_platform_drift["renderer_acceptance"]["android_quest_class"]["avatar_sha256"] = sha("e")
 expect_error(
     lambda: validate_release(cross_platform_drift, release_sha256=release_sha,
                              installed_body_id=body_id, installed_package_sha256=package_sha),
