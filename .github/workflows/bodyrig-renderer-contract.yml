@@ -12,10 +12,12 @@ on:
       - "tests/bodyrig/renderer_contracts.py"
       - "tests/bodyrig/live_frame_source_contract.py"
       - "tests/bodyrig/live_stream_probe.py"
+      - "tests/bodyrig/live_physical_gate.py"
       - "scripts/bodyrig_live_stream_probe.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
+      - "scripts/bodyrig_unity_live_*"
       - ".github/workflows/bodyrig-renderer-contract.yml"
   pull_request:
     paths:
@@ -25,10 +27,12 @@ on:
       - "tests/bodyrig/renderer_contracts.py"
       - "tests/bodyrig/live_frame_source_contract.py"
       - "tests/bodyrig/live_stream_probe.py"
+      - "tests/bodyrig/live_physical_gate.py"
       - "scripts/bodyrig_live_stream_probe.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
+      - "scripts/bodyrig_unity_live_*"
       - ".github/workflows/bodyrig-renderer-contract.yml"
   workflow_dispatch:
 
@@ -72,6 +76,14 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 scripts/bodyrig_live_stream_probe.py --help
+      - name: Sabotage-test the independent #846 live physical gate
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/live_physical_gate.py
+      - name: Validate #846 live physical gate CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 scripts/bodyrig_unity_live_physical_gate.py --help
       - name: Validate BodyRig M2.8 digest-bound renderer handoff
         env:
           PYTHONDONTWRITEBYTECODE: "1"
