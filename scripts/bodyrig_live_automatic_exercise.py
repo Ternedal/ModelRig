@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -124,9 +125,8 @@ def _write_create_only(path: Path, value: dict[str, Any]) -> None:
         if path.exists():
             raise ExerciseError("exercise receipt destination appeared before commit")
         temporary.replace(path)
-        temporary = Path()
     finally:
-        if temporary and temporary.exists():
+        if temporary.exists():
             temporary.unlink(missing_ok=True)
 
 
@@ -222,9 +222,6 @@ def run_exercise(
     if not isinstance(package_sha, str) or not SHA256_RE.fullmatch(package_sha):
         raise ExerciseError("machine run package SHA is invalid")
 
-    # Explicit idle gives the collector a deterministic start state. Waiting
-    # before the voice turn guarantees >80 live frames / >5s and spans at least
-    # one complete maximum scheduler blink period (5.2s).
     _request_json(method="POST", url=rig_origin + "/api/v1/body/state/idle", token=token)
     time.sleep(0.35)
     _request_json(method="POST", url=rig_origin + "/api/v1/body/state/listening", token=token)
@@ -248,9 +245,6 @@ def run_exercise(
             timeout_s=180.0,
         )
 
-    # Re-anchor to real playback truth, give the live renderer multiple speaking
-    # frames, then hard-interrupt twice: the second interrupt closes the race
-    # where a cancelling voice stream could finish one late synthesis callback.
     quoted = urllib.parse.quote(utterance, safe="")
     _request_json(method="POST", url=rig_origin + f"/api/v1/body/speech/{quoted}/started", token=token)
     time.sleep(0.40)
@@ -269,7 +263,7 @@ def run_exercise(
 
     receipt = {
         "schema": SCHEMA,
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "production_activation": False,
         "candidate_git_sha": candidate,
         "body_id": body_id,
