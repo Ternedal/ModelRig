@@ -101,6 +101,8 @@ func TestBodySessionRoutesForwardAndValidate(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
 		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-BodyRig-Body-ID", "bodyid-000000000000000000000abc")
+		w.Header().Set("X-BodyRig-Session-ID", "body-session-123")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("data: {\"state\":\"idle\"}\n\n"))
 	}))
@@ -109,14 +111,21 @@ func TestBodySessionRoutesForwardAndValidate(t *testing.T) {
 
 	if rec := doScheduleRequest(h, http.MethodGet, "/api/v1/body/frames?limit=1", scheduleToken, ""); rec.Code != http.StatusOK {
 		t.Fatalf("frames: got %d", rec.Code)
-	} else if !strings.HasPrefix(rec.Body.String(), "data: ") {
-		t.Fatalf("frames: SSE body not passed through: %q", rec.Body.String())
+	} else {
+		if !strings.HasPrefix(rec.Body.String(), "data: ") {
+			t.Fatalf("frames: SSE body not passed through: %q", rec.Body.String())
+		}
+		if rec.Header().Get("X-BodyRig-Body-ID") != "bodyid-000000000000000000000abc" || rec.Header().Get("X-BodyRig-Session-ID") != "body-session-123" {
+			t.Fatalf("frames: BodyRig identity headers not passed through: body=%q session=%q", rec.Header().Get("X-BodyRig-Body-ID"), rec.Header().Get("X-BodyRig-Session-ID"))
+		}
 	}
 	if seen[0] != "GET /body/frames?limit=1" {
 		t.Fatalf("frames forwarded as %q (query must survive)", seen[0])
 	}
 	if rec := doScheduleRequest(h, http.MethodGet, "/api/v1/body/state", scheduleToken, ""); rec.Code != http.StatusOK {
 		t.Fatalf("state: got %d", rec.Code)
+	} else if rec.Header().Get("X-BodyRig-Body-ID") == "" || rec.Header().Get("X-BodyRig-Session-ID") == "" {
+		t.Fatalf("state: BodyRig identity headers must pass through")
 	}
 	if rec := doScheduleRequest(h, http.MethodPost, "/api/v1/body/interrupt", scheduleToken, ""); rec.Code != http.StatusOK {
 		t.Fatalf("interrupt: got %d", rec.Code)

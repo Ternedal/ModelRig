@@ -317,8 +317,14 @@ def validate_evidence(
     if candidate_sha != expected_sha:
         raise PhysicalRendererGateError("physical build candidate differs from expected SHA")
     branch = candidate.get("branch")
-    if not isinstance(branch, str) or not branch or branch == "main":
-        raise PhysicalRendererGateError("physical proof must run from draft, not main")
+    # The proof once had to run from the #720 draft, because that is where the
+    # renderer lived. #720 was merged on 2/9 and the branch is gone; the proof
+    # script dropped this refusal in #894, and the gate kept it -- so a run
+    # that was correct in every other respect failed on the only branch it
+    # could legitimately have come from. The evidence rests on the SHA, which
+    # is checked above; the branch is recorded, not judged.
+    if not isinstance(branch, str) or not branch:
+        raise PhysicalRendererGateError("physical proof recorded no branch")
     _require_git_sha(candidate.get("origin_main_sha"), label="candidate.origin_main_sha")
     for key in (
         "origin_main_stable_during_build",
