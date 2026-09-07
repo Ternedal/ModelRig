@@ -304,9 +304,19 @@ check(not _tracked, f"the generated proof scene is not tracked {_tracked or ''}"
 # never mutate GraphicsSettings.asset.
 _build_source = strip_comments(
     (runtime_dir.parent / "Editor" / "BodyRigBuild.cs").read_text(encoding="utf-8"), ".cs")
-_graphics_source = (
+_graphics_lines = (
     unity / "ProjectSettings" / "GraphicsSettings.asset"
-).read_text(encoding="utf-8")
+).read_text(encoding="utf-8").splitlines()
+_always_included_start = _graphics_lines.index("  m_AlwaysIncludedShaders:") + 1
+_always_included_end = next(
+    index for index in range(_always_included_start, len(_graphics_lines))
+    if _graphics_lines[index].startswith("  m_")
+)
+_always_included_shader_refs = {
+    line.removeprefix("  - ").strip()
+    for line in _graphics_lines[_always_included_start:_always_included_end]
+    if line.startswith("  - ")
+}
 _required_shader_refs = {
     "VRM10/MToon10": "{fileID: 4800000, guid: e0edbf68d81d1f340ae8b110086b7063, type: 3}",
     "UniGLTF/UniUnlit": "{fileID: 4800000, guid: 8c17b56f4bf084c47872edcb95237e4a, type: 3}",
@@ -315,7 +325,7 @@ _required_shader_refs = {
 for _shader, _reference in _required_shader_refs.items():
     check(_shader in _build_source,
           f"the build validates the shader UniVRM may load by name: {_shader}")
-    check(_reference in _graphics_source,
+    check(_reference in _always_included_shader_refs,
           f"the committed GraphicsSettings pins the exact shader authority: {_shader}")
 check("ValidateRequiredShadersPinned()" in _build_source
       and "m_AlwaysIncludedShaders" in _build_source,
