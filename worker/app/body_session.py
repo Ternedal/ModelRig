@@ -7,14 +7,8 @@ the WAV; the turn ends -> idle; the client interrupts -> interrupted.
 Core owns every rule: BodyRigRuntime enforces state and sequence,
 EmbodimentScheduler turns snapshots into frames (blink, breath, procedural
 motion, mouth), voicerig_adapter derives the mouth track, and
-render_frame_to_mapping writes the v0.1 wire. This module only sequences
-events and hands frames out.
-
-Honest limits, on purpose: with no active body the session is a no-op and
-/body/frames answers 404; speech timing is synthesis time on the rig, not
-playback time on the phone (a client may report playback start later);
-and no emotion/gesture classification happens here -- frames say neutral
-until a cue slice supplies more.
+render_frame_to_mapping writes the v0.1 wire. Optional semantic expression
+intent crosses ModelRig -> BodyRig only as validated BodyCue v1.
 """
 
 from __future__ import annotations
@@ -26,7 +20,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Mapping
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -35,6 +29,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from bodyrig.body_cue import BodyCueError, expression_plan_from_body_cue, validate_body_cue  # noqa: E402
 from bodyrig.render_frame import render_frame_to_mapping  # noqa: E402
 from bodyrig.runtime import BodyRigRuntime, BodyState, CancelScope, EventRejected  # noqa: E402
 from bodyrig.scheduler import EmbodimentScheduler, SchedulerError  # noqa: E402
@@ -67,44 +62,98 @@ class BodySession:
                 bodyprint_package=bodyprint_package,
             )
         except SchedulerError:
-            # A bodyprint the motion mixer will not take must not stop the
-            # body from moving at all: fall back to generic motion.
             self._scheduler = EmbodimentScheduler(session_id=self.session_id, bodyprint_id=bodyprint_id)
         self._utterance_ends: dict[str, int] = {}
-        # Tracks kept for playback re-anchoring: the phone reports when it
-        # actually starts playing a sentence, and the mouth restarts from
-        # there. Bounded; a few sentences is all a turn ever needs in flight.
         self._tracks: dict[str, Any] = {}
         self._max_tracks = 16
+        self._last_body_cue: dict[str, Any] | None = None
 
     def _next(self) -> int:
         self._sequence += 1
         return self._sequence
 
+    @property
+    def last_body_cue(self) -> dict[str, Any] | None:
+        """Last successfully applied canonical BodyCue, for local proof/debug only."""
+        return dict(self._last_body_cue) if self._last_body_cue is not None else None
+
     # ---- events ------------------------------------------------------------
 
-    def set_state(self, state: str | BodyState) -> None:
+    def set_state(self, state: str | BodyState, *, utterance_id: str | None = None) -> None:
+        resolved_state = str(getattr(state, "value", state))
         with self._lock:
             try:
                 self._runtime.apply_state(sequence=self._next(), state=state)
             except EventRejected:
-                pass
-            plan = body_cues.plan_for_state(str(getattr(state, "value", state)))
-            if plan is not None:
-                self._apply_plan(plan)
+                return
+            cue = body_cues.cue_for_state(
+                state=resolved_state,
+                utterance_id=utterance_id,
+                body_id=self.body_id,
+            )
+            if cue is not None and utterance_id is not None:
+                self._apply_body_cue_locked(
+                    cue,
+                    state=resolved_state,
+                    expected_utterance_id=utterance_id,
+                )
 
-    def _apply_plan(self, plan: dict[str, Any]) -> None:
-        # Cues are best effort: a plan the runtime rejects is dropped, the
-        # state it came with stands.
+    def apply_body_cue(
+        self,
+        cue: Mapping[str, Any],
+        *,
+        state: str,
+        expected_utterance_id: str,
+        expected_duration_ms: int | None = None,
+    ) -> bool:
+        """Public fail-closed semantic boundary used by tests/integration adapters.
+
+        A caller must supply utterance authority. If the cue carries duration_ms,
+        it is accepted only when the caller also supplies the matching VoiceRig
+        track duration.
+        """
+        with self._lock:
+            return self._apply_body_cue_locked(
+                cue,
+                state=state,
+                expected_utterance_id=expected_utterance_id,
+                expected_duration_ms=expected_duration_ms,
+            )
+
+    def _apply_body_cue_locked(
+        self,
+        cue: Mapping[str, Any],
+        *,
+        state: str,
+        expected_utterance_id: str,
+        expected_duration_ms: int | None = None,
+    ) -> bool:
         try:
+            checked = validate_body_cue(cue)
+        except BodyCueError:
+            return False
+        if checked.get("body_id") not in (None, self.body_id):
+            return False
+        if not expected_utterance_id or checked["utterance_id"] != expected_utterance_id:
+            return False
+        if "duration_ms" in checked:
+            if expected_duration_ms is None or checked["duration_ms"] != expected_duration_ms:
+                return False
+        if state == BodyState.SPEAKING.value:
+            active = self._runtime.snapshot.active_utterance_id
+            if active is None or checked["utterance_id"] != active:
+                return False
+        try:
+            plan = expression_plan_from_body_cue(checked, state=state)
             self._runtime.apply_expression_plan(sequence=self._next(), plan=plan)
-        except EventRejected:
-            pass
+        except (BodyCueError, EventRejected):
+            return False
+        self._last_body_cue = checked
+        return True
 
     def speak(self, *, utterance_id: str, wav_bytes: bytes, headers: dict[str, Any] | None = None,
               sentence: str = "") -> int:
-        """Attach a synthesized sentence and enter SPEAKING. Returns the track
-        duration in ms so the caller can end the utterance when it is over."""
+        """Attach synthesized speech and apply only same-utterance BodyCue v1."""
         with self._lock:
             try:
                 track = wav_envelope_track(utterance_id=utterance_id, wav_bytes=wav_bytes, headers=headers)
@@ -118,9 +167,19 @@ class BodySession:
             except EventRejected:
                 return 0
             self._utterance_ends[utterance_id] = now + track.duration_ms
-            plan = body_cues.plan_for_speech(sentence)
-            if plan is not None:
-                self._apply_plan(plan)
+            cue = body_cues.cue_for_speech(
+                sentence=sentence,
+                utterance_id=utterance_id,
+                body_id=self.body_id,
+                duration_ms=track.duration_ms,
+            )
+            if cue is not None:
+                self._apply_body_cue_locked(
+                    cue,
+                    state=BodyState.SPEAKING.value,
+                    expected_utterance_id=utterance_id,
+                    expected_duration_ms=track.duration_ms,
+                )
             return track.duration_ms
 
     def _remember_track(self, utterance_id: str, track: Any) -> None:
@@ -129,9 +188,7 @@ class BodySession:
             self._tracks.pop(next(iter(self._tracks)))
 
     def playback_started(self, utterance_id: str) -> bool:
-        """The client began playing this sentence NOW: restart its mouth track
-        from this instant. Returns False for an utterance the session does not
-        know (never synthesized here, or long gone)."""
+        """Re-anchor a known sentence's mouth track to actual client playback."""
         with self._lock:
             track = self._tracks.get(utterance_id)
             if track is None:
@@ -165,7 +222,6 @@ class BodySession:
                 pass
 
     def interrupt(self) -> None:
-        """Hard interruption: cancel everything, clear the mouth, go INTERRUPTED."""
         with self._lock:
             for utterance_id in list(self._utterance_ends):
                 self._scheduler.cancel_utterance(utterance_id)
@@ -185,8 +241,6 @@ class BodySession:
     def frame(self, timestamp_ms: int | None = None) -> dict[str, Any]:
         with self._lock:
             now = timestamp_ms if timestamp_ms is not None else _now_ms()
-            # Utterances whose track has run out end themselves: the runtime
-            # must not stay SPEAKING with a silent mouth.
             for utterance_id, end in list(self._utterance_ends.items()):
                 if now >= end:
                     self._utterance_ends.pop(utterance_id, None)
@@ -195,9 +249,6 @@ class BodySession:
                     except EventRejected:
                         pass
             frame = self._scheduler.render(self._runtime.snapshot, timestamp_ms=now)
-            # The SSE data payload is exactly BodyRig RenderFrame v0.1. Stream
-            # identity is HTTP metadata; adding it here would violate the
-            # canonical schema's additionalProperties:false contract.
             return render_frame_to_mapping(frame)
 
 
@@ -212,13 +263,9 @@ def _bodyprint_of(active: Any) -> tuple[str, dict[str, Any] | None]:
 
 
 def current_session(create: bool = True) -> BodySession | None:
-    """The session for the active body, created on first use and replaced
-    when the active body changes. None when no body is active."""
     global _session
     from .body_assets import resolve_active_body
     try:
-        # Two seconds of staleness on WHICH body is active is invisible; a
-        # full archive re-validation per frame is not.
         active = resolve_active_body(max_age_s=2.0)
     except HTTPException:
         return None
@@ -232,7 +279,6 @@ def current_session(create: bool = True) -> BodySession | None:
 
 
 def _session_headers(session: BodySession) -> dict[str, str]:
-    """Identity for one canonical frame response/stream, outside the v0.1 payload."""
     return {
         "X-BodyRig-Body-ID": session.body_id,
         "X-BodyRig-Session-ID": session.session_id,
@@ -241,24 +287,19 @@ def _session_headers(session: BodySession) -> dict[str, str]:
 
 # ---- hooks used by the chat and voice paths (never raise into them) --------
 
-def note_state(state: str) -> None:
-    # Production chat phases call this unconditionally. Default-off must mean
-    # they cannot create/touch BodyRig state until the operator explicitly
-    # enables the integration.
+def note_state(state: str, *, utterance_id: str | None = None) -> None:
     if not bodyrig_enabled():
         return
     try:
         session = current_session(create=True)
         if session is not None:
-            session.set_state(state)
+            session.set_state(state, utterance_id=utterance_id)
     except Exception:
         pass
 
 
 def note_speech(*, utterance_id: str, wav_path: str, headers: dict[str, Any] | None = None,
                 sentence: str = "") -> None:
-    # VoiceRig likewise calls this for every synthesized chunk. Check authority
-    # before opening the WAV or resolving an active body.
     if not bodyrig_enabled():
         return
     try:
@@ -293,11 +334,6 @@ def build_body_session_router() -> APIRouter:
 
     @router.post("/state/{name}")
     def set_state(name: str) -> JSONResponse:
-        # For the client to report what only it knows -- listening while the
-        # mic is open, idle when the user walked away. Nothing else: thinking
-        # and waiting_for_tool come from the turn, speaking from a synthesized
-        # sentence, interrupted from /interrupt, error from a failure. A client
-        # cannot declare the body to be speaking with no mouth to speak.
         if name not in CLIENT_REPORTABLE_STATES:
             raise HTTPException(status_code=422, detail="state is not client-reportable")
         session = current_session(create=True)
@@ -308,7 +344,6 @@ def build_body_session_router() -> APIRouter:
 
     @router.post("/speech/{utterance_id}/started")
     def speech_started(utterance_id: str) -> JSONResponse:
-        # Playback truth from the phone: the mouth restarts from this instant.
         session = current_session(create=False)
         if session is None:
             raise HTTPException(status_code=404, detail="no active body session")
@@ -326,8 +361,6 @@ def build_body_session_router() -> APIRouter:
 
     @router.get("/frames")
     async def frames(limit: int | None = None) -> StreamingResponse:
-        # limit: stop after N frames. For tests and one-shot probes; a
-        # renderer leaves it out and reads until it disconnects.
         session = current_session(create=True)
         if session is None:
             raise HTTPException(status_code=404, detail="no active body")
