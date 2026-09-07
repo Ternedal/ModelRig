@@ -194,6 +194,9 @@ with tempfile.TemporaryDirectory(prefix="modelrig-bodyrig-upstream-") as temp:
     )
     check(binding["schema"] == BINDING_SCHEMA and binding["production_activation"] is False,
           "ModelRig binding remains non-activating even when upstream is production accepted")
+    check(binding["bodyrig_checkout_verified"] is False
+          and binding["modelrig_checkout_verified"] is False,
+          "test seam cannot claim checkout verification without Git authority checks")
     check(binding["installed_package_verified"] is True
           and binding["upstream"]["package_sha256"] == stored.package_sha256,
           "binding re-loads and freshly validates the installed .mrbody store bytes")
