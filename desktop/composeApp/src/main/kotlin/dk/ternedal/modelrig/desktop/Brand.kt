@@ -26,9 +26,9 @@ data class KalivColors(
     val SurfaceHigh: Color,  // elevated (menus, chips, composer)
     val CodeSurface: Color,
     val Border: Color,       // 1dp borders on chips/bubbles/composer
-    val Signal: Color,       // brand.bronze — actions/links
-    val Amber: Color,        // brand.gold — accents
-    val Highlight: Color,    // brand.highlight
+    val Signal: Color,       // primary accent used for actions/links
+    val Amber: Color,        // secondary accent
+    val Highlight: Color,    // softer accent/highlight
     val TextHigh: Color,
     val TextMuted: Color,
     val Success: Color,
@@ -43,7 +43,7 @@ data class KalivColors(
 // and re-apply" -- men re-apply var manuelt, og et haandtastet hex kan drive
 // fra sin kilde uden at nogen opdager det.
 //
-// CodeSurface og onPrimary staar stadig som literaler: de findes ikke i
+// CodeSurface og light onPrimary staar stadig som literaler: de findes ikke i
 // tokensaettet. Det er ikke en forglemmelse, det er graensen for hvad guiden
 // definerer.
 val KalivDark = KalivColors(
@@ -63,20 +63,25 @@ val KalivDark = KalivColors(
     isDark = true,
 )
 
+// Light mode must use the light-specific contrast roles. The old mapping reused
+// brand.bronze/gold/highlight and global semantic colours; those are explicitly
+// deprecated by the token source and, for example, brand.gold is only ~2.3:1
+// against the light canvas. Light.accent is deliberately darker and clears the
+// normal-text contrast boundary while preserving the same warm Kaliv hue.
 val KalivLight = KalivColors(
     Graphite = KalivTokens.Light.canvas,
     Surface = KalivTokens.Light.surface,
     SurfaceHigh = KalivTokens.Light.elevated,
     CodeSurface = Color(0xFFEDE7DA),
     Border = KalivTokens.Light.border,
-    Signal = KalivTokens.Brand.bronze,
-    Amber = KalivTokens.Brand.gold,
-    Highlight = KalivTokens.Brand.highlight,
+    Signal = KalivTokens.Light.accent,
+    Amber = KalivTokens.Light.accent,
+    Highlight = KalivTokens.Light.accentSoft,
     TextHigh = KalivTokens.Light.text,
     TextMuted = KalivTokens.Light.muted,
-    Success = KalivTokens.Semantic.success,
-    Warning = KalivTokens.Semantic.warning,
-    Danger = KalivTokens.Semantic.danger,
+    Success = KalivTokens.Light.ok,
+    Warning = KalivTokens.Light.warn,
+    Danger = KalivTokens.Light.danger,
     isDark = false,
 )
 
@@ -101,7 +106,12 @@ fun KalivTheme(dark: Boolean, content: @Composable () -> Unit) {
     ) else lightColorScheme(
         primary = c.Signal, onPrimary = Color(0xFFF7F4EF),
         secondary = c.Amber, background = c.Graphite, onBackground = c.TextHigh,
-        surface = c.Surface, onSurface = c.TextHigh, error = c.Danger,
+        surface = c.Surface, onSurface = c.TextHigh,
+        surfaceVariant = c.SurfaceHigh, onSurfaceVariant = c.TextMuted,
+        outline = c.Border, error = c.Danger,
+        // Keep every Material container in the same warm parchment family.
+        // Leaving these at M3 defaults introduces a lavender cast in light mode.
+        surfaceContainerLowest = c.Graphite,
         surfaceContainer = c.SurfaceHigh, surfaceContainerHigh = c.SurfaceHigh,
         surfaceContainerHighest = c.SurfaceHigh, surfaceContainerLow = c.Surface,
     )
