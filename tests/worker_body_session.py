@@ -3,7 +3,8 @@
 
 The session follows the turn: thinking, waiting_for_tool, speaking with an
 audio-envelope mouth derived from the synthesized WAV, back to idle when the
-track runs out, interrupted on demand. Every frame is core's v0.1 wire.
+track runs out, interrupted on demand. Every HTTP frame is exactly core's v0.1
+wire; body/session identity travels beside it in X-BodyRig-* headers.
 With no active body the routes answer 404 and the hooks are no-ops.
 """
 
@@ -30,11 +31,16 @@ from bodyrig.identity import build_identity_bundle  # noqa: E402
 from bodyrig.mrbody import build_mrbody  # noqa: E402
 from bodyrig.profile_selection import MRBodyCurrentProfileStore  # noqa: E402
 from bodyrig.profile_store import MRBodyProfileStore  # noqa: E402
+from bodyrig.render_frame import render_frame_from_mapping  # noqa: E402
 from bodyrig_fixtures import png_fixture, tracking_fixture, vrm_fixture  # noqa: E402
 
 from app import body_session  # noqa: E402
 from app.body_assets import BODY_STORE_ENV  # noqa: E402
 from app.body_session import build_body_session_router  # noqa: E402
+
+FRAME_SCHEMA = json.loads(
+    (ROOT / "docs" / "bodyrig" / "schemas" / "render-frame.schema.json").read_text(encoding="utf-8")
+)
 
 
 def tone_wav(duration_ms: int = 400, sr: int = 16000) -> bytes:
@@ -71,6 +77,16 @@ class BodySessionTests(unittest.TestCase):
     def _select(self) -> None:
         MRBodyCurrentProfileStore(self.store).select(self.body_id)
 
+    def _assert_canonical_frame(self, frame: dict) -> None:
+        # This schema intentionally has all properties required and rejects
+        # additionalProperties. Exact top-level equality plus the canonical
+        # parser therefore pins the HTTP payload to render-frame v0.1 without
+        # adding another JSON-schema runtime dependency to the worker tests.
+        self.assertFalse(FRAME_SCHEMA["additionalProperties"])
+        self.assertEqual(set(FRAME_SCHEMA["required"]), set(FRAME_SCHEMA["properties"]))
+        self.assertEqual(set(frame), set(FRAME_SCHEMA["required"]))
+        render_frame_from_mapping(frame)
+
     def test_no_active_body_is_404_and_hooks_are_noops(self) -> None:
         self.assertEqual(self.c.get("/body/state").status_code, 404)
         self.assertEqual(self.c.post("/body/interrupt").status_code, 404)
@@ -79,11 +95,15 @@ class BodySessionTests(unittest.TestCase):
 
     def test_frames_are_v01_wire_and_follow_the_turn(self) -> None:
         self._select()
-        f = self.c.get("/body/state").json()
+        response = self.c.get("/body/state")
+        f = response.json()
+        self._assert_canonical_frame(f)
         self.assertEqual((f["type"], f["version"]), ("bodyrig.render_frame", "0.1"))
         self.assertEqual(f["state"], "idle")
-        self.assertEqual(f["body_id"], self.body_id)
-        self.assertTrue(f["session_id"].startswith("body-"))
+        self.assertNotIn("body_id", f)
+        self.assertNotIn("session_id", f)
+        self.assertEqual(response.headers["x-bodyrig-body-id"], self.body_id)
+        self.assertTrue(response.headers["x-bodyrig-session-id"].startswith("body-"))
         body_session.note_state("thinking")
         self.assertEqual(self.c.get("/body/state").json()["state"], "thinking")
         body_session.note_state("waiting_for_tool")
@@ -103,6 +123,7 @@ class BodySessionTests(unittest.TestCase):
         start = session.started_ms
         now = body_session._now_ms()
         mid = session.frame(timestamp_ms=now + 100)
+        self._assert_canonical_frame(mid)
         self.assertEqual(mid["state"], "speaking")
         self.assertEqual(mid["speech_timing_mode"], "audio_envelope")
         self.assertGreater(mid["mouth_open"], 0.0)
@@ -130,14 +151,20 @@ class BodySessionTests(unittest.TestCase):
         body_session.note_speech(utterance_id="turn-0", wav_path=str(wav_path))
         self.assertEqual(self.c.get("/body/state").json()["state"], "speaking")
 
-    def test_sse_stream_emits_frames(self) -> None:
+    def test_sse_stream_emits_only_canonical_frames_and_identity_headers(self) -> None:
         self._select()
         r = self.c.get("/body/frames", params={"limit": 2})
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.headers["content-type"].startswith("text/event-stream"))
+        self.assertEqual(r.headers["x-bodyrig-body-id"], self.body_id)
+        self.assertTrue(r.headers["x-bodyrig-session-id"].startswith("body-"))
         lines = [json.loads(l[6:]) for l in r.text.splitlines() if l.startswith("data: ")]
         self.assertEqual(self.c.get("/body/frames", params={"limit": 0}).status_code, 422)
         self.assertEqual(len(lines), 2)
+        for frame in lines:
+            self._assert_canonical_frame(frame)
+            self.assertNotIn("body_id", frame)
+            self.assertNotIn("session_id", frame)
         self.assertEqual(lines[0]["type"], "bodyrig.render_frame")
         self.assertGreaterEqual(lines[1]["timestamp_ms"], lines[0]["timestamp_ms"])
 
