@@ -72,9 +72,9 @@ def validate_final_evidence(
     run_path = evidence_dir / "live-run-receipt.json"
     quality_path = evidence_dir / "live-quality-receipt.json"
     exercise_path = evidence_dir / "live-automatic-exercise-receipt.json"
-    run, _ = _load_json(run_path)
-    quality, _ = _load_json(quality_path)
-    exercise, _ = _load_json(exercise_path)
+    run, _, _ = _load_json(run_path)
+    quality, _, _ = _load_json(quality_path)
+    exercise, _, _ = _load_json(exercise_path)
 
     if exercise.get("schema") != EXERCISE_SCHEMA:
         raise LivePhysicalGateError("automatic exercise receipt schema mismatch")
