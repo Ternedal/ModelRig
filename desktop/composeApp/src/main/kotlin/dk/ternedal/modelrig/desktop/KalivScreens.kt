@@ -247,7 +247,7 @@ fun KalivTitleBar(
         modifier = Modifier
             .fillMaxWidth()
             .height(40.dp)
-            .background(Color(0x990B0A09))
+            .background(KalivTheme.colors.ShellTitleBar)
             .padding(start = 14.dp),
     ) {
         KalivAnkh(24)
@@ -258,10 +258,10 @@ fun KalivTitleBar(
             fontSize = 14.sp,
             letterSpacing = 3.sp,
             fontWeight = FontWeight.Medium,
-            color = Color(0xFFE9DFCE),
+            color = KalivTheme.colors.ShellTitleText,
         )
         Spacer(Modifier.width(10.dp))
-        Text(subtitle, fontSize = 11.5.sp, color = Color(0xFF6F665C))
+        Text(subtitle, fontSize = 11.5.sp, color = KalivTheme.colors.ShellSubtitleText)
         if (live != null) {
             Spacer(Modifier.width(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -270,7 +270,7 @@ fun KalivTitleBar(
                         .background(KalivTheme.colors.Warning),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text(live, fontSize = 11.sp, color = Color(0xFFD09A55))
+                Text(live, fontSize = 11.sp, color = KalivTheme.colors.ShellLiveText)
             }
         }
         Spacer(Modifier.weight(1f))
@@ -294,7 +294,7 @@ fun KalivIconRail(active: KalivScreen, onSelect: (KalivScreen) -> Unit) {
         modifier = Modifier
             .width(70.dp)
             .fillMaxHeight()
-            .background(Color(0x8C14110E))
+            .background(KalivTheme.colors.ShellRail)
             .padding(vertical = 16.dp),
     ) {
         val top = listOf(
@@ -335,7 +335,7 @@ private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
         Text(
             glyph,
             fontSize = 18.sp,
-            color = if (on) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+            color = if (on) KalivTheme.colors.TextHigh else KalivTheme.colors.ShellInactiveText,
         )
     }
 }
@@ -360,7 +360,7 @@ fun KalivNavRail(
         modifier
             .width(246.dp)
             .fillMaxHeight()
-            .background(Color(0x8C14110E)) // rgba(20,17,14,.55)
+            .background(KalivTheme.colors.ShellRail)
             .padding(horizontal = 14.dp, vertical = 16.dp),
     ) {
         // No brand row here: the 40dp KalivTitleBar above owns the ankh and
@@ -409,7 +409,7 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
         Spacer(Modifier.width(6.dp))
         Text(
             item.label,
-            color = if (active) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+            color = if (active) KalivTheme.colors.TextHigh else KalivTheme.colors.ShellInactiveText,
             fontSize = 13.5.sp,
             fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
         )
@@ -460,7 +460,7 @@ private fun PrivacySeal() {
         Text("\uD83D\uDD12", color = KalivTheme.colors.Highlight, fontSize = 15.sp) // 🔒
         Spacer(Modifier.width(9.dp))
         Column {
-            Text("100 % lokal", color = Color(0xFFE9DFCE), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text("100 % lokal", color = KalivTheme.colors.ShellTitleText, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             Text("Intet forlader maskinen", color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp)
         }
     }
@@ -498,7 +498,7 @@ fun KalivContextPanel(
         modifier
             .width(300.dp)
             .fillMaxHeight()
-            .background(Color(0x8014110E)) // rgba(20,17,14,.5)
+            .background(KalivTheme.colors.ShellPanel)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -873,7 +873,7 @@ fun KalivAgentCockpit(
         // --- Action log (264dp) ---
         Column(
             Modifier.width(264.dp).fillMaxHeight()
-                .background(Color(0x8014110E))
+                .background(KalivTheme.colors.ShellPanel)
                 .padding(16.dp),
         ) {
             SectionLabel("Handlingslog")
@@ -917,7 +917,7 @@ private fun AgentIdlePrompt() {
             "Find dubletter i mine dokumenter",
         ).forEach {
             Box(Modifier.padding(vertical = 3.dp)) {
-                Text("\u2022 $it", color = Color(0xFFC3B8A8), fontSize = 12.5.sp)
+                Text("\u2022 $it", color = KalivTheme.colors.ShellInactiveText, fontSize = 12.5.sp)
             }
         }
     }
@@ -1238,7 +1238,7 @@ fun KalivComputerUse(
         // --- Left column (340dp) ---
         Column(
             Modifier.width(340.dp).fillMaxHeight()
-                .background(Color(0x8014110E))
+                .background(KalivTheme.colors.ShellPanel)
                 .padding(18.dp),
         ) {
             // "Kaliv styrer skærmen" status only while running.

@@ -34,6 +34,16 @@ data class KalivColors(
     val Success: Color,
     val Warning: Color,
     val Danger: Color,
+    // Desktop shell/chrome roles. Dark keeps the existing handoff values
+    // byte-for-byte; light resolves from the light token family instead of
+    // leaving title bars/rails/side panels as hard-coded dark islands (#910).
+    val ShellTitleBar: Color,
+    val ShellRail: Color,
+    val ShellPanel: Color,
+    val ShellTitleText: Color,
+    val ShellSubtitleText: Color,
+    val ShellInactiveText: Color,
+    val ShellLiveText: Color,
     val isDark: Boolean,
 )
 
@@ -60,6 +70,15 @@ val KalivDark = KalivColors(
     Success = KalivTokens.Semantic.success,
     Warning = KalivTokens.Semantic.warning,
     Danger = KalivTokens.Semantic.danger,
+    ShellTitleBar = Color(0x990B0A09),
+    ShellRail = Color(0x8C14110E),
+    ShellPanel = Color(0x8014110E),
+    ShellTitleText = Color(0xFFE9DFCE),
+    // Preserve the old dark subtitle bytes (#6F665C) without duplicating a
+    // token literal in Brand.kt; Light.muted is the generated owner of them.
+    ShellSubtitleText = KalivTokens.Light.muted,
+    ShellInactiveText = Color(0xFFC3B8A8),
+    ShellLiveText = Color(0xFFD09A55),
     isDark = true,
 )
 
@@ -82,6 +101,13 @@ val KalivLight = KalivColors(
     Success = KalivTokens.Light.ok,
     Warning = KalivTokens.Light.warn,
     Danger = KalivTokens.Light.danger,
+    ShellTitleBar = KalivTokens.Light.surfaceDim,
+    ShellRail = KalivTokens.Light.surface,
+    ShellPanel = KalivTokens.Light.surface,
+    ShellTitleText = KalivTokens.Light.text,
+    ShellSubtitleText = KalivTokens.Light.muted,
+    ShellInactiveText = KalivTokens.Light.muted,
+    ShellLiveText = KalivTokens.Light.warn,
     isDark = false,
 )
 
