@@ -99,11 +99,11 @@ jobs:
       - name: Validate automatic live machine gate CLI surface
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python3 scripts/bodyrig_unity_live_automatic_gate.py --help
+        run: python3 -m scripts.bodyrig_unity_live_automatic_gate --help
       - name: Validate automatic live final gate CLI surface
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python3 scripts/bodyrig_unity_live_automatic_final_gate.py --help
+        run: python3 -m scripts.bodyrig_unity_live_automatic_final_gate --help
       - name: Validate BodyRig M2.8 digest-bound renderer handoff
         env:
           PYTHONDONTWRITEBYTECODE: "1"
