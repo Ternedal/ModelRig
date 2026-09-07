@@ -132,8 +132,7 @@ try {
     $headAfter = Invoke-Git @("rev-parse", "HEAD")
     if ($headAfter -ne $head) { throw "local HEAD moved during automatic proof; discard this evidence" }
 
-    $finalGate = Join-Path $RepoRoot "scripts\bodyrig_unity_live_automatic_final_gate.py"
-    & python $finalGate --expected-sha $head --evidence-dir $EvidenceDir
+    & python -m scripts.bodyrig_unity_live_automatic_final_gate --expected-sha $head --evidence-dir $EvidenceDir
     if ($LASTEXITCODE -ne 0) {
         throw "automatic #846 final gate failed"
     }
