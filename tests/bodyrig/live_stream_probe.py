@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+import sys
+import tempfile
+import threading
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from scripts.bodyrig_live_stream_probe import ProbeError, run_probe  # noqa: E402
+
+BODY_ID = "bodyid-" + "a" * 24
+PACKAGE_SHA = "b" * 64
+TOKEN = "probe-token-not-written-to-receipt"
+
+
+class RigHandler(BaseHTTPRequestHandler):
+    extra_unknown = False
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.headers.get("Authorization") != "Bearer " + TOKEN:
+            self.send_response(401)
+            self.end_headers()
+            return
+        if self.path == "/api/v1/body/active":
+            payload = {
+                "schema": "modelrig-body-assets/v1",
+                "body_id": BODY_ID,
+                "name": "Probe body",
+                "package_sha256": PACKAGE_SHA,
+                "source": "current",
+                "avatar": "/body/active/avatar.vrm",
+                "thumbnail": "/body/active/thumbnail.png",
+                "motions": {},
+                "payload_sizes": {},
+            }
+            raw = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+        if self.path.startswith("/api/v1/body/frames?"):
+            fixture = json.loads(
+                (
+                    ROOT
+                    / "renderers"
+                    / "bodyrig-unity"
+                    / "Assets"
+                    / "BodyRig"
+                    / "Resources"
+                    / "bodyrig-demo.json"
+                ).read_text(encoding="utf-8")
+            )["frames"][0]
+            chunks = []
+            for index in range(5):
+                frame = json.loads(json.dumps(fixture))
+                frame["timestamp_ms"] = 1000 + index * 50
+                frame["session_id"] = "body-test-session"
+                frame["body_id"] = BODY_ID
+                if self.extra_unknown:
+                    frame["renderer_bone"] = "Head"
+                chunks.append("data: " + json.dumps(frame, separators=(",", ":")) + "\n\n")
+            raw = "".join(chunks).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+
+class LiveStreamProbeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        RigHandler.extra_unknown = False
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), RigHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        host, port = self.server.server_address
+        self.base = f"http://{host}:{port}"
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+
+    def test_authenticated_probe_validates_expected_body_and_frames(self) -> None:
+        receipt = run_probe(
+            base_url=self.base,
+            token=TOKEN,
+            expected_body_id=BODY_ID,
+            expected_package_sha256=PACKAGE_SHA,
+            frame_count=5,
+            timeout=3,
+        )
+        self.assertEqual(receipt["schema"], "bodyrig.live_stream_probe/v0.1")
+        self.assertFalse(receipt["production_activation"])
+        self.assertEqual(receipt["active_body_id"], BODY_ID)
+        self.assertEqual(receipt["active_package_sha256"], PACKAGE_SHA)
+        self.assertEqual(receipt["frame_count"], 5)
+        self.assertEqual(receipt["slice_b_compatibility_extras"], ["body_id", "session_id"])
+        self.assertTrue(receipt["canonical_frame_validation"])
+        self.assertNotIn(TOKEN, json.dumps(receipt))
+
+    def test_wrong_token_fails_without_echoing_secret(self) -> None:
+        with self.assertRaisesRegex(ProbeError, r"HTTP 401") as caught:
+            run_probe(
+                base_url=self.base,
+                token="secret-that-must-not-be-echoed",
+                expected_body_id=BODY_ID,
+                expected_package_sha256=PACKAGE_SHA,
+                frame_count=2,
+                timeout=3,
+            )
+        self.assertNotIn("secret-that-must-not-be-echoed", str(caught.exception))
+
+    def test_unknown_wire_field_fails_closed(self) -> None:
+        RigHandler.extra_unknown = True
+        with self.assertRaisesRegex(ProbeError, "canonical render_frame"):
+            run_probe(
+                base_url=self.base,
+                token=TOKEN,
+                expected_body_id=BODY_ID,
+                expected_package_sha256=PACKAGE_SHA,
+                frame_count=2,
+                timeout=3,
+            )
+
+    def test_active_body_mismatch_fails(self) -> None:
+        with self.assertRaisesRegex(ProbeError, "active body differs"):
+            run_probe(
+                base_url=self.base,
+                token=TOKEN,
+                expected_body_id="bodyid-" + "c" * 24,
+                expected_package_sha256=PACKAGE_SHA,
+                frame_count=2,
+                timeout=3,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
