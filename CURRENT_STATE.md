@@ -42,6 +42,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` |
 | `KALIV_AGENT4_OPERATOR_API` | `0` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
+| `KALIV_BODYRIG_ENABLED` | `0` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_COMPUTER_USE` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
@@ -210,6 +211,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_backup.py`
 - `tests/worker_body_assets.py`
 - `tests/worker_body_session.py`
+- `tests/worker_bodyrig_activation.py`
 - `tests/worker_browser_host.py`
 - `tests/worker_browser_peer_adapter.py`
 - `tests/worker_browser_peer_fulfillment.py`
