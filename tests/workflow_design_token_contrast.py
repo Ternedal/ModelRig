@@ -19,10 +19,15 @@ Run: python3 tests/workflow_design_token_contrast.py
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS = ROOT / "assets" / "design" / "kaliv-ui-guide" / "kaliv-ui-tokens.json"
+DESKTOP_BRAND = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Brand.kt"
 
 AA_TEXT = 4.5   # almindelig tekst
 AA_UI = 3.0     # stor tekst, ikoner og UI-komponenter
@@ -120,12 +125,52 @@ for name in sorted(KNOWN_BELOW_AA):
     match = [p for p in all_pairs if p[0] == name]
     check(len(match) == 1, f"kendt defekt findes stadig som et maalt par: {name}")
 
+# #779 pkt. 5: desktop light mode used the deprecated global brand/semantic
+# colours as actual foreground/status roles. Bind it to the theme-specific
+# roles that this same test measures. Read code rather than comments so a
+# commented-out mapping cannot satisfy the gate.
+desktop = code_of(DESKTOP_BRAND)
+light_block = desktop.split("val KalivLight = KalivColors(", 1)[1].split("val LocalKalivColors", 1)[0]
+for role, ref in {
+    "Signal": "KalivTokens.Light.accent",
+    "Amber": "KalivTokens.Light.accent",
+    "Highlight": "KalivTokens.Light.accentSoft",
+    "Success": "KalivTokens.Light.ok",
+    "Warning": "KalivTokens.Light.warn",
+    "Danger": "KalivTokens.Light.danger",
+}.items():
+    check(f"{role} = {ref}" in light_block, f"desktop light {role} uses {ref}")
+check("KalivTokens.Brand." not in light_block,
+      "desktop light palette does not reuse deprecated global brand colours")
+check("KalivTokens.Semantic." not in light_block,
+      "desktop light palette does not reuse deprecated global semantic colours")
+for required in (
+    "surfaceVariant = c.SurfaceHigh",
+    "onSurfaceVariant = c.TextMuted",
+    "outline = c.Border",
+    "surfaceContainerLowest = c.Graphite",
+):
+    check(required in desktop, f"desktop light Material3 mapping pins {required}")
+
+# Text-like roles used on the light canvas must clear AA normal-text contrast.
+# light.warn is a semantic UI indicator and is already measured at AA_UI above.
+for role in ("accent", "muted", "ok", "danger"):
+    ratio = contrast(color["light"][role], color["light"]["canvas"])
+    check(ratio >= AA_TEXT,
+          f"light.{role} vs light.canvas contrast >= {AA_TEXT:.1f} (got {ratio:.2f})")
+old_ratio = contrast(color["brand"]["gold"], color["light"]["canvas"])
+check(old_ratio < AA_TEXT,
+      f"deprecated brand.gold remains a valid light-text regression fixture ({old_ratio:.2f})")
+
 # Sabotage: en gate der ikke kan blive roed er dekoration.
 sab = json.loads(TOKENS.read_text(encoding="utf-8"))["color"]
 sab["dark"]["text"] = sab["dark"]["canvas"]          # tekst = baggrund -> ratio 1.0
 sab_below = {n for n, fg, bg, need in pairs(sab) if contrast(fg, bg) < need}
 check("dark.text on dark.canvas" in sab_below,
       "tekst i baggrundsfarve fanges som under AA")
+sabotaged_desktop = light_block.replace("KalivTokens.Light.accent", "KalivTokens.Brand.gold", 1)
+check("Signal = KalivTokens.Light.accent" not in sabotaged_desktop,
+      "desktop regression: brand.gold for Signal would make the mapping gate red")
 
 print(f"\ndesign token contrast: {passed} passed, {failed} failed")
 if failed:
