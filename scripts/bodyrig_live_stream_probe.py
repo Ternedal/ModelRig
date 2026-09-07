@@ -6,10 +6,9 @@ URL serves the expected active body and a bounded sequence of valid v0.1 render
 frames. The device token is read from an environment variable and is never
 written to the receipt or accepted on the command line.
 
-#904 tracks the pre-existing Slice-B wire debt where session_id/body_id are
-currently appended outside the canonical render-frame schema. Until that issue
-lands, exactly those two metadata keys are tolerated and stripped before the
-canonical parser; any other unknown top-level key fails closed.
+Render-frame `data:` is required to be the canonical v0.1 object with no
+compatibility stripping. Body/session identity is carried separately in the
+`X-BodyRig-*` response headers and is bound into the preflight receipt.
 """
 from __future__ import annotations
 
@@ -33,9 +32,9 @@ from bodyrig import render_frame_from_mapping  # noqa: E402
 
 SCHEMA = "bodyrig.live_stream_probe/v0.1"
 BODY_ID_RE = re.compile(r"^bodyid-[0-9a-f]{24}$")
+SESSION_ID_RE = re.compile(r"^body-[0-9a-f]{12}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-KNOWN_SLICE_B_EXTRAS = frozenset({"session_id", "body_id"})
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
@@ -63,7 +62,7 @@ def _canonical_base_url(raw: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
-def _request(url: str, token: str, *, accept: str, timeout: float) -> bytes:
+def _request(url: str, token: str, *, accept: str, timeout: float) -> tuple[bytes, dict[str, str]]:
     req = Request(
         url,
         method="GET",
@@ -75,13 +74,14 @@ def _request(url: str, token: str, *, accept: str, timeout: float) -> bytes:
         # to a different origin before we had a chance to inspect the target.
         with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as response:  # noqa: S310 - operator-selected rig URL
             raw = response.read(MAX_RESPONSE_BYTES + 1)
+            headers = {name.lower(): value for name, value in response.headers.items()}
     except HTTPError as exc:
         raise ProbeError(f"rig returned HTTP {exc.code}") from exc
     except URLError as exc:
         raise ProbeError("rig is unreachable") from exc
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ProbeError("rig response exceeds safety cap")
-    return raw
+    return raw, headers
 
 
 def _json_object(raw: bytes, *, label: str) -> dict[str, Any]:
@@ -94,13 +94,12 @@ def _json_object(raw: bytes, *, label: str) -> dict[str, Any]:
     return value
 
 
-def _parse_sse(raw: bytes, *, expected_count: int) -> tuple[list[dict[str, Any]], set[str]]:
+def _parse_sse(raw: bytes, *, expected_count: int) -> list[dict[str, Any]]:
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ProbeError("frame stream is not UTF-8") from exc
     payloads: list[dict[str, Any]] = []
-    seen_extras: set[str] = set()
     for line in text.splitlines():
         if not line.startswith("data: "):
             continue
@@ -110,25 +109,16 @@ def _parse_sse(raw: bytes, *, expected_count: int) -> tuple[list[dict[str, Any]]
             raise ProbeError("frame stream contains malformed data JSON") from exc
         if not isinstance(value, dict):
             raise ProbeError("frame SSE data must be a JSON object")
-        extras = set(value) & KNOWN_SLICE_B_EXTRAS
-        # First remove only the two documented pre-existing Slice-B metadata
-        # keys. #904 removes this compatibility bridge when they move outside
-        # the canonical payload. The canonical parser remains fail-closed for
-        # every other unknown top-level field.
-        wire = {key: item for key, item in value.items() if key not in KNOWN_SLICE_B_EXTRAS}
         try:
-            render_frame_from_mapping(wire)
+            render_frame_from_mapping(value)
         except Exception as exc:
             raise ProbeError("frame stream violates canonical render_frame v0.1") from exc
-        if "body_id" in value and not BODY_ID_RE.fullmatch(str(value["body_id"])):
-            raise ProbeError("frame body_id metadata is invalid")
         payloads.append(value)
-        seen_extras.update(extras)
         if len(payloads) == expected_count:
             break
     if len(payloads) != expected_count:
         raise ProbeError(f"expected {expected_count} SSE frames, got {len(payloads)}")
-    return payloads, seen_extras
+    return payloads
 
 
 def _git_head() -> str:
@@ -169,10 +159,10 @@ def run_probe(
     if timeout <= 0 or timeout > 60:
         raise ProbeError("timeout must be > 0 and <= 60 seconds")
 
-    active = _json_object(
-        _request(base + "/api/v1/body/active", token, accept="application/json", timeout=timeout),
-        label="active body manifest",
+    active_raw, _active_headers = _request(
+        base + "/api/v1/body/active", token, accept="application/json", timeout=timeout
     )
+    active = _json_object(active_raw, label="active body manifest")
     if active.get("schema") != "modelrig-body-assets/v1":
         raise ProbeError("active body manifest schema mismatch")
     if active.get("body_id") != expected_body_id:
@@ -181,22 +171,23 @@ def run_probe(
         raise ProbeError("rig active package differs from the prepared renderer package")
 
     query = urlencode({"limit": frame_count})
-    frames, extras = _parse_sse(
-        _request(
-            base + "/api/v1/body/frames?" + query,
-            token,
-            accept="text/event-stream",
-            timeout=timeout,
-        ),
-        expected_count=frame_count,
+    frame_raw, frame_headers = _request(
+        base + "/api/v1/body/frames?" + query,
+        token,
+        accept="text/event-stream",
+        timeout=timeout,
     )
+    frame_body_id = frame_headers.get("x-bodyrig-body-id", "")
+    frame_session_id = frame_headers.get("x-bodyrig-session-id", "")
+    if frame_body_id != expected_body_id:
+        raise ProbeError("frame stream BodyRig body header differs from active body")
+    if SESSION_ID_RE.fullmatch(frame_session_id) is None:
+        raise ProbeError("frame stream BodyRig session header is missing or invalid")
+
+    frames = _parse_sse(frame_raw, expected_count=frame_count)
     timestamps = [int(frame["timestamp_ms"]) for frame in frames]
     if any(b <= a for a, b in zip(timestamps, timestamps[1:])):
         raise ProbeError("frame timestamps are not strictly increasing")
-    for payload in frames:
-        body_id = payload.get("body_id")
-        if body_id is not None and body_id != expected_body_id:
-            raise ProbeError("SSE body_id metadata differs from active body")
 
     return {
         "schema": SCHEMA,
@@ -207,11 +198,14 @@ def run_probe(
         "token_source": "environment",
         "active_body_id": expected_body_id,
         "active_package_sha256": expected_package_sha256,
+        "frame_identity": {
+            "body_id": frame_body_id,
+            "session_id": frame_session_id,
+        },
         "frame_count": len(frames),
         "first_timestamp_ms": timestamps[0],
         "last_timestamp_ms": timestamps[-1],
         "states_observed": sorted({str(frame["state"]) for frame in frames}),
-        "slice_b_compatibility_extras": sorted(extras),
         "canonical_frame_validation": True,
     }
 
