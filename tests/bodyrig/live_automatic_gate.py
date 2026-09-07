@@ -6,11 +6,13 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 FINAL_GATE_PATH = ROOT / "scripts" / "bodyrig_unity_live_automatic_final_gate.py"
 SPEC = importlib.util.spec_from_file_location("bodyrig_auto_final_gate", FINAL_GATE_PATH)
 assert SPEC and SPEC.loader
