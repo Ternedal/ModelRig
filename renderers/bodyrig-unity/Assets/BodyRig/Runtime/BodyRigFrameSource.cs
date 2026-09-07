@@ -12,8 +12,9 @@ namespace ModelRig.BodyRig.UnityRenderer
     /// "data:" line) and applies each frame to the renderer -- the same
     /// contract the fixture player uses, so the renderer cannot tell them
     /// apart. Every frame is validated before it is applied, no frame is
-    /// applied before the VRM is bound, timestamps must advance, and a
-    /// dropped connection reconnects with a delay instead of throwing.
+    /// applied before the VRM is bound, timestamps must advance within each
+    /// stream, and a dropped connection reconnects with a delay instead of
+    /// throwing.
     ///
     /// The fixture player remains the deterministic proof path; this is the
     /// product path. Both feed BodyRigVrmRenderer.Apply and nothing else.
@@ -71,6 +72,10 @@ namespace ModelRig.BodyRig.UnityRenderer
                     request.downloadHandler = new SseFrameHandler(this);
                     request.timeout = 0;
                     connected = false;
+                    // Monotonicity is scoped to one HTTP/SSE stream. A reconnect
+                    // starts a new stream and may legitimately follow a rig reboot
+                    // whose monotonic clock has restarted.
+                    lastTimestampMs = -1;
                     yield return request.SendWebRequest();
                     connected = false;
                     if (request.result != UnityWebRequest.Result.Success)
@@ -91,7 +96,6 @@ namespace ModelRig.BodyRig.UnityRenderer
         /// </summary>
         internal void OnFramePayload(string json)
         {
-            connected = true;
             BodyRigRenderFrame frame;
             try
             {
@@ -109,6 +113,7 @@ namespace ModelRig.BodyRig.UnityRenderer
                 Debug.LogWarning("BodyRig: dropped invalid frame: " + exc.Message);
                 return;
             }
+            connected = true;
             if (renderer == null || !renderer.IsBound)
             {
                 // Same rule as the fixture player: nothing reaches an avatar
@@ -117,13 +122,7 @@ namespace ModelRig.BodyRig.UnityRenderer
             }
             if (frame.timestamp_ms <= lastTimestampMs)
             {
-                // A reconnect restarts the rig's clock; accept the rewind once
-                // by treating a large drop as a new stream, never apply stale
-                // frames within one.
-                if (lastTimestampMs - frame.timestamp_ms < 1000)
-                {
-                    return;
-                }
+                return;
             }
             lastTimestampMs = frame.timestamp_ms;
             renderer.Apply(frame);
