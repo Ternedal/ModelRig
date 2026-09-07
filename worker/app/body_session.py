@@ -194,10 +194,10 @@ class BodySession:
                     except EventRejected:
                         pass
             frame = self._scheduler.render(self._runtime.snapshot, timestamp_ms=now)
-            payload = render_frame_to_mapping(frame)
-            payload["session_id"] = self.session_id
-            payload["body_id"] = self.body_id
-            return payload
+            # The SSE data payload is exactly BodyRig RenderFrame v0.1. Stream
+            # identity is HTTP metadata; adding it here would violate the
+            # canonical schema's additionalProperties:false contract.
+            return render_frame_to_mapping(frame)
 
 
 _session: BodySession | None = None
@@ -228,6 +228,14 @@ def current_session(create: bool = True) -> BodySession | None:
             bodyprint_id, package = _bodyprint_of(active)
             _session = BodySession(body_id=active.body_id, bodyprint_id=bodyprint_id, bodyprint_package=package)
         return _session
+
+
+def _session_headers(session: BodySession) -> dict[str, str]:
+    """Identity for one canonical frame response/stream, outside the v0.1 payload."""
+    return {
+        "X-BodyRig-Body-ID": session.body_id,
+        "X-BodyRig-Session-ID": session.session_id,
+    }
 
 
 # ---- hooks used by the chat and voice paths (never raise into them) --------
@@ -263,7 +271,7 @@ def build_body_session_router() -> APIRouter:
         session = current_session(create=True)
         if session is None:
             raise HTTPException(status_code=404, detail="no active body")
-        return JSONResponse(session.frame())
+        return JSONResponse(session.frame(), headers=_session_headers(session))
 
     @router.post("/interrupt")
     def interrupt() -> JSONResponse:
@@ -326,7 +334,11 @@ def build_body_session_router() -> APIRouter:
                     break
                 await asyncio.sleep(FRAME_INTERVAL_S)
 
-        return StreamingResponse(generate(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+        headers = {
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+            **_session_headers(session),
+        }
+        return StreamingResponse(generate(), media_type="text/event-stream", headers=headers)
 
     return router

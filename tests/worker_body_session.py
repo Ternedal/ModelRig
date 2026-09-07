@@ -30,11 +30,14 @@ from bodyrig.identity import build_identity_bundle  # noqa: E402
 from bodyrig.mrbody import build_mrbody  # noqa: E402
 from bodyrig.profile_selection import MRBodyCurrentProfileStore  # noqa: E402
 from bodyrig.profile_store import MRBodyProfileStore  # noqa: E402
+from bodyrig.render_frame import render_frame_from_mapping  # noqa: E402
 from bodyrig_fixtures import png_fixture, tracking_fixture, vrm_fixture  # noqa: E402
 
 from app import body_session  # noqa: E402
 from app.body_assets import BODY_STORE_ENV  # noqa: E402
 from app.body_session import build_body_session_router  # noqa: E402
+
+RENDER_FRAME_SCHEMA = ROOT / "docs" / "bodyrig" / "schemas" / "render-frame.schema.json"
 
 
 def tone_wav(duration_ms: int = 400, sr: int = 16000) -> bytes:
@@ -44,6 +47,23 @@ def tone_wav(duration_ms: int = 400, sr: int = 16000) -> bytes:
     header += b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, sr, sr * 2, 2, 16)
     header += b"data" + struct.pack("<I", len(samples))
     return header + samples
+
+
+def assert_canonical_frame(test: unittest.TestCase, payload: dict[str, object]) -> None:
+    """Bind the HTTP payload to the canonical schema and the executable parser.
+
+    The schema owns the allowed/required top-level wire shape; the parser owns
+    the full v0.1 value semantics. Together they catch both the #904 regression
+    (extra metadata fields) and malformed canonical fields without a second
+    hand-maintained schema implementation in the test suite.
+    """
+    schema = json.loads(RENDER_FRAME_SCHEMA.read_text(encoding="utf-8"))
+    test.assertIs(schema["additionalProperties"], False)
+    required = set(schema["required"])
+    properties = set(schema["properties"])
+    test.assertEqual(required, properties, "canonical schema must require its complete stable wire")
+    test.assertEqual(set(payload), required, "HTTP frame must have exactly the canonical schema fields")
+    render_frame_from_mapping(payload)
 
 
 class BodySessionTests(unittest.TestCase):
@@ -79,11 +99,13 @@ class BodySessionTests(unittest.TestCase):
 
     def test_frames_are_v01_wire_and_follow_the_turn(self) -> None:
         self._select()
-        f = self.c.get("/body/state").json()
+        response = self.c.get("/body/state")
+        f = response.json()
         self.assertEqual((f["type"], f["version"]), ("bodyrig.render_frame", "0.1"))
         self.assertEqual(f["state"], "idle")
-        self.assertEqual(f["body_id"], self.body_id)
-        self.assertTrue(f["session_id"].startswith("body-"))
+        assert_canonical_frame(self, f)
+        self.assertEqual(response.headers["X-BodyRig-Body-ID"], self.body_id)
+        self.assertTrue(response.headers["X-BodyRig-Session-ID"].startswith("body-"))
         body_session.note_state("thinking")
         self.assertEqual(self.c.get("/body/state").json()["state"], "thinking")
         body_session.note_state("waiting_for_tool")
@@ -130,14 +152,18 @@ class BodySessionTests(unittest.TestCase):
         body_session.note_speech(utterance_id="turn-0", wav_path=str(wav_path))
         self.assertEqual(self.c.get("/body/state").json()["state"], "speaking")
 
-    def test_sse_stream_emits_frames(self) -> None:
+    def test_sse_stream_emits_canonical_frames_with_identity_headers(self) -> None:
         self._select()
         r = self.c.get("/body/frames", params={"limit": 2})
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.headers["content-type"].startswith("text/event-stream"))
+        self.assertEqual(r.headers["X-BodyRig-Body-ID"], self.body_id)
+        self.assertTrue(r.headers["X-BodyRig-Session-ID"].startswith("body-"))
         lines = [json.loads(l[6:]) for l in r.text.splitlines() if l.startswith("data: ")]
         self.assertEqual(self.c.get("/body/frames", params={"limit": 0}).status_code, 422)
         self.assertEqual(len(lines), 2)
+        for frame in lines:
+            assert_canonical_frame(self, frame)
         self.assertEqual(lines[0]["type"], "bodyrig.render_frame")
         self.assertGreaterEqual(lines[1]["timestamp_ms"], lines[0]["timestamp_ms"])
 
