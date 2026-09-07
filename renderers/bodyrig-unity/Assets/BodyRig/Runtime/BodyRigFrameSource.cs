@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -21,6 +22,25 @@ namespace ModelRig.BodyRig.UnityRenderer
     /// </summary>
     public sealed class BodyRigFrameSource : MonoBehaviour
     {
+        private const string LiveReceiptSchema = "bodyrig.unity_live_stream/v0.1";
+
+        [Serializable]
+        private sealed class LiveReceipt
+        {
+            public string schema;
+            public string created_at;
+            public bool production_activation;
+            public string candidate_git_sha;
+            public string body_id;
+            public string package_sha256;
+            public string source_url;
+            public bool bearer_auth_used;
+            public bool renderer_bound;
+            public bool frame_applied;
+            public long first_frame_timestamp_ms;
+            public string first_frame_state;
+        }
+
         [SerializeField] private BodyRigVrmRenderer renderer;
         [SerializeField] private string baseUrl = "";
         [SerializeField] private string token = "";
@@ -28,6 +48,7 @@ namespace ModelRig.BodyRig.UnityRenderer
 
         private long lastTimestampMs = -1;
         private bool connected;
+        private bool liveReceiptAttempted;
 
         public BodyRigVrmRenderer Renderer
         {
@@ -126,6 +147,101 @@ namespace ModelRig.BodyRig.UnityRenderer
             }
             lastTimestampMs = frame.timestamp_ms;
             renderer.Apply(frame);
+            WriteLiveReceiptIfRequested(frame);
+        }
+
+        private void WriteLiveReceiptIfRequested(BodyRigRenderFrame frame)
+        {
+            if (liveReceiptAttempted)
+            {
+                return;
+            }
+            var receiptPathRaw = Environment.GetEnvironmentVariable("BODYRIG_LIVE_RECEIPT");
+            if (string.IsNullOrWhiteSpace(receiptPathRaw))
+            {
+                return;
+            }
+            liveReceiptAttempted = true;
+            try
+            {
+                var receiptPath = Path.GetFullPath(receiptPathRaw);
+                if (File.Exists(receiptPath) || Directory.Exists(receiptPath))
+                {
+                    throw new IOException("BodyRig live receipt destination already exists.");
+                }
+                var directory = Path.GetDirectoryName(receiptPath);
+                if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+                {
+                    throw new DirectoryNotFoundException("BodyRig live receipt directory does not exist.");
+                }
+
+                var receipt = new LiveReceipt
+                {
+                    schema = LiveReceiptSchema,
+                    created_at = DateTimeOffset.UtcNow.ToString("o"),
+                    production_activation = false,
+                    candidate_git_sha = RequireEnvironment("BODYRIG_CANDIDATE_SHA"),
+                    body_id = RequireEnvironment("BODYRIG_BODY_ID"),
+                    package_sha256 = RequireEnvironment("BODYRIG_PACKAGE_SHA256"),
+                    source_url = baseUrl.TrimEnd('/'),
+                    bearer_auth_used = !string.IsNullOrWhiteSpace(token),
+                    renderer_bound = renderer != null && renderer.IsBound,
+                    frame_applied = true,
+                    first_frame_timestamp_ms = frame.timestamp_ms,
+                    first_frame_state = frame.state,
+                };
+                var raw = Encoding.UTF8.GetBytes(JsonUtility.ToJson(receipt, false));
+                var temporary = receiptPath + ".tmp-" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    using (var stream = new FileStream(
+                        temporary,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None))
+                    {
+                        stream.Write(raw, 0, raw.Length);
+                        stream.Flush(true);
+                    }
+                    if (File.Exists(receiptPath) || Directory.Exists(receiptPath))
+                    {
+                        throw new IOException("BodyRig live receipt destination appeared before commit.");
+                    }
+                    File.Move(temporary, receiptPath);
+                    temporary = null;
+                }
+                finally
+                {
+                    if (!string.IsNullOrEmpty(temporary) && File.Exists(temporary))
+                    {
+                        try
+                        {
+                            File.Delete(temporary);
+                        }
+                        catch (IOException)
+                        {
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                        }
+                    }
+                }
+                Debug.Log("BodyRig: first authenticated live frame applied; receipt committed: " + receiptPath);
+            }
+            catch (Exception exc)
+            {
+                Debug.LogError("BodyRig: could not commit live-frame receipt: " + exc.Message);
+            }
+        }
+
+        private static string RequireEnvironment(string name)
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException("BodyRig live proof environment is missing " + name + ".");
+            }
+            return value;
         }
 
         private sealed class SseFrameHandler : DownloadHandlerScript
