@@ -773,12 +773,9 @@ fun App() {
                         RagDocRow(kind = kind, name = s, size = "")
                     },
                     onAddDocument = { ragMode = true; loadRagSources() },
-                    // Tokens/sec + response time would come from the last stream's
-                    // timing; shown as the reference figures until wired to real
-                    // measurement, so the panel is honest about being illustrative.
-                    tokensPerSec = 512,
-                    responseSeconds = 0.83,
-                    sparkline = listOf(3f, 5f, 4f, 7f, 6f, 9f, 7f, 10f, 8f, 11f),
+                    // There is no response-performance measurement pipeline yet.
+                    // Missing evidence is an explicit state, never demo telemetry.
+                    performance = KalivPerformanceTelemetry.Unavailable,
                 )
             }
         } // end Row (three columns)
