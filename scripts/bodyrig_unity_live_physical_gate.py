@@ -26,6 +26,7 @@ VISUAL_SCHEMA = "bodyrig.unity_live_visual_acceptance/v0.1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 _BODY_ID = re.compile(r"^bodyid-[0-9a-f]{24}$")
+_BODY_SESSION_ID = re.compile(r"^body-[0-9a-f]{12}$")
 MAX_JSON_BYTES = 2_000_000
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024 * 1024
 EXPECTED_VISUAL_CHECKS = {
@@ -321,6 +322,14 @@ def validate_evidence(
         raise LivePhysicalGateError("preflight token did not come from environment")
     if preflight.get("canonical_frame_validation") is not True:
         raise LivePhysicalGateError("preflight did not validate canonical frames")
+    frame_identity = preflight.get("frame_identity")
+    if not isinstance(frame_identity, Mapping):
+        raise LivePhysicalGateError("preflight frame identity is missing")
+    if frame_identity.get("body_id") != body_id:
+        raise LivePhysicalGateError("preflight frame body identity mismatch")
+    frame_session_id = frame_identity.get("session_id")
+    if not isinstance(frame_session_id, str) or _BODY_SESSION_ID.fullmatch(frame_session_id) is None:
+        raise LivePhysicalGateError("preflight frame session identity is invalid")
     frame_count = preflight.get("frame_count")
     first_ts = preflight.get("first_timestamp_ms")
     last_ts = preflight.get("last_timestamp_ms")
