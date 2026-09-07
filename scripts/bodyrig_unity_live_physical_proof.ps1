@@ -23,6 +23,7 @@ $ErrorActionPreference = "Stop"
 $GitShaPattern = '^[0-9a-f]{40}$'
 $BodyIdPattern = '^bodyid-[0-9a-f]{24}$'
 $Sha256Pattern = '^[0-9a-f]{64}$'
+$CandidateBranch = "feat/unity-frame-source"
 
 function Invoke-Git {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
@@ -31,6 +32,14 @@ function Invoke-Git {
         throw "git $($Arguments -join ' ') failed: $($lines -join [Environment]::NewLine)"
     }
     return (($lines -join "`n").Trim())
+}
+
+function Assert-FullyClean {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $status = Invoke-Git @("status", "--porcelain=v1", "--untracked-files=all")
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+        throw "repository is not fully clean at $Stage; live evidence is invalid:`n$status"
+    }
 }
 
 function Get-Sha256 {
@@ -61,8 +70,23 @@ if ($LiveReceiptTimeoutSeconds -lt 5 -or $LiveReceiptTimeoutSeconds -gt 300) {
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 Push-Location $RepoRoot
 try {
+    Assert-FullyClean "live proof start"
     $head = Invoke-Git @("rev-parse", "HEAD")
     if ($head -notmatch $GitShaPattern) { throw "current HEAD is not a canonical git SHA" }
+
+    Invoke-Git @("fetch", "--quiet", "origin", "main", $CandidateBranch) | Out-Null
+    $remoteHead = Invoke-Git @("rev-parse", ("origin/" + $CandidateBranch))
+    $mainBefore = Invoke-Git @("rev-parse", "origin/main")
+    if ($remoteHead -notmatch $GitShaPattern -or $mainBefore -notmatch $GitShaPattern) {
+        throw "remote authority is not a canonical git SHA"
+    }
+    if ($head -ne $remoteHead) {
+        throw "local HEAD is not the current remote #846 head; fetch/pull before collecting evidence"
+    }
+    $behind = [int](Invoke-Git @("rev-list", "--count", ($head + "..origin/main")))
+    if ($behind -ne 0) {
+        throw "#846 head is behind current origin/main; rebase before collecting physical evidence"
+    }
 
     $token = [Environment]::GetEnvironmentVariable($TokenEnv, "Process")
     if ([string]::IsNullOrWhiteSpace($token)) {
@@ -172,6 +196,19 @@ try {
     if ([bool]$live.production_activation -ne $false) { throw "Unity live receipt unexpectedly activated production" }
     if ([string]$live.source_url -ne $RigUrl.TrimEnd('/')) { throw "Unity live source URL differs from the probed rig URL" }
 
+    Assert-FullyClean "after Unity live machine proof"
+    $headAfter = Invoke-Git @("rev-parse", "HEAD")
+    if ($headAfter -ne $head) { throw "local HEAD moved during live proof; discard this run" }
+    Invoke-Git @("fetch", "--quiet", "origin", "main", $CandidateBranch) | Out-Null
+    $remoteHeadAfter = Invoke-Git @("rev-parse", ("origin/" + $CandidateBranch))
+    $mainAfter = Invoke-Git @("rev-parse", "origin/main")
+    if ($remoteHeadAfter -ne $remoteHead) {
+        throw "remote #846 head moved during live proof; discard this run"
+    }
+    if ($mainAfter -ne $mainBefore) {
+        throw "origin/main moved during live proof; discard this run and rebase #846"
+    }
+
     $runReceipt = [ordered]@{
         schema = "bodyrig.unity_live_run/v0.1"
         created_at = [DateTimeOffset]::UtcNow.ToString("o")
@@ -179,6 +216,14 @@ try {
         visual_acceptance = $false
         pr_number = 846
         candidate_git_sha = $head
+        authority = [ordered]@{
+            remote_branch = $CandidateBranch
+            remote_pr_head_sha = $remoteHead
+            origin_main_sha = $mainBefore
+            remote_pr_head_verified = $true
+            origin_main_stable_during_run = $true
+            clean_checkout = $true
+        }
         rig_url = $RigUrl.TrimEnd('/')
         profile = [ordered]@{
             body_id = $bodyId
@@ -208,6 +253,7 @@ try {
 
     Write-Host "BODYRIG UNITY LIVE MACHINE GATE: PASS"
     Write-Host "  candidate: $head"
+    Write-Host "  remote:    origin/$CandidateBranch"
     Write-Host "  body:      $bodyId"
     Write-Host "  rig:       $($RigUrl.TrimEnd('/'))"
     Write-Host "  evidence:  $EvidenceDir"
