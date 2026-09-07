@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WCAG-kontrast for designtokens -- maalt, ikke antaget.
+"""WCAG-kontrast og desktop theme-binding for designtokens -- maalt, ikke antaget.
 
 Guidens tilgaengelighedsafsnit kraever "WCAG AA for al almindelig tekst og
 interaktive kontroller" og navngiver en kontrasttest paa user bubble, muted meta
@@ -11,8 +11,10 @@ laast fast, saa de ikke kan glide videre ubemaerket og saa en rettelse ogsaa
 bliver synlig. Testen fejler i BEGGE retninger: et nyt par under AA er en
 regression, og et rettet par er en aendring der skal afspejles i listen.
 
-At rette dem er en designbeslutning: brand.gold og brand.highlight ER brandet,
-og at flytte dem er ikke en oprydning. Se ROADMAP.md.
+#779/#910 binder desuden desktop shell/chrome til de maalte tema-roller. Det er
+ikke nok at have korrekte light tokens, hvis titelbar, rails eller sidepaneler
+stadig bypasser temaet med dark-only literals. Intrinsic browser/page mockup i
+Computer-use er udtrykkeligt content og maa fortsat have lokale farver.
 
 Run: python3 tests/workflow_design_token_contrast.py
 """
@@ -28,6 +30,7 @@ from source_code import code_of  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS = ROOT / "assets" / "design" / "kaliv-ui-guide" / "kaliv-ui-tokens.json"
 DESKTOP_BRAND = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Brand.kt"
+DESKTOP_SCREENS = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivScreens.kt"
 
 AA_TEXT = 4.5   # almindelig tekst
 AA_UI = 3.0     # stor tekst, ikoner og UI-komponenter
@@ -106,6 +109,16 @@ def pairs(color: dict) -> list[tuple[str, str, str, float]]:
     return out
 
 
+def function_block(src: str, name: str) -> str:
+    marker = f"fun {name}("
+    check(marker in src, f"desktop function exists: {name}")
+    if marker not in src:
+        return ""
+    start = src.index(marker)
+    next_fun = src.find("\n@Composable", start + len(marker))
+    return src[start:] if next_fun < 0 else src[start:next_fun]
+
+
 color = json.loads(TOKENS.read_text(encoding="utf-8"))["color"]
 all_pairs = pairs(color)
 below = {name for name, fg, bg, need in all_pairs if contrast(fg, bg) < need}
@@ -125,11 +138,12 @@ for name in sorted(KNOWN_BELOW_AA):
     match = [p for p in all_pairs if p[0] == name]
     check(len(match) == 1, f"kendt defekt findes stadig som et maalt par: {name}")
 
-# #779 pkt. 5: desktop light mode used the deprecated global brand/semantic
-# colours as actual foreground/status roles. Bind it to the theme-specific
-# roles that this same test measures. Read code rather than comments so a
-# commented-out mapping cannot satisfy the gate.
+# #779 pkt. 5 / #907: desktop light mode used the deprecated global
+# brand/semantic colours as actual foreground/status roles. Bind it to the
+# theme-specific roles that this same test measures. Read code rather than
+# comments so a commented-out mapping cannot satisfy the gate.
 desktop = code_of(DESKTOP_BRAND)
+dark_block = desktop.split("val KalivDark = KalivColors(", 1)[1].split("val KalivLight = KalivColors(", 1)[0]
 light_block = desktop.split("val KalivLight = KalivColors(", 1)[1].split("val LocalKalivColors", 1)[0]
 for role, ref in {
     "Signal": "KalivTokens.Light.accent",
@@ -152,6 +166,77 @@ for required in (
 ):
     check(required in desktop, f"desktop light Material3 mapping pins {required}")
 
+# #910: shell/chrome itself must consume the light palette rather than keeping
+# high-area dark literals. Dark mode is explicitly not redesigned, so its old
+# pixels are pinned here while ownership moves into KalivColors.
+for role, value in {
+    "ShellTitleBar": "Color(0x990B0A09)",
+    "ShellRail": "Color(0x8C14110E)",
+    "ShellPanel": "Color(0x8014110E)",
+    "ShellTitleText": "Color(0xFFE9DFCE)",
+    "ShellSubtitleText": "KalivTokens.Light.muted",
+    "ShellInactiveText": "Color(0xFFC3B8A8)",
+    "ShellLiveText": "Color(0xFFD09A55)",
+}.items():
+    check(f"{role} = {value}" in dark_block, f"dark {role} preserves via {value}")
+check(color["light"]["muted"].upper() == "#6F665C",
+      "Light.muted token still owns the preserved dark subtitle bytes #6F665C")
+
+for role, ref in {
+    "ShellTitleBar": "KalivTokens.Light.surfaceDim",
+    "ShellRail": "KalivTokens.Light.surface",
+    "ShellPanel": "KalivTokens.Light.surface",
+    "ShellTitleText": "KalivTokens.Light.text",
+    "ShellSubtitleText": "KalivTokens.Light.muted",
+    "ShellInactiveText": "KalivTokens.Light.muted",
+    "ShellLiveText": "KalivTokens.Light.warn",
+}.items():
+    check(f"{role} = {ref}" in light_block, f"light {role} uses {ref}")
+
+for literal in (
+    "Color(0x990B0A09)",
+    "Color(0x8C14110E)",
+    "Color(0x8014110E)",
+    "Color(0xFFE9DFCE)",
+    "Color(0xFFC3B8A8)",
+):
+    check(literal not in light_block, f"light palette has no copied dark shell literal {literal}")
+
+screens = code_of(DESKTOP_SCREENS)
+component_contracts = {
+    "KalivTitleBar": (
+        ("ShellTitleBar", "ShellTitleText", "ShellSubtitleText", "ShellLiveText"),
+        ("Color(0x990B0A09)", "Color(0xFFE9DFCE)"),
+    ),
+    "KalivIconRail": (("ShellRail",), ("Color(0x8C14110E)",)),
+    "IconRailItem": (("ShellInactiveText",), ("Color(0xFFC3B8A8)",)),
+    "KalivNavRail": (("ShellRail",), ("Color(0x8C14110E)",)),
+    "NavRow": (("ShellInactiveText",), ("Color(0xFFC3B8A8)",)),
+    "PrivacySeal": (("ShellTitleText",), ("Color(0xFFE9DFCE)",)),
+    "KalivContextPanel": (("ShellPanel",), ("Color(0x8014110E)",)),
+    "KalivAgentCockpit": (("ShellPanel",), ("Color(0x8014110E)",)),
+    "AgentIdlePrompt": (("ShellInactiveText",), ("Color(0xFFC3B8A8)",)),
+    "KalivComputerUse": (("ShellPanel",), ("Color(0x8014110E)",)),
+}
+for name, (required, forbidden) in component_contracts.items():
+    body = function_block(screens, name)
+    for role in required:
+        check(f"KalivTheme.colors.{role}" in body, f"{name} consumes theme role {role}")
+    for literal in forbidden:
+        check(literal not in body, f"{name} does not hard-code old shell literal {literal}")
+
+for literal in ("Color(0x990B0A09)", "Color(0x8C14110E)", "Color(0x8014110E)"):
+    check(literal not in screens, f"Screens.kt has no old high-area shell literal {literal}")
+
+# Issue #910's explicit non-goal: the illustrative browser/page is intrinsic
+# content, not application shell. Protect the exception so nobody 'fixes' the
+# issue later by banning every local Color literal in KalivScreens.kt.
+viewport = function_block(screens, "LiveViewport")
+check("Color(0xFFFBF9F5)" in viewport,
+      "intrinsic LiveViewport mock page may retain its local light content colour")
+check("Color(0xFFEDE8E0)" in viewport,
+      "intrinsic LiveViewport browser chrome may retain its local content colour")
+
 # Text-like roles used on the light canvas must clear AA normal-text contrast.
 # light.warn is a semantic UI indicator and is already measured at AA_UI above.
 for role in ("accent", "muted", "ok", "danger"):
@@ -171,6 +256,10 @@ check("dark.text on dark.canvas" in sab_below,
 sabotaged_desktop = light_block.replace("KalivTokens.Light.accent", "KalivTokens.Brand.gold", 1)
 check("Signal = KalivTokens.Light.accent" not in sabotaged_desktop,
       "desktop regression: brand.gold for Signal would make the mapping gate red")
+context = function_block(screens, "KalivContextPanel")
+sabotaged_context = context.replace("KalivTheme.colors.ShellPanel", "Color(0x8014110E)", 1)
+check("KalivTheme.colors.ShellPanel" not in sabotaged_context and "Color(0x8014110E)" in sabotaged_context,
+      "desktop shell regression: context-panel dark literal is detectable")
 
 print(f"\ndesign token contrast: {passed} passed, {failed} failed")
 if failed:
