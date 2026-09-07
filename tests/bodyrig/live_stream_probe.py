@@ -120,7 +120,7 @@ class LiveStreamProbeTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=2)
 
-    def run(self, *, body_id: str = BODY_ID) -> dict:
+    def _run_probe(self, *, body_id: str = BODY_ID) -> dict:
         return run_probe(
             base_url=self.base,
             token=TOKEN,
@@ -131,7 +131,7 @@ class LiveStreamProbeTests(unittest.TestCase):
         )
 
     def test_authenticated_probe_validates_expected_body_frames_and_identity_headers(self) -> None:
-        receipt = self.run()
+        receipt = self._run_probe()
         self.assertEqual(receipt["schema"], "bodyrig.live_stream_probe/v0.1")
         self.assertFalse(receipt["production_activation"])
         self.assertEqual(receipt["active_body_id"], BODY_ID)
@@ -157,27 +157,27 @@ class LiveStreamProbeTests(unittest.TestCase):
     def test_redirect_is_rejected_before_bearer_can_be_replayed(self) -> None:
         RigHandler.redirect_active = True
         with self.assertRaisesRegex(ProbeError, r"HTTP 302"):
-            self.run()
+            self._run_probe()
         self.assertFalse(RigHandler.redirect_followed)
 
     def test_unknown_wire_field_fails_closed(self) -> None:
         RigHandler.extra_unknown = True
         with self.assertRaisesRegex(ProbeError, "canonical render_frame"):
-            self.run()
+            self._run_probe()
 
     def test_wrong_body_header_fails_closed(self) -> None:
         RigHandler.wrong_body_header = True
         with self.assertRaisesRegex(ProbeError, "body header differs"):
-            self.run()
+            self._run_probe()
 
     def test_bad_session_header_fails_closed(self) -> None:
         RigHandler.bad_session_header = True
         with self.assertRaisesRegex(ProbeError, "session header is missing or invalid"):
-            self.run()
+            self._run_probe()
 
     def test_active_body_mismatch_fails(self) -> None:
         with self.assertRaisesRegex(ProbeError, "active body differs"):
-            self.run(body_id="bodyid-" + "c" * 24)
+            self._run_probe(body_id="bodyid-" + "c" * 24)
 
 
 if __name__ == "__main__":
