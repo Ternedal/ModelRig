@@ -95,7 +95,7 @@ fun Agent3TaskScreen(
                 // Unknown/unreadable readiness is Agent 2, not an optimistic guess.
                 readiness = null
                 if (snapshot == null) preview = null
-                error = it.message ?: "Task-readiness kunne ikke hentes"
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
             }
         }
     }
@@ -120,7 +120,9 @@ fun Agent3TaskScreen(
             }
             busy = TaskBusy.NONE
             result.onSuccess { preview = it }
-                .onFailure { error = it.message ?: "Plan-preview fejlede" }
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.PREVIEW, it.message)
+                }
         }
     }
 
@@ -145,7 +147,9 @@ fun Agent3TaskScreen(
             }
             busy = TaskBusy.NONE
             result.onSuccess { snapshot = it }
-                .onFailure { error = it.message ?: "Opgaven kunne ikke startes" }
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START, it.message)
+                }
         }
     }
 
@@ -163,7 +167,9 @@ fun Agent3TaskScreen(
             }
             busy = TaskBusy.NONE
             result.onSuccess { snapshot = it }
-                .onFailure { error = it.message ?: "Task-status kunne ikke hentes" }
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STATUS, it.message)
+                }
         }
     }
 
@@ -186,7 +192,9 @@ fun Agent3TaskScreen(
             }
             busy = TaskBusy.NONE
             result.onSuccess { snapshot = it }
-                .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STOP_PLAN, it.message)
+                }
         }
     }
 
@@ -221,7 +229,10 @@ fun Agent3TaskScreen(
             if (result.isSuccess) {
                 snapshot = result.getOrThrow()
             } else {
-                error = result.exceptionOrNull()?.message ?: "Automatisk task-status fejlede"
+                error = presentAgent3TaskScreenError(
+                    Agent3TaskFailureOperation.AUTOMATIC_STATUS,
+                    result.exceptionOrNull()?.message,
+                )
                 return@LaunchedEffect
             }
         }
