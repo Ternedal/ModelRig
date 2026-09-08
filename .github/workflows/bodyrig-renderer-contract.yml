@@ -10,6 +10,7 @@ on:
       - "docs/bodyrig/**"
       - "renderers/bodyrig-unity/**"
       - "tests/bodyrig/renderer_contracts.py"
+      - "tests/bodyrig/ar_placement_contract.py"
       - "tests/bodyrig/live_frame_source_contract.py"
       - "tests/bodyrig/live_stream_probe.py"
       - "tests/bodyrig/live_physical_gate.py"
@@ -27,6 +28,7 @@ on:
       - "docs/bodyrig/**"
       - "renderers/bodyrig-unity/**"
       - "tests/bodyrig/renderer_contracts.py"
+      - "tests/bodyrig/ar_placement_contract.py"
       - "tests/bodyrig/live_frame_source_contract.py"
       - "tests/bodyrig/live_stream_probe.py"
       - "tests/bodyrig/live_physical_gate.py"
@@ -68,6 +70,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/bodyrig/renderer_contracts.py
+      - name: Validate Slice-D AR placement contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/ar_placement_contract.py
       - name: Validate live BodyRig frame source contract
         env:
           PYTHONDONTWRITEBYTECODE: "1"

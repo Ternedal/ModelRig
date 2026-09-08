@@ -26,6 +26,14 @@ namespace ModelRig.BodyRig.UnityRenderer
             loader.VrmPath = Environment.GetEnvironmentVariable("BODYRIG_VRM_PATH");
             loader.LoadOnStart = true;
 
+#if BODYRIG_AR
+            // Placement lives on the always-active controller root. The loader
+            // hands it the loaded VRM child after a successful renderer bind;
+            // hiding that child must never disable this controller itself.
+            var placement = root.AddComponent<BodyRigArPlacement>();
+            placement.Loader = loader;
+#endif
+
             // Frame source: the rig's live stream when a rig is named, otherwise
             // the deterministic fixture -- the physical proof runs unchanged
             // with both env vars unset.
