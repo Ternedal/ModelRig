@@ -460,7 +460,7 @@ fun App() {
                 val cancelled = err != null && cur.text.isNotEmpty()
                 val msg = if (err == null) cur.text
                     else if (cur.text.isEmpty()) "Fejl: ${apiErrorHint(err.message)}"
-                    else cur.text + "\n[afbrudt: ${err.message}]"
+                    else cur.text + "\n[afbrudt: ${apiErrorHint(err.message)}]"
                 messages[assistantIdx] = cur.copy(text = msg, streaming = false)
                 if (err == null || cancelled) {
                     val finalText = messages[assistantIdx].text
