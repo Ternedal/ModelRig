@@ -433,6 +433,13 @@ fun App() {
         )
         Row(Modifier.fillMaxWidth().weight(1f)) {
             if (activeScreen == KalivScreen.CHAT) {
+            val sidebarStatus = presentSidebarStatus(
+                preferLocal = preferLocal,
+                autoCloudFallback = autoCloudFallback,
+                cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
+                localModel = localModel,
+                cloudModel = cloudModel,
+            )
             KalivNavRail(
                 active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                 onSelect = { screen ->
@@ -451,13 +458,10 @@ fun App() {
                         else -> {}
                     }
                 },
-                modelName = localModel,
-                // VRAM is not queried live here; show the model's headline budget
-                // for the reference rig (RTX 3060 12GB). A live figure would come
-                // from /health/full -- left as a follow-up so this stays honest.
-                vramUsedGb = 6.2,
-                vramTotalGb = 12.0,
-                modelBackend = if (localPath.contains("/api/v1/")) "llama.cpp" else "Ollama",
+                status = sidebarStatus,
+                // No live VRAM authority is wired into the desktop shell yet.
+                // Missing measurement stays explicit instead of using reference data.
+                vram = KalivVramTelemetry.Unavailable,
             )
             } else {
                 KalivIconRail(
