@@ -485,9 +485,9 @@ private fun fmtGb(v: Double): String {
 data class RagDocRow(val kind: String, val name: String, val size: String)
 
 /**
- * The 300dp right panel of 1a. Reflects the LIVE state passed in (RAG on/off,
- * ingested sources, tokens/sec) rather than mock copy -- the toggle and the
- * source list are driven by App()'s ragMode / ragSources.
+ * The 300dp right panel of 1a. RAG state and source rows reflect live product
+ * state. Performance is rendered only from explicit measurement authority;
+ * missing measurement stays visibly unavailable rather than using demo data.
  */
 @Composable
 fun KalivContextPanel(
@@ -495,11 +495,10 @@ fun KalivContextPanel(
     onToggleRag: () -> Unit,
     docs: List<RagDocRow>,
     onAddDocument: () -> Unit,
-    tokensPerSec: Int,
-    responseSeconds: Double,
-    sparkline: List<Float>,
+    performance: KalivPerformanceTelemetry,
     modifier: Modifier = Modifier,
 ) {
+    val performancePresentation = presentPerformance(performance)
     Column(
         modifier
             .width(300.dp)
@@ -553,26 +552,41 @@ fun KalivContextPanel(
             OutlineChip("+ Tilf\u00f8j dokument", onClick = onAddDocument, modifier = Modifier.fillMaxWidth())
         }
 
-        // Performance card with sparkline
+        // Performance card: measured evidence or an explicit neutral state.
         KalivCard {
             SectionLabel("Ydelse")
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
                     Text("Tokens / sek.", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
-                    Text("$tokensPerSec", color = KalivTheme.colors.Highlight, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        performancePresentation.tokensPerSecondText,
+                        color = if (performancePresentation.measured) KalivTheme.colors.Highlight else KalivTheme.colors.TextMuted,
+                        fontSize = if (performancePresentation.measured) 22.sp else 12.5.sp,
+                        fontWeight = if (performancePresentation.measured) FontWeight.SemiBold else FontWeight.Normal,
+                    )
                 }
-                Sparkline(sparkline, Modifier.width(120.dp).height(34.dp))
+                performancePresentation.sparkline?.let { points ->
+                    Sparkline(points, Modifier.width(120.dp).height(34.dp))
+                }
             }
             Spacer(Modifier.height(10.dp))
             Row {
                 Text("Svartid", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
                 Spacer(Modifier.weight(1f))
                 Text(
-                    (if (String.format(java.util.Locale.US, "%.2f", responseSeconds).endsWith("0"))
-                        String.format(java.util.Locale.US, "%.2f", responseSeconds) else
-                        String.format(java.util.Locale.US, "%.2f", responseSeconds)).replace('.', ',') + " s",
-                    color = KalivTheme.colors.TextHigh, fontSize = 12.5.sp, fontFamily = FontFamily.Monospace,
+                    performancePresentation.responseTimeText,
+                    color = if (performancePresentation.measured) KalivTheme.colors.TextHigh else KalivTheme.colors.TextMuted,
+                    fontSize = 12.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (!performancePresentation.measured) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Vises først, når en rigtig svartur er målt.",
+                    color = KalivTheme.colors.TextMuted,
+                    fontSize = 10.5.sp,
                 )
             }
         }
