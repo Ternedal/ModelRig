@@ -25,6 +25,18 @@ internal data class KalivAgent3CockpitInteraction(
     val clearTerminalRunEnabled: Boolean,
 )
 
+internal enum class Agent3CockpitConfirmationState {
+    HIDDEN,
+    LIVE,
+    EXPIRED,
+    INVALID,
+}
+
+internal data class KalivAgent3CockpitConfirmation(
+    val state: Agent3CockpitConfirmationState,
+    val actionEnabled: Boolean,
+)
+
 internal fun presentAgent3CockpitInteraction(
     busy: Boolean,
     runState: String?,
@@ -45,6 +57,52 @@ internal fun presentAgent3CockpitInteraction(
         clearTerminalRunEnabled = !busy && terminal,
     )
 }
+
+internal fun presentAgent3CockpitConfirmation(
+    confirmationDigest: String?,
+    confirmationExpiresAt: Double?,
+    stepState: String?,
+    busy: Boolean,
+    nowEpochSeconds: Double,
+): KalivAgent3CockpitConfirmation {
+    if (confirmationDigest == null || isTerminal(stepState)) {
+        return KalivAgent3CockpitConfirmation(
+            state = Agent3CockpitConfirmationState.HIDDEN,
+            actionEnabled = false,
+        )
+    }
+    val expiresAt = confirmationExpiresAt
+    if (expiresAt == null || !expiresAt.isFinite() || !nowEpochSeconds.isFinite()) {
+        return KalivAgent3CockpitConfirmation(
+            state = Agent3CockpitConfirmationState.INVALID,
+            actionEnabled = false,
+        )
+    }
+    if (expiresAt <= nowEpochSeconds) {
+        return KalivAgent3CockpitConfirmation(
+            state = Agent3CockpitConfirmationState.EXPIRED,
+            actionEnabled = false,
+        )
+    }
+    return KalivAgent3CockpitConfirmation(
+        state = Agent3CockpitConfirmationState.LIVE,
+        actionEnabled = !busy,
+    )
+}
+
+internal fun canAgent3CockpitDecide(
+    confirmationDigest: String?,
+    confirmationExpiresAt: Double?,
+    stepState: String?,
+    busy: Boolean,
+    nowEpochSeconds: Double,
+): Boolean = presentAgent3CockpitConfirmation(
+    confirmationDigest = confirmationDigest,
+    confirmationExpiresAt = confirmationExpiresAt,
+    stepState = stepState,
+    busy = busy,
+    nowEpochSeconds = nowEpochSeconds,
+).actionEnabled
 
 internal fun canAgent3CockpitPreview(
     message: String,

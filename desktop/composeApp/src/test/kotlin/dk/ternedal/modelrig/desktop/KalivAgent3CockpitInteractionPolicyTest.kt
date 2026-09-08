@@ -172,4 +172,93 @@ class KalivAgent3CockpitInteractionPolicyTest {
     fun publicationEpochWrapsWithoutReusingTheCurrentMaxValue() {
         assertEquals(1L, nextAgent3CockpitPublicationEpoch(Long.MAX_VALUE))
     }
+
+    @Test
+    fun liveConfirmationIsActionableUntilServerExpiry() {
+        val p = presentAgent3CockpitConfirmation(
+            confirmationDigest = "a".repeat(64),
+            confirmationExpiresAt = 120.0,
+            stepState = "awaiting_confirmation",
+            busy = false,
+            nowEpochSeconds = 119.999,
+        )
+        assertEquals(Agent3CockpitConfirmationState.LIVE, p.state)
+        assertTrue(p.actionEnabled)
+        assertTrue(canAgent3CockpitDecide("a".repeat(64), 120.0, "awaiting_confirmation", false, 119.999))
+    }
+
+    @Test
+    fun exactConfirmationExpiryBoundaryFailsClosed() {
+        val p = presentAgent3CockpitConfirmation(
+            confirmationDigest = "a".repeat(64),
+            confirmationExpiresAt = 120.0,
+            stepState = "awaiting_confirmation",
+            busy = false,
+            nowEpochSeconds = 120.0,
+        )
+        assertEquals(Agent3CockpitConfirmationState.EXPIRED, p.state)
+        assertFalse(p.actionEnabled)
+        assertFalse(canAgent3CockpitDecide("a".repeat(64), 120.0, "awaiting_confirmation", false, 120.0))
+    }
+
+    @Test
+    fun expiredConfirmationRemainsVisibleButNotActionable() {
+        val p = presentAgent3CockpitConfirmation(
+            confirmationDigest = "a".repeat(64),
+            confirmationExpiresAt = 120.0,
+            stepState = "awaiting_confirmation",
+            busy = false,
+            nowEpochSeconds = 121.0,
+        )
+        assertEquals(Agent3CockpitConfirmationState.EXPIRED, p.state)
+        assertFalse(p.actionEnabled)
+    }
+
+    @Test
+    fun missingOrInvalidConfirmationExpiryFailsClosed() {
+        val missing = presentAgent3CockpitConfirmation(
+            confirmationDigest = "a".repeat(64),
+            confirmationExpiresAt = null,
+            stepState = "awaiting_confirmation",
+            busy = false,
+            nowEpochSeconds = 100.0,
+        )
+        val invalid = presentAgent3CockpitConfirmation(
+            confirmationDigest = "a".repeat(64),
+            confirmationExpiresAt = Double.NaN,
+            stepState = "awaiting_confirmation",
+            busy = false,
+            nowEpochSeconds = 100.0,
+        )
+        assertEquals(Agent3CockpitConfirmationState.INVALID, missing.state)
+        assertEquals(Agent3CockpitConfirmationState.INVALID, invalid.state)
+        assertFalse(missing.actionEnabled)
+        assertFalse(invalid.actionEnabled)
+    }
+
+    @Test
+    fun busyLiveConfirmationRemainsVisibleButActionsAreBlocked() {
+        val p = presentAgent3CockpitConfirmation(
+            confirmationDigest = "a".repeat(64),
+            confirmationExpiresAt = 120.0,
+            stepState = "awaiting_confirmation",
+            busy = true,
+            nowEpochSeconds = 100.0,
+        )
+        assertEquals(Agent3CockpitConfirmationState.LIVE, p.state)
+        assertFalse(p.actionEnabled)
+    }
+
+    @Test
+    fun terminalStepHidesConfirmationEvenIfDigestAndFutureExpiryRemain() {
+        val p = presentAgent3CockpitConfirmation(
+            confirmationDigest = "a".repeat(64),
+            confirmationExpiresAt = 120.0,
+            stepState = "done",
+            busy = false,
+            nowEpochSeconds = 100.0,
+        )
+        assertEquals(Agent3CockpitConfirmationState.HIDDEN, p.state)
+        assertFalse(p.actionEnabled)
+    }
 }
