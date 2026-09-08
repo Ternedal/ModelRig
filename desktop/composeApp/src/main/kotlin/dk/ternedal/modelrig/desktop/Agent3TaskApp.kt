@@ -262,12 +262,8 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (surface == Agent3TaskUiPolicy.AGENT3_READONLY) {
-                                "Agent 3 read-only valgt af serveren"
-                            } else {
-                                "Agent 2 fallback"
-                            },
-                            color = if (surface == Agent3TaskUiPolicy.AGENT3_READONLY) {
+                            presentTaskReadinessHeadline(readiness?.selectedSurface),
+                            color = if (readiness?.agent3ReadonlySelected == true) {
                                 KalivTheme.colors.Success
                             } else {
                                 KalivTheme.colors.Amber
@@ -276,27 +272,34 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            readiness?.reason ?: "readiness_unavailable",
+                            presentTaskReadinessStatus(readiness?.selectedSurface, readiness?.reason),
                             color = KalivTheme.colors.TextMuted,
                             fontSize = 11.sp,
                         )
+                        presentTaskReadinessServerReason(readiness?.reason)?.let { evidence ->
+                            Text(evidence, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+                        }
                     }
                     if (busy == DesktopTaskBusy.READINESS) CircularProgressIndicator()
                 }
                 Spacer(Modifier.height(8.dp))
                 DesktopValueRow("Backend", baseUrl)
                 DesktopValueRow("Device-token", if (token.isBlank()) "mangler" else "gemt")
-                DesktopValueRow("Aktiv surface", surface)
-                DesktopValueRow("Fallback", readiness?.fallbackSurface ?: Agent3TaskUiPolicy.AGENT2)
-                DesktopValueRow("Routing", readiness?.uiContract?.routeSource ?: "fail_closed")
+                DesktopValueRow("Aktiv surface", presentTaskReadinessSurface(readiness?.selectedSurface))
+                DesktopValueRow("Fallback", presentTaskReadinessSurface(readiness?.fallbackSurface))
+                DesktopValueRow("Routing", presentTaskReadinessRouteSource(readiness?.uiContract?.routeSource))
                 DesktopValueRow(
                     "Pilot",
                     readiness?.pilot?.successes?.let { "$it/${readiness?.pilot?.tasks ?: "?"}" } ?: "ukendt",
                 )
                 DesktopValueRow("Replans", readiness?.pilot?.replans?.toString() ?: "ukendt")
                 DesktopValueRow("Retry-events", readiness?.pilot?.retryEvents?.toString() ?: "ukendt")
-                readiness?.reasons?.distinct()?.forEach {
-                    Text("• $it", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+                val readinessReasons = readiness?.reasons?.distinct().orEmpty()
+                if (readinessReasons.isNotEmpty()) {
+                    Text("Tekniske readiness-koder", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+                    readinessReasons.forEach {
+                        Text("• $it", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(enabled = !isBusy, onClick = ::refreshReadiness) {
