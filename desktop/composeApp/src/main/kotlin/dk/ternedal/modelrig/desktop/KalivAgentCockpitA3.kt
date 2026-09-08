@@ -121,7 +121,7 @@ fun KalivAgentCockpitA3(
 
     fun preview() {
         val text = input.trim()
-        if (text.isEmpty() || busy) return
+        if (!canAgent3CockpitPreview(text, busy = busy, hasRun = run != null)) return
         busy = true; error = null
         scope.launch {
             val r = withContext(Dispatchers.IO) {
@@ -176,6 +176,24 @@ fun KalivAgentCockpitA3(
         }
     }
 
+    fun clearTerminalRun() {
+        val current = run ?: return
+        val presentation = presentAgent3CockpitInteraction(busy = busy, runState = current.state)
+        if (!presentation.clearTerminalRunEnabled) return
+        // Local history reset only. The server run is already terminal; this
+        // action never claims to cancel or mutate remote execution.
+        run = null
+        planId = null
+        previewSteps = emptyList()
+        rationale = ""
+        revision = 1
+        lastTotal = 0
+        log.clear()
+        error = null
+        input = ""
+    }
+
+    val interaction = presentAgent3CockpitInteraction(busy = busy, runState = run?.state)
     val steps = run?.steps ?: previewSteps
     val doneCount = steps.count { isTerminal(it.state) }
 
@@ -202,7 +220,7 @@ fun KalivAgentCockpitA3(
             } else {
                 AgentComposer(
                     value = input, onValue = { input = it },
-                    enabled = !busy, placeholder = "Ny opgave \u2026",
+                    enabled = interaction.composerEnabled, placeholder = "Ny opgave \u2026",
                     onSend = { preview() },
                 )
                 if (rationale.isNotBlank()) {
@@ -222,6 +240,10 @@ fun KalivAgentCockpitA3(
                 if (run != null && !isTerminal(run!!.state)) {
                     Spacer(Modifier.height(16.dp))
                     OutlineButton("\u25A0  Stop") { cancel() }
+                }
+                if (interaction.clearTerminalRunEnabled) {
+                    Spacer(Modifier.height(16.dp))
+                    OutlineButton("Ny opgave") { clearTerminalRun() }
                 }
             }
             error?.let {
