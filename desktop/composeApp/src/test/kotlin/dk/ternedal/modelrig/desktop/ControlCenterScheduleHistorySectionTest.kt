@@ -95,9 +95,31 @@ class ControlCenterScheduleHistorySectionTest {
             desktopControlCenterScheduleHistoryError("failed (401)"),
         )
         assertEquals(
+            "History-kaldet fik tidsudløb. Prøv igen.",
+            desktopControlCenterScheduleHistoryError("HttpTimeoutException: timed out"),
+        )
+        assertEquals(
+            "Kan ikke nå riggen for execution-historik.",
+            desktopControlCenterScheduleHistoryError("ConnectException: Connection refused"),
+        )
+        assertEquals(
             "Execution-historikken kunne ikke hentes.",
             desktopControlCenterScheduleHistoryError(null),
         )
+    }
+
+    @Test
+    fun unknownHistoryErrorsNeverLeakRawDiagnostics() {
+        val pathLike = "IllegalStateException: C:\\Users\\anders\\private.db"
+        val endpointLike = "HTTP 599 https://10.0.0.4:8080/internal?token=abc"
+        val socketLike = "SocketException: /var/lib/modelrig/private.sock bearer=secret-value"
+        listOf(pathLike, endpointLike, socketLike).forEach { raw ->
+            assertEquals(
+                "Execution-historikken kunne ikke hentes på grund af en ukendt klientfejl.",
+                desktopControlCenterScheduleHistoryError(raw),
+                raw,
+            )
+        }
     }
 
     private fun occurrence(
