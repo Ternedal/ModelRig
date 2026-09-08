@@ -445,7 +445,7 @@ private fun DesktopRunCard(
                 Text(value.run.id, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
             }
             Text(
-                value.run.state,
+                presentTaskRunState(value.run.state),
                 color = desktopRunColor(value.run.state),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
@@ -455,7 +455,7 @@ private fun DesktopRunCard(
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
-        DesktopValueRow("Route", value.run.route.kind)
+        DesktopValueRow("Route", presentTaskRunRoute(value.run.route.kind))
         DesktopValueRow("Step", "${value.run.currentStep}/${value.run.steps.size}")
         DesktopValueRow("Plan terminal", if (value.terminal) "ja" else "nej")
         DesktopValueRow("Statuspolling", if (polling) "aktiv" else "afsluttet")
