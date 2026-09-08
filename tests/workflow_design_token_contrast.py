@@ -13,8 +13,8 @@ regression, og et rettet par er en aendring der skal afspejles i listen.
 
 #779/#910 binder desuden desktop shell/chrome til de maalte tema-roller. Det er
 ikke nok at have korrekte light tokens, hvis titelbar, rails eller sidepaneler
-stadig bypasser temaet med dark-only literals. Intrinsic browser/page mockup i
-Computer-use er udtrykkeligt content og maa fortsat have lokale farver.
+stadig bypasser temaet med dark-only literals. #925 fjernede den illustrative
+Computer-use browser/page-mock, saa den gamle lokale farveundtagelse findes ikke.
 
 Run: python3 tests/workflow_design_token_contrast.py
 """
@@ -216,7 +216,6 @@ component_contracts = {
     "KalivContextPanel": (("ShellPanel",), ("Color(0x8014110E)",)),
     "KalivAgentCockpit": (("ShellPanel",), ("Color(0x8014110E)",)),
     "AgentIdlePrompt": (("ShellInactiveText",), ("Color(0xFFC3B8A8)",)),
-    "KalivComputerUse": (("ShellPanel",), ("Color(0x8014110E)",)),
 }
 for name, (required, forbidden) in component_contracts.items():
     body = function_block(screens, name)
@@ -228,14 +227,10 @@ for name, (required, forbidden) in component_contracts.items():
 for literal in ("Color(0x990B0A09)", "Color(0x8C14110E)", "Color(0x8014110E)"):
     check(literal not in screens, f"Screens.kt has no old high-area shell literal {literal}")
 
-# Issue #910's explicit non-goal: the illustrative browser/page is intrinsic
-# content, not application shell. Protect the exception so nobody 'fixes' the
-# issue later by banning every local Color literal in KalivScreens.kt.
-viewport = function_block(screens, "LiveViewport")
-check("Color(0xFFFBF9F5)" in viewport,
-      "intrinsic LiveViewport mock page may retain its local light content colour")
-check("Color(0xFFEDE8E0)" in viewport,
-      "intrinsic LiveViewport browser chrome may retain its local content colour")
+# #925 removed the illustrative Computer-use browser/page mock entirely. Its
+# old local-colour exception must therefore not remain as a required component.
+check("fun LiveViewport(" not in screens,
+      "removed Computer-use LiveViewport mock remains absent")
 
 # Text-like roles used on the light canvas must clear AA normal-text contrast.
 # light.warn is a semantic UI indicator and is already measured at AA_UI above.

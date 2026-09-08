@@ -519,10 +519,6 @@ fun App() {
                 }
             } else if (activeScreen == KalivScreen.COMPUTER) {
                 KalivComputerUse(
-                    baseUrl = localUrl,
-                    bearer = deviceToken.ifBlank { null },
-                    model = localModel,
-                    system = localSystem.trim().takeIf { it.isNotEmpty() },
                     onRunningChange = { computerRunning = it },
                 )
             } else {
