@@ -522,51 +522,60 @@ private fun DesktopRunCard(
 @Composable
 private fun DesktopTerminationScopes(value: Agent3ReadonlyTaskSnapshot) {
     val termination = value.termination
-    Text("Termination scopes", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
+    Text("Stop og afbrydelse", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
 
     Text("Plan", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-    DesktopValueRow("State", termination.plan.state)
-    DesktopValueRow("Kan anmodes", if (termination.plan.canRequest) "ja" else "nej")
-    DesktopValueRow("Scope", termination.plan.requestScope)
-    DesktopValueRow("Effekt", termination.plan.effect)
-    Text(termination.plan.reason, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+    DesktopValueRow("Planstatus", presentTerminationPlanState(termination.plan.state))
+    DesktopValueRow("Stopmulighed", if (termination.plan.canRequest) "Kan anmodes" else "Ikke tilgængelig")
+    DesktopValueRow("Omfang", presentTerminationPlanScope(termination.plan.requestScope))
+    DesktopValueRow("Stopeffekt", presentTerminationPlanEffect(termination.plan.effect))
     if (termination.plan.effect == "prevent_future_steps_active_tool_continues") {
         Text(
-            "Stop af planen forhindrer fremtidige steps; det aktive tool fortsætter.",
+            "Stop af planen forhindrer kommende trin, men det aktive værktøj kan fortsætte.",
             color = KalivTheme.colors.Amber,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 10.sp,
         )
     }
+    DesktopTechnicalReceipt("Plan", terminationPlanEvidence(termination.plan))
 
-    Spacer(Modifier.height(9.dp))
+    Spacer(Modifier.height(8.dp))
     Text("Modelstream", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-    DesktopValueRow("State", termination.modelStream.state)
-    DesktopValueRow("Aktiv", if (termination.modelStream.active) "ja" else "nej")
-    DesktopValueRow("Handle", if (termination.modelStream.handlePresent) "til stede" else "mangler")
-    DesktopValueRow("Kan anmodes", if (termination.modelStream.canRequest) "ja" else "nej")
-    Text(termination.modelStream.reason, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+    DesktopValueRow("Modelstream-status", presentTerminationModelState(termination.modelStream.state))
+    DesktopValueRow("Stopmulighed", if (termination.modelStream.canRequest) "Kan anmodes" else "Ikke tilgængelig")
+    DesktopValueRow("Runtime-handle", if (termination.modelStream.handlePresent) "Til stede" else "Ikke tilgængeligt")
+    DesktopTechnicalReceipt("Modelstream", terminationModelEvidence(termination.modelStream))
 
-    Spacer(Modifier.height(9.dp))
-    Text("Aktivt tool", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    Spacer(Modifier.height(8.dp))
+    Text("Aktivt værktøj", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
     termination.activeTool?.let { active ->
-        DesktopValueRow("Tool", active.tool)
-        DesktopValueRow("Step", active.stepId)
-        DesktopValueRow("State", active.state)
-        DesktopValueRow("Semantik", active.semantics ?: "ukendt")
-        DesktopValueRow("Handle", if (active.handlePresent) "til stede" else "mangler")
-        DesktopValueRow("Request state", active.requestState)
-        DesktopValueRow("Kan anmodes", if (active.canRequest) "ja" else "nej")
-        Text(active.reason, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
-        if (active.canRequest) {
-            Text(
-                "Serveren rapporterer en tool-kontrol, men normal task-surface har ingen tool-cancel-route; ingen request sendes.",
-                color = KalivTheme.colors.Amber,
-                fontSize = 10.sp,
-            )
-        }
-    } ?: Text("Intet aktivt tool", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+        DesktopValueRow("Værktøj", active.tool)
+        DesktopValueRow("Trin-id", active.stepId)
+        DesktopValueRow("Værktøjsstatus", presentTaskStepState(active.state) ?: "Status ukendt")
+        DesktopValueRow("Afbrydelse", presentTerminationSemantics(active.semantics))
+        DesktopValueRow("Stopstatus", presentTerminationRequestState(active.requestState))
+        DesktopValueRow("Runtime-handle", if (active.handlePresent) "Til stede" else "Ikke tilgængeligt")
+        DesktopValueRow("Direkte stop", if (active.canRequest) "Kan anmodes" else "Ikke tilgængeligt")
+        DesktopTechnicalReceipt("Aktivt værktøj", terminationActiveToolEvidence(active))
+    } ?: Text("Intet aktivt værktøj", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+}
+
+@Composable
+private fun DesktopTechnicalReceipt(title: String, fields: List<TaskTerminationEvidence>) {
+    Spacer(Modifier.height(4.dp))
+    Text(
+        "Teknisk kvittering · $title",
+        color = KalivTheme.colors.TextMuted,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+    )
+    fields.forEach { field ->
+        Text(
+            "${field.label}: ${field.value}",
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 9.sp,
+        )
+    }
 }
 
 @Composable
