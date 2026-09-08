@@ -488,10 +488,10 @@ private fun DesktopRunCard(
             Text("Outcome", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
             Text(it, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
         }
-        value.run.error?.takeIf { it.isNotBlank() }?.let {
+        presentTaskRunError(value.run.state, value.run.error)?.let { message ->
             Spacer(Modifier.height(10.dp))
-            Text("Fejl/outcome", color = KalivTheme.colors.Danger, fontWeight = FontWeight.SemiBold)
-            Text(it, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+            Text("Problem med kørslen", color = KalivTheme.colors.Danger, fontWeight = FontWeight.SemiBold)
+            Text(message, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
         }
         Spacer(Modifier.height(12.dp))
         Text("Tool-status", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
