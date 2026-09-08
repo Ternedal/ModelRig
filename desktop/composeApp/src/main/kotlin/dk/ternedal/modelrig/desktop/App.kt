@@ -171,6 +171,7 @@ fun App() {
         var showSettings by remember { mutableStateOf(true) }
         var toolsMode by remember { mutableStateOf(db.getSetting("toolsMode") == "true") }
         var pendingCard by remember { mutableStateOf<ToolTurn?>(null) }
+        var pendingCardError by remember { mutableStateOf<String?>(null) }
         var showAudit by remember { mutableStateOf(false) }
         var showControlCenter by remember { mutableStateOf(false) }
         var auditRows by remember { mutableStateOf(listOf<AuditEntry>()) }
@@ -193,6 +194,10 @@ fun App() {
         val messages = remember { mutableStateListOf<UiMessage>() }
         var input by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf(false) }
+        val chatConfirmationPresentation = presentChatConfirmation(
+            hasPendingConfirmation = pendingCard != null,
+            busy = busy,
+        )
         var lastSource by remember { mutableStateOf<ChatResult.Source?>(null) }
         var models by remember { mutableStateOf(listOf<String>()) }
         var modelMenuOpen by remember { mutableStateOf(false) }
@@ -252,7 +257,7 @@ fun App() {
 
         fun send() {
             val text = input.trim()
-            if (text.isEmpty() || busy) return
+            if (text.isEmpty() || busy || pendingCard != null) return
             // History for the tools path: the turns BEFORE this message --
             // the worker gets the new message in its own field (Android parity).
             val priorPairs = messages
@@ -301,6 +306,7 @@ fun App() {
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
                                     streaming = false,
                                 )
+                                pendingCardError = null
                                 pendingCard = turn
                             }
                             else -> {
@@ -736,12 +742,12 @@ fun App() {
                         onValueChange = { input = it },
                         modifier = Modifier.weight(1f).heightIn(min = 88.dp),
                         placeholder = { Text("Skriv til Kaliv …", color = KalivTheme.colors.TextMuted) },
-                        enabled = !busy,
+                        enabled = chatConfirmationPresentation.newTurnEnabled,
                         maxLines = 5,
                         shape = RoundedCornerShape(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))
-                    val canSend = !busy && input.isNotBlank()
+                    val canSend = chatConfirmationPresentation.newTurnEnabled && input.isNotBlank()
                     Box(
                         Modifier.size(44.dp)
                             .clip(RoundedCornerShape(16.dp))
@@ -786,8 +792,9 @@ fun App() {
         // cannot skip it. Deny is a first-class action, not a dismiss.
         pendingCard?.let { card ->
             fun decide(approve: Boolean) {
+                if (busy) return
                 val id = card.confirmation_id
-                pendingCard = null
+                pendingCardError = null
                 busy = true
                 scope.launch {
                     val res = withContext(Dispatchers.IO) {
@@ -796,31 +803,50 @@ fun App() {
                                 .toolsConfirm(id, approve)
                         }
                     }
-                    val next = res.getOrNull()
-                    if (next?.status == "confirmation_required") {
-                        // Agent v2: an approved write may continue the chain, and the
-                        // next write returns as its own card. Show it -- one approval
-                        // never authorises the next write.
-                        pendingCard = next
-                        busy = false
-                    } else {
-                        val text = res.fold(
-                            onSuccess = { it.answer.ifBlank { if (approve) "Udført." else "Afvist." } },
-                            onFailure = { "Fejl: ${apiErrorHint(it.message)}" },
-                        )
-                        messages.add(UiMessage("assistant", text))
-                        val cid = convId
-                        if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
-                        busy = false
+                    res.onSuccess { next ->
+                        if (next.status == "confirmation_required") {
+                            // A chained write gets its own authoritative card. One
+                            // approval never authorises the next write.
+                            pendingCard = next
+                            pendingCardError = null
+                        } else {
+                            // Only a successful worker acknowledgement may clear the card.
+                            pendingCard = null
+                            pendingCardError = null
+                            val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
+                            messages.add(UiMessage("assistant", text))
+                            val cid = convId
+                            if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
+                        }
+                    }.onFailure { e ->
+                        // Worker authority is unresolved: keep the card visible for retry/deny.
+                        pendingCardError = apiErrorHint(e.message)
                     }
+                    busy = false
                 }
             }
             AlertDialog(
                 onDismissRequest = { /* et kort lukkes med et VALG, ikke et klik udenfor */ },
                 title = { Text("Kaliv vil bruge et værktøj", fontWeight = FontWeight.SemiBold) },
-                text = { Text(card.summary.ifBlank { card.tool }) },
-                confirmButton = { Button(onClick = { decide(true) }) { Text("Godkend") } },
-                dismissButton = { OutlinedButton(onClick = { decide(false) }) { Text("Afvis") } },
+                text = {
+                    Column {
+                        Text(card.summary.ifBlank { card.tool })
+                        pendingCardError?.let { err ->
+                            Spacer(Modifier.height(8.dp))
+                            Text("Fejl: $err", color = KalivTheme.colors.Danger, fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(enabled = chatConfirmationPresentation.decisionEnabled, onClick = { decide(true) }) {
+                        Text("Godkend")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(enabled = chatConfirmationPresentation.decisionEnabled, onClick = { decide(false) }) {
+                        Text("Afvis")
+                    }
+                },
             )
         }
 
