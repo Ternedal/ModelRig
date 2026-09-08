@@ -41,6 +41,56 @@ class ControlCenterDialogTest {
     }
 
     @Test
+    fun knownControlCenterErrorsKeepBoundedHumanCopy() {
+        assertEquals(
+            "Ikke godkendt. Parringen mangler eller er udløbet.",
+            desktopControlCenterError("Control Center failed (401): token rejected"),
+        )
+        assertEquals(
+            "Riggen kunne ikke levere Control Center-status. Tjek at backend og worker kører.",
+            desktopControlCenterError("status unavailable (502)"),
+        )
+        assertEquals(
+            "Statuskaldet fik tidsudløb. Prøv igen.",
+            desktopControlCenterError("java.net.http.HttpTimeoutException: request timed out"),
+        )
+        assertEquals(
+            "Kan ikke nå riggen. Tjek URL og at serveren kører.",
+            desktopControlCenterError("java.net.ConnectException: Connection refused"),
+        )
+        assertEquals(
+            "Control Center-status kunne ikke hentes.",
+            desktopControlCenterError(null),
+        )
+    }
+
+    @Test
+    fun unknownStatusErrorsNeverLeakRawDiagnostics() {
+        val raw = "IllegalStateException: C:\\Users\\anders\\secret.txt https://10.0.0.4:8080/internal?token=abc"
+        assertEquals(
+            "Control Center-status kunne ikke hentes på grund af en ukendt klientfejl.",
+            desktopControlCenterError(raw),
+        )
+    }
+
+    @Test
+    fun unknownCapabilityErrorsNeverLeakRawDiagnostics() {
+        val raw = "SocketException: /var/lib/modelrig/private.sock bearer=secret-value"
+        assertEquals(
+            "Capabilities kunne ikke hentes på grund af en ukendt klientfejl.",
+            desktopControlCenterCapabilityError(raw),
+        )
+        assertEquals(
+            "Capabilities kunne ikke hentes.",
+            desktopControlCenterCapabilityError("   "),
+        )
+        assertEquals(
+            "Capability-kaldet fik tidsudløb. Prøv igen.",
+            desktopControlCenterCapabilityError("HttpTimeoutException: timed out"),
+        )
+    }
+
+    @Test
     fun capabilityLabelsDescribeAuthorityWithoutInventingHealth() {
         assertEquals("læse", desktopControlCenterAccessLabel("read"))
         assertEquals("skrive", desktopControlCenterAccessLabel("write"))

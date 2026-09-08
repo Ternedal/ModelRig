@@ -105,7 +105,7 @@ internal fun desktopControlCenterError(raw: String?): String {
             message.contains("ConnectException") ->
             "Kan ikke nå riggen. Tjek URL og at serveren kører."
         message.isBlank() -> "Control Center-status kunne ikke hentes."
-        else -> message.take(300)
+        else -> "Control Center-status kunne ikke hentes på grund af en ukendt klientfejl."
     }
 }
 
@@ -121,7 +121,7 @@ internal fun desktopControlCenterCapabilityError(raw: String?): String {
             message.contains("ConnectException") ->
             "Kan ikke nå riggen for capability-metadata."
         message.isBlank() -> "Capabilities kunne ikke hentes."
-        else -> message.take(300)
+        else -> "Capabilities kunne ikke hentes på grund af en ukendt klientfejl."
     }
 }
 
