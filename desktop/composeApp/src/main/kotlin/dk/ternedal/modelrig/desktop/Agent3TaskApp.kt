@@ -95,7 +95,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }.onFailure {
                     readiness = null
                     if (snapshot == null) preview = null
-                    error = it.message ?: "Task-readiness kunne ikke hentes"
+                    error = presentTaskRequestError(TaskRequestOperation.READINESS, it.message)
                 }
             }
         }
@@ -120,7 +120,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
                 busy = DesktopTaskBusy.NONE
                 result.onSuccess { preview = it }
-                    .onFailure { error = it.message ?: "Plan-preview fejlede" }
+                    .onFailure { error = presentTaskRequestError(TaskRequestOperation.PREVIEW, it.message) }
             }
         }
 
@@ -145,7 +145,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
                 busy = DesktopTaskBusy.NONE
                 result.onSuccess { snapshot = it }
-                    .onFailure { error = it.message ?: "Opgaven kunne ikke startes" }
+                    .onFailure { error = presentTaskRequestError(TaskRequestOperation.START, it.message) }
             }
         }
 
@@ -163,7 +163,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
                 busy = DesktopTaskBusy.NONE
                 result.onSuccess { snapshot = it }
-                    .onFailure { error = it.message ?: "Task-status kunne ikke hentes" }
+                    .onFailure { error = presentTaskRequestError(TaskRequestOperation.STATUS, it.message) }
             }
         }
 
@@ -185,7 +185,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
                 busy = DesktopTaskBusy.NONE
                 result.onSuccess { snapshot = it }
-                    .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
+                    .onFailure { error = presentTaskRequestError(TaskRequestOperation.STOP_PLAN, it.message) }
             }
         }
 
@@ -219,7 +219,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 if (result.isSuccess) {
                     snapshot = result.getOrThrow()
                 } else {
-                    error = result.exceptionOrNull()?.message ?: "Automatisk task-status fejlede"
+                    error = presentTaskRequestError(TaskRequestOperation.POLLING, result.exceptionOrNull()?.message)
                     return@LaunchedEffect
                 }
             }
