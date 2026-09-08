@@ -43,7 +43,9 @@ def check(condition, message):
 
 
 def write_json(path: Path, value: dict) -> None:
-    path.write_text(json.dumps(value), encoding="utf-8")
+    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(value), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def arm(directory: Path, schedule_id: str, challenge: str, *, mode="pause_before_guard", timeout=2.0):
