@@ -196,7 +196,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
         ) {
             throw Agent3Exception("Invalid read-only task preview: route is not local read-only")
         }
-        validateSteps(value.plan)
+        validateSteps(value.plan, preview = true)
         if (value.plan.isNotEmpty() && (value.planId == null || !OPAQUE_ID.matches(value.planId))) {
             throw Agent3Exception("Invalid read-only task preview: executable plan lacks a single-use id")
         }
@@ -250,7 +250,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
         if (value.run.route.kind != ROUTE) {
             throw Agent3Exception("Invalid read-only task snapshot: route changed")
         }
-        validateSteps(value.run.steps)
+        validateSteps(value.run.steps, preview = false)
         if (terminal != (value.run.state in TERMINAL_STATES)) {
             throw Agent3Exception("Invalid read-only task snapshot: terminal disagrees with run state")
         }
@@ -301,9 +301,17 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
         }
     }
 
-    private fun validateSteps(steps: List<Agent3ReadonlyTaskStep>) {
+    private fun validateSteps(steps: List<Agent3ReadonlyTaskStep>, preview: Boolean) {
         if (steps.any { it.tool.isBlank() || it.risk != "read" || it.egress != "local" || !it.idempotent }) {
             throw Agent3Exception("Invalid read-only task contract: only local idempotent reads are allowed")
+        }
+        val invalidState = if (preview) {
+            steps.any { it.state != null && it.state != "pending" }
+        } else {
+            steps.any { it.state == null || it.state !in TASK_STEP_STATES }
+        }
+        if (invalidState) {
+            throw Agent3Exception("Invalid read-only task contract: step state is outside the task surface")
         }
     }
 
@@ -445,6 +453,14 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
             "cancelled",
         )
         private val TERMINAL_STATES = setOf("blocked", "completed", "failed", "cancelled")
+        private val TASK_STEP_STATES = setOf(
+            "pending",
+            "executing",
+            "succeeded",
+            "completed_after_cancel",
+            "blocked",
+            "failed",
+        )
         private val PLAN_TERMINATION_STATES = setOf("available", "terminal")
         private val PLAN_EFFECTS = setOf(
             "prevent_future_steps",

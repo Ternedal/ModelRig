@@ -170,7 +170,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             throw ModelRigException("Ugyldig task-preview: ruten er ikke lokal read-only")
         }
         val steps = parseSteps(root.optJSONArray("plan") ?: JSONArray())
-        validateSteps(steps)
+        validateSteps(steps, preview = true)
         val planId = root.nullableString("plan_id")
         if (steps.isNotEmpty() && (planId == null || !OPAQUE_ID.matches(planId))) {
             throw ModelRigException("Ugyldig task-preview: executable plan mangler single-use id")
@@ -197,7 +197,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         if (run.routeKind != ROUTE) {
             throw ModelRigException("Ugyldigt read-only task-run: route er ændret")
         }
-        validateSteps(run.steps)
+        validateSteps(run.steps, preview = false)
         val terminal = root.requireBoolean("terminal")
         if (terminal != (run.state in TERMINAL_STATES)) {
             throw ModelRigException("Ugyldigt read-only task-run: terminal-status matcher ikke run-state")
@@ -277,7 +277,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         }
     }
 
-    private fun validateSteps(steps: List<Step>) {
+    private fun validateSteps(steps: List<Step>, preview: Boolean) {
         if (steps.any {
                 it.tool.isBlank() ||
                     it.risk != "read" ||
@@ -286,6 +286,14 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             }
         ) {
             throw ModelRigException("Ugyldig read-only task-kontrakt: kun lokale idempotente reads er tilladt")
+        }
+        val invalidState = if (preview) {
+            steps.any { it.state != null && it.state != "pending" }
+        } else {
+            steps.any { it.state == null || it.state !in TASK_STEP_STATES }
+        }
+        if (invalidState) {
+            throw ModelRigException("Ugyldig read-only task-kontrakt: step-state er uden for task-surface")
         }
     }
 
@@ -546,6 +554,14 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             "cancelled",
         )
         private val TERMINAL_STATES = setOf("blocked", "completed", "failed", "cancelled")
+        private val TASK_STEP_STATES = setOf(
+            "pending",
+            "executing",
+            "succeeded",
+            "completed_after_cancel",
+            "blocked",
+            "failed",
+        )
         private val PLAN_TERMINATION_STATES = setOf("available", "terminal")
         private val PLAN_EFFECTS = setOf(
             "prevent_future_steps",
