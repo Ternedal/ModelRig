@@ -456,7 +456,7 @@ private fun TaskRunCard(
                 Text(run.id, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             }
             Text(
-                run.state,
+                presentAgent3TaskRunState(run.state),
                 color = runStateColor(run.state),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
@@ -464,7 +464,7 @@ private fun TaskRunCard(
         }
         Spacer(Modifier.height(8.dp))
         if (shouldPoll) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        MetaRow("Route", run.routeKind)
+        MetaRow("Rute", presentAgent3TaskRunRoute(run.routeKind))
         MetaRow("Step", "${run.currentStep}/${run.steps.size}")
         MetaRow("Plan terminal", if (snapshot.terminal) "ja" else "nej")
         MetaRow("Statuspolling", if (shouldPoll) "aktiv" else "afsluttet")
@@ -494,10 +494,10 @@ private fun TaskRunCard(
             Text("Outcome", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
             Text(it, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
         }
-        run.error?.takeIf { it.isNotBlank() }?.let {
+        presentAgent3TaskRunError(run.state, run.error)?.let { message ->
             Spacer(Modifier.height(10.dp))
-            Text("Fejl/outcome", color = KalivTheme.colors.danger, fontWeight = FontWeight.SemiBold)
-            Text(it, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
+            Text("Kørselsproblem", color = KalivTheme.colors.danger, fontWeight = FontWeight.SemiBold)
+            Text(message, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(12.dp))
