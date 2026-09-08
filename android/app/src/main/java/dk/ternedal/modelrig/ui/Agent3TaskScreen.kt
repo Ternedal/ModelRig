@@ -520,9 +520,19 @@ private fun TaskRunCard(
         } else {
             snapshot.events.takeLast(20).forEach { event ->
                 Spacer(Modifier.height(5.dp))
-                Text(event.kind, color = KalivTheme.colors.signal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                if (event.payload.isNotBlank()) {
-                    Text(event.payload.take(320), color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                Text(
+                    presentAgent3TaskEventKind(event.kind),
+                    color = KalivTheme.colors.signal,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    presentAgent3TaskEventAuditCode(event.kind),
+                    color = KalivTheme.colors.textMuted,
+                    fontSize = 9.sp,
+                )
+                presentAgent3TaskEventStructuredDetail(event.payload)?.let { detail ->
+                    Text(detail, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
                 }
             }
         }
