@@ -510,7 +510,17 @@ private fun DesktopRunCard(
         } else {
             value.events.takeLast(20).forEach { event ->
                 Spacer(Modifier.height(5.dp))
-                Text(event.kind, color = KalivTheme.colors.Signal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    presentTaskEventKind(event.kind),
+                    color = KalivTheme.colors.Signal,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    presentTaskEventAuditCode(event.kind),
+                    color = KalivTheme.colors.TextMuted,
+                    fontSize = 9.sp,
+                )
                 presentTaskEventStructuredDetail(event.payload != null)?.let { detail ->
                     Text(detail, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
                 }
