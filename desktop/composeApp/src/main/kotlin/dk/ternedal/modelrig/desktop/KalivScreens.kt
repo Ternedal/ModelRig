@@ -29,6 +29,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -216,17 +220,6 @@ internal fun MetaBar(fraction: Float, modifier: Modifier = Modifier, height: Int
 // Left nav-rail (1a) -- 246dp, six items + active-model card + privacy seal
 // ---------------------------------------------------------------------------
 
-private data class NavItem(val screen: KalivScreen, val label: String, val glyph: String)
-
-private val navItems = listOf(
-    NavItem(KalivScreen.CHAT, "Chat", "\u25AC"),          // ▬ chat
-    NavItem(KalivScreen.AGENT, "Agent", "\u25C8"),        // ◈ agent
-    NavItem(KalivScreen.COMPUTER, "Computer-use", "\u25A6"), // ▦ computer
-    NavItem(KalivScreen.MODELS, "Modeller", "\u25F0"),    // ◰ models
-    NavItem(KalivScreen.DOCS, "Dokumenter", "\u25A4"),    // ▤ docs
-    NavItem(KalivScreen.SETTINGS, "Indstillinger", "\u2699"), // ⚙ settings
-)
-
 /**
  * The 40dp custom title bar from the mockup -- present on ALL three
  * directions and the single strongest visual signature of the design.
@@ -297,23 +290,28 @@ fun KalivIconRail(active: KalivScreen, onSelect: (KalivScreen) -> Unit) {
             .background(KalivTheme.colors.ShellRail)
             .padding(vertical = 16.dp),
     ) {
-        val top = listOf(
-            KalivScreen.CHAT to "\u2709",
-            KalivScreen.AGENT to "\u25C6",
-            KalivScreen.COMPUTER to "\u25A3",
-            KalivScreen.MODELS to "\u25A4",
-        )
-        top.forEach { (screen, glyph) ->
-            IconRailItem(glyph, screen == active) { onSelect(screen) }
-            Spacer(Modifier.height(8.dp))
-        }
+        kalivIconRailDestinations
+            .filter { it.screen != KalivScreen.SETTINGS }
+            .forEach { destination ->
+                IconRailItem(
+                    destination = destination,
+                    on = destination.isSelected(active),
+                    onClick = { onSelect(destination.screen) },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
         Spacer(Modifier.weight(1f))
-        IconRailItem("\u2699", false) { onSelect(KalivScreen.SETTINGS) }
+        val settings = kalivIconRailDestinations.single { it.screen == KalivScreen.SETTINGS }
+        IconRailItem(
+            destination = settings,
+            on = settings.isSelected(active),
+            onClick = { onSelect(settings.screen) },
+        )
     }
 }
 
 @Composable
-private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
+private fun IconRailItem(destination: KalivNavDestination, on: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Box(
         contentAlignment = Alignment.Center,
@@ -330,12 +328,17 @@ private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
                     .border(1.dp, Color(0x669A7136), shape)
                 else Modifier,
             )
-            .clickable { onClick() },
+            .semantics {
+                contentDescription = destination.label
+                selected = on
+            }
+            .clickable(onClickLabel = destination.label, role = Role.Tab, onClick = onClick),
     ) {
         Text(
-            glyph,
+            destination.iconGlyph,
             fontSize = 18.sp,
             color = if (on) KalivTheme.colors.TextHigh else KalivTheme.colors.ShellInactiveText,
+            modifier = Modifier.clearAndSetSemantics { },
         )
     }
 }
@@ -366,8 +369,12 @@ fun KalivNavRail(
         // No brand row here: the 40dp KalivTitleBar above owns the ankh and
         // the KALIV wordmark. The mockup's rail starts straight at the nav
         // items -- having both is what put the wordmark on screen twice.
-        navItems.forEach { item ->
-            NavRow(item = item, active = item.screen == active, onClick = { onSelect(item.screen) })
+        kalivNavDestinations.forEach { destination ->
+            NavRow(
+                destination = destination,
+                active = destination.isSelected(active),
+                onClick = { onSelect(destination.screen) },
+            )
             Spacer(Modifier.height(4.dp))
         }
 
@@ -381,14 +388,13 @@ fun KalivNavRail(
 }
 
 @Composable
-private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
+private fun NavRow(destination: KalivNavDestination, active: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(9.dp)
     val base = Modifier
         .fillMaxWidth()
         .clip(shape)
-        // NavItem baerer allerede et label ("Chat", "Modeller", ...); kun
-        // glyffen blev renderet, saa en skaermlaeser fik "\u25AC" eller intet.
-        .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
+        .semantics { selected = active }
+        .clickable(onClickLabel = destination.label, role = Role.Tab, onClick = onClick)
     val bg = if (active) {
         base.background(
             Brush.horizontalGradient(listOf(Color(0x389A7136), Color(0x0F9A7136))), // .22 → .06
@@ -401,14 +407,14 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            item.glyph,
+            destination.wideGlyph,
             color = if (active) KalivTheme.colors.Highlight else KalivTheme.colors.TextMuted,
             fontSize = 15.sp,
-            modifier = Modifier.width(24.dp),
+            modifier = Modifier.width(24.dp).clearAndSetSemantics { },
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            item.label,
+            destination.label,
             color = if (active) KalivTheme.colors.TextHigh else KalivTheme.colors.ShellInactiveText,
             fontSize = 13.5.sp,
             fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
