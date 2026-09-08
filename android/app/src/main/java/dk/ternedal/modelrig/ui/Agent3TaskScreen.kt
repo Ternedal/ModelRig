@@ -261,12 +261,8 @@ fun Agent3TaskScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (surface == Agent3TaskUiPolicy.AGENT3_READONLY) {
-                                "Agent 3 read-only valgt af serveren"
-                            } else {
-                                "Agent 2 fallback"
-                            },
-                            color = if (surface == Agent3TaskUiPolicy.AGENT3_READONLY) {
+                            presentAgent3TaskReadinessHeadline(readiness?.selectedSurface),
+                            color = if (readiness?.agent3ReadonlySelected == true) {
                                 KalivTheme.colors.success
                             } else {
                                 KalivTheme.colors.amber
@@ -275,25 +271,32 @@ fun Agent3TaskScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            readiness?.reason ?: "readiness_unavailable",
+                            presentAgent3TaskReadinessStatus(readiness?.selectedSurface, readiness?.reason),
                             color = KalivTheme.colors.textMuted,
                             fontSize = 11.sp,
                         )
+                        presentAgent3TaskReadinessServerReason(readiness?.reason)?.let { evidence ->
+                            Text(evidence, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                        }
                     }
                     if (busy == TaskBusy.READINESS) CircularProgressIndicator()
                 }
                 Spacer(Modifier.height(8.dp))
-                MetaRow("Aktiv surface", surface)
-                MetaRow("Fallback", readiness?.fallbackSurface ?: Agent3TaskUiPolicy.AGENT2)
-                MetaRow("Routing", readiness?.uiContract?.routeSource ?: "fail_closed")
+                MetaRow("Aktiv surface", presentAgent3TaskReadinessSurface(readiness?.selectedSurface))
+                MetaRow("Fallback", presentAgent3TaskReadinessSurface(readiness?.fallbackSurface))
+                MetaRow("Routing", presentAgent3TaskReadinessRouteSource(readiness?.uiContract?.routeSource))
                 MetaRow(
                     "Pilot",
                     readiness?.pilot?.successes?.let { "$it/${readiness?.pilot?.tasks ?: "?"}" } ?: "ukendt",
                 )
                 MetaRow("Replans", readiness?.pilot?.replans?.toString() ?: "ukendt")
                 MetaRow("Retry-events", readiness?.pilot?.retryEvents?.toString() ?: "ukendt")
-                readiness?.reasons?.distinct()?.forEach {
-                    Text("• $it", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                val readinessReasons = readiness?.reasons?.distinct().orEmpty()
+                if (readinessReasons.isNotEmpty()) {
+                    Text("Tekniske readiness-koder", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                    readinessReasons.forEach {
+                        Text("• $it", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(enabled = !isBusy, onClick = { refreshReadiness() }) {
