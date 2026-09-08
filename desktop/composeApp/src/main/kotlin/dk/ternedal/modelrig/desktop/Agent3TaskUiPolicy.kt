@@ -8,6 +8,8 @@ package dk.ternedal.modelrig.desktop
  * server-authorized plan Stop remain visible even if readiness later falls back.
  * Cancelling a terminal plan is not the same as stopping an executing tool, so
  * polling continues until the active-tool receipt is no longer pending/running.
+ * Publication epochs only order local async responses; they never cancel or
+ * reinterpret a server request.
  */
 object Agent3TaskUiPolicy {
     const val AGENT2 = "agent2"
@@ -46,4 +48,10 @@ object Agent3TaskUiPolicy {
     ): Boolean = runTerminal == false ||
         activeToolState == "executing" ||
         activeToolRequestState == "pending"
+
+    fun nextPublicationEpoch(current: Long): Long =
+        if (current == Long.MAX_VALUE) 1L else current + 1L
+
+    fun canPublish(requestEpoch: Long, currentEpoch: Long): Boolean =
+        requestEpoch == currentEpoch
 }

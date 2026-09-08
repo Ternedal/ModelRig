@@ -70,6 +70,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskSnapshot?>(null) }
         var busy by remember { mutableStateOf(DesktopTaskBusy.READINESS) }
         var error by remember { mutableStateOf<String?>(null) }
+        var publicationEpoch by remember { mutableStateOf(0L) }
 
         fun requireConnection(): Pair<String, String> {
             if (baseUrl.isBlank()) kotlin.error("Ingen ModelRig backend-URL er gemt")
@@ -152,6 +153,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         fun refreshRun() {
             val runId = snapshot?.run?.id ?: return
             if (busy != DesktopTaskBusy.NONE) return
+            publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
             busy = DesktopTaskBusy.STATUS
             error = null
             scope.launch {
@@ -174,6 +176,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     busy != DesktopTaskBusy.NONE,
                 )
             ) return
+            publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
             busy = DesktopTaskBusy.STOP_PLAN
             error = null
             scope.launch {
@@ -210,12 +213,14 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             ) {
                 delay(1_000)
                 if (busy != DesktopTaskBusy.NONE) continue
+                val requestEpoch = publicationEpoch
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         val (base, bearer) = requireConnection()
                         Agent3ReadonlyTaskClient(base, bearer).status(runId)
                     }
                 }
+                if (!Agent3TaskUiPolicy.canPublish(requestEpoch, publicationEpoch)) continue
                 if (result.isSuccess) {
                     snapshot = result.getOrThrow()
                 } else {
