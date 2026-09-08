@@ -104,6 +104,15 @@ class DesktopChatDb(
         }
     }
 
+    fun updateConversationRoute(convId: Long, source: String, model: String) {
+        conn.prepareStatement("UPDATE conversation SET source=?, model=? WHERE id=?").use { ps ->
+            ps.setString(1, source)
+            ps.setString(2, model)
+            ps.setLong(3, convId)
+            ps.executeUpdate()
+        }
+    }
+
     fun addMessage(convId: Long, role: String, content: String) {
         val now = System.currentTimeMillis()
         // Guard against a race: if the conversation was deleted between the send
