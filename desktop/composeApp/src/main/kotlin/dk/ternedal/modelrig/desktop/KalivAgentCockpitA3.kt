@@ -141,6 +141,13 @@ fun KalivAgentCockpitA3(
 
     fun start() {
         val id = planId ?: return
+        val presentation = presentAgent3CockpitInteraction(
+            busy = busy,
+            runState = run?.state,
+            planCanRequestStop = run?.termination?.plan?.canRequest,
+            hasPreview = true,
+        )
+        if (!presentation.previewStartEnabled) return
         busy = true; error = null
         scope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { client().startPlan(id) } }
@@ -152,6 +159,23 @@ fun KalivAgentCockpitA3(
             }.onFailure { error = it.message }
             busy = false
         }
+    }
+
+    fun discardPreview() {
+        val presentation = presentAgent3CockpitInteraction(
+            busy = busy,
+            runState = run?.state,
+            planCanRequestStop = run?.termination?.plan?.canRequest,
+            hasPreview = planId != null,
+        )
+        if (!presentation.previewDiscardEnabled) return
+        // Preview discard is local-only. No server run exists in this state, so
+        // this must never be presented as cancellation of remote work.
+        planId = null
+        previewSteps = emptyList()
+        rationale = ""
+        revision = 1
+        lastTotal = 0
     }
 
     fun decide(step: Agent3Step, approve: Boolean) {
@@ -211,6 +235,7 @@ fun KalivAgentCockpitA3(
         busy = busy,
         runState = run?.state,
         planCanRequestStop = run?.termination?.plan?.canRequest,
+        hasPreview = planId != null,
     )
     val steps = run?.steps ?: previewSteps
     val doneCount = steps.count { isTerminal(it.state) }
@@ -250,9 +275,9 @@ fun KalivAgentCockpitA3(
                 if (planId != null) {
                     Spacer(Modifier.height(16.dp))
                     Row {
-                        PrimaryButton("Start planen", enabled = !busy) { start() }
+                        PrimaryButton("Start planen", enabled = interaction.previewStartEnabled) { start() }
                         Spacer(Modifier.width(8.dp))
-                        OutlineButton("Kassér") { planId = null; previewSteps = emptyList() }
+                        OutlineButton("Kassér", enabled = interaction.previewDiscardEnabled) { discardPreview() }
                     }
                 }
                 if (interaction.stopPlanEnabled) {
@@ -433,13 +458,19 @@ private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun OutlineButton(label: String, onClick: () -> Unit) {
+private fun OutlineButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier.clip(shape).border(1.dp, Color(0x4D785A37), shape)
-            .clickable { onClick() }.padding(horizontal = 18.dp, vertical = 11.dp),
-    ) { Text(label, color = KalivTheme.colors.TextHigh, fontSize = 13.sp) }
+            .clickable(enabled = enabled) { onClick() }.padding(horizontal = 18.dp, vertical = 11.dp),
+    ) {
+        Text(
+            label,
+            color = if (enabled) KalivTheme.colors.TextHigh else KalivTheme.colors.TextMuted,
+            fontSize = 13.sp,
+        )
+    }
 }
 
 /**

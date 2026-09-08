@@ -6,19 +6,53 @@ import kotlin.test.assertTrue
 
 class KalivAgent3CockpitInteractionPolicyTest {
     @Test
-    fun idleCockpitAllowsPreview() {
+    fun idleCockpitAllowsPreviewButNoPreviewActionsWithoutPreview() {
         assertTrue(canAgent3CockpitPreview("undersøg status", busy = false, hasRun = false))
         val p = presentAgent3CockpitInteraction(busy = false, runState = null)
         assertTrue(p.composerEnabled)
+        assertFalse(p.previewStartEnabled)
+        assertFalse(p.previewDiscardEnabled)
         assertFalse(p.stopPlanEnabled)
     }
 
     @Test
-    fun busyCockpitBlocksPreview() {
+    fun idlePreviewAllowsStartAndLocalDiscard() {
+        val p = presentAgent3CockpitInteraction(
+            busy = false,
+            runState = null,
+            hasPreview = true,
+        )
+        assertTrue(p.previewStartEnabled)
+        assertTrue(p.previewDiscardEnabled)
+    }
+
+    @Test
+    fun busyPreviewBlocksStartAndDiscard() {
         assertFalse(canAgent3CockpitPreview("undersøg status", busy = true, hasRun = false))
-        val p = presentAgent3CockpitInteraction(busy = true, runState = null)
+        val p = presentAgent3CockpitInteraction(
+            busy = true,
+            runState = null,
+            hasPreview = true,
+        )
         assertFalse(p.composerEnabled)
+        assertFalse(p.previewStartEnabled)
+        assertFalse(p.previewDiscardEnabled)
         assertFalse(p.stopPlanEnabled)
+    }
+
+    @Test
+    fun existingRunBlocksPreviewStartAndDiscardEvenIfStalePreviewFlagExists() {
+        val p = presentAgent3CockpitInteraction(
+            busy = false,
+            runState = "running",
+            planCanRequestStop = false,
+            hasPreview = true,
+        )
+        assertFalse(p.composerEnabled)
+        assertFalse(p.previewStartEnabled)
+        assertFalse(p.previewDiscardEnabled)
+        assertFalse(p.stopPlanEnabled)
+        assertFalse(p.clearTerminalRunEnabled)
     }
 
     @Test
@@ -29,9 +63,7 @@ class KalivAgent3CockpitInteractionPolicyTest {
             runState = "running",
             planCanRequestStop = false,
         )
-        assertFalse(blocked.composerEnabled)
         assertFalse(blocked.stopPlanEnabled)
-        assertFalse(blocked.clearTerminalRunEnabled)
 
         val allowed = presentAgent3CockpitInteraction(
             busy = false,
@@ -60,6 +92,8 @@ class KalivAgent3CockpitInteractionPolicyTest {
             planCanRequestStop = false,
         )
         assertFalse(p.composerEnabled)
+        assertFalse(p.previewStartEnabled)
+        assertFalse(p.previewDiscardEnabled)
         assertFalse(p.stopPlanEnabled)
         assertFalse(p.clearTerminalRunEnabled)
     }
@@ -80,8 +114,11 @@ class KalivAgent3CockpitInteractionPolicyTest {
             busy = false,
             runState = "done",
             planCanRequestStop = true,
+            hasPreview = true,
         )
         assertFalse(p.composerEnabled)
+        assertFalse(p.previewStartEnabled)
+        assertFalse(p.previewDiscardEnabled)
         assertFalse(p.stopPlanEnabled)
         assertTrue(p.clearTerminalRunEnabled)
         assertFalse(canAgent3CockpitPreview("ny opgave", busy = false, hasRun = true))
@@ -95,6 +132,8 @@ class KalivAgent3CockpitInteractionPolicyTest {
             planCanRequestStop = false,
         )
         assertFalse(p.composerEnabled)
+        assertFalse(p.previewStartEnabled)
+        assertFalse(p.previewDiscardEnabled)
         assertFalse(p.stopPlanEnabled)
         assertFalse(p.clearTerminalRunEnabled)
     }
