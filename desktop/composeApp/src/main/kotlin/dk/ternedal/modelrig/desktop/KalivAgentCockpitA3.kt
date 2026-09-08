@@ -170,9 +170,23 @@ fun KalivAgentCockpitA3(
 
     fun cancel() {
         val r = run ?: return
+        val presentation = presentAgent3CockpitInteraction(
+            busy = busy,
+            runState = r.state,
+            planCanRequestStop = r.termination?.plan?.canRequest,
+        )
+        if (!presentation.stopPlanEnabled) return
+        busy = true
+        error = null
         scope.launch {
-            withContext(Dispatchers.IO) { runCatching { client().cancel(r.id) } }
-                .onSuccess { run = it; refresh(it.id) }
+            val result = withContext(Dispatchers.IO) { runCatching { client().cancel(r.id) } }
+            result.onSuccess { fresh ->
+                run = fresh
+                refresh(fresh.id)
+            }.onFailure {
+                error = it.message ?: "Planen kunne ikke stoppes"
+            }
+            busy = false
         }
     }
 
@@ -193,7 +207,11 @@ fun KalivAgentCockpitA3(
         input = ""
     }
 
-    val interaction = presentAgent3CockpitInteraction(busy = busy, runState = run?.state)
+    val interaction = presentAgent3CockpitInteraction(
+        busy = busy,
+        runState = run?.state,
+        planCanRequestStop = run?.termination?.plan?.canRequest,
+    )
     val steps = run?.steps ?: previewSteps
     val doneCount = steps.count { isTerminal(it.state) }
 
@@ -237,7 +255,7 @@ fun KalivAgentCockpitA3(
                         OutlineButton("Kassér") { planId = null; previewSteps = emptyList() }
                     }
                 }
-                if (run != null && !isTerminal(run!!.state)) {
+                if (interaction.stopPlanEnabled) {
                     Spacer(Modifier.height(16.dp))
                     OutlineButton("\u25A0  Stop") { cancel() }
                 }
