@@ -37,6 +37,13 @@ internal fun presentTaskStepReadOnlyMetadata(
     "Sikkerhedsmetadata ukendt"
 }
 
+/** Primary step title: never substitute an internal tool id for missing human copy. */
+internal fun presentTaskStepHeadline(summary: String?): String =
+    summary?.trim()?.takeIf { it.isNotEmpty() } ?: "Trin uden beskrivelse"
+
+/** Preserve the exact validated tool identity as secondary audit evidence. */
+internal fun presentTaskStepToolAudit(tool: String): String = "Værktøjskode: $tool"
+
 /**
  * Human-facing error copy for the normal read-only task card. The persisted
  * worker/tool diagnostic remains untouched; arbitrary exception text is never

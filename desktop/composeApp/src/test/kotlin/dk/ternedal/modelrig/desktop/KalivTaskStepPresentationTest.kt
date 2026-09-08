@@ -52,6 +52,24 @@ class KalivTaskStepPresentationTest {
         assertEquals("Sikkerhedsmetadata ukendt", presentTaskStepReadOnlyMetadata(null, null, false))
     }
     @Test
+    fun humanSummaryRemainsPrimaryStepHeadline() {
+        assertEquals("Læs lokale noter", presentTaskStepHeadline("Læs lokale noter"))
+        assertEquals("Læs lokale noter", presentTaskStepHeadline("  Læs lokale noter  "))
+    }
+
+    @Test
+    fun missingSummaryDoesNotPromoteToolIdToPrimaryCopy() {
+        assertEquals("Trin uden beskrivelse", presentTaskStepHeadline(""))
+        assertEquals("Trin uden beskrivelse", presentTaskStepHeadline("   "))
+        assertEquals("Trin uden beskrivelse", presentTaskStepHeadline(null))
+    }
+
+    @Test
+    fun exactToolIdentityRemainsSecondaryAuditEvidence() {
+        assertEquals("Værktøjskode: notes_search", presentTaskStepToolAudit("notes_search"))
+    }
+
+    @Test
     fun controlledReadOnlyErrorsUseBoundedProductCopy() {
         assertEquals(
             "Trinnet blev blokeret af read-only-politikken.",
