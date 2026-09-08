@@ -111,4 +111,19 @@ class Agent3TaskUiPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun stalePollCannotPublishAfterNewerTaskMutationOwnsTheScreen() {
+        val pollEpoch = 41L
+        val mutationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(pollEpoch)
+
+        assertEquals(42L, mutationEpoch)
+        assertTrue(Agent3TaskUiPolicy.canPublish(mutationEpoch, mutationEpoch))
+        assertFalse(Agent3TaskUiPolicy.canPublish(pollEpoch, mutationEpoch))
+    }
+
+    @Test
+    fun publicationEpochWrapsDeterministically() {
+        assertEquals(1L, Agent3TaskUiPolicy.nextPublicationEpoch(Long.MAX_VALUE))
+    }
 }

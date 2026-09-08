@@ -67,6 +67,7 @@ fun Agent3TaskScreen(
     var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskClient.Started?>(null) }
     var busy by remember { mutableStateOf(TaskBusy.READINESS) }
     var error by remember { mutableStateOf<String?>(null) }
+    var publicationEpoch by remember { mutableStateOf(0L) }
 
     fun connection(): Pair<String, String> {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
@@ -156,6 +157,7 @@ fun Agent3TaskScreen(
     fun refreshRun() {
         val runId = snapshot?.run?.id ?: return
         if (busy != TaskBusy.NONE) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
         busy = TaskBusy.STATUS
         error = null
         scope.launch {
@@ -181,6 +183,7 @@ fun Agent3TaskScreen(
                 busy = busy != TaskBusy.NONE,
             )
         ) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
         busy = TaskBusy.STOP_PLAN
         error = null
         scope.launch {
@@ -220,12 +223,14 @@ fun Agent3TaskScreen(
         ) {
             delay(1_000)
             if (busy != TaskBusy.NONE) continue
+            val requestEpoch = publicationEpoch
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val (base, token) = connection()
                     Agent3ReadonlyTaskClient(base, token).status(runId)
                 }
             }
+            if (!Agent3TaskUiPolicy.canPublish(requestEpoch, publicationEpoch)) continue
             if (result.isSuccess) {
                 snapshot = result.getOrThrow()
             } else {
