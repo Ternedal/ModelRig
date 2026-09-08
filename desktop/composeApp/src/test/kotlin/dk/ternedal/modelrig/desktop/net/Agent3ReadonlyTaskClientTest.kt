@@ -196,6 +196,31 @@ class Agent3ReadonlyTaskClientTest {
     }
 
     @Test
+    fun taskStepStatesFailClosedButPreviewMayOmitOrDeclarePending() {
+        val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
+
+        val omittedPreviewState = previewJson().replace("\"state\":\"pending\",", "")
+        val pendingPreview = previewJson()
+        val executingPreview = previewJson().replace("\"state\":\"pending\"", "\"state\":\"executing\"")
+        val futurePreview = previewJson().replace("\"state\":\"pending\"", "\"state\":\"future_step_state\"")
+
+        assertTrue(client.parsePreview(omittedPreviewState).canStart)
+        assertTrue(client.parsePreview(pendingPreview).canStart)
+        listOf(executingPreview, futurePreview).forEach { payload ->
+            assertIs<Agent3Exception>(runCatching { client.parsePreview(payload) }.exceptionOrNull())
+        }
+
+        listOf("future_step_state", "approved", "waiting_confirmation", "denied").forEach { stepState ->
+            val payload = snapshotJson(
+                state = "running",
+                terminal = false,
+                stepState = stepState,
+            )
+            assertIs<Agent3Exception>(runCatching { client.parseSnapshot(payload) }.exceptionOrNull(), stepState)
+        }
+    }
+
+    @Test
     fun malformedOpaqueIdsNeverTouchNetwork() {
         val hits = AtomicInteger(0)
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)

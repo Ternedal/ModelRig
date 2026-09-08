@@ -226,6 +226,41 @@ class Agent3ReadonlyTaskClientTest {
     }
 
     @Test
+    fun taskStepStatesFailClosedButPreviewMayOmitOrDeclarePending() {
+        val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
+
+        val omittedPreviewState = JSONObject(previewJson()).also {
+            it.getJSONArray("plan").getJSONObject(0).remove("state")
+        }
+        val pendingPreview = JSONObject(previewJson())
+        val executingPreview = JSONObject(previewJson()).also {
+            it.getJSONArray("plan").getJSONObject(0).put("state", "executing")
+        }
+        val futurePreview = JSONObject(previewJson()).also {
+            it.getJSONArray("plan").getJSONObject(0).put("state", "future_step_state")
+        }
+
+        assertTrue(client.parsePreview(omittedPreviewState).canStart)
+        assertTrue(client.parsePreview(pendingPreview).canStart)
+        listOf(executingPreview, futurePreview).forEach { value ->
+            assertTrue(runCatching { client.parsePreview(value) }.exceptionOrNull() is ModelRigException)
+        }
+
+        listOf("future_step_state", "approved", "waiting_confirmation", "denied").forEach { stepState ->
+            val value = JSONObject(
+                snapshotJson(
+                    state = "running",
+                    terminal = false,
+                    stepState = stepState,
+                ),
+            )
+            assertTrue(
+                runCatching { client.parseStarted(value) }.exceptionOrNull() is ModelRigException,
+            )
+        }
+    }
+
+    @Test
     fun statusRejectsAResponseForAnotherRun() {
         val server = MockWebServer()
         server.enqueue(jsonResponse(snapshotJson(state = "completed", terminal = true, runId = "run-2")))
