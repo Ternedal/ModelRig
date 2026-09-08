@@ -1,0 +1,46 @@
+name: tmp-patch-1000
+
+on:
+  push:
+    branches:
+      - fix/desktop-control-center-history-error-copy-1000
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Apply bounded history error patch
+        run: python scripts/tmp_patch_1000.py
+      - name: Verify history error boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterScheduleHistorySection.kt
+          TEST=desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterScheduleHistorySectionTest.kt
+          ! grep -F 'else -> message.take(300)' "$FILE"
+          grep -F 'Execution-historikken kunne ikke hentes på grund af en ukendt klientfejl.' "$FILE"
+          grep -F 'unknownHistoryErrorsNeverLeakRawDiagnostics' "$TEST"
+      - name: Desktop compile and unit tests
+        working-directory: desktop
+        run: ./gradlew :composeApp:test --no-daemon --console=plain
+      - name: Commit final product tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/tmp_patch_1000.py .github/workflows/tmp-patch-1000.yml
+          git config user.name modelrig-bot
+          git config user.email modelrig-bot@users.noreply.github.com
+          git add -A
+          git status --short
+          git commit -m 'fix(desktop): bound Control Center history errors (#1000)'
+          git push origin HEAD:fix/desktop-control-center-history-error-copy-1000
