@@ -581,27 +581,29 @@ private fun StepCard(index: Int, step: Agent3ReadonlyTaskClient.Step) {
         Column(Modifier.fillMaxWidth().padding(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "$index. ${step.summary.ifBlank { step.tool }}",
+                    "$index. ${presentAgent3TaskStepHeadline(step.summary)}",
                     color = KalivTheme.colors.textHigh,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                step.state?.let {
-                    Text(it, color = runStateColor(it), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                step.state?.let { rawState ->
+                    presentAgent3TaskStepState(rawState)?.let { label ->
+                        Text(label, color = runStateColor(rawState), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
-            Text("tool: ${step.tool}", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+            Text(presentAgent3TaskStepToolAudit(step.tool), color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             Text(
-                "risk=${step.risk} · egress=${step.egress} · idempotent=${step.idempotent}",
+                presentAgent3TaskStepReadOnlyMetadata(step.risk, step.egress, step.idempotent),
                 color = KalivTheme.colors.textMuted,
                 fontSize = 10.sp,
             )
-            if (step.args != "{}") {
-                Text("args: ${step.args.take(300)}", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+            presentAgent3TaskStepStructuredDetail(step.args != "{}")?.let { detail ->
+                Text(detail, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             }
-            step.error?.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = KalivTheme.colors.danger, fontSize = 10.sp)
+            presentAgent3TaskStepError(step.state, step.error)?.let { message ->
+                Text(message, color = KalivTheme.colors.danger, fontSize = 10.sp)
             }
         }
     }
