@@ -25,6 +25,53 @@ class ControlCenterDialogTest {
     }
 
     @Test
+    fun everyCodeOwnedControlCenterReasonUsesHumanCopy() {
+        val expected = mapOf(
+            "missing_source" to "Ingen statuskilde har rapporteret endnu.",
+            "missing_or_invalid_observed_at" to "Måletidspunktet mangler eller er ugyldigt.",
+            "observation_from_future" to "Måletidspunktet ligger foran riggens ur.",
+            "observation_too_old" to "Statusmålingen er for gammel.",
+            "disabled_by_configuration" to "Slået fra i riggens konfiguration.",
+            "source_reported_unavailable" to "Kilden rapporterer utilgængelig.",
+            "missing_boolean_verdict" to "Kilden leverede ikke en entydig status.",
+            "agent3_disabled_by_configuration" to "Agent 3 er slået fra i riggens konfiguration.",
+            "unknown_surface" to "Routing bruger en ukendt surface.",
+            "fallback_reason_missing" to "Fallback mangler serverens begrundelse.",
+            "server_selected_fallback" to "Serveren valgte fallback.",
+            "unsupported_route_transition" to "Routingovergangen understøttes ikke.",
+        )
+        expected.forEach { (raw, label) ->
+            assertEquals(label, desktopControlCenterReasonLabel(raw), raw)
+        }
+    }
+
+    @Test
+    fun unknownReasonsAndSurfacesFailClosedWithoutEchoingMachineValues() {
+        assertEquals("Teknisk årsag ukendt.", desktopControlCenterReasonLabel("future_reason=C:\\secret"))
+        assertNull(desktopControlCenterReasonLabel("   "))
+        assertNull(desktopControlCenterReasonLabel(null))
+        assertEquals("Agent 2", desktopControlCenterSurfaceLabel("agent_v2"))
+        assertEquals("Agent 3 · udvikler", desktopControlCenterSurfaceLabel("agent3_developer"))
+        assertEquals("Slået fra", desktopControlCenterSurfaceLabel("disabled"))
+        assertEquals("Ikke oplyst", desktopControlCenterSurfaceLabel(null))
+        assertEquals("Ukendt surface", desktopControlCenterSurfaceLabel("future_surface?token=abc"))
+    }
+
+    @Test
+    fun rawServerDetailIsExplicitlySecondaryEvidence() {
+        assertEquals(
+            "Teknisk detalje: provider_error:ConnectException",
+            desktopControlCenterTechnicalDetail(" provider_error:ConnectException "),
+        )
+        assertEquals(
+            "Serverens fallbackkode: validation_gate_not_ready",
+            desktopControlCenterFallbackEvidence("validation_gate_not_ready"),
+        )
+        assertNull(desktopControlCenterTechnicalDetail(""))
+        assertNull(desktopControlCenterFallbackEvidence(null))
+    }
+
+    @Test
     fun titlesAndAgeAreHumanReadableWithoutInventingFreshness() {
         assertEquals("Backend", desktopControlCenterTitle("backend"))
         assertEquals("Worker", desktopControlCenterTitle("worker"))
