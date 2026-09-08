@@ -550,9 +550,10 @@ private fun TerminationCard(receipt: Agent3ReadonlyTaskClient.TerminationReceipt
     Surface(color = KalivTheme.colors.surfaceHigh, shape = RoundedCornerShape(10.dp)) {
         Column(Modifier.fillMaxWidth().padding(10.dp)) {
             Text("Plan", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            MetaRow("Status", plan.state)
+            MetaRow("Status", presentAgent3TerminationPlanState(plan.state))
+            MetaRow("Stopomfang", presentAgent3TerminationPlanScope(plan.requestScope))
             MetaRow("Kan stoppes", if (plan.canRequest) "ja" else "nej")
-            MetaRow("Effekt", plan.effect)
+            MetaRow("Effekt", presentAgent3TerminationPlanEffect(plan.effect))
             if (plan.effect == "prevent_future_steps_active_tool_continues") {
                 Text(
                     "Plan-stop forhindrer nye steps, men det aktive tool fortsætter.",
@@ -560,26 +561,76 @@ private fun TerminationCard(receipt: Agent3ReadonlyTaskClient.TerminationReceipt
                     fontSize = 10.sp,
                 )
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Teknisk kvittering · plan",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            agent3TerminationPlanEvidence(
+                state = plan.state,
+                canRequest = plan.canRequest,
+                requestScope = plan.requestScope,
+                effect = plan.effect,
+                reason = plan.reason,
+            ).forEach { field ->
+                Text("${field.label}: ${field.value}", color = KalivTheme.colors.textMuted, fontSize = 9.sp)
+            }
 
             Spacer(Modifier.height(8.dp))
             Text("Modelstream", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            MetaRow("Status", stream.state)
+            MetaRow("Status", presentAgent3TerminationModelState(stream.state))
             MetaRow("Aktiv", if (stream.active) "ja" else "nej")
             MetaRow("Runtime-handle", if (stream.handlePresent) "ja" else "nej")
             MetaRow("Kan stoppes", if (stream.canRequest) "ja" else "nej")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Teknisk kvittering · modelstream",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            agent3TerminationModelEvidence(
+                state = stream.state,
+                active = stream.active,
+                canRequest = stream.canRequest,
+                handlePresent = stream.handlePresent,
+                reason = stream.reason,
+            ).forEach { field ->
+                Text("${field.label}: ${field.value}", color = KalivTheme.colors.textMuted, fontSize = 9.sp)
+            }
 
             Spacer(Modifier.height(8.dp))
             Text("Aktivt tool", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             if (tool == null) {
                 Text("Intet aktivt tool", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             } else {
-                MetaRow("Tool", tool.tool)
-                MetaRow("Step-state", tool.state)
-                MetaRow("Semantik", terminationSemanticsLabel(tool.semantics))
-                MetaRow("Request-state", tool.requestState)
+                MetaRow("Step-status", presentAgent3TaskStepState(tool.state) ?: "Status ukendt")
+                MetaRow("Afbrydelse", presentAgent3TerminationSemantics(tool.semantics))
+                MetaRow("Stopstatus", presentAgent3TerminationRequestState(tool.requestState))
                 MetaRow("Runtime-handle", if (tool.handlePresent) "ja" else "nej")
+                MetaRow("Kan stoppes", if (tool.canRequest) "ja" else "nej")
                 MetaRow("Direkte kontrol", if (tool.canRequest && tool.handlePresent) "tilgængelig" else "ingen")
-                Text(tool.reason, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Teknisk kvittering · aktivt tool",
+                    color = KalivTheme.colors.textMuted,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                agent3TerminationActiveToolEvidence(
+                    stepId = tool.stepId,
+                    tool = tool.tool,
+                    state = tool.state,
+                    semantics = tool.semantics,
+                    handlePresent = tool.handlePresent,
+                    canRequest = tool.canRequest,
+                    requestState = tool.requestState,
+                    reason = tool.reason,
+                ).forEach { field ->
+                    Text("${field.label}: ${field.value}", color = KalivTheme.colors.textMuted, fontSize = 9.sp)
+                }
             }
         }
     }
@@ -694,13 +745,6 @@ private fun runStateColor(state: String): Color = when (state) {
     "failed", "blocked" -> KalivTheme.colors.danger
     "cancelled", "completed_after_cancel" -> KalivTheme.colors.amber
     else -> KalivTheme.colors.signal
-}
-
-private fun terminationSemanticsLabel(value: String?): String = when (value) {
-    "none" -> "ikke-afbrydelig"
-    "cooperative" -> "kooperativ"
-    "runtime" -> "runtime-håndteret"
-    else -> "ukendt / fail-closed"
 }
 
 private fun String.shortHash(): String = if (length <= 14) this else take(12) + "…"
