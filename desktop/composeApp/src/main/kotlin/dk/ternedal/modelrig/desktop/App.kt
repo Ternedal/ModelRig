@@ -198,6 +198,10 @@ fun App() {
             hasPendingConfirmation = pendingCard != null,
             busy = busy,
         )
+        val conversationBrowserPresentation = presentConversationBrowser(
+            busy = busy,
+            hasPendingConfirmation = pendingCard != null,
+        )
         var lastSource by remember { mutableStateOf<ChatResult.Source?>(null) }
         var models by remember { mutableStateOf(listOf<String>()) }
         var modelMenuOpen by remember { mutableStateOf(false) }
@@ -557,6 +561,12 @@ fun App() {
             // changed, mirroring the Android header's chips.
             val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                ToolbarChip(CONVERSATION_BROWSER_LABEL, active = showConvos, filled = false) {
+                    showConvos = true
+                    showSettings = false
+                    showModels = false
+                }
+                Spacer(Modifier.width(6.dp))
                 Box {
                     ToolbarChip(presentLocalModelSelectorLabel(localModel), filled = false) { modelMenuOpen = true }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
@@ -663,23 +673,32 @@ fun App() {
                         ConversationsPanel(
                             db = db,
                             activeConvId = convId,
+                            presentation = conversationBrowserPresentation,
                             onActiveDeleted = {
-                                convId = null
-                                messages.clear()
+                                if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    convId = null
+                                    messages.clear()
+                                }
                             },
                             onOpen = { id ->
-                                scope.launch {
-                                    val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
-                                    messages.clear()
-                                    loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
-                                    convId = id
-                                    showConvos = false
+                                if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    scope.launch {
+                                        val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
+                                        if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                            messages.clear()
+                                            loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                                            convId = id
+                                            showConvos = false
+                                        }
+                                    }
                                 }
                             },
                             onNew = {
-                                messages.clear()
-                                convId = null
-                                showConvos = false
+                                if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    messages.clear()
+                                    convId = null
+                                    showConvos = false
+                                }
                             },
                         )
                         Spacer(Modifier.height(8.dp))
@@ -931,7 +950,14 @@ fun App() {
  * browse, switch, or clean up older ones.
  */
 @Composable
-private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (Long) -> Unit, onNew: () -> Unit, onActiveDeleted: () -> Unit) {
+private fun ConversationsPanel(
+    db: DesktopChatDb,
+    activeConvId: Long?,
+    presentation: KalivConversationBrowserPresentation,
+    onOpen: (Long) -> Unit,
+    onNew: () -> Unit,
+    onActiveDeleted: () -> Unit,
+) {
     var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
     var panelError by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -952,9 +978,18 @@ private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Samtaler", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onNew) { Text("+ Ny", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
+                TextButton(
+                    enabled = presentation.contextMutationEnabled,
+                    onClick = { if (presentation.contextMutationEnabled) onNew() },
+                ) {
+                    Text("+ Ny", color = if (presentation.contextMutationEnabled) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                }
             }
             panelError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+            presentation.lockMessage?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = query, onValueChange = { query = it },
@@ -989,7 +1024,11 @@ private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (
                     } else {
                         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(
-                                Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable { onOpen(c.id) }.padding(vertical = 4.dp),
+                                Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable(
+                                    enabled = presentation.contextMutationEnabled,
+                                ) {
+                                    if (presentation.contextMutationEnabled) onOpen(c.id)
+                                }.padding(vertical = 4.dp),
                             ) {
                                 Text(c.title.ifBlank { "(uden titel)" }, color = KalivTheme.colors.TextHigh, fontSize = 13.sp, maxLines = 1)
                                 Text(
@@ -1008,20 +1047,26 @@ private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (
                             }) {
                                 Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = KalivTheme.colors.Signal, fontSize = 12.sp)
                             }
-                            TextButton(onClick = {
-                                runCatching {
-                                    db.deleteConversation(c.id)
-                                    // If we just deleted the conversation we're
-                                    // standing in, tell the parent to drop the
-                                    // dangling convId and clear the view. Otherwise
-                                    // an in-flight send (or a streaming reply
-                                    // finalizing) calls addMessage() against a gone
-                                    // conversation -> SQLITE_CONSTRAINT_FOREIGNKEY
-                                    // crash. Seen on-device 12/7.
-                                    if (activeConvId == c.id) onActiveDeleted()
-                                    convos = db.listConversations()
-                                }.onFailure { panelError = it.message }
-                            }) { Text("Slet", color = KalivTheme.colors.Danger, fontSize = 12.sp) }
+                            TextButton(
+                                enabled = presentation.contextMutationEnabled,
+                                onClick = {
+                                    if (presentation.contextMutationEnabled) {
+                                        runCatching {
+                                            db.deleteConversation(c.id)
+                                            // Conversation deletion is an identity mutation. It is
+                                            // locked while a turn/confirmation owns the current context.
+                                            if (activeConvId == c.id) onActiveDeleted()
+                                            convos = db.listConversations()
+                                        }.onFailure { panelError = it.message }
+                                    }
+                                },
+                            ) {
+                                Text(
+                                    "Slet",
+                                    color = if (presentation.contextMutationEnabled) KalivTheme.colors.Danger else KalivTheme.colors.TextMuted,
+                                    fontSize = 12.sp,
+                                )
+                            }
                         }
                     }
                 }
