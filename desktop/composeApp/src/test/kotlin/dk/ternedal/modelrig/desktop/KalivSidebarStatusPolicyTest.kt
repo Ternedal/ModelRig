@@ -21,6 +21,7 @@ class KalivSidebarStatusPolicyTest {
         assertEquals("Primær · lokal", status.modelAuthority)
         assertEquals("Chat: kun lokal", status.privacyTitle)
         assertEquals("Ingen automatisk cloud-fallback", status.privacyDetail)
+        assertEquals("— lokal AI på din maskine", status.titleSubtitle)
         assertTrue(status.localOnly)
     }
 
@@ -36,7 +37,23 @@ class KalivSidebarStatusPolicyTest {
 
         assertEquals("local-model", status.modelName)
         assertEquals("Lokal først · cloud muligt", status.privacyTitle)
+        assertEquals("— lokal først · cloud muligt", status.titleSubtitle)
         assertFalse(status.localOnly)
+    }
+
+    @Test
+    fun localFirstWithUnavailableCloudDoesNotPretendFallbackIsUsable() {
+        val status = presentSidebarStatus(
+            preferLocal = true,
+            autoCloudFallback = true,
+            cloudConfigured = false,
+            localModel = "local-model",
+            cloudModel = "cloud-model",
+        )
+
+        assertEquals("Chat: lokal nu", status.privacyTitle)
+        assertEquals("— lokal AI på din maskine", status.titleSubtitle)
+        assertTrue(status.localOnly)
     }
 
     @Test
@@ -52,6 +69,7 @@ class KalivSidebarStatusPolicyTest {
         assertEquals("cloud-model", status.modelName)
         assertEquals("Primær · cloud", status.modelAuthority)
         assertEquals("Cloud foretrukket", status.privacyTitle)
+        assertEquals("— cloud foretrukket", status.titleSubtitle)
         assertFalse(status.localOnly)
     }
 
@@ -68,7 +86,14 @@ class KalivSidebarStatusPolicyTest {
         assertEquals("cloud-model", status.modelName)
         assertEquals("Cloud valgt · ikke konfigureret", status.modelAuthority)
         assertEquals("Cloud valgt · ikke klar", status.privacyTitle)
+        assertEquals("— cloud valgt · ikke klar", status.titleSubtitle)
         assertFalse(status.localOnly)
+    }
+
+    @Test
+    fun localModelSelectorIsExplicitlyLocalConfiguration() {
+        assertEquals("Lokal model: local-model ▾", presentLocalModelSelectorLabel("local-model"))
+        assertEquals("Lokal model: (ikke valgt) ▾", presentLocalModelSelectorLabel(""))
     }
 
     @Test

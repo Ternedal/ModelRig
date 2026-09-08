@@ -431,6 +431,16 @@ fun App() {
             }
         }
 
+        // One presentation authority feeds both the wide rail and Chat title.
+        // The shell must never claim local-only while configured routing says cloud.
+        val chatRouteStatus = presentSidebarStatus(
+            preferLocal = preferLocal,
+            autoCloudFallback = autoCloudFallback,
+            cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
+            localModel = localModel,
+            cloudModel = cloudModel,
+        )
+
         // Shell from the mockup: a 40dp custom title bar spans the FULL width,
         // and the three columns live below it. Each direction carries its own
         // chrome -- 1a a 246dp labelled rail, 1b/1c the 70dp icon rail -- and
@@ -441,7 +451,7 @@ fun App() {
             subtitle = when (activeScreen) {
                 KalivScreen.AGENT -> "\u2014 agent"
                 KalivScreen.COMPUTER -> "\u2014 computer-use"
-                else -> "\u2014 lokal AI p\u00e5 din maskine"
+                else -> chatRouteStatus.titleSubtitle
             },
             // Mockup 1c: an amber "Kaliv styrer skærmen" badge sits next to the
             // subtitle while a computer-use task is actually running.
@@ -453,13 +463,6 @@ fun App() {
         )
         Row(Modifier.fillMaxWidth().weight(1f)) {
             if (activeScreen == KalivScreen.CHAT) {
-            val sidebarStatus = presentSidebarStatus(
-                preferLocal = preferLocal,
-                autoCloudFallback = autoCloudFallback,
-                cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
-                localModel = localModel,
-                cloudModel = cloudModel,
-            )
             KalivNavRail(
                 active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                 onSelect = { screen ->
@@ -478,7 +481,7 @@ fun App() {
                         else -> {}
                     }
                 },
-                status = sidebarStatus,
+                status = chatRouteStatus,
                 // No live VRAM authority is wired into the desktop shell yet.
                 // Missing measurement stays explicit instead of using reference data.
                 vram = KalivVramTelemetry.Unavailable,
@@ -555,7 +558,7 @@ fun App() {
             val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Box {
-                    ToolbarChip("Model: $localModel \u25be", filled = false) { modelMenuOpen = true }
+                    ToolbarChip(presentLocalModelSelectorLabel(localModel), filled = false) { modelMenuOpen = true }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("\u21bb Genindl\u00e6s modeller", color = KalivTheme.colors.Signal, fontSize = 13.sp) },
