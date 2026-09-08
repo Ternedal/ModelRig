@@ -599,7 +599,7 @@ private fun DesktopStepCard(index: Int, step: Agent3ReadonlyTaskStep) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "$index. ${step.summary.ifBlank { step.tool }}",
+                "$index. ${presentTaskStepHeadline(step.summary)}",
                 color = KalivTheme.colors.TextHigh,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -616,7 +616,7 @@ private fun DesktopStepCard(index: Int, step: Agent3ReadonlyTaskStep) {
                 }
             }
         }
-        Text("tool: ${step.tool}", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+        Text(presentTaskStepToolAudit(step.tool), color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         Text(
             presentTaskStepReadOnlyMetadata(step.risk, step.egress, step.idempotent),
             color = KalivTheme.colors.TextMuted,
