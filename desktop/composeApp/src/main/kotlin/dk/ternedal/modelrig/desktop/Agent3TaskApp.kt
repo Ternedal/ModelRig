@@ -633,21 +633,51 @@ private fun DesktopStepCard(index: Int, step: Agent3ReadonlyTaskStep) {
 
 @Composable
 private fun DesktopReceipt(value: Agent3TaskCapabilityReceipt?) {
-    Text("Capability receipt", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
+    Text("Kapabilitetstjek", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
     if (value == null) {
-        Text("Ingen receipt returneret", color = KalivTheme.colors.Amber, fontSize = 11.sp)
+        Text(
+            presentTaskCapabilityStatus(null),
+            color = KalivTheme.colors.Amber,
+            fontSize = 11.sp,
+        )
         return
     }
-    DesktopValueRow("Tilladt", if (value.allowed) "ja" else "nej")
-    DesktopValueRow("Route", value.route)
-    DesktopValueRow("Graph", value.graphSha256.shortDesktopHash())
-    DesktopValueRow("Plan", value.planSha256.shortDesktopHash())
-    value.blockers.forEach {
+    Text(
+        presentTaskCapabilityStatus(value.allowed),
+        color = if (value.allowed) KalivTheme.colors.Success else KalivTheme.colors.Danger,
+        fontSize = 11.sp,
+    )
+    DesktopValueRow("Rute", presentTaskCapabilityRoute(value.route))
+    DesktopValueRow("Blokeringer", presentTaskCapabilityBlockerCount(value.blockers.size))
+    DesktopValueRow("Graf-hash", value.graphSha256.shortDesktopHash())
+    DesktopValueRow("Plan-hash", value.planSha256.shortDesktopHash())
+    if (value.blockers.isNotEmpty()) {
+        Spacer(Modifier.height(4.dp))
         Text(
-            "• ${it.capabilityId}: ${it.state} — ${it.reason}",
-            color = KalivTheme.colors.Danger,
-            fontSize = 10.sp,
+            "Teknisk kvittering · blokeringer",
+            color = KalivTheme.colors.TextMuted,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
         )
+        value.blockers.forEachIndexed { index, blocker ->
+            Text(
+                "Blokering ${index + 1}",
+                color = KalivTheme.colors.TextMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            taskCapabilityBlockerEvidence(
+                blocker.capabilityId,
+                blocker.state,
+                blocker.reason,
+            ).forEach { field ->
+                Text(
+                    "${field.label}: ${field.value}",
+                    color = KalivTheme.colors.TextMuted,
+                    fontSize = 9.sp,
+                )
+            }
+        }
     }
 }
 
