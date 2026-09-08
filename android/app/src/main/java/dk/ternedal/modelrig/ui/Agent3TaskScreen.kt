@@ -609,21 +609,47 @@ private fun StepCard(index: Int, step: Agent3ReadonlyTaskClient.Step) {
 
 @Composable
 private fun ReceiptCard(receipt: Agent3ReadonlyTaskClient.CapabilityReceipt?) {
-    Text("Capability receipt", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
+    Text("Kapabilitetstjek", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
     if (receipt == null) {
-        Text("Ingen receipt returneret", color = KalivTheme.colors.amber, fontSize = 11.sp)
+        Text("Kapabilitetskvittering er ikke tilgængelig.", color = KalivTheme.colors.amber, fontSize = 11.sp)
         return
     }
-    MetaRow("Tilladt", if (receipt.allowed) "ja" else "nej")
-    MetaRow("Route", receipt.route)
-    MetaRow("Graph", receipt.graphSha256.shortHash())
-    MetaRow("Plan", receipt.planSha256.shortHash())
-    receipt.blockers.forEach {
+    Text(
+        presentAgent3CapabilityStatusMessage(receipt.allowed),
+        color = if (receipt.allowed) KalivTheme.colors.success else KalivTheme.colors.danger,
+        fontSize = 11.sp,
+    )
+    MetaRow("Rute", presentAgent3CapabilityRoute(receipt.route))
+    MetaRow("Blokeringer", presentAgent3CapabilityBlockerCount(receipt.blockers.size))
+    MetaRow("Graf-hash", receipt.graphSha256.shortHash())
+    MetaRow("Plan-hash", receipt.planSha256.shortHash())
+    if (receipt.blockers.isNotEmpty()) {
+        Spacer(Modifier.height(4.dp))
         Text(
-            "• ${it.capabilityId}: ${it.state} — ${it.reason}",
-            color = KalivTheme.colors.danger,
-            fontSize = 10.sp,
+            "Teknisk kvittering · blokeringer",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
         )
+        receipt.blockers.forEachIndexed { index, blocker ->
+            Text(
+                "Blokering ${index + 1}",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            agent3CapabilityBlockerEvidence(
+                blocker.capabilityId,
+                blocker.state,
+                blocker.reason,
+            ).forEach { field ->
+                Text(
+                    "${field.label}: ${field.value}",
+                    color = KalivTheme.colors.textMuted,
+                    fontSize = 9.sp,
+                )
+            }
+        }
     }
 }
 
