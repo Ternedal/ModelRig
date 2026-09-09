@@ -253,12 +253,17 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     }
 
     fun startPlanEnvelope(planId: String): Agent3RunEnvelope =
-        decodeRunEnvelope(post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}"))
+        decodeRunEnvelope(
+            post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}"),
+        )
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
 
     fun getRun(runId: String): Agent3Run =
-        decodeRunEnvelope(get("/api/v1/experimental/agent3/runs/${seg(runId)}")).run
+        decodeRunEnvelope(
+            get("/api/v1/experimental/agent3/runs/${seg(runId)}"),
+            expectedRunId = runId,
+        ).run
 
     fun listRuns(): List<Agent3Run> =
         decode<RunsEnvelope>(get("/api/v1/experimental/agent3/runs")).runs
@@ -271,26 +276,42 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             post(
                 "/api/v1/experimental/agent3/runs/${seg(runId)}/retry",
                 json.encodeToString(RetryRequest(cloudReady)),
-            )
+            ),
+            expectedRunId = runId,
         ).run
 
     fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Agent3Run {
         val body = json.encodeToString(
             ConfirmRequest(stepId, if (approve) "approve" else "deny", digest)
         )
-        return decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/${seg(runId)}/confirm", body)).run
+        return decodeRunEnvelope(
+            post("/api/v1/experimental/agent3/runs/${seg(runId)}/confirm", body),
+            expectedRunId = runId,
+        ).run
     }
 
     fun resume(runId: String): Agent3Run =
-        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", "{}")).run
+        decodeRunEnvelope(
+            post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", "{}"),
+            expectedRunId = runId,
+        ).run
 
     fun cancel(runId: String): Agent3Run =
-        decodeRunEnvelope(post("/api/v1/experimental/agent3/runs/${seg(runId)}/cancel", "{}")).run
+        decodeRunEnvelope(
+            post("/api/v1/experimental/agent3/runs/${seg(runId)}/cancel", "{}"),
+            expectedRunId = runId,
+        ).run
 
-    private fun decodeRunEnvelope(body: String): Agent3RunEnvelope {
+    private fun decodeRunEnvelope(
+        body: String,
+        expectedRunId: String? = null,
+    ): Agent3RunEnvelope {
         val envelope = decode<Agent3RunEnvelope>(body)
         validateCapabilityReceipt(envelope.capabilityReceipt)
         val termination = validateTerminationReceipt(envelope.termination, envelope.run)
+        if (expectedRunId != null && envelope.run.id != expectedRunId) {
+            throw Agent3Exception("Invalid Agent 3.0 run envelope: server returned another run id")
+        }
         return envelope.copy(
             run = envelope.run.copy(termination = termination),
             termination = termination,
