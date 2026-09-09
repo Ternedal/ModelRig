@@ -41,6 +41,21 @@ object Agent3TaskUiPolicy {
         !busy &&
         !hasRun
 
+    fun readinessBindingMatches(
+        currentPilotReportSha256: String?,
+        currentPilotCandidateGitSha: String?,
+        currentRigValidationReportSha256: String?,
+        previewPilotReportSha256: String,
+        previewPilotCandidateGitSha: String,
+        previewRigValidationReportSha256: String,
+    ): Boolean =
+        !currentPilotReportSha256.isNullOrBlank() &&
+        !currentPilotCandidateGitSha.isNullOrBlank() &&
+        !currentRigValidationReportSha256.isNullOrBlank() &&
+        currentPilotReportSha256 == previewPilotReportSha256 &&
+        currentPilotCandidateGitSha == previewPilotCandidateGitSha &&
+        currentRigValidationReportSha256 == previewRigValidationReportSha256
+
     fun previewDeadlineMillis(requestStartedAtMillis: Long, expiresInSeconds: Int?): Long? {
         if (requestStartedAtMillis < 0L || expiresInSeconds == null || expiresInSeconds <= 0) return null
         val ttlMillis = expiresInSeconds.toLong() * 1_000L

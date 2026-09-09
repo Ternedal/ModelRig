@@ -157,8 +157,29 @@ fun Agent3TaskScreen(
         preview = null
         previewDeadlineMillis = null
         previewExpired = false
-        val requestStartedAtMillis = SystemClock.elapsedRealtime()
         scope.launch {
+            val readinessResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3TaskReadinessClient(base, token).readiness()
+                }
+            }
+            val freshReadiness = readinessResult.getOrElse {
+                busy = TaskBusy.NONE
+                readiness = null
+                preview = null
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
+                return@launch
+            }
+            readiness = freshReadiness
+            if (!freshReadiness.agent3ReadonlySelected) {
+                busy = TaskBusy.NONE
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                return@launch
+            }
+            val requestStartedAtMillis = SystemClock.elapsedRealtime()
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val (base, token) = connection()
@@ -178,8 +199,8 @@ fun Agent3TaskScreen(
                     SystemClock.elapsedRealtime(),
                 )
             }.onFailure {
-                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.PREVIEW, it.message)
-                }
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.PREVIEW, it.message)
+            }
         }
     }
 
@@ -202,6 +223,53 @@ fun Agent3TaskScreen(
         busy = TaskBusy.START
         error = null
         scope.launch {
+            val readinessResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3TaskReadinessClient(base, token).readiness()
+                }
+            }
+            val freshReadiness = readinessResult.getOrElse {
+                busy = TaskBusy.NONE
+                readiness = null
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
+                return@launch
+            }
+            readiness = freshReadiness
+            if (!freshReadiness.agent3ReadonlySelected) {
+                busy = TaskBusy.NONE
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                return@launch
+            }
+            if (!Agent3TaskUiPolicy.readinessBindingMatches(
+                    currentPilotReportSha256 = freshReadiness.pilot.reportSha256,
+                    currentPilotCandidateGitSha = freshReadiness.pilot.candidateGitSha,
+                    currentRigValidationReportSha256 = freshReadiness.rigValidation.reportSha256,
+                    previewPilotReportSha256 = plan.evidence.pilotReportSha256,
+                    previewPilotCandidateGitSha = plan.evidence.pilotCandidateGitSha,
+                    previewRigValidationReportSha256 = plan.evidence.rigValidationReportSha256,
+                )
+            ) {
+                busy = TaskBusy.NONE
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                error = "Plan-previewet matcher ikke længere task-readiness. Lav et nyt preview."
+                return@launch
+            }
+            val startNowMillis = SystemClock.elapsedRealtime()
+            if (!Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, startNowMillis)) {
+                busy = TaskBusy.NONE
+                if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, startNowMillis)) {
+                    previewExpired = true
+                }
+                return@launch
+            }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val (base, token) = connection()

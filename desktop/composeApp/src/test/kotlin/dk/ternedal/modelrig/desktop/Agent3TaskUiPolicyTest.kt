@@ -188,6 +188,32 @@ class Agent3TaskUiPolicyTest {
     }
 
     @Test
+    fun actionTimeReadinessBindingMustExactlyMatchReviewedPreview() {
+        val pilot = "a".repeat(64)
+        val candidate = "b".repeat(40)
+        val rig = "c".repeat(64)
+        assertTrue(Agent3TaskUiPolicy.readinessBindingMatches(pilot, candidate, rig, pilot, candidate, rig))
+        assertFalse(Agent3TaskUiPolicy.readinessBindingMatches(null, candidate, rig, pilot, candidate, rig))
+        assertFalse(Agent3TaskUiPolicy.readinessBindingMatches(pilot, null, rig, pilot, candidate, rig))
+        assertFalse(Agent3TaskUiPolicy.readinessBindingMatches(pilot, candidate, null, pilot, candidate, rig))
+        assertFalse(
+            Agent3TaskUiPolicy.readinessBindingMatches(
+                "d".repeat(64), candidate, rig, pilot, candidate, rig,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.readinessBindingMatches(
+                pilot, "d".repeat(40), rig, pilot, candidate, rig,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.readinessBindingMatches(
+                pilot, candidate, "d".repeat(64), pilot, candidate, rig,
+            ),
+        )
+    }
+
+    @Test
     fun terminalHistoryResetWaitsForFullRunAndToolTruth() {
         assertFalse(
             Agent3TaskUiPolicy.canResetTerminalHistory(
