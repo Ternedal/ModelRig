@@ -235,14 +235,19 @@ fun Agent3DevApp() {
         }
 
         fun stopPlan() {
-            val id = run?.id ?: return
+            val current = run ?: return
             val connection = runConnection ?: return
-            if (busy) return
+            if (!Agent3DevInteractionPolicy.canStopPlan(
+                    runState = current.state,
+                    planCanRequest = current.termination?.plan?.canRequest,
+                    busy = busy,
+                )
+            ) return
             busy = true
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { client(connection).cancel(id) }
+                    runCatching { client(connection).cancel(current.id) }
                 }
                 busy = false
                 result.onSuccess { run = it }
@@ -595,7 +600,12 @@ private fun RunCard(
         nowEpochSeconds = confirmationNow,
     )
     val termination = run.termination
-    val canStopPlan = termination?.plan?.canRequest == true
+    val stopPlanVisible = termination?.plan?.canRequest == true && !isTerminal(run.state)
+    val canStopPlan = Agent3DevInteractionPolicy.canStopPlan(
+        runState = run.state,
+        planCanRequest = termination?.plan?.canRequest,
+        busy = busy,
+    )
     DevCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -653,8 +663,8 @@ private fun RunCard(
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !busy, onClick = onRefresh) { Text("Opdatér") }
-            if (canStopPlan) {
-                OutlinedButton(enabled = !busy, onClick = onStopPlan) { Text("Stop plan") }
+            if (stopPlanVisible) {
+                OutlinedButton(enabled = canStopPlan, onClick = onStopPlan) { Text("Stop plan") }
             }
         }
     }

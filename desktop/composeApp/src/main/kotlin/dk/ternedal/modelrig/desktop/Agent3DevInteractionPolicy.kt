@@ -98,6 +98,15 @@ internal object Agent3DevInteractionPolicy {
             currentIntent != null &&
             currentIntent == previewIntent
 
+    fun canStopPlan(
+        runState: String?,
+        planCanRequest: Boolean?,
+        busy: Boolean,
+    ): Boolean =
+        runState != null &&
+            !isTerminal(runState) &&
+            Agent3TaskUiPolicy.canStopPlan(planCanRequest, busy)
+
     fun confirmation(
         confirmationDigest: String?,
         confirmationExpiresAt: Double?,
