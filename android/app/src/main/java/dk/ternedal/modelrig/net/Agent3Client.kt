@@ -132,6 +132,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
 
     data class RunEnvelope(
         val run: Run,
+        val planId: String? = null,
         val reviewReads: Boolean,
         val readReview: ReadReview,
         val capabilityReceipt: CapabilityReceipt?,
@@ -190,7 +191,11 @@ class Agent3Client(baseUrl: String, private val token: String) {
 
     fun startPlanEnvelope(planId: String): RunEnvelope {
         val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
-        return parseRunEnvelope(root)
+        val envelope = parseRunEnvelope(root)
+        if (envelope.planId.isNullOrBlank() || envelope.planId != planId) {
+            throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")
+        }
+        return envelope
     }
 
     fun startPlan(planId: String): Run = startPlanEnvelope(planId).run
@@ -291,6 +296,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val termination = parseTerminationReceipt(root.optJSONObject("termination"))
         return RunEnvelope(
             run = parseRun(root.requireObject("run")).copy(termination = termination),
+            planId = root.nullableString("plan_id"),
             reviewReads = root.optBoolean("review_reads", false),
             readReview = parseReadReview(root.optJSONObject("read_review")),
             capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),

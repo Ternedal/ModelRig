@@ -99,6 +99,7 @@ class Agent3RunIdBindingTest {
             "current_step": 0,
             "steps": []
           },
+          "plan_id": "plan-1",
           "termination": {
             "schema": "kaliv-agent3-termination/v1",
             "plan": {
