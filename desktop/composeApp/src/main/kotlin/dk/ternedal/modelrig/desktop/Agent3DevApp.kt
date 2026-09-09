@@ -83,10 +83,17 @@ fun Agent3DevApp() {
 
         fun previewPlan() {
             val text = message.trim()
-            if (text.isEmpty() || busy) return
+            val currentRun = run
+            if (!Agent3DevInteractionPolicy.canPreview(
+                    message = text,
+                    busy = busy,
+                    runState = currentRun?.state,
+                    activeToolState = currentRun?.termination?.activeTool?.state,
+                    activeToolRequestState = currentRun?.termination?.activeTool?.requestState,
+                )
+            ) return
             busy = true
             error = null
-            run = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
@@ -99,22 +106,35 @@ fun Agent3DevApp() {
                     }
                 }
                 busy = false
-                result.onSuccess { preview = it }
-                    .onFailure { error = it.message ?: "Planlægning fejlede" }
+                result.onSuccess { planned ->
+                    // Replace terminal history only after the new preview itself
+                    // succeeded. Failure keeps the old run/control truth visible.
+                    run = null
+                    preview = planned
+                }.onFailure { error = it.message ?: "Planlægning fejlede" }
             }
         }
 
         fun startPlan() {
             val current = preview ?: return
+            if (!Agent3DevInteractionPolicy.canStart(
+                    planId = current.planId,
+                    planSize = current.plan.size,
+                    capabilityAllowed = current.capabilityReceipt?.allowed,
+                    busy = busy,
+                    hasRun = run != null,
+                )
+            ) return
             val id = current.planId ?: return
-            if (current.capabilityReceipt?.allowed == false || busy) return
             busy = true
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) { runCatching { client().startPlan(id) } }
                 busy = false
-                result.onSuccess { run = it }
-                    .onFailure { error = it.message ?: "Planen kunne ikke startes" }
+                result.onSuccess { started ->
+                    preview = null
+                    run = started
+                }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
             }
         }
 
@@ -256,7 +276,15 @@ fun Agent3DevApp() {
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                Button(enabled = !busy && message.isNotBlank(), onClick = ::previewPlan) {
+                val currentRun = run
+                val previewEnabled = Agent3DevInteractionPolicy.canPreview(
+                    message = message,
+                    busy = busy,
+                    runState = currentRun?.state,
+                    activeToolState = currentRun?.termination?.activeTool?.state,
+                    activeToolRequestState = currentRun?.termination?.activeTool?.requestState,
+                )
+                Button(enabled = previewEnabled, onClick = ::previewPlan) {
                     Text(if (busy) "Arbejder…" else "Lav plan-preview")
                 }
             }
@@ -268,7 +296,7 @@ fun Agent3DevApp() {
 
             preview?.let {
                 Spacer(Modifier.height(12.dp))
-                PlanCard(it, busy, ::startPlan)
+                PlanCard(it, busy, run != null, ::startPlan)
             }
 
             run?.let {
@@ -293,8 +321,12 @@ private fun DevCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> Unit) {
-    val capabilityAllowed = preview.capabilityReceipt?.allowed != false
+private fun PlanCard(
+    preview: Agent3PlanPreview,
+    busy: Boolean,
+    hasRun: Boolean,
+    onStart: () -> Unit,
+) {
     DevCard {
         Text("Plan-preview", color = KalivTheme.colors.TextHigh, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(
@@ -354,7 +386,13 @@ private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> U
         }
         Spacer(Modifier.height(12.dp))
         Button(
-            enabled = !busy && capabilityAllowed && preview.planId != null && preview.plan.isNotEmpty(),
+            enabled = Agent3DevInteractionPolicy.canStart(
+                planId = preview.planId,
+                planSize = preview.plan.size,
+                capabilityAllowed = preview.capabilityReceipt?.allowed,
+                busy = busy,
+                hasRun = hasRun,
+            ),
             onClick = onStart,
         ) { Text("Start den viste plan") }
         preview.expiresInSeconds?.let {
