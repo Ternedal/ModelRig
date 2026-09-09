@@ -178,13 +178,58 @@ class KalivAgent3CockpitInteractionPolicyTest {
         val p = presentAgent3CockpitConfirmation(
             confirmationDigest = "a".repeat(64),
             confirmationExpiresAt = 120.0,
+            runState = "waiting_confirmation",
             stepState = "awaiting_confirmation",
             busy = false,
             nowEpochSeconds = 119.999,
         )
         assertEquals(Agent3CockpitConfirmationState.LIVE, p.state)
         assertTrue(p.actionEnabled)
-        assertTrue(canAgent3CockpitDecide("a".repeat(64), 120.0, "awaiting_confirmation", false, 119.999))
+        assertTrue(canAgent3CockpitDecide("a".repeat(64), 120.0, "waiting_confirmation", "awaiting_confirmation", false, 119.999))
+    }
+
+
+    @Test
+    fun terminalRunRevokesStaleConfirmationActionability() {
+        for (terminalRunState in listOf("cancelled", "blocked", "completed", "failed")) {
+            val p = presentAgent3CockpitConfirmation(
+                confirmationDigest = "a".repeat(64),
+                confirmationExpiresAt = 200.0,
+                runState = terminalRunState,
+                stepState = "awaiting_confirmation",
+                busy = false,
+                nowEpochSeconds = 100.0,
+            )
+            assertEquals(Agent3CockpitConfirmationState.HIDDEN, p.state, terminalRunState)
+            assertFalse(p.actionEnabled, terminalRunState)
+            assertFalse(
+                canAgent3CockpitDecide(
+                    "a".repeat(64),
+                    200.0,
+                    terminalRunState,
+                    "awaiting_confirmation",
+                    false,
+                    100.0,
+                ),
+                terminalRunState,
+            )
+        }
+    }
+
+    @Test
+    fun missingUnknownOrRunningRunStateCannotMintConfirmationAuthority() {
+        for (runState in listOf<String?>(null, "", "running", "some_future_state")) {
+            val p = presentAgent3CockpitConfirmation(
+                confirmationDigest = "a".repeat(64),
+                confirmationExpiresAt = 200.0,
+                runState = runState,
+                stepState = "awaiting_confirmation",
+                busy = false,
+                nowEpochSeconds = 100.0,
+            )
+            assertEquals(Agent3CockpitConfirmationState.HIDDEN, p.state, runState)
+            assertFalse(p.actionEnabled, runState)
+        }
     }
 
     @Test
@@ -192,13 +237,14 @@ class KalivAgent3CockpitInteractionPolicyTest {
         val p = presentAgent3CockpitConfirmation(
             confirmationDigest = "a".repeat(64),
             confirmationExpiresAt = 120.0,
+            runState = "waiting_confirmation",
             stepState = "awaiting_confirmation",
             busy = false,
             nowEpochSeconds = 120.0,
         )
         assertEquals(Agent3CockpitConfirmationState.EXPIRED, p.state)
         assertFalse(p.actionEnabled)
-        assertFalse(canAgent3CockpitDecide("a".repeat(64), 120.0, "awaiting_confirmation", false, 120.0))
+        assertFalse(canAgent3CockpitDecide("a".repeat(64), 120.0, "waiting_confirmation", "awaiting_confirmation", false, 120.0))
     }
 
     @Test
@@ -206,6 +252,7 @@ class KalivAgent3CockpitInteractionPolicyTest {
         val p = presentAgent3CockpitConfirmation(
             confirmationDigest = "a".repeat(64),
             confirmationExpiresAt = 120.0,
+            runState = "waiting_confirmation",
             stepState = "awaiting_confirmation",
             busy = false,
             nowEpochSeconds = 121.0,
@@ -219,6 +266,7 @@ class KalivAgent3CockpitInteractionPolicyTest {
         val missing = presentAgent3CockpitConfirmation(
             confirmationDigest = "a".repeat(64),
             confirmationExpiresAt = null,
+            runState = "waiting_confirmation",
             stepState = "awaiting_confirmation",
             busy = false,
             nowEpochSeconds = 100.0,
@@ -226,6 +274,7 @@ class KalivAgent3CockpitInteractionPolicyTest {
         val invalid = presentAgent3CockpitConfirmation(
             confirmationDigest = "a".repeat(64),
             confirmationExpiresAt = Double.NaN,
+            runState = "waiting_confirmation",
             stepState = "awaiting_confirmation",
             busy = false,
             nowEpochSeconds = 100.0,
@@ -241,6 +290,7 @@ class KalivAgent3CockpitInteractionPolicyTest {
         val p = presentAgent3CockpitConfirmation(
             confirmationDigest = "a".repeat(64),
             confirmationExpiresAt = 120.0,
+            runState = "waiting_confirmation",
             stepState = "awaiting_confirmation",
             busy = true,
             nowEpochSeconds = 100.0,
@@ -254,6 +304,7 @@ class KalivAgent3CockpitInteractionPolicyTest {
         val p = presentAgent3CockpitConfirmation(
             confirmationDigest = "a".repeat(64),
             confirmationExpiresAt = 120.0,
+            runState = "completed",
             stepState = "done",
             busy = false,
             nowEpochSeconds = 100.0,

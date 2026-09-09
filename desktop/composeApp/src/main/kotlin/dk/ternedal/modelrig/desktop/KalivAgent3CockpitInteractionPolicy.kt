@@ -58,14 +58,22 @@ internal fun presentAgent3CockpitInteraction(
     )
 }
 
+internal fun isAgent3CockpitWaitingForConfirmation(runState: String?): Boolean =
+    runState?.lowercase() in setOf("waiting_confirmation", "awaiting_confirmation")
+
 internal fun presentAgent3CockpitConfirmation(
     confirmationDigest: String?,
     confirmationExpiresAt: Double?,
+    runState: String?,
     stepState: String?,
     busy: Boolean,
     nowEpochSeconds: Double,
 ): KalivAgent3CockpitConfirmation {
-    if (confirmationDigest == null || isTerminal(stepState)) {
+    if (
+        !isAgent3CockpitWaitingForConfirmation(runState) ||
+        confirmationDigest == null ||
+        isTerminal(stepState)
+    ) {
         return KalivAgent3CockpitConfirmation(
             state = Agent3CockpitConfirmationState.HIDDEN,
             actionEnabled = false,
@@ -93,12 +101,14 @@ internal fun presentAgent3CockpitConfirmation(
 internal fun canAgent3CockpitDecide(
     confirmationDigest: String?,
     confirmationExpiresAt: Double?,
+    runState: String?,
     stepState: String?,
     busy: Boolean,
     nowEpochSeconds: Double,
 ): Boolean = presentAgent3CockpitConfirmation(
     confirmationDigest = confirmationDigest,
     confirmationExpiresAt = confirmationExpiresAt,
+    runState = runState,
     stepState = stepState,
     busy = busy,
     nowEpochSeconds = nowEpochSeconds,
