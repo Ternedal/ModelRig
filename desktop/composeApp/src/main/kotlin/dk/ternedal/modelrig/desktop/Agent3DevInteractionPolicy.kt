@@ -26,6 +26,31 @@ internal class Agent3DevConnectionBinding private constructor(
     }
 }
 
+/** Exact reviewed request intent that one developer preview represents. */
+internal data class Agent3DevPreviewIntent(
+    val message: String,
+    val useMemory: Boolean,
+    val memorySubjects: List<String>,
+) {
+    companion object {
+        fun capture(message: String, useMemory: Boolean, memorySubjects: String): Agent3DevPreviewIntent? {
+            val normalizedMessage = message.trim()
+            if (normalizedMessage.isBlank()) return null
+            val subjects = if (useMemory) {
+                memorySubjects
+                    .split(',')
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                    .take(20)
+            } else {
+                emptyList()
+            }
+            return Agent3DevPreviewIntent(normalizedMessage, useMemory, subjects)
+        }
+    }
+}
+
 /** Shared local authority for the explicit --agent3 developer surface. */
 internal object Agent3DevInteractionPolicy {
     fun canPreview(
@@ -45,6 +70,11 @@ internal object Agent3DevInteractionPolicy {
         )
     }
 
+    fun canPublishPreview(
+        requestIntent: Agent3DevPreviewIntent?,
+        currentIntent: Agent3DevPreviewIntent?,
+    ): Boolean = requestIntent != null && requestIntent == currentIntent
+
     fun canStart(
         planId: String?,
         planSize: Int,
@@ -53,6 +83,8 @@ internal object Agent3DevInteractionPolicy {
         hasRun: Boolean,
         currentConnection: Agent3DevConnectionBinding?,
         previewConnection: Agent3DevConnectionBinding?,
+        currentIntent: Agent3DevPreviewIntent?,
+        previewIntent: Agent3DevPreviewIntent?,
     ): Boolean =
         !busy &&
             !hasRun &&
@@ -60,5 +92,7 @@ internal object Agent3DevInteractionPolicy {
             planSize > 0 &&
             capabilityAllowed != false &&
             currentConnection != null &&
-            currentConnection == previewConnection
+            currentConnection == previewConnection &&
+            currentIntent != null &&
+            currentIntent == previewIntent
 }
