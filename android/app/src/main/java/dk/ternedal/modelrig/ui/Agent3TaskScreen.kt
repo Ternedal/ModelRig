@@ -263,6 +263,25 @@ fun Agent3TaskScreen(
         }
     }
 
+    fun resetTerminalHistory() {
+        val current = snapshot ?: return
+        val activeTool = current.termination.activeTool
+        if (!Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = current.terminal,
+                activeToolState = activeTool?.state,
+                activeToolRequestState = activeTool?.requestState,
+                busy = busy != TaskBusy.NONE,
+            )
+        ) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
+        snapshot = null
+        preview = null
+        previewDeadlineMillis = null
+        previewExpired = false
+        message = ""
+        error = null
+    }
+
     LaunchedEffect(Unit) { refreshReadiness() }
 
     // The screen owns phone-side polling. Leaving it cancels this coroutine, but
@@ -516,6 +535,19 @@ fun Agent3TaskScreen(
                     onRefresh = { refreshRun() },
                     onStopPlan = { stopPlan() },
                 )
+                val activeTool = run.termination.activeTool
+                if (Agent3TaskUiPolicy.canResetTerminalHistory(
+                        runTerminal = run.terminal,
+                        activeToolState = activeTool?.state,
+                        activeToolRequestState = activeTool?.requestState,
+                        busy = isBusy,
+                    )
+                ) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = { resetTerminalHistory() }) {
+                        Text("Ny opgave")
+                    }
+                }
             }
 
             Spacer(Modifier.height(24.dp))

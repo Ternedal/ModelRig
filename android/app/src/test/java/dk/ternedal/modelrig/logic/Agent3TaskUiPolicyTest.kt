@@ -191,4 +191,56 @@ class Agent3TaskUiPolicyTest {
         )
         assertNull(Agent3TaskUiPolicy.retainedRunIdAfterSnapshot("run_abc123", terminal = true))
     }
+
+    @Test
+    fun terminalHistoryResetWaitsForFullRunAndToolTruth() {
+        assertFalse(
+            Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = false,
+                activeToolState = null,
+                activeToolRequestState = null,
+                busy = false,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = true,
+                activeToolState = "executing",
+                activeToolRequestState = "unavailable",
+                busy = false,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = true,
+                activeToolState = "completed_after_cancel",
+                activeToolRequestState = "pending",
+                busy = false,
+            ),
+        )
+        assertTrue(
+            Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = true,
+                activeToolState = "completed_after_cancel",
+                activeToolRequestState = "terminal",
+                busy = false,
+            ),
+        )
+        assertTrue(
+            Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = true,
+                activeToolState = null,
+                activeToolRequestState = null,
+                busy = false,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = true,
+                activeToolState = null,
+                activeToolRequestState = null,
+                busy = true,
+            ),
+        )
+    }
 }
