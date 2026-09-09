@@ -25,6 +25,8 @@ REQUIRED_STATUS_CHECKS = (
     "desktop-compile",
     "desktop-dpapi-windows",
     "agent3-memory-dpapi-windows",
+    "analyze (go)",
+    "analyze (python)",
     "agent3-python",
     "full-test-log",
     "exact-head-core",
