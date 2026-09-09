@@ -196,6 +196,7 @@ fun KalivAgentCockpitA3(
         if (!canAgent3CockpitDecide(
                 confirmationDigest = step.confirmationDigest,
                 confirmationExpiresAt = step.confirmationExpiresAt,
+                runState = run?.state,
                 stepState = step.state,
                 busy = busy,
                 nowEpochSeconds = nowEpochSeconds,
@@ -368,6 +369,7 @@ fun KalivAgentCockpitA3(
                     A3StepRow(
                         index = i + 1,
                         step = s,
+                        runState = run?.state,
                         isCurrent = run?.currentStep == i,
                         onApprove = { decide(s, true) },
                         onReject = { decide(s, false) },
@@ -409,7 +411,7 @@ fun KalivAgentCockpitA3(
  */
 internal fun isTerminal(state: String?): Boolean = when (state?.lowercase()) {
     "done", "completed", "succeeded", "success",
-    "denied", "cancelled", "canceled", "failed", "error",
+    "denied", "cancelled", "canceled", "failed", "error", "blocked",
     "completed_after_cancel",
     -> true
     else -> false
@@ -418,7 +420,7 @@ internal fun isTerminal(state: String?): Boolean = when (state?.lowercase()) {
 internal fun statusOf(step: Agent3Step, isCurrent: Boolean): StepStatus =
     when (step.state?.lowercase()) {
         "done", "completed", "succeeded", "success" -> StepStatus.DONE
-        "denied", "cancelled", "canceled", "failed", "error" -> StepStatus.CANCELLED
+        "denied", "cancelled", "canceled", "failed", "error", "blocked" -> StepStatus.CANCELLED
         "running", "executing", "active", "awaiting_confirmation" -> StepStatus.ACTIVE
         else -> if (isCurrent) StepStatus.ACTIVE else StepStatus.PENDING
     }
@@ -427,6 +429,7 @@ internal fun statusOf(step: Agent3Step, isCurrent: Boolean): StepStatus =
 private fun A3StepRow(
     index: Int,
     step: Agent3Step,
+    runState: String?,
     isCurrent: Boolean,
     onApprove: () -> Unit,
     onReject: () -> Unit,
@@ -467,6 +470,7 @@ private fun A3StepRow(
     val confirmation = presentAgent3CockpitConfirmation(
         confirmationDigest = step.confirmationDigest,
         confirmationExpiresAt = step.confirmationExpiresAt,
+        runState = runState,
         stepState = step.state,
         busy = busy,
         nowEpochSeconds = confirmationNow,
