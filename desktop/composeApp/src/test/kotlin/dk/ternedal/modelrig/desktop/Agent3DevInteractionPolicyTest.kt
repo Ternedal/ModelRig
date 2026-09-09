@@ -102,22 +102,22 @@ class Agent3DevInteractionPolicyTest {
     @Test fun startRequiresUsablePreviewExactConnectionAndExactReviewedIntent() {
         assertTrue(
             Agent3DevInteractionPolicy.canStart(
-                "plan-1", 1, null, false, false, connection, connection, intent, intent
+                "plan-1", 1, null, true, false, false, connection, connection, intent, intent
             )
         )
         assertTrue(
             Agent3DevInteractionPolicy.canStart(
-                "plan-1", 1, true, false, false, connection, connection, intent, intent
+                "plan-1", 1, true, true, false, false, connection, connection, intent, intent
             )
         )
         assertFalse(
             Agent3DevInteractionPolicy.canStart(
-                "plan-1", 1, false, false, false, connection, connection, intent, intent
+                "plan-1", 1, false, true, false, false, connection, connection, intent, intent
             )
         )
         assertFalse(
             Agent3DevInteractionPolicy.canStart(
-                "plan-1", 1, true, false, true, connection, connection, intent, intent
+                "plan-1", 1, true, true, false, true, connection, connection, intent, intent
             )
         )
     }
@@ -126,17 +126,36 @@ class Agent3DevInteractionPolicyTest {
         val otherUrl = binding("http://rig-b:8080", "token-a")
         val otherToken = binding("http://rig-a:8080", "token-b")
         val otherIntent = intent("anden opgave", false, "")
-        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, false, false, otherUrl, connection, intent, intent))
-        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, false, false, otherToken, connection, intent, intent))
-        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, false, false, connection, connection, otherIntent, intent))
-        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, false, false, connection, connection, intent, null))
-        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, false, false, connection, connection, null, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, true, false, false, otherUrl, connection, intent, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, true, false, false, otherToken, connection, intent, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, true, false, false, connection, connection, otherIntent, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, true, false, false, connection, connection, intent, null))
+        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, true, false, false, connection, connection, null, intent))
     }
 
     @Test fun startRejectsBusyMissingOrEmptyPreview() {
-        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, true, false, connection, connection, intent, intent))
-        assertFalse(Agent3DevInteractionPolicy.canStart(null, 1, true, false, false, connection, connection, intent, intent))
-        assertFalse(Agent3DevInteractionPolicy.canStart("", 1, true, false, false, connection, connection, intent, intent))
-        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 0, true, false, false, connection, connection, intent, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 1, true, true, true, false, connection, connection, intent, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart(null, 1, true, true, false, false, connection, connection, intent, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart("", 1, true, true, false, false, connection, connection, intent, intent))
+        assertFalse(Agent3DevInteractionPolicy.canStart("plan-1", 0, true, true, false, false, connection, connection, intent, intent))
+    }
+
+    @Test fun previewExpiryUsesSharedMonotonicDeadlineAndFailsClosedAtBoundary() {
+        val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, 5)
+        assertEquals(15_000L, deadline)
+        assertTrue(Agent3TaskUiPolicy.isPreviewFresh(deadline, 14_999L))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(deadline, 15_000L))
+        assertTrue(Agent3TaskUiPolicy.isPreviewExpired(deadline, 15_000L))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, null))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, 0))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(null, 10_000L))
+    }
+
+    @Test fun startFailsClosedWhenReviewedPreviewIsNotFresh() {
+        assertFalse(
+            Agent3DevInteractionPolicy.canStart(
+                "plan-1", 1, true, false, false, false, connection, connection, intent, intent
+            )
+        )
     }
 }
