@@ -65,6 +65,7 @@ fun Agent3DevApp() {
         var memorySubjects by remember { mutableStateOf("") }
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
         var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
+        var previewIntent by remember { mutableStateOf<Agent3DevPreviewIntent?>(null) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
         var runConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var busy by remember { mutableStateOf(false) }
@@ -81,18 +82,20 @@ fun Agent3DevApp() {
         fun client(connection: Agent3DevConnectionBinding): Agent3Client =
             Agent3Client(connection.baseUrl, connection.token)
 
-        fun selectedSubjects(): List<String> = memorySubjects
-            .split(',')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .take(20)
+        fun currentIntent(): Agent3DevPreviewIntent? =
+            Agent3DevPreviewIntent.capture(message, useMemory, memorySubjects)
+
+        fun clearPreviewAuthority() {
+            preview = null
+            previewConnection = null
+            previewIntent = null
+        }
 
         fun previewPlan() {
-            val text = message.trim()
+            val intent = currentIntent() ?: return
             val currentRun = run
             if (!Agent3DevInteractionPolicy.canPreview(
-                    message = text,
+                    message = intent.message,
                     busy = busy,
                     runState = currentRun?.state,
                     activeToolState = currentRun?.termination?.activeTool?.state,
@@ -110,21 +113,25 @@ fun Agent3DevApp() {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         client(connection).previewPlan(
-                            message = text,
+                            message = intent.message,
                             mode = "rig",
-                            useMemory = useMemory,
-                            memorySubjects = if (useMemory) selectedSubjects() else emptyList(),
+                            useMemory = intent.useMemory,
+                            memorySubjects = intent.memorySubjects,
                         )
                     }
                 }
                 busy = false
                 result.onSuccess { planned ->
-                    // Replace terminal history only after the new preview itself
-                    // succeeded. Failure keeps the old run/control truth visible.
+                    if (!Agent3DevInteractionPolicy.canPublishPreview(intent, currentIntent())) {
+                        return@onSuccess
+                    }
+                    // Replace terminal history only after the exact reviewed intent
+                    // succeeded. Failure or stale publication keeps prior truth visible.
                     run = null
                     runConnection = null
                     preview = planned
                     previewConnection = connection
+                    previewIntent = intent
                 }.onFailure { error = it.message ?: "Planlægning fejlede" }
             }
         }
@@ -132,7 +139,9 @@ fun Agent3DevApp() {
         fun startPlan() {
             val current = preview ?: return
             val boundConnection = previewConnection
+            val boundIntent = previewIntent
             val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
+            val currentIntent = currentIntent()
             if (!Agent3DevInteractionPolicy.canStart(
                     planId = current.planId,
                     planSize = current.plan.size,
@@ -141,6 +150,8 @@ fun Agent3DevApp() {
                     hasRun = run != null,
                     currentConnection = currentConnection,
                     previewConnection = boundConnection,
+                    currentIntent = currentIntent,
+                    previewIntent = boundIntent,
                 )
             ) return
             val id = current.planId ?: return
@@ -153,8 +164,7 @@ fun Agent3DevApp() {
                 }
                 busy = false
                 result.onSuccess { started ->
-                    preview = null
-                    previewConnection = null
+                    clearPreviewAuthority()
                     run = started
                     runConnection = connection
                 }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
@@ -270,7 +280,11 @@ fun Agent3DevApp() {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = message,
-                    onValueChange = { message = it },
+                    onValueChange = { value ->
+                        message = value
+                        clearPreviewAuthority()
+                    },
+                    enabled = !busy,
                     label = { Text("Hvad skal agenten planlægge?") },
                     minLines = 3,
                     maxLines = 8,
@@ -279,11 +293,24 @@ fun Agent3DevApp() {
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (useMemory) {
-                        Button(onClick = { useMemory = false; memorySubjects = ""; preview = null }) {
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                useMemory = false
+                                memorySubjects = ""
+                                clearPreviewAuthority()
+                            },
+                        ) {
                             Text("Memory: til")
                         }
                     } else {
-                        OutlinedButton(onClick = { useMemory = true; preview = null }) {
+                        OutlinedButton(
+                            enabled = !busy,
+                            onClick = {
+                                useMemory = true
+                                clearPreviewAuthority()
+                            },
+                        ) {
                             Text("Memory: fra")
                         }
                     }
@@ -298,7 +325,11 @@ fun Agent3DevApp() {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = memorySubjects,
-                        onValueChange = { memorySubjects = it; preview = null },
+                        onValueChange = { value ->
+                            memorySubjects = value
+                            clearPreviewAuthority()
+                        },
+                        enabled = !busy,
                         label = { Text("Valgfrit subject-filter, kommasepareret") },
                         supportingText = { Text("Tomt felt bruger alle eligible memories inden for serverens budget.") },
                         singleLine = true,
@@ -332,6 +363,8 @@ fun Agent3DevApp() {
                     hasRun = run != null,
                     currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token),
                     previewConnection = previewConnection,
+                    currentIntent = currentIntent(),
+                    previewIntent = previewIntent,
                     onStart = ::startPlan,
                 )
             }
@@ -364,6 +397,8 @@ private fun PlanCard(
     hasRun: Boolean,
     currentConnection: Agent3DevConnectionBinding?,
     previewConnection: Agent3DevConnectionBinding?,
+    currentIntent: Agent3DevPreviewIntent?,
+    previewIntent: Agent3DevPreviewIntent?,
     onStart: () -> Unit,
 ) {
     DevCard {
@@ -433,6 +468,8 @@ private fun PlanCard(
                 hasRun = hasRun,
                 currentConnection = currentConnection,
                 previewConnection = previewConnection,
+                currentIntent = currentIntent,
+                previewIntent = previewIntent,
             ),
             onClick = onStart,
         ) { Text("Start den viste plan") }
