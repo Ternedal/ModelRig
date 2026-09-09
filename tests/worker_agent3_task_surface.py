@@ -472,6 +472,115 @@ class SimulatedWorkerRestart(BaseException):
     pass
 
 
+# A worker can die after terminal RunStore truth is durable but before #1034's
+# PlanStore terminal-retention marker is committed. A new task surface repairs
+# only that bookkeeping at construction time, before any client status/replay.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-terminal-reconcile-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"terminal reconcile"}',
+    root=root,
+)
+reconcile_plan = plan(first)
+reconcile_started = first.client.post(
+    f"/experimental/agent3/task/plans/{reconcile_plan}/start"
+)
+reconcile_run = reconcile_started.json()["run"]["id"]
+reconcile_terminal = wait_terminal(first, reconcile_run)
+check(
+    reconcile_terminal.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"],
+    "terminal-reconcile fixture persists one completed task execution",
+)
+# Simulate abrupt death in the exact post-run/pre-retention window by erasing
+# only the PlanStore marker while preserving terminal RunStore truth.
+with sqlite3.connect(first.plans.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET start_terminal_at=NULL,expires_at=? WHERE id=?",
+        (time.time() - 1, reconcile_plan),
+    )
+    connection.commit()
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"terminal reconcile"}',
+    root=root,
+)
+with sqlite3.connect(second.plans.path) as connection:
+    reconciled_row = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (reconcile_plan,),
+    ).fetchone()
+check(
+    reconciled_row is not None
+    and reconciled_row[0] is not None
+    and float(reconciled_row[1]) > time.time(),
+    "startup repairs missing terminal Start retention before any client replay",
+)
+check(
+    gate.proposals == ["rig_status"],
+    "startup terminal reconciliation never re-executes the completed task",
+)
+second.close()
+third = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"terminal reconcile"}',
+    root=root,
+)
+with sqlite3.connect(third.plans.path) as connection:
+    reconciled_again = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (reconcile_plan,),
+    ).fetchone()
+check(
+    reconciled_again == reconciled_row,
+    "repeated startup reconciliation does not slide terminal recovery grace",
+)
+third.close()
+shared.cleanup()
+
+
+# A pre-materialization Start claim has no RunStore row. Startup reconciliation
+# must preserve it exactly and must never materialize or execute it implicitly.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-terminal-reconcile-missing-")
+root = Path(shared.name)
+seed_store = PlanStore(str(root / "plans.db"), ttl_seconds=30)
+missing_plan, _ = seed_store.save("missing-run")
+seed_store.claim_task_start(
+    missing_plan, "run-missing-startup", "prepared-missing-startup"
+)
+with sqlite3.connect(seed_store.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, missing_plan),
+    )
+    connection.commit()
+seed_store.close()
+missing_fixture = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"missing startup"}',
+    root=root,
+)
+missing_recovery = missing_fixture.plans.start_recovery(missing_plan)
+with sqlite3.connect(missing_fixture.plans.path) as connection:
+    missing_marker = connection.execute(
+        "SELECT start_terminal_at FROM agent_plans WHERE id=?",
+        (missing_plan,),
+    ).fetchone()
+check(
+    missing_recovery is not None
+    and missing_recovery[0] == "pending"
+    and missing_recovery[1] == "run-missing-startup"
+    and missing_marker == (None,),
+    "startup preserves a bound Start whose RunStore row does not exist yet",
+)
+check(
+    missing_fixture.store.load("run-missing-startup") is None and gate.proposals == [],
+    "startup reconciliation never materializes or executes a missing run",
+)
+missing_fixture.close()
+shared.cleanup()
+
+
 def leave_bound_start_without_executor(fixture: Fixture) -> tuple[str, str, str | None]:
     plan_id = plan(fixture)
     original_submit = fixture.pool.submit_reserved
@@ -645,6 +754,10 @@ second = Fixture(
     root=root,
 )
 check(second.plans.start_owner != pending_owner, "restarted task store has a distinct generation")
+check(
+    gate.proposals == [],
+    "startup terminal reconciliation does not auto-resume a nonterminal task",
+)
 recovered = second.client.post(f"/experimental/agent3/task/plans/{pending_plan}/start")
 check(
     recovered.status_code == 202 and recovered.json()["run"]["id"] == pending_run,

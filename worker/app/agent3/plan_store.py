@@ -477,6 +477,24 @@ class PlanStore:
                     connection.rollback()
                     raise
 
+    def unmarked_start_recovery_run_ids(self) -> tuple[str, ...]:
+        """Return only exact bound Start recoveries lacking terminal retention.
+
+        This is an internal startup-reconciliation view, not run discovery: rows
+        without a server-bound run id, refusals and already-terminal-marked rows
+        are deliberately excluded.
+        """
+        with self._lock:
+            with self._connection() as connection:
+                rows = connection.execute(
+                    "SELECT result_run_id FROM agent_plans "
+                    "WHERE result_run_id IS NOT NULL "
+                    "AND start_result IN ('pending','accepted') "
+                    "AND start_terminal_at IS NULL "
+                    "ORDER BY created_at,id"
+                ).fetchall()
+        return tuple(str(row[0]) for row in rows if row[0])
+
     def mark_start_terminal_for_run(self, run_id: str) -> bool:
         """Start a bounded post-terminal recovery grace for one exact task run."""
         if not run_id:
