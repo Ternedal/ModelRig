@@ -79,6 +79,7 @@ internal object Agent3DevInteractionPolicy {
         planId: String?,
         planSize: Int,
         capabilityAllowed: Boolean?,
+        previewFresh: Boolean,
         busy: Boolean,
         hasRun: Boolean,
         currentConnection: Agent3DevConnectionBinding?,
@@ -86,7 +87,8 @@ internal object Agent3DevInteractionPolicy {
         currentIntent: Agent3DevPreviewIntent?,
         previewIntent: Agent3DevPreviewIntent?,
     ): Boolean =
-        !busy &&
+        previewFresh &&
+            !busy &&
             !hasRun &&
             !planId.isNullOrBlank() &&
             planSize > 0 &&

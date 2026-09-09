@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import dk.ternedal.modelrig.desktop.net.Agent3PlanPreview
 import dk.ternedal.modelrig.desktop.net.Agent3Run
 import dk.ternedal.modelrig.desktop.net.Agent3Step
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -66,6 +68,8 @@ fun Agent3DevApp() {
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
         var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var previewIntent by remember { mutableStateOf<Agent3DevPreviewIntent?>(null) }
+        var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+        var previewExpired by remember { mutableStateOf(false) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
         var runConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var busy by remember { mutableStateOf(false) }
@@ -89,6 +93,8 @@ fun Agent3DevApp() {
             preview = null
             previewConnection = null
             previewIntent = null
+            previewDeadlineMillis = null
+            previewExpired = false
         }
 
         fun previewPlan() {
@@ -107,6 +113,7 @@ fun Agent3DevApp() {
                     error = it.message ?: "Forbindelsen er ugyldig"
                     return
                 }
+            val requestStartedAtMillis = System.nanoTime() / 1_000_000L
             busy = true
             error = null
             scope.launch {
@@ -129,9 +136,18 @@ fun Agent3DevApp() {
                     // succeeded. Failure or stale publication keeps prior truth visible.
                     run = null
                     runConnection = null
+                    val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                        requestStartedAtMillis,
+                        planned.expiresInSeconds,
+                    )
                     preview = planned
                     previewConnection = connection
                     previewIntent = intent
+                    previewDeadlineMillis = deadline
+                    previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                        deadline,
+                        System.nanoTime() / 1_000_000L,
+                    )
                 }.onFailure { error = it.message ?: "Planlægning fejlede" }
             }
         }
@@ -142,10 +158,14 @@ fun Agent3DevApp() {
             val boundIntent = previewIntent
             val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
             val currentIntent = currentIntent()
+            val nowMillis = System.nanoTime() / 1_000_000L
+            val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
+            if (!previewFresh) previewExpired = true
             if (!Agent3DevInteractionPolicy.canStart(
                     planId = current.planId,
                     planSize = current.plan.size,
                     capabilityAllowed = current.capabilityReceipt?.allowed,
+                    previewFresh = previewFresh,
                     busy = busy,
                     hasRun = run != null,
                     currentConnection = currentConnection,
@@ -219,6 +239,24 @@ fun Agent3DevApp() {
                 busy = false
                 result.onSuccess { run = it }
                     .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
+            }
+        }
+
+        LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+            val planId = preview?.planId ?: return@LaunchedEffect
+            val deadline = previewDeadlineMillis
+            if (deadline == null) {
+                previewExpired = true
+                return@LaunchedEffect
+            }
+            val remaining = deadline - (System.nanoTime() / 1_000_000L)
+            if (remaining > 0L) delay(remaining)
+            if (preview?.planId == planId && Agent3TaskUiPolicy.isPreviewExpired(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
+            ) {
+                previewExpired = true
             }
         }
 
@@ -365,6 +403,11 @@ fun Agent3DevApp() {
                     previewConnection = previewConnection,
                     currentIntent = currentIntent(),
                     previewIntent = previewIntent,
+                    previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                        previewDeadlineMillis,
+                        System.nanoTime() / 1_000_000L,
+                    ),
+                    previewExpired = previewExpired,
                     onStart = ::startPlan,
                 )
             }
@@ -399,6 +442,8 @@ private fun PlanCard(
     previewConnection: Agent3DevConnectionBinding?,
     currentIntent: Agent3DevPreviewIntent?,
     previewIntent: Agent3DevPreviewIntent?,
+    previewFresh: Boolean,
+    previewExpired: Boolean,
     onStart: () -> Unit,
 ) {
     DevCard {
@@ -464,6 +509,7 @@ private fun PlanCard(
                 planId = preview.planId,
                 planSize = preview.plan.size,
                 capabilityAllowed = preview.capabilityReceipt?.allowed,
+                previewFresh = previewFresh,
                 busy = busy,
                 hasRun = hasRun,
                 currentConnection = currentConnection,
@@ -473,8 +519,16 @@ private fun PlanCard(
             ),
             onClick = onStart,
         ) { Text("Start den viste plan") }
-        preview.expiresInSeconds?.let {
-            Text("Plan-id udløber om ca. $it sek.", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+        if (previewExpired) {
+            Text(
+                "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                color = KalivTheme.colors.Danger,
+                fontSize = 11.sp,
+            )
+        } else {
+            preview.expiresInSeconds?.let {
+                Text("Plan-id udløber om ca. $it sek.", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+            }
         }
     }
 }
