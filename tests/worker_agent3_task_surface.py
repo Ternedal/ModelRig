@@ -273,6 +273,29 @@ check(
     replay_retention == terminal_retention,
     "same-plan replay does not extend terminal recovery grace forever",
 )
+with sqlite3.connect(fixture.plans.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, plan_id),
+    )
+    connection.commit()
+expired_replay = fixture.client.post(
+    f"/experimental/agent3/task/plans/{plan_id}/start"
+)
+check(
+    expired_replay.status_code == 409
+    and expired_replay.json().get("detail", {}).get("reason") == "task_start_refused"
+    and gate.proposals == ["rig_status"],
+    "expired terminal same-plan recovery is refused without another tool execution",
+)
+known_status = fixture.client.get(f"/experimental/agent3/task/runs/{run_id}")
+check(
+    known_status.status_code == 200
+    and known_status.json().get("run", {}).get("id") == run_id
+    and known_status.json().get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"],
+    "known run-id status remains available after plan recovery grace expires",
+)
 fixture.close()
 
 

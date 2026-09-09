@@ -333,6 +333,11 @@ with sqlite3.connect(retention_path) as connection:
     )
     connection.commit()
 check(
+    retention_store.start_recovery(active_retention) == ("refused", None, None)
+    and retention_store.start_recovery_for_run("run-active") is None,
+    "expired terminal Start recovery loses request authority before opportunistic purge",
+)
+check(
     retention_store.purge() == 1
     and retention_store.start_recovery(active_retention) is None,
     "terminal Start recovery is eventually purged after its grace",
