@@ -431,23 +431,21 @@ class SimulatedWorkerRestart(BaseException):
 
 def leave_bound_start_without_executor(fixture: Fixture) -> tuple[str, str, str | None]:
     plan_id = plan(fixture)
-    original_bind = fixture.plans.bind_pending_run
+    original_submit = fixture.pool.submit_reserved
 
-    def bind_then_crash(bound_plan_id: str, run_id: str) -> None:
-        original_bind(bound_plan_id, run_id)
+    def crash_before_submit(*_args, **_kwargs) -> None:
         raise SimulatedWorkerRestart()
 
-    fixture.plans.bind_pending_run = bind_then_crash  # type: ignore[method-assign]
+    fixture.pool.submit_reserved = crash_before_submit  # type: ignore[method-assign]
     crashed = False
     try:
-        # TestClient re-raises server exceptions by default. BaseException is
-        # deliberately outside the Start handler's Exception/HTTPException
-        # cleanup, matching an abrupt worker death after the durable bind.
+        # BaseException bypasses normal Start cleanup, matching abrupt process
+        # death after the claimed run is persisted and task-bound but pre-submit.
         fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
     except SimulatedWorkerRestart:
         crashed = True
     finally:
-        fixture.plans.bind_pending_run = original_bind  # type: ignore[method-assign]
+        fixture.pool.submit_reserved = original_submit  # type: ignore[method-assign]
     check(crashed, "simulated worker restart lands after pending run binding")
     recovery = fixture.plans.start_recovery(plan_id)
     check(
@@ -456,6 +454,136 @@ def leave_bound_start_without_executor(fixture: Fixture) -> tuple[str, str, str 
     )
     assert recovery is not None and recovery[1] is not None
     return plan_id, recovery[1], recovery[2]
+
+
+def leave_claim_without_run(fixture: Fixture) -> tuple[str, str, str | None]:
+    plan_id = plan(fixture)
+    original_claim = fixture.plans.claim_task_start
+
+    def claim_then_crash(bound_plan_id: str, run_id: str, prepared_run: str) -> None:
+        original_claim(bound_plan_id, run_id, prepared_run)
+        raise SimulatedWorkerRestart()
+
+    fixture.plans.claim_task_start = claim_then_crash  # type: ignore[method-assign]
+    crashed = False
+    try:
+        fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+    except SimulatedWorkerRestart:
+        crashed = True
+    finally:
+        fixture.plans.claim_task_start = original_claim  # type: ignore[method-assign]
+    check(crashed, "simulated worker restart lands immediately after atomic Start claim")
+    recovery = fixture.plans.start_recovery(plan_id)
+    check(
+        recovery is not None
+        and recovery[0] == "pending"
+        and bool(recovery[1])
+        and fixture.store.load(recovery[1]) is None,
+        "atomic claim persists one run id before RunStore materialization",
+    )
+    assert recovery is not None and recovery[1] is not None
+    return plan_id, recovery[1], recovery[2]
+
+
+# Same-generation replay cannot parallel-materialize a Start that crashed just
+# after the atomic claim; a new worker generation can recover that exact run id.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-prebind-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart prebind"}',
+    root=root,
+)
+prebind_plan, prebind_run, prebind_owner = leave_claim_without_run(first)
+same_generation = first.client.post(f"/experimental/agent3/task/plans/{prebind_plan}/start")
+check(
+    same_generation.status_code == 409
+    and same_generation.json().get("detail", {}).get("reason") == "task_start_pending"
+    and first.store.load(prebind_run) is None
+    and gate.proposals == [],
+    "same worker generation leaves claimed-but-unmaterialized Start pending",
+)
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart prebind"}',
+    root=root,
+)
+check(second.plans.start_owner != prebind_owner, "prebind recovery sees a new worker generation")
+prebind_recovered = second.client.post(f"/experimental/agent3/task/plans/{prebind_plan}/start")
+check(
+    prebind_recovered.status_code == 202
+    and prebind_recovered.json()["run"]["id"] == prebind_run,
+    "new worker materializes the exact server-generated run id from atomic claim",
+)
+terminal = wait_terminal(second, prebind_run)
+check(
+    terminal.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"],
+    "prebind crash recovery executes the reviewed read exactly once",
+)
+second.close()
+shared.cleanup()
+
+
+# Crash after run_created but before task_surface_bound is repaired by adding
+# only the missing binding to the exact prepared run, then executing once.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-run-created-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart run created"}',
+    root=root,
+)
+run_created_plan = plan(first)
+original_event = first.store.event
+
+def crash_before_binding(run_id: str, kind: str, payload) -> None:
+    if kind == "task_surface_bound":
+        raise SimulatedWorkerRestart()
+    original_event(run_id, kind, payload)
+
+first.store.event = crash_before_binding  # type: ignore[method-assign]
+crashed = False
+try:
+    first.client.post(f"/experimental/agent3/task/plans/{run_created_plan}/start")
+except SimulatedWorkerRestart:
+    crashed = True
+finally:
+    first.store.event = original_event  # type: ignore[method-assign]
+recovery = first.plans.start_recovery(run_created_plan)
+assert recovery is not None and recovery[1] is not None
+run_created_run = recovery[1]
+check(
+    crashed
+    and first.store.load(run_created_run) is not None
+    and not any(event.get("kind") == "task_surface_bound" for event in first.store.events(run_created_run))
+    and gate.proposals == [],
+    "worker crash can leave exact run_created truth without task binding or execution",
+)
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart run created"}',
+    root=root,
+)
+run_created_recovered = second.client.post(
+    f"/experimental/agent3/task/plans/{run_created_plan}/start"
+)
+check(
+    run_created_recovered.status_code == 202
+    and run_created_recovered.json()["run"]["id"] == run_created_run,
+    "restart binds and resumes the exact already-created run",
+)
+terminal = wait_terminal(second, run_created_run)
+events = terminal.get("events", [])
+check(
+    terminal.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"]
+    and sum(event.get("kind") == "run_created" for event in events) == 1
+    and sum(event.get("kind") == "task_surface_bound" for event in events) == 1,
+    "run-created crash recovery adds one binding and never duplicates run/tool execution",
+)
+second.close()
+shared.cleanup()
 
 
 # A new worker generation reclaims the exact pending run; no second run is created.
