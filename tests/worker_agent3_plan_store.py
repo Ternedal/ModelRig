@@ -289,6 +289,43 @@ check(
     not retention_store.mark_start_terminal_for_run("run-other"),
     "terminal retention cannot attach to an unrelated run id",
 )
+
+candidates_path = os.path.join(root, "retention-candidates.db")
+candidates_store = PlanStore(candidates_path, ttl_seconds=30)
+preview_candidate, _ = candidates_store.save("preview")
+unbound_candidate, _ = candidates_store.save("unbound-consumed")
+candidates_store.consume(unbound_candidate)
+refused_candidate, _ = candidates_store.save("refused-candidate")
+candidates_store.refuse_unconsumed(refused_candidate)
+pending_candidate, _ = candidates_store.save("pending-candidate")
+candidates_store.claim_task_start(
+    pending_candidate, "run-reconcile-pending", "prepared-pending"
+)
+accepted_candidate, _ = candidates_store.save("accepted-candidate")
+candidates_store.claim_task_start(
+    accepted_candidate, "run-reconcile-accepted", "prepared-accepted"
+)
+candidates_store.mark_start_accepted(accepted_candidate, "run-reconcile-accepted")
+terminal_candidate, _ = candidates_store.save("terminal-candidate")
+candidates_store.claim_task_start(
+    terminal_candidate, "run-reconcile-terminal", "prepared-terminal"
+)
+candidates_store.mark_start_accepted(terminal_candidate, "run-reconcile-terminal")
+candidates_store.mark_start_terminal_for_run("run-reconcile-terminal")
+check(
+    candidates_store.unmarked_start_recovery_run_ids()
+    == ("run-reconcile-pending", "run-reconcile-accepted"),
+    "startup reconciliation enumerates only bound unmarked pending/accepted runs",
+)
+check(
+    preview_candidate not in candidates_store.unmarked_start_recovery_run_ids()
+    and unbound_candidate not in candidates_store.unmarked_start_recovery_run_ids()
+    and refused_candidate not in candidates_store.unmarked_start_recovery_run_ids()
+    and "run-reconcile-terminal" not in candidates_store.unmarked_start_recovery_run_ids(),
+    "startup reconciliation excludes preview/unbound/refused/already-terminal authority",
+)
+candidates_store.close()
+
 with sqlite3.connect(retention_path) as connection:
     connection.execute(
         "UPDATE agent_plans SET expires_at=? WHERE id=?",

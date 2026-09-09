@@ -31,6 +31,12 @@ from .routing import StrictTurnRouter
 
 TASK_SURFACE = "agent3_readonly"
 TASK_REASON = "agent3_readonly_selected"
+_TERMINAL_TASK_STATES = {
+    RunState.COMPLETED,
+    RunState.FAILED,
+    RunState.CANCELLED,
+    RunState.BLOCKED,
+}
 ReadinessProvider = Callable[[], dict[str, Any]]
 CapabilityGraphProvider = Callable[[], CapabilityGraph]
 
@@ -174,6 +180,29 @@ def _assert_readonly_template(template: AgentRun) -> None:
         )
 
 
+def _reconcile_terminal_start_recovery(
+    orchestrator: Agent3Orchestrator,
+    plan_store: PlanStore,
+) -> None:
+    """Repair only missing terminal-retention bookkeeping after worker restart.
+
+    Recovery authority wins on every uncertainty: enumeration/load/mark failures
+    leave the PlanStore row untouched. This helper never claims an executor,
+    creates/materializes a run, consumes a plan or changes run state.
+    """
+    try:
+        run_ids = plan_store.unmarked_start_recovery_run_ids()
+    except Exception:
+        return
+    for run_id in run_ids:
+        try:
+            run = orchestrator.store.load(run_id)
+            if run is not None and run.state in _TERMINAL_TASK_STATES:
+                plan_store.mark_start_terminal_for_run(run_id)
+        except Exception:
+            continue
+
+
 def build_task_surface_router(
     adapter: V2ToolAdapter,
     orchestrator: Agent3Orchestrator,
@@ -198,6 +227,7 @@ def build_task_surface_router(
     )
     planner = planner or TypedPlanner(adapter)
     turn_router = StrictTurnRouter()
+    _reconcile_terminal_start_recovery(orchestrator, plan_store)
 
     def capability_receipt(template: AgentRun) -> dict[str, Any] | None:
         if capability_graph_provider is None:
@@ -239,12 +269,7 @@ def build_task_surface_router(
         return run, {str(k): str(v) for k, v in binding.items()}, receipt, events
 
     def retain_terminal_start_recovery(run: AgentRun) -> None:
-        if run.state not in {
-            RunState.COMPLETED,
-            RunState.FAILED,
-            RunState.CANCELLED,
-            RunState.BLOCKED,
-        }:
+        if run.state not in _TERMINAL_TASK_STATES:
             return
         try:
             plan_store.mark_start_terminal_for_run(run.id)
@@ -273,12 +298,7 @@ def build_task_surface_router(
             "run": json.loads(run.to_json()),
             "events": events,
             "readiness_binding": binding,
-            "terminal": run.state in {
-                RunState.COMPLETED,
-                RunState.FAILED,
-                RunState.CANCELLED,
-                RunState.BLOCKED,
-            },
+            "terminal": run.state in _TERMINAL_TASK_STATES,
             "production_activation": False,
             "normal_chat_route_unchanged": True,
         }
