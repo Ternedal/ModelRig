@@ -3,6 +3,7 @@ package dk.ternedal.modelrig.desktop
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class Agent3TaskUiPolicyTest {
@@ -120,5 +121,29 @@ class Agent3TaskUiPolicyTest {
     @Test
     fun publicationEpochWrapsDeterministically() {
         assertEquals(1L, Agent3TaskUiPolicy.nextPublicationEpoch(Long.MAX_VALUE))
+    }
+
+    @Test
+    fun retainedRunReferenceBlocksNewTaskUntilServerTruthIsRecovered() {
+        assertTrue(Agent3TaskUiPolicy.hasRunAuthority(snapshotPresent = false, retainedRunId = "run_abc123"))
+        assertFalse(
+            Agent3TaskUiPolicy.canPreview(
+                serverSurface = Agent3TaskUiPolicy.AGENT3_READONLY,
+                message = "ny opgave",
+                busy = false,
+                hasRun = Agent3TaskUiPolicy.hasRunAuthority(false, "run_abc123"),
+            ),
+        )
+        assertTrue(Agent3TaskUiPolicy.canRecoverRun("run_abc123", busy = false))
+        assertFalse(Agent3TaskUiPolicy.canRecoverRun("run_abc123", busy = true))
+    }
+
+    @Test
+    fun onlyServerTerminalSnapshotClearsRetainedRunReference() {
+        assertEquals(
+            "run_abc123",
+            Agent3TaskUiPolicy.retainedRunIdAfterSnapshot("run_abc123", terminal = false),
+        )
+        assertNull(Agent3TaskUiPolicy.retainedRunIdAfterSnapshot("run_abc123", terminal = true))
     }
 }

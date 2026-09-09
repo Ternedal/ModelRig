@@ -7,6 +7,7 @@ internal enum class TaskRequestOperation {
     STATUS,
     STOP_PLAN,
     POLLING,
+    LOCAL_REFERENCE,
     UNKNOWN,
 }
 
@@ -28,6 +29,8 @@ internal fun presentTaskRequestError(operation: TaskRequestOperation, rawError: 
             TaskRequestOperation.STATUS -> "Task-status kunne ikke hentes."
             TaskRequestOperation.STOP_PLAN -> "Planen kunne ikke stoppes."
             TaskRequestOperation.POLLING -> "Automatisk task-status kunne ikke hentes."
+            TaskRequestOperation.LOCAL_REFERENCE ->
+                "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben."
             TaskRequestOperation.UNKNOWN -> "Task-handlingen kunne ikke gennemføres."
         }
     }

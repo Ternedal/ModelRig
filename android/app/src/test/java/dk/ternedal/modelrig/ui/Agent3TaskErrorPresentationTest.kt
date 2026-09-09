@@ -31,6 +31,10 @@ class Agent3TaskErrorPresentationTest {
             "Automatisk task-status kunne ikke hentes.",
             presentAgent3TaskScreenError(Agent3TaskFailureOperation.AUTOMATIC_STATUS, "unknown"),
         )
+        assertEquals(
+            "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben.",
+            presentAgent3TaskScreenError(Agent3TaskFailureOperation.LOCAL_REFERENCE, "SQLiteException /private/path"),
+        )
     }
 
     @Test

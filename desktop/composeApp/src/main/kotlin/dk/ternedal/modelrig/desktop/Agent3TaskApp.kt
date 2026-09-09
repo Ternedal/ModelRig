@@ -68,6 +68,10 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         var message by remember { mutableStateOf("") }
         var preview by remember { mutableStateOf<Agent3ReadonlyTaskPreview?>(null) }
         var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskSnapshot?>(null) }
+        var retainedRunId by remember {
+            mutableStateOf(db.getSetting(ACTIVE_TASK_RUN_ID_SETTING)?.trim()?.takeIf { it.isNotEmpty() })
+        }
+        var initialRecoveryPending by remember { mutableStateOf(retainedRunId != null) }
         var busy by remember { mutableStateOf(DesktopTaskBusy.READINESS) }
         var error by remember { mutableStateOf<String?>(null) }
         var publicationEpoch by remember { mutableStateOf(0L) }
@@ -76,6 +80,38 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             if (baseUrl.isBlank()) kotlin.error("Ingen ModelRig backend-URL er gemt")
             if (token.isBlank()) kotlin.error("Ingen device-token er gemt")
             return baseUrl.trim() to token.trim()
+        }
+
+        fun writeRetainedRunId(runId: String?): Boolean = runCatching {
+            db.putSetting(ACTIVE_TASK_RUN_ID_SETTING, runId.orEmpty())
+        }.isSuccess
+
+        fun publishSnapshot(value: Agent3ReadonlyTaskSnapshot) {
+            snapshot = value
+            val retained = Agent3TaskUiPolicy.retainedRunIdAfterSnapshot(value.run.id, value.terminal)
+            retainedRunId = retained
+            if (!writeRetainedRunId(retained)) {
+                error = presentTaskRequestError(TaskRequestOperation.LOCAL_REFERENCE, null)
+            }
+        }
+
+        fun recoverRun() {
+            val runId = retainedRunId ?: return
+            if (!Agent3TaskUiPolicy.canRecoverRun(runId, busy != DesktopTaskBusy.NONE)) return
+            publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
+            busy = DesktopTaskBusy.STATUS
+            error = null
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val (base, bearer) = requireConnection()
+                        Agent3ReadonlyTaskClient(base, bearer).status(runId)
+                    }
+                }
+                busy = DesktopTaskBusy.NONE
+                result.onSuccess(::publishSnapshot)
+                    .onFailure { error = presentTaskRequestError(TaskRequestOperation.STATUS, it.message) }
+            }
         }
 
         fun refreshReadiness() {
@@ -98,6 +134,10 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     if (snapshot == null) preview = null
                     error = presentTaskRequestError(TaskRequestOperation.READINESS, it.message)
                 }
+                if (initialRecoveryPending) {
+                    initialRecoveryPending = false
+                    recoverRun()
+                }
             }
         }
 
@@ -106,7 +146,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     readiness?.selectedSurface,
                     message,
                     busy != DesktopTaskBusy.NONE,
-                    snapshot != null,
+                    Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
                 )
             ) return
             busy = DesktopTaskBusy.PREVIEW
@@ -132,7 +172,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     readiness?.selectedSurface,
                     plan.canStart,
                     busy != DesktopTaskBusy.NONE,
-                    snapshot != null,
+                    Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
                 )
             ) return
             busy = DesktopTaskBusy.START
@@ -145,7 +185,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     }
                 }
                 busy = DesktopTaskBusy.NONE
-                result.onSuccess { snapshot = it }
+                result.onSuccess(::publishSnapshot)
                     .onFailure { error = presentTaskRequestError(TaskRequestOperation.START, it.message) }
             }
         }
@@ -164,7 +204,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     }
                 }
                 busy = DesktopTaskBusy.NONE
-                result.onSuccess { snapshot = it }
+                result.onSuccess(::publishSnapshot)
                     .onFailure { error = presentTaskRequestError(TaskRequestOperation.STATUS, it.message) }
             }
         }
@@ -187,7 +227,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     }
                 }
                 busy = DesktopTaskBusy.NONE
-                result.onSuccess { snapshot = it }
+                result.onSuccess(::publishSnapshot)
                     .onFailure { error = presentTaskRequestError(TaskRequestOperation.STOP_PLAN, it.message) }
             }
         }
@@ -222,7 +262,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
                 if (!Agent3TaskUiPolicy.canPublish(requestEpoch, publicationEpoch)) continue
                 if (result.isSuccess) {
-                    snapshot = result.getOrThrow()
+                    publishSnapshot(result.getOrThrow())
                 } else {
                     error = presentTaskRequestError(TaskRequestOperation.POLLING, result.exceptionOrNull()?.message)
                     return@LaunchedEffect
@@ -232,7 +272,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
 
         val surface = Agent3TaskUiPolicy.normalizedSurface(readiness?.selectedSurface)
         val isBusy = busy != DesktopTaskBusy.NONE
-        val hasRun = snapshot != null
+        val hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId)
 
         Column(
             Modifier
@@ -317,6 +357,30 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 DesktopTaskCard {
                     Text("Fejl", color = KalivTheme.colors.Danger, fontWeight = FontWeight.Bold)
                     Text(it, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                }
+            }
+
+            if (snapshot == null && retainedRunId != null) {
+                Spacer(Modifier.height(12.dp))
+                DesktopTaskCard {
+                    Text(
+                        "Tidligere task skal genforbindes",
+                        color = KalivTheme.colors.TextHigh,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "Denne klient har en gemt reference til en read-only task. En ny task er låst, indtil riggen har bekræftet den eksisterende status.",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        enabled = Agent3TaskUiPolicy.canRecoverRun(retainedRunId, isBusy),
+                        onClick = ::recoverRun,
+                    ) {
+                        Text(if (busy == DesktopTaskBusy.STATUS) "Henter status…" else "Prøv igen")
+                    }
                 }
             }
 
@@ -723,6 +787,8 @@ private fun desktopRunColor(state: String): Color = when (state) {
 }
 
 private fun String.shortDesktopHash(): String = if (length <= 14) this else take(12) + "…"
+
+private const val ACTIVE_TASK_RUN_ID_SETTING = "agent3TaskActiveRunId"
 
 private enum class DesktopTaskBusy {
     NONE,
