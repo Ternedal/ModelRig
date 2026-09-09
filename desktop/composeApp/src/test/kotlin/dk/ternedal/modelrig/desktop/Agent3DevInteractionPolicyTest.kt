@@ -158,4 +158,67 @@ class Agent3DevInteractionPolicyTest {
             )
         )
     }
+
+    @Test fun confirmationUsesQualifiedServerExpiryPolicy() {
+        val live = Agent3DevInteractionPolicy.confirmation(
+            "digest", 101.0, "waiting_confirmation", "waiting_confirmation", false, 100.0
+        )
+        assertEquals(Agent3CockpitConfirmationState.LIVE, live.state)
+        assertTrue(live.actionEnabled)
+
+        val exactBoundary = Agent3DevInteractionPolicy.confirmation(
+            "digest", 101.0, "waiting_confirmation", "waiting_confirmation", false, 101.0
+        )
+        assertEquals(Agent3CockpitConfirmationState.EXPIRED, exactBoundary.state)
+        assertFalse(exactBoundary.actionEnabled)
+
+        val expired = Agent3DevInteractionPolicy.confirmation(
+            "digest", 101.0, "waiting_confirmation", "waiting_confirmation", false, 102.0
+        )
+        assertEquals(Agent3CockpitConfirmationState.EXPIRED, expired.state)
+        assertFalse(expired.actionEnabled)
+    }
+
+    @Test fun confirmationFailsClosedForMissingOrNonFiniteExpiry() {
+        listOf<Double?>(null, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY).forEach { expiry ->
+            val presentation = Agent3DevInteractionPolicy.confirmation(
+                "digest", expiry, "waiting_confirmation", "waiting_confirmation", false, 100.0
+            )
+            assertEquals(Agent3CockpitConfirmationState.INVALID, presentation.state)
+            assertFalse(presentation.actionEnabled)
+        }
+    }
+
+    @Test fun confirmationDecisionRequiresLiveRunStepAndIdleSurface() {
+        assertTrue(
+            Agent3DevInteractionPolicy.canDecide(
+                "digest", 101.0, "waiting_confirmation", "waiting_confirmation", false, 100.0
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canDecide(
+                "digest", 101.0, "waiting_confirmation", "waiting_confirmation", true, 100.0
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canDecide(
+                "digest", 101.0, "running", "waiting_confirmation", false, 100.0
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canDecide(
+                "digest", 101.0, "waiting_confirmation", "completed", false, 100.0
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canDecide(
+                null, 101.0, "waiting_confirmation", "waiting_confirmation", false, 100.0
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canDecide(
+                "digest", 101.0, "waiting_confirmation", "waiting_confirmation", false, 101.0
+            )
+        )
+    }
 }

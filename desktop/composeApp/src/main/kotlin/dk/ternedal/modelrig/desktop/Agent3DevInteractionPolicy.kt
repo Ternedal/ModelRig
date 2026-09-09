@@ -97,4 +97,36 @@ internal object Agent3DevInteractionPolicy {
             currentConnection == previewConnection &&
             currentIntent != null &&
             currentIntent == previewIntent
+
+    fun confirmation(
+        confirmationDigest: String?,
+        confirmationExpiresAt: Double?,
+        runState: String?,
+        stepState: String?,
+        busy: Boolean,
+        nowEpochSeconds: Double,
+    ): KalivAgent3CockpitConfirmation = presentAgent3CockpitConfirmation(
+        confirmationDigest = confirmationDigest,
+        confirmationExpiresAt = confirmationExpiresAt,
+        runState = runState,
+        stepState = stepState,
+        busy = busy,
+        nowEpochSeconds = nowEpochSeconds,
+    )
+
+    fun canDecide(
+        confirmationDigest: String?,
+        confirmationExpiresAt: Double?,
+        runState: String?,
+        stepState: String?,
+        busy: Boolean,
+        nowEpochSeconds: Double,
+    ): Boolean = confirmation(
+        confirmationDigest = confirmationDigest,
+        confirmationExpiresAt = confirmationExpiresAt,
+        runState = runState,
+        stepState = stepState,
+        busy = busy,
+        nowEpochSeconds = nowEpochSeconds,
+    ).actionEnabled
 }

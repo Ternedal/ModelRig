@@ -213,7 +213,15 @@ fun Agent3DevApp() {
             val step = current.steps.getOrNull(current.currentStep) ?: return
             val stepId = step.id ?: return
             val digest = step.confirmationDigest ?: return
-            if (busy) return
+            if (!Agent3DevInteractionPolicy.canDecide(
+                    confirmationDigest = digest,
+                    confirmationExpiresAt = step.confirmationExpiresAt,
+                    runState = current.state,
+                    stepState = step.state,
+                    busy = busy,
+                    nowEpochSeconds = System.currentTimeMillis() / 1000.0,
+                )
+            ) return
             busy = true
             error = null
             scope.launch {
@@ -543,7 +551,49 @@ private fun RunCard(
     onStopPlan: () -> Unit,
 ) {
     val current = run.steps.getOrNull(run.currentStep)
-    val waiting = run.state == "waiting_confirmation" && current?.id != null && current.confirmationDigest != null
+    var confirmationNow by remember(
+        run.state,
+        current?.id,
+        current?.state,
+        current?.confirmationDigest,
+        current?.confirmationExpiresAt,
+    ) { mutableStateOf(System.currentTimeMillis() / 1000.0) }
+
+    LaunchedEffect(
+        run.state,
+        current?.id,
+        current?.state,
+        current?.confirmationDigest,
+        current?.confirmationExpiresAt,
+    ) {
+        val expiry = current?.confirmationExpiresAt
+        if (
+            current?.confirmationDigest != null &&
+            expiry != null &&
+            expiry.isFinite() &&
+            !isTerminal(current.state) &&
+            isAgent3CockpitWaitingForConfirmation(run.state)
+        ) {
+            while (true) {
+                val now = System.currentTimeMillis() / 1000.0
+                confirmationNow = now
+                if (now >= expiry) break
+                val remainingMillis = ((expiry - now) * 1000.0)
+                    .toLong()
+                    .coerceIn(1L, 1_000L)
+                delay(remainingMillis)
+            }
+        }
+    }
+
+    val confirmation = Agent3DevInteractionPolicy.confirmation(
+        confirmationDigest = current?.confirmationDigest,
+        confirmationExpiresAt = current?.confirmationExpiresAt,
+        runState = run.state,
+        stepState = current?.state,
+        busy = busy,
+        nowEpochSeconds = confirmationNow,
+    )
     val termination = run.termination
     val canStopPlan = termination?.plan?.canRequest == true
     DevCard {
@@ -566,14 +616,37 @@ private fun RunCard(
         run.error?.takeIf { it.isNotBlank() }?.let {
             Spacer(Modifier.height(8.dp)); Text(it, color = KalivTheme.colors.Danger, fontSize = 13.sp)
         }
-        if (waiting) {
-            Spacer(Modifier.height(12.dp))
-            Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = !busy, onClick = onApprove) { Text("Godkend") }
-                OutlinedButton(enabled = !busy, onClick = onDeny) { Text("Afvis") }
+        when (confirmation.state) {
+            Agent3CockpitConfirmationState.LIVE -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = confirmation.actionEnabled, onClick = onApprove) { Text("Godkend") }
+                    OutlinedButton(enabled = confirmation.actionEnabled, onClick = onDeny) { Text("Afvis") }
+                }
             }
+            Agent3CockpitConfirmationState.EXPIRED -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Bekræftelsen er udløbet. Ingen beslutning sendes på den gamle godkendelse; opdatér run-status.",
+                    color = KalivTheme.colors.Warning,
+                    fontSize = 11.5.sp,
+                )
+            }
+            Agent3CockpitConfirmationState.INVALID -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Bekræftelsen mangler en gyldig udløbstid. Godkend/Afvis er låst fail-closed.",
+                    color = KalivTheme.colors.Warning,
+                    fontSize = 11.5.sp,
+                )
+            }
+            Agent3CockpitConfirmationState.HIDDEN -> Unit
         }
         Spacer(Modifier.height(10.dp))
         TerminationCard(termination, run.state)
