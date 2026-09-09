@@ -237,7 +237,11 @@ check(
     "task execution cannot claim activation or normal-chat changes",
 )
 reused = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
-check(reused.status_code == 409, "task plan token is single-use")
+check(
+    reused.status_code == 202 and reused.json()["run"]["id"] == run_id,
+    "accepted task Start replays the exact same task run",
+)
+check(gate.proposals == ["rig_status"], "accepted Start replay never executes the tool twice")
 fixture.close()
 
 
@@ -281,9 +285,18 @@ changed = readiness()
 changed["pilot"] = dict(changed["pilot"], report_sha256="d" * 64)
 fixture.state.value = changed
 changed_start = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
-check(changed_start.status_code == 409 and gate.proposals == [], "plan is bound to the exact physical pilot report")
+check(
+    changed_start.status_code == 409
+    and changed_start.json().get("detail", {}).get("reason") == "task_start_refused"
+    and gate.proposals == [],
+    "plan is bound to the exact physical pilot report",
+)
 consumed_after_mismatch = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
-check(consumed_after_mismatch.status_code == 409, "evidence-mismatched plan fails closed as consumed")
+check(
+    consumed_after_mismatch.status_code == 409
+    and consumed_after_mismatch.json().get("detail", {}).get("reason") == "task_start_refused",
+    "evidence-mismatched plan remains definitively refused on replay",
+)
 fixture.close()
 
 
@@ -377,6 +390,26 @@ check(
 )
 if second.status_code == 202:
     wait_terminal(fixture, second.json()["run"]["id"])
+fixture.close()
+
+
+# Executor-submit failure happens after run acceptance. Replay returns that same
+# cancelled run instead of consuming the plan into an unrecoverable ambiguity.
+gate.reset()
+fixture = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"read status"}'
+)
+executor_plan = plan(fixture)
+fixture.pool.submit_reserved = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("executor unavailable"))  # type: ignore[method-assign]
+executor_failed = fixture.client.post(f"/experimental/agent3/task/plans/{executor_plan}/start")
+check(executor_failed.status_code == 503, "executor-submit failure is reported on the first Start")
+executor_replay = fixture.client.post(f"/experimental/agent3/task/plans/{executor_plan}/start")
+check(
+    executor_replay.status_code == 409
+    and executor_replay.json().get("detail", {}).get("reason") == "task_start_refused",
+    "executor-submit failure remains definitively refused on replay",
+)
+check(gate.proposals == [], "executor-submit failure never executes the task")
 fixture.close()
 
 

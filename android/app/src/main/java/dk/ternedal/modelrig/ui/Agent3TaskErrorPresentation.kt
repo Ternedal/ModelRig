@@ -4,6 +4,8 @@ internal enum class Agent3TaskFailureOperation {
     READINESS,
     PREVIEW,
     START,
+    START_NOT_ACCEPTED,
+    START_REFUSED,
     STATUS,
     STOP_PLAN,
     AUTOMATIC_STATUS,
@@ -25,7 +27,12 @@ internal fun presentAgent3TaskScreenError(
         else -> when (operation) {
             Agent3TaskFailureOperation.READINESS -> "Task-routing kunne ikke hentes."
             Agent3TaskFailureOperation.PREVIEW -> "Plan-preview kunne ikke hentes."
-            Agent3TaskFailureOperation.START -> "Opgaven kunne ikke startes."
+            Agent3TaskFailureOperation.START ->
+                "Startstatus kunne ikke bekræftes. Prøv Start igen; samme preview starter ikke en ny task."
+            Agent3TaskFailureOperation.START_NOT_ACCEPTED ->
+                "Opgaven blev ikke accepteret. Prøv samme preview igen."
+            Agent3TaskFailureOperation.START_REFUSED ->
+                "Opgaven blev ikke accepteret. Lav et nyt plan-preview."
             Agent3TaskFailureOperation.STATUS -> "Task-status kunne ikke hentes."
             Agent3TaskFailureOperation.STOP_PLAN -> "Planen kunne ikke stoppes."
             Agent3TaskFailureOperation.AUTOMATIC_STATUS -> "Automatisk task-status kunne ikke hentes."

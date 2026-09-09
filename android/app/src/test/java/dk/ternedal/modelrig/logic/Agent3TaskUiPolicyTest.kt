@@ -91,6 +91,40 @@ class Agent3TaskUiPolicyTest {
     }
 
     @Test
+    fun startRecoveryKeepsOnlyTheSameReviewedPlanActionable() {
+        assertTrue(
+            Agent3TaskUiPolicy.canStart(
+                serverSurface = Agent3TaskUiPolicy.AGENT2,
+                previewCanStart = true,
+                previewFresh = false,
+                busy = false,
+                hasRun = false,
+                recoveryPending = true,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canStart(
+                serverSurface = Agent3TaskUiPolicy.AGENT2,
+                previewCanStart = true,
+                previewFresh = false,
+                busy = true,
+                hasRun = false,
+                recoveryPending = true,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canStart(
+                serverSurface = Agent3TaskUiPolicy.AGENT2,
+                previewCanStart = true,
+                previewFresh = false,
+                busy = false,
+                hasRun = true,
+                recoveryPending = true,
+            ),
+        )
+    }
+
+    @Test
     fun planStopRemainsAvailableAfterReadinessFallbackOnlyWhenServerAllowsIt() {
         assertTrue(Agent3TaskUiPolicy.canStopPlan(planCanRequest = true, busy = false))
 

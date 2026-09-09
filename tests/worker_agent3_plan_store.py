@@ -124,6 +124,29 @@ except PlanStoreError:
     expired = True
 check(expired, "expired plan is refused")
 
+replay_store = PlanStore(os.path.join(root, "replay.db"), ttl_seconds=30)
+accepted_id, _ = replay_store.save("accepted")
+replay_store.consume(accepted_id)
+check(replay_store.start_result(accepted_id) == ("pending", None), "consumed plan is pending before run binding")
+replay_store.bind_pending_run(accepted_id, "run-123")
+check(replay_store.start_result(accepted_id) == ("pending", "run-123"), "bound run remains pending before executor acceptance")
+replay_store.mark_start_accepted(accepted_id, "run-123")
+check(replay_store.start_result(accepted_id) == ("accepted", "run-123"), "accepted plan remembers its exact task run")
+replay_store.bind_pending_run(accepted_id, "run-123")
+try:
+    replay_store.bind_pending_run(accepted_id, "run-456")
+    rebound = True
+except PlanStoreError:
+    rebound = False
+check(not rebound, "accepted plan cannot bind a second task run")
+refused_id, _ = replay_store.save("refused")
+replay_store.consume(refused_id)
+replay_store.bind_pending_run(refused_id, "run-refused")
+replay_store.mark_start_refused(refused_id)
+check(replay_store.start_result(refused_id) == ("refused", None), "refused plan remains definitively refused")
+check(replay_store.purge() == 0, "consumed replay records survive until expiry")
+replay_store.close()
+
 plan_store.close()
 expiry_store.close()
 print(f"\n{passed} passed, {failed} failed")

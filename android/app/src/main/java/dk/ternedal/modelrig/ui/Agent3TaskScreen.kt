@@ -39,6 +39,7 @@ import dk.ternedal.modelrig.data.Agent3TaskRunReferenceStore
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3ReadonlyTaskClient
+import dk.ternedal.modelrig.net.Agent3TaskHttpException
 import dk.ternedal.modelrig.net.Agent3TaskReadinessClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -71,6 +72,7 @@ fun Agent3TaskScreen(
     var preview by remember { mutableStateOf<Agent3ReadonlyTaskClient.Preview?>(null) }
     var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
     var previewExpired by remember { mutableStateOf(false) }
+    var startRecoveryPending by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskClient.Started?>(null) }
     var retainedRunId by remember { mutableStateOf(runReferenceStore.read()) }
     var initialRecoveryPending by remember { mutableStateOf(retainedRunId != null) }
@@ -87,6 +89,7 @@ fun Agent3TaskScreen(
     }
 
     fun publishSnapshot(value: Agent3ReadonlyTaskClient.Started) {
+        startRecoveryPending = false
         snapshot = value
         val retained = Agent3TaskUiPolicy.retainedRunIdAfterSnapshot(value.run.id, value.terminal)
         retainedRunId = retained
@@ -130,11 +133,11 @@ fun Agent3TaskScreen(
             busy = TaskBusy.NONE
             result.onSuccess { value ->
                 readiness = value
-                if (!value.agent3ReadonlySelected && snapshot == null) preview = null
+                if (!value.agent3ReadonlySelected && snapshot == null && !startRecoveryPending) preview = null
             }.onFailure {
                 // Unknown/unreadable readiness is Agent 2, not an optimistic guess.
                 readiness = null
-                if (snapshot == null) preview = null
+                if (snapshot == null && !startRecoveryPending) preview = null
                 error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
             }
             if (initialRecoveryPending) {
@@ -157,6 +160,7 @@ fun Agent3TaskScreen(
         preview = null
         previewDeadlineMillis = null
         previewExpired = false
+        startRecoveryPending = false
         scope.launch {
             val readinessResult = withContext(Dispatchers.IO) {
                 runCatching {
@@ -204,9 +208,51 @@ fun Agent3TaskScreen(
         }
     }
 
+    fun publishStartFailure(failure: Throwable) {
+        if (failure is Agent3TaskHttpException && failure.reasonCode != "task_start_pending") {
+            startRecoveryPending = false
+            if (failure.reasonCode == "task_start_refused") {
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START_REFUSED, failure.message)
+            } else {
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START_NOT_ACCEPTED, failure.message)
+            }
+            return
+        }
+        startRecoveryPending = true
+        error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START, failure.message)
+    }
+
     fun startTask() {
         val plan = preview ?: return
         val planId = plan.planId ?: return
+        if (startRecoveryPending) {
+            if (!Agent3TaskUiPolicy.canStart(
+                    serverSurface = readiness?.selectedSurface,
+                    previewCanStart = plan.canStart,
+                    previewFresh = false,
+                    busy = busy != TaskBusy.NONE,
+                    hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
+                    recoveryPending = true,
+                )
+            ) return
+            busy = TaskBusy.START
+            error = null
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val (base, token) = connection()
+                        Agent3ReadonlyTaskClient(base, token).start(planId)
+                    }
+                }
+                busy = TaskBusy.NONE
+                result.onSuccess(::publishSnapshot)
+                    .onFailure(::publishStartFailure)
+            }
+            return
+        }
         val nowMillis = SystemClock.elapsedRealtime()
         val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
         if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, nowMillis)) {
@@ -270,6 +316,7 @@ fun Agent3TaskScreen(
                 }
                 return@launch
             }
+            startRecoveryPending = true
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val (base, token) = connection()
@@ -278,9 +325,7 @@ fun Agent3TaskScreen(
             }
             busy = TaskBusy.NONE
             result.onSuccess(::publishSnapshot)
-                .onFailure {
-                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START, it.message)
-                }
+                .onFailure(::publishStartFailure)
         }
     }
 
@@ -346,6 +391,7 @@ fun Agent3TaskScreen(
         preview = null
         previewDeadlineMillis = null
         previewExpired = false
+        startRecoveryPending = false
         message = ""
         error = null
     }
@@ -515,7 +561,7 @@ fun Agent3TaskScreen(
                 }
             }
 
-            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasRun) {
+            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasRun && !startRecoveryPending) {
                 Spacer(Modifier.height(12.dp))
                 SurfaceCard {
                     Text(
@@ -545,7 +591,7 @@ fun Agent3TaskScreen(
                             previewDeadlineMillis = null
                             previewExpired = false
                         },
-                        enabled = !isBusy,
+                        enabled = !isBusy && !startRecoveryPending,
                         label = { Text("Hvad skal Kaliv undersøge?") },
                         supportingText = {
                             Text("Kun lokale, idempotente read-tools kan godkendes af serveren.")
@@ -560,7 +606,7 @@ fun Agent3TaskScreen(
                             serverSurface = readiness?.selectedSurface,
                             message = message,
                             busy = isBusy,
-                            hasRun = false,
+                            hasRun = startRecoveryPending,
                         ),
                         onClick = { requestPreview() },
                     ) {
@@ -587,8 +633,10 @@ fun Agent3TaskScreen(
                             previewFresh = previewFresh,
                             busy = isBusy,
                             hasRun = false,
+                            recoveryPending = startRecoveryPending,
                         ),
                         expired = expired,
+                        recoveryPending = startRecoveryPending,
                         starting = busy == TaskBusy.START,
                         onStart = { startTask() },
                     )
@@ -634,6 +682,7 @@ private fun PlanReviewCard(
     preview: Agent3ReadonlyTaskClient.Preview,
     canStart: Boolean,
     expired: Boolean,
+    recoveryPending: Boolean,
     starting: Boolean,
     onStart: () -> Unit,
 ) {
@@ -644,7 +693,14 @@ private fun PlanReviewCard(
             color = KalivTheme.colors.success,
             fontSize = 11.sp,
         )
-        if (expired) {
+        if (recoveryPending) {
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "Start blev sendt, men udfaldet er ikke bekræftet. Samme Start bruges kun til at hente det allerede accepterede run eller et serverafslag.",
+                color = KalivTheme.colors.amber,
+                fontSize = 11.sp,
+            )
+        } else if (expired) {
             Spacer(Modifier.height(5.dp))
             Text(
                 "Plan-previewet er udløbet. Lav et nyt preview før start.",
@@ -667,7 +723,11 @@ private fun PlanReviewCard(
         EvidenceCard(preview.evidence)
         Spacer(Modifier.height(12.dp))
         Button(enabled = canStart, onClick = onStart) {
-            Text(if (starting) "Starter…" else "Start read-only opgave")
+            Text(
+                if (starting) "Henter startstatus…"
+                else if (recoveryPending) "Hent startstatus"
+                else "Start read-only opgave"
+            )
         }
     }
 }

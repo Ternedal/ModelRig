@@ -16,8 +16,16 @@ class Agent3TaskErrorPresentationTest {
             presentAgent3TaskScreenError(Agent3TaskFailureOperation.PREVIEW, ""),
         )
         assertEquals(
-            "Opgaven kunne ikke startes.",
+            "Startstatus kunne ikke bekræftes. Prøv Start igen; samme preview starter ikke en ny task.",
             presentAgent3TaskScreenError(Agent3TaskFailureOperation.START, "unknown"),
+        )
+        assertEquals(
+            "Opgaven blev ikke accepteret. Prøv samme preview igen.",
+            presentAgent3TaskScreenError(Agent3TaskFailureOperation.START_NOT_ACCEPTED, "503 /secret"),
+        )
+        assertEquals(
+            "Opgaven blev ikke accepteret. Lav et nyt plan-preview.",
+            presentAgent3TaskScreenError(Agent3TaskFailureOperation.START_REFUSED, "409 /secret"),
         )
         assertEquals(
             "Task-status kunne ikke hentes.",

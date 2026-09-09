@@ -120,6 +120,12 @@ data class Agent3ReadonlyTaskSnapshot(
     @SerialName("normal_chat_route_unchanged") val normalChatRouteUnchanged: Boolean = false,
 )
 
+internal class Agent3TaskHttpException(
+    val statusCode: Int,
+    val reasonCode: String?,
+    message: String,
+) : RuntimeException(message)
+
 /**
  * Normal desktop transport for the readiness-bound read-only task surface.
  *
@@ -423,7 +429,17 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
         }
         val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         if (response.statusCode() !in 200..299) {
-            throw Agent3Exception(
+            val reasonCode = runCatching {
+                json.parseToJsonElement(response.body())
+                    .jsonObject["detail"]
+                    ?.jsonObject
+                    ?.get("reason")
+                    ?.jsonPrimitive
+                    ?.content
+            }.getOrNull()
+            throw Agent3TaskHttpException(
+                response.statusCode(),
+                reasonCode,
                 "Agent 3.0 read-only task failed (${response.statusCode()}): ${response.body().take(500)}",
             )
         }
