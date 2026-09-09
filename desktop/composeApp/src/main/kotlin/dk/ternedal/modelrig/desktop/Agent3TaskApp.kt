@@ -70,10 +70,19 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         var preview by remember { mutableStateOf<Agent3ReadonlyTaskPreview?>(null) }
         var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
         var previewExpired by remember { mutableStateOf(false) }
-        var startRecoveryPending by remember { mutableStateOf(false) }
         var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskSnapshot?>(null) }
         var retainedRunId by remember {
             mutableStateOf(db.getSetting(ACTIVE_TASK_RUN_ID_SETTING)?.trim()?.takeIf { it.isNotEmpty() })
+        }
+        var retainedStartPlanId by remember {
+            mutableStateOf(
+                db.getSetting(ACTIVE_TASK_START_RECOVERY_PLAN_ID_SETTING)
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() },
+            )
+        }
+        var startRecoveryPending by remember {
+            mutableStateOf(retainedRunId == null && retainedStartPlanId != null)
         }
         var initialRecoveryPending by remember { mutableStateOf(retainedRunId != null) }
         var busy by remember { mutableStateOf(DesktopTaskBusy.READINESS) }
@@ -90,14 +99,29 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             db.putSetting(ACTIVE_TASK_RUN_ID_SETTING, runId.orEmpty())
         }.isSuccess
 
+        fun writeRetainedStartPlanId(planId: String?): Boolean {
+            val normalized = planId?.trim()?.takeIf { it.isNotEmpty() }
+            val saved = runCatching {
+                db.putSetting(ACTIVE_TASK_START_RECOVERY_PLAN_ID_SETTING, normalized.orEmpty())
+            }.isSuccess
+            if (saved) {
+                retainedStartPlanId = normalized
+                startRecoveryPending = normalized != null && retainedRunId == null && snapshot == null
+            }
+            return saved
+        }
+
         fun publishSnapshot(value: Agent3ReadonlyTaskSnapshot) {
-            startRecoveryPending = false
             snapshot = value
             val retained = Agent3TaskUiPolicy.retainedRunIdAfterSnapshot(value.run.id, value.terminal)
             retainedRunId = retained
             if (!writeRetainedRunId(retained)) {
+                startRecoveryPending = retainedStartPlanId != null
                 error = presentTaskRequestError(TaskRequestOperation.LOCAL_REFERENCE, null)
+                return
             }
+            if (retainedStartPlanId != null) writeRetainedStartPlanId(null)
+            startRecoveryPending = false
         }
 
         fun recoverRun() {
@@ -151,7 +175,11 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     readiness?.selectedSurface,
                     message,
                     busy != DesktopTaskBusy.NONE,
-                    Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
+                    Agent3TaskUiPolicy.hasTaskAuthority(
+                        snapshotPresent = snapshot != null,
+                        retainedRunId = retainedRunId,
+                        retainedStartPlanId = retainedStartPlanId,
+                    ),
                 )
             ) return
             busy = DesktopTaskBusy.PREVIEW
@@ -207,7 +235,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
 
         fun publishStartFailure(failure: Throwable) {
             if (failure is Agent3TaskHttpException && failure.reasonCode != "task_start_pending") {
-                startRecoveryPending = false
+                writeRetainedStartPlanId(null)
                 if (failure.reasonCode == "task_start_refused") {
                     preview = null
                     previewDeadlineMillis = null
@@ -222,34 +250,38 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             error = presentTaskRequestError(TaskRequestOperation.START, failure.message)
         }
 
-        fun startTask() {
-            val plan = preview ?: return
-            val planId = plan.planId ?: return
-            if (startRecoveryPending) {
-                if (!Agent3TaskUiPolicy.canStart(
-                        readiness?.selectedSurface,
-                        plan.canStart,
-                        previewFresh = false,
-                        busy = busy != DesktopTaskBusy.NONE,
-                        hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
-                        recoveryPending = true,
-                    )
-                ) return
-                busy = DesktopTaskBusy.START
-                error = null
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        runCatching {
-                            val (base, bearer) = requireConnection()
-                            Agent3ReadonlyTaskClient(base, bearer).start(planId)
-                        }
+        fun recoverPendingStart() {
+            val planId = retainedStartPlanId ?: return
+            val hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId)
+            if (!Agent3TaskUiPolicy.canRecoverStart(
+                    retainedStartPlanId = planId,
+                    busy = busy != DesktopTaskBusy.NONE,
+                    hasRun = hasRun,
+                )
+            ) return
+            busy = DesktopTaskBusy.START
+            error = null
+            startRecoveryPending = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val (base, bearer) = requireConnection()
+                        Agent3ReadonlyTaskClient(base, bearer).start(planId)
                     }
-                    busy = DesktopTaskBusy.NONE
-                    result.onSuccess(::publishSnapshot)
-                        .onFailure(::publishStartFailure)
                 }
+                busy = DesktopTaskBusy.NONE
+                result.onSuccess(::publishSnapshot)
+                    .onFailure(::publishStartFailure)
+            }
+        }
+
+        fun startTask() {
+            if (startRecoveryPending) {
+                recoverPendingStart()
                 return
             }
+            val plan = preview ?: return
+            val planId = plan.planId ?: return
             val nowMillis = System.nanoTime() / 1_000_000L
             val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
             if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, nowMillis)) {
@@ -311,6 +343,11 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, startNowMillis)) {
                         previewExpired = true
                     }
+                    return@launch
+                }
+                if (!writeRetainedStartPlanId(planId)) {
+                    busy = DesktopTaskBusy.NONE
+                    error = presentTaskRequestError(TaskRequestOperation.START_RECOVERY_REFERENCE, null)
                     return@launch
                 }
                 startRecoveryPending = true
@@ -383,7 +420,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             preview = null
             previewDeadlineMillis = null
             previewExpired = false
-            startRecoveryPending = false
+            startRecoveryPending = retainedStartPlanId != null && retainedRunId == null
             message = ""
             error = null
         }
@@ -442,6 +479,11 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         val surface = Agent3TaskUiPolicy.normalizedSurface(readiness?.selectedSurface)
         val isBusy = busy != DesktopTaskBusy.NONE
         val hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId)
+        val hasTaskAuthority = Agent3TaskUiPolicy.hasTaskAuthority(
+            snapshotPresent = snapshot != null,
+            retainedRunId = retainedRunId,
+            retainedStartPlanId = retainedStartPlanId,
+        )
 
         Column(
             Modifier
@@ -553,7 +595,35 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
             }
 
-            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasRun && !startRecoveryPending) {
+            if (snapshot == null && retainedRunId == null && retainedStartPlanId != null && preview == null) {
+                Spacer(Modifier.height(12.dp))
+                DesktopTaskCard {
+                    Text(
+                        "Startstatus skal afklares",
+                        color = KalivTheme.colors.TextHigh,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "Denne klient har gemt den samme plan-reference fra en Start, der ikke fik et entydigt svar. Ingen ny opgave kan startes, før riggen har afklaret den Start.",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        enabled = Agent3TaskUiPolicy.canRecoverStart(
+                            retainedStartPlanId = retainedStartPlanId,
+                            busy = isBusy,
+                            hasRun = hasRun,
+                        ),
+                        onClick = ::recoverPendingStart,
+                    ) {
+                        Text(if (busy == DesktopTaskBusy.START) "Henter startstatus…" else "Hent startstatus")
+                    }
+                }
+            }
+
+            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasTaskAuthority) {
                 Spacer(Modifier.height(12.dp))
                 DesktopTaskCard {
                     Text(
@@ -570,7 +640,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Button(onClick = onUseAgent2) { Text("Åbn normal chat") }
                 }
-            } else if (!hasRun) {
+            } else if (!hasRun && (retainedStartPlanId == null || preview != null)) {
                 Spacer(Modifier.height(12.dp))
                 DesktopTaskCard {
                     Text("Ny read-only opgave", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.Bold)
@@ -583,7 +653,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                             previewDeadlineMillis = null
                             previewExpired = false
                         },
-                        enabled = !isBusy && !startRecoveryPending,
+                        enabled = !isBusy && !hasTaskAuthority,
                         label = { Text("Hvad skal Kaliv undersøge?") },
                         supportingText = { Text("Kun lokale, idempotente read-tools kan startes.") },
                         minLines = 3,
@@ -596,7 +666,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                             readiness?.selectedSurface,
                             message,
                             isBusy,
-                            hasRun = startRecoveryPending,
+                            hasRun = hasTaskAuthority,
                         ),
                         onClick = ::requestPreview,
                     ) {
@@ -617,16 +687,23 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     )
                     DesktopPlanReview(
                         value,
-                        canStart = Agent3TaskUiPolicy.canStart(
-                            readiness?.selectedSurface,
-                            value.canStart,
-                            previewFresh,
-                            isBusy,
-                            hasRun = false,
-                            recoveryPending = startRecoveryPending,
-                        ),
+                        canStart = if (retainedStartPlanId != null) {
+                            Agent3TaskUiPolicy.canRecoverStart(
+                                retainedStartPlanId = retainedStartPlanId,
+                                busy = isBusy,
+                                hasRun = hasRun,
+                            )
+                        } else {
+                            Agent3TaskUiPolicy.canStart(
+                                readiness?.selectedSurface,
+                                value.canStart,
+                                previewFresh,
+                                isBusy,
+                                hasRun = false,
+                            )
+                        },
                         expired = expired,
-                        recoveryPending = startRecoveryPending,
+                        recoveryPending = retainedStartPlanId != null,
                         starting = busy == DesktopTaskBusy.START,
                         onStart = ::startTask,
                     )
@@ -1010,6 +1087,7 @@ private fun desktopRunColor(state: String): Color = when (state) {
 private fun String.shortDesktopHash(): String = if (length <= 14) this else take(12) + "…"
 
 private const val ACTIVE_TASK_RUN_ID_SETTING = "agent3TaskActiveRunId"
+private const val ACTIVE_TASK_START_RECOVERY_PLAN_ID_SETTING = "agent3TaskPendingStartPlanId"
 
 private enum class DesktopTaskBusy {
     NONE,

@@ -101,6 +101,19 @@ object Agent3TaskUiPolicy {
     fun hasRunAuthority(snapshotPresent: Boolean, retainedRunId: String?): Boolean =
         snapshotPresent || !retainedRunId.isNullOrBlank()
 
+    fun hasTaskAuthority(
+        snapshotPresent: Boolean,
+        retainedRunId: String?,
+        retainedStartPlanId: String?,
+    ): Boolean =
+        hasRunAuthority(snapshotPresent, retainedRunId) || !retainedStartPlanId.isNullOrBlank()
+
+    fun canRecoverStart(
+        retainedStartPlanId: String?,
+        busy: Boolean,
+        hasRun: Boolean,
+    ): Boolean = !retainedStartPlanId.isNullOrBlank() && !busy && !hasRun
+
     fun canRecoverRun(retainedRunId: String?, busy: Boolean): Boolean =
         !retainedRunId.isNullOrBlank() && !busy
 

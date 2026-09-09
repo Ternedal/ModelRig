@@ -10,6 +10,7 @@ internal enum class Agent3TaskFailureOperation {
     STOP_PLAN,
     AUTOMATIC_STATUS,
     LOCAL_REFERENCE,
+    START_RECOVERY_REFERENCE,
 }
 
 /**
@@ -38,6 +39,8 @@ internal fun presentAgent3TaskScreenError(
             Agent3TaskFailureOperation.AUTOMATIC_STATUS -> "Automatisk task-status kunne ikke hentes."
             Agent3TaskFailureOperation.LOCAL_REFERENCE ->
                 "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben."
+            Agent3TaskFailureOperation.START_RECOVERY_REFERENCE ->
+                "Start blev ikke sendt, fordi recovery-referencen ikke kunne gemmes lokalt."
         }
     }
 }

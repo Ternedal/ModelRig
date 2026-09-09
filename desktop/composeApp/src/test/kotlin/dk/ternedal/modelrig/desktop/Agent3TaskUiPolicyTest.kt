@@ -213,6 +213,28 @@ class Agent3TaskUiPolicyTest {
     }
 
     @Test
+    fun retainedStartReferenceBlocksNewTaskUntilSamePlanRecoveryIsResolved() {
+        val authority = Agent3TaskUiPolicy.hasTaskAuthority(
+            snapshotPresent = false,
+            retainedRunId = null,
+            retainedStartPlanId = "plan_abc123",
+        )
+        assertTrue(authority)
+        assertFalse(
+            Agent3TaskUiPolicy.canPreview(
+                serverSurface = Agent3TaskUiPolicy.AGENT3_READONLY,
+                message = "ny opgave",
+                busy = false,
+                hasRun = authority,
+            ),
+        )
+        assertTrue(Agent3TaskUiPolicy.canRecoverStart("plan_abc123", busy = false, hasRun = false))
+        assertFalse(Agent3TaskUiPolicy.canRecoverStart("plan_abc123", busy = true, hasRun = false))
+        assertFalse(Agent3TaskUiPolicy.canRecoverStart("plan_abc123", busy = false, hasRun = true))
+        assertFalse(Agent3TaskUiPolicy.canRecoverStart("   ", busy = false, hasRun = false))
+    }
+
+    @Test
     fun onlyServerTerminalSnapshotClearsRetainedRunReference() {
         assertEquals(
             "run_abc123",

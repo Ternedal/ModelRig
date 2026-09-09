@@ -30,6 +30,8 @@ class KalivTaskRequestErrorPresentationTest {
             TaskRequestOperation.STOP_PLAN to "Planen kunne ikke stoppes.",
             TaskRequestOperation.POLLING to "Automatisk task-status kunne ikke hentes.",
             TaskRequestOperation.LOCAL_REFERENCE to "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben.",
+            TaskRequestOperation.START_RECOVERY_REFERENCE to
+                "Start blev ikke sendt, fordi recovery-referencen ikke kunne gemmes lokalt.",
             TaskRequestOperation.UNKNOWN to "Task-handlingen kunne ikke gennemføres.",
         )
         expected.forEach { (operation, copy) ->

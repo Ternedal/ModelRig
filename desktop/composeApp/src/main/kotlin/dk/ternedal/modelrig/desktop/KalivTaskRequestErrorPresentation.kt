@@ -10,6 +10,7 @@ internal enum class TaskRequestOperation {
     STOP_PLAN,
     POLLING,
     LOCAL_REFERENCE,
+    START_RECOVERY_REFERENCE,
     UNKNOWN,
 }
 
@@ -38,6 +39,8 @@ internal fun presentTaskRequestError(operation: TaskRequestOperation, rawError: 
             TaskRequestOperation.POLLING -> "Automatisk task-status kunne ikke hentes."
             TaskRequestOperation.LOCAL_REFERENCE ->
                 "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben."
+            TaskRequestOperation.START_RECOVERY_REFERENCE ->
+                "Start blev ikke sendt, fordi recovery-referencen ikke kunne gemmes lokalt."
             TaskRequestOperation.UNKNOWN -> "Task-handlingen kunne ikke gennemføres."
         }
     }
