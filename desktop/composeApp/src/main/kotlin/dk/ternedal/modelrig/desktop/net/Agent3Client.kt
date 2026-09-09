@@ -290,39 +290,118 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     private fun decodeRunEnvelope(body: String): Agent3RunEnvelope {
         val envelope = decode<Agent3RunEnvelope>(body)
         validateCapabilityReceipt(envelope.capabilityReceipt)
-        validateTerminationReceipt(envelope.termination)
-        return envelope.copy(run = envelope.run.copy(termination = envelope.termination))
+        val termination = validateTerminationReceipt(envelope.termination, envelope.run)
+        return envelope.copy(
+            run = envelope.run.copy(termination = termination),
+            termination = termination,
+        )
     }
 
-    private fun validateTerminationReceipt(receipt: Agent3TerminationReceipt?) {
-        if (receipt == null) return
-        if (receipt.schema != "kaliv-agent3-termination/v1") {
-            throw Agent3Exception("Unsupported Agent 3.0 termination receipt schema: ${receipt.schema}")
+    internal fun validateTerminationReceipt(
+        receipt: Agent3TerminationReceipt?,
+        run: Agent3Run,
+    ): Agent3TerminationReceipt {
+        val value = receipt
+            ?: throw Agent3Exception("Invalid termination receipt: missing for run envelope")
+        if (value.schema != "kaliv-agent3-termination/v1") {
+            throw Agent3Exception("Unsupported Agent 3.0 termination receipt schema: ${value.schema}")
         }
-        if (receipt.productionActivation) {
+        if (value.productionActivation) {
             throw Agent3Exception("Invalid termination receipt: it must never activate production")
         }
-        if (receipt.plan.state !in setOf("available", "terminal") ||
-            receipt.plan.requestScope != "plan" ||
-            receipt.plan.effect.isBlank() || receipt.plan.reason.isBlank() ||
-            receipt.plan.canRequest != (receipt.plan.state == "available")
+
+        val runStates = setOf(
+            "running",
+            "waiting_confirmation",
+            "blocked",
+            "completed",
+            "failed",
+            "cancelled",
+        )
+        val terminalStates = setOf("blocked", "completed", "failed", "cancelled")
+        val stepStates = setOf(
+            "pending",
+            "completed_after_cancel",
+            "waiting_confirmation",
+            "approved",
+            "executing",
+            "succeeded",
+            "denied",
+            "blocked",
+            "failed",
+        )
+        val requestStates = setOf("available", "pending", "terminal", "unavailable", "not_active")
+        val semantics = setOf<String?>(null, "none", "cooperative", "runtime")
+
+        if (run.id.isBlank() || run.state !in runStates || run.currentStep < 0 || run.currentStep > run.steps.size) {
+            throw Agent3Exception("Invalid termination receipt: run identity/state/current step is invalid")
+        }
+        if (run.steps.any { it.state == null || it.state !in stepStates }) {
+            throw Agent3Exception("Invalid termination receipt: run step state is outside Agent 3")
+        }
+
+        val terminal = run.state in terminalStates
+        val expectedPlanState = if (terminal) "terminal" else "available"
+        val current = run.steps.getOrNull(run.currentStep)
+        val executing = current?.state == "executing"
+        val expectedEffect = if (executing) {
+            "prevent_future_steps_active_tool_continues"
+        } else {
+            "prevent_future_steps"
+        }
+        val plan = value.plan
+        if (
+            plan.state != expectedPlanState ||
+            plan.canRequest != !terminal ||
+            plan.requestScope != "plan" ||
+            plan.effect != expectedEffect ||
+            plan.reason.isBlank()
         ) {
-            throw Agent3Exception("Invalid termination receipt: inconsistent plan scope")
+            throw Agent3Exception("Invalid termination receipt: plan scope disagrees with run")
         }
-        if (receipt.modelStream.state.isBlank() || receipt.modelStream.reason.isBlank() ||
-            (receipt.modelStream.canRequest && !receipt.modelStream.handlePresent)
+
+        val stream = value.modelStream
+        if (
+            stream.state != "not_active" ||
+            stream.active ||
+            stream.canRequest ||
+            stream.handlePresent ||
+            stream.reason.isBlank()
         ) {
-            throw Agent3Exception("Invalid termination receipt: inconsistent model stream")
+            throw Agent3Exception("Invalid termination receipt: model stream disagrees with Agent 3 run")
         }
-        receipt.activeTool?.let { active ->
-            if (active.stepId.isBlank() || active.tool.isBlank() || active.state.isBlank() ||
-                active.requestState.isBlank() || active.reason.isBlank() ||
-                active.semantics !in setOf(null, "none", "cooperative", "runtime") ||
-                (active.canRequest && !active.handlePresent)
-            ) {
-                throw Agent3Exception("Invalid termination receipt: inconsistent active tool")
-            }
+
+        val active = value.activeTool
+        if ((active == null) != (current == null)) {
+            throw Agent3Exception("Invalid termination receipt: active tool disagrees with current step")
         }
+        if (active == null) return value
+
+        if (
+            active.stepId.isBlank() ||
+            active.tool.isBlank() ||
+            active.state !in stepStates ||
+            active.requestState !in requestStates ||
+            active.reason.isBlank() ||
+            active.semantics !in semantics ||
+            active.stepId != current?.id ||
+            active.tool != current?.tool ||
+            active.state != current?.state ||
+            (active.canRequest && !active.handlePresent) ||
+            (active.canRequest && active.semantics !in setOf("cooperative", "runtime"))
+        ) {
+            throw Agent3Exception("Invalid termination receipt: active tool disagrees with current step")
+        }
+        if (active.state == "executing" && active.requestState == "terminal") {
+            throw Agent3Exception("Invalid termination receipt: executing tool cannot be terminal")
+        }
+        if (active.state == "completed_after_cancel" && active.requestState != "terminal") {
+            throw Agent3Exception("Invalid termination receipt: late completion is not terminal")
+        }
+        if (active.requestState == "available" && !active.canRequest) {
+            throw Agent3Exception("Invalid termination receipt: available tool control cannot be requested")
+        }
+        return value
     }
 
     private fun validateCapabilityReceipt(receipt: Agent3CapabilityReceipt?) {
