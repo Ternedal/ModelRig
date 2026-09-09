@@ -16,6 +16,11 @@ The schema is vendored at contracts/mrbody-manifest-v1.schema.json. When
 BodyRig changes it, copy the new one in and let this gate say whether
 ModelRig still complies. Validation is dependency-free on purpose: the
 gate must run wherever the tests run.
+
+The cross-repo authority decision is machine-readable at
+contracts/bodyrig-authority-v1.json. This test also proves that ModelRig's
+internal bodyrig package remains a compatibility consumer rather than a
+second source of product/contract truth.
 """
 
 from __future__ import annotations
@@ -35,6 +40,9 @@ from bodyrig.mrbody import OPTIONAL_MOTION_PATHS, REQUIRED_PATHS, build_mrbody  
 from bodyrig_fixtures import png_fixture, tracking_fixture, vrm_fixture  # noqa: E402
 
 SCHEMA = ROOT / "contracts" / "mrbody-manifest-v1.schema.json"
+AUTHORITY = ROOT / "contracts" / "bodyrig-authority-v1.json"
+BODYRIG_REPO = "Ternedal/BodyRig"
+MODELRIG_REPO = "Ternedal/ModelRig"
 # From BodyRig docs/MRBODY_SPEC.md at the verified commit.
 BODYRIG_REQUIRED = {
     "manifest.json", "checksums.json", "avatar.vrm",
@@ -43,6 +51,12 @@ BODYRIG_REQUIRED = {
 BODYRIG_MOTIONS = {
     "motions/idle.vrma", "motions/walk.vrma", "motions/talk.vrma",
     "motions/gesture_01.vrma", "motions/gesture_02.vrma", "motions/gesture_03.vrma",
+}
+BODYRIG_OWNED_FAMILIES = {
+    "mrbody", "bodyprint", "motor_state", "embodiment_runtime",
+}
+MODELRIG_OWNED_FAMILIES = {
+    "assistant_intent", "bodyrig_facing_cue_production",
 }
 
 passed = failed = 0
@@ -91,6 +105,65 @@ def validate(instance: dict, schema: dict, path: str = "manifest") -> list[str]:
     return problems
 
 
+# --- cross-repo authorship / source-of-truth boundary ---------------------
+check(AUTHORITY.exists(), "BodyRig authority manifest is present")
+authority = json.loads(AUTHORITY.read_text(encoding="utf-8"))
+
+check(authority.get("format") == "modelrig-bodyrig-authority",
+      "authority manifest format is explicit")
+check(authority.get("version") == 1,
+      "authority manifest version is v1")
+check(authority.get("consumer_repository") == MODELRIG_REPO,
+      "ModelRig is explicitly the consumer repository")
+check(authority.get("authoritative_bodyrig_repository") == BODYRIG_REPO,
+      "standalone BodyRig is explicitly the authoritative body repository")
+major = authority.get("consumed_bodyrig_contract_major")
+check(isinstance(major, int) and not isinstance(major, bool) and major >= 1,
+      "consumed BodyRig contract major is explicit and positive")
+
+internal = authority.get("modelrig_internal_package") or {}
+check(internal.get("path") == "bodyrig",
+      "the existing ModelRig bodyrig package is named explicitly")
+check(internal.get("role") == "compatibility_adapter",
+      "ModelRig bodyrig package remains a compatibility adapter")
+check(internal.get("product_authority") is False,
+      "ModelRig bodyrig package has no standalone BodyRig product authority")
+check(internal.get("contract_authority") is False,
+      "ModelRig bodyrig package has no standalone BodyRig contract authority")
+
+policy = authority.get("compatibility_policy") or {}
+check(policy.get("breaking_change_requires_major_bump") is True,
+      "breaking BodyRig contract changes require a major bump")
+check(policy.get("unknown_major") == "reject",
+      "unknown BodyRig contract majors fail closed")
+check(policy.get("mirrored_contracts_are_authoritative") is False,
+      "vendored/mirrored ModelRig contracts cannot become authority")
+check(policy.get("explicit_supported_majors_required") is True,
+      "supported BodyRig contract majors must remain explicit")
+
+families = authority.get("contract_families") or {}
+check(BODYRIG_OWNED_FAMILIES <= set(families),
+      "all BodyRig-owned contract families are represented")
+check(MODELRIG_OWNED_FAMILIES <= set(families),
+      "all ModelRig-owned boundary families are represented")
+for name in sorted(BODYRIG_OWNED_FAMILIES):
+    family = families.get(name) or {}
+    check(family.get("authority") == BODYRIG_REPO,
+          f"{name} remains authored by standalone BodyRig")
+    check(family.get("modelrig_role") not in {None, "authority"},
+          f"{name} keeps ModelRig in a non-authoritative compatibility role")
+for name in sorted(MODELRIG_OWNED_FAMILIES):
+    family = families.get(name) or {}
+    check(family.get("authority") == MODELRIG_REPO,
+          f"{name} remains authored by ModelRig")
+
+mrbody_family = families.get("mrbody") or {}
+check(mrbody_family.get("modelrig_snapshot") == "contracts/mrbody-manifest-v1.schema.json",
+      "the vendored mrbody schema is declared as a compatibility snapshot")
+check(ROOT.joinpath(str(mrbody_family.get("modelrig_snapshot", "<missing>"))).is_file(),
+      "the declared mrbody compatibility snapshot exists")
+
+# --- concrete .mrbody compatibility ---------------------------------------
 check(SCHEMA.exists(), "BodyRig's manifest schema is vendored")
 schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
 

@@ -1,0 +1,60 @@
+{
+  "format": "modelrig-bodyrig-authority",
+  "version": 1,
+  "consumer_repository": "Ternedal/ModelRig",
+  "authoritative_bodyrig_repository": "Ternedal/BodyRig",
+  "consumed_bodyrig_contract_major": 1,
+  "modelrig_internal_package": {
+    "path": "bodyrig",
+    "role": "compatibility_adapter",
+    "product_authority": false,
+    "contract_authority": false
+  },
+  "compatibility_policy": {
+    "breaking_change_requires_major_bump": true,
+    "unknown_major": "reject",
+    "mirrored_contracts_are_authoritative": false,
+    "explicit_supported_majors_required": true
+  },
+  "contract_families": {
+    "mrbody": {
+      "authority": "Ternedal/BodyRig",
+      "authority_reference": "docs/MRBODY_SPEC.md",
+      "modelrig_role": "consumer_validator_store",
+      "modelrig_snapshot": "contracts/mrbody-manifest-v1.schema.json"
+    },
+    "bodyprint": {
+      "authority": "Ternedal/BodyRig",
+      "authority_reference": "docs/ARCHITECTURE.md",
+      "modelrig_role": "consumer_compatibility_adapter"
+    },
+    "motor_state": {
+      "authority": "Ternedal/BodyRig",
+      "authority_reference": "docs/MOTOR_STATE.md",
+      "modelrig_role": "consumer_orchestration_adapter"
+    },
+    "embodiment_runtime": {
+      "authority": "Ternedal/BodyRig",
+      "authority_reference": "docs/ARCHITECTURE.md",
+      "modelrig_role": "client_compatibility_integration"
+    },
+    "assistant_intent": {
+      "authority": "Ternedal/ModelRig",
+      "authority_reference": "docs/BODYRIG_V1.md",
+      "modelrig_role": "authority"
+    },
+    "bodyrig_facing_cue_production": {
+      "authority": "Ternedal/ModelRig",
+      "authority_reference": "docs/BODYRIG_V1.md",
+      "modelrig_role": "semantic_request_authority"
+    },
+    "speech_audio_timing": {
+      "authority": "VoiceRig",
+      "modelrig_role": "consumer_correlator"
+    },
+    "presentation_renderer": {
+      "authority": "Kaliv/VR client",
+      "modelrig_role": "orchestrator_consumer"
+    }
+  }
+}
