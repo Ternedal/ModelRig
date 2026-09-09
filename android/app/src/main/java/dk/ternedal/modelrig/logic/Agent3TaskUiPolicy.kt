@@ -32,12 +32,30 @@ object Agent3TaskUiPolicy {
     fun canStart(
         serverSurface: String?,
         previewCanStart: Boolean,
+        previewFresh: Boolean,
         busy: Boolean,
         hasRun: Boolean,
     ): Boolean = normalizedSurface(serverSurface) == AGENT3_READONLY &&
         previewCanStart &&
+        previewFresh &&
         !busy &&
         !hasRun
+
+    fun previewDeadlineMillis(requestStartedAtMillis: Long, expiresInSeconds: Int?): Long? {
+        if (requestStartedAtMillis < 0L || expiresInSeconds == null || expiresInSeconds <= 0) return null
+        val ttlMillis = expiresInSeconds.toLong() * 1_000L
+        return if (requestStartedAtMillis > Long.MAX_VALUE - ttlMillis) {
+            Long.MAX_VALUE
+        } else {
+            requestStartedAtMillis + ttlMillis
+        }
+    }
+
+    fun isPreviewFresh(deadlineMillis: Long?, nowMillis: Long): Boolean =
+        deadlineMillis != null && nowMillis >= 0L && nowMillis < deadlineMillis
+
+    fun isPreviewExpired(deadlineMillis: Long?, nowMillis: Long): Boolean =
+        deadlineMillis != null && !isPreviewFresh(deadlineMillis, nowMillis)
 
     fun canStopPlan(planCanRequest: Boolean?, busy: Boolean): Boolean =
         planCanRequest == true && !busy

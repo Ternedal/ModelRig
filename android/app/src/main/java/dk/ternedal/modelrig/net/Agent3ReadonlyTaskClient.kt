@@ -172,15 +172,19 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         val steps = parseSteps(root.optJSONArray("plan") ?: JSONArray())
         validateSteps(steps, preview = true)
         val planId = root.nullableString("plan_id")
+        val expiresInSeconds = root.nullableInt("expires_in_seconds")
         if (steps.isNotEmpty() && (planId == null || !OPAQUE_ID.matches(planId))) {
             throw ModelRigException("Ugyldig task-preview: executable plan mangler single-use id")
+        }
+        if (steps.isNotEmpty() && (expiresInSeconds == null || expiresInSeconds <= 0)) {
+            throw ModelRigException("Ugyldig task-preview: executable plan mangler gyldig udløbstid")
         }
         if (steps.isEmpty() && planId != null) {
             throw ModelRigException("Ugyldig task-preview: tom plan må ikke have start-token")
         }
         return Preview(
             planId = planId,
-            expiresInSeconds = root.nullableInt("expires_in_seconds"),
+            expiresInSeconds = expiresInSeconds,
             rationale = root.optString("rationale"),
             steps = steps,
             evidence = parseEvidence(root.requireObject("readiness_binding")),

@@ -36,6 +36,7 @@ class Agent3TaskUiPolicyTest {
             Agent3TaskUiPolicy.canStart(
                 Agent3TaskUiPolicy.AGENT3_READONLY,
                 previewCanStart = true,
+                previewFresh = true,
                 busy = false,
                 hasRun = false,
             ),
@@ -44,6 +45,45 @@ class Agent3TaskUiPolicyTest {
             Agent3TaskUiPolicy.canStart(
                 Agent3TaskUiPolicy.AGENT2,
                 previewCanStart = true,
+                previewFresh = true,
+                busy = false,
+                hasRun = false,
+            ),
+        )
+    }
+
+    @Test
+    fun previewAuthorityUsesFiniteMonotonicDeadlineAndFailsClosed() {
+        val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, 120)
+        assertEquals(130_000L, deadline)
+        assertTrue(Agent3TaskUiPolicy.isPreviewFresh(deadline, 129_999L))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(deadline, 130_000L))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, null))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, 0))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, -1))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(-1L, 120))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(null, 10_000L))
+        assertFalse(Agent3TaskUiPolicy.isPreviewExpired(null, 10_000L))
+        assertFalse(Agent3TaskUiPolicy.isPreviewExpired(deadline, 129_999L))
+        assertTrue(Agent3TaskUiPolicy.isPreviewExpired(deadline, 130_000L))
+        assertEquals(
+            Long.MAX_VALUE,
+            Agent3TaskUiPolicy.previewDeadlineMillis(Long.MAX_VALUE - 500L, 1),
+        )
+        assertTrue(
+            Agent3TaskUiPolicy.canStart(
+                serverSurface = Agent3TaskUiPolicy.AGENT3_READONLY,
+                previewCanStart = true,
+                previewFresh = true,
+                busy = false,
+                hasRun = false,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canStart(
+                serverSurface = Agent3TaskUiPolicy.AGENT3_READONLY,
+                previewCanStart = true,
+                previewFresh = false,
                 busy = false,
                 hasRun = false,
             ),

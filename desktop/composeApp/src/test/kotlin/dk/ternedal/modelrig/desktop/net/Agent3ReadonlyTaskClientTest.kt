@@ -48,6 +48,7 @@ class Agent3ReadonlyTaskClientTest {
             val cancelled = client.cancel(started.run.id)
 
             assertTrue(preview.canStart)
+            assertEquals(120, preview.expiresInSeconds)
             assertEquals("rig_status", preview.plan.single().tool)
             assertFalse(started.terminal)
             assertEquals("running", started.run.state)
@@ -147,6 +148,15 @@ class Agent3ReadonlyTaskClientTest {
             "\"production_activation\":false",
             "\"production_activation\":true",
         )
+        val missingExpiry = previewJson().replace("\"expires_in_seconds\":120,", "")
+        val zeroExpiry = previewJson().replace(
+            "\"expires_in_seconds\":120",
+            "\"expires_in_seconds\":0",
+        )
+        val negativeExpiry = previewJson().replace(
+            "\"expires_in_seconds\":120",
+            "\"expires_in_seconds\":-1",
+        )
         val missingTermination = snapshotJson(
             state = "running",
             terminal = false,
@@ -175,7 +185,15 @@ class Agent3ReadonlyTaskClientTest {
             currentStepOverride = 2,
         )
 
-        assertIs<Agent3Exception>(runCatching { client.parsePreview(writePreview) }.exceptionOrNull())
+        listOf(
+            writePreview,
+            productionActivation,
+            missingExpiry,
+            zeroExpiry,
+            negativeExpiry,
+        ).forEach { payload ->
+            assertIs<Agent3Exception>(runCatching { client.parsePreview(payload) }.exceptionOrNull())
+        }
         listOf(
             confirmation,
             terminalMismatch,
@@ -189,9 +207,6 @@ class Agent3ReadonlyTaskClientTest {
         }
         assertIs<Agent3Exception>(
             runCatching { client.parseSnapshot(wrongRun, expectedRunId = "run-1") }.exceptionOrNull(),
-        )
-        assertIs<Agent3Exception>(
-            runCatching { client.parsePreview(productionActivation) }.exceptionOrNull(),
         )
     }
 
