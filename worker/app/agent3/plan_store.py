@@ -28,6 +28,9 @@ class PlanStore:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.ttl_seconds = max(30, min(ttl_seconds, 3600))
+        # Opaque per-store/process generation used only to decide whether an
+        # in-process task executor from a previous worker can still be live.
+        self._start_owner = uuid.uuid4().hex
         self._lock = threading.RLock()
         self._closed = False
         self._memory_connection = self._connect() if path == ":memory:" else None
@@ -45,6 +48,8 @@ class PlanStore:
                 connection.execute("ALTER TABLE agent_plans ADD COLUMN start_result TEXT")
             if "result_run_id" not in columns:
                 connection.execute("ALTER TABLE agent_plans ADD COLUMN result_run_id TEXT")
+            if "start_owner" not in columns:
+                connection.execute("ALTER TABLE agent_plans ADD COLUMN start_owner TEXT")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -126,30 +131,125 @@ class PlanStore:
                     connection.rollback()
                     raise
 
-    def start_result(self, plan_id: str) -> tuple[str, str | None] | None:
-        """Return task-Start recovery state without granting new execution authority."""
+    @property
+    def start_owner(self) -> str:
+        """Opaque owner for executor work created by this PlanStore generation."""
+        return self._start_owner
+
+    @staticmethod
+    def _owner_value(value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise PlanStoreError("plan has invalid start owner")
+        return value
+
+    def start_recovery(self, plan_id: str) -> tuple[str, str | None, str | None] | None:
+        """Return task-Start state plus the opaque executor-generation owner."""
         with self._lock:
             with self._connection() as connection:
                 row = connection.execute(
-                    "SELECT consumed_at,start_result,result_run_id FROM agent_plans WHERE id=?",
+                    "SELECT consumed_at,start_result,result_run_id,start_owner "
+                    "FROM agent_plans WHERE id=?",
                     (plan_id,),
                 ).fetchone()
         if row is None:
             return None
-        consumed_at, result, run_id = row
+        consumed_at, result, run_id, owner_raw = row
+        owner = self._owner_value(owner_raw)
         if result == "accepted":
             if not isinstance(run_id, str) or not run_id:
                 raise PlanStoreError("accepted plan is missing its task run")
-            return "accepted", run_id
+            return "accepted", run_id, owner
         if result == "pending":
-            return "pending", run_id if isinstance(run_id, str) and run_id else None
+            return "pending", run_id if isinstance(run_id, str) and run_id else None, owner
         if result == "refused":
-            return "refused", None
+            return "refused", None, None
         if result is not None:
             raise PlanStoreError("plan has invalid start result")
         if consumed_at is not None:
-            return "pending", None
+            return "pending", None, owner
         return None
+
+    def start_result(self, plan_id: str) -> tuple[str, str | None] | None:
+        """Compatibility view of task-Start recovery without owner metadata."""
+        recovery = self.start_recovery(plan_id)
+        if recovery is None:
+            return None
+        state, run_id, _owner = recovery
+        return state, run_id
+
+    def start_recovery_for_run(self, run_id: str) -> tuple[str, str, str | None] | None:
+        """Resolve the one task plan that owns a pending/accepted task run."""
+        with self._lock:
+            with self._connection() as connection:
+                rows = connection.execute(
+                    "SELECT id,start_result,start_owner FROM agent_plans "
+                    "WHERE result_run_id=? AND start_result IN ('pending','accepted')",
+                    (run_id,),
+                ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise PlanStoreError("task run is bound to multiple start records")
+        plan_id, state, owner_raw = rows[0]
+        if state not in {"pending", "accepted"}:
+            raise PlanStoreError("task run has invalid start state")
+        return str(plan_id), str(state), self._owner_value(owner_raw)
+
+    def claim_start_recovery(
+        self,
+        plan_id: str,
+        run_id: str,
+        previous_owner: str | None,
+    ) -> str | None:
+        """CAS a dead-owner pending/accepted run to this process generation."""
+        now = time.time()
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT start_result,result_run_id,start_owner,expires_at "
+                        "FROM agent_plans WHERE id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("plan not found")
+                    state, existing_run_id, owner_raw, expires_at = row
+                    if state not in {"pending", "accepted"} or existing_run_id != run_id:
+                        raise PlanStoreError("plan is not recoverable for this task run")
+                    owner = self._owner_value(owner_raw)
+                    if owner == self._start_owner or owner != previous_owner:
+                        connection.commit()
+                        return None
+                    connection.execute(
+                        "UPDATE agent_plans SET start_owner=?,expires_at=? WHERE id=?",
+                        (self._start_owner, max(float(expires_at), now + self.ttl_seconds), plan_id),
+                    )
+                    connection.commit()
+                    return str(state)
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def release_start_recovery_claim(self, plan_id: str, run_id: str) -> bool:
+        """Release a current-generation claim when executor submission failed."""
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    changed = connection.execute(
+                        "UPDATE agent_plans SET start_owner=NULL "
+                        "WHERE id=? AND result_run_id=? AND start_owner=? "
+                        "AND start_result IN ('pending','accepted')",
+                        (plan_id, run_id, self._start_owner),
+                    ).rowcount
+                    connection.commit()
+                    return changed == 1
+                except Exception:
+                    connection.rollback()
+                    raise
 
     def bind_pending_run(self, plan_id: str, run_id: str) -> None:
         """Bind a consumed task plan to one run before executor submission."""
@@ -176,9 +276,14 @@ class PlanStore:
                         connection.commit()
                         return
                     connection.execute(
-                        "UPDATE agent_plans SET start_result='pending',result_run_id=?,expires_at=? "
-                        "WHERE id=?",
-                        (run_id, max(float(expires_at), now + self.ttl_seconds), plan_id),
+                        "UPDATE agent_plans SET start_result='pending',result_run_id=?,"
+                        "start_owner=?,expires_at=? WHERE id=?",
+                        (
+                            run_id,
+                            self._start_owner,
+                            max(float(expires_at), now + self.ttl_seconds),
+                            plan_id,
+                        ),
                     )
                     connection.commit()
                 except Exception:
@@ -231,7 +336,7 @@ class PlanStore:
                     if row[1] not in (None, "pending", "refused"):
                         raise PlanStoreError("plan has invalid start result")
                     connection.execute(
-                        "UPDATE agent_plans SET start_result='refused',result_run_id=NULL WHERE id=?",
+                        "UPDATE agent_plans SET start_result='refused',result_run_id=NULL,start_owner=NULL WHERE id=?",
                         (plan_id,),
                     )
                     connection.commit()

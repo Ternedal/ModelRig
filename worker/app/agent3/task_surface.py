@@ -268,16 +268,7 @@ def build_task_surface_router(
         return response
 
     def execute_task(run_id: str) -> None:
-        """Advance only the promoted read path and stop immediately on cancel.
-
-        The generic orchestrator also owns write confirmations and recovery. Its
-        broad advance loop historically continued after `_execute()` had marked a
-        late read as COMPLETED_AFTER_CANCEL, incremented the step and wrote a
-        contradictory run_completed event. The normal task surface has a smaller
-        authority, so its executor is smaller too: pending, local, idempotent reads
-        only, with an explicit cancellation check before every step and before the
-        terminal completion write.
-        """
+        """Advance only the promoted read path, including crash-safe idempotent resume."""
         try:
             run = orchestrator.store.load(run_id)
             if run is None or run.state in {
@@ -293,9 +284,42 @@ def build_task_surface_router(
                 fresh = orchestrator.store.load(run.id)
                 if fresh is None or fresh.state == RunState.CANCELLED:
                     return
+                run = fresh
                 step = run.steps[run.current_step]
+
+                # A worker restart can leave the exact persisted idempotent read
+                # either EXECUTING or already SUCCEEDED before current_step was
+                # advanced. Resume that same run; never clone a second task run.
+                if step.state == StepState.SUCCEEDED:
+                    conflict = orchestrator._advance_succeeded_step(run)
+                    if conflict is not None:
+                        return
+                    refreshed = orchestrator.store.load(run.id)
+                    if refreshed is None:
+                        return
+                    run = refreshed
+                    continue
+                if step.state == StepState.EXECUTING:
+                    if not step.idempotent:
+                        raise RuntimeError("read-only task interrupted a non-idempotent step")
+                    expected_payload = run.to_json()
+                    step.state = StepState.PENDING
+                    step.result = None
+                    step.error = None
+                    if not orchestrator.store.save_with_event_if_unchanged(
+                        run,
+                        expected_state=RunState.RUNNING,
+                        expected_payload=expected_payload,
+                        kind="task_interrupted_execution_replayable",
+                        payload={"step_id": step.id, "tool": step.tool},
+                    ):
+                        fresh = orchestrator.store.load(run.id)
+                        if fresh is None or fresh.state == RunState.CANCELLED:
+                            return
+                        raise RuntimeError("task changed during interrupted read recovery")
+                    continue
                 if step.state != StepState.PENDING:
-                    raise RuntimeError("read-only task step left the pending state")
+                    raise RuntimeError("read-only task step left the recoverable state")
 
                 decision = orchestrator.policy.evaluate(
                     step,
@@ -328,28 +352,33 @@ def build_task_surface_router(
                     )
                     return
 
-                # Reuse the shared execution primitive for atomic step events and
-                # COMPLETED_AFTER_CANCEL detection, but own the surrounding loop
-                # so CANCELLED is terminal here rather than falling through.
                 orchestrator._execute(run, step)
                 if run.state in {RunState.FAILED, RunState.CANCELLED}:
                     return
                 if step.state != StepState.SUCCEEDED:
                     raise RuntimeError("read-only task step did not finish successfully")
-                run.current_step += 1
-                run.state = RunState.RUNNING
-                orchestrator.store.save(run)
+                conflict = orchestrator._advance_succeeded_step(run)
+                if conflict is not None:
+                    return
+                refreshed = orchestrator.store.load(run.id)
+                if refreshed is None:
+                    return
+                run = refreshed
 
-            fresh = orchestrator.store.load(run.id)
-            if fresh is None or fresh.state == RunState.CANCELLED:
-                return
+            expected_payload = run.to_json()
             run.state = RunState.COMPLETED
             run.answer = orchestrator.answerer(run)
-            orchestrator.store.save_with_event(
+            if not orchestrator.store.save_with_event_if_unchanged(
                 run,
-                "run_completed",
-                {"steps": len(run.steps)},
-            )
+                expected_state=RunState.RUNNING,
+                expected_payload=expected_payload,
+                kind="run_completed",
+                payload={"steps": len(run.steps)},
+            ):
+                fresh = orchestrator.store.load(run.id)
+                if fresh is None or fresh.state == RunState.CANCELLED:
+                    return
+                raise RuntimeError("task changed while final completion was committed")
         except Exception as exc:
             run = orchestrator.store.load(run_id)
             if run is not None and run.state not in {
@@ -463,37 +492,82 @@ def build_task_surface_router(
             response["capability_receipt"] = receipt
         return response
 
-    def replay_start(plan_id: str) -> dict[str, Any] | None:
-        result = plan_store.start_result(plan_id)
-        if result is None:
-            return None
-        state, run_id = result
-        if state == "accepted" and run_id is not None:
+    def recover_bound_execution(
+        plan_id: str,
+        state: str,
+        run_id: str,
+        owner: str | None,
+    ) -> dict[str, Any] | None:
+        run, _binding, _receipt, events = task_context(run_id)
+        if run.state in {
+            RunState.COMPLETED,
+            RunState.FAILED,
+            RunState.CANCELLED,
+            RunState.BLOCKED,
+        }:
+            if state == "pending":
+                plan_store.mark_start_accepted(plan_id, run_id)
             return task_response(run_id)
-        if state == "pending" and run_id is not None:
-            # A process can fail after binding the run but before publishing
-            # executor acceptance. Only persisted execution evidence or terminal
-            # server truth may promote that recovery record after restart.
-            run, _binding, _receipt, events = task_context(run_id)
+
+        if owner == plan_store.start_owner:
+            if state == "accepted":
+                return task_response(run_id)
             execution_evidence = any(
                 event.get("kind") in {
                     "policy_decision",
                     "step_started",
                     "step_succeeded",
                     "step_failed",
+                    "task_interrupted_execution_replayable",
                     "task_execution_failed",
                     "run_completed",
                 }
                 for event in events
             )
-            if execution_evidence or run.state in {
-                RunState.COMPLETED,
-                RunState.FAILED,
-                RunState.CANCELLED,
-                RunState.BLOCKED,
-            }:
+            if execution_evidence:
                 plan_store.mark_start_accepted(plan_id, run_id)
                 return task_response(run_id)
+            return None
+
+        # The shipped worker launcher owns exactly one uvicorn process. A bound
+        # owner from another PlanStore generation therefore cannot still have a
+        # live in-process executor. Reclaim only the exact existing run and only
+        # after current-process capacity is reserved.
+        if not execution_pool.reserve():
+            return None
+        reserved = True
+        try:
+            claimed_state = plan_store.claim_start_recovery(plan_id, run_id, owner)
+            if claimed_state is None:
+                return None
+            try:
+                execution_pool.submit_reserved(execute_task, run_id)
+            except Exception:
+                plan_store.release_start_recovery_claim(plan_id, run_id)
+                return None
+            reserved = False
+            if claimed_state == "pending":
+                try:
+                    plan_store.mark_start_accepted(plan_id, run_id)
+                except PlanStoreError:
+                    # The worker now owns this exact run. Leave pending truth for
+                    # same-plan replay to promote from persisted execution state.
+                    return None
+            return task_response(run_id)
+        finally:
+            if reserved:
+                execution_pool.release_reserved()
+
+    def replay_start(plan_id: str) -> dict[str, Any] | None:
+        result = plan_store.start_recovery(plan_id)
+        if result is None:
+            return None
+        state, run_id, owner = result
+        if state in {"pending", "accepted"} and run_id is not None:
+            recovered = recover_bound_execution(plan_id, state, run_id, owner)
+            if recovered is not None:
+                return recovered
+            raise HTTPException(status_code=409, detail={"reason": "task_start_pending"})
         reason = "task_start_pending" if state == "pending" else "task_start_refused"
         raise HTTPException(status_code=409, detail={"reason": reason})
 
@@ -636,8 +710,19 @@ def build_task_surface_router(
     @router.get("/runs/{run_id}")
     def get_run(run_id: str) -> dict[str, Any]:
         # Outcome visibility remains available if readiness later falls back to
-        # Agent 2. A running task must never disappear merely because its evidence
-        # expired between start and poll.
+        # Agent 2. If the single worker process restarted, a persisted active run
+        # can reclaim its exact idempotent read executor through this same scoped
+        # status authority; no generic run discovery is introduced.
+        recovery = plan_store.start_recovery_for_run(run_id)
+        if recovery is not None:
+            plan_id, state, owner = recovery
+            recovered = recover_bound_execution(plan_id, state, run_id, owner)
+            if recovered is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"reason": "task_execution_recovery_pending"},
+                )
+            return recovered
         return task_response(run_id)
 
     @router.post("/runs/{run_id}/cancel")
