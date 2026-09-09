@@ -232,6 +232,90 @@ except PlanStoreError:
 check(not refused_claimed, "refused reviewed plan cannot race into task Start authority")
 refusal_store.close()
 
+retention_path = os.path.join(root, "retention.db")
+retention_store = PlanStore(retention_path, ttl_seconds=30)
+preview_retention, _ = retention_store.save("expired-preview")
+refused_retention, _ = retention_store.save("expired-refusal")
+retention_store.refuse_unconsumed(refused_retention)
+active_retention, _ = retention_store.save("active-start")
+retention_store.claim_task_start(active_retention, "run-active", "prepared-active")
+retention_store.mark_start_accepted(active_retention, "run-active")
+with sqlite3.connect(retention_path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id IN (?,?,?)",
+        (
+            time.time() - 1,
+            preview_retention,
+            refused_retention,
+            active_retention,
+        ),
+    )
+    connection.commit()
+check(
+    retention_store.purge() == 2
+    and retention_store.start_recovery(active_retention)
+    == ("accepted", "run-active", retention_store.start_owner),
+    "purge removes expired preview/refusal but preserves active Start recovery past TTL",
+)
+check(
+    retention_store.mark_start_terminal_for_run("run-active"),
+    "terminal task run starts a bounded recovery grace",
+)
+with sqlite3.connect(retention_path) as connection:
+    first_terminal = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (active_retention,),
+    ).fetchone()
+check(
+    first_terminal is not None
+    and first_terminal[0] is not None
+    and float(first_terminal[1]) > time.time(),
+    "terminal recovery survives for a fresh TTL after completion",
+)
+check(
+    retention_store.mark_start_terminal_for_run("run-active"),
+    "terminal retention marking is idempotent for the exact run",
+)
+with sqlite3.connect(retention_path) as connection:
+    second_terminal = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (active_retention,),
+    ).fetchone()
+check(
+    second_terminal == first_terminal,
+    "repeated terminal observation does not extend recovery grace forever",
+)
+check(
+    not retention_store.mark_start_terminal_for_run("run-other"),
+    "terminal retention cannot attach to an unrelated run id",
+)
+with sqlite3.connect(retention_path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, active_retention),
+    )
+    connection.commit()
+check(
+    retention_store.purge() == 1
+    and retention_store.start_recovery(active_retention) is None,
+    "terminal Start recovery is eventually purged after its grace",
+)
+reopen_expired, _ = retention_store.save("reopen-expired")
+with sqlite3.connect(retention_path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, reopen_expired),
+    )
+    connection.commit()
+retention_store.close()
+retention_reopened = PlanStore(retention_path, ttl_seconds=30)
+check(
+    retention_reopened.start_recovery(reopen_expired) is None
+    and retention_reopened.purge() == 0,
+    "opening the store opportunistically removes safely expired rows",
+)
+retention_reopened.close()
+
 plan_store.close()
 expiry_store.close()
 print(f"\n{passed} passed, {failed} failed")

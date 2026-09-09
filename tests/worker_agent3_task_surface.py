@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import threading
 import time
@@ -241,6 +242,17 @@ check(
     and gate.proposals == ["rig_status"],
     "polling observes exactly the reviewed read step complete",
 )
+with sqlite3.connect(fixture.plans.path) as connection:
+    terminal_retention = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (plan_id,),
+    ).fetchone()
+check(
+    terminal_retention is not None
+    and terminal_retention[0] is not None
+    and float(terminal_retention[1]) > time.time(),
+    "completed task retains same-plan Start recovery for a bounded grace",
+)
 check(
     completed["production_activation"] is False
     and completed["normal_chat_route_unchanged"] is True,
@@ -252,6 +264,15 @@ check(
     "accepted task Start replays the exact same task run",
 )
 check(gate.proposals == ["rig_status"], "accepted Start replay never executes the tool twice")
+with sqlite3.connect(fixture.plans.path) as connection:
+    replay_retention = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (plan_id,),
+    ).fetchone()
+check(
+    replay_retention == terminal_retention,
+    "same-plan replay does not extend terminal recovery grace forever",
+)
 fixture.close()
 
 
@@ -347,6 +368,17 @@ started = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start"
 check(started.status_code == 202, "slow read returns a run id before the tool completes")
 run_id = started.json()["run"]["id"]
 check(gate.slow_started.wait(timeout=2), "background worker actually entered the slow read")
+with sqlite3.connect(fixture.plans.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, plan_id),
+    )
+    connection.commit()
+check(
+    fixture.plans.purge() == 0
+    and fixture.plans.start_recovery(plan_id) is not None,
+    "cleanup never drops an active Start recovery record solely on TTL",
+)
 fixture.state.value = readiness(
     selected_surface="agent2",
     eligible_for_task_ui=False,
@@ -357,6 +389,17 @@ cancelled = fixture.client.post(f"/experimental/agent3/task/runs/{run_id}/cancel
 check(
     cancelled.status_code == 200 and cancelled.json()["run"]["state"] == "cancelled",
     "Stop remains reachable and cancels the task after readiness fallback",
+)
+with sqlite3.connect(fixture.plans.path) as connection:
+    cancelled_retention = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (plan_id,),
+    ).fetchone()
+check(
+    cancelled_retention is not None
+    and cancelled_retention[0] is not None
+    and float(cancelled_retention[1]) > time.time(),
+    "cancelled task starts bounded same-plan recovery retention",
 )
 gate.slow_release.set()
 terminal = wait_terminal(fixture, run_id)

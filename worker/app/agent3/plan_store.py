@@ -52,7 +52,15 @@ class PlanStore:
                 connection.execute("ALTER TABLE agent_plans ADD COLUMN start_owner TEXT")
             if "start_run" not in columns:
                 connection.execute("ALTER TABLE agent_plans ADD COLUMN start_run TEXT")
+            if "start_terminal_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE agent_plans ADD COLUMN start_terminal_at REAL"
+                )
             connection.commit()
+
+        # Safe opportunistic cleanup: active Start recovery rows are excluded by
+        # purge() until their exact run has been observed terminal.
+        self.purge()
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, check_same_thread=False)
@@ -85,6 +93,9 @@ class PlanStore:
                 connection.close()
 
     def save(self, payload: str) -> tuple[str, int]:
+        # Bound file growth without a timer/background worker. A cleanup failure
+        # fails the same SQLite write path rather than silently corrupting state.
+        self.purge()
         plan_id = str(uuid.uuid4())
         now = time.time()
         with self._lock:
@@ -173,7 +184,8 @@ class PlanStore:
                         return False
                     changed = connection.execute(
                         "UPDATE agent_plans SET consumed_at=?,start_result='refused',"
-                        "result_run_id=NULL,start_owner=NULL,start_run=NULL WHERE id=? "
+                        "result_run_id=NULL,start_owner=NULL,start_run=NULL,"
+                        "start_terminal_at=NULL WHERE id=? "
                         "AND consumed_at IS NULL AND start_result IS NULL",
                         (now, plan_id),
                     ).rowcount
@@ -206,7 +218,8 @@ class PlanStore:
                     if now > float(expires_at):
                         connection.execute(
                             "UPDATE agent_plans SET consumed_at=?,start_result='refused',"
-                            "result_run_id=NULL,start_owner=NULL,start_run=NULL "
+                            "result_run_id=NULL,start_owner=NULL,start_run=NULL,"
+                            "start_terminal_at=NULL "
                             "WHERE id=? AND consumed_at IS NULL AND start_result IS NULL",
                             (now, plan_id),
                         )
@@ -214,7 +227,8 @@ class PlanStore:
                         raise PlanStoreError("plan expired")
                     changed = connection.execute(
                         "UPDATE agent_plans SET consumed_at=?,start_result='pending',"
-                        "result_run_id=?,start_owner=?,start_run=?,expires_at=? "
+                        "result_run_id=?,start_owner=?,start_run=?,start_terminal_at=NULL,"
+                        "expires_at=? "
                         "WHERE id=? AND consumed_at IS NULL AND start_result IS NULL",
                         (
                             now,
@@ -395,7 +409,7 @@ class PlanStore:
                         return
                     connection.execute(
                         "UPDATE agent_plans SET start_result='pending',result_run_id=?,"
-                        "start_owner=?,expires_at=? WHERE id=?",
+                        "start_owner=?,start_terminal_at=NULL,expires_at=? WHERE id=?",
                         (
                             run_id,
                             self._start_owner,
@@ -455,7 +469,7 @@ class PlanStore:
                         raise PlanStoreError("plan has invalid start result")
                     connection.execute(
                         "UPDATE agent_plans SET start_result='refused',result_run_id=NULL,"
-                        "start_owner=NULL,start_run=NULL WHERE id=?",
+                        "start_owner=NULL,start_run=NULL,start_terminal_at=NULL WHERE id=?",
                         (plan_id,),
                     )
                     connection.commit()
@@ -463,12 +477,62 @@ class PlanStore:
                     connection.rollback()
                     raise
 
+    def mark_start_terminal_for_run(self, run_id: str) -> bool:
+        """Start a bounded post-terminal recovery grace for one exact task run."""
+        if not run_id:
+            raise PlanStoreError("terminal task run id is missing")
+        now = time.time()
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    rows = connection.execute(
+                        "SELECT id,start_terminal_at,expires_at FROM agent_plans "
+                        "WHERE result_run_id=? AND start_result IN ('pending','accepted')",
+                        (run_id,),
+                    ).fetchall()
+                    if not rows:
+                        connection.commit()
+                        return False
+                    if len(rows) != 1:
+                        raise PlanStoreError(
+                            "task run is bound to multiple terminal recovery records"
+                        )
+                    plan_id, terminal_at, expires_at = rows[0]
+                    if terminal_at is not None:
+                        connection.commit()
+                        return True
+                    changed = connection.execute(
+                        "UPDATE agent_plans SET start_terminal_at=?,expires_at=? "
+                        "WHERE id=? AND result_run_id=? AND start_terminal_at IS NULL "
+                        "AND start_result IN ('pending','accepted')",
+                        (
+                            now,
+                            max(float(expires_at), now + self.ttl_seconds),
+                            plan_id,
+                            run_id,
+                        ),
+                    ).rowcount
+                    if changed != 1:
+                        raise PlanStoreError(
+                            "task Start terminal retention changed concurrently"
+                        )
+                    connection.commit()
+                    return True
+                except Exception:
+                    connection.rollback()
+                    raise
+
     def purge(self) -> int:
+        """Delete only records whose expiry can no longer carry live Start authority."""
         now = time.time()
         with self._lock:
             with self._connection() as connection:
                 cursor = connection.execute(
-                    "DELETE FROM agent_plans WHERE expires_at < ?",
+                    "DELETE FROM agent_plans WHERE expires_at < ? AND ("
+                    "start_result IS NULL OR start_result='refused' OR "
+                    "(start_result IN ('pending','accepted') "
+                    "AND start_terminal_at IS NOT NULL))",
                     (now,),
                 )
                 connection.commit()

@@ -238,14 +238,33 @@ def build_task_surface_router(
         _assert_readonly_template(run)
         return run, {str(k): str(v) for k, v in binding.items()}, receipt, events
 
+    def retain_terminal_start_recovery(run: AgentRun) -> None:
+        if run.state not in {
+            RunState.COMPLETED,
+            RunState.FAILED,
+            RunState.CANCELLED,
+            RunState.BLOCKED,
+        }:
+            return
+        try:
+            plan_store.mark_start_terminal_for_run(run.id)
+        except Exception:
+            # This is retention bookkeeping only. The persisted run remains the
+            # outcome authority; a failed mark safely retains recovery longer.
+            return
+
     def task_response(run_id: str) -> dict[str, Any]:
         run, binding, receipt, events = task_context(run_id)
         if run.state == RunState.WAITING_CONFIRMATION:
             orchestrator.cancel(run.id)
+            cancelled = orchestrator.store.load(run.id)
+            if cancelled is not None:
+                retain_terminal_start_recovery(cancelled)
             raise HTTPException(
                 status_code=500,
                 detail="read-only task unexpectedly requested confirmation",
             )
+        retain_terminal_start_recovery(run)
         response: dict[str, Any] = {
             "task_surface": TASK_SURFACE,
             "selected_surface": TASK_SURFACE,
@@ -393,6 +412,10 @@ def build_task_surface_router(
                     "task_execution_failed",
                     {"error": str(exc)},
                 )
+        finally:
+            terminal_run = orchestrator.store.load(run_id)
+            if terminal_run is not None:
+                retain_terminal_start_recovery(terminal_run)
 
     @router.post("/plan")
     async def preview(req: TaskPlanReq) -> dict[str, Any]:
