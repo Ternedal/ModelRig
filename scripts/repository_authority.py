@@ -18,6 +18,8 @@ REQUIRED_STATUS_CHECK_APP_ID = 15368
 # the repository trust boundary, not every diagnostic job that may exist.
 REQUIRED_STATUS_CHECKS = (
     "test / test",
+    "test / test-windows-appliance",
+    "test / test-windows-tool-isolation",
     "browser-use-runtime-contract",
     "android-compile",
     "desktop-compile",
