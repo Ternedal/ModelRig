@@ -253,6 +253,25 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             }
         }
 
+        fun resetTerminalHistory() {
+            val current = snapshot ?: return
+            val activeTool = current.termination.activeTool
+            if (!Agent3TaskUiPolicy.canResetTerminalHistory(
+                    runTerminal = current.terminal,
+                    activeToolState = activeTool?.state,
+                    activeToolRequestState = activeTool?.requestState,
+                    busy = busy != DesktopTaskBusy.NONE,
+                )
+            ) return
+            publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
+            snapshot = null
+            preview = null
+            previewDeadlineMillis = null
+            previewExpired = false
+            message = ""
+            error = null
+        }
+
         LaunchedEffect(Unit) { refreshReadiness() }
 
         // Window-owned polling is cancelled when --tasks is closed or falls back
@@ -504,6 +523,19 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     onRefresh = ::refreshRun,
                     onStopPlan = ::stopPlan,
                 )
+                val activeTool = value.termination.activeTool
+                if (Agent3TaskUiPolicy.canResetTerminalHistory(
+                        runTerminal = value.terminal,
+                        activeToolState = activeTool?.state,
+                        activeToolRequestState = activeTool?.requestState,
+                        busy = isBusy,
+                    )
+                ) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = ::resetTerminalHistory) {
+                        Text("Ny opgave")
+                    }
+                }
             }
 
             Spacer(Modifier.height(22.dp))

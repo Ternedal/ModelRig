@@ -68,6 +68,15 @@ object Agent3TaskUiPolicy {
         activeToolState == "executing" ||
         activeToolRequestState == "pending"
 
+    fun canResetTerminalHistory(
+        runTerminal: Boolean?,
+        activeToolState: String?,
+        activeToolRequestState: String?,
+        busy: Boolean,
+    ): Boolean = runTerminal == true &&
+        !shouldPoll(runTerminal, activeToolState, activeToolRequestState) &&
+        !busy
+
     fun nextPublicationEpoch(current: Long): Long =
         if (current == Long.MAX_VALUE) 1L else current + 1L
 
