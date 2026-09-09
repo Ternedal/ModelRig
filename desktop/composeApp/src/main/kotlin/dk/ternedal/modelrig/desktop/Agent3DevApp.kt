@@ -64,15 +64,22 @@ fun Agent3DevApp() {
         var useMemory by remember { mutableStateOf(false) }
         var memorySubjects by remember { mutableStateOf("") }
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
+        var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
+        var runConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var busy by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
 
-        fun client(): Agent3Client {
+        fun currentConnection(): Agent3DevConnectionBinding {
             require(baseUrl.isNotBlank()) { "Base-URL mangler" }
             require(token.isNotBlank()) { "Device-token mangler" }
-            return Agent3Client(baseUrl.trim(), token.trim())
+            return requireNotNull(Agent3DevConnectionBinding.capture(baseUrl, token)) {
+                "Forbindelsen er ugyldig"
+            }
         }
+
+        fun client(connection: Agent3DevConnectionBinding): Agent3Client =
+            Agent3Client(connection.baseUrl, connection.token)
 
         fun selectedSubjects(): List<String> = memorySubjects
             .split(',')
@@ -92,12 +99,17 @@ fun Agent3DevApp() {
                     activeToolRequestState = currentRun?.termination?.activeTool?.requestState,
                 )
             ) return
+            val connection = runCatching { currentConnection() }
+                .getOrElse {
+                    error = it.message ?: "Forbindelsen er ugyldig"
+                    return
+                }
             busy = true
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        client().previewPlan(
+                        client(connection).previewPlan(
                             message = text,
                             mode = "rig",
                             useMemory = useMemory,
@@ -110,41 +122,55 @@ fun Agent3DevApp() {
                     // Replace terminal history only after the new preview itself
                     // succeeded. Failure keeps the old run/control truth visible.
                     run = null
+                    runConnection = null
                     preview = planned
+                    previewConnection = connection
                 }.onFailure { error = it.message ?: "Planlægning fejlede" }
             }
         }
 
         fun startPlan() {
             val current = preview ?: return
+            val boundConnection = previewConnection
+            val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
             if (!Agent3DevInteractionPolicy.canStart(
                     planId = current.planId,
                     planSize = current.plan.size,
                     capabilityAllowed = current.capabilityReceipt?.allowed,
                     busy = busy,
                     hasRun = run != null,
+                    currentConnection = currentConnection,
+                    previewConnection = boundConnection,
                 )
             ) return
             val id = current.planId ?: return
+            val connection = boundConnection ?: return
             busy = true
             error = null
             scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { client().startPlan(id) } }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { client(connection).startPlan(id) }
+                }
                 busy = false
                 result.onSuccess { started ->
                     preview = null
+                    previewConnection = null
                     run = started
+                    runConnection = connection
                 }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
             }
         }
 
         fun refreshRun() {
             val id = run?.id ?: return
+            val connection = runConnection ?: return
             if (busy) return
             busy = true
             error = null
             scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { client().getRun(id) } }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { client(connection).getRun(id) }
+                }
                 busy = false
                 result.onSuccess { run = it }
                     .onFailure { error = it.message ?: "Run-status kunne ikke hentes" }
@@ -153,6 +179,7 @@ fun Agent3DevApp() {
 
         fun decide(approve: Boolean) {
             val current = run ?: return
+            val connection = runConnection ?: return
             val step = current.steps.getOrNull(current.currentStep) ?: return
             val stepId = step.id ?: return
             val digest = step.confirmationDigest ?: return
@@ -161,7 +188,7 @@ fun Agent3DevApp() {
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { client().confirm(current.id, stepId, digest, approve) }
+                    runCatching { client(connection).confirm(current.id, stepId, digest, approve) }
                 }
                 busy = false
                 result.onSuccess { run = it }
@@ -171,11 +198,14 @@ fun Agent3DevApp() {
 
         fun stopPlan() {
             val id = run?.id ?: return
+            val connection = runConnection ?: return
             if (busy) return
             busy = true
             error = null
             scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { client().cancel(id) } }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { client(connection).cancel(id) }
+                }
                 busy = false
                 result.onSuccess { run = it }
                     .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
@@ -296,7 +326,14 @@ fun Agent3DevApp() {
 
             preview?.let {
                 Spacer(Modifier.height(12.dp))
-                PlanCard(it, busy, run != null, ::startPlan)
+                PlanCard(
+                    preview = it,
+                    busy = busy,
+                    hasRun = run != null,
+                    currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token),
+                    previewConnection = previewConnection,
+                    onStart = ::startPlan,
+                )
             }
 
             run?.let {
@@ -325,6 +362,8 @@ private fun PlanCard(
     preview: Agent3PlanPreview,
     busy: Boolean,
     hasRun: Boolean,
+    currentConnection: Agent3DevConnectionBinding?,
+    previewConnection: Agent3DevConnectionBinding?,
     onStart: () -> Unit,
 ) {
     DevCard {
@@ -392,6 +431,8 @@ private fun PlanCard(
                 capabilityAllowed = preview.capabilityReceipt?.allowed,
                 busy = busy,
                 hasRun = hasRun,
+                currentConnection = currentConnection,
+                previewConnection = previewConnection,
             ),
             onClick = onStart,
         ) { Text("Start den viste plan") }
