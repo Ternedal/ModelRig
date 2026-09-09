@@ -182,6 +182,56 @@ check(
 )
 owner_second.close()
 
+claim_path = os.path.join(root, "atomic-claim.db")
+claim_first = PlanStore(claim_path, ttl_seconds=30)
+claim_plan, _ = claim_first.save("claim-payload")
+check(
+    claim_first.inspect_unconsumed(claim_plan) == "claim-payload",
+    "task Start validation can inspect an unconsumed plan without claiming it",
+)
+claim_first.claim_task_start(claim_plan, "run-claim", "prepared-run-json")
+check(
+    claim_first.start_recovery(claim_plan)
+    == ("pending", "run-claim", claim_first.start_owner),
+    "atomic task Start claim persists pending run id and worker generation",
+)
+check(
+    claim_first.start_materialization(claim_plan, "run-claim")
+    == ("claim-payload", "prepared-run-json"),
+    "atomic task Start claim retains exact prepared-run materialization authority",
+)
+try:
+    claim_first.inspect_unconsumed(claim_plan)
+    claim_reinspect = True
+except PlanStoreError:
+    claim_reinspect = False
+check(not claim_reinspect, "claimed task plan cannot be inspected as fresh again")
+claim_owner = claim_first.start_owner
+claim_first.close()
+claim_second = PlanStore(claim_path, ttl_seconds=30)
+check(
+    claim_second.claim_start_recovery(claim_plan, "run-claim", claim_owner) == "pending"
+    and claim_second.start_materialization(claim_plan, "run-claim")
+    == ("claim-payload", "prepared-run-json"),
+    "new worker generation transfers the exact atomic claim without losing prepared run",
+)
+claim_second.close()
+
+refusal_store = PlanStore(os.path.join(root, "atomic-refusal.db"), ttl_seconds=30)
+refusal_plan, _ = refusal_store.save("refuse")
+check(
+    refusal_store.refuse_unconsumed(refusal_plan)
+    and refusal_store.start_result(refusal_plan) == ("refused", None),
+    "pre-claim validation refusal becomes a definitive consumed refusal",
+)
+try:
+    refusal_store.claim_task_start(refusal_plan, "run-never", "prepared-never")
+    refused_claimed = True
+except PlanStoreError:
+    refused_claimed = False
+check(not refused_claimed, "refused reviewed plan cannot race into task Start authority")
+refusal_store.close()
+
 plan_store.close()
 expiry_store.close()
 print(f"\n{passed} passed, {failed} failed")

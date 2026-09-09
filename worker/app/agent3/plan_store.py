@@ -50,6 +50,8 @@ class PlanStore:
                 connection.execute("ALTER TABLE agent_plans ADD COLUMN result_run_id TEXT")
             if "start_owner" not in columns:
                 connection.execute("ALTER TABLE agent_plans ADD COLUMN start_owner TEXT")
+            if "start_run" not in columns:
+                connection.execute("ALTER TABLE agent_plans ADD COLUMN start_run TEXT")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -130,6 +132,122 @@ class PlanStore:
                 except Exception:
                     connection.rollback()
                     raise
+
+    def inspect_unconsumed(self, plan_id: str) -> str:
+        """Read an unconsumed plan for validation without granting Start authority."""
+        now = time.time()
+        with self._lock:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT payload,expires_at,consumed_at FROM agent_plans WHERE id=?",
+                    (plan_id,),
+                ).fetchone()
+        if row is None:
+            raise PlanStoreError("plan not found")
+        payload, expires_at, consumed_at = row
+        if consumed_at is not None:
+            raise PlanStoreError("plan already used")
+        if now > float(expires_at):
+            raise PlanStoreError("plan expired")
+        return str(payload)
+
+    def refuse_unconsumed(self, plan_id: str) -> bool:
+        """Consume an unclaimed reviewed plan into a definitive refusal."""
+        now = time.time()
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT consumed_at,start_result FROM agent_plans WHERE id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("plan not found")
+                    consumed_at, state = row
+                    if state == "refused":
+                        connection.commit()
+                        return True
+                    if consumed_at is not None or state is not None:
+                        connection.commit()
+                        return False
+                    changed = connection.execute(
+                        "UPDATE agent_plans SET consumed_at=?,start_result='refused',"
+                        "result_run_id=NULL,start_owner=NULL,start_run=NULL WHERE id=? "
+                        "AND consumed_at IS NULL AND start_result IS NULL",
+                        (now, plan_id),
+                    ).rowcount
+                    connection.commit()
+                    return changed == 1
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def claim_task_start(self, plan_id: str, run_id: str, prepared_run: str) -> None:
+        """Atomically consume a validated task plan and bind its exact prepared run."""
+        if not run_id:
+            raise PlanStoreError("pending task run id is missing")
+        if not prepared_run:
+            raise PlanStoreError("prepared task run is missing")
+        now = time.time()
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT expires_at,consumed_at,start_result FROM agent_plans WHERE id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("plan not found")
+                    expires_at, consumed_at, state = row
+                    if consumed_at is not None or state is not None:
+                        raise PlanStoreError("plan already used")
+                    if now > float(expires_at):
+                        connection.execute(
+                            "UPDATE agent_plans SET consumed_at=?,start_result='refused',"
+                            "result_run_id=NULL,start_owner=NULL,start_run=NULL "
+                            "WHERE id=? AND consumed_at IS NULL AND start_result IS NULL",
+                            (now, plan_id),
+                        )
+                        connection.commit()
+                        raise PlanStoreError("plan expired")
+                    changed = connection.execute(
+                        "UPDATE agent_plans SET consumed_at=?,start_result='pending',"
+                        "result_run_id=?,start_owner=?,start_run=?,expires_at=? "
+                        "WHERE id=? AND consumed_at IS NULL AND start_result IS NULL",
+                        (
+                            now,
+                            run_id,
+                            self._start_owner,
+                            prepared_run,
+                            max(float(expires_at), now + self.ttl_seconds),
+                            plan_id,
+                        ),
+                    ).rowcount
+                    if changed != 1:
+                        raise PlanStoreError("plan already used")
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def start_materialization(self, plan_id: str, run_id: str) -> tuple[str, str]:
+        """Return immutable plan + prepared-run authority for one claimed task Start."""
+        with self._lock:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT payload,start_result,result_run_id,start_run FROM agent_plans WHERE id=?",
+                    (plan_id,),
+                ).fetchone()
+        if row is None:
+            raise PlanStoreError("plan not found")
+        payload, state, existing_run_id, prepared_run = row
+        if state not in {"pending", "accepted"} or existing_run_id != run_id:
+            raise PlanStoreError("plan is not materializable for this task run")
+        if not isinstance(prepared_run, str) or not prepared_run:
+            raise PlanStoreError("task Start is missing its prepared run")
+        return str(payload), prepared_run
 
     @property
     def start_owner(self) -> str:
@@ -336,7 +454,8 @@ class PlanStore:
                     if row[1] not in (None, "pending", "refused"):
                         raise PlanStoreError("plan has invalid start result")
                     connection.execute(
-                        "UPDATE agent_plans SET start_result='refused',result_run_id=NULL,start_owner=NULL WHERE id=?",
+                        "UPDATE agent_plans SET start_result='refused',result_run_id=NULL,"
+                        "start_owner=NULL,start_run=NULL WHERE id=?",
                         (plan_id,),
                     )
                     connection.commit()
