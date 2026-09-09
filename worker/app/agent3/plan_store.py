@@ -281,13 +281,22 @@ class PlanStore:
         with self._lock:
             with self._connection() as connection:
                 row = connection.execute(
-                    "SELECT consumed_at,start_result,result_run_id,start_owner "
-                    "FROM agent_plans WHERE id=?",
+                    "SELECT consumed_at,start_result,result_run_id,start_owner,"
+                    "expires_at,start_terminal_at FROM agent_plans WHERE id=?",
                     (plan_id,),
                 ).fetchone()
         if row is None:
             return None
-        consumed_at, result, run_id, owner_raw = row
+        consumed_at, result, run_id, owner_raw, expires_at, terminal_at = row
+        if (
+            result in {"pending", "accepted"}
+            and terminal_at is not None
+            and time.time() > float(expires_at)
+        ):
+            # The post-terminal same-plan recovery grace is authority, not only
+            # storage cleanup. Enforce it even when opportunistic purge() has
+            # not run since the task became terminal.
+            return "refused", None, None
         owner = self._owner_value(owner_raw)
         if result == "accepted":
             if not isinstance(run_id, str) or not run_id:
@@ -316,17 +325,22 @@ class PlanStore:
         with self._lock:
             with self._connection() as connection:
                 rows = connection.execute(
-                    "SELECT id,start_result,start_owner FROM agent_plans "
-                    "WHERE result_run_id=? AND start_result IN ('pending','accepted')",
+                    "SELECT id,start_result,start_owner,expires_at,start_terminal_at "
+                    "FROM agent_plans WHERE result_run_id=? "
+                    "AND start_result IN ('pending','accepted')",
                     (run_id,),
                 ).fetchall()
         if not rows:
             return None
         if len(rows) != 1:
             raise PlanStoreError("task run is bound to multiple start records")
-        plan_id, state, owner_raw = rows[0]
+        plan_id, state, owner_raw, expires_at, terminal_at = rows[0]
         if state not in {"pending", "accepted"}:
             raise PlanStoreError("task run has invalid start state")
+        if terminal_at is not None and time.time() > float(expires_at):
+            # A known run id still has status authority through task_response();
+            # only the expired plan-to-run recovery binding stops being active.
+            return None
         return str(plan_id), str(state), self._owner_value(owner_raw)
 
     def claim_start_recovery(
