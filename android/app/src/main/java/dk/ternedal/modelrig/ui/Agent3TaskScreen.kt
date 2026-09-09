@@ -30,9 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.data.Agent3TaskRunReferenceStore
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3ReadonlyTaskClient
@@ -61,10 +63,14 @@ fun Agent3TaskScreen(
     onUseAgent2: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current.applicationContext
+    val runReferenceStore = remember { Agent3TaskRunReferenceStore(context) }
     var readiness by remember { mutableStateOf<Agent3TaskReadinessClient.Readiness?>(null) }
     var message by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Agent3ReadonlyTaskClient.Preview?>(null) }
     var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskClient.Started?>(null) }
+    var retainedRunId by remember { mutableStateOf(runReferenceStore.read()) }
+    var initialRecoveryPending by remember { mutableStateOf(retainedRunId != null) }
     var busy by remember { mutableStateOf(TaskBusy.READINESS) }
     var error by remember { mutableStateOf<String?>(null) }
     var publicationEpoch by remember { mutableStateOf(0L) }
@@ -75,6 +81,36 @@ fun Agent3TaskScreen(
         val token = store.token?.takeIf { it.isNotBlank() }
             ?: kotlin.error("Ingen device-token er gemt")
         return base to token
+    }
+
+    fun publishSnapshot(value: Agent3ReadonlyTaskClient.Started) {
+        snapshot = value
+        val retained = Agent3TaskUiPolicy.retainedRunIdAfterSnapshot(value.run.id, value.terminal)
+        retainedRunId = retained
+        if (!runReferenceStore.write(retained)) {
+            error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.LOCAL_REFERENCE, null)
+        }
+    }
+
+    fun recoverRun() {
+        val runId = retainedRunId ?: return
+        if (!Agent3TaskUiPolicy.canRecoverRun(runId, busy != TaskBusy.NONE)) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
+        busy = TaskBusy.STATUS
+        error = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3ReadonlyTaskClient(base, token).status(runId)
+                }
+            }
+            busy = TaskBusy.NONE
+            result.onSuccess(::publishSnapshot)
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STATUS, it.message)
+                }
+        }
     }
 
     fun refreshReadiness() {
@@ -98,6 +134,10 @@ fun Agent3TaskScreen(
                 if (snapshot == null) preview = null
                 error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
             }
+            if (initialRecoveryPending) {
+                initialRecoveryPending = false
+                recoverRun()
+            }
         }
     }
 
@@ -106,7 +146,7 @@ fun Agent3TaskScreen(
                 serverSurface = readiness?.selectedSurface,
                 message = message,
                 busy = busy != TaskBusy.NONE,
-                hasRun = snapshot != null,
+                hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
             )
         ) return
         busy = TaskBusy.PREVIEW
@@ -134,7 +174,7 @@ fun Agent3TaskScreen(
                 serverSurface = readiness?.selectedSurface,
                 previewCanStart = plan.canStart,
                 busy = busy != TaskBusy.NONE,
-                hasRun = snapshot != null,
+                hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
             )
         ) return
         busy = TaskBusy.START
@@ -147,7 +187,7 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { snapshot = it }
+            result.onSuccess(::publishSnapshot)
                 .onFailure {
                     error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START, it.message)
                 }
@@ -168,7 +208,7 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { snapshot = it }
+            result.onSuccess(::publishSnapshot)
                 .onFailure {
                     error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STATUS, it.message)
                 }
@@ -194,7 +234,7 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { snapshot = it }
+            result.onSuccess(::publishSnapshot)
                 .onFailure {
                     error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STOP_PLAN, it.message)
                 }
@@ -232,7 +272,7 @@ fun Agent3TaskScreen(
             }
             if (!Agent3TaskUiPolicy.canPublish(requestEpoch, publicationEpoch)) continue
             if (result.isSuccess) {
-                snapshot = result.getOrThrow()
+                publishSnapshot(result.getOrThrow())
             } else {
                 error = presentAgent3TaskScreenError(
                     Agent3TaskFailureOperation.AUTOMATIC_STATUS,
@@ -244,7 +284,7 @@ fun Agent3TaskScreen(
     }
 
     val surface = Agent3TaskUiPolicy.normalizedSurface(readiness?.selectedSurface)
-    val hasRun = snapshot != null
+    val hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId)
     val isBusy = busy != TaskBusy.NONE
 
     Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
@@ -326,6 +366,30 @@ fun Agent3TaskScreen(
                     Text("Fejl", color = KalivTheme.colors.danger, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
                     Text(it, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
+                }
+            }
+
+            if (snapshot == null && retainedRunId != null) {
+                Spacer(Modifier.height(12.dp))
+                SurfaceCard {
+                    Text(
+                        "Tidligere task skal genforbindes",
+                        color = KalivTheme.colors.textHigh,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "Denne enhed har en gemt reference til en read-only task. En ny task er låst, indtil riggen har bekræftet den eksisterende status.",
+                        color = KalivTheme.colors.textMuted,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        enabled = Agent3TaskUiPolicy.canRecoverRun(retainedRunId, isBusy),
+                        onClick = { recoverRun() },
+                    ) {
+                        Text(if (busy == TaskBusy.STATUS) "Henter status…" else "Prøv igen")
+                    }
                 }
             }
 

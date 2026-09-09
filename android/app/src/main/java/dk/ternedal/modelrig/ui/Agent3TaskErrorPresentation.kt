@@ -7,6 +7,7 @@ internal enum class Agent3TaskFailureOperation {
     STATUS,
     STOP_PLAN,
     AUTOMATIC_STATUS,
+    LOCAL_REFERENCE,
 }
 
 /**
@@ -28,6 +29,8 @@ internal fun presentAgent3TaskScreenError(
             Agent3TaskFailureOperation.STATUS -> "Task-status kunne ikke hentes."
             Agent3TaskFailureOperation.STOP_PLAN -> "Planen kunne ikke stoppes."
             Agent3TaskFailureOperation.AUTOMATIC_STATUS -> "Automatisk task-status kunne ikke hentes."
+            Agent3TaskFailureOperation.LOCAL_REFERENCE ->
+                "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben."
         }
     }
 }

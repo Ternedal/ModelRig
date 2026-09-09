@@ -9,7 +9,8 @@ package dk.ternedal.modelrig.desktop
  * Cancelling a terminal plan is not the same as stopping an executing tool, so
  * polling continues until the active-tool receipt is no longer pending/running.
  * Publication epochs only order local async responses; they never cancel or
- * reinterpret a server request.
+ * reinterpret a server request. A retained run id is local recovery authority,
+ * not proof that the run is still active; only a server-terminal snapshot clears it.
  */
 object Agent3TaskUiPolicy {
     const val AGENT2 = "agent2"
@@ -54,4 +55,13 @@ object Agent3TaskUiPolicy {
 
     fun canPublish(requestEpoch: Long, currentEpoch: Long): Boolean =
         requestEpoch == currentEpoch
+
+    fun hasRunAuthority(snapshotPresent: Boolean, retainedRunId: String?): Boolean =
+        snapshotPresent || !retainedRunId.isNullOrBlank()
+
+    fun canRecoverRun(retainedRunId: String?, busy: Boolean): Boolean =
+        !retainedRunId.isNullOrBlank() && !busy
+
+    fun retainedRunIdAfterSnapshot(runId: String, terminal: Boolean): String? =
+        if (terminal) null else runId.takeIf { it.isNotBlank() }
 }

@@ -246,6 +246,11 @@ class DesktopChatDb(
 
     companion object {
         private val CREDENTIAL_SETTING_KEYS = setOf("deviceToken", "cloudKey")
+        private const val ACTIVE_TASK_RUN_ID_SETTING = "agent3TaskActiveRunId"
+        private const val DEFAULT_LOCAL_URL = "http://127.0.0.1:8080"
+
+        internal fun taskRunReferenceStorageKey(baseUrl: String): String =
+            "$ACTIVE_TASK_RUN_ID_SETTING:${baseUrl.trim().trimEnd('/')}"
 
         fun defaultDbPath(): String {
             val dir = File(System.getProperty("user.home"), ".modelrig")
@@ -263,9 +268,12 @@ class DesktopChatDb(
      * writes are DPAPI-protected and reads decrypt. A legacy non-empty plaintext
      * value is encrypted in-place before it is returned. An unknown/corrupt
      * Kaliv credential envelope fails closed and is never returned as plaintext.
+     * The read-only task run reference uses the same API but is physically scoped
+     * by active rig URL, so an id from one rig is never offered to another rig.
      */
     fun getSetting(key: String): String? {
-        val raw = getRawSetting(key) ?: return null
+        val storageKey = storageKey(key)
+        val raw = getRawSetting(storageKey) ?: return null
         if (key !in CREDENTIAL_SETTING_KEYS || raw.isEmpty()) return raw
 
         return when {
@@ -287,7 +295,16 @@ class DesktopChatDb(
         } else {
             value
         }
-        putRawSetting(key, stored)
+        putRawSetting(storageKey(key), stored)
+    }
+
+    private fun storageKey(key: String): String {
+        if (key != ACTIVE_TASK_RUN_ID_SETTING) return key
+        val activeRig = System.getenv("MODELRIG_AGENT3_URL")?.takeIf { it.isNotBlank() }
+            ?: System.getenv("MODELRIG_LOCAL_URL")?.takeIf { it.isNotBlank() }
+            ?: getRawSetting("localUrl")?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_LOCAL_URL
+        return taskRunReferenceStorageKey(activeRig)
     }
 
     private fun protectCredential(value: String): String {
