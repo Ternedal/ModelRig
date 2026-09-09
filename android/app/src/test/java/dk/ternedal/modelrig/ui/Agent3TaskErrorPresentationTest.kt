@@ -43,6 +43,13 @@ class Agent3TaskErrorPresentationTest {
             "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben.",
             presentAgent3TaskScreenError(Agent3TaskFailureOperation.LOCAL_REFERENCE, "SQLiteException /private/path"),
         )
+        assertEquals(
+            "Start blev ikke sendt, fordi recovery-referencen ikke kunne gemmes lokalt.",
+            presentAgent3TaskScreenError(
+                Agent3TaskFailureOperation.START_RECOVERY_REFERENCE,
+                "SharedPreferences /private/path",
+            ),
+        )
     }
 
     @Test
