@@ -67,6 +67,8 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         var readiness by remember { mutableStateOf<Agent3TaskReadiness?>(null) }
         var message by remember { mutableStateOf("") }
         var preview by remember { mutableStateOf<Agent3ReadonlyTaskPreview?>(null) }
+        var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+        var previewExpired by remember { mutableStateOf(false) }
         var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskSnapshot?>(null) }
         var retainedRunId by remember {
             mutableStateOf(db.getSetting(ACTIVE_TASK_RUN_ID_SETTING)?.trim()?.takeIf { it.isNotEmpty() })
@@ -152,6 +154,9 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             busy = DesktopTaskBusy.PREVIEW
             error = null
             preview = null
+            previewDeadlineMillis = null
+            previewExpired = false
+            val requestStartedAtMillis = System.nanoTime() / 1_000_000L
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
@@ -160,17 +165,33 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     }
                 }
                 busy = DesktopTaskBusy.NONE
-                result.onSuccess { preview = it }
-                    .onFailure { error = presentTaskRequestError(TaskRequestOperation.PREVIEW, it.message) }
+                result.onSuccess { value ->
+                    preview = value
+                    val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                        requestStartedAtMillis,
+                        value.expiresInSeconds,
+                    )
+                    previewDeadlineMillis = deadline
+                    previewExpired = Agent3TaskUiPolicy.isPreviewExpired(
+                        deadline,
+                        System.nanoTime() / 1_000_000L,
+                    )
+                }.onFailure { error = presentTaskRequestError(TaskRequestOperation.PREVIEW, it.message) }
             }
         }
 
         fun startTask() {
             val plan = preview ?: return
             val planId = plan.planId ?: return
+            val nowMillis = System.nanoTime() / 1_000_000L
+            val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
+            if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, nowMillis)) {
+                previewExpired = true
+            }
             if (!Agent3TaskUiPolicy.canStart(
                     readiness?.selectedSurface,
                     plan.canStart,
+                    previewFresh,
                     busy != DesktopTaskBusy.NONE,
                     Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
                 )
@@ -267,6 +288,19 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     error = presentTaskRequestError(TaskRequestOperation.POLLING, result.exceptionOrNull()?.message)
                     return@LaunchedEffect
                 }
+            }
+        }
+
+        LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+            val deadline = previewDeadlineMillis ?: return@LaunchedEffect
+            val remaining = deadline - (System.nanoTime() / 1_000_000L)
+            if (remaining > 0L) delay(remaining)
+            if (preview?.planId != null && Agent3TaskUiPolicy.isPreviewExpired(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
+            ) {
+                previewExpired = true
             }
         }
 
@@ -408,7 +442,12 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = message,
-                        onValueChange = { message = it; preview = null },
+                        onValueChange = {
+                            message = it
+                            preview = null
+                            previewDeadlineMillis = null
+                            previewExpired = false
+                        },
                         enabled = !isBusy,
                         label = { Text("Hvad skal Kaliv undersøge?") },
                         supportingText = { Text("Kun lokale, idempotente read-tools kan startes.") },
@@ -432,14 +471,25 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
 
                 preview?.let { value ->
                     Spacer(Modifier.height(12.dp))
+                    val nowMillis = System.nanoTime() / 1_000_000L
+                    val expired = previewExpired || Agent3TaskUiPolicy.isPreviewExpired(
+                        previewDeadlineMillis,
+                        nowMillis,
+                    )
+                    val previewFresh = !expired && Agent3TaskUiPolicy.isPreviewFresh(
+                        previewDeadlineMillis,
+                        nowMillis,
+                    )
                     DesktopPlanReview(
                         value,
                         canStart = Agent3TaskUiPolicy.canStart(
                             readiness?.selectedSurface,
                             value.canStart,
+                            previewFresh,
                             isBusy,
                             hasRun = false,
                         ),
+                        expired = expired,
                         starting = busy == DesktopTaskBusy.START,
                         onStart = ::startTask,
                     )
@@ -471,12 +521,21 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
 private fun DesktopPlanReview(
     value: Agent3ReadonlyTaskPreview,
     canStart: Boolean,
+    expired: Boolean,
     starting: Boolean,
     onStart: () -> Unit,
 ) {
     DesktopTaskCard {
         Text("Plan og review", color = KalivTheme.colors.TextHigh, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text("Preview har ikke kørt et tool.", color = KalivTheme.colors.Success, fontSize = 11.sp)
+        if (expired) {
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "Plan-previewet er udløbet. Lav et nyt preview før start.",
+                color = KalivTheme.colors.Danger,
+                fontSize = 11.sp,
+            )
+        }
         if (value.rationale.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
             Text(value.rationale, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)

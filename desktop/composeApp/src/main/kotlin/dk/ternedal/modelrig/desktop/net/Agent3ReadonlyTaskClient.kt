@@ -200,6 +200,9 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val bearer: String) {
         if (value.plan.isNotEmpty() && (value.planId == null || !OPAQUE_ID.matches(value.planId))) {
             throw Agent3Exception("Invalid read-only task preview: executable plan lacks a single-use id")
         }
+        if (value.plan.isNotEmpty() && (value.expiresInSeconds == null || value.expiresInSeconds <= 0)) {
+            throw Agent3Exception("Invalid read-only task preview: executable plan lacks a valid expiry")
+        }
         if (value.plan.isEmpty() && value.planId != null) {
             throw Agent3Exception("Invalid read-only task preview: empty plan must not have a start token")
         }

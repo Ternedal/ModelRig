@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -68,6 +69,8 @@ fun Agent3TaskScreen(
     var readiness by remember { mutableStateOf<Agent3TaskReadinessClient.Readiness?>(null) }
     var message by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Agent3ReadonlyTaskClient.Preview?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskClient.Started?>(null) }
     var retainedRunId by remember { mutableStateOf(runReferenceStore.read()) }
     var initialRecoveryPending by remember { mutableStateOf(retainedRunId != null) }
@@ -152,6 +155,9 @@ fun Agent3TaskScreen(
         busy = TaskBusy.PREVIEW
         error = null
         preview = null
+        previewDeadlineMillis = null
+        previewExpired = false
+        val requestStartedAtMillis = SystemClock.elapsedRealtime()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -160,8 +166,18 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { preview = it }
-                .onFailure {
+            result.onSuccess { value ->
+                preview = value
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    value.expiresInSeconds,
+                )
+                previewDeadlineMillis = deadline
+                previewExpired = Agent3TaskUiPolicy.isPreviewExpired(
+                    deadline,
+                    SystemClock.elapsedRealtime(),
+                )
+            }.onFailure {
                     error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.PREVIEW, it.message)
                 }
         }
@@ -170,9 +186,15 @@ fun Agent3TaskScreen(
     fun startTask() {
         val plan = preview ?: return
         val planId = plan.planId ?: return
+        val nowMillis = SystemClock.elapsedRealtime()
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
+        if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, nowMillis)) {
+            previewExpired = true
+        }
         if (!Agent3TaskUiPolicy.canStart(
                 serverSurface = readiness?.selectedSurface,
                 previewCanStart = plan.canStart,
+                previewFresh = previewFresh,
                 busy = busy != TaskBusy.NONE,
                 hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
             )
@@ -280,6 +302,19 @@ fun Agent3TaskScreen(
                 )
                 return@LaunchedEffect
             }
+        }
+    }
+
+    LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+        val deadline = previewDeadlineMillis ?: return@LaunchedEffect
+        val remaining = deadline - SystemClock.elapsedRealtime()
+        if (remaining > 0L) delay(remaining)
+        if (preview?.planId != null && Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                SystemClock.elapsedRealtime(),
+            )
+        ) {
+            previewExpired = true
         }
     }
 
@@ -420,6 +455,8 @@ fun Agent3TaskScreen(
                         onValueChange = {
                             message = it
                             preview = null
+                            previewDeadlineMillis = null
+                            previewExpired = false
                         },
                         enabled = !isBusy,
                         label = { Text("Hvad skal Kaliv undersøge?") },
@@ -446,14 +483,25 @@ fun Agent3TaskScreen(
 
                 preview?.let { plan ->
                     Spacer(Modifier.height(12.dp))
+                    val nowMillis = SystemClock.elapsedRealtime()
+                    val expired = previewExpired || Agent3TaskUiPolicy.isPreviewExpired(
+                        previewDeadlineMillis,
+                        nowMillis,
+                    )
+                    val previewFresh = !expired && Agent3TaskUiPolicy.isPreviewFresh(
+                        previewDeadlineMillis,
+                        nowMillis,
+                    )
                     PlanReviewCard(
                         preview = plan,
                         canStart = Agent3TaskUiPolicy.canStart(
                             serverSurface = readiness?.selectedSurface,
                             previewCanStart = plan.canStart,
+                            previewFresh = previewFresh,
                             busy = isBusy,
                             hasRun = false,
                         ),
+                        expired = expired,
                         starting = busy == TaskBusy.START,
                         onStart = { startTask() },
                     )
@@ -485,6 +533,7 @@ fun Agent3TaskScreen(
 private fun PlanReviewCard(
     preview: Agent3ReadonlyTaskClient.Preview,
     canStart: Boolean,
+    expired: Boolean,
     starting: Boolean,
     onStart: () -> Unit,
 ) {
@@ -495,6 +544,14 @@ private fun PlanReviewCard(
             color = KalivTheme.colors.success,
             fontSize = 11.sp,
         )
+        if (expired) {
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "Plan-previewet er udløbet. Lav et nyt preview før start.",
+                color = KalivTheme.colors.danger,
+                fontSize = 11.sp,
+            )
+        }
         if (preview.rationale.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
             Text(preview.rationale, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
