@@ -189,6 +189,7 @@ private data class RetryRequest(
 @Serializable
 data class Agent3RunEnvelope(
     val run: Agent3Run = Agent3Run(),
+    @SerialName("plan_id") val planId: String? = null,
     @SerialName("review_reads") val reviewReads: Boolean = false,
     @SerialName("read_review") val readReview: Agent3ReadReview = Agent3ReadReview(),
     @SerialName("capability_receipt") val capabilityReceipt: Agent3CapabilityReceipt? = null,
@@ -255,6 +256,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     fun startPlanEnvelope(planId: String): Agent3RunEnvelope =
         decodeRunEnvelope(
             post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}"),
+            expectedPlanId = planId,
         )
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
@@ -305,10 +307,14 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     private fun decodeRunEnvelope(
         body: String,
         expectedRunId: String? = null,
+        expectedPlanId: String? = null,
     ): Agent3RunEnvelope {
         val envelope = decode<Agent3RunEnvelope>(body)
         validateCapabilityReceipt(envelope.capabilityReceipt)
         val termination = validateTerminationReceipt(envelope.termination, envelope.run)
+        if (expectedPlanId != null && (envelope.planId.isNullOrBlank() || envelope.planId != expectedPlanId)) {
+            throw Agent3Exception("Invalid Agent 3.0 Start envelope: server returned another plan id")
+        }
         if (expectedRunId != null && envelope.run.id != expectedRunId) {
             throw Agent3Exception("Invalid Agent 3.0 run envelope: server returned another run id")
         }
