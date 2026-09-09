@@ -126,6 +126,59 @@ class KalivAgent3CockpitInteractionPolicyTest {
     }
 
     @Test
+    fun terminalRunWithExecutingToolCannotBeClearedAndOffersStatusRefresh() {
+        val p = presentAgent3CockpitInteraction(
+            busy = false,
+            runState = "cancelled",
+            planCanRequestStop = false,
+            activeToolState = "executing",
+            activeToolRequestState = "unavailable",
+        )
+        assertFalse(p.clearTerminalRunEnabled)
+        assertTrue(p.refreshTerminalToolEnabled)
+        assertFalse(p.composerEnabled)
+    }
+
+    @Test
+    fun terminalRunWithPendingToolRequestCannotBeClearedAndOffersStatusRefresh() {
+        val p = presentAgent3CockpitInteraction(
+            busy = false,
+            runState = "cancelled",
+            planCanRequestStop = false,
+            activeToolState = "completed_after_cancel",
+            activeToolRequestState = "pending",
+        )
+        assertFalse(p.clearTerminalRunEnabled)
+        assertTrue(p.refreshTerminalToolEnabled)
+    }
+
+    @Test
+    fun fullyTerminalToolTruthAllowsLocalClearWithoutRefresh() {
+        val p = presentAgent3CockpitInteraction(
+            busy = false,
+            runState = "cancelled",
+            planCanRequestStop = false,
+            activeToolState = "completed_after_cancel",
+            activeToolRequestState = "terminal",
+        )
+        assertTrue(p.clearTerminalRunEnabled)
+        assertFalse(p.refreshTerminalToolEnabled)
+    }
+
+    @Test
+    fun busyTerminalToolFollowupBlocksRefreshAndClear() {
+        val p = presentAgent3CockpitInteraction(
+            busy = true,
+            runState = "cancelled",
+            planCanRequestStop = false,
+            activeToolState = "executing",
+            activeToolRequestState = "unavailable",
+        )
+        assertFalse(p.refreshTerminalToolEnabled)
+        assertFalse(p.clearTerminalRunEnabled)
+    }
+
+    @Test
     fun busyTerminalRunCannotBeCleared() {
         val p = presentAgent3CockpitInteraction(
             busy = true,

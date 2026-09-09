@@ -247,9 +247,45 @@ fun KalivAgentCockpitA3(
         }
     }
 
+    fun refreshTerminalToolStatus() {
+        val current = run ?: return
+        val presentation = presentAgent3CockpitInteraction(
+            busy = busy,
+            runState = current.state,
+            planCanRequestStop = current.termination?.plan?.canRequest,
+            activeToolState = current.termination?.activeTool?.state,
+            activeToolRequestState = current.termination?.activeTool?.requestState,
+        )
+        if (!presentation.refreshTerminalToolEnabled) return
+        val mutationEpoch = advancePublicationEpoch()
+        busy = true
+        error = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { client().getRun(current.id) } }
+            if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
+                result.onSuccess { fresh ->
+                    val total = fresh.steps.size
+                    if (lastTotal != 0 && total != lastTotal) revision += 1
+                    lastTotal = total
+                    run = fresh
+                    refresh(fresh.id, mutationEpoch)
+                }.onFailure {
+                    error = it.message ?: "Task-status kunne ikke hentes"
+                }
+            }
+            busy = false
+        }
+    }
+
     fun clearTerminalRun() {
         val current = run ?: return
-        val presentation = presentAgent3CockpitInteraction(busy = busy, runState = current.state)
+        val presentation = presentAgent3CockpitInteraction(
+            busy = busy,
+            runState = current.state,
+            planCanRequestStop = current.termination?.plan?.canRequest,
+            activeToolState = current.termination?.activeTool?.state,
+            activeToolRequestState = current.termination?.activeTool?.requestState,
+        )
         if (!presentation.clearTerminalRunEnabled) return
         // Invalidate any detached refresh so it cannot resurrect the locally
         // cleared terminal history after this explicit reset.
@@ -271,6 +307,8 @@ fun KalivAgentCockpitA3(
         busy = busy,
         runState = run?.state,
         planCanRequestStop = run?.termination?.plan?.canRequest,
+        activeToolState = run?.termination?.activeTool?.state,
+        activeToolRequestState = run?.termination?.activeTool?.requestState,
         hasPreview = planId != null,
     )
     val steps = run?.steps ?: previewSteps
@@ -319,6 +357,16 @@ fun KalivAgentCockpitA3(
                 if (interaction.stopPlanEnabled) {
                     Spacer(Modifier.height(16.dp))
                     OutlineButton("\u25A0  Stop") { cancel() }
+                }
+                if (interaction.refreshTerminalToolEnabled) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Planen er afsluttet, men et aktivt værktøj kan stadig køre på riggen.",
+                        color = KalivTheme.colors.Warning,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlineButton("Opdater status") { refreshTerminalToolStatus() }
                 }
                 if (interaction.clearTerminalRunEnabled) {
                     Spacer(Modifier.height(16.dp))

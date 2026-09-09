@@ -22,6 +22,7 @@ internal data class KalivAgent3CockpitInteraction(
     val previewStartEnabled: Boolean,
     val previewDiscardEnabled: Boolean,
     val stopPlanEnabled: Boolean,
+    val refreshTerminalToolEnabled: Boolean,
     val clearTerminalRunEnabled: Boolean,
 )
 
@@ -41,11 +42,24 @@ internal fun presentAgent3CockpitInteraction(
     busy: Boolean,
     runState: String?,
     planCanRequestStop: Boolean? = null,
+    activeToolState: String? = null,
+    activeToolRequestState: String? = null,
     hasPreview: Boolean = false,
 ): KalivAgent3CockpitInteraction {
     val hasRun = runState != null
     val terminal = hasRun && isTerminal(runState)
     val previewActionsEnabled = !busy && !hasRun && hasPreview
+    val fullTerminal = hasRun && Agent3TaskUiPolicy.canResetTerminalHistory(
+        runTerminal = terminal,
+        activeToolState = activeToolState,
+        activeToolRequestState = activeToolRequestState,
+        busy = busy,
+    )
+    val terminalToolStillActive = terminal && Agent3TaskUiPolicy.shouldPoll(
+        runTerminal = true,
+        activeToolState = activeToolState,
+        activeToolRequestState = activeToolRequestState,
+    )
     return KalivAgent3CockpitInteraction(
         composerEnabled = !busy && !hasRun,
         previewStartEnabled = previewActionsEnabled,
@@ -54,7 +68,8 @@ internal fun presentAgent3CockpitInteraction(
             planCanRequest = planCanRequestStop,
             busy = busy,
         ),
-        clearTerminalRunEnabled = !busy && terminal,
+        refreshTerminalToolEnabled = !busy && terminalToolStillActive,
+        clearTerminalRunEnabled = fullTerminal,
     )
 }
 
