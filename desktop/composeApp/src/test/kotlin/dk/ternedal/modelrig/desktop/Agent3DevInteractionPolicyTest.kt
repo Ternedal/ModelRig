@@ -221,4 +221,26 @@ class Agent3DevInteractionPolicyTest {
             )
         )
     }
+
+    @Test fun stopPlanRequiresExplicitLiveServerAuthority() {
+        assertTrue(Agent3DevInteractionPolicy.canStopPlan("running", true, false))
+        assertTrue(Agent3DevInteractionPolicy.canStopPlan("future_nonterminal_state", true, false))
+        assertFalse(Agent3DevInteractionPolicy.canStopPlan("running", false, false))
+        assertFalse(Agent3DevInteractionPolicy.canStopPlan("running", null, false))
+        assertFalse(Agent3DevInteractionPolicy.canStopPlan("running", true, true))
+        assertFalse(Agent3DevInteractionPolicy.canStopPlan(null, true, false))
+    }
+
+    @Test fun stopPlanRejectsTerminalRunEvenWithStaleTrueReceipt() {
+        listOf(
+            "completed", "failed", "cancelled", "canceled", "blocked",
+            "completed_after_cancel", "done", "succeeded", "success", "error",
+        ).forEach { state ->
+            assertFalse(
+                Agent3DevInteractionPolicy.canStopPlan(state, true, false),
+                "terminal state must fail closed: $state",
+            )
+        }
+    }
+
 }
