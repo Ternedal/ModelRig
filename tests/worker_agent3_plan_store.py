@@ -147,6 +147,41 @@ check(replay_store.start_result(refused_id) == ("refused", None), "refused plan 
 check(replay_store.purge() == 0, "consumed replay records survive until expiry")
 replay_store.close()
 
+owner_path = os.path.join(root, "owner-recovery.db")
+owner_first = PlanStore(owner_path, ttl_seconds=30)
+owner_plan, _ = owner_first.save("owner")
+owner_first.consume(owner_plan)
+owner_first.bind_pending_run(owner_plan, "run-owner")
+owner_recovery = owner_first.start_recovery(owner_plan)
+old_owner = owner_recovery[2] if owner_recovery is not None else None
+check(
+    owner_recovery == ("pending", "run-owner", owner_first.start_owner),
+    "bound Start persists its opaque worker-generation owner",
+)
+owner_first.close()
+owner_second = PlanStore(owner_path, ttl_seconds=30)
+check(owner_second.start_owner != old_owner, "reopening the store creates a new worker generation")
+check(
+    owner_second.start_recovery(owner_plan) == ("pending", "run-owner", old_owner),
+    "worker restart preserves the previous generation on the pending run",
+)
+claimed_state = owner_second.claim_start_recovery(owner_plan, "run-owner", old_owner)
+check(
+    claimed_state == "pending"
+    and owner_second.start_recovery(owner_plan) == (
+        "pending",
+        "run-owner",
+        owner_second.start_owner,
+    ),
+    "dead-owner recovery CAS transfers only the same pending run",
+)
+check(
+    owner_second.release_start_recovery_claim(owner_plan, "run-owner")
+    and owner_second.start_recovery(owner_plan) == ("pending", "run-owner", None),
+    "failed recovery submission can release the generation claim for retry",
+)
+owner_second.close()
+
 plan_store.close()
 expiry_store.close()
 print(f"\n{passed} passed, {failed} failed")
