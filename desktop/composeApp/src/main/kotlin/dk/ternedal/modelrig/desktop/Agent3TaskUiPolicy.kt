@@ -35,11 +35,11 @@ object Agent3TaskUiPolicy {
         previewFresh: Boolean,
         busy: Boolean,
         hasRun: Boolean,
-    ): Boolean = normalizedSurface(serverSurface) == AGENT3_READONLY &&
-        previewCanStart &&
-        previewFresh &&
+        recoveryPending: Boolean = false,
+    ): Boolean = previewCanStart &&
         !busy &&
-        !hasRun
+        !hasRun &&
+        (recoveryPending || (normalizedSurface(serverSurface) == AGENT3_READONLY && previewFresh))
 
     fun readinessBindingMatches(
         currentPilotReportSha256: String?,

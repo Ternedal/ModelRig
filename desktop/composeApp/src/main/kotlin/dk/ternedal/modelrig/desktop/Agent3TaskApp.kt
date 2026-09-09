@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
 import dk.ternedal.modelrig.desktop.net.Agent3ReadonlyTaskClient
+import dk.ternedal.modelrig.desktop.net.Agent3TaskHttpException
 import dk.ternedal.modelrig.desktop.net.Agent3ReadonlyTaskPreview
 import dk.ternedal.modelrig.desktop.net.Agent3ReadonlyTaskSnapshot
 import dk.ternedal.modelrig.desktop.net.Agent3ReadonlyTaskStep
@@ -69,6 +70,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         var preview by remember { mutableStateOf<Agent3ReadonlyTaskPreview?>(null) }
         var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
         var previewExpired by remember { mutableStateOf(false) }
+        var startRecoveryPending by remember { mutableStateOf(false) }
         var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskSnapshot?>(null) }
         var retainedRunId by remember {
             mutableStateOf(db.getSetting(ACTIVE_TASK_RUN_ID_SETTING)?.trim()?.takeIf { it.isNotEmpty() })
@@ -89,6 +91,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
         }.isSuccess
 
         fun publishSnapshot(value: Agent3ReadonlyTaskSnapshot) {
+            startRecoveryPending = false
             snapshot = value
             val retained = Agent3TaskUiPolicy.retainedRunIdAfterSnapshot(value.run.id, value.terminal)
             retainedRunId = retained
@@ -130,10 +133,10 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 busy = DesktopTaskBusy.NONE
                 result.onSuccess { value ->
                     readiness = value
-                    if (!value.agent3ReadonlySelected && snapshot == null) preview = null
+                    if (!value.agent3ReadonlySelected && snapshot == null && !startRecoveryPending) preview = null
                 }.onFailure {
                     readiness = null
-                    if (snapshot == null) preview = null
+                    if (snapshot == null && !startRecoveryPending) preview = null
                     error = presentTaskRequestError(TaskRequestOperation.READINESS, it.message)
                 }
                 if (initialRecoveryPending) {
@@ -156,6 +159,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             preview = null
             previewDeadlineMillis = null
             previewExpired = false
+            startRecoveryPending = false
             scope.launch {
                 val readinessResult = withContext(Dispatchers.IO) {
                     runCatching {
@@ -201,9 +205,51 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             }
         }
 
+        fun publishStartFailure(failure: Throwable) {
+            if (failure is Agent3TaskHttpException && failure.reasonCode != "task_start_pending") {
+                startRecoveryPending = false
+                if (failure.reasonCode == "task_start_refused") {
+                    preview = null
+                    previewDeadlineMillis = null
+                    previewExpired = false
+                    error = presentTaskRequestError(TaskRequestOperation.START_REFUSED, failure.message)
+                } else {
+                    error = presentTaskRequestError(TaskRequestOperation.START_NOT_ACCEPTED, failure.message)
+                }
+                return
+            }
+            startRecoveryPending = true
+            error = presentTaskRequestError(TaskRequestOperation.START, failure.message)
+        }
+
         fun startTask() {
             val plan = preview ?: return
             val planId = plan.planId ?: return
+            if (startRecoveryPending) {
+                if (!Agent3TaskUiPolicy.canStart(
+                        readiness?.selectedSurface,
+                        plan.canStart,
+                        previewFresh = false,
+                        busy = busy != DesktopTaskBusy.NONE,
+                        hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
+                        recoveryPending = true,
+                    )
+                ) return
+                busy = DesktopTaskBusy.START
+                error = null
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val (base, bearer) = requireConnection()
+                            Agent3ReadonlyTaskClient(base, bearer).start(planId)
+                        }
+                    }
+                    busy = DesktopTaskBusy.NONE
+                    result.onSuccess(::publishSnapshot)
+                        .onFailure(::publishStartFailure)
+                }
+                return
+            }
             val nowMillis = System.nanoTime() / 1_000_000L
             val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
             if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, nowMillis)) {
@@ -267,6 +313,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                     }
                     return@launch
                 }
+                startRecoveryPending = true
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         val (base, bearer) = requireConnection()
@@ -275,7 +322,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
                 busy = DesktopTaskBusy.NONE
                 result.onSuccess(::publishSnapshot)
-                    .onFailure { error = presentTaskRequestError(TaskRequestOperation.START, it.message) }
+                    .onFailure(::publishStartFailure)
             }
         }
 
@@ -336,6 +383,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
             preview = null
             previewDeadlineMillis = null
             previewExpired = false
+            startRecoveryPending = false
             message = ""
             error = null
         }
@@ -505,7 +553,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                 }
             }
 
-            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasRun) {
+            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasRun && !startRecoveryPending) {
                 Spacer(Modifier.height(12.dp))
                 DesktopTaskCard {
                     Text(
@@ -535,7 +583,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                             previewDeadlineMillis = null
                             previewExpired = false
                         },
-                        enabled = !isBusy,
+                        enabled = !isBusy && !startRecoveryPending,
                         label = { Text("Hvad skal Kaliv undersøge?") },
                         supportingText = { Text("Kun lokale, idempotente read-tools kan startes.") },
                         minLines = 3,
@@ -548,7 +596,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                             readiness?.selectedSurface,
                             message,
                             isBusy,
-                            hasRun = false,
+                            hasRun = startRecoveryPending,
                         ),
                         onClick = ::requestPreview,
                     ) {
@@ -575,8 +623,10 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                             previewFresh,
                             isBusy,
                             hasRun = false,
+                            recoveryPending = startRecoveryPending,
                         ),
                         expired = expired,
+                        recoveryPending = startRecoveryPending,
                         starting = busy == DesktopTaskBusy.START,
                         onStart = ::startTask,
                     )
@@ -622,13 +672,21 @@ private fun DesktopPlanReview(
     value: Agent3ReadonlyTaskPreview,
     canStart: Boolean,
     expired: Boolean,
+    recoveryPending: Boolean,
     starting: Boolean,
     onStart: () -> Unit,
 ) {
     DesktopTaskCard {
         Text("Plan og review", color = KalivTheme.colors.TextHigh, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text("Preview har ikke kørt et tool.", color = KalivTheme.colors.Success, fontSize = 11.sp)
-        if (expired) {
+        if (recoveryPending) {
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "Start blev sendt, men udfaldet er ikke bekræftet. Samme Start bruges kun til at hente det allerede accepterede run eller et serverafslag.",
+                color = KalivTheme.colors.Amber,
+                fontSize = 11.sp,
+            )
+        } else if (expired) {
             Spacer(Modifier.height(5.dp))
             Text(
                 "Plan-previewet er udløbet. Lav et nyt preview før start.",
@@ -651,7 +709,11 @@ private fun DesktopPlanReview(
         DesktopEvidence(value.evidence)
         Spacer(Modifier.height(12.dp))
         Button(enabled = canStart, onClick = onStart) {
-            Text(if (starting) "Starter…" else "Start read-only opgave")
+            Text(
+                if (starting) "Henter startstatus…"
+                else if (recoveryPending) "Hent startstatus"
+                else "Start read-only opgave"
+            )
         }
     }
 }

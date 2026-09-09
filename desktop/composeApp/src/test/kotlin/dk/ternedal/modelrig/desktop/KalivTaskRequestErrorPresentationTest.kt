@@ -23,7 +23,9 @@ class KalivTaskRequestErrorPresentationTest {
         val expected = mapOf(
             TaskRequestOperation.READINESS to "Task-readiness kunne ikke hentes.",
             TaskRequestOperation.PREVIEW to "Plan-preview kunne ikke hentes.",
-            TaskRequestOperation.START to "Opgaven kunne ikke startes.",
+            TaskRequestOperation.START to "Startstatus kunne ikke bekræftes. Prøv Start igen; samme preview starter ikke en ny task.",
+            TaskRequestOperation.START_NOT_ACCEPTED to "Opgaven blev ikke accepteret. Prøv samme preview igen.",
+            TaskRequestOperation.START_REFUSED to "Opgaven blev ikke accepteret. Lav et nyt plan-preview.",
             TaskRequestOperation.STATUS to "Task-status kunne ikke hentes.",
             TaskRequestOperation.STOP_PLAN to "Planen kunne ikke stoppes.",
             TaskRequestOperation.POLLING to "Automatisk task-status kunne ikke hentes.",
@@ -52,7 +54,10 @@ class KalivTaskRequestErrorPresentationTest {
     fun nearMatchDoesNotGainControlledPrerequisiteSemantics() {
         val raw = "Ingen device-token er gemt: secret-token"
         val presented = presentTaskRequestError(TaskRequestOperation.START, raw)
-        assertEquals("Opgaven kunne ikke startes.", presented)
+        assertEquals(
+            "Startstatus kunne ikke bekræftes. Prøv Start igen; samme preview starter ikke en ny task.",
+            presented,
+        )
         assertFalse(presented.contains("secret-token"))
     }
 

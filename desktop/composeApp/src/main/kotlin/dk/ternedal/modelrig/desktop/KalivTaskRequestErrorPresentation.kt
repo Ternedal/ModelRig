@@ -4,6 +4,8 @@ internal enum class TaskRequestOperation {
     READINESS,
     PREVIEW,
     START,
+    START_NOT_ACCEPTED,
+    START_REFUSED,
     STATUS,
     STOP_PLAN,
     POLLING,
@@ -25,7 +27,12 @@ internal fun presentTaskRequestError(operation: TaskRequestOperation, rawError: 
         else -> when (operation) {
             TaskRequestOperation.READINESS -> "Task-readiness kunne ikke hentes."
             TaskRequestOperation.PREVIEW -> "Plan-preview kunne ikke hentes."
-            TaskRequestOperation.START -> "Opgaven kunne ikke startes."
+            TaskRequestOperation.START ->
+                "Startstatus kunne ikke bekræftes. Prøv Start igen; samme preview starter ikke en ny task."
+            TaskRequestOperation.START_NOT_ACCEPTED ->
+                "Opgaven blev ikke accepteret. Prøv samme preview igen."
+            TaskRequestOperation.START_REFUSED ->
+                "Opgaven blev ikke accepteret. Lav et nyt plan-preview."
             TaskRequestOperation.STATUS -> "Task-status kunne ikke hentes."
             TaskRequestOperation.STOP_PLAN -> "Planen kunne ikke stoppes."
             TaskRequestOperation.POLLING -> "Automatisk task-status kunne ikke hentes."

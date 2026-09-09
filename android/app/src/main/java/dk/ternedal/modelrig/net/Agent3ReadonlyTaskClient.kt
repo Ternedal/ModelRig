@@ -8,6 +8,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+internal class Agent3TaskHttpException(
+    val statusCode: Int,
+    val reasonCode: String?,
+    message: String,
+) : RuntimeException(message)
+
 /**
  * Normal-client transport for the readiness-bound Agent 3 read-only task surface.
  *
@@ -501,14 +507,22 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
+                var reasonCode: String? = null
                 val detail = runCatching {
                     val root = JSONObject(text)
                     when (val raw = root.opt("detail")) {
-                        is JSONObject -> raw.optString("reason").ifBlank { raw.toString() }
+                        is JSONObject -> {
+                            reasonCode = raw.optString("reason").ifBlank { null }
+                            reasonCode ?: raw.toString()
+                        }
                         else -> root.optString("error").ifBlank { raw?.toString().orEmpty() }
                     }
                 }.getOrNull()?.ifBlank { null } ?: text.take(500)
-                throw ModelRigException("Read-only task fejlede (${response.code}): $detail")
+                throw Agent3TaskHttpException(
+                    response.code,
+                    reasonCode,
+                    "Read-only task fejlede (${response.code}): $detail",
+                )
             }
             return runCatching { JSONObject(text) }
                 .getOrElse { throw ModelRigException("Read-only task returnerede ugyldig JSON") }
