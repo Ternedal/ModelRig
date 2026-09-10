@@ -18,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3Client
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dk.ternedal.modelrig.ui.components.kalivScreenInsets
@@ -49,6 +51,8 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
     var previewConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
     var previewIntent by remember { mutableStateOf<Agent3ReviewPreviewIntent?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
     var runConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
     var review by remember { mutableStateOf<Agent3Client.ReadReview?>(null) }
@@ -74,6 +78,8 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         preview = null
         previewConnection = null
         previewIntent = null
+        previewDeadlineMillis = null
+        previewExpired = false
     }
 
     fun createPreview() {
@@ -96,6 +102,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 error = it.message ?: "Forbindelsen er ugyldig"
                 return
             }
+        val requestStartedAtMillis = System.nanoTime() / 1_000_000L
         busy = true
         error = null
         scope.launch {
@@ -115,9 +122,18 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     error = "Preview blev forældet, fordi opgaven eller Read review ændrede sig"
                     return@onSuccess
                 }
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    planned.expiresInSeconds,
+                )
                 preview = planned
                 previewConnection = connection
                 previewIntent = requestIntent
+                previewDeadlineMillis = deadline
+                previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
                 run = null
                 runConnection = null
                 review = null
@@ -132,9 +148,15 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         val boundConnection = previewConnection
         val currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token)
         val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+            previewDeadlineMillis,
+            System.nanoTime() / 1_000_000L,
+        )
+        if (!previewFresh) previewExpired = true
         if (!Agent3ReviewPreviewPolicy.canStart(
                 planId = currentPreview.planId,
                 hasSteps = currentPreview.steps.isNotEmpty(),
+                previewFresh = previewFresh,
                 busy = busy,
                 hasRun = run != null,
                 currentConnection = currentConnection,
@@ -158,6 +180,27 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 runConnection = connection
                 review = it.readReview
             }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
+        }
+    }
+
+    LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+        val planId = preview?.planId ?: return@LaunchedEffect
+        val deadline = previewDeadlineMillis
+        if (deadline == null) {
+            previewExpired = true
+            return@LaunchedEffect
+        }
+        val remaining = deadline - (System.nanoTime() / 1_000_000L)
+        if (remaining > 0L) delay(remaining)
+        if (
+            preview?.planId == planId &&
+            previewDeadlineMillis == deadline &&
+            Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+        ) {
+            previewExpired = true
         }
     }
 
@@ -243,6 +286,11 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             }
 
             preview?.let { plan ->
+                val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                    previewDeadlineMillis,
+                    System.nanoTime() / 1_000_000L,
+                )
+                val expiredForDisplay = previewExpired || !previewFresh
                 Spacer(Modifier.height(12.dp))
                 ReviewSurface {
                     Text("Server-preview", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold)
@@ -263,6 +311,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                         enabled = Agent3ReviewPreviewPolicy.canStart(
                             planId = plan.planId,
                             hasSteps = plan.steps.isNotEmpty(),
+                            previewFresh = previewFresh,
                             busy = busy,
                             hasRun = run != null,
                             currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token),
@@ -272,6 +321,21 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                         ),
                         onClick = { startPreview() },
                     ) { Text("Start den viste single-use plan") }
+                    if (expiredForDisplay) {
+                        Text(
+                            "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                            color = KalivTheme.colors.danger,
+                            fontSize = 11.sp,
+                        )
+                    } else {
+                        plan.expiresInSeconds?.let {
+                            Text(
+                                "Plan-id udløber om ca. $it sek.",
+                                color = KalivTheme.colors.textMuted,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
                 }
             }
 

@@ -39,6 +39,7 @@ class Agent3ReviewPreviewIntentTest {
             Agent3ReviewPreviewPolicy.canStart(
                 planId = "plan-1",
                 hasSteps = true,
+                previewFresh = true,
                 busy = false,
                 hasRun = false,
                 currentConnection = connection,
@@ -49,26 +50,41 @@ class Agent3ReviewPreviewIntentTest {
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", true, false, false, connection, connection,
+                "plan-1", true, true, false, false, connection, connection,
                 intent("vis logs", false), reviewed,
             ),
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", true, false, false, connection, connection,
+                "plan-1", true, true, false, false, connection, connection,
                 intent("vis status", true), reviewed,
             ),
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", true, false, false, connection, connection,
+                "plan-1", true, true, false, false, connection, connection,
                 null, reviewed,
             ),
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", true, false, false, connection, connection,
+                "plan-1", true, true, false, false, connection, connection,
                 reviewed, null,
+            ),
+        )
+    }
+
+    @Test
+    fun reviewedStartRequiresFreshPreviewAuthority() {
+        val reviewed = intent()
+        assertTrue(
+            Agent3ReviewPreviewPolicy.canStart(
+                "plan-1", true, true, false, false, connection, connection, reviewed, reviewed,
+            ),
+        )
+        assertFalse(
+            Agent3ReviewPreviewPolicy.canStart(
+                "plan-1", true, false, false, false, connection, connection, reviewed, reviewed,
             ),
         )
     }
@@ -81,27 +97,27 @@ class Agent3ReviewPreviewIntentTest {
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                null, true, false, false, connection, connection, reviewed, reviewed,
+                null, true, true, false, false, connection, connection, reviewed, reviewed,
             ),
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", false, false, false, connection, connection, reviewed, reviewed,
+                "plan-1", false, true, false, false, connection, connection, reviewed, reviewed,
             ),
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", true, true, false, connection, connection, reviewed, reviewed,
+                "plan-1", true, true, true, false, connection, connection, reviewed, reviewed,
             ),
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", true, false, true, connection, connection, reviewed, reviewed,
+                "plan-1", true, true, false, true, connection, connection, reviewed, reviewed,
             ),
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", true, false, false, otherConnection, connection, reviewed, reviewed,
+                "plan-1", true, true, false, false, otherConnection, connection, reviewed, reviewed,
             ),
         )
     }
