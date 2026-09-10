@@ -276,11 +276,30 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         return preview
     }
 
-    fun startPlanEnvelope(planId: String): Agent3RunEnvelope =
-        decodeRunEnvelope(
-            post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}"),
-            expectedPlanId = planId,
-        )
+    fun startPlanEnvelope(
+        planId: String,
+        expectedReviewReads: Boolean? = null,
+    ): Agent3RunEnvelope {
+        val body = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
+        if (expectedReviewReads != null) {
+            val responseReviewReads = runCatching {
+                val root = json.parseToJsonElement(body) as? JsonObject
+                val raw = root?.get("review_reads") as? JsonPrimitive
+                when {
+                    raw == null || raw.isString -> null
+                    raw.content == "true" -> true
+                    raw.content == "false" -> false
+                    else -> null
+                }
+            }.getOrNull()
+            if (responseReviewReads != expectedReviewReads) {
+                throw Agent3Exception(
+                    "Invalid Agent 3.0 Start envelope: server review_reads does not match reviewed intent"
+                )
+            }
+        }
+        return decodeRunEnvelope(body, expectedPlanId = planId)
+    }
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
 
