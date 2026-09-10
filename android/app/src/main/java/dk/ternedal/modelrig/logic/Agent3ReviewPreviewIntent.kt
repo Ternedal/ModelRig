@@ -36,18 +36,21 @@ internal object Agent3ReviewPreviewPolicy {
         planId: String?,
         hasSteps: Boolean,
         previewFresh: Boolean,
+        capabilityAllowed: Boolean?,
         busy: Boolean,
         hasRun: Boolean,
         currentConnection: Agent3ReviewConnectionBinding?,
         previewConnection: Agent3ReviewConnectionBinding?,
         currentIntent: Agent3ReviewPreviewIntent?,
         previewIntent: Agent3ReviewPreviewIntent?,
-    ): Boolean = previewFresh && Agent3ReviewConnectionPolicy.canStart(
-        planId = planId,
-        hasSteps = hasSteps,
-        busy = busy,
-        hasRun = hasRun,
-        currentConnection = currentConnection,
-        previewConnection = previewConnection,
-    ) && currentIntent != null && currentIntent == previewIntent
+    ): Boolean = previewFresh &&
+        capabilityAllowed != false &&
+        Agent3ReviewConnectionPolicy.canStart(
+            planId = planId,
+            hasSteps = hasSteps,
+            busy = busy,
+            hasRun = hasRun,
+            currentConnection = currentConnection,
+            previewConnection = previewConnection,
+        ) && currentIntent != null && currentIntent == previewIntent
 }
