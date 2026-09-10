@@ -63,6 +63,70 @@ class Agent3ReviewedStartBindingTest {
         }
     }
 
+    @Test
+    fun reviewedStartAcceptsMatchingReadReviewState() {
+        listOf(true, false).forEach { expected ->
+            val server = server(
+                startEnvelope(
+                    reviewReads = expected,
+                    readReviewJson = "{\"enabled\":$expected,\"waiting\":false}",
+                ),
+            )
+            try {
+                val envelope = Agent3Client(server.url("/").toString(), "token")
+                    .startReviewedPlanEnvelope("plan-1", expected, null)
+                assertEquals(expected, envelope.readReview.enabled)
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun reviewedStartRejectsReadReviewStateMismatch() {
+        listOf(
+            true to false,
+            false to true,
+        ).forEach { (expected, returned) ->
+            val server = server(
+                startEnvelope(
+                    reviewReads = expected,
+                    readReviewJson = "{\"enabled\":$returned,\"waiting\":false}",
+                ),
+            )
+            try {
+                assertReadReviewFailure(server, expected)
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun reviewedStartRejectsMissingReadReviewState() {
+        val server = server(startEnvelope(reviewReads = true, readReviewJson = null))
+        try {
+            assertReadReviewFailure(server, true)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun reviewedStartRejectsUnusableReadReviewState() {
+        val server = server(
+            startEnvelope(
+                reviewReads = true,
+                readReviewJson = "{\"enabled\":\"not-a-bool\",\"waiting\":false}",
+            ),
+        )
+        try {
+            assertReadReviewFailure(server, true)
+        } finally {
+            server.shutdown()
+        }
+    }
+
     private fun assertReceiptFailure(
         server: MockWebServer,
         expected: Agent3Client.CapabilityReceipt?,
@@ -74,6 +138,18 @@ class Agent3ReviewedStartBindingTest {
         assertTrue(error is ModelRigException)
         assertEquals(
             "Ugyldigt Agent 3.0 Start-svar: capability receipt matcher ikke previewet",
+            error?.message,
+        )
+    }
+
+    private fun assertReadReviewFailure(server: MockWebServer, expected: Boolean) {
+        val error = runCatching {
+            Agent3Client(server.url("/").toString(), "token")
+                .startReviewedPlanEnvelope("plan-1", expected, null)
+        }.exceptionOrNull()
+        assertTrue(error is ModelRigException)
+        assertEquals(
+            "Ugyldigt Agent 3.0 Start-svar: Read review-state matcher ikke previewet",
             error?.message,
         )
     }
@@ -112,7 +188,11 @@ class Agent3ReviewedStartBindingTest {
         server.start()
     }
 
-    private fun startEnvelope(capabilityReceiptJson: String? = null): String = """
+    private fun startEnvelope(
+        capabilityReceiptJson: String? = null,
+        reviewReads: Boolean = true,
+        readReviewJson: String? = "{\"enabled\":true,\"waiting\":false}",
+    ): String = """
         {
           "run": {
             "id": "server-run",
@@ -121,7 +201,8 @@ class Agent3ReviewedStartBindingTest {
             "steps": []
           },
           "plan_id": "plan-1",
-          "review_reads": true,
+          "review_reads": $reviewReads,
+          ${readReviewJson?.let { "\"read_review\":$it," } ?: ""}
           ${capabilityReceiptJson?.let { "\"capability_receipt\":$it," } ?: ""}
           "termination": {
             "schema": "kaliv-agent3-termination/v1",

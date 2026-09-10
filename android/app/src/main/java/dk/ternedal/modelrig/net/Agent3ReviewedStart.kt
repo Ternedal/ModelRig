@@ -2,11 +2,11 @@ package dk.ternedal.modelrig.net
 
 /**
  * Reviewed Start keeps the server-authored Start envelope bound to the exact
- * capability receipt that was visible in the reviewed Preview.
+ * review mode and capability receipt that were visible in the reviewed Preview.
  *
- * The worker stores that receipt with the single-use plan and requires the
- * start-time re-evaluation to equal it. Mirror that authority at the Android
- * response boundary before run/read-review state can be published to UI.
+ * The worker persists read-review policy before the run itself and returns that
+ * policy in the Start envelope. Reject a response whose parsed review state no
+ * longer agrees with the reviewed mode before run/read-review state reaches UI.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -20,6 +20,11 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
         throw ModelRigException(
             "Ugyldigt Agent 3.0 Start-svar: capability receipt matcher ikke previewet",
+        )
+    }
+    if (envelope.readReview.enabled != expectedReviewReads) {
+        throw ModelRigException(
+            "Ugyldigt Agent 3.0 Start-svar: Read review-state matcher ikke previewet",
         )
     }
     return envelope
