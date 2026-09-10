@@ -3,12 +3,13 @@ package dk.ternedal.modelrig.net
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class Agent3ReplanApplyBindingTest {
     @Test
-    fun reviewedApplyAcceptsExactConsumedPreviewAndRevisionReceipt() {
+    fun reviewedApplyAcceptsExactConsumedPreviewRevisionAndWaitingCheckpoint() {
         val reviewed = reviewedPreview()
         val server = server(applyResponse())
         try {
@@ -19,8 +20,43 @@ class Agent3ReplanApplyBindingTest {
             assertEquals(2, result.replan.fromRevision)
             assertEquals(3, result.replan.toRevision)
             assertEquals(2, result.replan.replanNumber)
+            assertTrue(result.readReview.enabled)
+            assertTrue(result.readReview.waiting)
+            assertEquals(1, result.readReview.windowStart)
+            assertEquals(2, result.readReview.windowEnd)
+            assertEquals(listOf("step-new"), result.readReview.removableStepIds)
+            assertEquals("step-1", result.readReview.completedStepId)
+            assertEquals("rig_status", result.readReview.completedTool)
         } finally {
             server.shutdown()
+        }
+    }
+
+    @Test
+    fun reviewedApplyAcceptsClearedEnabledAndDisabledReviewStates() {
+        listOf(true, false).forEach { enabled ->
+            val server = server(
+                applyResponse(
+                    reviewEnabledJson = enabled.toString(),
+                    reviewWaitingJson = "false",
+                    reviewWindowStartJson = "null",
+                    reviewWindowEndJson = "null",
+                    reviewRemovableIdsJson = "[]",
+                    reviewCompletedStepIdJson = "null",
+                    reviewCompletedToolJson = "null",
+                ),
+            )
+            try {
+                val result = Agent3ReplanClient(server.url("/").toString(), "token")
+                    .applyReviewed(reviewedPreview())
+                assertEquals(enabled, result.readReview.enabled)
+                assertFalse(result.readReview.waiting)
+                assertEquals(null, result.readReview.windowStart)
+                assertEquals(null, result.readReview.windowEnd)
+                assertTrue(result.readReview.removableStepIds.isEmpty())
+            } finally {
+                server.shutdown()
+            }
         }
     }
 
@@ -109,6 +145,108 @@ class Agent3ReplanApplyBindingTest {
     }
 
     @Test
+    fun reviewedApplyRejectsMissingReadReviewOrBooleanAuthority() {
+        val missingObject = server(applyResponse(includeReadReview = false))
+        try {
+            assertAuthorityFailure(missingObject, reviewedPreview(), "read_review")
+        } finally {
+            missingObject.shutdown()
+        }
+
+        val missingEnabled = server(applyResponse(includeReviewEnabled = false))
+        try {
+            assertAuthorityFailure(missingEnabled, reviewedPreview(), "read_review.enabled")
+        } finally {
+            missingEnabled.shutdown()
+        }
+
+        val missingWaiting = server(applyResponse(includeReviewWaiting = false))
+        try {
+            assertAuthorityFailure(missingWaiting, reviewedPreview(), "read_review.waiting")
+        } finally {
+            missingWaiting.shutdown()
+        }
+
+        val wrongEnabled = server(applyResponse(reviewEnabledJson = "\"true\""))
+        try {
+            assertAuthorityFailure(wrongEnabled, reviewedPreview(), "read_review.enabled")
+        } finally {
+            wrongEnabled.shutdown()
+        }
+
+        val wrongWaiting = server(applyResponse(reviewWaitingJson = "1"))
+        try {
+            assertAuthorityFailure(wrongWaiting, reviewedPreview(), "read_review.waiting")
+        } finally {
+            wrongWaiting.shutdown()
+        }
+    }
+
+    @Test
+    fun reviewedApplyRejectsStaleOrMismatchedWaitingWindow() {
+        val cases = listOf(
+            "read_review window" to applyResponse(reviewWindowStartJson = "0"),
+            "read_review window" to applyResponse(reviewWindowEndJson = "4"),
+            "read_review.removable_step_ids" to applyResponse(
+                reviewRemovableIdsJson = "[\"stale-step\"]",
+            ),
+            "read_review.removable_step_ids" to applyResponse(
+                reviewRemovableIdsJson = "[1]",
+            ),
+        )
+        cases.forEach { (field, body) ->
+            val server = server(body)
+            try {
+                assertAuthorityFailure(server, reviewedPreview(), field)
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun reviewedApplyRejectsNonReadOrNonPendingWaitingWindowStep() {
+        val cases = listOf(
+            applyResponse(replacementRisk = "write"),
+            applyResponse(replacementState = "succeeded"),
+        )
+        cases.forEach { body ->
+            val server = server(body)
+            try {
+                assertAuthorityFailure(server, reviewedPreview(), "read_review window steps")
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun reviewedApplyRejectsIncompleteOrStaleClearedCheckpointPayload() {
+        val missingCompleted = server(applyResponse(reviewCompletedStepIdJson = "null"))
+        try {
+            assertAuthorityFailure(missingCompleted, reviewedPreview(), "read_review.completed_step_id")
+        } finally {
+            missingCompleted.shutdown()
+        }
+
+        val staleCleared = server(
+            applyResponse(
+                reviewWaitingJson = "false",
+                reviewWindowStartJson = "1",
+                reviewWindowEndJson = "2",
+                reviewRemovableIdsJson = "[\"step-new\"]",
+                reviewCompletedStepIdJson = "\"step-1\"",
+                reviewCompletedToolJson = "\"rig_status\"",
+            ),
+        )
+        try {
+            assertAuthorityFailure(staleCleared, reviewedPreview(), "cleared read_review checkpoint")
+        } finally {
+            staleCleared.shutdown()
+        }
+    }
+
+    @Test
     fun genericApplyKeepsExistingPermissiveCompatibilityContract() {
         val server = server(
             """
@@ -128,6 +266,9 @@ class Agent3ReplanApplyBindingTest {
             assertEquals("generic-run", result.run.id)
             assertEquals(0, result.replan.fromRevision)
             assertEquals("", result.preview.previewId)
+            assertFalse(result.readReview.enabled)
+            assertFalse(result.readReview.waiting)
+            assertTrue(result.readReview.removableStepIds.isEmpty())
             assertEquals(
                 "/api/v1/experimental/agent3/replan-previews/preview-1/apply",
                 server.takeRequest().path,
@@ -167,7 +308,7 @@ class Agent3ReplanApplyBindingTest {
         window = Agent3ReplanClient.Window(
             start = 1,
             end = 2,
-            removableStepIds = listOf("step-2"),
+            removableStepIds = listOf("step-old"),
             immutablePrefixIds = listOf("step-1"),
             immutableTailIds = listOf("step-3"),
         ),
@@ -186,6 +327,9 @@ class Agent3ReplanApplyBindingTest {
 
     private fun applyResponse(
         runId: String = "run-1",
+        runState: String = "running",
+        replacementRisk: String = "read",
+        replacementState: String = "pending",
         previewId: String = "preview-1",
         previewRunId: String = "run-1",
         plannerModelJson: String = "\"planner-a\"",
@@ -197,6 +341,16 @@ class Agent3ReplanApplyBindingTest {
         includeFromRevision: Boolean = true,
         toRevisionJson: String = "3",
         replanNumberJson: String = "2",
+        includeReadReview: Boolean = true,
+        includeReviewEnabled: Boolean = true,
+        includeReviewWaiting: Boolean = true,
+        reviewEnabledJson: String = "true",
+        reviewWaitingJson: String = "true",
+        reviewWindowStartJson: String = "1",
+        reviewWindowEndJson: String = "2",
+        reviewRemovableIdsJson: String = "[\"step-new\"]",
+        reviewCompletedStepIdJson: String = "\"step-1\"",
+        reviewCompletedToolJson: String = "\"rig_status\"",
     ): String {
         val plannerModelField = if (includePlannerModel) {
             "\"planner_model\": $plannerModelJson,"
@@ -208,23 +362,81 @@ class Agent3ReplanApplyBindingTest {
         } else {
             ""
         }
+        val reviewEnabledField = if (includeReviewEnabled) {
+            "\"enabled\": $reviewEnabledJson,"
+        } else {
+            ""
+        }
+        val reviewWaitingField = if (includeReviewWaiting) {
+            "\"waiting\": $reviewWaitingJson,"
+        } else {
+            ""
+        }
+        val readReviewField = if (includeReadReview) {
+            """
+              "read_review": {
+                $reviewEnabledField
+                $reviewWaitingField
+                "window_start": $reviewWindowStartJson,
+                "window_end": $reviewWindowEndJson,
+                "removable_step_ids": $reviewRemovableIdsJson,
+                "completed_step_id": $reviewCompletedStepIdJson,
+                "completed_tool": $reviewCompletedToolJson,
+                "updated_at": 123.5
+              },
+            """.trimIndent()
+        } else {
+            ""
+        }
         return """
             {
               "run": {
                 "id": "$runId",
-                "state": "running",
+                "state": "$runState",
                 "current_step": 1,
-                "steps": []
+                "steps": [
+                  {
+                    "id": "step-1",
+                    "tool": "rig_status",
+                    "args": {},
+                    "risk": "read",
+                    "sensitivity": "operational",
+                    "egress": "local",
+                    "summary": "completed read",
+                    "state": "succeeded"
+                  },
+                  {
+                    "id": "step-new",
+                    "tool": "current_datetime",
+                    "args": {},
+                    "risk": "$replacementRisk",
+                    "sensitivity": "operational",
+                    "egress": "local",
+                    "summary": "replacement read",
+                    "state": "$replacementState"
+                  },
+                  {
+                    "id": "step-3",
+                    "tool": "note_append",
+                    "args": {},
+                    "risk": "write",
+                    "sensitivity": "operational",
+                    "egress": "local",
+                    "summary": "immutable write",
+                    "state": "pending"
+                  }
+                ]
               },
               "replan": {
                 "reason": "$receiptReason",
                 $fromRevisionField
                 "to_revision": $toRevisionJson,
                 "replan_number": $replanNumberJson,
-                "removed_tools": ["read-a"],
-                "added_tools": ["read-b"],
+                "removed_tools": ["list_models"],
+                "added_tools": ["current_datetime"],
                 "immutable_tail_ids": ["step-3"]
               },
+              $readReviewField
               "preview": {
                 "preview_id": "$previewId",
                 "run_id": "$previewRunId",
