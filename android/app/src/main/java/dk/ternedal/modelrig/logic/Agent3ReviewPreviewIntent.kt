@@ -35,13 +35,14 @@ internal object Agent3ReviewPreviewPolicy {
     fun canStart(
         planId: String?,
         hasSteps: Boolean,
+        previewFresh: Boolean,
         busy: Boolean,
         hasRun: Boolean,
         currentConnection: Agent3ReviewConnectionBinding?,
         previewConnection: Agent3ReviewConnectionBinding?,
         currentIntent: Agent3ReviewPreviewIntent?,
         previewIntent: Agent3ReviewPreviewIntent?,
-    ): Boolean = Agent3ReviewConnectionPolicy.canStart(
+    ): Boolean = previewFresh && Agent3ReviewConnectionPolicy.canStart(
         planId = planId,
         hasSteps = hasSteps,
         busy = busy,
