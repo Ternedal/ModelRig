@@ -275,6 +275,61 @@ class Agent3TaskUiPolicyTest {
     }
 
     @Test
+    fun reviewedPreviewNeverReplacesLiveOrUnprovenRunAuthority() {
+        assertTrue(
+            Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = "ny opgave", busy = false, hasRun = false, runTerminal = null,
+                terminationPresent = false, activeToolState = null, activeToolRequestState = null,
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = "ny opgave", busy = false, hasRun = true, runTerminal = false,
+                terminationPresent = true, activeToolState = "executing", activeToolRequestState = "unavailable",
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = "ny opgave", busy = false, hasRun = true, runTerminal = true,
+                terminationPresent = true, activeToolState = "executing", activeToolRequestState = "unavailable",
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = "ny opgave", busy = false, hasRun = true, runTerminal = true,
+                terminationPresent = true, activeToolState = "completed_after_cancel", activeToolRequestState = "pending",
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = "ny opgave", busy = false, hasRun = true, runTerminal = true,
+                terminationPresent = false, activeToolState = null, activeToolRequestState = null,
+            ),
+        )
+        assertTrue(
+            Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = "ny opgave", busy = false, hasRun = true, runTerminal = true,
+                terminationPresent = true, activeToolState = "completed_after_cancel", activeToolRequestState = "terminal",
+            ),
+        )
+        assertFalse(
+            Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = " ", busy = false, hasRun = false, runTerminal = null,
+                terminationPresent = false, activeToolState = null, activeToolRequestState = null,
+            ),
+        )
+    }
+
+    @Test
+    fun reviewedStartRequiresUnconsumedPreviewAndNoRunAuthority() {
+        assertTrue(Agent3TaskUiPolicy.canStartReviewPreview("plan-1", hasSteps = true, busy = false, hasRun = false))
+        assertFalse(Agent3TaskUiPolicy.canStartReviewPreview("plan-1", hasSteps = true, busy = true, hasRun = false))
+        assertFalse(Agent3TaskUiPolicy.canStartReviewPreview("plan-1", hasSteps = true, busy = false, hasRun = true))
+        assertFalse(Agent3TaskUiPolicy.canStartReviewPreview(null, hasSteps = true, busy = false, hasRun = false))
+        assertFalse(Agent3TaskUiPolicy.canStartReviewPreview("plan-1", hasSteps = false, busy = false, hasRun = false))
+    }
+
+    @Test
     fun terminalHistoryResetWaitsForFullRunAndToolTruth() {
         assertFalse(
             Agent3TaskUiPolicy.canResetTerminalHistory(

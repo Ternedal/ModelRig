@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3Client
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -60,11 +61,21 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
 
     fun createPreview() {
         val text = message.trim()
-        if (text.isEmpty() || busy) return
+        val currentRun = run
+        val termination = currentRun?.termination
+        val runTerminal = currentRun?.state?.lowercase() in setOf("blocked", "completed", "failed", "cancelled")
+        if (!Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = text,
+                busy = busy,
+                hasRun = currentRun != null,
+                runTerminal = if (currentRun == null) null else runTerminal,
+                terminationPresent = termination != null,
+                activeToolState = termination?.activeTool?.state,
+                activeToolRequestState = termination?.activeTool?.requestState,
+            )
+        ) return
         busy = true
         error = null
-        run = null
-        review = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -76,14 +87,26 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 }
             }
             busy = false
-            result.onSuccess { preview = it }
-                .onFailure { error = it.message ?: "Plan-preview fejlede" }
+            result.onSuccess {
+                preview = it
+                run = null
+                review = null
+                resultBody = null
+                replanPreview = null
+            }.onFailure { error = it.message ?: "Plan-preview fejlede" }
         }
     }
 
     fun startPreview() {
-        val planId = preview?.planId ?: return
-        if (busy) return
+        val currentPreview = preview ?: return
+        if (!Agent3TaskUiPolicy.canStartReviewPreview(
+                planId = currentPreview.planId,
+                hasSteps = currentPreview.steps.isNotEmpty(),
+                busy = busy,
+                hasRun = run != null,
+            )
+        ) return
+        val planId = currentPreview.planId ?: return
         busy = true
         error = null
         scope.launch {
@@ -92,6 +115,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             }
             busy = false
             result.onSuccess {
+                preview = null
                 run = it.run
                 review = it.readReview
             }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
@@ -157,7 +181,19 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(10.dp))
-                Button(enabled = !busy && message.isNotBlank(), onClick = { createPreview() }) {
+                val currentRun = run
+                val termination = currentRun?.termination
+                val runTerminal = currentRun?.state?.lowercase() in setOf("blocked", "completed", "failed", "cancelled")
+                val canCreatePreview = Agent3TaskUiPolicy.canCreateReviewPreview(
+                    message = message.trim(),
+                    busy = busy,
+                    hasRun = currentRun != null,
+                    runTerminal = if (currentRun == null) null else runTerminal,
+                    terminationPresent = termination != null,
+                    activeToolState = termination?.activeTool?.state,
+                    activeToolRequestState = termination?.activeTool?.requestState,
+                )
+                Button(enabled = canCreatePreview, onClick = { createPreview() }) {
                     Text(if (busy) "Arbejder…" else "Lav preview")
                 }
             }
@@ -185,7 +221,12 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     }
                     Spacer(Modifier.height(10.dp))
                     Button(
-                        enabled = !busy && plan.planId != null && plan.steps.isNotEmpty(),
+                        enabled = Agent3TaskUiPolicy.canStartReviewPreview(
+                            planId = plan.planId,
+                            hasSteps = plan.steps.isNotEmpty(),
+                            busy = busy,
+                            hasRun = run != null,
+                        ),
                         onClick = { startPreview() },
                     ) { Text("Start den viste single-use plan") }
                 }
