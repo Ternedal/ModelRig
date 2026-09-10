@@ -99,13 +99,20 @@ fun Agent3ReviewDevApp() {
         }
 
         fun startPreview() {
-            val planId = preview?.planId ?: return
+            val reviewedPreview = preview ?: return
+            val planId = reviewedPreview.planId ?: return
+            val expectedReviewReads = reviewedPreview.reviewReads
             if (busy) return
             busy = true
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { client().startPlanEnvelope(planId) }
+                    runCatching {
+                        client().startPlanEnvelope(
+                            planId = planId,
+                            expectedReviewReads = expectedReviewReads,
+                        )
+                    }
                 }
                 busy = false
                 result.onSuccess {
