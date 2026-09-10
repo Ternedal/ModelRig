@@ -18,6 +18,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import dk.ternedal.modelrig.desktop.net.Agent3ReadReview
 import dk.ternedal.modelrig.desktop.net.Agent3Run
 import dk.ternedal.modelrig.desktop.net.startReviewedPlanEnvelope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -67,6 +69,8 @@ fun Agent3ReviewDevApp() {
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
         var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var previewIntent by remember { mutableStateOf<Agent3ReviewPreviewIntent?>(null) }
+        var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+        var previewExpired by remember { mutableStateOf(false) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
         var review by remember { mutableStateOf(Agent3ReadReview()) }
         var busy by remember { mutableStateOf(false) }
@@ -85,6 +89,8 @@ fun Agent3ReviewDevApp() {
             preview = null
             previewConnection = null
             previewIntent = null
+            previewDeadlineMillis = null
+            previewExpired = false
         }
 
         fun createPreview() {
@@ -95,6 +101,7 @@ fun Agent3ReviewDevApp() {
                     error = it.message ?: "Forbindelsen er ugyldig"
                     return
                 }
+            val requestStartedAtMillis = System.nanoTime() / 1_000_000L
             busy = true
             error = null
             run = null
@@ -116,9 +123,23 @@ fun Agent3ReviewDevApp() {
                         error = "Preview blev forældet, fordi opgaven eller Read review ændrede sig"
                         return@onSuccess
                     }
+                    val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                        requestStartedAtMillis,
+                        planned.expiresInSeconds,
+                    )
+                    val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                        deadline,
+                        System.nanoTime() / 1_000_000L,
+                    )
                     preview = planned
                     previewConnection = connection
                     previewIntent = requestIntent
+                    previewDeadlineMillis = deadline
+                    previewExpired = Agent3ReviewPreviewPolicy.shouldMarkExpired(
+                        planId = planned.planId,
+                        planSize = planned.plan.size,
+                        previewFresh = previewFresh,
+                    )
                 }.onFailure { error = it.message ?: "Plan-preview fejlede" }
             }
         }
@@ -128,9 +149,22 @@ fun Agent3ReviewDevApp() {
             val boundConnection = previewConnection
             val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
             val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
+            val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                previewDeadlineMillis,
+                System.nanoTime() / 1_000_000L,
+            )
+            if (Agent3ReviewPreviewPolicy.shouldMarkExpired(
+                    planId = reviewedPreview.planId,
+                    planSize = reviewedPreview.plan.size,
+                    previewFresh = previewFresh,
+                )
+            ) {
+                previewExpired = true
+            }
             if (!Agent3ReviewPreviewPolicy.canStart(
                     planId = reviewedPreview.planId,
                     planSize = reviewedPreview.plan.size,
+                    previewFresh = previewFresh,
                     busy = busy,
                     currentConnection = currentConnection,
                     previewConnection = boundConnection,
@@ -160,6 +194,39 @@ fun Agent3ReviewDevApp() {
                     run = it.run
                     review = it.readReview
                 }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
+            }
+        }
+
+        LaunchedEffect(preview?.planId, previewDeadlineMillis, previewIntent, previewConnection) {
+            val currentPreview = preview ?: return@LaunchedEffect
+            val deadline = previewDeadlineMillis
+            val currentFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+            if (Agent3ReviewPreviewPolicy.shouldMarkExpired(
+                    planId = currentPreview.planId,
+                    planSize = currentPreview.plan.size,
+                    previewFresh = currentFresh,
+                )
+            ) {
+                previewExpired = true
+                return@LaunchedEffect
+            }
+            if (!currentFresh) return@LaunchedEffect
+            val remaining = requireNotNull(deadline) - (System.nanoTime() / 1_000_000L)
+            if (remaining > 0L) delay(remaining)
+            val freshAfterDelay = Agent3TaskUiPolicy.isPreviewFresh(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+            if (Agent3ReviewPreviewPolicy.shouldMarkExpired(
+                    planId = currentPreview.planId,
+                    planSize = currentPreview.plan.size,
+                    previewFresh = freshAfterDelay,
+                )
+            ) {
+                previewExpired = true
             }
         }
 
@@ -255,6 +322,15 @@ fun Agent3ReviewDevApp() {
             }
 
             preview?.let { plan ->
+                val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                    previewDeadlineMillis,
+                    System.nanoTime() / 1_000_000L,
+                )
+                val showExpired = previewExpired || Agent3ReviewPreviewPolicy.shouldMarkExpired(
+                    planId = plan.planId,
+                    planSize = plan.plan.size,
+                    previewFresh = previewFresh,
+                )
                 Spacer(Modifier.height(12.dp))
                 ReviewCard {
                     Text("Server-preview", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.Bold)
@@ -276,6 +352,7 @@ fun Agent3ReviewDevApp() {
                         enabled = Agent3ReviewPreviewPolicy.canStart(
                             planId = plan.planId,
                             planSize = plan.plan.size,
+                            previewFresh = previewFresh,
                             busy = busy,
                             currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token),
                             previewConnection = previewConnection,
@@ -284,6 +361,21 @@ fun Agent3ReviewDevApp() {
                         ),
                         onClick = ::startPreview,
                     ) { Text("Start den viste single-use plan") }
+                    if (showExpired) {
+                        Text(
+                            "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                            color = KalivTheme.colors.Danger,
+                            fontSize = 11.sp,
+                        )
+                    } else {
+                        plan.expiresInSeconds?.let {
+                            Text(
+                                "Plan-id udløber om ca. $it sek.",
+                                color = KalivTheme.colors.TextMuted,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
                 }
             }
 

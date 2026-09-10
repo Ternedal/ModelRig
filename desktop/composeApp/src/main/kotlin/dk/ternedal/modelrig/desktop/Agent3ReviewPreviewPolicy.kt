@@ -24,17 +24,28 @@ internal object Agent3ReviewPreviewPolicy {
     fun canStart(
         planId: String?,
         planSize: Int,
+        previewFresh: Boolean,
         busy: Boolean,
         currentConnection: Agent3DevConnectionBinding?,
         previewConnection: Agent3DevConnectionBinding?,
         currentIntent: Agent3ReviewPreviewIntent?,
         previewIntent: Agent3ReviewPreviewIntent?,
     ): Boolean =
-        !busy &&
+        previewFresh &&
+            !busy &&
             !planId.isNullOrBlank() &&
             planSize > 0 &&
             currentConnection != null &&
             currentConnection == previewConnection &&
             currentIntent != null &&
             currentIntent == previewIntent
+
+    fun shouldMarkExpired(
+        planId: String?,
+        planSize: Int,
+        previewFresh: Boolean,
+    ): Boolean =
+        !planId.isNullOrBlank() &&
+            planSize > 0 &&
+            !previewFresh
 }

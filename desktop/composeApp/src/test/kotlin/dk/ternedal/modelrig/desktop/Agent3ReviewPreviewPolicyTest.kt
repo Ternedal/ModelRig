@@ -37,12 +37,13 @@ class Agent3ReviewPreviewPolicyTest {
     }
 
     @Test
-    fun startAcceptsExactNormalizedConnectionAndReviewedIntent() {
+    fun startAcceptsExactNormalizedConnectionReviewedIntentAndFreshPreview() {
         val reviewed = intent("vis status", true)
         assertTrue(
             Agent3ReviewPreviewPolicy.canStart(
                 planId = "plan-1",
                 planSize = 1,
+                previewFresh = true,
                 busy = false,
                 currentConnection = binding("  http://rig-a:8080/// ", " token-a "),
                 previewConnection = connection,
@@ -53,29 +54,39 @@ class Agent3ReviewPreviewPolicyTest {
     }
 
     @Test
+    fun startRejectsExpiredPreview() {
+        val reviewed = intent()
+        assertFalse(
+            Agent3ReviewPreviewPolicy.canStart(
+                "plan-1", 1, false, false, connection, connection, reviewed, reviewed,
+            )
+        )
+    }
+
+    @Test
     fun startRejectsMessageReviewModeOrMissingIntentDrift() {
         val reviewed = intent("vis status", false)
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", 1, false, connection, connection,
+                "plan-1", 1, true, false, connection, connection,
                 intent("vis logs", false), reviewed,
             )
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", 1, false, connection, connection,
+                "plan-1", 1, true, false, connection, connection,
                 intent("vis status", true), reviewed,
             )
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", 1, false, connection, connection,
+                "plan-1", 1, true, false, connection, connection,
                 null, reviewed,
             )
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", 1, false, connection, connection,
+                "plan-1", 1, true, false, connection, connection,
                 reviewed, null,
             )
         )
@@ -86,13 +97,34 @@ class Agent3ReviewPreviewPolicyTest {
         val reviewed = intent()
         val otherUrl = binding("http://rig-b:8080", "token-a")
         val otherToken = binding("http://rig-a:8080", "token-b")
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, otherUrl, connection, reviewed, reviewed))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, otherToken, connection, reviewed, reviewed))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, null, connection, reviewed, reviewed))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, connection, null, reviewed, reviewed))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart(null, 1, false, connection, connection, reviewed, reviewed))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("", 1, false, connection, connection, reviewed, reviewed))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 0, false, connection, connection, reviewed, reviewed))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, connection, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, false, otherUrl, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, false, otherToken, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, false, null, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, false, connection, null, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart(null, 1, true, false, connection, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("", 1, true, false, connection, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 0, true, false, connection, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, true, connection, connection, reviewed, reviewed))
+    }
+
+    @Test
+    fun ttlUsesSharedMonotonicDeadlineAndFailsClosedAtExactBoundary() {
+        val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, 5)
+        assertEquals(15_000L, deadline)
+        assertTrue(Agent3TaskUiPolicy.isPreviewFresh(deadline, 14_999L))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(deadline, 15_000L))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(null, 10_000L))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, null))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, 0))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, -1))
+    }
+
+    @Test
+    fun expiredCopyAppliesOnlyToOtherwiseExecutablePreview() {
+        assertTrue(Agent3ReviewPreviewPolicy.shouldMarkExpired("plan-1", 1, false))
+        assertFalse(Agent3ReviewPreviewPolicy.shouldMarkExpired("plan-1", 1, true))
+        assertFalse(Agent3ReviewPreviewPolicy.shouldMarkExpired(null, 1, false))
+        assertFalse(Agent3ReviewPreviewPolicy.shouldMarkExpired("", 1, false))
+        assertFalse(Agent3ReviewPreviewPolicy.shouldMarkExpired("plan-1", 0, false))
     }
 }
