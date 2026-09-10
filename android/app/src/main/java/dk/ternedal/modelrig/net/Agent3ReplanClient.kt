@@ -64,6 +64,7 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
         val run: Agent3Client.Run,
         val replan: Receipt,
         val preview: AppliedPreview,
+        val readReview: Agent3Client.ReadReview,
     )
 
     fun preview(runId: String, plannerModel: String? = null): Preview {
@@ -98,16 +99,19 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
 
     /**
      * Reviewed Apply boundary. The worker response must prove that the consumed
-     * single-use preview and deterministic revision receipt are exactly the ones
-     * the operator reviewed before any result is returned to UI state.
+     * single-use preview, deterministic revision receipt and post-Apply review
+     * checkpoint are coherent before any result is returned to UI state.
      */
     fun applyReviewed(reviewedPreview: Preview): ApplyResult {
         if (reviewedPreview.revision == Int.MAX_VALUE || reviewedPreview.replanCount == Int.MAX_VALUE) {
             throw ModelRigException("Agent 3.0 replan reviewed Preview has invalid revision authority")
         }
         val root = postApply(reviewedPreview.previewId)
+        val readReviewObject = root.requireObject("read_review")
         validateReviewedApplyResponse(root, reviewedPreview)
-        return parseApplyResult(root)
+        val result = parseApplyResult(root)
+        validateReviewedReadReview(readReviewObject, result.run, result.readReview)
+        return result
     }
 
     private fun postApply(previewId: String): JSONObject = post(
@@ -136,6 +140,7 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
                 promptSha256 = preview.optString("prompt_sha256"),
                 rationale = preview.optString("rationale"),
             ),
+            readReview = parseReadReview(root.optJSONObject("read_review")),
         )
     }
 
@@ -155,6 +160,79 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
         receipt.requireExactInt("from_revision", reviewed.revision, "replan")
         receipt.requireExactInt("to_revision", reviewed.revision + 1, "replan")
         receipt.requireExactInt("replan_number", reviewed.replanCount + 1, "replan")
+    }
+
+    private fun validateReviewedReadReview(
+        raw: JSONObject,
+        run: Agent3Client.Run,
+        review: Agent3Client.ReadReview,
+    ) {
+        val enabled = raw.requireBoolean("enabled", "read_review")
+        val waiting = raw.requireBoolean("waiting", "read_review")
+        val rawRemovable = raw.opt("removable_step_ids") as? JSONArray
+            ?: throw ModelRigException(
+                "Agent 3.0 replan Apply response authority mismatch: read_review.removable_step_ids",
+            )
+        val removableIds = rawRemovable.requireNonBlankStrings("read_review.removable_step_ids")
+
+        if (enabled != review.enabled || waiting != review.waiting || removableIds != review.removableStepIds) {
+            throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: read_review")
+        }
+
+        if (!waiting) {
+            if (
+                review.windowStart != null ||
+                review.windowEnd != null ||
+                removableIds.isNotEmpty() ||
+                review.completedStepId != null ||
+                review.completedTool != null
+            ) {
+                throw ModelRigException(
+                    "Agent 3.0 replan Apply response authority mismatch: cleared read_review checkpoint",
+                )
+            }
+            return
+        }
+
+        if (!enabled || run.state != "running") {
+            throw ModelRigException(
+                "Agent 3.0 replan Apply response authority mismatch: waiting read_review state",
+            )
+        }
+        val start = raw.requireInt("window_start", "read_review")
+        val end = raw.requireInt("window_end", "read_review")
+        if (
+            review.windowStart != start ||
+            review.windowEnd != end ||
+            start != run.currentStep ||
+            start < 0 ||
+            end <= start ||
+            end > run.steps.size
+        ) {
+            throw ModelRigException(
+                "Agent 3.0 replan Apply response authority mismatch: read_review window",
+            )
+        }
+
+        val window = run.steps.subList(start, end)
+        if (window.any { it.id.isNullOrBlank() || it.risk != "read" || it.state != "pending" }) {
+            throw ModelRigException(
+                "Agent 3.0 replan Apply response authority mismatch: read_review window steps",
+            )
+        }
+        val expectedIds = window.map { requireNotNull(it.id) }
+        if (removableIds != expectedIds) {
+            throw ModelRigException(
+                "Agent 3.0 replan Apply response authority mismatch: read_review.removable_step_ids",
+            )
+        }
+        raw.requireNonBlankString("completed_step_id", "read_review")
+        raw.requireNonBlankString("completed_tool", "read_review")
+        if (review.completedStepId.isNullOrBlank() || review.completedTool.isNullOrBlank()) {
+            throw ModelRigException(
+                "Agent 3.0 replan Apply response authority mismatch: read_review completed checkpoint",
+            )
+        }
     }
 
     private fun JSONObject.requireExactString(name: String, expected: String, context: String) {
@@ -181,14 +259,49 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
     }
 
     private fun JSONObject.requireExactInt(name: String, expected: Int, context: String) {
+        val actual = rawInt(name)
+        if (actual != expected) {
+            throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: $context.$name")
+        }
+    }
+
+    private fun JSONObject.requireBoolean(name: String, context: String): Boolean {
+        val actual = if (has(name) && !isNull(name)) opt(name) as? Boolean else null
+        return actual ?: throw ModelRigException(
+            "Agent 3.0 replan Apply response authority mismatch: $context.$name",
+        )
+    }
+
+    private fun JSONObject.requireInt(name: String, context: String): Int =
+        rawInt(name) ?: throw ModelRigException(
+            "Agent 3.0 replan Apply response authority mismatch: $context.$name",
+        )
+
+    private fun JSONObject.requireNonBlankString(name: String, context: String): String {
+        val actual = if (has(name) && !isNull(name)) opt(name) as? String else null
+        return actual?.takeIf { it.isNotBlank() } ?: throw ModelRigException(
+            "Agent 3.0 replan Apply response authority mismatch: $context.$name",
+        )
+    }
+
+    private fun JSONObject.rawInt(name: String): Int? {
         val raw = if (has(name) && !isNull(name)) opt(name) else null
-        val actual = when (raw) {
+        return when (raw) {
             is Int -> raw
             is Long -> raw.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt()
             else -> null
         }
-        if (actual != expected) {
-            throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: $context.$name")
+    }
+
+    private fun JSONArray.requireNonBlankStrings(context: String): List<String> = buildList {
+        for (index in 0 until length()) {
+            val value = opt(index) as? String
+            if (value.isNullOrBlank()) {
+                throw ModelRigException(
+                    "Agent 3.0 replan Apply response authority mismatch: $context",
+                )
+            }
+            add(value)
         }
     }
 
@@ -226,6 +339,20 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
         termination = null,
     )
 
+    private fun parseReadReview(o: JSONObject?): Agent3Client.ReadReview {
+        val review = o ?: JSONObject()
+        return Agent3Client.ReadReview(
+            enabled = review.optBoolean("enabled", false),
+            waiting = review.optBoolean("waiting", false),
+            windowStart = review.nullableInt("window_start"),
+            windowEnd = review.nullableInt("window_end"),
+            removableStepIds = review.optJSONArray("removable_step_ids").toStrings(),
+            completedStepId = review.nullableString("completed_step_id"),
+            completedTool = review.nullableString("completed_tool"),
+            updatedAt = review.nullableDouble("updated_at"),
+        )
+    }
+
     private fun parseSteps(arr: JSONArray): List<Agent3Client.Step> = buildList {
         for (index in 0 until arr.length()) {
             val step = arr.optJSONObject(index) ?: continue
@@ -259,6 +386,9 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
 
     private fun JSONObject.nullableString(name: String): String? =
         if (!has(name) || isNull(name)) null else optString(name).ifBlank { null }
+
+    private fun JSONObject.nullableInt(name: String): Int? =
+        if (!has(name) || isNull(name)) null else optInt(name)
 
     private fun JSONObject.nullableDouble(name: String): Double? =
         if (!has(name) || isNull(name)) null else optDouble(name)
