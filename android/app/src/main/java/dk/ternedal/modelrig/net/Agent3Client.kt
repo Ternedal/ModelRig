@@ -163,8 +163,9 @@ class Agent3Client(baseUrl: String, private val token: String) {
         memorySubjects: List<String> = emptyList(),
         memoryMaxChars: Int = 4_000,
         memoryMaxRecords: Int = 25,
-        reviewReads: Boolean = false,
+        reviewReads: Boolean? = null,
     ): PlanPreview {
+        val requestedReviewReads = reviewReads ?: false
         val payload = JSONObject()
             .put("message", message)
             .put("mode", mode)
@@ -177,10 +178,18 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .put("memory_subjects", JSONArray(memorySubjects))
             .put("memory_max_chars", memoryMaxChars)
             .put("memory_max_records", memoryMaxRecords)
-            .put("review_reads", reviewReads)
+            .put("review_reads", requestedReviewReads)
         conversationId?.let { payload.put("conversation_id", it) }
         plannerModel?.let { payload.put("planner_model", it) }
         val root = post("/api/v1/experimental/agent3/plan", payload)
+        if (reviewReads != null) {
+            val responseReviewReads = root.opt("review_reads")
+            if (responseReviewReads !is Boolean || responseReviewReads != requestedReviewReads) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 Preview-svar: serverens Read review matcher ikke den reviewede intent",
+                )
+            }
+        }
         return PlanPreview(
             planId = root.nullableString("plan_id"),
             expiresInSeconds = root.nullableInt("expires_in_seconds"),
