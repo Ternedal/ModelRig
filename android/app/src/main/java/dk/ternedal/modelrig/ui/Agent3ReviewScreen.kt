@@ -157,6 +157,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 planId = currentPreview.planId,
                 hasSteps = currentPreview.steps.isNotEmpty(),
                 previewFresh = previewFresh,
+                capabilityAllowed = currentPreview.capabilityReceipt?.allowed,
                 busy = busy,
                 hasRun = run != null,
                 currentConnection = currentConnection,
@@ -306,12 +307,17 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                             fontSize = 13.sp,
                         )
                     }
+                    plan.capabilityReceipt?.let { receipt ->
+                        Spacer(Modifier.height(10.dp))
+                        Agent3CapabilityReceiptCard(receipt)
+                    }
                     Spacer(Modifier.height(10.dp))
                     Button(
                         enabled = Agent3ReviewPreviewPolicy.canStart(
                             planId = plan.planId,
                             hasSteps = plan.steps.isNotEmpty(),
                             previewFresh = previewFresh,
+                            capabilityAllowed = plan.capabilityReceipt?.allowed,
                             busy = busy,
                             hasRun = run != null,
                             currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token),
