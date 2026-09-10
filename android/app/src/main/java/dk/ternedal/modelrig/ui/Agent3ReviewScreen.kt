@@ -118,8 +118,12 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             busy = false
             result.onSuccess { planned ->
                 val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
-                if (!Agent3ReviewPreviewPolicy.canPublish(requestIntent, currentIntent)) {
-                    error = "Preview blev forældet, fordi opgaven eller Read review ændrede sig"
+                if (!Agent3ReviewPreviewPolicy.canPublish(requestIntent, currentIntent, planned.reviewReads)) {
+                    error = if (requestIntent.reviewReads != planned.reviewReads) {
+                        "Preview blev afvist, fordi serverens Read review ikke matcher den reviewede opgave"
+                    } else {
+                        "Preview blev forældet, fordi opgaven eller Read review ændrede sig"
+                    }
                     return@onSuccess
                 }
                 val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
@@ -164,6 +168,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 previewConnection = boundConnection,
                 currentIntent = currentIntent,
                 previewIntent = previewIntent,
+                previewReviewReads = currentPreview.reviewReads,
             )
         ) return
         val planId = currentPreview.planId ?: return
@@ -324,6 +329,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                             previewConnection = previewConnection,
                             currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads),
                             previewIntent = previewIntent,
+                            previewReviewReads = plan.reviewReads,
                         ),
                         onClick = { startPreview() },
                     ) { Text("Start den viste single-use plan") }
