@@ -194,8 +194,14 @@ class Agent3Client(baseUrl: String, private val token: String) {
         )
     }
 
-    fun startPlanEnvelope(planId: String): RunEnvelope {
+    fun startPlanEnvelope(planId: String, expectedReviewReads: Boolean? = null): RunEnvelope {
         val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
+        if (expectedReviewReads != null) {
+            val responseReviewReads = root.opt("review_reads")
+            if (responseReviewReads !is Boolean || responseReviewReads != expectedReviewReads) {
+                throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serverens Read review matcher ikke previewet")
+            }
+        }
         val envelope = parseRunEnvelope(root)
         if (envelope.planId.isNullOrBlank() || envelope.planId != planId) {
             throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")

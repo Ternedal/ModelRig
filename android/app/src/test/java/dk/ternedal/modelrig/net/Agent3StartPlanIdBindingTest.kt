@@ -54,6 +54,77 @@ class Agent3StartPlanIdBindingTest {
         }
     }
 
+    @Test
+    fun reviewedStartAcceptsMatchingTrueMode() {
+        val server = server(startEnvelope("server-run", "plan-1", "true"))
+        try {
+            val envelope = Agent3Client(server.url("/").toString(), "token")
+                .startPlanEnvelope("plan-1", expectedReviewReads = true)
+            assertTrue(envelope.reviewReads)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun reviewedStartAcceptsMatchingFalseMode() {
+        val server = server(startEnvelope("server-run", "plan-1", "false"))
+        try {
+            val envelope = Agent3Client(server.url("/").toString(), "token")
+                .startPlanEnvelope("plan-1", expectedReviewReads = false)
+            assertEquals(false, envelope.reviewReads)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun reviewedStartRejectsMismatchingMode() {
+        listOf(
+            true to "false",
+            false to "true",
+        ).forEach { (expected, responseValue) ->
+            val server = server(startEnvelope("server-run", "plan-1", responseValue))
+            try {
+                assertReviewModeFailure(server, expected)
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun reviewedStartRejectsMissingMode() {
+        val server = server(startEnvelope("server-run", "plan-1"))
+        try {
+            assertReviewModeFailure(server, false)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun reviewedStartRejectsNonBooleanMode() {
+        val server = server(startEnvelope("server-run", "plan-1", "\"false\""))
+        try {
+            assertReviewModeFailure(server, false)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    private fun assertReviewModeFailure(server: MockWebServer, expected: Boolean) {
+        val error = runCatching {
+            Agent3Client(server.url("/").toString(), "token")
+                .startPlanEnvelope("plan-1", expectedReviewReads = expected)
+        }.exceptionOrNull()
+        assertTrue(error is ModelRigException)
+        assertEquals(
+            "Ugyldigt Agent 3.0 Start-svar: serverens Read review matcher ikke previewet",
+            error?.message,
+        )
+    }
+
     private fun server(body: String): MockWebServer = MockWebServer().also { server ->
         server.enqueue(
             MockResponse()
@@ -63,7 +134,11 @@ class Agent3StartPlanIdBindingTest {
         server.start()
     }
 
-    private fun startEnvelope(runId: String, planId: String?): String = """
+    private fun startEnvelope(
+        runId: String,
+        planId: String?,
+        reviewReadsJson: String? = null,
+    ): String = """
         {
           "run": {
             "id": "$runId",
@@ -72,6 +147,7 @@ class Agent3StartPlanIdBindingTest {
             "steps": []
           },
           ${planId?.let { "\"plan_id\":\"$it\"," } ?: ""}
+          ${reviewReadsJson?.let { "\"review_reads\":$it," } ?: ""}
           "termination": {
             "schema": "kaliv-agent3-termination/v1",
             "plan": {
