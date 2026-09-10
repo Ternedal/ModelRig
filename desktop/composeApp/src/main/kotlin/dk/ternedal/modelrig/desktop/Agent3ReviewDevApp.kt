@@ -66,6 +66,7 @@ fun Agent3ReviewDevApp() {
         var reviewReads by remember { mutableStateOf(false) }
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
         var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
+        var previewIntent by remember { mutableStateOf<Agent3ReviewPreviewIntent?>(null) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
         var review by remember { mutableStateOf(Agent3ReadReview()) }
         var busy by remember { mutableStateOf(false) }
@@ -83,11 +84,12 @@ fun Agent3ReviewDevApp() {
         fun clearPreviewAuthority() {
             preview = null
             previewConnection = null
+            previewIntent = null
         }
 
         fun createPreview() {
-            val text = message.trim()
-            if (text.isEmpty() || busy) return
+            val requestIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads) ?: return
+            if (busy) return
             val connection = runCatching { currentConnection() }
                 .getOrElse {
                     error = it.message ?: "Forbindelsen er ugyldig"
@@ -101,16 +103,22 @@ fun Agent3ReviewDevApp() {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         client(connection).previewPlan(
-                            message = text,
+                            message = requestIntent.message,
                             mode = "rig",
-                            reviewReads = reviewReads,
+                            reviewReads = requestIntent.reviewReads,
                         )
                     }
                 }
                 busy = false
-                result.onSuccess {
-                    preview = it
+                result.onSuccess { planned ->
+                    val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
+                    if (!Agent3ReviewPreviewPolicy.canPublish(requestIntent, currentIntent)) {
+                        error = "Preview blev forældet, fordi opgaven eller Read review ændrede sig"
+                        return@onSuccess
+                    }
+                    preview = planned
                     previewConnection = connection
+                    previewIntent = requestIntent
                 }.onFailure { error = it.message ?: "Plan-preview fejlede" }
             }
         }
@@ -119,12 +127,15 @@ fun Agent3ReviewDevApp() {
             val reviewedPreview = preview ?: return
             val boundConnection = previewConnection
             val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
+            val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
             if (!Agent3ReviewPreviewPolicy.canStart(
                     planId = reviewedPreview.planId,
                     planSize = reviewedPreview.plan.size,
                     busy = busy,
                     currentConnection = currentConnection,
                     previewConnection = boundConnection,
+                    currentIntent = currentIntent,
+                    previewIntent = previewIntent,
                 )
             ) return
             val planId = reviewedPreview.planId ?: return
@@ -268,6 +279,8 @@ fun Agent3ReviewDevApp() {
                             busy = busy,
                             currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token),
                             previewConnection = previewConnection,
+                            currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads),
+                            previewIntent = previewIntent,
                         ),
                         onClick = ::startPreview,
                     ) { Text("Start den viste single-use plan") }
