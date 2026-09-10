@@ -1,59 +1,98 @@
 package dk.ternedal.modelrig.desktop
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class Agent3ReviewPreviewPolicyTest {
+    private val connection = binding("http://rig-a:8080", "token-a")
+
     private fun binding(base: String, token: String): Agent3DevConnectionBinding =
         requireNotNull(Agent3DevConnectionBinding.capture(base, token))
 
+    private fun intent(
+        message: String = "vis status",
+        reviewReads: Boolean = false,
+    ): Agent3ReviewPreviewIntent =
+        requireNotNull(Agent3ReviewPreviewIntent.capture(message, reviewReads))
+
     @Test
-    fun startAcceptsExactNormalizedOriginatingConnection() {
-        val previewConnection = binding("http://rig-a:8080", "token-a")
-        val currentConnection = binding("  http://rig-a:8080/// ", " token-a ")
+    fun intentCaptureNormalizesMessageAndPreservesReviewMode() {
+        assertEquals(intent("vis status", true), intent("  vis status  ", true))
+        assertFalse(intent("vis status", false) == intent("vis status", true))
+        assertFalse(intent("vis status", false) == intent("vis logs", false))
+        assertNull(Agent3ReviewPreviewIntent.capture("   ", false))
+    }
+
+    @Test
+    fun previewPublicationRequiresExactCurrentIntent() {
+        val requested = intent("vis status", false)
+        assertTrue(Agent3ReviewPreviewPolicy.canPublish(requested, intent(" vis status ", false)))
+        assertFalse(Agent3ReviewPreviewPolicy.canPublish(requested, intent("vis logs", false)))
+        assertFalse(Agent3ReviewPreviewPolicy.canPublish(requested, intent("vis status", true)))
+        assertFalse(Agent3ReviewPreviewPolicy.canPublish(requested, null))
+        assertFalse(Agent3ReviewPreviewPolicy.canPublish(null, requested))
+    }
+
+    @Test
+    fun startAcceptsExactNormalizedConnectionAndReviewedIntent() {
+        val reviewed = intent("vis status", true)
         assertTrue(
             Agent3ReviewPreviewPolicy.canStart(
                 planId = "plan-1",
                 planSize = 1,
                 busy = false,
-                currentConnection = currentConnection,
-                previewConnection = previewConnection,
+                currentConnection = binding("  http://rig-a:8080/// ", " token-a "),
+                previewConnection = connection,
+                currentIntent = intent("  vis status  ", true),
+                previewIntent = reviewed,
             )
         )
     }
 
     @Test
-    fun startRejectsUrlOrCredentialDrift() {
-        val previewConnection = binding("http://rig-a:8080", "token-a")
+    fun startRejectsMessageReviewModeOrMissingIntentDrift() {
+        val reviewed = intent("vis status", false)
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", 1, false,
-                binding("http://rig-b:8080", "token-a"), previewConnection,
+                "plan-1", 1, false, connection, connection,
+                intent("vis logs", false), reviewed,
             )
         )
         assertFalse(
             Agent3ReviewPreviewPolicy.canStart(
-                "plan-1", 1, false,
-                binding("http://rig-a:8080", "token-b"), previewConnection,
+                "plan-1", 1, false, connection, connection,
+                intent("vis status", true), reviewed,
+            )
+        )
+        assertFalse(
+            Agent3ReviewPreviewPolicy.canStart(
+                "plan-1", 1, false, connection, connection,
+                null, reviewed,
+            )
+        )
+        assertFalse(
+            Agent3ReviewPreviewPolicy.canStart(
+                "plan-1", 1, false, connection, connection,
+                reviewed, null,
             )
         )
     }
 
     @Test
-    fun startRejectsMissingConnectionAuthority() {
-        val previewConnection = binding("http://rig-a:8080", "token-a")
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, null, previewConnection))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, previewConnection, null))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, null, null))
-    }
-
-    @Test
-    fun startRetainsExistingPlanAndBusyGuards() {
-        val connection = binding("http://rig-a:8080", "token-a")
-        assertFalse(Agent3ReviewPreviewPolicy.canStart(null, 1, false, connection, connection))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("", 1, false, connection, connection))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 0, false, connection, connection))
-        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, connection, connection))
+    fun existingConnectionPlanAndBusyGuardsRemainFailClosed() {
+        val reviewed = intent()
+        val otherUrl = binding("http://rig-b:8080", "token-a")
+        val otherToken = binding("http://rig-a:8080", "token-b")
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, otherUrl, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, otherToken, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, null, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, false, connection, null, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart(null, 1, false, connection, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("", 1, false, connection, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 0, false, connection, connection, reviewed, reviewed))
+        assertFalse(Agent3ReviewPreviewPolicy.canStart("plan-1", 1, true, connection, connection, reviewed, reviewed))
     }
 }

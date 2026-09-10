@@ -1,17 +1,40 @@
 package dk.ternedal.modelrig.desktop
 
-/** Local Start authority for the isolated reviewed Preview surface. */
+/** Exact visible operator intent represented by one reviewed Preview request. */
+internal data class Agent3ReviewPreviewIntent(
+    val message: String,
+    val reviewReads: Boolean,
+) {
+    companion object {
+        fun capture(message: String, reviewReads: Boolean): Agent3ReviewPreviewIntent? {
+            val normalizedMessage = message.trim()
+            if (normalizedMessage.isBlank()) return null
+            return Agent3ReviewPreviewIntent(normalizedMessage, reviewReads)
+        }
+    }
+}
+
+/** Local publication and Start authority for the isolated reviewed Preview surface. */
 internal object Agent3ReviewPreviewPolicy {
+    fun canPublish(
+        requestIntent: Agent3ReviewPreviewIntent?,
+        currentIntent: Agent3ReviewPreviewIntent?,
+    ): Boolean = requestIntent != null && requestIntent == currentIntent
+
     fun canStart(
         planId: String?,
         planSize: Int,
         busy: Boolean,
         currentConnection: Agent3DevConnectionBinding?,
         previewConnection: Agent3DevConnectionBinding?,
+        currentIntent: Agent3ReviewPreviewIntent?,
+        previewIntent: Agent3ReviewPreviewIntent?,
     ): Boolean =
         !busy &&
             !planId.isNullOrBlank() &&
             planSize > 0 &&
             currentConnection != null &&
-            currentConnection == previewConnection
+            currentConnection == previewConnection &&
+            currentIntent != null &&
+            currentIntent == previewIntent
 }
