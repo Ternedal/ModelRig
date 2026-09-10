@@ -177,7 +177,12 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client(connection).startPlanEnvelope(planId) }
+                runCatching {
+                    client(connection).startPlanEnvelope(
+                        planId = planId,
+                        expectedReviewReads = currentPreview.reviewReads,
+                    )
+                }
             }
             busy = false
             result.onSuccess {
