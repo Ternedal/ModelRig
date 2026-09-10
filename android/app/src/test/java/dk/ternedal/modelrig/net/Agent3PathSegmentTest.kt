@@ -20,12 +20,37 @@ import org.junit.Test
  */
 class Agent3PathSegmentTest {
 
+    private fun runEnvelope(runId: String) = """
+        {
+          "run":{"id":"$runId","state":"running","current_step":0,"steps":[]},
+          "termination":{
+            "schema":"kaliv-agent3-termination/v1",
+            "plan":{
+              "state":"available",
+              "can_request":true,
+              "request_scope":"plan",
+              "effect":"prevent_future_steps",
+              "reason":"fixture"
+            },
+            "model_stream":{
+              "state":"not_active",
+              "active":false,
+              "can_request":false,
+              "handle_present":false,
+              "reason":"fixture"
+            },
+            "active_tool":null,
+            "production_activation":false
+          }
+        }
+    """.trimIndent()
+
     private fun server(runId: String): MockWebServer {
         val s = MockWebServer()
         repeat(4) {
             s.enqueue(
                 MockResponse().setHeader("Content-Type", "application/json")
-                    .setBody("""{"run":{"id":"$runId","plan_id":"p","state":"running","steps":[]}}"""),
+                    .setBody(runEnvelope(runId)),
             )
         }
         s.start()
