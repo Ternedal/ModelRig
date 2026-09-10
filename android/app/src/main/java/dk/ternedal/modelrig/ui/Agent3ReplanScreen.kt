@@ -18,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,9 +33,11 @@ import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.logic.Agent3ReplanPreviewIntent
 import dk.ternedal.modelrig.logic.Agent3ReplanPreviewPolicy
 import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
+import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3ReplanClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dk.ternedal.modelrig.ui.components.kalivScreenInsets
@@ -48,6 +51,8 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
     var preview by remember { mutableStateOf<Agent3ReplanClient.Preview?>(null) }
     var previewConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
     var previewIntent by remember { mutableStateOf<Agent3ReplanPreviewIntent?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var applied by remember { mutableStateOf<Agent3ReplanClient.ApplyResult?>(null) }
     var applyArmed by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -65,6 +70,8 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
         preview = null
         previewConnection = null
         previewIntent = null
+        previewDeadlineMillis = null
+        previewExpired = false
         applyArmed = false
     }
 
@@ -76,6 +83,7 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
                 error = it.message ?: "Rig-forbindelsen er ugyldig"
                 return
             }
+        val requestStartedAtMillis = System.nanoTime() / 1_000_000L
         busy = true
         error = null
         clearPreviewAuthority()
@@ -105,9 +113,18 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
                     }
                     return@onSuccess
                 }
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    planned.expiresInSeconds,
+                )
                 preview = planned
                 previewConnection = connection
                 previewIntent = requestIntent
+                previewDeadlineMillis = deadline
+                previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
             }.onFailure { error = it.message ?: "Replan-preview fejlede" }
         }
     }
@@ -117,9 +134,18 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
         val boundConnection = previewConnection
         val currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token)
         val currentIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel)
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+            previewDeadlineMillis,
+            System.nanoTime() / 1_000_000L,
+        )
+        if (!previewFresh) {
+            previewExpired = true
+            applyArmed = false
+        }
         if (!Agent3ReplanPreviewPolicy.canApply(
                 previewId = current.previewId,
                 previewRunId = current.runId,
+                previewFresh = previewFresh,
                 busy = busy,
                 currentIntent = currentIntent,
                 previewIntent = previewIntent,
@@ -128,7 +154,11 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
             )
         ) {
             applyArmed = false
-            error = "Replan-previewet matcher ikke længere den reviewede opgave eller forbindelse"
+            error = if (!previewFresh) {
+                "Replan-previewet er udløbet. Lav et nyt preview."
+            } else {
+                "Replan-previewet matcher ikke længere den reviewede opgave eller forbindelse"
+            }
             return
         }
         if (!applyArmed) {
@@ -147,6 +177,29 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
                 clearPreviewAuthority()
                 applied = it
             }.onFailure { error = it.message ?: "Replan kunne ikke anvendes" }
+        }
+    }
+
+    LaunchedEffect(preview?.previewId, previewDeadlineMillis) {
+        val previewId = preview?.previewId ?: return@LaunchedEffect
+        val deadline = previewDeadlineMillis
+        if (deadline == null) {
+            previewExpired = true
+            applyArmed = false
+            return@LaunchedEffect
+        }
+        val remaining = deadline - (System.nanoTime() / 1_000_000L)
+        if (remaining > 0L) delay(remaining)
+        if (
+            preview?.previewId == previewId &&
+            previewDeadlineMillis == deadline &&
+            Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+        ) {
+            previewExpired = true
+            applyArmed = false
         }
     }
 
@@ -229,9 +282,14 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
             }
 
             preview?.let { current ->
+                val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                    previewDeadlineMillis,
+                    System.nanoTime() / 1_000_000L,
+                )
                 val applyAllowed = Agent3ReplanPreviewPolicy.canApply(
                     previewId = current.previewId,
                     previewRunId = current.runId,
+                    previewFresh = previewFresh,
                     busy = busy,
                     currentIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel),
                     previewIntent = previewIntent,
@@ -244,6 +302,7 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
                     busy,
                     applyArmed,
                     applyAllowed,
+                    previewExpired || !previewFresh,
                     onApply = { applyPreview() },
                     onDisarm = { applyArmed = false },
                 )
@@ -271,6 +330,7 @@ private fun ReplanPreviewSurface(
     busy: Boolean,
     armed: Boolean,
     applyAllowed: Boolean,
+    expired: Boolean,
     onApply: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -311,7 +371,13 @@ private fun ReplanPreviewSurface(
                 OutlinedButton(enabled = applyAllowed && !busy, onClick = onDisarm) { Text("Fortryd") }
             }
         }
-        if (!applyAllowed) {
+        if (expired) {
+            Text(
+                "Previewet er udløbet eller har en ugyldig TTL. Lav et nyt preview før Apply.",
+                color = KalivTheme.colors.danger,
+                fontSize = 11.sp,
+            )
+        } else if (!applyAllowed) {
             Text(
                 "Apply er låst, fordi previewets opgave eller forbindelse ikke længere matcher.",
                 color = KalivTheme.colors.danger,

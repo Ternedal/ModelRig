@@ -29,13 +29,15 @@ internal object Agent3ReplanPreviewPolicy {
     fun canApply(
         previewId: String,
         previewRunId: String,
+        previewFresh: Boolean,
         busy: Boolean,
         currentIntent: Agent3ReplanPreviewIntent?,
         previewIntent: Agent3ReplanPreviewIntent?,
         currentConnection: Agent3ReviewConnectionBinding?,
         previewConnection: Agent3ReviewConnectionBinding?,
     ): Boolean =
-        !busy &&
+        previewFresh &&
+            !busy &&
             previewId.isNotBlank() &&
             previewIntent != null &&
             currentIntent == previewIntent &&
