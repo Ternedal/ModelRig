@@ -29,6 +29,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.logic.Agent3ReplanPreviewIntent
+import dk.ternedal.modelrig.logic.Agent3ReplanPreviewPolicy
+import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
 import dk.ternedal.modelrig.net.Agent3ReplanClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -43,60 +46,106 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
     var runId by remember { mutableStateOf("") }
     var plannerModel by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Agent3ReplanClient.Preview?>(null) }
+    var previewConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
+    var previewIntent by remember { mutableStateOf<Agent3ReplanPreviewIntent?>(null) }
     var applied by remember { mutableStateOf<Agent3ReplanClient.ApplyResult?>(null) }
     var applyArmed by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    fun client(): Agent3ReplanClient {
-        val base = store.baseUrl?.takeIf { it.isNotBlank() }
-            ?: error("Ingen rig-URL er gemt")
-        val token = store.token?.takeIf { it.isNotBlank() }
-            ?: error("Ingen device-token er gemt")
-        return Agent3ReplanClient(base, token)
+    fun currentConnection(): Agent3ReviewConnectionBinding =
+        requireNotNull(Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token)) {
+            "Rig-forbindelsen mangler eller er ugyldig"
+        }
+
+    fun client(connection: Agent3ReviewConnectionBinding): Agent3ReplanClient =
+        Agent3ReplanClient(connection.baseUrl, connection.token)
+
+    fun clearPreviewAuthority() {
+        preview = null
+        previewConnection = null
+        previewIntent = null
+        applyArmed = false
     }
 
     fun loadPreview() {
-        val id = runId.trim()
-        if (busy || id.isEmpty()) return
+        val requestIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel) ?: return
+        if (busy) return
+        val connection = runCatching { currentConnection() }
+            .getOrElse {
+                error = it.message ?: "Rig-forbindelsen er ugyldig"
+                return
+            }
         busy = true
         error = null
-        preview = null
+        clearPreviewAuthority()
         applied = null
-        applyArmed = false
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client().preview(
-                        id,
-                        plannerModel.trim().takeIf { it.isNotEmpty() },
+                    client(connection).preview(
+                        requestIntent.runId,
+                        requestIntent.plannerModel,
                     )
                 }
             }
             busy = false
-            result.onSuccess { preview = it }
-                .onFailure { error = it.message ?: "Replan-preview fejlede" }
+            result.onSuccess { planned ->
+                val currentIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel)
+                if (!Agent3ReplanPreviewPolicy.canPublish(
+                        requestIntent = requestIntent,
+                        currentIntent = currentIntent,
+                        responseRunId = planned.runId,
+                    )
+                ) {
+                    error = if (planned.runId != requestIntent.runId) {
+                        "Replan-preview blev afvist, fordi serverens run-id ikke matcher den reviewede kørsel"
+                    } else {
+                        "Replan-preview blev forældet, fordi run-id eller replanner-model ændrede sig"
+                    }
+                    return@onSuccess
+                }
+                preview = planned
+                previewConnection = connection
+                previewIntent = requestIntent
+            }.onFailure { error = it.message ?: "Replan-preview fejlede" }
         }
     }
 
     fun applyPreview() {
         val current = preview ?: return
-        if (busy) return
+        val boundConnection = previewConnection
+        val currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token)
+        val currentIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel)
+        if (!Agent3ReplanPreviewPolicy.canApply(
+                previewId = current.previewId,
+                previewRunId = current.runId,
+                busy = busy,
+                currentIntent = currentIntent,
+                previewIntent = previewIntent,
+                currentConnection = currentConnection,
+                previewConnection = boundConnection,
+            )
+        ) {
+            applyArmed = false
+            error = "Replan-previewet matcher ikke længere den reviewede opgave eller forbindelse"
+            return
+        }
         if (!applyArmed) {
             applyArmed = true
             return
         }
+        val connection = boundConnection ?: return
         busy = true
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().apply(current.previewId) }
+                runCatching { client(connection).apply(current.previewId) }
             }
             busy = false
-            applyArmed = false
             result.onSuccess {
+                clearPreviewAuthority()
                 applied = it
-                preview = null
             }.onFailure { error = it.message ?: "Replan kunne ikke anvendes" }
         }
     }
@@ -147,7 +196,11 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = runId,
-                    onValueChange = { runId = it; preview = null; applied = null; applyArmed = false },
+                    onValueChange = {
+                        runId = it
+                        clearPreviewAuthority()
+                        applied = null
+                    },
                     label = { Text("AgentRun-id") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -155,7 +208,10 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = plannerModel,
-                    onValueChange = { plannerModel = it; preview = null; applyArmed = false },
+                    onValueChange = {
+                        plannerModel = it
+                        clearPreviewAuthority()
+                    },
                     label = { Text("Lokal replanner-model, valgfri") },
                     supportingText = { Text("Tomt felt bruger workerens standardmodel.") },
                     singleLine = true,
@@ -173,11 +229,21 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
             }
 
             preview?.let { current ->
+                val applyAllowed = Agent3ReplanPreviewPolicy.canApply(
+                    previewId = current.previewId,
+                    previewRunId = current.runId,
+                    busy = busy,
+                    currentIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel),
+                    previewIntent = previewIntent,
+                    currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token),
+                    previewConnection = previewConnection,
+                )
                 Spacer(Modifier.height(12.dp))
                 ReplanPreviewSurface(
                     current,
                     busy,
                     applyArmed,
+                    applyAllowed,
                     onApply = { applyPreview() },
                     onDisarm = { applyArmed = false },
                 )
@@ -204,6 +270,7 @@ private fun ReplanPreviewSurface(
     preview: Agent3ReplanClient.Preview,
     busy: Boolean,
     armed: Boolean,
+    applyAllowed: Boolean,
     onApply: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -237,14 +304,20 @@ private fun ReplanPreviewSurface(
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !busy, onClick = onApply) {
+            Button(enabled = applyAllowed, onClick = onApply) {
                 Text(if (armed) "Bekræft apply" else "Armér apply")
             }
             if (armed) {
-                OutlinedButton(enabled = !busy, onClick = onDisarm) { Text("Fortryd") }
+                OutlinedButton(enabled = applyAllowed && !busy, onClick = onDisarm) { Text("Fortryd") }
             }
         }
-        if (armed) {
+        if (!applyAllowed) {
+            Text(
+                "Apply er låst, fordi previewets opgave eller forbindelse ikke længere matcher.",
+                color = KalivTheme.colors.danger,
+                fontSize = 11.sp,
+            )
+        } else if (armed) {
             Text(
                 "Næste klik forbruger tokenet og erstatter kun det viste pending read-window. Runnet fortsættes ikke automatisk.",
                 color = KalivTheme.colors.amber,
