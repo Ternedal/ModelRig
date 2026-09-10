@@ -103,6 +103,7 @@ fun Agent3ReviewDevApp() {
             val reviewedPreview = preview ?: return
             val planId = reviewedPreview.planId ?: return
             val expectedReviewReads = reviewedPreview.reviewReads
+            val expectedCapabilityReceipt = reviewedPreview.capabilityReceipt
             if (busy) return
             busy = true
             error = null
@@ -112,6 +113,7 @@ fun Agent3ReviewDevApp() {
                         client().startReviewedPlanEnvelope(
                             planId = planId,
                             expectedReviewReads = expectedReviewReads,
+                            expectedCapabilityReceipt = expectedCapabilityReceipt,
                         )
                     }
                 }
