@@ -34,6 +34,7 @@ import dk.ternedal.modelrig.desktop.net.Agent3Client
 import dk.ternedal.modelrig.desktop.net.Agent3PlanPreview
 import dk.ternedal.modelrig.desktop.net.Agent3ReadReview
 import dk.ternedal.modelrig.desktop.net.Agent3Run
+import dk.ternedal.modelrig.desktop.net.startReviewedPlanEnvelope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -108,7 +109,7 @@ fun Agent3ReviewDevApp() {
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        client().startPlanEnvelope(
+                        client().startReviewedPlanEnvelope(
                             planId = planId,
                             expectedReviewReads = expectedReviewReads,
                         )
