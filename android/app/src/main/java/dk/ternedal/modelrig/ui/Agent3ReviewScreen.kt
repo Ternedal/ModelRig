@@ -29,6 +29,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
+import dk.ternedal.modelrig.logic.Agent3ReviewConnectionPolicy
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3Client
 import dk.ternedal.modelrig.ui.theme.KalivTheme
@@ -44,19 +46,31 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var message by remember { mutableStateOf("") }
     var reviewReads by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
+    var previewConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
+    var runConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
     var review by remember { mutableStateOf<Agent3Client.ReadReview?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var resultBody by remember { mutableStateOf<String?>(null) }
     var replanPreview by remember { mutableStateOf<dk.ternedal.modelrig.net.Agent3ReplanClient.Preview?>(null) }
 
-    fun client(): Agent3Client {
+    fun currentConnection(): Agent3ReviewConnectionBinding {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
             ?: error("Ingen rig-URL er gemt")
         val token = store.token?.takeIf { it.isNotBlank() }
             ?: error("Ingen device-token er gemt")
-        return Agent3Client(base, token)
+        return requireNotNull(Agent3ReviewConnectionBinding.capture(base, token)) {
+            "Forbindelsen er ugyldig"
+        }
+    }
+
+    fun client(connection: Agent3ReviewConnectionBinding): Agent3Client =
+        Agent3Client(connection.baseUrl, connection.token)
+
+    fun clearPreviewAuthority() {
+        preview = null
+        previewConnection = null
     }
 
     fun createPreview() {
@@ -74,12 +88,17 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 activeToolRequestState = termination?.activeTool?.requestState,
             )
         ) return
+        val connection = runCatching { currentConnection() }
+            .getOrElse {
+                error = it.message ?: "Forbindelsen er ugyldig"
+                return
+            }
         busy = true
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client().previewPlan(
+                    client(connection).previewPlan(
                         message = text,
                         mode = "rig",
                         reviewReads = reviewReads,
@@ -89,7 +108,9 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             busy = false
             result.onSuccess {
                 preview = it
+                previewConnection = connection
                 run = null
+                runConnection = null
                 review = null
                 resultBody = null
                 replanPreview = null
@@ -99,24 +120,31 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
 
     fun startPreview() {
         val currentPreview = preview ?: return
-        if (!Agent3TaskUiPolicy.canStartReviewPreview(
+        val boundConnection = previewConnection
+        val currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token)
+        if (!Agent3ReviewConnectionPolicy.canStart(
                 planId = currentPreview.planId,
                 hasSteps = currentPreview.steps.isNotEmpty(),
                 busy = busy,
                 hasRun = run != null,
+                currentConnection = currentConnection,
+                previewConnection = boundConnection,
             )
         ) return
         val planId = currentPreview.planId ?: return
+        val connection = boundConnection ?: return
         busy = true
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().startPlanEnvelope(planId) }
+                runCatching { client(connection).startPlanEnvelope(planId) }
             }
             busy = false
             result.onSuccess {
                 preview = null
+                previewConnection = null
                 run = it.run
+                runConnection = connection
                 review = it.readReview
             }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
         }
@@ -153,7 +181,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = message,
-                    onValueChange = { message = it; preview = null },
+                    onValueChange = { message = it; clearPreviewAuthority() },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 8,
@@ -165,11 +193,11 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (reviewReads) {
-                        Button(onClick = { reviewReads = false; preview = null }) {
+                        Button(onClick = { reviewReads = false; clearPreviewAuthority() }) {
                             Text("Read review: til")
                         }
                     } else {
-                        OutlinedButton(onClick = { reviewReads = true; preview = null }) {
+                        OutlinedButton(onClick = { reviewReads = true; clearPreviewAuthority() }) {
                             Text("Read review: fra")
                         }
                     }
@@ -221,11 +249,13 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     }
                     Spacer(Modifier.height(10.dp))
                     Button(
-                        enabled = Agent3TaskUiPolicy.canStartReviewPreview(
+                        enabled = Agent3ReviewConnectionPolicy.canStart(
                             planId = plan.planId,
                             hasSteps = plan.steps.isNotEmpty(),
                             busy = busy,
                             hasRun = run != null,
+                            currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token),
+                            previewConnection = previewConnection,
                         ),
                         onClick = { startPreview() },
                     ) { Text("Start den viste single-use plan") }
@@ -317,41 +347,62 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     dk.ternedal.modelrig.ui.chat.Agent3CheckpointActions(
                         busy = busy,
                         onContinue = {
-                            busy = true
-                            scope.launch {
-                                val res = withContext(Dispatchers.IO) { runCatching { client().resume(current.id) } }
-                                res.onSuccess {
-                                    run = it
-                                    resultBody = null
-                                    replanPreview = null
-                                    error = null
-                                }.onFailure { error = it.message }
-                                val fresh = withContext(Dispatchers.IO) { runCatching { client().getRun(current.id) } }
-                                fresh.onSuccess { run = it }
-                                busy = false
+                            val connection = runConnection
+                            if (connection == null) {
+                                error = "Run-forbindelsen mangler"
+                            } else if (!busy) {
+                                busy = true
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching { client(connection).resume(current.id) }
+                                    }
+                                    res.onSuccess {
+                                        run = it
+                                        resultBody = null
+                                        replanPreview = null
+                                        error = null
+                                    }.onFailure { error = it.message }
+                                    val fresh = withContext(Dispatchers.IO) {
+                                        runCatching { client(connection).getRun(current.id) }
+                                    }
+                                    fresh.onSuccess { run = it }
+                                    busy = false
+                                }
                             }
                         },
                         onReplan = {
-                            busy = true
-                            scope.launch {
-                                val res = withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        dk.ternedal.modelrig.net.Agent3ReplanClient(
-                                            store.baseUrl.orEmpty(), store.token.orEmpty(),
-                                        ).preview(current.id)
+                            val connection = runConnection
+                            if (connection == null) {
+                                error = "Run-forbindelsen mangler"
+                            } else if (!busy) {
+                                busy = true
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            dk.ternedal.modelrig.net.Agent3ReplanClient(
+                                                connection.baseUrl, connection.token,
+                                            ).preview(current.id)
+                                        }
                                     }
+                                    res.onSuccess { replanPreview = it; error = null }
+                                        .onFailure { error = it.message }
+                                    busy = false
                                 }
-                                res.onSuccess { replanPreview = it; error = null }
-                                    .onFailure { error = it.message }
-                                busy = false
                             }
                         },
                         onStop = {
-                            busy = true
-                            scope.launch {
-                                val res = withContext(Dispatchers.IO) { runCatching { client().cancel(current.id) } }
-                                res.onSuccess { run = it; error = null }.onFailure { error = it.message }
-                                busy = false
+                            val connection = runConnection
+                            if (connection == null) {
+                                error = "Run-forbindelsen mangler"
+                            } else if (!busy) {
+                                busy = true
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching { client(connection).cancel(current.id) }
+                                    }
+                                    res.onSuccess { run = it; error = null }.onFailure { error = it.message }
+                                    busy = false
+                                }
                             }
                         },
                     )
