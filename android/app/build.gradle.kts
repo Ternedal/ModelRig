@@ -94,7 +94,7 @@ dependencies {
     //    til at TEGNE koden, telefonen til at laese den.
     //  * CameraX giver et livscyklus-bundet kamera uden at vi skal skrive
     //    Camera2-state selv. Vi tager kun de fire moduler vi bruger.
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:core:3.5.4")
     implementation("androidx.camera:camera-core:1.4.2")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")
