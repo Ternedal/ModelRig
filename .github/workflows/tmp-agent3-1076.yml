@@ -1,0 +1,70 @@
+name: tmp-agent3-1076
+
+on:
+  push:
+    branches:
+      - fix/android-a3-termination-run-truth-1076
+    paths:
+      - .tmp/patch_1076.py
+      - .github/workflows/tmp-agent3-1076.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: fix/android-a3-termination-run-truth-1076
+      - name: Guard exact base ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=9ee4d933549536dbcefc69729daedbc285917b1e
+          test "$(git merge-base HEAD "$base")" = "$base"
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Apply focused patch
+        run: python .tmp/patch_1076.py
+      - name: Product diff guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git status --short
+          test -f android/app/src/test/java/dk/ternedal/modelrig/net/Agent3TerminationRunTruthTest.kt
+      - name: Compile Android and run unit tests
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest -Proborazzi.test.verify=true --no-daemon --console=plain
+      - name: Publish one clean product commit
+        shell: bash
+        env:
+          BRANCH: fix/android-a3-termination-run-truth-1076
+          BASE: 9ee4d933549536dbcefc69729daedbc285917b1e
+        run: |
+          set -euo pipefail
+          git add android/app/src/main/java/dk/ternedal/modelrig/net/Agent3Client.kt \
+                  android/app/src/test/java/dk/ternedal/modelrig/net/Agent3TerminationRunTruthTest.kt
+          git diff --cached --check
+          git diff --cached --binary "$BASE" -- \
+            android/app/src/main/java/dk/ternedal/modelrig/net/Agent3Client.kt \
+            android/app/src/test/java/dk/ternedal/modelrig/net/Agent3TerminationRunTruthTest.kt > "$RUNNER_TEMP/product.patch"
+          git reset --hard "$BASE"
+          git clean -fd
+          git apply --index "$RUNNER_TEMP/product.patch"
+          git config user.name Ternedal
+          git config user.email a.nielbaek@gmail.com
+          git commit -m "fix(agent3): bind Android termination receipt to run truth (#1076)"
+          test "$(git rev-list --count "$BASE"..HEAD)" = "1"
+          git push --force-with-lease origin HEAD:"$BRANCH"
