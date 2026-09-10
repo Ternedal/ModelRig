@@ -170,7 +170,7 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client(connection).apply(current.previewId) }
+                runCatching { client(connection).applyReviewed(current) }
             }
             busy = false
             result.onSuccess {
