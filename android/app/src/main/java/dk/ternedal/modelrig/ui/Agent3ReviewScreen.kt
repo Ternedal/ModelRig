@@ -35,6 +35,7 @@ import dk.ternedal.modelrig.logic.Agent3ReviewPreviewIntent
 import dk.ternedal.modelrig.logic.Agent3ReviewPreviewPolicy
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.net.startReviewedPlanEnvelope
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -178,9 +179,10 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client(connection).startPlanEnvelope(
+                    client(connection).startReviewedPlanEnvelope(
                         planId = planId,
                         expectedReviewReads = currentPreview.reviewReads,
+                        expectedCapabilityReceipt = currentPreview.capabilityReceipt,
                     )
                 }
             }
