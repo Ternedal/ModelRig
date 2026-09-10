@@ -30,7 +30,10 @@ internal object Agent3ReviewPreviewPolicy {
     fun canPublish(
         requestIntent: Agent3ReviewPreviewIntent?,
         currentIntent: Agent3ReviewPreviewIntent?,
-    ): Boolean = requestIntent != null && requestIntent == currentIntent
+        previewReviewReads: Boolean,
+    ): Boolean = requestIntent != null &&
+        requestIntent == currentIntent &&
+        requestIntent.reviewReads == previewReviewReads
 
     fun canStart(
         planId: String?,
@@ -43,6 +46,7 @@ internal object Agent3ReviewPreviewPolicy {
         previewConnection: Agent3ReviewConnectionBinding?,
         currentIntent: Agent3ReviewPreviewIntent?,
         previewIntent: Agent3ReviewPreviewIntent?,
+        previewReviewReads: Boolean,
     ): Boolean = previewFresh &&
         capabilityAllowed != false &&
         Agent3ReviewConnectionPolicy.canStart(
@@ -52,5 +56,8 @@ internal object Agent3ReviewPreviewPolicy {
             hasRun = hasRun,
             currentConnection = currentConnection,
             previewConnection = previewConnection,
-        ) && currentIntent != null && currentIntent == previewIntent
+        ) && currentIntent != null &&
+        previewIntent != null &&
+        currentIntent == previewIntent &&
+        previewIntent.reviewReads == previewReviewReads
 }
