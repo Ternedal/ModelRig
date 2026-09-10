@@ -30,7 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
-import dk.ternedal.modelrig.logic.Agent3ReviewConnectionPolicy
+import dk.ternedal.modelrig.logic.Agent3ReviewPreviewIntent
+import dk.ternedal.modelrig.logic.Agent3ReviewPreviewPolicy
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3Client
 import dk.ternedal.modelrig.ui.theme.KalivTheme
@@ -47,6 +48,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var reviewReads by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
     var previewConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
+    var previewIntent by remember { mutableStateOf<Agent3ReviewPreviewIntent?>(null) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
     var runConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
     var review by remember { mutableStateOf<Agent3Client.ReadReview?>(null) }
@@ -71,15 +73,16 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     fun clearPreviewAuthority() {
         preview = null
         previewConnection = null
+        previewIntent = null
     }
 
     fun createPreview() {
-        val text = message.trim()
+        val requestIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads) ?: return
         val currentRun = run
         val termination = currentRun?.termination
         val runTerminal = currentRun?.state?.lowercase() in setOf("blocked", "completed", "failed", "cancelled")
         if (!Agent3TaskUiPolicy.canCreateReviewPreview(
-                message = text,
+                message = requestIntent.message,
                 busy = busy,
                 hasRun = currentRun != null,
                 runTerminal = if (currentRun == null) null else runTerminal,
@@ -99,16 +102,22 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     client(connection).previewPlan(
-                        message = text,
+                        message = requestIntent.message,
                         mode = "rig",
-                        reviewReads = reviewReads,
+                        reviewReads = requestIntent.reviewReads,
                     )
                 }
             }
             busy = false
-            result.onSuccess {
-                preview = it
+            result.onSuccess { planned ->
+                val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
+                if (!Agent3ReviewPreviewPolicy.canPublish(requestIntent, currentIntent)) {
+                    error = "Preview blev forældet, fordi opgaven eller Read review ændrede sig"
+                    return@onSuccess
+                }
+                preview = planned
                 previewConnection = connection
+                previewIntent = requestIntent
                 run = null
                 runConnection = null
                 review = null
@@ -122,13 +131,16 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         val currentPreview = preview ?: return
         val boundConnection = previewConnection
         val currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token)
-        if (!Agent3ReviewConnectionPolicy.canStart(
+        val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
+        if (!Agent3ReviewPreviewPolicy.canStart(
                 planId = currentPreview.planId,
                 hasSteps = currentPreview.steps.isNotEmpty(),
                 busy = busy,
                 hasRun = run != null,
                 currentConnection = currentConnection,
                 previewConnection = boundConnection,
+                currentIntent = currentIntent,
+                previewIntent = previewIntent,
             )
         ) return
         val planId = currentPreview.planId ?: return
@@ -141,8 +153,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             }
             busy = false
             result.onSuccess {
-                preview = null
-                previewConnection = null
+                clearPreviewAuthority()
                 run = it.run
                 runConnection = connection
                 review = it.readReview
@@ -249,13 +260,15 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     }
                     Spacer(Modifier.height(10.dp))
                     Button(
-                        enabled = Agent3ReviewConnectionPolicy.canStart(
+                        enabled = Agent3ReviewPreviewPolicy.canStart(
                             planId = plan.planId,
                             hasSteps = plan.steps.isNotEmpty(),
                             busy = busy,
                             hasRun = run != null,
                             currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token),
                             previewConnection = previewConnection,
+                            currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads),
+                            previewIntent = previewIntent,
                         ),
                         onClick = { startPreview() },
                     ) { Text("Start den viste single-use plan") }
