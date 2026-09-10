@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.net.URI
 import java.net.http.HttpClient
@@ -173,7 +174,7 @@ private data class PlanRequest(
     @SerialName("conversation_id") val conversationId: String? = null,
     @SerialName("planner_model") val plannerModel: String? = null,
     val proactive: Boolean = false,
-    @SerialName("review_reads") val reviewReads: Boolean = false,
+    @SerialName("review_reads") val reviewReads: Boolean? = null,
     @SerialName("use_memory") val useMemory: Boolean = false,
     @SerialName("memory_subjects") val memorySubjects: List<String> = emptyList(),
     @SerialName("memory_max_chars") val memoryMaxChars: Int = 4_000,
@@ -226,35 +227,51 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         conversationId: String? = null,
         plannerModel: String? = null,
         proactive: Boolean = false,
-        reviewReads: Boolean = false,
+        reviewReads: Boolean? = null,
         useMemory: Boolean = false,
         memorySubjects: List<String> = emptyList(),
         memoryMaxChars: Int = 4_000,
         memoryMaxRecords: Int = 25,
     ): Agent3PlanPreview {
-        val preview = decode<Agent3PlanPreview>(
-            post(
-                "/api/v1/experimental/agent3/plan",
-                json.encodeToString(
-                    PlanRequest(
-                        message = message,
-                        mode = mode,
-                        rag = rag,
-                        allowRagCloud = allowRagCloud,
-                        allowPrivateCloud = allowPrivateCloud,
-                        cloudReady = cloudReady,
-                        conversationId = conversationId,
-                        plannerModel = plannerModel,
-                        proactive = proactive,
-                        reviewReads = reviewReads,
-                        useMemory = useMemory,
-                        memorySubjects = memorySubjects,
-                        memoryMaxChars = memoryMaxChars,
-                        memoryMaxRecords = memoryMaxRecords,
-                    )
-                ),
-            )
+        val body = post(
+            "/api/v1/experimental/agent3/plan",
+            json.encodeToString(
+                PlanRequest(
+                    message = message,
+                    mode = mode,
+                    rag = rag,
+                    allowRagCloud = allowRagCloud,
+                    allowPrivateCloud = allowPrivateCloud,
+                    cloudReady = cloudReady,
+                    conversationId = conversationId,
+                    plannerModel = plannerModel,
+                    proactive = proactive,
+                    reviewReads = reviewReads,
+                    useMemory = useMemory,
+                    memorySubjects = memorySubjects,
+                    memoryMaxChars = memoryMaxChars,
+                    memoryMaxRecords = memoryMaxRecords,
+                )
+            ),
         )
+        if (reviewReads != null) {
+            val responseReviewReads = runCatching {
+                val root = json.parseToJsonElement(body) as? JsonObject
+                val raw = root?.get("review_reads") as? JsonPrimitive
+                when {
+                    raw == null || raw.isString -> null
+                    raw.content == "true" -> true
+                    raw.content == "false" -> false
+                    else -> null
+                }
+            }.getOrNull()
+            if (responseReviewReads != reviewReads) {
+                throw Agent3Exception(
+                    "Invalid Agent 3.0 Preview envelope: server review_reads does not match reviewed intent"
+                )
+            }
+        }
+        val preview = decode<Agent3PlanPreview>(body)
         validateCapabilityReceipt(preview.capabilityReceipt)
         return preview
     }
