@@ -302,9 +302,10 @@ class Agent3Client(baseUrl: String, private val token: String) {
         expectedRunId: String? = null,
         expectedRetryOfRunId: String? = null,
     ): RunEnvelope {
-        val termination = parseTerminationReceipt(root.optJSONObject("termination"))
+        val parsedRun = parseRun(root.requireObject("run"))
+        val termination = parseTerminationReceipt(root.optJSONObject("termination"), parsedRun)
         val envelope = RunEnvelope(
-            run = parseRun(root.requireObject("run")).copy(termination = termination),
+            run = parsedRun.copy(termination = termination),
             planId = root.nullableString("plan_id"),
             reviewReads = root.optBoolean("review_reads", false),
             readReview = parseReadReview(root.optJSONObject("read_review")),
@@ -335,8 +336,9 @@ class Agent3Client(baseUrl: String, private val token: String) {
         ),
     )
 
-    private fun parseTerminationReceipt(o: JSONObject?): TerminationReceipt? {
-        val receipt = o ?: return null
+    private fun parseTerminationReceipt(o: JSONObject?, run: Run): TerminationReceipt {
+        val receipt = o
+            ?: throw ModelRigException("Ugyldigt termination receipt: mangler for run-svar")
         val plan = receipt.optJSONObject("plan")
             ?: throw ModelRigException("Ugyldigt termination receipt: plan mangler")
         val modelStream = receipt.optJSONObject("model_stream")
@@ -372,38 +374,111 @@ class Agent3Client(baseUrl: String, private val token: String) {
             activeTool = activeTool,
             productionActivation = receipt.optBoolean("production_activation", true),
         )
-        validateTerminationReceipt(parsed)
-        return parsed
+        return validateTerminationReceipt(parsed, run)
     }
 
-    private fun validateTerminationReceipt(receipt: TerminationReceipt) {
-        if (receipt.schema != "kaliv-agent3-termination/v1") {
-            throw ModelRigException("Ukendt termination receipt-schema: ${receipt.schema}")
+    internal fun validateTerminationReceipt(receipt: TerminationReceipt?, run: Run): TerminationReceipt {
+        val value = receipt
+            ?: throw ModelRigException("Ugyldigt termination receipt: mangler for run-svar")
+        if (value.schema != "kaliv-agent3-termination/v1") {
+            throw ModelRigException("Ukendt termination receipt-schema: ${value.schema}")
         }
-        if (receipt.productionActivation) {
+        if (value.productionActivation) {
             throw ModelRigException("Ugyldigt termination receipt: produktion må aldrig aktiveres")
         }
-        if (receipt.plan.state !in setOf("available", "terminal") ||
-            receipt.plan.requestScope != "plan" ||
-            receipt.plan.effect.isBlank() || receipt.plan.reason.isBlank() ||
-            receipt.plan.canRequest != (receipt.plan.state == "available")
+
+        val runStates = setOf(
+            "running",
+            "waiting_confirmation",
+            "blocked",
+            "completed",
+            "failed",
+            "cancelled",
+        )
+        val terminalStates = setOf("blocked", "completed", "failed", "cancelled")
+        val stepStates = setOf(
+            "pending",
+            "completed_after_cancel",
+            "waiting_confirmation",
+            "approved",
+            "executing",
+            "succeeded",
+            "denied",
+            "blocked",
+            "failed",
+        )
+        val requestStates = setOf("available", "pending", "terminal", "unavailable", "not_active")
+        val semantics = setOf<String?>(null, "none", "cooperative", "runtime")
+
+        if (run.id.isBlank() || run.state !in runStates || run.currentStep < 0 || run.currentStep > run.steps.size) {
+            throw ModelRigException("Ugyldigt termination receipt: run-id/state/current-step er inkonsistent")
+        }
+        if (run.steps.any { it.state == null || it.state !in stepStates }) {
+            throw ModelRigException("Ugyldigt termination receipt: run-step state er uden for Agent 3")
+        }
+
+        val terminal = run.state in terminalStates
+        val expectedPlanState = if (terminal) "terminal" else "available"
+        val current = run.steps.getOrNull(run.currentStep)
+        val executing = current?.state == "executing"
+        val expectedEffect = if (executing) {
+            "prevent_future_steps_active_tool_continues"
+        } else {
+            "prevent_future_steps"
+        }
+        val plan = value.plan
+        if (
+            plan.state != expectedPlanState ||
+            plan.canRequest != !terminal ||
+            plan.requestScope != "plan" ||
+            plan.effect != expectedEffect ||
+            plan.reason.isBlank()
         ) {
-            throw ModelRigException("Ugyldigt termination receipt: plan-scope er inkonsistent")
+            throw ModelRigException("Ugyldigt termination receipt: plan-scope er uenig med run")
         }
-        if (receipt.modelStream.state.isBlank() || receipt.modelStream.reason.isBlank() ||
-            (receipt.modelStream.canRequest && !receipt.modelStream.handlePresent)
+
+        val stream = value.modelStream
+        if (
+            stream.state != "not_active" ||
+            stream.active ||
+            stream.canRequest ||
+            stream.handlePresent ||
+            stream.reason.isBlank()
         ) {
-            throw ModelRigException("Ugyldigt termination receipt: model-stream er inkonsistent")
+            throw ModelRigException("Ugyldigt termination receipt: model-stream er uenig med Agent 3-run")
         }
-        receipt.activeTool?.let { active ->
-            if (active.stepId.isBlank() || active.tool.isBlank() || active.state.isBlank() ||
-                active.requestState.isBlank() || active.reason.isBlank() ||
-                active.semantics !in setOf(null, "none", "cooperative", "runtime") ||
-                (active.canRequest && !active.handlePresent)
-            ) {
-                throw ModelRigException("Ugyldigt termination receipt: active_tool er inkonsistent")
-            }
+
+        val active = value.activeTool
+        if ((active == null) != (current == null)) {
+            throw ModelRigException("Ugyldigt termination receipt: active_tool er uenig med current-step")
         }
+        if (active == null) return value
+
+        if (
+            active.stepId.isBlank() ||
+            active.tool.isBlank() ||
+            active.state !in stepStates ||
+            active.requestState !in requestStates ||
+            active.reason.isBlank() ||
+            active.semantics !in semantics ||
+            active.stepId != current?.id ||
+            active.tool != current?.tool ||
+            active.state != current?.state ||
+            (active.canRequest && !active.handlePresent) ||
+            (active.canRequest && active.semantics !in setOf("cooperative", "runtime"))
+        ) {
+            throw ModelRigException("Ugyldigt termination receipt: active_tool er uenig med current-step")
+        }
+        if (active.state == "executing" && active.requestState == "terminal") {
+            throw ModelRigException("Ugyldigt termination receipt: executing tool kan ikke være terminal")
+        }
+        if (active.state == "completed_after_cancel" && active.requestState != "terminal") {
+            throw ModelRigException("Ugyldigt termination receipt: sen completion er ikke terminal")
+        }
+        if (active.requestState == "available" && !active.canRequest) {
+            throw ModelRigException("Ugyldigt termination receipt: available tool-control kan ikke requestes")
+        }
+        return value
     }
 
     private fun parseMemoryReceipt(o: JSONObject?): MemoryReceipt {
