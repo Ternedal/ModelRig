@@ -93,11 +93,29 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
         )
     }
 
-    fun apply(previewId: String): ApplyResult {
-        val root = post(
-            "/api/v1/experimental/agent3/replan-previews/${seg(previewId)}/apply",
-            JSONObject(),
-        )
+    /** Generic compatibility path: parses the Apply response without reviewed-preview binding. */
+    fun apply(previewId: String): ApplyResult = parseApplyResult(postApply(previewId))
+
+    /**
+     * Reviewed Apply boundary. The worker response must prove that the consumed
+     * single-use preview and deterministic revision receipt are exactly the ones
+     * the operator reviewed before any result is returned to UI state.
+     */
+    fun applyReviewed(reviewedPreview: Preview): ApplyResult {
+        if (reviewedPreview.revision == Int.MAX_VALUE || reviewedPreview.replanCount == Int.MAX_VALUE) {
+            throw ModelRigException("Agent 3.0 replan reviewed Preview has invalid revision authority")
+        }
+        val root = postApply(reviewedPreview.previewId)
+        validateReviewedApplyResponse(root, reviewedPreview)
+        return parseApplyResult(root)
+    }
+
+    private fun postApply(previewId: String): JSONObject = post(
+        "/api/v1/experimental/agent3/replan-previews/${seg(previewId)}/apply",
+        JSONObject(),
+    )
+
+    private fun parseApplyResult(root: JSONObject): ApplyResult {
         val receipt = root.optJSONObject("replan") ?: JSONObject()
         val preview = root.optJSONObject("preview") ?: JSONObject()
         return ApplyResult(
@@ -119,6 +137,59 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
                 rationale = preview.optString("rationale"),
             ),
         )
+    }
+
+    private fun validateReviewedApplyResponse(root: JSONObject, reviewed: Preview) {
+        val run = root.requireObject("run")
+        val receipt = root.requireObject("replan")
+        val appliedPreview = root.requireObject("preview")
+
+        run.requireExactString("id", reviewed.runId, "run")
+        appliedPreview.requireExactString("preview_id", reviewed.previewId, "preview")
+        appliedPreview.requireExactString("run_id", reviewed.runId, "preview")
+        appliedPreview.requireExactNullableString("planner_model", reviewed.plannerModel, "preview")
+        appliedPreview.requireExactString("prompt_sha256", reviewed.promptSha256, "preview")
+        appliedPreview.requireExactString("rationale", reviewed.rationale, "preview")
+
+        receipt.requireExactString("reason", reviewed.rationale, "replan")
+        receipt.requireExactInt("from_revision", reviewed.revision, "replan")
+        receipt.requireExactInt("to_revision", reviewed.revision + 1, "replan")
+        receipt.requireExactInt("replan_number", reviewed.replanCount + 1, "replan")
+    }
+
+    private fun JSONObject.requireExactString(name: String, expected: String, context: String) {
+        val actual = if (has(name) && !isNull(name)) opt(name) as? String else null
+        if (actual != expected) {
+            throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: $context.$name")
+        }
+    }
+
+    private fun JSONObject.requireExactNullableString(name: String, expected: String?, context: String) {
+        if (!has(name)) {
+            throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: $context.$name")
+        }
+        if (isNull(name)) {
+            if (expected != null) {
+                throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: $context.$name")
+            }
+            return
+        }
+        val actual = opt(name) as? String
+        if (actual != expected) {
+            throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: $context.$name")
+        }
+    }
+
+    private fun JSONObject.requireExactInt(name: String, expected: Int, context: String) {
+        val raw = if (has(name) && !isNull(name)) opt(name) else null
+        val actual = when (raw) {
+            is Int -> raw
+            is Long -> raw.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt()
+            else -> null
+        }
+        if (actual != expected) {
+            throw ModelRigException("Agent 3.0 replan Apply response authority mismatch: $context.$name")
+        }
     }
 
     private fun post(path: String, payload: JSONObject): JSONObject = execute(
