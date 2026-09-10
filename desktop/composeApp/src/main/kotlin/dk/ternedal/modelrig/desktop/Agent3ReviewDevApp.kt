@@ -65,20 +65,34 @@ fun Agent3ReviewDevApp() {
         var message by remember { mutableStateOf("") }
         var reviewReads by remember { mutableStateOf(false) }
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
+        var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
         var review by remember { mutableStateOf(Agent3ReadReview()) }
         var busy by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
 
-        fun client(): Agent3Client {
-            require(baseUrl.isNotBlank()) { "Base-URL mangler" }
-            require(token.isNotBlank()) { "Device-token mangler" }
-            return Agent3Client(baseUrl.trim(), token.trim())
+        fun currentConnection(): Agent3DevConnectionBinding {
+            return requireNotNull(Agent3DevConnectionBinding.capture(baseUrl, token)) {
+                "Forbindelsen er ugyldig"
+            }
+        }
+
+        fun client(connection: Agent3DevConnectionBinding): Agent3Client =
+            Agent3Client(connection.baseUrl, connection.token)
+
+        fun clearPreviewAuthority() {
+            preview = null
+            previewConnection = null
         }
 
         fun createPreview() {
             val text = message.trim()
             if (text.isEmpty() || busy) return
+            val connection = runCatching { currentConnection() }
+                .getOrElse {
+                    error = it.message ?: "Forbindelsen er ugyldig"
+                    return
+                }
             busy = true
             error = null
             run = null
@@ -86,7 +100,7 @@ fun Agent3ReviewDevApp() {
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        client().previewPlan(
+                        client(connection).previewPlan(
                             message = text,
                             mode = "rig",
                             reviewReads = reviewReads,
@@ -94,23 +108,35 @@ fun Agent3ReviewDevApp() {
                     }
                 }
                 busy = false
-                result.onSuccess { preview = it }
-                    .onFailure { error = it.message ?: "Plan-preview fejlede" }
+                result.onSuccess {
+                    preview = it
+                    previewConnection = connection
+                }.onFailure { error = it.message ?: "Plan-preview fejlede" }
             }
         }
 
         fun startPreview() {
             val reviewedPreview = preview ?: return
+            val boundConnection = previewConnection
+            val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
+            if (!Agent3ReviewPreviewPolicy.canStart(
+                    planId = reviewedPreview.planId,
+                    planSize = reviewedPreview.plan.size,
+                    busy = busy,
+                    currentConnection = currentConnection,
+                    previewConnection = boundConnection,
+                )
+            ) return
             val planId = reviewedPreview.planId ?: return
+            val connection = boundConnection ?: return
             val expectedReviewReads = reviewedPreview.reviewReads
             val expectedCapabilityReceipt = reviewedPreview.capabilityReceipt
-            if (busy) return
             busy = true
             error = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        client().startReviewedPlanEnvelope(
+                        client(connection).startReviewedPlanEnvelope(
                             planId = planId,
                             expectedReviewReads = expectedReviewReads,
                             expectedCapabilityReceipt = expectedCapabilityReceipt,
@@ -119,6 +145,7 @@ fun Agent3ReviewDevApp() {
                 }
                 busy = false
                 result.onSuccess {
+                    clearPreviewAuthority()
                     run = it.run
                     review = it.readReview
                 }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
@@ -178,7 +205,7 @@ fun Agent3ReviewDevApp() {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = message,
-                    onValueChange = { message = it; preview = null },
+                    onValueChange = { message = it; clearPreviewAuthority() },
                     label = { Text("Forespørgsel") },
                     minLines = 3,
                     maxLines = 8,
@@ -190,11 +217,11 @@ fun Agent3ReviewDevApp() {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (reviewReads) {
-                        Button(onClick = { reviewReads = false; preview = null }) {
+                        Button(onClick = { reviewReads = false; clearPreviewAuthority() }) {
                             Text("Read review: til")
                         }
                     } else {
-                        OutlinedButton(onClick = { reviewReads = true; preview = null }) {
+                        OutlinedButton(onClick = { reviewReads = true; clearPreviewAuthority() }) {
                             Text("Read review: fra")
                         }
                     }
@@ -235,7 +262,13 @@ fun Agent3ReviewDevApp() {
                     }
                     Spacer(Modifier.height(10.dp))
                     Button(
-                        enabled = !busy && plan.planId != null && plan.plan.isNotEmpty(),
+                        enabled = Agent3ReviewPreviewPolicy.canStart(
+                            planId = plan.planId,
+                            planSize = plan.plan.size,
+                            busy = busy,
+                            currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token),
+                            previewConnection = previewConnection,
+                        ),
                         onClick = ::startPreview,
                     ) { Text("Start den viste single-use plan") }
                 }
