@@ -33,6 +33,11 @@ jobs:
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
       - name: Install Android platform
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Locate affected legacy fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -R -n -l -E 'class Agent3(CancellationContract|ProductionSeam|RunIdBinding|StartPlanIdBinding)Test' android/app/src/test || true
       - name: Apply focused patch
         run: python .tmp/patch_1076.py
       - name: Product diff guard
@@ -44,9 +49,21 @@ jobs:
           test -f android/app/src/test/java/dk/ternedal/modelrig/net/Agent3TerminationRunTruthTest.kt
       - name: Compile Android and run unit tests
         working-directory: android
+        shell: bash
         run: |
+          set +e
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
           ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest -Proborazzi.test.verify=true --no-daemon --console=plain
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "===== failing JUnit suites ====="
+            grep -R -n -E '<testsuite[^>]*failures="[1-9]|<failure|<error' app/build/test-results || true
+            echo "===== affected fixture sources ====="
+            for name in Agent3CancellationContractTest.kt Agent3ProductionSeamTest.kt Agent3RunIdBindingTest.kt Agent3StartPlanIdBindingTest.kt; do
+              find app/src/test -type f -name "$name" -print -exec sed -n '1,280p' {} \;
+            done
+          fi
+          exit "$status"
       - name: Publish one clean product commit
         shell: bash
         env:
