@@ -211,9 +211,17 @@ class Agent3Client(baseUrl: String, private val token: String) {
 
     fun startPlan(planId: String): Run = startPlanEnvelope(planId).run
 
-    fun getRun(runId: String): Run {
+    fun getRun(runId: String): Run = getRunEnvelope(runId).run
+
+    internal fun getRunEnvelope(
+        runId: String,
+        expectedReviewReads: Boolean? = null,
+    ): RunEnvelope {
         val root = get("/api/v1/experimental/agent3/runs/${seg(runId)}")
-        return parseRunEnvelope(root, expectedRunId = runId).run
+        return bindRunEnvelopeReview(
+            parseRunEnvelope(root, expectedRunId = runId),
+            expectedReviewReads,
+        )
     }
 
     fun listRuns(): List<Run> {
@@ -266,14 +274,42 @@ class Agent3Client(baseUrl: String, private val token: String) {
         return parseRunEnvelope(root, expectedRunId = runId).run
     }
 
-    fun resume(runId: String): Run {
+    fun resume(runId: String): Run = resumeRunEnvelope(runId).run
+
+    internal fun resumeRunEnvelope(
+        runId: String,
+        expectedReviewReads: Boolean? = null,
+    ): RunEnvelope {
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", JSONObject())
-        return parseRunEnvelope(root, expectedRunId = runId).run
+        return bindRunEnvelopeReview(
+            parseRunEnvelope(root, expectedRunId = runId),
+            expectedReviewReads,
+        )
     }
 
-    fun cancel(runId: String): Run {
+    fun cancel(runId: String): Run = cancelRunEnvelope(runId).run
+
+    internal fun cancelRunEnvelope(
+        runId: String,
+        expectedReviewReads: Boolean? = null,
+    ): RunEnvelope {
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/cancel", JSONObject())
-        return parseRunEnvelope(root, expectedRunId = runId).run
+        return bindRunEnvelopeReview(
+            parseRunEnvelope(root, expectedRunId = runId),
+            expectedReviewReads,
+        )
+    }
+
+    private fun bindRunEnvelopeReview(
+        envelope: RunEnvelope,
+        expectedReviewReads: Boolean?,
+    ): RunEnvelope {
+        if (expectedReviewReads != null && envelope.readReview.enabled != expectedReviewReads) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 run-svar: Read review-state matcher ikke runnet",
+            )
+        }
+        return envelope
     }
 
     private fun get(path: String): JSONObject = execute(

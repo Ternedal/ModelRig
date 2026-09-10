@@ -56,6 +56,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
     var runConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
+    var runReviewReads by remember { mutableStateOf<Boolean?>(null) }
     var review by remember { mutableStateOf<Agent3Client.ReadReview?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -141,6 +142,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 )
                 run = null
                 runConnection = null
+                runReviewReads = null
                 review = null
                 resultBody = null
                 replanPreview = null
@@ -191,6 +193,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 clearPreviewAuthority()
                 run = it.run
                 runConnection = connection
+                runReviewReads = currentPreview.reviewReads
                 review = it.readReview
             }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
         }
@@ -444,24 +447,41 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                         busy = busy,
                         onContinue = {
                             val connection = runConnection
+                            val expectedReviewReads = runReviewReads
                             if (connection == null) {
                                 error = "Run-forbindelsen mangler"
+                            } else if (expectedReviewReads == null) {
+                                error = "Run review-mode mangler"
                             } else if (!busy) {
                                 busy = true
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
-                                        runCatching { client(connection).resume(current.id) }
+                                        runCatching {
+                                            client(connection).resumeRunEnvelope(
+                                                current.id,
+                                                expectedReviewReads,
+                                            )
+                                        }
                                     }
                                     res.onSuccess {
-                                        run = it
+                                        run = it.run
+                                        review = it.readReview
                                         resultBody = null
                                         replanPreview = null
                                         error = null
                                     }.onFailure { error = it.message }
                                     val fresh = withContext(Dispatchers.IO) {
-                                        runCatching { client(connection).getRun(current.id) }
+                                        runCatching {
+                                            client(connection).getRunEnvelope(
+                                                current.id,
+                                                expectedReviewReads,
+                                            )
+                                        }
                                     }
-                                    fresh.onSuccess { run = it }
+                                    fresh.onSuccess {
+                                        run = it.run
+                                        review = it.readReview
+                                    }
                                     busy = false
                                 }
                             }
@@ -488,15 +508,27 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                         },
                         onStop = {
                             val connection = runConnection
+                            val expectedReviewReads = runReviewReads
                             if (connection == null) {
                                 error = "Run-forbindelsen mangler"
+                            } else if (expectedReviewReads == null) {
+                                error = "Run review-mode mangler"
                             } else if (!busy) {
                                 busy = true
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
-                                        runCatching { client(connection).cancel(current.id) }
+                                        runCatching {
+                                            client(connection).cancelRunEnvelope(
+                                                current.id,
+                                                expectedReviewReads,
+                                            )
+                                        }
                                     }
-                                    res.onSuccess { run = it; error = null }.onFailure { error = it.message }
+                                    res.onSuccess {
+                                        run = it.run
+                                        review = it.readReview
+                                        error = null
+                                    }.onFailure { error = it.message }
                                     busy = false
                                 }
                             }
