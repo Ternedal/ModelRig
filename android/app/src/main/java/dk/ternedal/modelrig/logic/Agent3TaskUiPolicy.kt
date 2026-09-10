@@ -92,6 +92,33 @@ object Agent3TaskUiPolicy {
         !shouldPoll(runTerminal, activeToolState, activeToolRequestState) &&
         !busy
 
+    fun canCreateReviewPreview(
+        message: String,
+        busy: Boolean,
+        hasRun: Boolean,
+        runTerminal: Boolean?,
+        terminationPresent: Boolean,
+        activeToolState: String?,
+        activeToolRequestState: String?,
+    ): Boolean {
+        if (message.isBlank() || busy) return false
+        if (!hasRun) return true
+        if (!terminationPresent) return false
+        return canResetTerminalHistory(
+            runTerminal = runTerminal,
+            activeToolState = activeToolState,
+            activeToolRequestState = activeToolRequestState,
+            busy = false,
+        )
+    }
+
+    fun canStartReviewPreview(
+        planId: String?,
+        hasSteps: Boolean,
+        busy: Boolean,
+        hasRun: Boolean,
+    ): Boolean = !planId.isNullOrBlank() && hasSteps && !busy && !hasRun
+
     fun nextPublicationEpoch(current: Long): Long =
         if (current == Long.MAX_VALUE) 1L else current + 1L
 
