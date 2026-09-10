@@ -20,12 +20,12 @@ import org.junit.Test
  */
 class Agent3PathSegmentTest {
 
-    private fun server(): MockWebServer {
+    private fun server(runId: String): MockWebServer {
         val s = MockWebServer()
         repeat(4) {
             s.enqueue(
                 MockResponse().setHeader("Content-Type", "application/json")
-                    .setBody("""{"run":{"id":"r","plan_id":"p","state":"running","steps":[]}}"""),
+                    .setBody("""{"run":{"id":"$runId","plan_id":"p","state":"running","steps":[]}}"""),
             )
         }
         s.start()
@@ -34,7 +34,7 @@ class Agent3PathSegmentTest {
 
     @Test
     fun traversalInARunIdCannotChangeTheEndpoint() {
-        val s = server()
+        val s = server("../../healthz")
         try {
             Agent3Client(s.url("/").toString(), "t")
                 .confirm("../../healthz", "step", "digest", approve = true)
@@ -51,7 +51,7 @@ class Agent3PathSegmentTest {
 
     @Test
     fun queryInjectionInARunIdStaysInTheSegment() {
-        val s = server()
+        val s = server("run-1?x=1")
         try {
             Agent3Client(s.url("/").toString(), "t")
                 .confirm("run-1?x=1", "step", "digest", approve = true)
@@ -65,7 +65,7 @@ class Agent3PathSegmentTest {
     @Test
     fun anOrdinaryIdIsUnchanged() {
         // Kontrolpunkt. Uden det ville en encoder der oedelagde ALLE id'er bestaa.
-        val s = server()
+        val s = server("run-1")
         try {
             Agent3Client(s.url("/").toString(), "t")
                 .confirm("run-1", "step", "digest", approve = true)

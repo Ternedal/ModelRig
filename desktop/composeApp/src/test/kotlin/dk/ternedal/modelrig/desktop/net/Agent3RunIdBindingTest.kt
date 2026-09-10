@@ -10,7 +10,7 @@ import kotlin.test.assertFailsWith
 
 class Agent3RunIdBindingTest {
     @Test
-    fun runScopedMethodsAcceptOnlyTheRequestedRunId() {
+    fun sameRunMethodsAcceptOnlyTheRequestedRunId() {
         val paths = CopyOnWriteArrayList<String>()
         val server = server { exchange ->
             paths += exchange.requestURI.path
@@ -20,7 +20,6 @@ class Agent3RunIdBindingTest {
             val client = Agent3Client(server.baseUrl(), "token")
 
             assertEquals("run-1", client.getRun("run-1").id)
-            assertEquals("run-1", client.retry("run-1").id)
             assertEquals("run-1", client.confirm("run-1", "step-1", "digest", approve = true).id)
             assertEquals("run-1", client.resume("run-1").id)
             assertEquals("run-1", client.cancel("run-1").id)
@@ -28,7 +27,6 @@ class Agent3RunIdBindingTest {
             assertEquals(
                 listOf(
                     "/api/v1/experimental/agent3/runs/run-1",
-                    "/api/v1/experimental/agent3/runs/run-1/retry",
                     "/api/v1/experimental/agent3/runs/run-1/confirm",
                     "/api/v1/experimental/agent3/runs/run-1/resume",
                     "/api/v1/experimental/agent3/runs/run-1/cancel",
@@ -41,14 +39,13 @@ class Agent3RunIdBindingTest {
     }
 
     @Test
-    fun everyRunScopedMethodRejectsAnotherRunId() {
+    fun everySameRunMethodRejectsAnotherRunId() {
         val server = server { exchange -> exchange.respond(200, completedEnvelope("run-2")) }
         try {
             val client = Agent3Client(server.baseUrl(), "token")
 
             listOf<() -> Agent3Run>(
                 { client.getRun("run-1") },
-                { client.retry("run-1") },
                 { client.confirm("run-1", "step-1", "digest", approve = false) },
                 { client.resume("run-1") },
                 { client.cancel("run-1") },
@@ -65,8 +62,42 @@ class Agent3RunIdBindingTest {
     }
 
     @Test
+    fun retryAcceptsFreshRunIdBoundToOriginalRun() {
+        val server = server { exchange ->
+            exchange.respond(200, completedEnvelope("run-2", retryOfRunId = "run-1"))
+        }
+        try {
+            val run = Agent3Client(server.baseUrl(), "token").retry("run-1")
+            assertEquals("run-2", run.id)
+            assertEquals("run-1", run.request.retryOfRunId)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun retryRejectsMissingOrMismatchingOriginalRunId() {
+        listOf(null, "run-other").forEach { retryOf ->
+            val server = server { exchange ->
+                exchange.respond(200, completedEnvelope("run-2", retryOfRunId = retryOf))
+            }
+            try {
+                val error = assertFailsWith<Agent3Exception> {
+                    Agent3Client(server.baseUrl(), "token").retry("run-1")
+                }
+                assertEquals(
+                    "Invalid Agent 3.0 Retry envelope: server returned another original run id",
+                    error.message,
+                )
+            } finally {
+                server.stop(0)
+            }
+        }
+    }
+
+    @Test
     fun startKeepsServerAuthoredRunIdentity() {
-        val server = server { exchange -> exchange.respond(200, completedEnvelope("server-run")) }
+        val server = server { exchange -> exchange.respond(200, completedEnvelope("server-run", planId = "plan-1")) }
         try {
             val client = Agent3Client(server.baseUrl(), "token")
             assertEquals("server-run", client.startPlan("plan-1").id)
@@ -91,15 +122,19 @@ class Agent3RunIdBindingTest {
         responseBody.use { it.write(bytes) }
     }
 
-    private fun completedEnvelope(runId: String): String = """
+    private fun completedEnvelope(
+        runId: String,
+        retryOfRunId: String? = null,
+        planId: String? = null,
+    ): String = """
         {
           "run": {
             "id": "$runId",
             "state": "completed",
             "current_step": 0,
-            "steps": []
+            "steps": []${retryOfRunId?.let { ",\n            \"request\": {\"retry_of_run_id\": \"$it\"}" } ?: ""}
           },
-          "plan_id": "plan-1",
+          ${planId?.let { "\"plan_id\": \"$it\"," } ?: ""}
           "termination": {
             "schema": "kaliv-agent3-termination/v1",
             "plan": {
