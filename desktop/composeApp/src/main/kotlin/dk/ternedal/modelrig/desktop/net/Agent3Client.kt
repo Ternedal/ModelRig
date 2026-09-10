@@ -138,6 +138,11 @@ data class Agent3PlanPreview(
 )
 
 @Serializable
+data class Agent3RunRequest(
+    @SerialName("retry_of_run_id") val retryOfRunId: String? = null,
+)
+
+@Serializable
 data class Agent3Run(
     val id: String = "",
     val state: String = "",
@@ -147,6 +152,7 @@ data class Agent3Run(
     val answer: String? = null,
     val error: String? = null,
     val termination: Agent3TerminationReceipt? = null,
+    val request: Agent3RunRequest = Agent3RunRequest(),
 )
 
 @Serializable
@@ -279,7 +285,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
                 "/api/v1/experimental/agent3/runs/${seg(runId)}/retry",
                 json.encodeToString(RetryRequest(cloudReady)),
             ),
-            expectedRunId = runId,
+            expectedRetryOfRunId = runId,
         ).run
 
     fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Agent3Run {
@@ -308,6 +314,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         body: String,
         expectedRunId: String? = null,
         expectedPlanId: String? = null,
+        expectedRetryOfRunId: String? = null,
     ): Agent3RunEnvelope {
         val envelope = decode<Agent3RunEnvelope>(body)
         validateCapabilityReceipt(envelope.capabilityReceipt)
@@ -317,6 +324,11 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         }
         if (expectedRunId != null && envelope.run.id != expectedRunId) {
             throw Agent3Exception("Invalid Agent 3.0 run envelope: server returned another run id")
+        }
+        if (expectedRetryOfRunId != null &&
+            (envelope.run.request.retryOfRunId.isNullOrBlank() || envelope.run.request.retryOfRunId != expectedRetryOfRunId)
+        ) {
+            throw Agent3Exception("Invalid Agent 3.0 Retry envelope: server returned another original run id")
         }
         return envelope.copy(
             run = envelope.run.copy(termination = termination),

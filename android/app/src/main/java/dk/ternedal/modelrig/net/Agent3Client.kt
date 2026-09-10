@@ -119,6 +119,10 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val reviewReads: Boolean,
     )
 
+    data class RunRequest(
+        val retryOfRunId: String? = null,
+    )
+
     data class Run(
         val id: String,
         val state: String,
@@ -128,6 +132,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val answer: String?,
         val error: String?,
         val termination: TerminationReceipt?,
+        val request: RunRequest = RunRequest(),
     )
 
     data class RunEnvelope(
@@ -202,7 +207,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
 
     fun getRun(runId: String): Run {
         val root = get("/api/v1/experimental/agent3/runs/${seg(runId)}")
-        return parseRunEnvelope(root).run
+        return parseRunEnvelope(root, expectedRunId = runId).run
     }
 
     fun listRuns(): List<Run> {
@@ -243,7 +248,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
     fun retry(runId: String, cloudReady: Boolean = false): Run {
         val payload = JSONObject().put("cloud_ready", cloudReady)
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/retry", payload)
-        return parseRunEnvelope(root).run
+        return parseRunEnvelope(root, expectedRetryOfRunId = runId).run
     }
 
     fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Run {
@@ -252,17 +257,17 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .put("digest", digest)
             .put("decision", if (approve) "approve" else "deny")
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/confirm", payload)
-        return parseRunEnvelope(root).run
+        return parseRunEnvelope(root, expectedRunId = runId).run
     }
 
     fun resume(runId: String): Run {
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", JSONObject())
-        return parseRunEnvelope(root).run
+        return parseRunEnvelope(root, expectedRunId = runId).run
     }
 
     fun cancel(runId: String): Run {
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/cancel", JSONObject())
-        return parseRunEnvelope(root).run
+        return parseRunEnvelope(root, expectedRunId = runId).run
     }
 
     private fun get(path: String): JSONObject = execute(
@@ -292,15 +297,28 @@ class Agent3Client(baseUrl: String, private val token: String) {
         }
     }
 
-    private fun parseRunEnvelope(root: JSONObject): RunEnvelope {
+    private fun parseRunEnvelope(
+        root: JSONObject,
+        expectedRunId: String? = null,
+        expectedRetryOfRunId: String? = null,
+    ): RunEnvelope {
         val termination = parseTerminationReceipt(root.optJSONObject("termination"))
-        return RunEnvelope(
+        val envelope = RunEnvelope(
             run = parseRun(root.requireObject("run")).copy(termination = termination),
             planId = root.nullableString("plan_id"),
             reviewReads = root.optBoolean("review_reads", false),
             readReview = parseReadReview(root.optJSONObject("read_review")),
             capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
         )
+        if (expectedRunId != null && envelope.run.id != expectedRunId) {
+            throw ModelRigException("Ugyldigt Agent 3.0 run-svar: serveren returnerede et andet run-id")
+        }
+        if (expectedRetryOfRunId != null &&
+            (envelope.run.request.retryOfRunId.isNullOrBlank() || envelope.run.request.retryOfRunId != expectedRetryOfRunId)
+        ) {
+            throw ModelRigException("Ugyldigt Agent 3.0 Retry-svar: serveren returnerede et andet oprindeligt run-id")
+        }
+        return envelope
     }
 
     private fun parseRun(o: JSONObject): Run = Run(
@@ -312,6 +330,9 @@ class Agent3Client(baseUrl: String, private val token: String) {
         answer = o.nullableString("answer"),
         error = o.nullableString("error"),
         termination = null,
+        request = RunRequest(
+            retryOfRunId = o.optJSONObject("request")?.nullableString("retry_of_run_id"),
+        ),
     )
 
     private fun parseTerminationReceipt(o: JSONObject?): TerminationReceipt? {
