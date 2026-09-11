@@ -161,9 +161,12 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
         val body = postApply(reviewedPreview.previewId)
         val root = parseObject(body)
         val rawReadReview = root.requireObject("read_review")
+        val rawReceipt = root.requireObject("replan")
         validateReviewedApplyResponse(root, reviewedPreview)
+        val receiptAuthority = validateReviewedReplanReceiptShape(rawReceipt, reviewedPreview)
         validateReviewedReplanCheckpointShape(rawReadReview)
         val result = decode<Agent3ReplanApplyResult>(body)
+        validateReviewedReplanReceiptBinding(receiptAuthority, result)
         validateReviewedReplanCheckpoint(rawReadReview, result)
         return result
     }
