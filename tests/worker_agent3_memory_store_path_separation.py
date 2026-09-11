@@ -115,6 +115,10 @@ run_support(
     "W04 loopback write surface",
     "worker_memory4_write_surface.py",
 )
+run_support(
+    "W04 validation redaction",
+    "worker_memory4_write_surface_validation.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
