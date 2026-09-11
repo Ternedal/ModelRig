@@ -105,7 +105,7 @@ fun Agent3ReplanDevApp() {
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        client(connection).preview(
+                        client(connection).previewReviewed(
                             requestIntent.runId,
                             requestIntent.plannerModel,
                         )
