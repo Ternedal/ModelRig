@@ -71,6 +71,7 @@ data class Agent3ReplanApplyResult(
     val run: Agent3Run = Agent3Run(),
     val replan: Agent3ReplanReceipt = Agent3ReplanReceipt(),
     val preview: Agent3AppliedPreview = Agent3AppliedPreview(),
+    @SerialName("read_review") val readReview: Agent3ReadReview = Agent3ReadReview(),
 )
 
 @Serializable
@@ -105,8 +106,12 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
         }
         val body = postApply(reviewedPreview.previewId)
         val root = parseObject(body)
+        val rawReadReview = root.requireObject("read_review")
         validateReviewedApplyResponse(root, reviewedPreview)
-        return decode(body)
+        validateReviewedReplanCheckpointShape(rawReadReview)
+        val result = decode<Agent3ReplanApplyResult>(body)
+        validateReviewedReplanCheckpoint(rawReadReview, result)
+        return result
     }
 
     private fun postApply(previewId: String): String =

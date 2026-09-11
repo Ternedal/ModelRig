@@ -447,6 +447,7 @@ private fun ReplanPreviewCard(
 
 @Composable
 private fun AppliedReplanCard(result: Agent3ReplanApplyResult) {
+    val review = result.readReview
     ReplanCard {
         Text("Replan anvendt", color = KalivTheme.colors.Signal, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         ReplanValue("Run", result.run.id)
@@ -455,8 +456,23 @@ private fun AppliedReplanCard(result: Agent3ReplanApplyResult) {
         ReplanValue("Fjernede tools", result.replan.removedTools.joinToString().ifBlank { "ingen" })
         ReplanValue("Tilføjede tools", result.replan.addedTools.joinToString().ifBlank { "ingen" })
         ReplanValue("Prompt SHA-256", result.preview.promptSha256)
+        ReplanValue(
+            "Read review",
+            when {
+                review.waiting -> "venter · ${review.windowStart}..<${review.windowEnd}"
+                review.enabled -> "aktiv · intet ventende checkpoint"
+                else -> "deaktiveret"
+            },
+        )
+        if (review.waiting) {
+            ReplanValue("Checkpoint reads", review.removableStepIds.joinToString())
+        }
         Text(
-            "Revisionen er journalført. Denne skærm starter eller genoptager ikke runnet automatisk.",
+            if (review.waiting) {
+                "Revisionen er journalført. Runnet er fortsat pauset ved det re-bundne Read review-checkpoint; denne skærm genoptager ikke automatisk."
+            } else {
+                "Revisionen er journalført. Denne skærm starter eller genoptager ikke runnet automatisk."
+            },
             color = KalivTheme.colors.TextMuted,
             fontSize = 11.sp,
         )
