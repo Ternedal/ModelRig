@@ -63,7 +63,11 @@ Before mutation W02-B:
 4. reruns `MemoryConsolidator`;
 5. requires the fresh plan to equal the supplied plan exactly, unless the durable state proves an exact idempotent replay of a previously successful execution.
 
-The fresh snapshot is not a whole-database scan. Structured candidates read every active non-secret pending/confirmed row in their exact `subject`/`predicate` slot, plus any trusted ids already named by the plan. Canonical verbatim candidates are narrower: because different verbatim values are independent log entries by W02-A contract, their snapshot selector also requires the exact candidate value. This keeps the 128-row safety bound meaningful without allowing 128+ unrelated historical user statements to block a new statement write.
+The fresh snapshot is not a whole-database scan. Structured candidates read every active non-secret pending/confirmed row in their exact `subject`/`predicate` slot, plus any trusted ids already named by the plan.
+
+For **legacy/plaintext** storage, canonical verbatim candidates can be narrowed further by exact value: different verbatim values are independent log entries by W02-A contract. This means 128+ unrelated historical verbatim statements do not consume the snapshot budget for a new statement.
+
+For **protected** storage, plaintext `value` is intentionally `''`; W02-B therefore cannot safely put the real value in a SQL predicate. Protected mode reads the exact canonical subject/predicate slot under the existing 128-row bound and decrypts those rows through `ProtectedMemoryReader` before replanning. More than 128 relevant protected verbatim rows therefore fail closed today. A scalable privacy-preserving exact-match index would require an explicit storage/migration design and is tracked separately in #1216 rather than weakening this slice with an unbounded scan or plaintext/deterministic-value index.
 
 No raw model JSON, caller-supplied operation, correction token or caller-selected supersede target enters this boundary.
 
@@ -128,7 +132,8 @@ W02-B is accepted only when exact-head repository qualification proves:
 - W02-A plans are rerun under the write transaction and stale/forged plans fail closed;
 - exact storage keys remain distinct and no case-normalization gains merge authority;
 - unrelated durable rows do not consume the bounded relevant snapshot;
-- 128+ different canonical verbatim statements cannot exhaust a new independent statement write;
+- legacy mode remains writable with 128+ different canonical verbatim statements by using the exact-value selector;
+- protected mode never uses plaintext value lookup and retains its explicit bounded fail-closed behavior pending #1216;
 - create preserves candidate authority/provenance fields exactly;
 - exact create replay is idempotent only on a full durable-field match and never through a later superseding version;
 - exact pending-to-confirmed verbatim promotion creates a new version, links `supersedes_id` and preserves history;
