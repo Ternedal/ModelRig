@@ -303,7 +303,7 @@ func (s *server) requestMemory4CompletedTurnWrite(
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	resp, err := memory4WorkerClient(timeout).Do(req)
 	if err != nil {
 		return err
 	}
