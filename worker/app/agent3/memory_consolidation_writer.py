@@ -12,7 +12,11 @@ from ..memory.consolidation import (
     MemoryConsolidationError,
     MemoryConsolidator,
 )
-from ..memory.extraction import MemoryCandidate
+from ..memory.extraction import (
+    VERBATIM_USER_PREDICATE,
+    VERBATIM_USER_SUBJECT,
+    MemoryCandidate,
+)
 from .memory import MemoryConflict, MemoryRecord, MemoryStore
 from .memory_protected_reader import MemoryReadAccess, ProtectedMemoryReader
 from .memory_protected_writer import MemoryWriteAccess, ProtectedMemoryWriter
@@ -185,13 +189,31 @@ def _snapshot_query(
 ) -> tuple[str | None, tuple[object, ...]]:
     """Build a bounded exact-key lookup instead of scanning the whole memory DB.
 
-    W02-A decisions can depend only on rows for candidate subject/predicate slots
-    plus the trusted ids named by dedupe/supersede actions. Restricting the fresh
-    snapshot to those selectors keeps W02-B usable when the store has far more
-    than MAX_CONSOLIDATION_EXISTING total memories while still failing closed if
-    the relevant set itself exceeds the planner bound.
+    Structured W02-A decisions can depend on every row in the candidate's exact
+    subject/predicate slot, so those slots are read in full (within the planner's
+    hard bound). The canonical verbatim slot is different by design: W02-A treats
+    different statement values as independent log entries, and only an exact value
+    can dedupe or take the narrow pending->confirmed promotion path. Filtering that
+    slot by exact value prevents an old statement log with >128 unrelated values
+    from blocking a new statement without changing any W02-A decision authority.
+
+    Trusted ids named by dedupe/supersede actions are also selected explicitly.
     """
-    keys = sorted({(item.subject, item.predicate) for item in candidates})
+    selectors_by_key = sorted(
+        {
+            (
+                item.subject,
+                item.predicate,
+                item.value
+                if (
+                    item.subject == VERBATIM_USER_SUBJECT
+                    and item.predicate == VERBATIM_USER_PREDICATE
+                )
+                else None,
+            )
+            for item in candidates
+        }
+    )
     touched = sorted(
         {
             action.existing_id
@@ -201,9 +223,13 @@ def _snapshot_query(
     )
     selectors: list[str] = []
     params: list[object] = []
-    for subject, predicate in keys:
-        selectors.append("(subject=? AND predicate=?)")
-        params.extend((subject, predicate))
+    for subject, predicate, exact_value in selectors_by_key:
+        if exact_value is None:
+            selectors.append("(subject=? AND predicate=?)")
+            params.extend((subject, predicate))
+        else:
+            selectors.append("(subject=? AND predicate=? AND value=?)")
+            params.extend((subject, predicate, exact_value))
     if touched:
         selectors.append("id IN (" + ",".join("?" for _ in touched) + ")")
         params.extend(touched)
