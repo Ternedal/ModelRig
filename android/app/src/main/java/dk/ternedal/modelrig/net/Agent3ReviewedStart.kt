@@ -4,27 +4,33 @@ package dk.ternedal.modelrig.net
  * Reviewed Start keeps the server-authored Start envelope bound to the exact
  * review mode and capability receipt that were visible in the reviewed Preview.
  *
- * The transport first proves the raw top-level review mode, termination receipt
- * and exact plan id. This boundary then proves the exact Preview capability
- * receipt before parsed read-review/checkpoint state may become UI authority.
- *
- * If that final reviewed state is rejected, the already-bound nonblank run id is
- * only a recovery reference: the rejected Start payload is never published.
- * Fresh server truth must be fetched on the same client connection and pass the
- * exact run-id, review-mode and checkpoint bindings before it can be returned.
+ * The reviewed transport baseline-validates plan/run/termination/capability
+ * structure before exposing the raw top-level review mode separately. A raw mode
+ * conflict therefore grants only a safely bound run id as recovery reference;
+ * the rejected Start payload never becomes UI authority. Fresh server truth must
+ * then independently prove the exact run id, reviewed mode and checkpoint.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
     expectedReviewReads: Boolean,
     expectedCapabilityReceipt: Agent3Client.CapabilityReceipt?,
 ): Agent3Client.RunEnvelope {
-    val envelope = startPlanEnvelope(
-        planId = planId,
-        expectedReviewReads = expectedReviewReads,
-    )
+    val transport = startReviewedPlanTransport(planId)
+    val envelope = transport.envelope
     if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
         throw ModelRigException(
             "Ugyldigt Agent 3.0 Start-svar: capability receipt matcher ikke previewet",
+        )
+    }
+
+    if (transport.responseReviewReads != expectedReviewReads) {
+        return recoverReviewedStartEnvelope(
+            recoveryRunId = envelope.run.id,
+            expectedReviewReads = expectedReviewReads,
+            originalFailure = ModelRigException(
+                "Ugyldigt Agent 3.0 Start-svar: serverens Read review matcher ikke previewet; " +
+                    "det baseline-validerede run-id er kun recovery-reference",
+            ),
         )
     }
 
@@ -41,23 +47,22 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     if (validationFailure !is ModelRigException) throw validationFailure
 
     return recoverReviewedStartEnvelope(
-        rejectedEnvelope = envelope,
+        recoveryRunId = envelope.run.id,
         expectedReviewReads = expectedReviewReads,
         originalFailure = validationFailure,
     )
 }
 
 private fun Agent3Client.recoverReviewedStartEnvelope(
-    rejectedEnvelope: Agent3Client.RunEnvelope,
+    recoveryRunId: String,
     expectedReviewReads: Boolean,
     originalFailure: ModelRigException,
 ): Agent3Client.RunEnvelope {
-    val runId = rejectedEnvelope.run.id.takeIf { it.isNotBlank() }
-        ?: throw originalFailure
+    if (recoveryRunId.isBlank()) throw originalFailure
 
     return try {
         val fresh = getRunEnvelope(
-            runId = runId,
+            runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
         )
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)

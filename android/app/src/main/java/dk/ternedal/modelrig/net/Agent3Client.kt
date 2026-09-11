@@ -143,6 +143,11 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val capabilityReceipt: CapabilityReceipt?,
     )
 
+    internal data class ReviewedStartTransportEnvelope(
+        val envelope: RunEnvelope,
+        val responseReviewReads: Boolean,
+    )
+
     data class Event(
         val timestamp: Double,
         val kind: String,
@@ -216,6 +221,32 @@ class Agent3Client(baseUrl: String, private val token: String) {
             throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")
         }
         return envelope
+    }
+
+    /**
+     * Reviewed-only Start transport boundary.
+     *
+     * Unlike [startPlanEnvelope], this validates the baseline server envelope
+     * before exposing the raw boolean review mode as a separate proof. That lets
+     * the reviewed caller retain only a safely bound run id as recovery reference
+     * when the raw mode conflicts, without weakening ordinary Start semantics.
+     */
+    internal fun startReviewedPlanTransport(planId: String): ReviewedStartTransportEnvelope {
+        val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
+        val envelope = parseRunEnvelope(root)
+        if (envelope.planId.isNullOrBlank() || envelope.planId != planId) {
+            throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")
+        }
+        val responseReviewReads = root.opt("review_reads")
+        if (responseReviewReads !is Boolean) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 Start-svar: serverens Read review mangler en boolsk binding",
+            )
+        }
+        return ReviewedStartTransportEnvelope(
+            envelope = envelope,
+            responseReviewReads = responseReviewReads,
+        )
     }
 
     fun startPlan(planId: String): Run = startPlanEnvelope(planId).run
