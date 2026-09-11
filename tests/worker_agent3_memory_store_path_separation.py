@@ -95,6 +95,14 @@ run_support(
     "W02 exact-key",
     "worker_memory_consolidation_exact_keys.py",
 )
+run_support(
+    "W02 protected blind index",
+    "worker_agent3_memory_protected_exact_lookup.py",
+)
+run_support(
+    "W02 protected blind-index cross-store",
+    "worker_agent3_memory_protected_lookup_cross_store.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
