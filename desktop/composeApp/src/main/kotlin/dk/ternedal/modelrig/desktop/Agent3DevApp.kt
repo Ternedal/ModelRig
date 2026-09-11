@@ -262,7 +262,10 @@ fun Agent3DevApp() {
                 }
                 busy = false
                 result.onSuccess { run = it }
-                    .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
+                    .onFailure {
+                        val detail = it.message ?: "Stop-kaldet gav ikke et autoritativt svar"
+                        error = "$detail. Stop-resultatet er ukendt; serveren kan allerede have stoppet planen. Opdatér run-status før du konkluderer eller prøver igen."
+                    }
             }
         }
 
