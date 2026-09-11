@@ -197,22 +197,25 @@ check(stubborn.close(timeout=0.5), "a later shutdown retry may complete")
 check(stubborn_jobs.closed and stubborn_schedules.closed, "successful retry closes the stores")
 
 
-# --- production entrypoint owns the lifespan; raw route app remains testable --
+# --- production entrypoint preserves scheduler as the inner lifespan ----------
 
 old_flag = os.environ.pop("KALIV_SCHEDULER", None)
 try:
     from app import entrypoint  # noqa: E402
 
-    check(entrypoint.fastapi_app.router.lifespan_context is scheduler_lifespan,
-          "documented production entrypoint installs the scheduler lifespan")
+    production_lifespan = entrypoint.fastapi_app.router.lifespan_context
+    check(
+        getattr(production_lifespan, "__wrapped__", None) is scheduler_lifespan,
+        "documented production entrypoint preserves scheduler as the inner lifespan",
+    )
 
     async def exercise_off_lifespan():
-        async with scheduler_lifespan(entrypoint.fastapi_app):
+        async with production_lifespan(entrypoint.fastapi_app):
             live = entrypoint.fastapi_app.state.scheduler_runtime.status()
             check(not live.configured and not live.resources_open,
-                  "production lifespan remains resource-free while flag is OFF")
+                  "production composed lifespan remains resource-free while scheduler flag is OFF")
         check(not entrypoint.fastapi_app.state.scheduler_runtime.status().resources_open,
-              "production lifespan shutdown leaves no scheduler resources")
+              "production composed lifespan shutdown leaves no scheduler resources")
 
     asyncio.run(exercise_off_lifespan())
 finally:
