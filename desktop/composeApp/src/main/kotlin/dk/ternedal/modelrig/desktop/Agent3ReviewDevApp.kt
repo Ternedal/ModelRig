@@ -178,6 +178,7 @@ fun Agent3ReviewDevApp() {
             val expectedCapabilityReceipt = reviewedPreview.capabilityReceipt
             busy = true
             error = null
+            clearPreviewAuthority()
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
@@ -190,10 +191,12 @@ fun Agent3ReviewDevApp() {
                 }
                 busy = false
                 result.onSuccess {
-                    clearPreviewAuthority()
                     run = it.run
                     review = it.readReview
-                }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
+                }.onFailure {
+                    val detail = it.message ?: "Planen kunne ikke startes"
+                    error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
+                }
             }
         }
 
