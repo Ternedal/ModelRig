@@ -159,17 +159,33 @@ fun KalivAgentCockpitA3(
             hasPreview = true,
         )
         if (!presentation.previewStartEnabled) return
+        val startClient = runCatching { client() }
+            .getOrElse {
+                error = it.message ?: "Forbindelsen er ugyldig"
+                return
+            }
         val mutationEpoch = advancePublicationEpoch()
-        busy = true; error = null
+        busy = true
+        error = null
+        // The worker consumes plan_id before Start is guaranteed to return.
+        // Once this request begins, the same local Preview must never become
+        // retryable again after an uncertain/lost response.
+        planId = null
+        previewSteps = emptyList()
+        rationale = ""
+        revision = 1
+        lastTotal = 0
         scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { client().startPlan(id) } }
+            val r = withContext(Dispatchers.IO) { runCatching { startClient.startPlan(id) } }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 r.onSuccess {
                     run = it
                     lastTotal = it.steps.size
-                    planId = null // single-use: the id cannot be started twice
                     refresh(it.id, mutationEpoch)
-                }.onFailure { error = it.message }
+                }.onFailure {
+                    val detail = it.message ?: "Planen kunne ikke startes"
+                    error = "$detail. Start-resultatet kan allerede være ændret på serveren; det gamle plan-preview er forbrugt lokalt og kan ikke genbruges. Lav et nyt preview eller genindlæs run-sandhed før nyt forsøg."
+                }
             }
             busy = false
         }
