@@ -1,7 +1,8 @@
 # Memory 4.0 W04-A — default-off loopback completed-turn write surface
 
-Status: implementation candidate. The surface is local-only, independently
-flagged and does not connect normal chat to automatic persistence.
+Status: landed implementation, with W04-H1 request-boundary privacy hardening.
+The surface is local-only, independently flagged and does not by itself connect
+normal chat to automatic persistence.
 
 `production_activation=false`
 
@@ -57,10 +58,19 @@ The route is loopback-only and receives exactly:
 Unknown fields are forbidden and Pydantic coercion of non-string values is not
 accepted.
 
-The body is converted to `CompletedMemoryTurn` and handed to the landed
-`MemoryCompletedTurnWriteService`. W03 then re-applies W01 turn bounds before the
-extractor sees the turn and revalidates extracted candidates through W02 before a
-storage adapter may commit them.
+W04-H1 (#1239) hardens the request boundary so loopback admission is evaluated
+**before any request-body consumption**. Only an admitted local request enters the
+body reader. The route then enforces a server-owned 512 KiB byte ceiling
+incrementally while reading the ASGI stream, before JSON/Pydantic decoding. The
+ceiling is intentionally above the worst-case escaped representation of the
+allowed W01 text fields while remaining far below the worker's broad global body
+limit.
+
+After that bounded read, the body is validated with the strict
+`CompletedTurnWriteBody` model, converted to `CompletedMemoryTurn` and handed to
+the landed `MemoryCompletedTurnWriteService`. W03 then re-applies W01 turn bounds
+before the extractor sees the turn and revalidates extracted candidates through
+W02 before a storage adapter may commit them.
 
 The response is exactly the value-free W03 receipt. It can contain schema, counts,
 durable ids, replay state and `sent_to_store`, but it has no representation for:
@@ -111,9 +121,17 @@ be complete and be current. W04-A does not migrate or repair it.
 
 ## Failure and privacy behavior
 
-Loopback admission failure returns `403` before W03 execution.
+Loopback admission failure returns `403` **before the request body is read**.
+A denied caller therefore cannot make W04-A parse a completed-turn payload.
 
-Strict body validation failures return the framework's bounded `422` response.
+Empty, oversized, malformed-JSON, unknown-field, wrong-type and field-bound
+validation failures all return the same fixed bounded `422` response:
+
+`invalid memory completed-turn request`
+
+The route does not expose Pydantic's validation structure because that structure
+can contain the rejected `input`. The 422 body therefore contains no reflected
+user text, assistant text, `source_ref` or unexpected private field value.
 
 Extraction, W03, storage, protection or sidecar failures return a generic `503`
 with the fixed public detail:
@@ -158,7 +176,10 @@ entry point and covers:
 - explicit indexed migration followed by keyed-selector write;
 - invalid legacy/indexed mode rollback;
 - idempotent cleanup;
-- runtime lifespan nesting and scheduler authority-marker preservation.
+- runtime lifespan nesting and scheduler authority-marker preservation;
+- W04-H1 non-loopback denial without body consumption;
+- W04-H1 fixed value-free 422 validation response;
+- W04-H1 byte-ceiling enforcement before JSON/Pydantic parsing.
 
 Existing full-repository scheduler tests additionally verify that the documented
 production entrypoint still exposes the scheduler as the root lifespan authority.
@@ -167,9 +188,7 @@ production entrypoint still exposes the scheduler as the root lifespan authority
 
 W04-A adds no:
 
-- `/api/v1/chat` persistence call;
-- response-stream interception or buffering;
-- automatic extraction after assistant completion;
+- `/api/v1/chat` persistence call by itself;
 - background queue, retry daemon or scheduler;
 - cloud extractor/write path;
 - private-cloud memory grant;
@@ -178,6 +197,7 @@ W04-A adds no:
 - semantic stale-fact replacement or trusted review UI;
 - production activation.
 
-A separately reviewed W04-B slice is still required to capture a successfully
-completed normal-chat user/assistant turn and invoke this loopback worker surface
-without breaking the existing streaming contract.
+W04-B is the separately reviewed slice that may capture a successfully completed
+normal-chat user/assistant turn and invoke this loopback worker surface. W04-H1
+does not change W04-B activation or persistence semantics; it only hardens the
+worker HTTP admission/validation boundary.
