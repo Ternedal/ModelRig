@@ -88,6 +88,7 @@ fun KalivAgentCockpitA3(
     var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
     var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Run?>(null) }
+    var runConnection by remember { mutableStateOf<KalivAgent3CockpitPreviewConnection?>(null) }
     // A replan may replace the remaining pending read-suffix, so the total is
     // not eternal. The mockup's "2 af 4" becomes "Plan 2 · 2 af 5" when that
     // happens -- pretending the first total still holds would be a lie.
@@ -136,8 +137,15 @@ fun KalivAgentCockpitA3(
     }
 
     fun refresh(runId: String, requestEpoch: Long = publicationEpoch) {
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Ingen run-data hentes på en anden forbindelse."
+            return
+        }
         scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { client().getRun(runId) } }
+            val r = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).getRun(runId) }
+            }
             if (!canPublishAgent3CockpitResponse(requestEpoch, publicationEpoch)) return@launch
             r.onSuccess { fresh ->
                 val total = fresh.steps.size
@@ -146,7 +154,9 @@ fun KalivAgentCockpitA3(
                 run = fresh
             }.onFailure { error = it.message }
 
-            val ev = withContext(Dispatchers.IO) { runCatching { client().events(runId) } }
+            val ev = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).events(runId) }
+            }
             if (!canPublishAgent3CockpitResponse(requestEpoch, publicationEpoch)) return@launch
             ev.onSuccess { list ->
                 log.clear()
@@ -244,6 +254,7 @@ fun KalivAgentCockpitA3(
             }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 r.onSuccess {
+                    runConnection = connection
                     run = it
                     lastTotal = it.steps.size
                     refresh(it.id, mutationEpoch)
@@ -286,13 +297,18 @@ fun KalivAgentCockpitA3(
                 confirmationConsumed = confirmationConsumed,
             )
         ) return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Beslutningen sendes ikke på en anden forbindelse."
+            return
+        }
         val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
         consumedConfirmation = authority
         scope.launch {
             val res = withContext(Dispatchers.IO) {
-                runCatching { client().confirm(r.id, sid, digest, approve) }
+                runCatching { previewClient(connection).confirm(r.id, sid, digest, approve) }
             }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 res.onSuccess {
@@ -315,11 +331,18 @@ fun KalivAgentCockpitA3(
             planCanRequestStop = r.termination?.plan?.canRequest,
         )
         if (!presentation.stopPlanEnabled) return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Stop sendes ikke på en anden forbindelse."
+            return
+        }
         val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { client().cancel(r.id) } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).cancel(r.id) }
+            }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 result.onSuccess { fresh ->
                     run = fresh
@@ -342,11 +365,18 @@ fun KalivAgentCockpitA3(
             activeToolRequestState = current.termination?.activeTool?.requestState,
         )
         if (!presentation.refreshTerminalToolEnabled) return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Task-status hentes ikke på en anden forbindelse."
+            return
+        }
         val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { client().getRun(current.id) } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).getRun(current.id) }
+            }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 result.onSuccess { fresh ->
                     val total = fresh.steps.size
@@ -378,6 +408,7 @@ fun KalivAgentCockpitA3(
         // Local history reset only. The server run is already terminal; this
         // action never claims to cancel or mutate remote execution.
         run = null
+        runConnection = null
         clearPreviewAuthority()
         consumedConfirmation = null
         log.clear()
