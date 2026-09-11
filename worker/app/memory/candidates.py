@@ -7,6 +7,7 @@ from typing import Any
 
 
 CANDIDATE_SCHEMA = "kaliv-memory-candidates/v1"
+CONFIRMED_VERBATIM_PREDICATE = "verbatim_user_statement"
 MAX_TURN_CHARS = 20_000
 MAX_EXTRACTOR_RESPONSE_BYTES = 32 * 1024
 MAX_MEMORY_CANDIDATES = 8
@@ -100,9 +101,12 @@ def prepare_completed_turn(user_text: str, assistant_text: str) -> CompletedTurn
 def parse_candidate_batch(raw: str | bytes, *, turn: CompletedTurn) -> CandidateBatch:
     """Parse untrusted extractor output and derive review authority server-side.
 
-    The extractor is allowed to propose source type, but it never supplies
-    ``review_status``. Only an exact user-grounded ``user_explicit`` candidate
-    can become confirmed. Everything else remains pending for review.
+    The extractor may propose structured semantics, but it never supplies
+    ``review_status``. W01A grants confirmed authority only to a canonical,
+    complete verbatim user statement. For that case the server deliberately
+    discards model-generated predicate/kind/sensitivity/confidence semantics and
+    stores a conservative private verbatim note. All structured interpretations
+    remain pending for review.
     """
     if not isinstance(turn, CompletedTurn):
         raise MemoryCandidateError("turn must be a validated CompletedTurn")
@@ -156,7 +160,9 @@ def _candidate_from_row(
     row: dict[str, Any], *, turn: CompletedTurn, index: int
 ) -> MemoryCandidate:
     subject = _clean_text(f"candidate {index} subject", row["subject"], 200)
-    predicate = _clean_text(f"candidate {index} predicate", row["predicate"], 200)
+    proposed_predicate = _clean_text(
+        f"candidate {index} predicate", row["predicate"], 200
+    )
     value = _clean_text(
         f"candidate {index} value",
         row["value"],
@@ -169,8 +175,10 @@ def _candidate_from_row(
         MAX_CANDIDATE_EVIDENCE_CHARS,
         allow_newlines=True,
     )
-    kind = _choice(f"candidate {index} kind", row["kind"], _ALLOWED_KINDS)
-    sensitivity = _choice(
+    proposed_kind = _choice(
+        f"candidate {index} kind", row["kind"], _ALLOWED_KINDS
+    )
+    proposed_sensitivity = _choice(
         f"candidate {index} sensitivity",
         row["sensitivity"],
         _ALLOWED_SENSITIVITIES,
@@ -180,23 +188,38 @@ def _candidate_from_row(
         row["source_type"],
         _ALLOWED_SOURCE_TYPES,
     )
-    confidence = _confidence(row["confidence"], index=index)
+    proposed_confidence = _confidence(row["confidence"], index=index)
 
-    # Explicit automatic confirmation is deliberately narrower than the legacy
-    # MemoryStore default. The model must quote both the exact value and a wider
-    # evidence span from the user turn, the value must occur inside that evidence,
-    # and the subject must be the fixed normal-chat user subject. A paraphrase,
-    # assistant-only claim or attribution drift is still useful as a candidate,
-    # but it is never granted confirmed authority by W01A.
-    verbatim = (
+    # Exact text alone cannot validate model-generated semantics. Without this
+    # boundary, "I live in Copenhagen" plus a hallucinated predicate such as
+    # "favorite_city" could become a confirmed false fact merely because the
+    # value "Copenhagen" was verbatim. Confirmation therefore requires one
+    # complete canonical span (value == evidence) copied exactly from the user
+    # turn. The server then replaces every semantic/model-owned field that could
+    # change the meaning or data classification with conservative constants.
+    verbatim_statement = (
         source_type == "user_explicit"
         and subject == "user"
+        and row["value"] == value
+        and row["evidence"] == evidence
+        and value == evidence
         and value in turn.user_text
-        and evidence in turn.user_text
-        and value in evidence
     )
-    review_status = "confirmed" if verbatim else "pending"
-    grounding = "verbatim_user" if verbatim else "unverified"
+
+    if verbatim_statement:
+        predicate = CONFIRMED_VERBATIM_PREDICATE
+        kind = "note"
+        sensitivity = "private"
+        confidence = 1.0
+        review_status = "confirmed"
+        grounding = "verbatim_user"
+    else:
+        predicate = proposed_predicate
+        kind = proposed_kind
+        sensitivity = proposed_sensitivity
+        confidence = proposed_confidence
+        review_status = "pending"
+        grounding = "unverified"
 
     return MemoryCandidate(
         subject=subject,
