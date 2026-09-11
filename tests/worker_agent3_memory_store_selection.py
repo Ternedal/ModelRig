@@ -32,6 +32,7 @@ from app.agent3.memory_protection import (  # noqa: E402
 )
 from app.agent3.memory_protection_migration import MemoryProtectionMigrator  # noqa: E402
 from app.agent3.production_mount import close_agent3, mount_agent3  # noqa: E402
+from app.memory import MemoryReadRequest, SharedMemoryReadError  # noqa: E402
 
 SIGNING_MATERIAL = b"t033-protected-memory-gateway-test-signing-material-0123456789"
 DOMAIN = MEMORY_GRANT_SCHEMA.encode("ascii") + b"\x00"
@@ -47,6 +48,17 @@ def check(condition: object, label: str) -> None:
     else:
         failed += 1
         print(f"  FAIL: {label}")
+
+
+def expect_shared_error(label: str, fn, contains: str | None = None) -> None:
+    try:
+        fn()
+    except SharedMemoryReadError as exc:
+        check(contains is None or contains in str(exc), label)
+    except Exception:
+        check(False, label)
+    else:
+        check(False, label)
 
 
 class TestAeadProvider:
@@ -222,6 +234,60 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as ra
             Path(app.state.agent3_protected_memory_grant_db) == grant_path,
             "protected mode selects the exact separate grant ledger path",
         )
+
+        shared = app.state.agent3_shared_memory_reader
+        check(
+            shared.mode == "protected"
+            and not hasattr(shared, "create")
+            and not hasattr(shared, "correct")
+            and not hasattr(shared, "delete"),
+            "protected mode publishes a read-only shared Memory 4 adapter",
+        )
+        local_candidates = shared.read_candidates(
+            MemoryReadRequest(target="local", subjects=("Anders",))
+        )
+        check(
+            len(local_candidates) == 1
+            and local_candidates[0].value == "T033-SELECTION-PRIVATE-PLAINTEXT"
+            and local_candidates[0].sensitivity == "private",
+            "shared protected reader opens eligible private data only through local context",
+        )
+        check(
+            not hasattr(local_candidates[0], "source_ref"),
+            "shared protected projection strips storage provenance fields",
+        )
+        cloud_candidates = shared.read_candidates(
+            MemoryReadRequest(target="cloud", subjects=("Anders",))
+        )
+        check(
+            cloud_candidates == (),
+            "shared protected reader excludes private rows before cloud decryption by default",
+        )
+        cloud_private_candidates = shared.read_candidates(
+            MemoryReadRequest(
+                target="cloud",
+                subjects=("Anders",),
+                allow_private_cloud=True,
+            )
+        )
+        check(
+            len(cloud_private_candidates) == 1
+            and cloud_private_candidates[0].value
+            == "T033-SELECTION-PRIVATE-PLAINTEXT",
+            "shared protected reader requires explicit private-cloud authority",
+        )
+        expect_shared_error(
+            "shared reader rejects non-boolean private cloud authority",
+            lambda: shared.read_candidates(
+                MemoryReadRequest(
+                    target="cloud",
+                    subjects=("Anders",),
+                    allow_private_cloud="yes",  # type: ignore[arg-type]
+                )
+            ),
+            "boolean",
+        )
+
         paths = set(app.openapi()["paths"])
         check(
             "/experimental/agent3/memory/status" in paths
@@ -280,8 +346,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-protected-") as ra
         close_agent3(app)
         check(
             app.state.agent3_resources_closed is True
-            and app.state.agent3_mounted is False,
-            "protected shutdown releases every mounted resource",
+            and app.state.agent3_mounted is False
+            and app.state.agent3_shared_memory_reader is None,
+            "protected shutdown releases resources and clears shared reader state",
         )
 
 
@@ -311,9 +378,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-incomplete-") as r
             getattr(app.state, "agent3_memory_store", None) is None
             and not getattr(app.state, "agent3_mounted", False)
             and not getattr(app.state, "agent3_core_mounted", False)
+            and getattr(app.state, "agent3_shared_memory_reader", None) is None
             and tuple(app.routes) == before_routes
             and tuple(app.user_middleware) == before_middleware,
-            "failed protected startup rolls back routes middleware resources and fallback state",
+            "failed protected startup rolls back routes middleware resources and shared state",
         )
 
 
@@ -343,8 +411,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-signing-") as raw:
         check(
             tuple(app.routes) == before_routes
             and tuple(app.user_middleware) == before_middleware
+            and getattr(app.state, "agent3_shared_memory_reader", None) is None
             and not getattr(app.state, "agent3_core_mounted", False),
-            "signing-material failure leaves no partial route or middleware surface",
+            "signing-material failure leaves no partial route middleware or shared state",
         )
 
 
@@ -363,6 +432,65 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-legacy-") as raw:
             and app.state.agent3_protected_memory_grant_db is None,
             "legacy mode retains existing store/planner and creates no grant ledger",
         )
+
+        legacy_store = app.state.agent3_memory_store
+        legacy_store.create(
+            subject="Anders",
+            predicate="shared_public",
+            value="R02-LEGACY-PUBLIC",
+            sensitivity="public",
+        )
+        legacy_store.create(
+            subject="Anders",
+            predicate="shared_private",
+            value="R02-LEGACY-PRIVATE",
+            sensitivity="private",
+            source_ref="conversation:r02",
+        )
+        legacy_shared = app.state.agent3_shared_memory_reader
+        check(
+            legacy_shared.mode == "legacy",
+            "legacy mode publishes the same shared Memory 4 reader contract",
+        )
+        legacy_local = legacy_shared.read_candidates(
+            MemoryReadRequest(subjects=("Anders",))
+        )
+        check(
+            {item.value for item in legacy_local}
+            == {"R02-LEGACY-PUBLIC", "R02-LEGACY-PRIVATE"},
+            "shared legacy reader returns eligible public and private local data",
+        )
+        check(
+            all(not hasattr(item, "source_ref") for item in legacy_local),
+            "shared legacy projection strips source references",
+        )
+        legacy_cloud = legacy_shared.read_candidates(
+            MemoryReadRequest(target="cloud", subjects=("Anders",))
+        )
+        check(
+            {item.value for item in legacy_cloud} == {"R02-LEGACY-PUBLIC"},
+            "shared legacy reader excludes private cloud data by default",
+        )
+        legacy_cloud_private = legacy_shared.read_candidates(
+            MemoryReadRequest(
+                target="cloud",
+                subjects=("Anders",),
+                allow_private_cloud=True,
+            )
+        )
+        check(
+            {item.value for item in legacy_cloud_private}
+            == {"R02-LEGACY-PUBLIC", "R02-LEGACY-PRIVATE"},
+            "shared legacy reader admits private cloud data only with explicit authority",
+        )
+        expect_shared_error(
+            "shared reader rejects oversized candidate bounds",
+            lambda: legacy_shared.read_candidates(
+                MemoryReadRequest(max_candidates=201)
+            ),
+            "between 0 and 200",
+        )
+
         check(
             "/experimental/agent3/memory/context-preview" in paths
             and "/experimental/agent3/memory/status" not in paths,
@@ -374,8 +502,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-legacy-") as raw:
         )
         close_agent3(app)
         check(
-            app.state.agent3_resources_closed is True,
-            "legacy shutdown releases the same composition-owned resources",
+            app.state.agent3_resources_closed is True
+            and app.state.agent3_shared_memory_reader is None,
+            "legacy shutdown releases resources and clears shared reader state",
         )
 
 
@@ -393,10 +522,11 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-selection-invalid-") as raw:
             check(False, "unknown store mode aborts startup")
         check(
             getattr(app.state, "agent3_memory_store", None) is None
+            and getattr(app.state, "agent3_shared_memory_reader", None) is None
             and tuple(app.routes) == before_routes
             and tuple(app.user_middleware) == before_middleware
             and not getattr(app.state, "agent3_core_mounted", False),
-            "unknown mode cannot choose legacy or leave partial routes or middleware",
+            "unknown mode cannot choose storage or leave shared state/routes/middleware",
         )
 
 print(f"\n===== AGENT3 MEMORY STORE SELECTION: {passed} passed, {failed} failed =====")

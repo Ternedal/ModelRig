@@ -52,6 +52,7 @@ _CLEAR_STATE_NAMES = _RESOURCE_STATE_NAMES + (
     "agent3_read_review_store",
     "agent3_protected_memory_grant_db",
     "agent3_planner_memory_context_provider",
+    "agent3_shared_memory_reader",
     "agent3_replan_preview_service",
 )
 
@@ -195,6 +196,7 @@ def mount_agent3(
         app.state.agent3_planner_memory_context_provider = (
             memory_surface.planner_context_provider
         )
+        app.state.agent3_shared_memory_reader = memory_surface.shared_reader
         app.state.agent3_planner_memory_enabled = (
             memory_surface.planner_memory_store is not None
             or memory_surface.planner_context_provider is not None
