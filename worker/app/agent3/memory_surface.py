@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from ..memory import SharedMemoryReader
 from .memory import MemoryStore
 from .memory_api import build_memory_router
 from .memory_protected_api import build_protected_memory_router
@@ -22,7 +23,7 @@ from .memory_protected_gateway import (
     protected_memory_secret,
 )
 from .memory_protected_planner import ProtectedPlannerMemoryContextProvider
-from .memory_protected_reader import ProtectedMemoryReader
+from .memory_protected_reader import MemoryReadAccess, ProtectedMemoryReader
 from .memory_protected_writer import ProtectedMemoryWriter
 from .memory_protection import (
     MemoryProtectionCodec,
@@ -50,9 +51,36 @@ class Agent3MemorySurface:
     legacy_store: MemoryStore | None
     protected_reader: ProtectedMemoryReader | None
     protected_writer: ProtectedMemoryWriter | None
+    shared_reader: SharedMemoryReader
     planner_memory_store: MemoryStore | None
     planner_context_provider: ProtectedPlannerMemoryContextProvider | None
     grant_db_path: Path | None
+
+
+def _legacy_shared_reader(store: MemoryStore) -> SharedMemoryReader:
+    def read_context(*, subjects, include_private, limit, max_chars):
+        return store.context_records(
+            subjects=subjects,
+            include_private=include_private,
+            include_secret=False,
+            limit=limit,
+            max_chars=max_chars,
+        )
+
+    return SharedMemoryReader(mode="legacy", read_context=read_context)
+
+
+def _protected_shared_reader(reader: ProtectedMemoryReader) -> SharedMemoryReader:
+    def read_context(*, subjects, include_private, limit, max_chars):
+        return reader.context_records(
+            access=MemoryReadAccess.LOCAL_CONTEXT,
+            subjects=subjects,
+            include_private=include_private,
+            limit=limit,
+            max_chars=max_chars,
+        )
+
+    return SharedMemoryReader(mode="protected", read_context=read_context)
 
 
 def _is_protected_memory_path(path: str) -> bool:
@@ -132,8 +160,9 @@ def mount_memory_surface(
     source. Exact ``protected`` validates the shared grant material, completed
     migration, provider/key scope and separate durable replay ledger before the
     protected router becomes visible. It also creates the exact local-only
-    planner adapter over the same validated reader. A protected failure is
-    propagated; this function never catches it to instantiate ``MemoryStore``.
+    planner adapter and the read-only Memory 4 shared adapter over the same
+    validated substrate. A protected failure is propagated; this function never
+    catches it to instantiate ``MemoryStore``.
     """
 
     mode = memory_store_mode()
@@ -147,6 +176,7 @@ def mount_memory_surface(
             legacy_store=store,
             protected_reader=None,
             protected_writer=None,
+            shared_reader=_legacy_shared_reader(store),
             planner_memory_store=store,
             planner_context_provider=None,
             grant_db_path=None,
@@ -169,12 +199,14 @@ def mount_memory_surface(
     reader: ProtectedMemoryReader | None = None
     writer: ProtectedMemoryWriter | None = None
     planner_context_provider: ProtectedPlannerMemoryContextProvider | None = None
+    shared_reader: SharedMemoryReader | None = None
     try:
         # Reader and writer independently require a completed migration and a
         # matching provider/key scope. No migrator is imported or invoked here.
         reader = ProtectedMemoryReader(memory, codec)
         writer = ProtectedMemoryWriter(memory, codec)
         planner_context_provider = ProtectedPlannerMemoryContextProvider(reader)
+        shared_reader = _protected_shared_reader(reader)
         authorizer = GatewayProtectedMemoryAuthorizer(
             signing_material,
             replay_ledger=ProtectedMemoryGrantReplayLedger(replay_path),
@@ -194,11 +226,15 @@ def mount_memory_surface(
             reader.close()
         raise
 
+    if shared_reader is None:
+        raise RuntimeError("protected shared memory reader was not constructed")
+
     return Agent3MemorySurface(
         mode="protected",
         legacy_store=None,
         protected_reader=reader,
         protected_writer=writer,
+        shared_reader=shared_reader,
         # Protected planning never reopens or emulates the legacy plaintext
         # store. It receives only the exact local-only context provider.
         planner_memory_store=None,

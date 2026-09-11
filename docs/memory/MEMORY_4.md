@@ -32,10 +32,14 @@ implicit Agent 3 dependency.
 flowchart LR
     U[User turn] --> Q[Memory query]
     Q --> R[Shared retrieval kernel]
-    S[(Durable reviewed memory)] --> R
+    S[(Existing reviewed memory substrate)] --> A[Neutral shared read adapter]
+    A --> R
     R --> C[Privacy-aware context compiler]
     C --> B[Bounded memory data block]
     B --> L[Selected LLM]
+
+    LEG[Legacy MemoryStore] --> S
+    PROT[Protected query-only reader / DPAPI] --> S
 
     A3[Agent 3 planner] --> Q
     NC[Normal chat] -. future gated integration .-> Q
@@ -49,7 +53,8 @@ stored memory.
 
 ## M4-R01 — shared retrieval kernel
 
-The first landed candidate is deliberately read-only and model-independent:
+R01 is landed on `main` through PR #1168. It is deliberately read-only and
+model-independent:
 
 - `worker/app/memory/retrieval.py` defines the shared retrieval contract;
 - it accepts record-like objects rather than importing Agent 3 storage classes;
@@ -90,13 +95,37 @@ The formula is a first-stage deterministic ranker, not the final semantic
 retrieval design. Later hybrid retrieval may add embeddings, but privacy,
 lifecycle and review eligibility remain hard gates outside the embedding model.
 
+## M4-R02 — neutral shared storage/read adapter
+
+R02 adds `worker/app/memory/storage.py` as a storage-neutral read boundary over
+the existing Memory 3 substrate. It does **not** introduce a second database,
+perform migration, open SQLite, invoke DPAPI or import Agent 3 storage classes.
+
+The Agent 3 composition root selects the real backing substrate and injects one
+read-only callback:
+
+- legacy mode delegates to `MemoryStore.context_records(...)`;
+- protected mode delegates to the already-migrated `ProtectedMemoryReader` with
+  exact `MemoryReadAccess.LOCAL_CONTEXT` authority;
+- protected mode therefore keeps encrypted-field opening inside the existing
+  DPAPI/protected-reader boundary;
+- the shared adapter projects backing records to `SharedMemoryRecord`, which has
+  no `source_ref`, protected envelope, supersede pointer, deletion metadata or
+  storage handle;
+- secret rows are invalid at the shared boundary;
+- private cloud reads are excluded at the backing query unless explicit boolean
+  authority is present, and R01 independently repeats that privacy check later;
+- returned rows are revalidated as active, confirmed, unexpired and bounded.
+
+The read request has hard caps of 200 candidate records, 50,000 source
+characters and 64 exact subject filters. Malformed targets, authority flags,
+filters and bounds fail closed rather than broadening the read.
+
+R02 deliberately adds no HTTP endpoint, normal-chat injection, write method,
+new migration path or activation authority. The shared reader is merely exposed
+from the existing composition root for later R03/R04 use.
+
 ## Planned slices
-
-### M4-R02 — shared storage/read adapter
-
-Expose the existing reviewed-memory substrate through a neutral shared reader
-interface. Preserve protected-memory/DPAPI boundaries and avoid a second
-persistent database unless migration evidence justifies one.
 
 ### M4-R03 — semantic retrieval
 
@@ -172,7 +201,7 @@ runtime authority.
 
 ## R01 acceptance
 
-R01 is complete only when repository CI proves:
+R01 was accepted after exact-head repository qualification proved:
 
 - shared module imports without Agent 3 storage dependency;
 - exact relevance ranking is deterministic;
@@ -183,3 +212,22 @@ R01 is complete only when repository CI proves:
 - duplicate ids and result bounds are enforced;
 - ranked records remain compatible with the existing context compiler;
 - normal chat, Agent 3 activation and production authority are unchanged.
+
+## R02 acceptance
+
+R02 is complete only when repository CI proves:
+
+- legacy and protected modes expose the same read-only shared contract;
+- protected reads traverse the existing completed-migration, query-only reader
+  with exact local-context access rather than opening SQLite or DPAPI in the
+  shared package;
+- protected private records are not decrypted for cloud use by default;
+- explicit private-cloud authority is boolean and required;
+- secret values, `source_ref`, protection envelopes and storage internals never
+  cross the neutral projection;
+- inactive, unreviewed, expired, duplicate or over-budget backend output fails
+  closed;
+- malformed target/filter/bound inputs fail closed;
+- shutdown and failed startup clear the shared reader state;
+- no new persistent database, migration/fallback, write API, HTTP route, normal
+  chat wiring, Agent 3 activation or production authority is introduced.

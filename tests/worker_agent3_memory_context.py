@@ -8,7 +8,13 @@ import time
 
 from app.agent3.memory import MemoryStore
 from app.agent3.memory_context import ContextTarget, MemoryContextCompiler
-from app.memory import MemoryRetrievalQuery, MemoryRetriever
+from app.memory import (
+    MemoryReadRequest,
+    MemoryRetrievalQuery,
+    MemoryRetriever,
+    SharedMemoryReadError,
+    SharedMemoryReader,
+)
 
 passed = failed = 0
 
@@ -21,6 +27,17 @@ def check(cond, name):
     else:
         failed += 1
         print(f"  FAIL: {name}")
+
+
+def expect_shared_error(name, reader, request, contains=None):
+    try:
+        reader.read_candidates(request)
+    except SharedMemoryReadError as exc:
+        check(contains is None or contains in str(exc), name)
+    except Exception:
+        check(False, name)
+    else:
+        check(False, name)
 
 
 store = MemoryStore(os.path.join(tempfile.mkdtemp(prefix="agent3-memory-context-"), "memory.db"))
@@ -244,6 +261,80 @@ check(retriever.rank([public], MemoryRetrievalQuery("gpu", min_score=1.1, now=no
 check(retriever.rank([public], MemoryRetrievalQuery("gpu", recency_half_life_days=0, now=now)) == [], "non-positive recency half-life fails closed")
 check(retriever.rank([public], MemoryRetrievalQuery("gpu", now=float("nan"))) == [], "non-finite query clock fails closed")
 check(retriever.rank([private], MemoryRetrievalQuery("anders", target="cloud", allow_private_cloud="yes", now=now)) == [], "non-boolean private-cloud consent fails closed")
+
+# Memory 4.0 R02: the shared reader is not allowed to trust a backing store merely
+# because the selected Memory 3 implementations are already strict. A malformed
+# or future backend must still fail closed at the neutral boundary.
+def reader_for(*items):
+    return SharedMemoryReader(mode="legacy", read_context=lambda **_kwargs: items)
+
+
+expect_shared_error(
+    "shared reader rejects pending backend output",
+    reader_for(pending),
+    MemoryReadRequest(),
+    "unreviewed or inactive",
+)
+expect_shared_error(
+    "shared reader rejects deleted backend output",
+    reader_for(deleted_tombstone),
+    MemoryReadRequest(),
+    "unreviewed or inactive",
+)
+expect_shared_error(
+    "shared reader rejects expired backend output",
+    reader_for(expired),
+    MemoryReadRequest(),
+    "expired",
+)
+expect_shared_error(
+    "shared reader rejects secret backend output",
+    reader_for(secret),
+    MemoryReadRequest(),
+    "sensitivity",
+)
+expect_shared_error(
+    "shared reader rejects duplicate backend ids",
+    reader_for(public, public),
+    MemoryReadRequest(),
+    "duplicate",
+)
+expect_shared_error(
+    "shared reader independently enforces character budget",
+    reader_for(public),
+    MemoryReadRequest(max_chars=1),
+    "character budget",
+)
+expect_shared_error(
+    "shared reader blocks backend private-cloud policy violation",
+    reader_for(private),
+    MemoryReadRequest(target="cloud"),
+    "private cloud",
+)
+expect_shared_error(
+    "shared reader rejects unknown read target",
+    reader_for(public),
+    MemoryReadRequest(target="external"),
+    "local or cloud",
+)
+expect_shared_error(
+    "shared reader rejects duplicate subject filters",
+    reader_for(public),
+    MemoryReadRequest(subjects=("modelrig", "modelrig")),
+    "unique",
+)
+
+
+def broken_backend(**_kwargs):
+    raise RuntimeError("backend failure must not escape raw")
+
+
+expect_shared_error(
+    "shared reader wraps backend failures without broadening authority",
+    SharedMemoryReader(mode="legacy", read_context=broken_backend),
+    MemoryReadRequest(),
+    "backend read failed",
+)
 
 store.close()
 print(f"\n{passed} passed, {failed} failed")
