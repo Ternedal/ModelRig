@@ -20,6 +20,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,13 +33,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.logic.Agent3ConfirmationAuthority
+import dk.ternedal.modelrig.logic.Agent3PreviewAuthorityPolicy
+import dk.ternedal.modelrig.logic.Agent3PreviewConnection
+import dk.ternedal.modelrig.logic.Agent3PreviewIntent
+import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.logic.isAgent3ConfirmationAuthorityConsumed
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
 @Composable
 fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
@@ -47,6 +53,10 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
     var useMemory by remember { mutableStateOf(false) }
     var memorySubjects by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
+    var previewConnection by remember { mutableStateOf<Agent3PreviewConnection?>(null) }
+    var previewIntent by remember { mutableStateOf<Agent3PreviewIntent?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
     var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -60,51 +70,101 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         return Agent3Client(base, token)
     }
 
-    fun selectedSubjects(): List<String> = memorySubjects
-        .split(',')
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .distinct()
-        .take(20)
+    fun currentConnection(): Agent3PreviewConnection =
+        requireNotNull(Agent3PreviewConnection.capture(store.baseUrl, store.token)) {
+            "Forbindelsen er ugyldig"
+        }
+
+    fun client(connection: Agent3PreviewConnection): Agent3Client =
+        Agent3Client(connection.baseUrl, connection.token)
+
+    fun currentIntent(): Agent3PreviewIntent? =
+        Agent3PreviewIntent.capture(message, useMemory, memorySubjects)
+
+    fun clearPreviewAuthority() {
+        preview = null
+        previewConnection = null
+        previewIntent = null
+        previewDeadlineMillis = null
+        previewExpired = false
+    }
 
     fun previewPlan() {
-        val text = message.trim()
-        if (text.isEmpty() || busy) return
+        val requestIntent = currentIntent() ?: return
+        if (busy) return
+        val connection = runCatching { currentConnection() }
+            .getOrElse {
+                error = it.message ?: "Forbindelsen er ugyldig"
+                return
+            }
+        val requestStartedAtMillis = System.nanoTime() / 1_000_000L
         busy = true
         error = null
         run = null
+        clearPreviewAuthority()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client().previewPlan(
-                        message = text,
+                    client(connection).previewPlan(
+                        message = requestIntent.message,
                         mode = "rig",
-                        useMemory = useMemory,
-                        memorySubjects = if (useMemory) selectedSubjects() else emptyList(),
+                        useMemory = requestIntent.useMemory,
+                        memorySubjects = requestIntent.memorySubjects,
                     )
                 }
             }
             busy = false
-            result.onSuccess { preview = it }
-                .onFailure { error = it.message ?: "Planlægning fejlede" }
+            result.onSuccess { planned ->
+                if (!Agent3PreviewAuthorityPolicy.canPublish(requestIntent, currentIntent())) {
+                    error = "Preview blev forældet, fordi opgaven eller memory-valget ændrede sig"
+                    return@onSuccess
+                }
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    planned.expiresInSeconds,
+                )
+                preview = planned
+                previewConnection = connection
+                previewIntent = requestIntent
+                previewDeadlineMillis = deadline
+                previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
+            }.onFailure { error = it.message ?: "Planlægning fejlede" }
         }
     }
 
     fun startPlan() {
         val current = preview ?: return
+        val currentConnection = Agent3PreviewConnection.capture(store.baseUrl, store.token)
+        val currentIntent = currentIntent()
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+            previewDeadlineMillis,
+            System.nanoTime() / 1_000_000L,
+        )
+        if (!previewFresh) previewExpired = true
+        if (!Agent3PreviewAuthorityPolicy.canStart(
+                planId = current.planId,
+                hasSteps = current.steps.isNotEmpty(),
+                capabilityAllowed = current.capabilityReceipt?.allowed,
+                previewFresh = previewFresh,
+                busy = busy,
+                hasRun = run != null,
+                currentConnection = currentConnection,
+                previewConnection = previewConnection,
+                currentIntent = currentIntent,
+                previewIntent = previewIntent,
+            )
+        ) return
         val id = current.planId ?: return
-        if (current.capabilityReceipt?.allowed == false || busy) return
-        val startClient = runCatching { client() }
-            .getOrElse {
-                error = it.message ?: "Forbindelsen er ugyldig"
-                return
-            }
+        val connection = previewConnection ?: return
         busy = true
         error = null
-        preview = null
+        clearPreviewAuthority()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { startClient.startPlan(id) }
+                runCatching { client(connection).startPlan(id) }
             }
             busy = false
             result.onSuccess { run = it }
@@ -168,6 +228,27 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         }
     }
 
+    LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+        val planId = preview?.planId ?: return@LaunchedEffect
+        val deadline = previewDeadlineMillis
+        if (deadline == null) {
+            previewExpired = true
+            return@LaunchedEffect
+        }
+        val remaining = deadline - (System.nanoTime() / 1_000_000L)
+        if (remaining > 0L) delay(remaining)
+        if (
+            preview?.planId == planId &&
+            previewDeadlineMillis == deadline &&
+            Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+        ) {
+            previewExpired = true
+        }
+    }
+
     Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
         Column(
             Modifier
@@ -204,7 +285,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = message,
-                        onValueChange = { message = it },
+                        onValueChange = { message = it; clearPreviewAuthority() },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 3,
                         maxLines = 8,
@@ -216,11 +297,11 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         if (useMemory) {
-                            Button(onClick = { useMemory = false; memorySubjects = ""; preview = null }) {
+                            Button(onClick = { useMemory = false; memorySubjects = ""; clearPreviewAuthority() }) {
                                 Text("Memory: til")
                             }
                         } else {
-                            OutlinedButton(onClick = { useMemory = true; preview = null }) {
+                            OutlinedButton(onClick = { useMemory = true; clearPreviewAuthority() }) {
                                 Text("Memory: fra")
                             }
                         }
@@ -235,7 +316,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
                         Spacer(Modifier.height(8.dp))
                         OutlinedTextField(
                             value = memorySubjects,
-                            onValueChange = { memorySubjects = it; preview = null },
+                            onValueChange = { memorySubjects = it; clearPreviewAuthority() },
                             label = { Text("Valgfrit subject-filter, kommasepareret") },
                             supportingText = { Text("Tomt felt bruger alle eligible memories inden for serverens budget.") },
                             singleLine = true,
@@ -265,8 +346,29 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
             }
 
             preview?.let { p ->
+                val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                    previewDeadlineMillis,
+                    System.nanoTime() / 1_000_000L,
+                )
+                val startEnabled = Agent3PreviewAuthorityPolicy.canStart(
+                    planId = p.planId,
+                    hasSteps = p.steps.isNotEmpty(),
+                    capabilityAllowed = p.capabilityReceipt?.allowed,
+                    previewFresh = previewFresh,
+                    busy = busy,
+                    hasRun = run != null,
+                    currentConnection = Agent3PreviewConnection.capture(store.baseUrl, store.token),
+                    previewConnection = previewConnection,
+                    currentIntent = currentIntent(),
+                    previewIntent = previewIntent,
+                )
                 Spacer(Modifier.height(14.dp))
-                Agent3PlanCard(p, busy = busy, onStart = { startPlan() })
+                Agent3PlanCard(
+                    preview = p,
+                    startEnabled = startEnabled,
+                    expiredForDisplay = previewExpired || !previewFresh,
+                    onStart = { startPlan() },
+                )
             }
 
             run?.let { r ->
@@ -290,10 +392,10 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
 @Composable
 private fun Agent3PlanCard(
     preview: Agent3Client.PlanPreview,
-    busy: Boolean,
+    startEnabled: Boolean,
+    expiredForDisplay: Boolean,
     onStart: () -> Unit,
 ) {
-    val capabilityAllowed = preview.capabilityReceipt?.allowed != false
     Surface(color = KalivTheme.colors.surface, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Text("Plan-preview", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
@@ -353,14 +455,23 @@ private fun Agent3PlanCard(
             }
             Spacer(Modifier.height(12.dp))
             Button(
-                enabled = !busy && capabilityAllowed && preview.planId != null && preview.steps.isNotEmpty(),
+                enabled = startEnabled,
                 onClick = onStart,
             ) {
                 Text("Start den viste plan")
             }
-            preview.expiresInSeconds?.let {
+            if (expiredForDisplay) {
                 Spacer(Modifier.height(4.dp))
-                Text("Plan-id udløber om ca. $it sek.", fontSize = 11.sp, color = KalivTheme.colors.textMuted)
+                Text(
+                    "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                    fontSize = 11.sp,
+                    color = KalivTheme.colors.danger,
+                )
+            } else {
+                preview.expiresInSeconds?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text("Plan-id udløber om ca. $it sek.", fontSize = 11.sp, color = KalivTheme.colors.textMuted)
+                }
             }
         }
     }
