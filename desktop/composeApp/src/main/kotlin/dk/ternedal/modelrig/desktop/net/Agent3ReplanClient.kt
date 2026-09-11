@@ -248,6 +248,14 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
                 summary = summary,
             )
         }
+        val replacementIds = steps.map { it.id }
+        if (replacementIds.size != replacementIds.distinct().size) {
+            previewMismatch("plan.step_ids")
+        }
+        val immutableIds = (immutablePrefixIds + immutableTailIds).toSet()
+        if (replacementIds.any { it in immutableIds }) {
+            previewMismatch("plan.step_ids")
+        }
 
         return ReviewedPreviewAuthority(
             previewId = previewId,

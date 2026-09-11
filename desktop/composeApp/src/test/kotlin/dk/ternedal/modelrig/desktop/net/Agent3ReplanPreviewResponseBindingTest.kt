@@ -120,6 +120,37 @@ class Agent3ReplanPreviewResponseBindingTest {
     }
 
     @Test
+    fun reviewedPreviewRejectsDuplicateOrImmutableCollidingReplacementIds() {
+        listOf(
+            validBody(
+                planJson = """[{"id":"read-new","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"},{"id":"read-new","tool":"rig_status","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"status"}]"""
+            ),
+            validBody(
+                planJson = """[{"id":"done-1","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""
+            ),
+            validBody(
+                planJson = """[{"id":"write-1","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""
+            ),
+        ).forEach(::assertReviewedFailure)
+    }
+
+    @Test
+    fun reviewedPreviewAllowsReplacementIdReuseFromRemovableWindow() {
+        val server = server(
+            validBody(
+                planJson = """[{"id":"read-old","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""
+            )
+        )
+        try {
+            val preview = Agent3ReplanClient(server.baseUrl(), "token")
+                .previewReviewed("run-1", "planner-a")
+            assertEquals("read-old", preview.plan.single().id)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun reviewedPreviewRejectsMalformedOrUnsafeReplacementStepShape() {
         listOf(
             validBody(planJson = """[{"id":"read-new","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
