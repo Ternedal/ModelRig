@@ -7,6 +7,11 @@ package dk.ternedal.modelrig.desktop.net
  * plan/termination/capability authority. Only then may the parsed read-review
  * state reach the UI: review mode and capability authority must agree with the
  * exact Preview, and any returned checkpoint must agree with the returned run.
+ *
+ * If that final reviewed state is rejected, the already-bound nonblank run id is
+ * only a recovery reference: the rejected Start payload is never published.
+ * Fresh server truth must be fetched on the same client connection and pass the
+ * exact run-id, review-mode and checkpoint bindings before it can be returned.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -17,18 +22,53 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
         planId = planId,
         expectedReviewReads = expectedReviewReads,
     )
-    if (envelope.readReview.enabled != expectedReviewReads) {
-        throw Agent3Exception(
-            "Invalid Agent 3.0 Start envelope: read_review state does not match reviewed intent"
-        )
-    }
     if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
         throw Agent3Exception(
             "Invalid Agent 3.0 Start envelope: capability receipt does not match reviewed Preview"
         )
     }
-    validateReviewedStartCheckpoint(envelope, expectedReviewReads)
-    return envelope
+
+    val validationFailure = runCatching {
+        if (envelope.readReview.enabled != expectedReviewReads) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 Start envelope: read_review state does not match reviewed intent"
+            )
+        }
+        validateReviewedStartCheckpoint(envelope, expectedReviewReads)
+    }.exceptionOrNull()
+
+    if (validationFailure == null) return envelope
+    if (validationFailure !is Agent3Exception) throw validationFailure
+
+    return recoverReviewedStartEnvelope(
+        rejectedEnvelope = envelope,
+        expectedReviewReads = expectedReviewReads,
+        originalFailure = validationFailure,
+    )
+}
+
+private fun Agent3Client.recoverReviewedStartEnvelope(
+    rejectedEnvelope: Agent3RunEnvelope,
+    expectedReviewReads: Boolean,
+    originalFailure: Agent3Exception,
+): Agent3RunEnvelope {
+    val runId = rejectedEnvelope.run.id.takeIf { it.isNotBlank() }
+        ?: throw originalFailure
+
+    return try {
+        val fresh = getRunEnvelope(
+            runId = runId,
+            expectedReviewReads = expectedReviewReads,
+        )
+        validateReviewedStartCheckpoint(fresh, expectedReviewReads)
+        fresh
+    } catch (recoveryFailure: Exception) {
+        val original = originalFailure.message ?: "the reviewed Start envelope was rejected"
+        val recovery = recoveryFailure.message ?: "fresh run status could not be validated"
+        throw Agent3Exception(
+            "$original. Fresh run recovery failed: $recovery"
+        )
+    }
 }
 
 internal fun validateReviewedStartCheckpoint(
