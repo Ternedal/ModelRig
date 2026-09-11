@@ -3,29 +3,41 @@ package dk.ternedal.modelrig.desktop.net
 /**
  * Reviewed Start boundary for the desktop operator surface.
  *
- * The transport first proves the raw top-level review mode plus its existing
- * plan/termination/capability authority. Only then may the parsed read-review
- * state reach the UI: review mode and capability authority must agree with the
- * exact Preview, and any returned checkpoint must agree with the returned run.
+ * Ordinary Start still requires an exact raw top-level review-mode match before
+ * it can succeed. This reviewed-only transport additionally preserves a narrow
+ * recovery reference when that raw proof conflicts: JSON/envelope shape, exact
+ * plan id, termination/run identity and exact reviewed capability authority are
+ * all proven before a run id can be used for one fresh same-client GET.
  *
- * If that final reviewed state is rejected, the already-bound nonblank run id is
- * only a recovery reference: the rejected Start payload is never published.
- * Fresh server truth must be fetched on the same client connection and pass the
- * exact run-id, review-mode and checkpoint bindings before it can be returned.
+ * The conflicting Start payload never becomes UI run authority. Fresh truth from
+ * a raw-mode conflict must independently prove both its exact top-level
+ * `review_reads` Boolean and parsed read-review state before checkpoint validation
+ * may publish it. Post-envelope checkpoint recovery keeps the existing path.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
     expectedReviewReads: Boolean,
     expectedCapabilityReceipt: Agent3CapabilityReceipt? = null,
 ): Agent3RunEnvelope {
-    val envelope = startPlanEnvelope(
+    val transport = startReviewedPlanTransport(
         planId = planId,
         expectedReviewReads = expectedReviewReads,
+        expectedCapabilityReceipt = expectedCapabilityReceipt,
     )
-    if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
-        throw Agent3Exception(
-            "Invalid Agent 3.0 Start envelope: capability receipt does not match reviewed Preview"
-        )
+
+    val envelope = when (transport) {
+        is Agent3ReviewedStartTransportResult.Accepted -> transport.envelope
+        is Agent3ReviewedStartTransportResult.RawReviewConflict -> {
+            val originalFailure = Agent3Exception(
+                "Invalid Agent 3.0 Start envelope: server review_reads does not match reviewed intent"
+            )
+            return recoverReviewedStartEnvelope(
+                runId = transport.runId,
+                expectedReviewReads = expectedReviewReads,
+                originalFailure = originalFailure,
+                requireRawReviewBinding = true,
+            )
+        }
     }
 
     val validationFailure = runCatching {
@@ -41,25 +53,34 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     if (validationFailure !is Agent3Exception) throw validationFailure
 
     return recoverReviewedStartEnvelope(
-        rejectedEnvelope = envelope,
+        runId = envelope.run.id,
         expectedReviewReads = expectedReviewReads,
         originalFailure = validationFailure,
+        requireRawReviewBinding = false,
     )
 }
 
 private fun Agent3Client.recoverReviewedStartEnvelope(
-    rejectedEnvelope: Agent3RunEnvelope,
+    runId: String,
     expectedReviewReads: Boolean,
     originalFailure: Agent3Exception,
+    requireRawReviewBinding: Boolean,
 ): Agent3RunEnvelope {
-    val runId = rejectedEnvelope.run.id.takeIf { it.isNotBlank() }
+    val recoveryRunId = runId.takeIf { it.isNotBlank() }
         ?: throw originalFailure
 
     return try {
-        val fresh = getRunEnvelope(
-            runId = runId,
-            expectedReviewReads = expectedReviewReads,
-        )
+        val fresh = if (requireRawReviewBinding) {
+            getReviewedRunEnvelopeStrict(
+                runId = recoveryRunId,
+                expectedReviewReads = expectedReviewReads,
+            )
+        } else {
+            getRunEnvelope(
+                runId = recoveryRunId,
+                expectedReviewReads = expectedReviewReads,
+            )
+        }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
         fresh
     } catch (recoveryFailure: Exception) {
