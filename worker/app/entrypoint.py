@@ -19,6 +19,7 @@ from .memory.context_mount import (
     compose_memory4_context_lifespan,
     mount_memory4_context,
 )
+from .memory.write_mount import close_memory4_write, mount_memory4_write
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
@@ -61,8 +62,14 @@ install_termination_contract(fastapi_app)
 # Memory 4 R04 is a separate default-off, loopback-only read surface. It reuses
 # the durable Memory 3 substrate but never calls mount_agent3 and does not inspect
 # KALIV_AGENT3_ENABLED. With its own flag off this call opens no DB/provider and
-# registers no route. Normal /api/v1/chat remains unchanged until R05.
+# registers no route.
 mount_memory4_context(fastapi_app)
+
+# Memory 4 W04-A is independently default-off and loopback-only. With
+# KALIV_MEMORY4_WRITE_ENABLED unset this returns before opening a writer/provider
+# or registering a route. It composes the already-landed W01/W03/W02 boundaries
+# but does not intercept /api/v1/chat or depend on Agent 3 activation.
+mount_memory4_write(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
@@ -94,10 +101,11 @@ mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
 
 # The raw route app stays inert for unit tests. Only the documented production
-# entrypoint owns process lifecycle. R04 cleanup is explicitly composed around
-# the existing scheduler lifespan so a custom lifespan cannot bypass closing the
-# query-only memory substrate.
+# entrypoint owns process lifecycle. Memory 4 reader and writer cleanup are
+# composed inside the existing R04 wrapper, preserving scheduler_lifespan as the
+# exact ``__wrapped__`` owner instead of adding a competing lifespan layer.
 fastapi_app.router.lifespan_context = compose_memory4_context_lifespan(
-    scheduler_lifespan
+    scheduler_lifespan,
+    extra_cleanup=close_memory4_write,
 )
 app = harden(fastapi_app)
