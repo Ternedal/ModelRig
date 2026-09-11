@@ -116,6 +116,10 @@ run_support(
     "worker_memory4_write_surface.py",
 )
 run_support(
+    "W04-H1 admission before body parsing",
+    "worker_memory4_write_admission.py",
+)
+run_support(
     "W04-A write lifespan",
     "worker_memory4_write_lifespan.py",
 )
