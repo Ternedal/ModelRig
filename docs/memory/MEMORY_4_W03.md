@@ -43,6 +43,36 @@ committer can see it. This validation-only plan grants no storage authority and 
 discarded; storage adapters make the authoritative plan from a fresh bounded
 snapshot under their existing write transaction.
 
+## Completed-turn authority rebinding
+
+W02 validates candidate/storage authority but deliberately does not receive the
+completed turn that produced a candidate. W03 therefore rechecks the W01
+invariants that are provable from the already bounded turn before an injected
+committer can see the batch:
+
+- every candidate `source_ref` must equal the canonical completed-turn
+  `source_ref`;
+- every `user_explicit` candidate must carry non-empty evidence literally present
+  in the canonical user turn, and its value must be contained in that evidence;
+- every `confirmed` candidate must be the exact W01 server-owned canonical
+  verbatim shape for this turn: `subject=user`,
+  `predicate=verbatim_user_statement`, `kind=note`, `sensitivity=private`,
+  `source_type=user_explicit`, `confidence=1.0`, `review_status=confirmed`, and
+  `value == evidence == canonical user_text`;
+- credential-like confirmed content is rejected. Because a custom extractor can
+  hide the model-proposed subject/predicate labels that W01 saw before
+  canonicalization, W03 conservatively reruns credential detection against both
+  the candidate and the bounded turn text.
+
+This check prevents a custom or faulty extractor from replaying another turn's
+provenance, manufacturing confirmed verbatim authority for different text, or
+reclassifying credential-like user text as ordinary private confirmed memory.
+
+The rebinding is not a new review boundary. Correctly turn-bound structured
+candidates may still remain `pending`, pass to W02, and be persisted as pending
+state. W03-H1 does not replace the broader W03 policy with a defer-all-pending
+policy and does not silently promote pending semantics.
+
 ## Empty and failure behavior
 
 An empty W01 candidate tuple is a deterministic no-store result:
@@ -54,9 +84,9 @@ An empty W01 candidate tuple is a deterministic no-store result:
 
 The committer is not invoked.
 
-Extraction failure, a non-tuple candidate batch, W02 validation failure, storage
-failure or malformed durable receipt fails closed with `MemoryTurnWriteError`.
-No fallback path writes raw extractor output directly.
+Extraction failure, a non-tuple candidate batch, W02 validation failure, completed-
+turn authority mismatch, storage failure or malformed durable receipt fails closed
+with `MemoryTurnWriteError`. No fallback path writes raw extractor output directly.
 
 ## Durable receipt boundary
 
@@ -124,7 +154,7 @@ fails closed.
 W03 does not weaken W01/W02 authority:
 
 - automatic confirmed memory remains only the server-owned complete verbatim user
-  statement defined by W01 hardening;
+  statement defined by W01 hardening and rebound to the exact completed turn;
 - model-authored structured interpretations remain pending;
 - pending structured state cannot supersede confirmed state;
 - secret candidates remain pending at W01 and are skipped/no-auto-persist at W02;
@@ -149,6 +179,12 @@ Coverage includes:
 - structured partial evidence staying pending and out of context;
 - secret no-auto-persist behavior;
 - extraction and candidate-container failure before commit;
+- spoofed `source_ref` rejection before commit;
+- wrong-turn confirmed verbatim rejection;
+- fabricated `user_explicit` evidence rejection;
+- credential-disguised confirmed rejection;
+- correctly turn-bound pending semantic persistence without authority upgrade;
+- W01 turn bounds applying before an injected extractor can observe the turn;
 - durable receipt mismatch rejection;
 - storage failure propagation;
 - value/evidence/source-ref absence from W03 receipts;
