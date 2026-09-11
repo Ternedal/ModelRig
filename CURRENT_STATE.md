@@ -246,6 +246,10 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_hardening_stream_disconnect.py`
 - `tests/worker_home_rig_runtime.py`
 - `tests/worker_jobs.py`
+- `tests/worker_memory4_consolidation_persistence.py`
+- `tests/worker_memory4_consolidation_persistence_authority.py`
+- `tests/worker_memory4_consolidation_persistence_batch.py`
+- `tests/worker_memory4_consolidation_persistence_edges.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
