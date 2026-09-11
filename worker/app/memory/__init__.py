@@ -2,7 +2,6 @@ from .consolidation import (
     ACTION_CREATE,
     ACTION_REUSE,
     ACTION_REVIEW,
-    ACTION_SUPERSEDE,
     MAX_CONSOLIDATION_CANDIDATES,
     MAX_CONSOLIDATION_RECORDS,
     ConsolidationDecision,
@@ -50,11 +49,7 @@ from .storage import (
 
 
 async def embed_memory_text_local(text: str) -> list[float]:
-    """Lazily enter the ModelRig-specific local Ollama adapter.
-
-    Keeping this import inside the call preserves the shared package's neutral
-    import boundary for R01/R02/R03 core users that never enable semantics.
-    """
+    """Lazily enter the ModelRig-specific local Ollama adapter."""
     from .local_embeddings import embed_memory_text_local as _embed
 
     return await _embed(text)
@@ -75,7 +70,6 @@ __all__ = [
     "ACTION_CREATE",
     "ACTION_REUSE",
     "ACTION_REVIEW",
-    "ACTION_SUPERSEDE",
     "DEFAULT_MIN_SEMANTIC_SCORE",
     "MAX_CANDIDATE_EVIDENCE_CHARS",
     "MAX_CANDIDATE_PREDICATE_CHARS",
