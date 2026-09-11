@@ -17,6 +17,12 @@ from .memory import (
     MemoryRecord,
     MemoryStoreError,
 )
+from .memory_protected_lookup import (
+    LOOKUP_COLUMN,
+    ProtectedMemoryExactLookup,
+    ProtectedMemoryLookupError,
+    validate_lookup_digest,
+)
 from .memory_protected_reader import ProtectedMemoryReader
 from .memory_protection import (
     ENVELOPE_SCHEMA,
@@ -66,6 +72,7 @@ class ProtectedMemoryWriter:
         self._lock = threading.RLock()
         self._closed = False
         self._conn: sqlite3.Connection | None = None
+        self._lookup: ProtectedMemoryExactLookup | None = None
         self._validate_path()
 
         # Reuse the exact read boundary before opening a writable connection.
@@ -88,8 +95,21 @@ class ProtectedMemoryWriter:
                     "protected memory writer requires WAL journal mode"
                 )
             self._validate_migration()
-        except (sqlite3.Error, MemoryProtectionError, ProtectedMemoryWriteError):
+            self._lookup = ProtectedMemoryExactLookup.load_if_available(
+                self._conn,
+                self.codec,
+            )
+        except (
+            sqlite3.Error,
+            MemoryProtectionError,
+            ProtectedMemoryLookupError,
+            ProtectedMemoryWriteError,
+        ) as exc:
             self._close_connection()
+            if isinstance(exc, ProtectedMemoryLookupError):
+                raise ProtectedMemoryWriteError(
+                    "protected exact lookup state is not write-eligible"
+                ) from exc
             raise
 
     def close(self) -> None:
@@ -98,6 +118,10 @@ class ProtectedMemoryWriter:
             self._closed = True
 
     def _close_connection(self) -> None:
+        lookup = self._lookup
+        self._lookup = None
+        if lookup is not None:
+            lookup.close()
         connection = self._conn
         self._conn = None
         if connection is not None:
@@ -224,9 +248,12 @@ class ProtectedMemoryWriter:
                 now=now,
                 supersedes_id=old_id,
             )
+            lookup_clear = (
+                f",{LOOKUP_COLUMN}=NULL" if self._lookup is not None else ""
+            )
             changed = self._execute(
                 "UPDATE agent_memories SET lifecycle_status='superseded',"
-                "updated_at=? WHERE id=? AND lifecycle_status='active' "
+                f"updated_at=?{lookup_clear} WHERE id=? AND lifecycle_status='active' "
                 "AND updated_at=?",
                 (now, old_id, expected),
             ).rowcount
@@ -262,12 +289,15 @@ class ProtectedMemoryWriter:
             self._validate_protected_row(row)
             if float(row["updated_at"]) != expected:
                 raise MemoryConflict("memory changed before protected delete")
+            lookup_clear = (
+                f",{LOOKUP_COLUMN}=NULL" if self._lookup is not None else ""
+            )
             changed = self._execute(
                 "UPDATE agent_memories SET value='',source_ref=NULL,"
                 "value_protected=NULL,source_ref_protected=NULL,"
                 "review_status='rejected',lifecycle_status='deleted',"
                 "deleted_at=?,updated_at=?,protection_state='redacted',"
-                "protection_fields='',protection_updated_at=? "
+                f"protection_fields='',protection_updated_at=?{lookup_clear} "
                 "WHERE id=? AND lifecycle_status!='deleted' AND updated_at=?",
                 (now, now, now, cleaned_id, expected),
             ).rowcount
@@ -314,46 +344,95 @@ class ProtectedMemoryWriter:
         now: float,
         supersedes_id: str | None,
     ) -> None:
-        try:
-            self._execute(
-                "INSERT INTO agent_memories("
-                "id,subject,predicate,value,kind,sensitivity,source_type,"
-                "source_ref,confidence,review_status,lifecycle_status,"
-                "supersedes_id,created_at,updated_at,expires_at,deleted_at,"
-                "schema_version,value_protected,source_ref_protected,"
-                "protection_schema,protection_provider,protection_key_scope,"
-                "protection_state,protection_fields,protection_revision,"
-                "protection_updated_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    memory_id,
-                    fields["subject"],
-                    fields["predicate"],
-                    "",
-                    fields["kind"],
-                    fields["sensitivity"],
-                    fields["source_type"],
-                    None,
-                    fields["confidence"],
-                    fields["review_status"],
-                    "active",
-                    supersedes_id,
-                    now,
-                    now,
-                    fields["expires_at"],
-                    None,
-                    1,
-                    value_envelope,
-                    source_envelope,
-                    ENVELOPE_SCHEMA,
-                    self.codec.provider.provider_id,
-                    self.codec.provider.key_scope,
-                    "protected",
-                    protected_fields,
-                    PROTECTION_REVISION,
-                    now,
-                ),
+        lookup_digest = None
+        if self._lookup is not None and fields["sensitivity"] == "private":
+            lookup_digest = self._lookup.digest(
+                subject=str(fields["subject"]),
+                predicate=str(fields["predicate"]),
+                value=str(fields["value"]),
             )
+        try:
+            if self._lookup is None:
+                self._execute(
+                    "INSERT INTO agent_memories("
+                    "id,subject,predicate,value,kind,sensitivity,source_type,"
+                    "source_ref,confidence,review_status,lifecycle_status,"
+                    "supersedes_id,created_at,updated_at,expires_at,deleted_at,"
+                    "schema_version,value_protected,source_ref_protected,"
+                    "protection_schema,protection_provider,protection_key_scope,"
+                    "protection_state,protection_fields,protection_revision,"
+                    "protection_updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        memory_id,
+                        fields["subject"],
+                        fields["predicate"],
+                        "",
+                        fields["kind"],
+                        fields["sensitivity"],
+                        fields["source_type"],
+                        None,
+                        fields["confidence"],
+                        fields["review_status"],
+                        "active",
+                        supersedes_id,
+                        now,
+                        now,
+                        fields["expires_at"],
+                        None,
+                        1,
+                        value_envelope,
+                        source_envelope,
+                        ENVELOPE_SCHEMA,
+                        self.codec.provider.provider_id,
+                        self.codec.provider.key_scope,
+                        "protected",
+                        protected_fields,
+                        PROTECTION_REVISION,
+                        now,
+                    ),
+                )
+            else:
+                self._execute(
+                    "INSERT INTO agent_memories("
+                    "id,subject,predicate,value,kind,sensitivity,source_type,"
+                    "source_ref,confidence,review_status,lifecycle_status,"
+                    "supersedes_id,created_at,updated_at,expires_at,deleted_at,"
+                    "schema_version,value_protected,source_ref_protected,"
+                    "protection_schema,protection_provider,protection_key_scope,"
+                    "protection_state,protection_fields,protection_revision,"
+                    f"protection_updated_at,{LOOKUP_COLUMN}) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        memory_id,
+                        fields["subject"],
+                        fields["predicate"],
+                        "",
+                        fields["kind"],
+                        fields["sensitivity"],
+                        fields["source_type"],
+                        None,
+                        fields["confidence"],
+                        fields["review_status"],
+                        "active",
+                        supersedes_id,
+                        now,
+                        now,
+                        fields["expires_at"],
+                        None,
+                        1,
+                        value_envelope,
+                        source_envelope,
+                        ENVELOPE_SCHEMA,
+                        self.codec.provider.provider_id,
+                        self.codec.provider.key_scope,
+                        "protected",
+                        protected_fields,
+                        PROTECTION_REVISION,
+                        now,
+                        lookup_digest,
+                    ),
+                )
         except sqlite3.IntegrityError as exc:
             raise MemoryConflict("protected memory id already exists") from exc
         row = self._row_locked(memory_id)
@@ -448,6 +527,24 @@ class ProtectedMemoryWriter:
             raise ProtectedMemoryWriteError(
                 f"protected memory {row['id']} metadata mismatch"
             )
+        if self._lookup is not None:
+            digest = row[LOOKUP_COLUMN]
+            eligible = (
+                row["sensitivity"] == "private"
+                and row["lifecycle_status"] == "active"
+                and state == "protected"
+            )
+            if eligible:
+                try:
+                    validate_lookup_digest(digest)
+                except ProtectedMemoryLookupError as exc:
+                    raise ProtectedMemoryWriteError(
+                        f"protected memory {row['id']} lookup digest is invalid"
+                    ) from exc
+            elif digest is not None:
+                raise ProtectedMemoryWriteError(
+                    f"protected memory {row['id']} retains an ineligible lookup digest"
+                )
         fields = str(row["protection_fields"])
         if state == "redacted":
             if (
