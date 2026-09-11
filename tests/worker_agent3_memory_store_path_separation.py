@@ -111,6 +111,10 @@ run_support(
     "W03-H1 turn authority",
     "worker_memory4_w03_turn_authority.py",
 )
+run_support(
+    "W04 loopback write surface",
+    "worker_memory4_write_surface.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
