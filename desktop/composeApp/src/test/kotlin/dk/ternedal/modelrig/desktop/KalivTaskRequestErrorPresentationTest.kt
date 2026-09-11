@@ -27,7 +27,8 @@ class KalivTaskRequestErrorPresentationTest {
             TaskRequestOperation.START_NOT_ACCEPTED to "Opgaven blev ikke accepteret. Prøv samme preview igen.",
             TaskRequestOperation.START_REFUSED to "Opgaven blev ikke accepteret. Lav et nyt plan-preview.",
             TaskRequestOperation.STATUS to "Task-status kunne ikke hentes.",
-            TaskRequestOperation.STOP_PLAN to "Planen kunne ikke stoppes.",
+            TaskRequestOperation.STOP_PLAN to
+                "Stop-resultatet kunne ikke bekræftes. Planen kan allerede være stoppet på serveren. Opdatér task-status før du konkluderer eller prøver igen.",
             TaskRequestOperation.POLLING to "Automatisk task-status kunne ikke hentes.",
             TaskRequestOperation.LOCAL_REFERENCE to "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben.",
             TaskRequestOperation.START_RECOVERY_REFERENCE to
@@ -66,7 +67,7 @@ class KalivTaskRequestErrorPresentationTest {
     @Test
     fun nullOrBlankDiagnosticsStillUseOperationCopy() {
         assertEquals(
-            "Planen kunne ikke stoppes.",
+            "Stop-resultatet kunne ikke bekræftes. Planen kan allerede være stoppet på serveren. Opdatér task-status før du konkluderer eller prøver igen.",
             presentTaskRequestError(TaskRequestOperation.STOP_PLAN, null),
         )
         assertEquals(

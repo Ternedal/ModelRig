@@ -32,7 +32,7 @@ class Agent3TaskErrorPresentationTest {
             presentAgent3TaskScreenError(Agent3TaskFailureOperation.STATUS, "unknown"),
         )
         assertEquals(
-            "Planen kunne ikke stoppes.",
+            "Stop-resultatet kunne ikke bekræftes. Planen kan allerede være stoppet på serveren. Opdatér task-status før du konkluderer eller prøver igen.",
             presentAgent3TaskScreenError(Agent3TaskFailureOperation.STOP_PLAN, "unknown"),
         )
         assertEquals(
