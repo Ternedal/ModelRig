@@ -13,19 +13,19 @@ import (
 
 func memory4ValidTurnWriteReceipt() map[string]any {
 	return map[string]any{
-		"schema":            memory4TurnWriteReceiptSchema,
-		"candidate_count":   1,
-		"considered_count":  1,
-		"created_count":     1,
-		"superseded_count":  0,
-		"deduped_count":     0,
-		"skipped_count":     0,
-		"created_ids":       []string{"memory-w04b-1"},
-		"superseded_ids":    []string{},
-		"superseding_ids":   []string{},
-		"deduped_ids":       []string{},
-		"replayed":          false,
-		"sent_to_store":     true,
+		"schema":           memory4TurnWriteReceiptSchema,
+		"candidate_count":  1,
+		"considered_count": 1,
+		"created_count":    1,
+		"superseded_count": 0,
+		"deduped_count":    0,
+		"skipped_count":    0,
+		"created_ids":      []string{"memory-w04b-1"},
+		"superseded_ids":   []string{},
+		"superseding_ids":  []string{},
+		"deduped_ids":      []string{},
+		"replayed":         false,
+		"sent_to_store":    true,
 	}
 }
 
@@ -75,7 +75,7 @@ func TestMemory4ChatBothFlagsOffKeepsDirectProxyContract(t *testing.T) {
 	}))
 	defer ollama.Close()
 
-	raw := "{\n \"model\":\"qwen\", \"messages\":[{\"role\":\"user\",\"content\":\"hello\"}], \"stream\":true\n}"
+	raw := "{\n  \"model\":\"qwen\", \"messages\":[{\"role\":\"user\",\"content\":\"hello\"}], \"stream\":true\n}"
 	s := memory4DirectServer(worker.URL, ollama.URL)
 	rec := httptest.NewRecorder()
 	s.handleMemory4Chat(rec, memory4Request(raw))
@@ -204,8 +204,21 @@ func TestMemory4ChatReadAndWritePersistsOriginalUserNotInjectedContext(t *testin
 	if contextHits.Load() != 1 || writeHits.Load() != 1 {
 		t.Fatalf("worker calls context=%d write=%d", contextHits.Load(), writeHits.Load())
 	}
-	if !strings.Contains(modelBody, context) || !strings.Contains(modelBody, memory4CurrentUserBegin) {
-		t.Fatalf("R05 model body did not receive verified context: %s", modelBody)
+	var modelRequest struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(modelBody), &modelRequest); err != nil {
+		t.Fatalf("decode R05 model body: %v body=%s", err, modelBody)
+	}
+	if len(modelRequest.Messages) == 0 {
+		t.Fatal("R05 model body has no messages")
+	}
+	injectedUser := modelRequest.Messages[len(modelRequest.Messages)-1].Content
+	if !strings.Contains(injectedUser, context) || !strings.Contains(injectedUser, memory4CurrentUserBegin) {
+		t.Fatalf("R05 final user content did not receive verified context: %q", injectedUser)
 	}
 	if posted.UserText != "what do I like?" || strings.Contains(posted.UserText, "KALIV MEMORY DATA") || strings.Contains(posted.UserText, "espresso") {
 		t.Fatalf("W04-B persisted injected context instead of original user text: %+v", posted)
