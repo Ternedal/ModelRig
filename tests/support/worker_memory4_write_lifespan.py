@@ -50,6 +50,8 @@ async def existing_context_wrapper(app):
         events.append("context:close")
 
 
+# Match R04's documented authority marker: runtime enters this wrapper, while
+# repository introspection must still see the scheduler as the root owner.
 existing_context_wrapper.__wrapped__ = scheduler_owner
 composed = compose_memory4_write_lifespan(existing_context_wrapper)
 check(

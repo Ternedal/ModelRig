@@ -22,7 +22,10 @@ _MOUNTED_STATE = "memory4_write_mounted"
 _SUBSTRATE_STATE = "memory4_write_substrate"
 _SERVICE_STATE = "memory4_write_service"
 
-ExtractCandidates = Callable[[CompletedMemoryTurn], Any]
+ExtractCandidates = Callable[
+    [CompletedMemoryTurn],
+    Any,
+]
 
 
 def memory4_write_enabled() -> bool:
@@ -34,6 +37,7 @@ def memory4_write_indexed_protected_enabled() -> bool:
 
 
 def close_memory4_write(app: FastAPI) -> None:
+    """Close process-owned W04-A storage state; safe to call repeatedly."""
     substrate = getattr(app.state, _SUBSTRATE_STATE, None)
     if substrate is not None:
         close = getattr(substrate, "close", None)
@@ -45,6 +49,15 @@ def close_memory4_write(app: FastAPI) -> None:
 
 
 def compose_memory4_write_lifespan(inner_lifespan):
+    """Compose W04-A cleanup without hiding the production lifespan owner.
+
+    Runtime composition must enter the exact supplied ``inner_lifespan`` so an
+    already-composed R04 wrapper still performs its own cleanup. Repository
+    lifecycle contracts also use ``__wrapped__`` to prove that the scheduler is
+    the original production authority owner. Preserve that root identity across
+    this additional W04-A wrapper instead of making wrapper nesting look like a
+    transfer of lifecycle ownership.
+    """
     if not callable(inner_lifespan):
         raise TypeError("inner lifespan must be callable")
     authority_owner = getattr(inner_lifespan, "__wrapped__", inner_lifespan)
@@ -69,6 +82,12 @@ def mount_memory4_write(
     protected_provider_factory: Callable[[], Any] | None = None,
     loopback_allowed: LoopbackPolicy | None = None,
 ) -> bool:
+    """Mount the independent default-off W04-A completed-turn write surface.
+
+    Flag-off returns before storage/provider imports. Explicit opt-in reuses the
+    durable Memory 3 substrate through W03 adapters, but does not mount Agent 3,
+    inspect `KALIV_AGENT3_ENABLED`, create a chat hook, or migrate protected state.
+    """
     if not memory4_write_enabled():
         return False
     if getattr(app.state, _MOUNTED_STATE, False):
@@ -88,7 +107,9 @@ def mount_memory4_write(
         commit_protected_candidates,
     )
 
-    memory_path = Path(_paths.peek_resolve(_MEMORY4_DB_DEFAULT, env=_MEMORY4_DB_ENV))
+    memory_path = Path(
+        _paths.peek_resolve(_MEMORY4_DB_DEFAULT, env=_MEMORY4_DB_ENV)
+    )
     mode = memory_store_mode()
     indexed_protected = memory4_write_indexed_protected_enabled()
     substrate: Any = None
@@ -141,7 +162,10 @@ def mount_memory4_write(
         else:
             raise RuntimeError("unsupported Memory 4 storage mode")
 
-        service = MemoryCompletedTurnWriteService(extract=extractor, commit=commit)
+        service = MemoryCompletedTurnWriteService(
+            extract=extractor,
+            commit=commit,
+        )
         router_kwargs = {}
         if loopback_allowed is not None:
             if not callable(loopback_allowed):
