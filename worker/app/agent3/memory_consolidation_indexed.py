@@ -203,11 +203,15 @@ def _add_touched_rows(
     plan: ConsolidationPlan,
     records: dict[str, MemoryRecord],
 ) -> None:
+    # Structured plans may name a trusted existing id, but canonical verbatim
+    # dedupe/supersede targets must be rediscovered through the blind index.
+    # Allowing a verbatim existing_id fallback would let a stale/forged plan
+    # bypass the selector that #1216 is specifically designed to revalidate.
     touched = sorted(
         {
             action.existing_id
             for action in plan.actions
-            if action.existing_id is not None
+            if action.existing_id is not None and not _is_verbatim(action.candidate)
         }
     )
     if not touched:
