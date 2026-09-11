@@ -101,6 +101,7 @@ def _step_payload(step: AgentStep) -> dict[str, Any]:
         "sensitivity": step.sensitivity.value,
         "egress": step.egress.value,
         "origin": step.origin,
+        "idempotent": step.idempotent,
         "conversation_id": step.conversation_id,
         "summary": step.summary,
     }
@@ -115,11 +116,14 @@ def _step_from_payload(payload: dict[str, Any]) -> AgentStep:
         "sensitivity",
         "egress",
         "origin",
+        "idempotent",
         "conversation_id",
         "summary",
     }
     if set(payload) != expected or not isinstance(payload.get("args"), dict):
         raise ReplanPreviewError("stored replacement step has an unsupported schema")
+    if type(payload.get("idempotent")) is not bool:
+        raise ReplanPreviewError("stored replacement step has invalid field types")
     try:
         return AgentStep(
             id=str(payload["id"]),
@@ -129,6 +133,7 @@ def _step_from_payload(payload: dict[str, Any]) -> AgentStep:
             sensitivity=Sensitivity(payload["sensitivity"]),
             egress=EgressClass(payload["egress"]),
             origin=str(payload["origin"]),
+            idempotent=payload["idempotent"],
             conversation_id=(
                 None
                 if payload["conversation_id"] is None

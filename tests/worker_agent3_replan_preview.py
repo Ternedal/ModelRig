@@ -164,6 +164,8 @@ check(journal.history(run.id) == [], "preview does not reserve a replan transact
 check(stored.before_digest == before and stored.revision == 0, "preview binds run digest and revision")
 check(stored.removable_step_ids == tuple(item.id for item in run.steps[1:3]), "preview binds removable step ids")
 check([item.tool for item in proposal.steps] == ["rig_status"], "preview retains registry-classified replacement")
+check(proposal.steps[0].idempotent is True, "planner replacement carries registry idempotency snapshot")
+check(stored.steps[0].get("idempotent") is True, "stored preview preserves registry idempotency snapshot")
 with sqlite3.connect(preview_store.path) as connection:
     raw_payload = connection.execute(
         "SELECT payload FROM agent_plans WHERE id=?", (preview_id,)
@@ -173,11 +175,57 @@ check(model_calls["count"] == 1, "preview calls the model once")
 
 revised, receipt, applied = service.apply(preview_id)
 check([item.tool for item in revised.steps] == ["rig_status", "rig_status", "note_append"], "single-use preview applies exact replacement")
+check(revised.steps[1].idempotent is True, "apply preserves replanned read idempotency for recovery")
 check(revised.steps[-1].args == {"text": "IMMUTABLE_SECRET_WRITE_ARG_normal"}, "apply preserves immutable write tail")
 check(receipt["removed_step_ids"] == list(applied.removable_step_ids), "committed receipt matches reviewed window")
 check(journal.revision_state(run.id) == (1, 1), "applied preview creates one committed revision")
 check(model_calls["count"] == 1, "apply does not call the model again")
 expect_error(lambda: service.apply(preview_id), "preview token is single-use")
+
+# Legacy or malformed stored previews cannot silently default recovery metadata.
+missing_idempotent_run = make_run("missing-idempotent")
+store.save(missing_idempotent_run)
+missing_idempotent_id, _, _, _ = asyncio.run(service.preview(missing_idempotent_run.id))
+with sqlite3.connect(preview_store.path) as connection:
+    row = connection.execute(
+        "SELECT payload FROM agent_plans WHERE id=?", (missing_idempotent_id,)
+    ).fetchone()
+    payload = json.loads(row[0])
+    del payload["steps"][0]["idempotent"]
+    connection.execute(
+        "UPDATE agent_plans SET payload=? WHERE id=?",
+        (json.dumps(payload), missing_idempotent_id),
+    )
+expect_error(
+    lambda: service.apply(missing_idempotent_id),
+    "stored preview missing idempotent fails closed",
+)
+check(
+    journal.history(missing_idempotent_run.id) == [],
+    "missing idempotent never reaches replan journal",
+)
+
+wrong_idempotent_run = make_run("wrong-idempotent")
+store.save(wrong_idempotent_run)
+wrong_idempotent_id, _, _, _ = asyncio.run(service.preview(wrong_idempotent_run.id))
+with sqlite3.connect(preview_store.path) as connection:
+    row = connection.execute(
+        "SELECT payload FROM agent_plans WHERE id=?", (wrong_idempotent_id,)
+    ).fetchone()
+    payload = json.loads(row[0])
+    payload["steps"][0]["idempotent"] = "true"
+    connection.execute(
+        "UPDATE agent_plans SET payload=? WHERE id=?",
+        (json.dumps(payload), wrong_idempotent_id),
+    )
+expect_error(
+    lambda: service.apply(wrong_idempotent_id),
+    "stored preview non-boolean idempotent fails closed",
+)
+check(
+    journal.history(wrong_idempotent_run.id) == [],
+    "non-boolean idempotent never reaches replan journal",
+)
 
 # Any persisted run change consumes and invalidates the reviewed token.
 stale_run = make_run("stale")
