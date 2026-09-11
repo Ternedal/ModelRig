@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import runpy
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -70,11 +71,27 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-path-separation-") as raw:
             not shared.exists(),
         )
 
+# W02-B has a large focused qualification, but keeping it under tests/support
+# avoids inventing another top-level suite merely to exercise one slice. The
+# existing storage test remains the CI/inventory entrypoint on Linux and on the
+# Windows protected-store gate.
+w02b_ok = False
+try:
+    runpy.run_path(
+        str(ROOT / "tests" / "support" / "worker_agent3_memory_consolidation_writer.py"),
+        run_name="__main__",
+    )
+except SystemExit as exc:
+    w02b_ok = exc.code in (None, 0)
+except Exception as exc:
+    print(f"  W02-B support suite raised {type(exc).__name__}: {exc}")
+check("W02-B focused storage qualification passes", w02b_ok)
+
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
     print(f"  {'PASS' if ok else 'FAIL'}: {label}")
 print(
-    f"\n===== T-033 STORE PATH SEPARATION: "
+    f"\n===== T-033 STORE PATH SEPARATION + W02-B: "
     f"{len(checks) - len(failed)} passed, {len(failed)} failed ====="
 )
 raise SystemExit(1 if failed else 0)
