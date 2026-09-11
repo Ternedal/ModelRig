@@ -9,8 +9,12 @@ from app.agent3.memory import MemoryNotFound, MemoryStore, MemoryStoreError
 from app.agent3.memory_consolidation import (
     MemoryConsolidationApplyError,
     apply_legacy_consolidation_decision,
+    apply_protected_consolidation_decision,
     plan_legacy_consolidation,
+    plan_protected_consolidation,
 )
+from app.agent3.memory_protected_reader import MemoryReadAccess
+from app.agent3.memory_protected_writer import MemoryWriteAccess
 from app.memory import (
     ACTION_CREATE,
     ACTION_REUSE,
@@ -395,6 +399,154 @@ try:
 except MemoryConsolidationError:
     malformed_refused = True
 check(malformed_refused, "W02 rejects non-active existing snapshots fail-closed")
+
+# The real ProtectedMemoryWriter suite already proves encrypted correction/history
+# semantics and Windows DPAPI behavior. These fakes qualify only W02's composition
+# contract: LOCAL_MANAGEMENT authority, exact optimistic token and no stale apply.
+protected_old = w02_store.create(
+    subject="anders",
+    predicate="protected_adapter",
+    value="old protected value",
+    sensitivity="private",
+    source_type="user_explicit",
+)
+protected_candidate = w02_candidate(
+    predicate="protected_adapter",
+    value="new protected value",
+)
+
+
+class FakeProtectedReader:
+    def __init__(self, rows):
+        self.rows = list(rows)
+        self.accesses = []
+
+    def list(
+        self,
+        *,
+        access,
+        subject=None,
+        predicate=None,
+        review_status=None,
+        lifecycle_status="active",
+        include_expired=False,
+        include_secret=False,
+        limit=100,
+    ):
+        self.accesses.append(access)
+        rows = [item for item in self.rows if item.lifecycle_status == lifecycle_status]
+        if subject is not None:
+            rows = [item for item in rows if item.subject == subject]
+        if predicate is not None:
+            rows = [item for item in rows if item.predicate == predicate]
+        if review_status is not None:
+            rows = [item for item in rows if item.review_status == review_status]
+        if not include_secret:
+            rows = [item for item in rows if item.sensitivity != "secret"]
+        return rows[:limit]
+
+
+class FakeProtectedWriter:
+    def __init__(self, old_record):
+        self.old_record = old_record
+        self.correct_calls = []
+        self.create_calls = []
+
+    def create(self, *, access, **fields):
+        self.create_calls.append((access, fields))
+        return replace(
+            self.old_record,
+            id="protected-created-w02",
+            subject=fields["subject"],
+            predicate=fields["predicate"],
+            value=fields["value"],
+            kind=fields["kind"],
+            sensitivity=fields["sensitivity"],
+            source_type=fields["source_type"],
+            source_ref=fields["source_ref"],
+            confidence=fields["confidence"],
+            review_status=fields["review_status"],
+            supersedes_id=None,
+        )
+
+    def correct(
+        self,
+        memory_id,
+        *,
+        access,
+        expected_updated_at,
+        value,
+        source_ref=None,
+        sensitivity=None,
+        confidence=1.0,
+        expires_at=None,
+    ):
+        self.correct_calls.append(
+            (
+                memory_id,
+                access,
+                expected_updated_at,
+                value,
+                source_ref,
+                sensitivity,
+                confidence,
+                expires_at,
+            )
+        )
+        return replace(
+            self.old_record,
+            id="protected-corrected-w02",
+            value=value,
+            source_ref=source_ref,
+            sensitivity=sensitivity or self.old_record.sensitivity,
+            confidence=confidence,
+            supersedes_id=self.old_record.id,
+            updated_at=self.old_record.updated_at + 1,
+        )
+
+
+fake_reader = FakeProtectedReader([protected_old])
+fake_writer = FakeProtectedWriter(protected_old)
+protected_plan = plan_protected_consolidation(
+    fake_reader,
+    [protected_candidate],
+)
+check(
+    protected_plan.decisions[0].action == ACTION_SUPERSEDE
+    and fake_reader.accesses
+    and all(access is MemoryReadAccess.LOCAL_MANAGEMENT for access in fake_reader.accesses),
+    "W02 protected planning requires local-management read authority",
+)
+protected_applied = apply_protected_consolidation_decision(
+    fake_reader,
+    fake_writer,
+    protected_plan.decisions[0],
+)
+check(
+    protected_applied.action == ACTION_SUPERSEDE
+    and protected_applied.superseded_id == protected_old.id
+    and len(fake_writer.correct_calls) == 1
+    and fake_writer.correct_calls[0][1] is MemoryWriteAccess.LOCAL_MANAGEMENT
+    and fake_writer.correct_calls[0][2] == protected_old.updated_at,
+    "W02 protected supersede uses existing writer with exact local-management optimistic token",
+)
+
+stale_reader = FakeProtectedReader(
+    [replace(protected_old, updated_at=protected_old.updated_at + 1)]
+)
+try:
+    apply_protected_consolidation_decision(
+        stale_reader,
+        fake_writer,
+        protected_plan.decisions[0],
+    )
+    protected_stale_refused = False
+except MemoryConsolidationApplyError:
+    protected_stale_refused = True
+check(
+    protected_stale_refused and len(fake_writer.correct_calls) == 1,
+    "W02 protected stale plan is refused before the protected writer mutates",
+)
 
 w02_store.close()
 
