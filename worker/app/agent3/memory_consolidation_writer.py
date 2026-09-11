@@ -18,6 +18,7 @@ from ..memory.extraction import (
     MemoryCandidate,
 )
 from .memory import MemoryConflict, MemoryRecord, MemoryStore
+from .memory_protected_lookup import LOOKUP_COLUMN, ProtectedMemoryExactLookup
 from .memory_protected_reader import MemoryReadAccess, ProtectedMemoryReader
 from .memory_protected_writer import MemoryWriteAccess, ProtectedMemoryWriter
 
@@ -109,7 +110,12 @@ def apply_protected_consolidation_plan(
             writer.codec,
             busy_timeout_ms=writer.busy_timeout_ms,
         ) as reader:
-            snapshot = _protected_snapshot_locked(reader, candidates, plan)
+            snapshot = _protected_snapshot_locked(
+                reader,
+                candidates,
+                plan,
+                lookup=writer._lookup,
+            )
             fresh = _replan(candidates, snapshot)
             if fresh != plan:
                 replay = _protected_replay_receipt_locked(reader, plan, fresh)
@@ -196,8 +202,8 @@ def _snapshot_query(
     hard bound). In legacy/plaintext storage the canonical verbatim slot can be
     narrowed by exact value because W02-A treats different statement values as
     independent log entries. Protected rows intentionally have an empty plaintext
-    ``value`` column, so protected mode must keep the full exact-key selector and
-    let ProtectedMemoryReader decrypt values before W02-A replans.
+    ``value`` column, so an unindexed protected store keeps the full exact-key
+    selector and lets ProtectedMemoryReader decrypt values before W02-A replans.
 
     Trusted ids named by dedupe/supersede actions are also selected explicitly.
     """
@@ -241,6 +247,63 @@ def _snapshot_query(
     return " OR ".join(selectors), tuple(params)
 
 
+def _protected_snapshot_query(
+    candidates: tuple[MemoryCandidate, ...],
+    plan: ConsolidationPlan,
+    lookup: ProtectedMemoryExactLookup | None,
+) -> tuple[str | None, tuple[object, ...]]:
+    if lookup is None:
+        return _snapshot_query(
+            candidates,
+            plan,
+            filter_verbatim_value=False,
+        )
+
+    selectors_by_key = sorted(
+        {
+            (
+                item.subject,
+                item.predicate,
+                lookup.digest(
+                    subject=item.subject,
+                    predicate=item.predicate,
+                    value=item.value,
+                )
+                if (
+                    item.subject == VERBATIM_USER_SUBJECT
+                    and item.predicate == VERBATIM_USER_PREDICATE
+                )
+                else None,
+            )
+            for item in candidates
+        }
+    )
+    touched = sorted(
+        {
+            action.existing_id
+            for action in plan.actions
+            if action.existing_id is not None
+        }
+    )
+    selectors: list[str] = []
+    params: list[object] = []
+    for subject, predicate, digest in selectors_by_key:
+        if digest is None:
+            selectors.append("(subject=? AND predicate=?)")
+            params.extend((subject, predicate))
+        else:
+            selectors.append(
+                f"(subject=? AND predicate=? AND {LOOKUP_COLUMN}=?)"
+            )
+            params.extend((subject, predicate, digest))
+    if touched:
+        selectors.append("id IN (" + ",".join("?" for _ in touched) + ")")
+        params.extend(touched)
+    if not selectors:
+        return None, ()
+    return " OR ".join(selectors), tuple(params)
+
+
 def _legacy_snapshot_locked(
     store: MemoryStore,
     candidates: tuple[MemoryCandidate, ...],
@@ -266,12 +329,10 @@ def _protected_snapshot_locked(
     reader: ProtectedMemoryReader,
     candidates: tuple[MemoryCandidate, ...],
     plan: ConsolidationPlan,
+    *,
+    lookup: ProtectedMemoryExactLookup | None,
 ) -> list[MemoryRecord]:
-    selectors, params = _snapshot_query(
-        candidates,
-        plan,
-        filter_verbatim_value=False,
-    )
+    selectors, params = _protected_snapshot_query(candidates, plan, lookup)
     if selectors is None:
         return []
     rows = reader._execute(
@@ -564,9 +625,13 @@ def _apply_protected_fresh_locked(
             now=now,
             supersedes_id=action.existing_id,
         )
+        lookup_clear = (
+            f",{LOOKUP_COLUMN}=NULL" if writer._lookup is not None else ""
+        )
         changed = writer._execute(
-            "UPDATE agent_memories SET lifecycle_status='superseded',updated_at=? "
-            "WHERE id=? AND lifecycle_status='active' AND review_status='pending'",
+            "UPDATE agent_memories SET lifecycle_status='superseded',"
+            f"updated_at=?{lookup_clear} WHERE id=? AND lifecycle_status='active' "
+            "AND review_status='pending'",
             (now, action.existing_id),
         ).rowcount
         if changed != 1:
