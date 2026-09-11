@@ -76,31 +76,21 @@ def apply_legacy_consolidation_decision(
 
     W02 intentionally does not pretend a multi-decision batch is atomic. Each
     mutation is one existing MemoryStore transaction. Reuse/review never mutate.
-    Supersede revalidates the exact id/update token immediately before invoking
-    the existing versioning correction path, so a stale plan fails closed.
+    Every existing-slot action first revalidates that the slot still contains
+    exactly the one active row captured by the plan.
     """
     _validate_decision(decision)
     if decision.action == ACTION_REVIEW:
         return AppliedConsolidation(ACTION_REVIEW, None, None, decision.reason)
     if decision.action == ACTION_REUSE:
-        current = _legacy_current(store, decision)
-        return AppliedConsolidation(
-            ACTION_REUSE,
-            current.id,
-            None,
-            decision.reason,
-        )
+        current = _legacy_unique_current(store, decision)
+        return AppliedConsolidation(ACTION_REUSE, current.id, None, decision.reason)
     if decision.action == ACTION_CREATE:
         _validate_create_precondition_legacy(store, decision)
         created = store.create(**decision.candidate.store_fields())
-        return AppliedConsolidation(
-            ACTION_CREATE,
-            created.id,
-            None,
-            decision.reason,
-        )
+        return AppliedConsolidation(ACTION_CREATE, created.id, None, decision.reason)
     if decision.action == ACTION_SUPERSEDE:
-        current = _legacy_current(store, decision)
+        current = _legacy_unique_current(store, decision)
         candidate = decision.candidate
         try:
             replacement = store.correct(
@@ -133,13 +123,8 @@ def apply_protected_consolidation_decision(
     if decision.action == ACTION_REVIEW:
         return AppliedConsolidation(ACTION_REVIEW, None, None, decision.reason)
     if decision.action == ACTION_REUSE:
-        current = _protected_current(reader, decision)
-        return AppliedConsolidation(
-            ACTION_REUSE,
-            current.id,
-            None,
-            decision.reason,
-        )
+        current = _protected_unique_current(reader, decision)
+        return AppliedConsolidation(ACTION_REUSE, current.id, None, decision.reason)
     if decision.action == ACTION_CREATE:
         _validate_create_precondition_protected(reader, decision)
         candidate = decision.candidate
@@ -152,14 +137,9 @@ def apply_protected_consolidation_decision(
             raise MemoryConsolidationApplyError(
                 "protected create failed closed"
             ) from exc
-        return AppliedConsolidation(
-            ACTION_CREATE,
-            created.id,
-            None,
-            decision.reason,
-        )
+        return AppliedConsolidation(ACTION_CREATE, created.id, None, decision.reason)
     if decision.action == ACTION_SUPERSEDE:
-        current = _protected_current(reader, decision)
+        current = _protected_unique_current(reader, decision)
         candidate = decision.candidate
         try:
             replacement = writer.correct(
@@ -211,33 +191,59 @@ def _validate_decision(decision: ConsolidationDecision) -> None:
             )
 
 
-def _legacy_current(
+def _legacy_slot_records(
+    store: MemoryStore,
+    candidate: MemoryCandidate,
+) -> list[MemoryRecord]:
+    return store.list(
+        subject=candidate.subject,
+        predicate=candidate.predicate,
+        lifecycle_status="active",
+        include_expired=True,
+        include_secret=True,
+        limit=3,
+    )
+
+
+def _protected_slot_records(
+    reader: ProtectedMemoryReader,
+    candidate: MemoryCandidate,
+) -> list[MemoryRecord]:
+    return reader.list(
+        access=MemoryReadAccess.LOCAL_MANAGEMENT,
+        subject=candidate.subject,
+        predicate=candidate.predicate,
+        lifecycle_status="active",
+        include_expired=True,
+        include_secret=True,
+        limit=3,
+    )
+
+
+def _legacy_unique_current(
     store: MemoryStore,
     decision: ConsolidationDecision,
 ) -> MemoryRecord:
-    try:
-        current = store.get(decision.existing_id or "")
-    except Exception as exc:
+    rows = _legacy_slot_records(store, decision.candidate)
+    if len(rows) != 1:
         raise MemoryConsolidationApplyError(
-            "legacy consolidation target is no longer active"
-        ) from exc
+            "legacy consolidation slot is no longer unambiguous"
+        )
+    current = rows[0]
     _verify_current(current, decision)
     return current
 
 
-def _protected_current(
+def _protected_unique_current(
     reader: ProtectedMemoryReader,
     decision: ConsolidationDecision,
 ) -> MemoryRecord:
-    try:
-        current = reader.get(
-            decision.existing_id or "",
-            access=MemoryReadAccess.LOCAL_MANAGEMENT,
-        )
-    except Exception as exc:
+    rows = _protected_slot_records(reader, decision.candidate)
+    if len(rows) != 1:
         raise MemoryConsolidationApplyError(
-            "protected consolidation target is no longer active"
-        ) from exc
+            "protected consolidation slot is no longer unambiguous"
+        )
+    current = rows[0]
     _verify_current(current, decision)
     return current
 
@@ -260,40 +266,29 @@ def _validate_create_precondition_legacy(
     store: MemoryStore,
     decision: ConsolidationDecision,
 ) -> None:
+    rows = _legacy_slot_records(store, decision.candidate)
     if decision.existing_id is None:
-        current = store.list(
-            subject=decision.candidate.subject,
-            predicate=decision.candidate.predicate,
-            lifecycle_status="active",
-            include_expired=True,
-            include_secret=True,
-            limit=2,
-        )
-        if current:
-            raise MemoryConsolidationApplyError(
-                "new-slot create plan is stale"
-            )
+        if rows:
+            raise MemoryConsolidationApplyError("new-slot create plan is stale")
         return
-    _legacy_current(store, decision)
+    if len(rows) != 1:
+        raise MemoryConsolidationApplyError(
+            "legacy consolidation slot is no longer unambiguous"
+        )
+    _verify_current(rows[0], decision)
 
 
 def _validate_create_precondition_protected(
     reader: ProtectedMemoryReader,
     decision: ConsolidationDecision,
 ) -> None:
+    rows = _protected_slot_records(reader, decision.candidate)
     if decision.existing_id is None:
-        current = reader.list(
-            access=MemoryReadAccess.LOCAL_MANAGEMENT,
-            subject=decision.candidate.subject,
-            predicate=decision.candidate.predicate,
-            lifecycle_status="active",
-            include_expired=True,
-            include_secret=True,
-            limit=2,
-        )
-        if current:
-            raise MemoryConsolidationApplyError(
-                "new-slot create plan is stale"
-            )
+        if rows:
+            raise MemoryConsolidationApplyError("new-slot create plan is stale")
         return
-    _protected_current(reader, decision)
+    if len(rows) != 1:
+        raise MemoryConsolidationApplyError(
+            "protected consolidation slot is no longer unambiguous"
+        )
+    _verify_current(rows[0], decision)
