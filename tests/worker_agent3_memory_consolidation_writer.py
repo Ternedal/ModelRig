@@ -103,7 +103,7 @@ def plan(candidates, existing=()):
     return MemoryConsolidator().plan(candidates, existing)
 
 
-# --- Legacy writer: create, exact replay, bounded relevant lookup and stale refusal.
+# --- Legacy writer: create, dedupe, exact replay, bounded lookup and stale refusal.
 legacy_path = os.path.join(tempfile.mkdtemp(prefix="w02b-legacy-"), "memory.db")
 legacy = MemoryStore(legacy_path)
 
@@ -142,6 +142,15 @@ check(
     and created.confidence == candidate_a.confidence
     and created.review_status == candidate_a.review_status,
     "legacy W02-B preserves candidate provenance/review/privacy fields exactly",
+)
+
+dedupe_plan = plan([candidate_a], [created])
+dedupe_receipt = apply_legacy_consolidation_plan(legacy, dedupe_plan)
+check(
+    dedupe_receipt.created_count == 0
+    and dedupe_receipt.deduped_ids == (created_id,)
+    and dedupe_receipt.replayed is False,
+    "legacy W02-B applies a current dedupe plan without mutation",
 )
 
 replay_receipt = apply_legacy_consolidation_plan(legacy, create_plan)
@@ -191,6 +200,27 @@ expect_error(
     "legacy W02-B rejects a forged plan receipt before mutation",
     lambda: apply_legacy_consolidation_plan(legacy, forged),
     MemoryConsolidationWriteError,
+)
+
+secret_candidate = MemoryCandidate(
+    subject="user",
+    predicate="credential",
+    value="secret-material",
+    kind="fact",
+    sensitivity="secret",
+    source_type="inferred",
+    source_ref="conversation:w02b-secret",
+    confidence=0.9,
+    review_status="pending",
+    evidence="",
+)
+secret_plan = plan([secret_candidate])
+secret_receipt = apply_legacy_consolidation_plan(legacy, secret_plan)
+check(
+    secret_receipt.created_count == 0
+    and secret_receipt.skipped_count == 1
+    and not legacy.list(subject="user", predicate="credential", include_secret=True),
+    "legacy W02-B never auto-persists a secret candidate",
 )
 
 # Exact pending -> confirmed verbatim authority promotion is versioned, never in-place.
@@ -275,11 +305,14 @@ check(
     "legacy W02-B rolls the full mutating batch back on late failure",
 )
 
-receipt_text = str(created_receipt.to_dict())
+receipt_payload = created_receipt.to_dict()
+receipt_text = repr(receipt_payload)
 check(
-    candidate_a.value not in receipt_text
-    and candidate_a.source_ref not in receipt_text
-    and candidate_a.evidence not in receipt_text,
+    "value" not in receipt_payload
+    and "evidence" not in receipt_payload
+    and "source_ref" not in receipt_payload
+    and candidate_a.value not in receipt_text
+    and candidate_a.source_ref not in receipt_text,
     "W02-B receipt omits candidate values/evidence/source_ref",
 )
 legacy.close()
@@ -432,10 +465,11 @@ try:
     ).fetchone()
 finally:
     raw.close()
+protected_family = family_bytes(protected_db)
 check(
     stored == ("", None, "protected")
-    and protected_candidate.value.encode("utf-8") not in family_bytes(protected_db)
-    and protected_candidate.source_ref.encode("utf-8") not in family_bytes(protected_db),
+    and protected_candidate.value.encode("utf-8") not in protected_family
+    and protected_candidate.source_ref.encode("utf-8") not in protected_family,
     "protected W02-B keeps value/source_ref plaintext out of SQLite family files",
 )
 
@@ -530,10 +564,11 @@ expect_error(
     ),
     ProtectedMemoryWriteError,
 )
+rollback_family = family_bytes(protected_db)
 check(
     row_count(protected_db) == before_rows
-    and protected_rollback_a.value.encode("utf-8") not in family_bytes(protected_db)
-    and protected_rollback_b.value.encode("utf-8") not in family_bytes(protected_db),
+    and protected_rollback_a.value.encode("utf-8") not in rollback_family
+    and protected_rollback_b.value.encode("utf-8") not in rollback_family,
     "protected W02-B rolls back the whole batch and leaves no sensitive plaintext",
 )
 rollback_writer.close()
