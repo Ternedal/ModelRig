@@ -91,7 +91,7 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client(connection).preview(
+                    client(connection).previewReviewed(
                         requestIntent.runId,
                         requestIntent.plannerModel,
                     )

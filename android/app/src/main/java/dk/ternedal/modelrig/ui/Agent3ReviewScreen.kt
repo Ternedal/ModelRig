@@ -497,7 +497,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                                         runCatching {
                                             dk.ternedal.modelrig.net.Agent3ReplanClient(
                                                 connection.baseUrl, connection.token,
-                                            ).preview(current.id)
+                                            ).previewReviewed(current.id)
                                         }
                                     }
                                     res.onSuccess { replanPreview = it; error = null }
