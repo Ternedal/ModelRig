@@ -168,15 +168,20 @@ fun Agent3ReplanScreen(store: TokenStore, onClose: () -> Unit) {
         val connection = boundConnection ?: return
         busy = true
         error = null
+        // The single-use Preview can be consumed/committed server-side before a
+        // usable response reaches Android. Never leave that authority retryable.
+        clearPreviewAuthority()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching { client(connection).applyReviewed(current) }
             }
             busy = false
             result.onSuccess {
-                clearPreviewAuthority()
                 applied = it
-            }.onFailure { error = it.message ?: "Replan kunne ikke anvendes" }
+            }.onFailure {
+                val detail = it.message ?: "Replan kunne ikke anvendes"
+                error = "$detail. Preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
+            }
         }
     }
 
