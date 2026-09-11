@@ -7,6 +7,7 @@ import os
 from app import ollama_client
 from app.memory.candidates import (
     CANDIDATE_SCHEMA,
+    CONFIRMED_VERBATIM_PREDICATE,
     MAX_MEMORY_CANDIDATES,
     MAX_TURN_CHARS,
     MemoryCandidateError,
@@ -49,14 +50,17 @@ def payload(candidates):
 
 
 def candidate(**overrides):
+    # Deliberately untrustworthy semantic metadata: a model could infer
+    # favorite_city from an exact residence statement. A confirmed candidate
+    # must therefore discard all of these proposed semantics server-side.
     row = {
         "subject": "user",
-        "predicate": "city",
-        "value": "Copenhagen",
-        "kind": "fact",
-        "sensitivity": "private",
+        "predicate": "favorite_city",
+        "value": "I live in Copenhagen",
+        "kind": "preference",
+        "sensitivity": "public",
         "source_type": "user_explicit",
-        "confidence": 0.99,
+        "confidence": 0.12,
         "evidence": "I live in Copenhagen",
     }
     row.update(overrides)
@@ -69,27 +73,73 @@ turn = prepare_completed_turn(
 )
 
 batch = parse_candidate_batch(payload([candidate()]), turn=turn)
+confirmed = batch.candidates[0]
 check(
     len(batch.candidates) == 1
-    and batch.candidates[0].review_status == "confirmed"
-    and batch.candidates[0].grounding == "verbatim_user"
+    and confirmed.review_status == "confirmed"
+    and confirmed.grounding == "verbatim_user"
     and batch.confirmed_count == 1
     and batch.pending_count == 0,
-    "verbatim user-explicit candidate derives confirmed authority",
+    "complete canonical verbatim user statement derives confirmed authority",
+)
+check(
+    confirmed.predicate == CONFIRMED_VERBATIM_PREDICATE
+    and confirmed.kind == "note"
+    and confirmed.sensitivity == "private"
+    and confirmed.confidence == 1.0,
+    "confirmed candidate discards model-generated semantics and classification",
+)
+check(
+    confirmed.value == "I live in Copenhagen"
+    and confirmed.evidence == confirmed.value,
+    "confirmed candidate preserves the complete user statement as its claim",
 )
 check(
     "review_status" in batch.to_dict()["candidates"][0],
     "derived review status is exposed only after server-side validation",
 )
 
+subset = parse_candidate_batch(
+    payload([candidate(value="Copenhagen")]),
+    turn=turn,
+)
+check(
+    subset.candidates[0].review_status == "pending"
+    and subset.candidates[0].predicate == "favorite_city",
+    "entity-only value cannot auto-confirm a model-generated semantic relation",
+)
+
 paraphrase = parse_candidate_batch(
-    payload([candidate(value="lives in Copenhagen")]),
+    payload(
+        [
+            candidate(
+                value="I reside in Copenhagen",
+                evidence="I reside in Copenhagen",
+            )
+        ]
+    ),
     turn=turn,
 )
 check(
     paraphrase.candidates[0].review_status == "pending"
     and paraphrase.candidates[0].grounding == "unverified",
     "user-explicit paraphrase cannot auto-confirm",
+)
+
+noncanonical = parse_candidate_batch(
+    payload(
+        [
+            candidate(
+                value=" I live in Copenhagen",
+                evidence=" I live in Copenhagen",
+            )
+        ]
+    ),
+    turn=turn,
+)
+check(
+    noncanonical.candidates[0].review_status == "pending",
+    "extractor whitespace normalization cannot manufacture verbatim authority",
 )
 
 wrong_subject = parse_candidate_batch(
@@ -114,7 +164,7 @@ assistant_only = parse_candidate_batch(
     payload(
         [
             candidate(
-                value="Thanks",
+                value="Thanks, I will keep that in mind.",
                 evidence="Thanks, I will keep that in mind.",
             )
         ]
@@ -166,19 +216,17 @@ expect_error(
 expect_error(
     "candidate count is hard bounded",
     lambda: parse_candidate_batch(
-        payload(
-            [
-                candidate(predicate=f"p-{idx}", value="Copenhagen", evidence="I live in Copenhagen")
-                for idx in range(MAX_MEMORY_CANDIDATES + 1)
-            ]
-        ),
+        payload([candidate(predicate=f"p-{idx}") for idx in range(MAX_MEMORY_CANDIDATES + 1)]),
         turn=turn,
     ),
     "more than",
 )
 expect_error(
-    "exact duplicate candidates fail closed",
-    lambda: parse_candidate_batch(payload([candidate(), candidate()]), turn=turn),
+    "duplicates that normalize to the same confirmed statement fail closed",
+    lambda: parse_candidate_batch(
+        payload([candidate(), candidate(predicate="residence_city")]),
+        turn=turn,
+    ),
     "duplicate",
 )
 expect_error(
@@ -226,10 +274,12 @@ check(
     len(messages) == 2
     and messages[0]["role"] == "system"
     and "untrusted conversation data" in messages[0]["content"]
+    and "value and evidence MUST be identical" in messages[0]["content"]
+    and "normalized to a conservative private verbatim note" in messages[0]["content"]
     and "BEGIN USER TURN" in messages[1]["content"]
     and turn.user_text in messages[1]["content"]
     and turn.assistant_text in messages[1]["content"],
-    "local extractor prompt keeps authority text server-authored and turn text delimited as data",
+    "local extractor prompt keeps authority server-owned and turn text delimited as data",
 )
 
 original_chat = ollama_client.chat
@@ -255,9 +305,10 @@ finally:
 
 check(
     local_batch.confirmed_count == 1
+    and local_batch.candidates[0].predicate == CONFIRMED_VERBATIM_PREDICATE
     and len(local_calls) == 1
     and local_calls[0][1] == "qwen-memory:7b",
-    "local adapter delegates once to existing local Ollama chat with server-owned model selection",
+    "local adapter delegates once to local Ollama without restoring model semantics",
 )
 
 original_model = os.environ.get("KALIV_MEMORY4_EXTRACTION_MODEL")
