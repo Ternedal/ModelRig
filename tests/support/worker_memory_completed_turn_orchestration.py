@@ -18,6 +18,7 @@ from app.memory import (  # noqa: E402
     MemoryConsolidator,
     MemoryOrchestrationError,
 )
+from source_code import code_of  # noqa: E402
 
 WRITE_SCHEMA = "kaliv-memory-consolidation-write-receipt/v1"
 passed = failed = 0
@@ -447,9 +448,7 @@ expect_error(
 
 # Static dependency check: shared W03 core must not import Agent 3 storage or the
 # local Ollama extraction adapter. Those dependencies belong in later adapters.
-orchestration_source = (
-    ROOT / "worker" / "app" / "memory" / "orchestration.py"
-).read_text(encoding="utf-8")
+orchestration_source = code_of(ROOT / "worker" / "app" / "memory" / "orchestration.py")
 check("app.agent3" not in orchestration_source, "W03 shared core has no Agent 3 import")
 check(
     "local_extraction" not in orchestration_source,
