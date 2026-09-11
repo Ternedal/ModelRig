@@ -15,6 +15,8 @@ LOOKUP_MIGRATION_ID = "agent3-memory-protected-exact-lookup-v1"
 LOOKUP_STATE_TABLE = "agent_memory_protected_lookup_migrations"
 LOOKUP_COLUMN = "value_lookup_hmac"
 LOOKUP_INDEX = "idx_agent_memories_protected_exact_lookup_v1"
+LOOKUP_INSERT_GUARD = "trg_agent_memories_protected_exact_lookup_insert_v1"
+LOOKUP_UPDATE_GUARD = "trg_agent_memories_protected_exact_lookup_update_v1"
 LOOKUP_REVISION = 1
 LOOKUP_KEY_BYTES = 32
 LOOKUP_DIGEST_HEX_CHARS = 64
@@ -71,7 +73,15 @@ class ProtectedMemoryExactLookup:
         has_column = LOOKUP_COLUMN in columns
         has_table = _table_exists(conn, LOOKUP_STATE_TABLE)
         has_index = _index_exists(conn, LOOKUP_INDEX)
-        artifacts = (has_column, has_table, has_index)
+        has_insert_guard = _trigger_exists(conn, LOOKUP_INSERT_GUARD)
+        has_update_guard = _trigger_exists(conn, LOOKUP_UPDATE_GUARD)
+        artifacts = (
+            has_column,
+            has_table,
+            has_index,
+            has_insert_guard,
+            has_update_guard,
+        )
         if not any(artifacts):
             return None
         if not all(artifacts):
@@ -94,31 +104,6 @@ class ProtectedMemoryExactLookup:
                 "protected exact lookup migration receipt is missing"
             )
         _validate_state_row(row, codec, require_completed=True)
-
-        # A completed receipt is not enough authority to trust an equality
-        # selector forever. A database could later be touched by older code,
-        # manual repair or a partial restore. Prove the cheap metadata invariant
-        # at writer startup: every currently eligible row has a digest and no
-        # ineligible row retains one. This performs no decryption and prevents a
-        # missing index entry from becoming a false "no exact match" result.
-        missing = conn.execute(
-            f"SELECT 1 FROM agent_memories WHERE sensitivity='private' "
-            "AND lifecycle_status='active' AND protection_state='protected' "
-            f"AND {LOOKUP_COLUMN} IS NULL LIMIT 1"
-        ).fetchone()
-        if missing is not None:
-            raise ProtectedMemoryLookupError(
-                "completed protected exact lookup has an unindexed active private row"
-            )
-        stale = conn.execute(
-            f"SELECT 1 FROM agent_memories WHERE {LOOKUP_COLUMN} IS NOT NULL AND NOT ("
-            "sensitivity='private' AND lifecycle_status='active' "
-            "AND protection_state='protected') LIMIT 1"
-        ).fetchone()
-        if stale is not None:
-            raise ProtectedMemoryLookupError(
-                "completed protected exact lookup retains an ineligible digest"
-            )
         return cls(_unwrap_lookup_key(codec, row))
 
     def close(self) -> None:
@@ -132,6 +117,66 @@ class ProtectedMemoryExactLookup:
             raise ProtectedMemoryLookupError("protected exact lookup is closed")
         payload = _lookup_bytes(subject=subject, predicate=predicate, value=value)
         return hmac.new(bytes(self._key), payload, hashlib.sha256).hexdigest()
+
+
+def lookup_guard_sql(trigger_name: str, operation: str) -> str:
+    if trigger_name not in {LOOKUP_INSERT_GUARD, LOOKUP_UPDATE_GUARD}:
+        raise ProtectedMemoryLookupError("protected lookup guard name is invalid")
+    if operation not in {"INSERT", "UPDATE"}:
+        raise ProtectedMemoryLookupError("protected lookup guard operation is invalid")
+    eligible = (
+        "COALESCE(NEW.sensitivity,'')='private' "
+        "AND COALESCE(NEW.lifecycle_status,'')='active' "
+        "AND COALESCE(NEW.protection_state,'')='protected'"
+    )
+    violation = (
+        f"(({eligible}) AND NEW.{LOOKUP_COLUMN} IS NULL) OR "
+        f"((NOT ({eligible})) AND NEW.{LOOKUP_COLUMN} IS NOT NULL)"
+    )
+    return (
+        f"CREATE TRIGGER {trigger_name} BEFORE {operation} ON agent_memories "
+        f"WHEN ({violation}) BEGIN SELECT RAISE(ABORT, "
+        "'protected exact lookup digest invariant'); END"
+    )
+
+
+def require_lookup_guards(conn: sqlite3.Connection) -> None:
+    for name, operation in (
+        (LOOKUP_INSERT_GUARD, "INSERT"),
+        (LOOKUP_UPDATE_GUARD, "UPDATE"),
+    ):
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (name,),
+        ).fetchone()
+        if row is None or not isinstance(row[0], str):
+            raise ProtectedMemoryLookupError(
+                "protected exact lookup guard trigger is missing"
+            )
+        # SQLite may normalize whitespace, but the authority-bearing identifiers
+        # and operation must remain explicit. This rejects a same-name no-op or
+        # a trigger rewritten to inspect plaintext/protected payload columns.
+        sql = row[0]
+        required = (
+            f"BEFORE {operation}",
+            "ON agent_memories",
+            LOOKUP_COLUMN,
+            "sensitivity",
+            "lifecycle_status",
+            "protection_state",
+            "RAISE(ABORT",
+        )
+        forbidden = (
+            "value_protected",
+            "source_ref_protected",
+            "source_ref",
+        )
+        if any(token not in sql for token in required) or any(
+            token in sql for token in forbidden
+        ):
+            raise ProtectedMemoryLookupError(
+                "protected exact lookup guard trigger contract mismatch"
+            )
 
 
 def new_wrapped_lookup_key(
@@ -295,6 +340,16 @@ def _index_exists(conn: sqlite3.Connection, name: str) -> bool:
     return (
         conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+            (name,),
+        ).fetchone()
+        is not None
+    )
+
+
+def _trigger_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
             (name,),
         ).fetchone()
         is not None
