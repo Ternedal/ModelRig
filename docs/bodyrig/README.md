@@ -1,70 +1,62 @@
-# BodyRig
+# BodyRig integration in ModelRig
 
-BodyRig is the embodiment layer for ModelRig: the visual and physical counterpart to VoiceRig.
+> **Authority notice:** standalone `Ternedal/BodyRig` is the authoritative BodyRig product/contract repository. This directory is retained as **ModelRig-side integration and historical design material**. If a BodyRig-owned contract here disagrees with standalone BodyRig, standalone BodyRig wins. See `../BODYRIG_AUTHORITY.md`.
 
-## Mission
+## ModelRig's responsibility
 
-Turn ordinary video material into a reusable `bodyprint` that can drive a real-time avatar across Windows, Android and Quest-class clients.
+ModelRig owns assistant reasoning and **semantic** body intent. It may translate a planned response into a bounded BodyRig-facing cue and may carry compatibility parsers/adapters required by current clients.
 
-BodyRig does not own intelligence or personality. ModelRig remains the brain. VoiceRig owns speech/listening. BodyRig turns semantic intent, voice timing and a body profile into synchronized physical expression.
+ModelRig does **not** own:
 
-## Core flow
+- `.mrbody` semantics;
+- BodyPrint/body identity;
+- source-derived Movement Identity;
+- Motor State;
+- body build/selection/activation/realization semantics;
+- renderer-specific body realization.
 
-```text
-video/images
-    |
-    v
-BodyRig Capture + Analysis
-    |
-    +--> appearance profile
-    +--> body/skeleton profile
-    +--> motion signature
-    +--> face/expression profile
-    +--> gaze/gesture profile
-    |
-    v
-.bodyprint package
-    |
-    v
-BodyRig Runtime <--- ModelRig ExpressionPlan
-       ^          <--- VoiceRig audio + visemes/timing
-       |
-       v
-VRM 1.0 avatar + animation runtime
-       |
-       +--> Windows
-       +--> Android
-       +--> Quest / MR
+Those are authored by `Ternedal/BodyRig` and consumed deliberately by ModelRig.
+
+## Current boundary
+
+```mermaid
+flowchart LR
+    M["ModelRig\nreasoning + semantic intent"]
+    A["ModelRig bodyrig compatibility layer\nvalidation · storage · orchestration adapters"]
+    B["Ternedal/BodyRig\nAUTHORITATIVE\n.mrbody · BodyPrint · Movement Identity\nMotor State · realization semantics"]
+    V["VoiceRig\naudio + timing"]
+    R["Kaliv / VR / renderer"]
+
+    M -->|BodyCue / semantic request| B
+    V -->|utterance/viseme timing| B
+    B -->|performed Motor State / embodiment| R
+    B -->|versioned contracts| A
+    M --> A
+    A -->|compatibility integration| R
+
+    classDef authority stroke-width:3px;
+    class B authority;
+    classDef compat stroke-dasharray:5 3;
+    class A compat;
 ```
 
-## MVP principle
+Mirrored schemas/constants are snapshots for deterministic compatibility testing; copying them into ModelRig never transfers authorship.
 
-MVP proves *embodiment*, not photorealism.
+## What remains useful in this directory
 
-The first release is successful when a normal video can produce a reproducible bodyprint whose movement, gaze, facial style and gestures can be applied to a VRM avatar in real time and synchronized with VoiceRig.
+The older `SPEC.md`, `BODYPRINT.md`, `PROTOCOL.md` and `ROADMAP.md` files capture the original ModelRig-local BodyRig design and historical integration assumptions. Treat them as design/history unless a current cross-repo test explicitly consumes them.
 
-Photorealistic body/face reconstruction is deliberately a later milestone.
+For current BodyRig architecture, source sufficiency, Movement Identity, BodyCue v2 / Motor State v3, digital-twin M1–M6 and physical acceptance, use the standalone repository documentation, especially:
 
-## Non-goals for MVP
+- `Ternedal/BodyRig/README.md`;
+- `Ternedal/BodyRig/docs/ARCHITECTURE.md`;
+- `Ternedal/BodyRig/docs/MOTOR_STATE.md`;
+- `Ternedal/BodyRig/HANDOFF.md`.
 
-- No LLM-generated bone rotations.
-- No hard dependency on one body reconstruction model.
-- No requirement for mocap hardware.
-- No requirement for photorealistic skin/hair/clothing.
-- No intelligence/personality duplicated inside BodyRig.
+## ModelRig invariants
 
-## Architecture invariants
-
-1. ModelRig emits semantic intent, never low-level animation transforms.
-2. VoiceRig is authoritative for speech audio and lip timing.
-3. BodyRig runtime is deterministic and interruptible.
-4. A bodyprint is renderer-independent.
-5. Avatar reconstruction backends are replaceable adapters.
-6. Provenance and consent metadata travel with every bodyprint.
-
-See:
-
-- `SPEC.md` — system architecture and requirements
-- `BODYPRINT.md` — package format v0.1
-- `PROTOCOL.md` — ModelRig/VoiceRig/BodyRig contracts
-- `ROADMAP.md` — implementation milestones and acceptance gates
+1. ModelRig emits semantics, not low-level bone transforms.
+2. VoiceRig remains authoritative for speech/audio timing.
+3. BodyRig-owned unknown contract majors fail closed.
+4. ModelRig's internal `bodyrig` package is a consumer/compatibility layer, not a second BodyRig product authority.
+5. Cross-repo compatibility must be proven on the exact ModelRig candidate before a BodyRig contract-major change is accepted.
