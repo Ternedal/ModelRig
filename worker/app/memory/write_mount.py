@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 
 from .extraction import CompletedMemoryTurn, MemoryCandidate
 from .write_api import LoopbackPolicy, build_memory4_write_router
