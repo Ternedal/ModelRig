@@ -6,7 +6,7 @@ Issue: #1052
 
 ## Context
 
-ModelRig and standalone BodyRig already describe the same conceptual boundary:
+ModelRig and standalone BodyRig describe one conceptual boundary:
 
 - ModelRig owns reasoning and semantic assistant intent;
 - VoiceRig owns speech/audio and timing;
@@ -17,6 +17,33 @@ ModelRig also contains an internal `bodyrig` Python package, vendored contract m
 
 This ADR resolves authorship. It does not move runtime code and it does not weaken compatibility testing.
 
+## Authority diagram
+
+```mermaid
+flowchart LR
+    MR["Ternedal/ModelRig\nAUTHORITY\nreasoning + semantic intent\nBodyRig-facing cue production"]
+    VR["VoiceRig\nAUTHORITY\naudio + utterance/viseme timing"]
+    BR["Ternedal/BodyRig\nAUTHORITY\n.mrbody · BodyPrint\nMovement Identity · Motor State\nbuild/selection/realization semantics"]
+    AD["ModelRig internal bodyrig package\nCONSUMER / COMPATIBILITY LAYER\nparser · validation · orchestration adapter"]
+    KR["Kaliv / VR / renderer\nCONSUMER\npresentation + engine realization"]
+    MIR["Mirrored schemas/constants\nCOMPATIBILITY SNAPSHOTS\nnever authorship"]
+
+    MR -->|BodyCue / semantic request| BR
+    VR -->|utterance-bound timing| BR
+    BR -->|performed embodiment / Motor State| KR
+    BR -->|versioned BodyRig-owned contracts| MIR
+    MIR --> AD
+    MR --> AD
+    AD -->|compatibility integration| KR
+
+    classDef authority stroke-width:3px;
+    class MR,VR,BR authority;
+    classDef mirror stroke-dasharray:5 3;
+    class MIR,AD mirror;
+```
+
+The important direction is authorship: a parser, mirror or adapter can consume a BodyRig contract without becoming its owner.
+
 ## Decision
 
 ### 1. Standalone BodyRig is the product/contract authority
@@ -25,7 +52,8 @@ This ADR resolves authorship. It does not move runtime code and it does not weak
 
 - `.mrbody` package semantics and package validation;
 - BodyPrint/body identity semantics;
-- Motor State and embodiment-state semantics;
+- Movement Identity and source-derived body-performance semantics;
+- Motor State and embodiment-state semantics, including later contract versions such as Motor State v3;
 - body build, selection, activation and realization semantics;
 - the renderer-neutral embodiment/runtime contract as that contract is migrated and versioned in standalone BodyRig.
 
@@ -40,11 +68,11 @@ BodyRig contract authorship must not be inferred from whichever repository happe
 - the bounded translation from assistant intent into the BodyRig-facing cue request;
 - ModelRig-side orchestration, lifecycle and compatibility handling.
 
-ModelRig must not become authoritative for body identity, package build semantics or renderer-specific body realization.
+ModelRig must not become authoritative for body identity, package build semantics, Movement Identity or renderer-specific body realization.
 
 ### 3. ModelRig's internal `bodyrig` package is a compatibility/integration layer
 
-The existing internal package is retained in this slice. Its role is explicitly:
+The existing internal package is retained. Its role is explicitly:
 
 - compatibility parsing/validation;
 - ModelRig-side storage and orchestration;
@@ -75,6 +103,7 @@ Copying a schema or implementation into ModelRig never transfers authorship.
 |---|---|---|
 | `.mrbody` | `Ternedal/BodyRig` | consumer / validator / store |
 | BodyPrint / body identity | `Ternedal/BodyRig` | consumer / compatibility adapter |
+| Movement Identity | `Ternedal/BodyRig` | consumer / semantic-cue producer only |
 | Motor State | `Ternedal/BodyRig` | consumer / orchestration adapter |
 | embodiment runtime / realization | `Ternedal/BodyRig` | client-facing compatibility integration |
 | assistant intent | `Ternedal/ModelRig` | authority |
@@ -115,4 +144,4 @@ This ADR does not:
 
 ## Consequence
 
-The architecture can now evolve without confusing implementation location with contract ownership. Standalone BodyRig authors body-domain contracts; ModelRig consumes them deliberately and proves compatibility.
+The architecture can evolve without confusing implementation location with contract ownership. Standalone BodyRig authors body-domain contracts; ModelRig consumes them deliberately and proves compatibility.
