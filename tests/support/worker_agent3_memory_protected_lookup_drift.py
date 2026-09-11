@@ -221,5 +221,30 @@ with tempfile.TemporaryDirectory(prefix="kaliv-w02c-drift-") as raw:
     repaired_writer.close()
     check(True, "writer reopens after offline lookup guard repair")
 
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(f"DROP TRIGGER {LOOKUP_UPDATE_GUARD}")
+        connection.execute(
+            f"CREATE TRIGGER {LOOKUP_UPDATE_GUARD} BEFORE UPDATE ON agent_memories "
+            "BEGIN SELECT 1; END"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    expect_error(
+        "writer refuses a same-name lookup guard whose contract was weakened",
+        lambda: ProtectedMemoryWriter(path, codec()),
+        ProtectedMemoryWriteError,
+    )
+    repaired_again = ProtectedMemoryLookupMigrator(path, codec()).migrate()
+    check(
+        repaired_again.complete and repaired_again.remaining_rows == 0,
+        "offline lookup migration replaces a weakened guard with the canonical contract",
+    )
+    final_writer = ProtectedMemoryWriter(path, codec())
+    final_writer.close()
+    check(True, "writer reopens after canonical guard restoration")
+
 print(f"\n===== M4 PROTECTED LOOKUP DRIFT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
