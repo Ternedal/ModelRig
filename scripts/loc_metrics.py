@@ -70,6 +70,10 @@ CONFIG_EXTENSIONS = {
     ".xml": "XML",
     ".gradle": "Gradle",
     ".properties": "Properties",
+    ".csproj": "MSBuild",
+    ".fsproj": "MSBuild",
+    ".props": "MSBuild",
+    ".targets": "MSBuild",
 }
 
 SPECIAL_SOURCE_FILES = {
@@ -157,11 +161,12 @@ def is_test(path: PurePosixPath) -> bool:
     parts = {part.lower() for part in path.parts[:-1]}
     name = path.name.lower()
     stem = path.stem.lower()
+    original_stem = path.stem
     return bool(
         parts & TEST_DIRS
         or name.startswith("test_")
         or stem.endswith("_test")
-        or stem.endswith("test")
+        or original_stem.endswith(("Test", "Tests"))
         or ".test." in name
         or ".spec." in name
     )
@@ -262,6 +267,8 @@ def self_test() -> None:
     assert language_for(PurePosixPath("desktop/App.kt")) == "Kotlin"
     assert category_for(PurePosixPath("tests/test_app.py")) == "tests"
     assert category_for(PurePosixPath("worker/test_router.py")) == "tests"
+    assert category_for(PurePosixPath("desktop/FooTest.kt")) == "tests"
+    assert category_for(PurePosixPath("worker/latest.py")) == "product"
     assert category_for(PurePosixPath("scripts/check.py")) == "scripts"
     assert category_for(PurePosixPath("deploy.ps1")) == "scripts"
     assert category_for(PurePosixPath(".github/workflows/ci.yml")) == "config"
