@@ -32,6 +32,7 @@ class Agent3ReplanPreviewResponseBindingTest {
             assertEquals(promptHash, preview.promptSha256)
             assertFalse(preview.executed)
             assertEquals(listOf("read-old"), preview.window.removableStepIds)
+            assertEquals("read-new", preview.plan.single().id)
             assertEquals("list_models", preview.plan.single().tool)
             assertEquals("read", preview.plan.single().risk)
             assertEquals("local", preview.plan.single().egress)
@@ -109,14 +110,24 @@ class Agent3ReplanPreviewResponseBindingTest {
     }
 
     @Test
+    fun reviewedPreviewRejectsMissingNullBlankOrWrongTypedReplacementIds() {
+        listOf(
+            validBody(planJson = """[{"tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":null,"tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":" ","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":7,"tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
+        ).forEach(::assertReviewedFailure)
+    }
+
+    @Test
     fun reviewedPreviewRejectsMalformedOrUnsafeReplacementStepShape() {
         listOf(
-            validBody(planJson = """[{"args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
-            validBody(planJson = """[{"tool":"list_models","args":[],"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
-            validBody(planJson = """[{"tool":"list_models","args":{},"risk":"write","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
-            validBody(planJson = """[{"tool":"list_models","args":{},"risk":"read","sensitivity":"","egress":"local","summary":"list models"}]"""),
-            validBody(planJson = """[{"tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"cloud","summary":"list models"}]"""),
-            validBody(planJson = """[{"tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":7}]"""),
+            validBody(planJson = """[{"id":"read-new","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":"read-new","tool":"list_models","args":[],"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":"read-new","tool":"list_models","args":{},"risk":"write","sensitivity":"operational","egress":"local","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":"read-new","tool":"list_models","args":{},"risk":"read","sensitivity":"","egress":"local","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":"read-new","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"cloud","summary":"list models"}]"""),
+            validBody(planJson = """[{"id":"read-new","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":7}]"""),
         ).forEach(::assertReviewedFailure)
     }
 
@@ -167,7 +178,7 @@ class Agent3ReplanPreviewResponseBindingTest {
         prefixIds: List<String> = listOf("done-1"),
         tailIds: List<String> = listOf("write-1"),
         removableIdsJson: String? = null,
-        planJson: String = """[{"tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]""",
+        planJson: String = """[{"id":"read-new","tool":"list_models","args":{},"risk":"read","sensitivity":"operational","egress":"local","summary":"list models"}]""",
         includePreviewId: Boolean = true,
         includeExpires: Boolean = true,
         includeRevision: Boolean = true,

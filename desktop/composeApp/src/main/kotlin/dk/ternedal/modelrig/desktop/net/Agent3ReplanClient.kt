@@ -81,6 +81,7 @@ private data class ReplanPreviewRequest(
 )
 
 private data class ReviewedPreviewStepAuthority(
+    val id: String,
     val tool: String,
     val args: JsonObject,
     val risk: String,
@@ -228,6 +229,7 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
         val rawPlan = root["plan"] as? JsonArray ?: previewMismatch("plan")
         val steps = rawPlan.mapIndexed { index, element ->
             val step = element as? JsonObject ?: previewMismatch("plan[$index]")
+            val id = step.requirePreviewNonBlankString("id", "plan[$index]")
             val tool = step.requirePreviewNonBlankString("tool", "plan[$index]")
             val args = step["args"] as? JsonObject ?: previewMismatch("plan[$index].args")
             val risk = step.requirePreviewNonBlankString("risk", "plan[$index]")
@@ -237,6 +239,7 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
             if (risk != "read") previewMismatch("plan[$index].risk")
             if (egress != "local") previewMismatch("plan[$index].egress")
             ReviewedPreviewStepAuthority(
+                id = id,
                 tool = tool,
                 args = args,
                 risk = risk,
@@ -269,14 +272,16 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
         preview: Agent3ReplanPreview,
         authority: ReviewedPreviewAuthority,
     ) {
-        val typedSteps = preview.plan.map {
+        val typedSteps = preview.plan.mapIndexed { index, step ->
             ReviewedPreviewStepAuthority(
-                tool = it.tool,
-                args = it.args,
-                risk = it.risk,
-                sensitivity = it.sensitivity,
-                egress = it.egress,
-                summary = it.summary,
+                id = step.id?.takeIf { it.isNotBlank() }
+                    ?: previewMismatch("typed_preview.plan[$index].id"),
+                tool = step.tool,
+                args = step.args,
+                risk = step.risk,
+                sensitivity = step.sensitivity,
+                egress = step.egress,
+                summary = step.summary,
             )
         }
         if (
