@@ -9,19 +9,31 @@ from typing import Callable
 from .memory_protected_lookup import (
     LOOKUP_COLUMN,
     LOOKUP_INDEX,
+    LOOKUP_INSERT_GUARD,
     LOOKUP_MIGRATION_ID,
     LOOKUP_REVISION,
     LOOKUP_SCHEMA,
     LOOKUP_STATE_TABLE,
+    LOOKUP_UPDATE_GUARD,
     ProtectedMemoryExactLookup,
     ProtectedMemoryLookupError,
+    lookup_guard_sql,
     new_wrapped_lookup_key,
+    require_lookup_guards,
     unwrap_lookup_key,
     validate_lookup_digest,
     validate_lookup_state_row,
 )
-from .memory_protection import MemoryProtectionCodec, MemoryProtectionError, MemoryProtectionScope
-from .memory_protection_migration import MIGRATION_ID, MIGRATION_SCHEMA, PROTECTION_REVISION
+from .memory_protection import (
+    MemoryProtectionCodec,
+    MemoryProtectionError,
+    MemoryProtectionScope,
+)
+from .memory_protection_migration import (
+    MIGRATION_ID,
+    MIGRATION_SCHEMA,
+    PROTECTION_REVISION,
+)
 
 
 class ProtectedMemoryLookupMigrationError(RuntimeError):
@@ -63,6 +75,10 @@ class ProtectedMemoryLookupMigrator:
     per store, protects that key with the configured current-user provider, and
     stores only domain-separated HMAC-SHA256 values in SQLite. Secret, deleted,
     superseded, redacted and non-protected rows never receive an equality digest.
+
+    Finalization additionally installs metadata-only SQLite guards. Once present,
+    older writer code cannot create an active/private/protected row without a
+    digest or leave a digest behind after a row becomes ineligible.
     """
 
     def __init__(
@@ -95,6 +111,7 @@ class ProtectedMemoryLookupMigrator:
             raise ProtectedMemoryLookupMigrationError(
                 "batch_limit must be a positive integer"
             )
+
         conn = self._connect()
         lookup: ProtectedMemoryExactLookup | None = None
         try:
@@ -102,8 +119,7 @@ class ProtectedMemoryLookupMigrator:
             self._require_completed_protection(conn)
             self._ensure_schema(conn)
             row = self._ensure_state(conn)
-            key = unwrap_lookup_key(self.codec, row)
-            lookup = ProtectedMemoryExactLookup(key)
+            lookup = ProtectedMemoryExactLookup(unwrap_lookup_key(self.codec, row))
             self._clear_ineligible_digests(conn)
 
             rows = conn.execute(
@@ -151,13 +167,17 @@ class ProtectedMemoryLookupMigrator:
             validate_lookup_state_row(row, self.codec, require_completed=False)
             lookup = ProtectedMemoryExactLookup(unwrap_lookup_key(self.codec, row))
             if str(row["state"]) == "completed":
+                require_lookup_guards(conn)
                 self._validate_indexed_rows(conn, lookup)
             return self._refresh_summary(conn, mutate=False)
         except (
             sqlite3.Error,
             MemoryProtectionError,
             ProtectedMemoryLookupError,
+            ProtectedMemoryLookupMigrationError,
         ) as exc:
+            if isinstance(exc, ProtectedMemoryLookupMigrationError):
+                raise
             raise ProtectedMemoryLookupMigrationError(
                 f"protected exact lookup inspection failed closed: {type(exc).__name__}"
             ) from exc
@@ -224,6 +244,7 @@ class ProtectedMemoryLookupMigrator:
             raise ProtectedMemoryLookupMigrationError(
                 "base protected-memory migration is not lookup-eligible"
             )
+
         columns = {
             str(item["name"])
             for item in conn.execute("PRAGMA table_info(agent_memories)").fetchall()
@@ -295,6 +316,7 @@ class ProtectedMemoryLookupMigrator:
             raise ProtectedMemoryLookupMigrationError(
                 "protected lookup column is missing"
             )
+
         state_columns = {
             str(item["name"])
             for item in conn.execute(f"PRAGMA table_info({LOOKUP_STATE_TABLE})").fetchall()
@@ -318,6 +340,7 @@ class ProtectedMemoryLookupMigrator:
             raise ProtectedMemoryLookupMigrationError(
                 "protected lookup migration table schema mismatch"
             )
+
         index = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
             (LOOKUP_INDEX,),
@@ -509,6 +532,7 @@ class ProtectedMemoryLookupMigrator:
             raise ProtectedMemoryLookupMigrationError(
                 "protected lookup rows remain before completion"
             )
+
         completed = self.clock()
         indexed = int(
             conn.execute(
@@ -518,8 +542,19 @@ class ProtectedMemoryLookupMigrator:
                 f"AND {LOOKUP_COLUMN} IS NOT NULL"
             ).fetchone()[0]
         )
+
         conn.execute("BEGIN EXCLUSIVE")
         try:
+            # Install the two metadata-only guards in the same transaction that
+            # marks the lookup migration completed. A crash can therefore leave
+            # either running/no-authority state or completed+guarded state, never
+            # a completed receipt without durable write-time invariants.
+            for name, operation in (
+                (LOOKUP_INSERT_GUARD, "INSERT"),
+                (LOOKUP_UPDATE_GUARD, "UPDATE"),
+            ):
+                conn.execute(f"DROP TRIGGER IF EXISTS {name}")
+                conn.execute(lookup_guard_sql(name, operation))
             conn.execute(
                 f"UPDATE {LOOKUP_STATE_TABLE} SET state='completed',updated_at=?,"
                 "completed_at=?,indexed_rows=?,remaining_rows=0 WHERE id=?",
@@ -529,6 +564,8 @@ class ProtectedMemoryLookupMigrator:
         except Exception:
             conn.rollback()
             raise
+
+        require_lookup_guards(conn)
         mode = str(conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]).lower()
         if mode != "wal":
             raise ProtectedMemoryLookupMigrationError(
@@ -572,6 +609,7 @@ class ProtectedMemoryLookupMigrator:
                 raise ProtectedMemoryLookupMigrationError(
                     "protected lookup digest does not match encrypted value"
                 )
+
         bad = int(
             conn.execute(
                 f"SELECT COUNT(*) FROM agent_memories WHERE {LOOKUP_COLUMN} IS NOT NULL "
