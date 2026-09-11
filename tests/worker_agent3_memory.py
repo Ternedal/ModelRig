@@ -7,7 +7,15 @@ import tempfile
 import time
 
 from app.agent3.memory import MemoryNotFound, MemoryStore, MemoryStoreError
-from app.memory import CompletedMemoryTurn, MEMORY_CANDIDATE_SCHEMA, MemoryCandidateExtractor
+from app.memory import (
+    MAX_CONSOLIDATION_CANDIDATES,
+    CompletedMemoryTurn,
+    MEMORY_CANDIDATE_SCHEMA,
+    MemoryCandidate,
+    MemoryCandidateExtractor,
+    MemoryConsolidationError,
+    MemoryConsolidator,
+)
 
 passed = failed = 0
 
@@ -20,6 +28,17 @@ def check(cond, name):
     else:
         failed += 1
         print(f"  FAIL: {name}")
+
+
+def expect_consolidation_error(name, fn, contains=None):
+    try:
+        fn()
+    except MemoryConsolidationError as exc:
+        check(contains is None or contains in str(exc), name)
+    except Exception:
+        check(False, name)
+    else:
+        check(False, name)
 
 
 path = os.path.join(tempfile.mkdtemp(prefix="agent3-memory-"), "memory.db")
@@ -220,6 +239,252 @@ padded = asyncio.run(
 check(
     padded.review_status == "pending",
     "extractor whitespace normalization cannot manufacture confirmed authority",
+)
+
+# Memory 4.0 W02-A: storage-neutral consolidation must preserve the stricter W01
+# authority boundary. A neutral verbatim statement is a statement log entry, not
+# a semantic singleton slot that may overwrite another statement.
+consolidator = MemoryConsolidator()
+
+new_statement_plan = consolidator.plan([hardened], [])
+check(
+    len(new_statement_plan.actions) == 1
+    and new_statement_plan.actions[0].decision == "create"
+    and new_statement_plan.actions[0].reason == "new_confirmed_verbatim_statement"
+    and new_statement_plan.receipt.sent_to_store is False,
+    "W02-A plans a new canonical confirmed statement without touching storage",
+)
+
+existing_same_statement = store.create(
+    subject="user",
+    predicate="verbatim_user_statement",
+    value="I live in Copenhagen",
+    kind="note",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:older-same-statement",
+    confidence=1.0,
+    review_status="confirmed",
+)
+exact_statement_plan = consolidator.plan([hardened], [existing_same_statement])
+check(
+    exact_statement_plan.actions[0].decision == "dedupe"
+    and exact_statement_plan.actions[0].existing_id == existing_same_statement.id,
+    "W02-A exact confirmed verbatim replay dedupes deterministically",
+)
+
+existing_other_statement_a = store.create(
+    subject="user",
+    predicate="verbatim_user_statement",
+    value="I live in Aarhus",
+    kind="note",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:other-a",
+    confidence=1.0,
+    review_status="confirmed",
+)
+existing_other_statement_b = store.create(
+    subject="user",
+    predicate="verbatim_user_statement",
+    value="I work in Odense",
+    kind="note",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:other-b",
+    confidence=1.0,
+    review_status="confirmed",
+)
+distinct_statement_plan = consolidator.plan(
+    [hardened],
+    [existing_other_statement_b, existing_other_statement_a],
+)
+check(
+    distinct_statement_plan.actions[0].decision == "create"
+    and distinct_statement_plan.receipt.supersede_count == 0,
+    "W02-A never treats different verbatim user turns as stale versions of one fact",
+)
+
+pending_semantic = partial
+pending_semantic_plan = consolidator.plan([pending_semantic], [])
+check(
+    pending_semantic_plan.actions[0].decision == "create"
+    and pending_semantic_plan.actions[0].reason == "new_pending_candidate",
+    "W02-A may plan storage of a structured pending proposal for later review",
+)
+
+existing_semantic_confirmed = store.create(
+    subject="anders",
+    predicate="favorite_city",
+    value="Copenhagen",
+    kind="preference",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:reviewed-city",
+    confidence=1.0,
+    review_status="confirmed",
+)
+semantic_exact_plan = consolidator.plan(
+    [pending_semantic],
+    [existing_semantic_confirmed],
+)
+check(
+    semantic_exact_plan.actions[0].decision == "dedupe"
+    and semantic_exact_plan.actions[0].existing_id == existing_semantic_confirmed.id,
+    "W02-A pending proposal can dedupe against an exact already-reviewed durable fact",
+)
+
+forged_confirmed_semantic = MemoryCandidate(
+    subject="anders",
+    predicate="favorite_city",
+    value="Copenhagen",
+    kind="preference",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:forged",
+    confidence=1.0,
+    review_status="confirmed",
+    evidence="Copenhagen",
+)
+expect_consolidation_error(
+    "W02-A rejects a hand-built confirmed semantic candidate even when it claims user_explicit provenance",
+    lambda: consolidator.plan([forged_confirmed_semantic], []),
+    "verbatim authority shape",
+)
+
+pending_verbatim = store.create(
+    subject="user",
+    predicate="verbatim_user_statement",
+    value="I live in Copenhagen",
+    kind="note",
+    sensitivity="private",
+    source_type="inferred",
+    source_ref="run:pending-verbatim",
+    confidence=0.4,
+    review_status="pending",
+)
+promotion_plan = consolidator.plan([hardened], [pending_verbatim])
+check(
+    promotion_plan.actions[0].decision == "supersede"
+    and promotion_plan.actions[0].existing_id == pending_verbatim.id
+    and promotion_plan.actions[0].reason == "exact_verbatim_authority_promotion",
+    "W02-A permits only exact pending-to-confirmed verbatim authority promotion",
+)
+
+secret_candidate = MemoryCandidate(
+    subject="user",
+    predicate="token",
+    value="hidden-token",
+    kind="note",
+    sensitivity="secret",
+    source_type="inferred",
+    source_ref="conversation:secret-candidate",
+    confidence=0.8,
+    review_status="pending",
+    evidence="",
+)
+secret_plan = consolidator.plan([secret_candidate], [])
+check(
+    secret_plan.actions[0].decision == "skip"
+    and secret_plan.actions[0].reason == "secret_candidate",
+    "W02-A keeps secret candidates outside consolidation writes",
+)
+
+less_restrictive_existing = store.create(
+    subject="anders",
+    predicate="favorite_city",
+    value="Copenhagen",
+    kind="preference",
+    sensitivity="public",
+    source_type="user_explicit",
+    source_ref="conversation:old-public-city",
+    confidence=1.0,
+    review_status="confirmed",
+)
+expect_consolidation_error(
+    "W02-A refuses exact dedupe that would silently declassify a private W01 candidate",
+    lambda: consolidator.plan([pending_semantic], [less_restrictive_existing]),
+    "less restrictive",
+)
+
+pending_duplicate_a = MemoryCandidate(
+    subject="modelrig",
+    predicate="likely_model",
+    value="qwen",
+    kind="fact",
+    sensitivity="private",
+    source_type="inferred",
+    source_ref="run:z-source",
+    confidence=0.5,
+    review_status="pending",
+    evidence="",
+)
+pending_duplicate_b = MemoryCandidate(
+    subject="modelrig",
+    predicate="likely_model",
+    value="qwen",
+    kind="fact",
+    sensitivity="private",
+    source_type="inferred",
+    source_ref="run:a-source",
+    confidence=0.5,
+    review_status="pending",
+    evidence="",
+)
+duplicate_plan = consolidator.plan([pending_duplicate_a, pending_duplicate_b], [])
+check(
+    [action.decision for action in duplicate_plan.actions] == ["create", "skip"]
+    and duplicate_plan.actions[0].candidate.source_ref == "run:a-source",
+    "W02-A batch dedupe is order-independent and deterministic by canonical sort",
+)
+
+ambiguous_semantic_a = store.create(
+    subject="w02",
+    predicate="ambiguous",
+    value="a",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:ambiguous-a",
+    review_status="confirmed",
+)
+ambiguous_semantic_b = store.create(
+    subject="w02",
+    predicate="ambiguous",
+    value="b",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:ambiguous-b",
+    review_status="confirmed",
+)
+expect_consolidation_error(
+    "W02-A fails closed when semantic durable state already has multiple active confirmed values",
+    lambda: consolidator.plan(
+        [pending_duplicate_a],
+        [ambiguous_semantic_b, ambiguous_semantic_a],
+    ),
+    "ambiguous confirmed semantic state",
+)
+
+expect_consolidation_error(
+    "W02-A hard-bounds candidate batch size before planning work",
+    lambda: consolidator.plan(
+        [pending_duplicate_a] * (MAX_CONSOLIDATION_CANDIDATES + 1),
+        [],
+    ),
+    "exceeds",
+)
+expect_consolidation_error(
+    "W02-A rejects secret durable records from its snapshot",
+    lambda: consolidator.plan([pending_duplicate_a], [secret]),
+    "secret memory",
+)
+
+public_plan = consolidator.plan([secret_candidate], [])
+projection = public_plan.to_dict()
+check(
+    "hidden-token" not in json.dumps(projection)
+    and "conversation:secret-candidate" not in json.dumps(projection),
+    "W02-A public plan projection omits candidate values evidence and source_ref",
 )
 
 store.close()
