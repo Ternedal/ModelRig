@@ -25,6 +25,11 @@ adds a separately gated Go normal-chat integration, but that does not make Agent
 route and the R05 flag is off by default. Agent 3 remains deliberately separate
 from the normal Android/Desktop `TurnRouter` flow.
 
+W01 adds the first shared write-side primitive: bounded candidate extraction from
+a completed turn. It is still only a proposal boundary. W01 itself does not open
+a database, persist a candidate, correct/delete memory, wire extraction into
+normal chat or grant a model durable-write authority.
+
 Memory 4.0 shares those primitives without turning normal chat into an implicit
 Agent 3 activation dependency.
 
@@ -54,7 +59,9 @@ flowchart LR
     LEG[Legacy query-only reader] --> S
     PROT[Protected query-only reader / DPAPI] --> S
     A3[Agent 3 planner] --> Q
-    X[Memory extraction / consolidation] -. later write path .-> S
+    T[Completed turn] --> W01[W01 bounded candidate extractor]
+    LO[Local Ollama chat only] -. proposal generation .-> W01
+    W01 -. later persistence/consolidation boundary .-> S
 ```
 
 R04 returns a bounded context block and a pre-model receipt. R05 is the separate
@@ -288,16 +295,53 @@ R04's `sent_to_model=false` is treated as an invariant to verify, not as model
 permission. The model egress is the explicit R05 backend action after receipt
 verification.
 
+## M4-W01 — bounded memory candidate extraction
+
+W01 adds a model-independent proposal boundary in
+`worker/app/memory/extraction.py` and a separate ModelRig-local adapter in
+`worker/app/memory/local_extraction.py`.
+
+The completed turn is validated **before** an extractor/model callback can see
+it. User text and assistant text are each capped at 16,000 characters and the
+caller-owned `source_ref` at 1,000 characters. Extractor output is capped at
+64,000 characters, uses exact schema `kaliv-memory-candidates/v1`, contains at
+most 16 candidates and rejects unknown top-level or candidate fields.
+
+The model may propose only:
+
+- subject, predicate and value;
+- memory kind and sensitivity;
+- provenance (`user_explicit`, `inferred`, `tool_observation` or `imported`);
+- confidence;
+- evidence text.
+
+The model cannot return `source_ref`, `review_status`, ids, supersede targets,
+operations, correction tokens or delete/write instructions. `source_ref` always
+comes from the trusted caller and review state is derived locally.
+
+A `user_explicit` candidate can become `confirmed` only when its non-empty
+evidence is a literal substring of the completed **user** text and the candidate
+value is a literal substring of that evidence. This deliberately prefers false
+negatives over model normalization gaining authority. Explicit candidates with
+`secret` sensitivity remain `pending`.
+
+`inferred`, `imported` and `tool_observation` candidates are always `pending`,
+regardless of confidence or what the extractor attempted to imply. Assistant
+claims cannot become user-explicit evidence.
+
+The product adapter calls only the existing local `ollama_client.chat()` path and
+exposes no API-key, cloud-base-URL or caller-selected upstream argument. The
+neutral boundary validates the turn before the adapter can call Ollama and
+validates the returned JSON again afterward.
+
+W01 still performs **no durable write**. `MemoryCandidate.store_fields()` is only
+a create-shaped projection for later composition and contains no evidence/id,
+correction/delete/supersede authority. There is no automatic normal-chat
+extraction hook, no Agent 3 activation, no private-cloud grant and no production
+activation in this slice. Corrections must continue to use the existing
+version/supersede lifecycle once a later persistence slice is introduced.
+
 ## Planned slices
-
-### M4-W01 — memory candidate extraction
-
-After read-path qualification, add candidate extraction from completed turns.
-Explicit user facts may become confirmed under the existing policy; inferred,
-imported and tool-observed candidates remain pending until review.
-
-The extractor cannot directly overwrite durable memory. Corrections must use
-version/supersede semantics.
 
 ### M4-W02 — consolidation
 
@@ -333,6 +377,9 @@ runtime authority.
 9. Context has hard size/record bounds and an exact receipt before model use.
 10. Normal-chat memory is default-off, remains at user-data authority, and
     enabling it neither activates Agent 3 nor changes memory write/tool authority.
+11. Candidate extraction cannot accept model-supplied provenance references,
+    review state, lifecycle operation or overwrite authority.
+12. W01 candidate extraction is not itself permission to persist memory.
 
 ## R01 acceptance
 
@@ -449,3 +496,23 @@ R05 is complete only when exact-head repository qualification proves:
 - the R04 receipt never enters the model payload;
 - R05 adds no private-cloud grant, memory write, Android/Desktop route, Agent 3
   activation or production activation.
+
+## W01 acceptance
+
+W01 is complete only when exact-head repository qualification proves:
+
+- completed user and assistant turn text plus caller `source_ref` are hard-bounded
+  before the extractor callback can run;
+- output is exact-schema JSON with hard output, candidate-count and per-field
+  limits, and unknown fields fail closed;
+- the extractor cannot supply or replace `source_ref`, `review_status`, ids,
+  supersede targets or write/correction/delete operations;
+- a non-secret `user_explicit` proposal is confirmed only when exact evidence is
+  present in the completed user turn and contains the exact candidate value;
+- explicit secret, inferred, imported and tool-observed proposals remain pending;
+- malformed/oversized output and fabricated explicit evidence fail closed;
+- the product adapter delegates only to the existing local Ollama chat client and
+  an oversized turn is rejected before that client is invoked;
+- W01 exposes no database write, correction/delete/supersede path, automatic
+  normal-chat persistence, Agent 3 activation, private-cloud grant or production
+  activation.
