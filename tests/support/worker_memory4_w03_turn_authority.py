@@ -108,7 +108,7 @@ expect_write_error(
         extract=extract_wrong_confirmed,
         commit=forbidden_commit,
     ).commit_completed_turn(turn),
-    "verbatim turn authority",
+    "evidence",
 )
 
 # user_explicit evidence/value authority must remain grounded in the bounded turn.
