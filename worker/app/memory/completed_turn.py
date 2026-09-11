@@ -18,6 +18,9 @@ from .extraction import (
     VERBATIM_USER_SUBJECT,
     CompletedMemoryTurn,
     MemoryCandidate,
+    MemoryCandidateExtractor,
+    MemoryExtractionError,
+    _looks_like_credential,
 )
 
 
@@ -110,9 +113,12 @@ class CompletedTurnMemoryPersistence:
     storage, opens a database, mounts HTTP, calls a model by itself or broadens
     write authority.
 
-    Only the exact server-normalized W01 confirmed verbatim shape may cross into
-    the injected persistence callbacks. Pending, secret and semantic proposals are
-    counted as deferred and remain outside durable auto-write authority.
+    The completed turn is validated through the exact W01 pre-model boundary
+    before the injected extractor can observe it. Candidate provenance and literal
+    grounding are then rebound to that validated turn. Only the exact
+    server-normalized W01 confirmed verbatim shape may cross into the persistence
+    callbacks. Pending, secret and semantic proposals are counted as deferred and
+    remain outside durable auto-write authority.
     """
 
     def __init__(
@@ -136,10 +142,21 @@ class CompletedTurnMemoryPersistence:
         self,
         turn: CompletedMemoryTurn,
     ) -> CompletedTurnPersistenceReceipt:
-        candidates = await self._extract(turn)
-        self._validate_candidate_batch(candidates)
+        try:
+            bounded_turn = MemoryCandidateExtractor._validate_turn(turn)
+        except MemoryExtractionError as exc:
+            raise CompletedTurnPersistenceError(
+                "W03-A completed turn violates the W01 pre-model boundary"
+            ) from exc
 
-        eligible = tuple(item for item in candidates if _auto_persistable(item))
+        candidates = await self._extract(bounded_turn)
+        self._validate_candidate_batch(candidates, bounded_turn)
+
+        eligible = tuple(
+            item
+            for item in candidates
+            if _auto_persistable(item, bounded_turn)
+        )
         deferred_count = len(candidates) - len(eligible)
         if not eligible:
             return CompletedTurnPersistenceReceipt(
@@ -199,7 +216,10 @@ class CompletedTurnMemoryPersistence:
         return rows
 
     @staticmethod
-    def _validate_candidate_batch(candidates: tuple[MemoryCandidate, ...]) -> None:
+    def _validate_candidate_batch(
+        candidates: tuple[MemoryCandidate, ...],
+        turn: CompletedMemoryTurn,
+    ) -> None:
         try:
             # Validation only. W03-A does not use this empty-snapshot plan for a
             # write; the injected prepare callback owns the trusted current-state
@@ -209,6 +229,27 @@ class CompletedTurnMemoryPersistence:
             raise CompletedTurnPersistenceError(
                 "W03-A candidate batch violates the W01/W02 contract"
             ) from exc
+
+        for candidate in candidates:
+            if candidate.source_ref != turn.source_ref:
+                raise CompletedTurnPersistenceError(
+                    "W03-A candidate source_ref is not bound to the completed turn"
+                )
+            if candidate.source_type == "user_explicit":
+                if not candidate.evidence or candidate.evidence not in turn.user_text:
+                    raise CompletedTurnPersistenceError(
+                        "W03-A user-explicit evidence is not grounded in the completed turn"
+                    )
+                if candidate.value not in candidate.evidence:
+                    raise CompletedTurnPersistenceError(
+                        "W03-A user-explicit value is not grounded in its evidence"
+                    )
+            if candidate.review_status == "confirmed" and not _auto_persistable(
+                candidate, turn
+            ):
+                raise CompletedTurnPersistenceError(
+                    "W03-A confirmed candidate violates the W01 turn-bound authority shape"
+                )
 
     def _prepare(
         self,
@@ -248,18 +289,30 @@ class CompletedTurnMemoryPersistence:
         return _parse_write_receipt(raw, expected_count=expected_count)
 
 
-def _auto_persistable(candidate: MemoryCandidate) -> bool:
-    return (
-        candidate.subject == VERBATIM_USER_SUBJECT
-        and candidate.predicate == VERBATIM_USER_PREDICATE
-        and candidate.kind == "note"
-        and candidate.sensitivity == "private"
-        and candidate.source_type == "user_explicit"
-        and not isinstance(candidate.confidence, bool)
-        and float(candidate.confidence) == 1.0
-        and candidate.review_status == "confirmed"
-        and bool(candidate.evidence)
-        and candidate.value == candidate.evidence
+def _auto_persistable(
+    candidate: MemoryCandidate,
+    turn: CompletedMemoryTurn,
+) -> bool:
+    if (
+        candidate.subject != VERBATIM_USER_SUBJECT
+        or candidate.predicate != VERBATIM_USER_PREDICATE
+        or candidate.kind != "note"
+        or candidate.sensitivity != "private"
+        or candidate.source_type != "user_explicit"
+        or candidate.source_ref != turn.source_ref
+        or isinstance(candidate.confidence, bool)
+        or float(candidate.confidence) != 1.0
+        or candidate.review_status != "confirmed"
+        or not candidate.evidence
+        or candidate.value != candidate.evidence
+        or candidate.evidence != turn.user_text
+    ):
+        return False
+    return not _looks_like_credential(
+        subject=candidate.subject,
+        predicate=candidate.predicate,
+        value=candidate.value,
+        evidence=candidate.evidence,
     )
 
 
