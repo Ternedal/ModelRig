@@ -66,7 +66,7 @@ class Agent3ReplanPreviewAuthorityTest {
     }
 
     @Test
-    fun applyAcceptsExactNormalizedIntentConnectionAndPreviewRun() {
+    fun applyAcceptsExactNormalizedIntentConnectionAndFreshPreview() {
         val reviewed = Agent3ReplanPreviewIntent("run-1", null)
         val normalizedConnection = requireNotNull(
             Agent3DevConnectionBinding.capture("  http://rig-a:8080///  ", " token-a ")
@@ -76,6 +76,7 @@ class Agent3ReplanPreviewAuthorityTest {
             Agent3ReplanPreviewPolicy.canApply(
                 previewId = "preview-1",
                 previewRunId = "run-1",
+                previewFresh = true,
                 busy = false,
                 currentIntent = Agent3ReplanPreviewIntent.capture(" run-1 ", "   "),
                 previewIntent = reviewed,
@@ -83,6 +84,34 @@ class Agent3ReplanPreviewAuthorityTest {
                 previewConnection = connection,
             )
         )
+    }
+
+    @Test
+    fun applyRejectsExpiredPreviewAndMarksOnlyRealPreviewAuthorityExpired() {
+        val reviewed = Agent3ReplanPreviewIntent("run-1", "planner-a")
+        assertFalse(canApply(reviewed, previewFresh = false))
+        assertTrue(Agent3ReplanPreviewPolicy.shouldMarkExpired("preview-1", previewFresh = false))
+        assertFalse(Agent3ReplanPreviewPolicy.shouldMarkExpired("", previewFresh = false))
+        assertFalse(Agent3ReplanPreviewPolicy.shouldMarkExpired("preview-1", previewFresh = true))
+    }
+
+    @Test
+    fun monotonicDeadlineIsFreshBeforeAndStaleAtExactDeadline() {
+        val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+            requestStartedAtMillis = 10_000L,
+            expiresInSeconds = 30,
+        )
+        assertEquals(40_000L, deadline)
+        assertTrue(Agent3TaskUiPolicy.isPreviewFresh(deadline, 39_999L))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(deadline, 40_000L))
+    }
+
+    @Test
+    fun missingOrNonPositiveTtlHasNoApplyAuthority() {
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, null))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, 0))
+        assertNull(Agent3TaskUiPolicy.previewDeadlineMillis(10_000L, -1))
+        assertFalse(Agent3TaskUiPolicy.isPreviewFresh(null, 10_001L))
     }
 
     @Test
@@ -113,6 +142,7 @@ class Agent3ReplanPreviewAuthorityTest {
         reviewed: Agent3ReplanPreviewIntent,
         previewId: String = "preview-1",
         previewRunId: String = reviewed.runId,
+        previewFresh: Boolean = true,
         busy: Boolean = false,
         currentIntent: Agent3ReplanPreviewIntent? = reviewed,
         previewIntent: Agent3ReplanPreviewIntent? = reviewed,
@@ -121,6 +151,7 @@ class Agent3ReplanPreviewAuthorityTest {
     ): Boolean = Agent3ReplanPreviewPolicy.canApply(
         previewId = previewId,
         previewRunId = previewRunId,
+        previewFresh = previewFresh,
         busy = busy,
         currentIntent = currentIntent,
         previewIntent = previewIntent,

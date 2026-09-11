@@ -18,6 +18,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,7 @@ import dk.ternedal.modelrig.desktop.net.Agent3ReplanApplyResult
 import dk.ternedal.modelrig.desktop.net.Agent3ReplanClient
 import dk.ternedal.modelrig.desktop.net.Agent3ReplanPreview
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -63,6 +65,8 @@ fun Agent3ReplanDevApp() {
         var preview by remember { mutableStateOf<Agent3ReplanPreview?>(null) }
         var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
         var previewIntent by remember { mutableStateOf<Agent3ReplanPreviewIntent?>(null) }
+        var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+        var previewExpired by remember { mutableStateOf(false) }
         var applied by remember { mutableStateOf<Agent3ReplanApplyResult?>(null) }
         var applyArmed by remember { mutableStateOf(false) }
         var busy by remember { mutableStateOf(false) }
@@ -80,6 +84,8 @@ fun Agent3ReplanDevApp() {
             preview = null
             previewConnection = null
             previewIntent = null
+            previewDeadlineMillis = null
+            previewExpired = false
             applyArmed = false
         }
 
@@ -91,6 +97,7 @@ fun Agent3ReplanDevApp() {
                     error = it.message ?: "Forbindelsen er ugyldig"
                     return
                 }
+            val requestStartedAtMillis = System.nanoTime() / 1_000_000L
             busy = true
             error = null
             clearPreviewAuthority()
@@ -120,9 +127,22 @@ fun Agent3ReplanDevApp() {
                         }
                         return@onSuccess
                     }
+                    val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                        requestStartedAtMillis,
+                        planned.expiresInSeconds,
+                    )
+                    val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                        deadline,
+                        System.nanoTime() / 1_000_000L,
+                    )
                     preview = planned
                     previewConnection = connection
                     previewIntent = requestIntent
+                    previewDeadlineMillis = deadline
+                    previewExpired = Agent3ReplanPreviewPolicy.shouldMarkExpired(
+                        previewId = planned.previewId,
+                        previewFresh = previewFresh,
+                    )
                 }.onFailure { error = it.message ?: "Replan-preview fejlede" }
             }
         }
@@ -132,9 +152,18 @@ fun Agent3ReplanDevApp() {
             val boundConnection = previewConnection
             val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
             val currentIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel)
+            val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                previewDeadlineMillis,
+                System.nanoTime() / 1_000_000L,
+            )
+            if (Agent3ReplanPreviewPolicy.shouldMarkExpired(current.previewId, previewFresh)) {
+                previewExpired = true
+                applyArmed = false
+            }
             if (!Agent3ReplanPreviewPolicy.canApply(
                     previewId = current.previewId,
                     previewRunId = current.runId,
+                    previewFresh = previewFresh,
                     busy = busy,
                     currentIntent = currentIntent,
                     previewIntent = previewIntent,
@@ -143,7 +172,11 @@ fun Agent3ReplanDevApp() {
                 )
             ) {
                 applyArmed = false
-                error = "Replan-previewet matcher ikke længere den reviewede opgave eller forbindelse"
+                error = if (!previewFresh) {
+                    "Replan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview."
+                } else {
+                    "Replan-previewet matcher ikke længere den reviewede opgave eller forbindelse"
+                }
                 return
             }
             if (!applyArmed) {
@@ -163,6 +196,31 @@ fun Agent3ReplanDevApp() {
                     clearPreviewAuthority()
                     applied = it
                 }.onFailure { error = it.message ?: "Replan kunne ikke anvendes" }
+            }
+        }
+
+        LaunchedEffect(preview?.previewId, previewDeadlineMillis, previewIntent, previewConnection) {
+            val currentPreview = preview ?: return@LaunchedEffect
+            val deadline = previewDeadlineMillis
+            val currentFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+            if (Agent3ReplanPreviewPolicy.shouldMarkExpired(currentPreview.previewId, currentFresh)) {
+                previewExpired = true
+                applyArmed = false
+                return@LaunchedEffect
+            }
+            if (!currentFresh) return@LaunchedEffect
+            val remaining = requireNotNull(deadline) - (System.nanoTime() / 1_000_000L)
+            if (remaining > 0L) delay(remaining)
+            val freshAfterDelay = Agent3TaskUiPolicy.isPreviewFresh(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+            if (Agent3ReplanPreviewPolicy.shouldMarkExpired(currentPreview.previewId, freshAfterDelay)) {
+                previewExpired = true
+                applyArmed = false
             }
         }
 
@@ -261,9 +319,18 @@ fun Agent3ReplanDevApp() {
             }
 
             preview?.let { current ->
+                val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                    previewDeadlineMillis,
+                    System.nanoTime() / 1_000_000L,
+                )
+                val showExpired = previewExpired || Agent3ReplanPreviewPolicy.shouldMarkExpired(
+                    previewId = current.previewId,
+                    previewFresh = previewFresh,
+                )
                 val applyAllowed = Agent3ReplanPreviewPolicy.canApply(
                     previewId = current.previewId,
                     previewRunId = current.runId,
+                    previewFresh = previewFresh,
                     busy = busy,
                     currentIntent = Agent3ReplanPreviewIntent.capture(runId, plannerModel),
                     previewIntent = previewIntent,
@@ -271,9 +338,15 @@ fun Agent3ReplanDevApp() {
                     previewConnection = previewConnection,
                 )
                 Spacer(Modifier.height(12.dp))
-                ReplanPreviewCard(current, busy, applyArmed, applyAllowed, ::applyPreview) {
-                    applyArmed = false
-                }
+                ReplanPreviewCard(
+                    preview = current,
+                    busy = busy,
+                    armed = applyArmed,
+                    applyAllowed = applyAllowed,
+                    expired = showExpired,
+                    onApply = ::applyPreview,
+                    onDisarm = { applyArmed = false },
+                )
             }
 
             applied?.let {
@@ -303,6 +376,7 @@ private fun ReplanPreviewCard(
     busy: Boolean,
     armed: Boolean,
     applyAllowed: Boolean,
+    expired: Boolean,
     onApply: () -> Unit,
     onDisarm: () -> Unit,
 ) {
@@ -347,14 +421,18 @@ private fun ReplanPreviewCard(
                 OutlinedButton(enabled = applyAllowed && !busy, onClick = onDisarm) { Text("Fortryd") }
             }
         }
-        if (!applyAllowed) {
-            Text(
+        when {
+            expired -> Text(
+                "Replan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                color = KalivTheme.colors.Danger,
+                fontSize = 11.sp,
+            )
+            !applyAllowed -> Text(
                 "Apply er låst, fordi previewets opgave eller forbindelse ikke længere matcher.",
                 color = KalivTheme.colors.Danger,
                 fontSize = 11.sp,
             )
-        } else if (armed) {
-            Text(
+            armed -> Text(
                 "Næste klik forbruger single-use-tokenet og ændrer kun det viste pending read-window. Runnet fortsættes ikke automatisk.",
                 color = KalivTheme.colors.Amber,
                 fontSize = 11.sp,
