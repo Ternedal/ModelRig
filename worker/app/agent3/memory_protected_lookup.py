@@ -104,6 +104,7 @@ class ProtectedMemoryExactLookup:
                 "protected exact lookup migration receipt is missing"
             )
         _validate_state_row(row, codec, require_completed=True)
+        require_lookup_guards(conn)
         return cls(_unwrap_lookup_key(codec, row))
 
     def close(self) -> None:
