@@ -203,6 +203,15 @@ data class Agent3RunEnvelope(
     val termination: Agent3TerminationReceipt? = null,
 )
 
+internal sealed interface Agent3ReviewedStartTransportResult {
+    data class Accepted(val envelope: Agent3RunEnvelope) : Agent3ReviewedStartTransportResult
+
+    data class RawReviewConflict(
+        val runId: String,
+        val returnedReviewReads: Boolean?,
+    ) : Agent3ReviewedStartTransportResult
+}
+
 @Serializable
 private data class RunsEnvelope(val runs: List<Agent3Run> = emptyList())
 
@@ -282,16 +291,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     ): Agent3RunEnvelope {
         val body = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
         if (expectedReviewReads != null) {
-            val responseReviewReads = runCatching {
-                val root = json.parseToJsonElement(body) as? JsonObject
-                val raw = root?.get("review_reads") as? JsonPrimitive
-                when {
-                    raw == null || raw.isString -> null
-                    raw.content == "true" -> true
-                    raw.content == "false" -> false
-                    else -> null
-                }
-            }.getOrNull()
+            val responseReviewReads = strictRawReviewReads(body)
             if (responseReviewReads != expectedReviewReads) {
                 throw Agent3Exception(
                     "Invalid Agent 3.0 Start envelope: server review_reads does not match reviewed intent"
@@ -299,6 +299,29 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             }
         }
         return decodeRunEnvelope(body, expectedPlanId = planId)
+    }
+
+    internal fun startReviewedPlanTransport(
+        planId: String,
+        expectedReviewReads: Boolean,
+        expectedCapabilityReceipt: Agent3CapabilityReceipt?,
+    ): Agent3ReviewedStartTransportResult {
+        val body = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
+        val envelope = decodeRunEnvelope(body, expectedPlanId = planId)
+        if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 Start envelope: capability receipt does not match reviewed Preview"
+            )
+        }
+        val returnedReviewReads = strictRawReviewReads(body)
+        return if (returnedReviewReads == expectedReviewReads) {
+            Agent3ReviewedStartTransportResult.Accepted(envelope)
+        } else {
+            Agent3ReviewedStartTransportResult.RawReviewConflict(
+                runId = envelope.run.id,
+                returnedReviewReads = returnedReviewReads,
+            )
+        }
     }
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
@@ -314,6 +337,25 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             expectedRunId = runId,
         )
         if (expectedReviewReads != null && envelope.readReview.enabled != expectedReviewReads) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 run envelope: read_review state does not match reviewed run"
+            )
+        }
+        return envelope
+    }
+
+    internal fun getReviewedRunEnvelopeStrict(
+        runId: String,
+        expectedReviewReads: Boolean,
+    ): Agent3RunEnvelope {
+        val body = get("/api/v1/experimental/agent3/runs/${seg(runId)}")
+        val envelope = decodeRunEnvelope(body, expectedRunId = runId)
+        if (strictRawReviewReads(body) != expectedReviewReads) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 run envelope: server review_reads does not match reviewed run"
+            )
+        }
+        if (envelope.readReview.enabled != expectedReviewReads) {
             throw Agent3Exception(
                 "Invalid Agent 3.0 run envelope: read_review state does not match reviewed run"
             )
@@ -518,6 +560,17 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             throw Agent3Exception("Invalid capability receipt: allowed plan contains blockers")
         }
     }
+
+    private fun strictRawReviewReads(body: String): Boolean? = runCatching {
+        val root = json.parseToJsonElement(body) as? JsonObject
+        val raw = root?.get("review_reads") as? JsonPrimitive
+        when {
+            raw == null || raw.isString -> null
+            raw.content == "true" -> true
+            raw.content == "false" -> false
+            else -> null
+        }
+    }.getOrNull()
 
     private fun builder(path: String): HttpRequest.Builder = HttpRequest.newBuilder(URI.create(base + path))
         .header("Content-Type", "application/json")
