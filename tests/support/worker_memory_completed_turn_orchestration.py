@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "worker"))
+sys.path.insert(0, str(ROOT / "tests" / "support"))
 
 from app.memory import (  # noqa: E402
     COMPLETED_TURN_PERSISTENCE_SCHEMA,
