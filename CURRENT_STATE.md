@@ -192,7 +192,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent4_handoff_e2e.py`
 - `tests/worker_agent4_handoff_mutation_contract.py`
 - `tests/worker_agent4_handoff_persistence.py`
-- `tests/worker_agent4_handoff_persistence_regressions.py`
 - `tests/worker_agent4_handoff_runtime.py`
 - `tests/worker_agent4_operator_api.py`
 - `tests/worker_agent4_operator_api_review.py`
@@ -246,6 +245,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_hardening_stream_disconnect.py`
 - `tests/worker_home_rig_runtime.py`
 - `tests/worker_jobs.py`
+- `tests/worker_memory4_consolidation_writer.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
@@ -392,7 +392,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_person_create.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
-- `tests/workflow_physical_validation_final_gate.py`
 - `tests/workflow_prepare_first_body.py`
 - `tests/workflow_proof_campaign_gate_receipt_rule_matrix.py`
 - `tests/workflow_proof_campaign_gate_receipt_unknown_gate.py`
