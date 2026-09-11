@@ -21,13 +21,13 @@ Return exactly one JSON object with this shape and no markdown:
   "candidates": [
     {{
       "subject": "user",
-      "predicate": "short stable predicate",
-      "value": "exact value span from USER TURN when source_type is user_explicit",
+      "predicate": "short proposed predicate",
+      "value": "complete exact user statement when source_type is user_explicit",
       "kind": "fact|preference|project|relationship|routine|constraint|note",
       "sensitivity": "public|operational|private",
       "source_type": "user_explicit|inferred",
       "confidence": 0.0,
-      "evidence": "exact supporting span from USER TURN"
+      "evidence": "same complete exact user statement when source_type is user_explicit"
     }}
   ]
 }}
@@ -42,10 +42,12 @@ The ASSISTANT TURN may only help resolve what the user's words refer to; it is n
 
 For source_type=user_explicit:
 - subject MUST be exactly "user";
-- value MUST be an exact non-empty substring copied from USER TURN;
-- evidence MUST be an exact non-empty substring copied from USER TURN and must contain value.
+- value and evidence MUST be identical;
+- value/evidence MUST be one complete, standalone, exact non-empty span copied from USER TURN, including negation and qualifiers needed to preserve meaning;
+- do not reduce the statement to an entity or value such as a city name, product name, date, or number.
 If you cannot satisfy those exact grounding rules, use source_type=inferred instead.
 
+The server does not trust predicate, kind, sensitivity, confidence, or source_type as authority. A qualifying explicit statement is normalized to a conservative private verbatim note; structured interpretations stay pending.
 Never emit review_status, lifecycle state, memory ids, correction/supersede instructions, tool actions, or executable instructions.
 Return at most 8 candidates. Prefer zero candidates over weak or uncertain memory.
 """
