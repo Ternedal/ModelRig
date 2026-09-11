@@ -6,6 +6,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -89,7 +92,87 @@ class Agent3ReplanClient(baseUrl: String, private val bearer: String) {
     }
 
     fun apply(previewId: String): Agent3ReplanApplyResult =
-        decode(post("/api/v1/experimental/agent3/replan-previews/${seg(previewId)}/apply", "{}"))
+        decode(postApply(previewId))
+
+    /**
+     * Reviewed Apply boundary. A 2xx response may describe a replan that is
+     * already committed, so raw response authority is proven before permissive
+     * typed defaults are allowed to reach operator-visible state.
+     */
+    fun applyReviewed(reviewedPreview: Agent3ReplanPreview): Agent3ReplanApplyResult {
+        if (reviewedPreview.revision == Int.MAX_VALUE || reviewedPreview.replanCount == Int.MAX_VALUE) {
+            throw Agent3Exception("Invalid Agent 3.0 reviewed replan Preview revision authority")
+        }
+        val body = postApply(reviewedPreview.previewId)
+        val root = parseObject(body)
+        validateReviewedApplyResponse(root, reviewedPreview)
+        return decode(body)
+    }
+
+    private fun postApply(previewId: String): String =
+        post("/api/v1/experimental/agent3/replan-previews/${seg(previewId)}/apply", "{}")
+
+    private fun validateReviewedApplyResponse(
+        root: JsonObject,
+        reviewed: Agent3ReplanPreview,
+    ) {
+        val run = root.requireObject("run")
+        val receipt = root.requireObject("replan")
+        val appliedPreview = root.requireObject("preview")
+
+        run.requireExactString("id", reviewed.runId, "run")
+        appliedPreview.requireExactString("preview_id", reviewed.previewId, "preview")
+        appliedPreview.requireExactString("run_id", reviewed.runId, "preview")
+        appliedPreview.requireExactNullableString(
+            "planner_model",
+            reviewed.plannerModel,
+            "preview",
+        )
+        appliedPreview.requireExactString("prompt_sha256", reviewed.promptSha256, "preview")
+        appliedPreview.requireExactString("rationale", reviewed.rationale, "preview")
+
+        receipt.requireExactString("reason", reviewed.rationale, "replan")
+        receipt.requireExactInt("from_revision", reviewed.revision, "replan")
+        receipt.requireExactInt("to_revision", reviewed.revision + 1, "replan")
+        receipt.requireExactInt("replan_number", reviewed.replanCount + 1, "replan")
+    }
+
+    private fun parseObject(body: String): JsonObject = try {
+        json.parseToJsonElement(body) as? JsonObject
+            ?: throw Agent3Exception("Agent 3.0 replan returned invalid JSON object")
+    } catch (e: Agent3Exception) {
+        throw e
+    } catch (e: Exception) {
+        throw Agent3Exception("Agent 3.0 replan returned invalid JSON: ${e.message}")
+    }
+
+    private fun JsonObject.requireObject(name: String): JsonObject =
+        this[name] as? JsonObject ?: authorityMismatch(name)
+
+    private fun JsonObject.requireExactString(name: String, expected: String, context: String) {
+        val raw = this[name]
+        val actual = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (actual != expected) authorityMismatch("$context.$name")
+    }
+
+    private fun JsonObject.requireExactNullableString(name: String, expected: String?, context: String) {
+        val raw = this[name] ?: authorityMismatch("$context.$name")
+        if (raw === JsonNull) {
+            if (expected != null) authorityMismatch("$context.$name")
+            return
+        }
+        val actual = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (expected == null || actual != expected) authorityMismatch("$context.$name")
+    }
+
+    private fun JsonObject.requireExactInt(name: String, expected: Int, context: String) {
+        val raw = this[name] as? JsonPrimitive
+        val actual = raw?.takeIf { !it.isString }?.content?.toIntOrNull()
+        if (actual != expected) authorityMismatch("$context.$name")
+    }
+
+    private fun authorityMismatch(field: String): Nothing =
+        throw Agent3Exception("Agent 3.0 replan Apply response authority mismatch: $field")
 
     private fun builder(path: String): HttpRequest.Builder = HttpRequest.newBuilder(URI.create(base + path))
         .header("Content-Type", "application/json")
