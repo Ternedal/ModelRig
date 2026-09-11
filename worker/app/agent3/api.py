@@ -41,6 +41,7 @@ from .replan_runtime import (
 )
 from .replanner import ReadSuffixReplanner, ReplanError
 from .review_orchestrator import (
+    ReadReviewError,
     ReadReviewStore,
     ReviewingAgent3Orchestrator,
 )
@@ -100,6 +101,11 @@ class ReplanReq(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
     # Empty is valid: it means the remaining pending read window is unnecessary.
     plan: list[PlanStepReq] = Field(default_factory=list, max_length=12)
+
+
+class ResumeReq(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    completed_step_id: str | None = None
 
 
 class CancelReq(BaseModel):
@@ -424,13 +430,27 @@ def build_router(
         return response(run, approval_receipt=approval_receipt)
 
     @router.post("/runs/{run_id}/resume")
-    def resume(run_id: str) -> dict[str, Any]:
+    def resume(run_id: str, req: ResumeReq | None = None) -> dict[str, Any]:
         recover_or_block(run_id)
+        expected_review_step_id = req.completed_step_id if req is not None else None
+        if reviewing:
+            checkpoint = read_review(run_id)
+            if checkpoint["enabled"] and not expected_review_step_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="reviewed Resume requires the exact completed_step_id checkpoint authority",
+                )
         try:
-            run = orchestrator.advance(run_id)
+            if reviewing:
+                run = orchestrator.advance(
+                    run_id,
+                    expected_review_step_id=expected_review_step_id,
+                )
+            else:
+                run = orchestrator.advance(run_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
-        except RunConflict as exc:
+        except (RunConflict, ReadReviewError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return response(run)
 

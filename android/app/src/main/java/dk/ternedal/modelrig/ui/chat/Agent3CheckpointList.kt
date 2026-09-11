@@ -213,6 +213,7 @@ fun Agent3CheckpointActions(
     onReplan: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
+    continueEnabled: Boolean = !busy,
 ) {
     Column(modifier.fillMaxWidth()) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -220,14 +221,14 @@ fun Agent3CheckpointActions(
                 Modifier
                     .weight(1f)
                     .background(KalivTokens.Gold.fill, RoundedCornerShape(12.dp))
-                    .clickable(enabled = !busy, onClickLabel = "Fortsæt (ét read)") { onContinue() }
+                    .clickable(enabled = continueEnabled && !busy, onClickLabel = "Fortsæt (ét read)") { onContinue() }
                     .padding(vertical = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     "Fortsæt (ét read)",
                     style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
-                    color = KalivTokens.Gold.on,
+                    color = if (continueEnabled) KalivTokens.Gold.on else KalivTheme.colors.faint,
                 )
             }
             Box(

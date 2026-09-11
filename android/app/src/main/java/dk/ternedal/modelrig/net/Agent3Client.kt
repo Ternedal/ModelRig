@@ -288,8 +288,11 @@ class Agent3Client(baseUrl: String, private val token: String) {
     internal fun resumeRunEnvelope(
         runId: String,
         expectedReviewReads: Boolean? = null,
+        expectedCompletedStepId: String? = null,
     ): RunEnvelope {
-        val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", JSONObject())
+        val payload = JSONObject()
+        expectedCompletedStepId?.let { payload.put("completed_step_id", it) }
+        val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", payload)
         return bindRunEnvelopeReview(
             parseRunEnvelope(root, expectedRunId = runId),
             expectedReviewReads,
