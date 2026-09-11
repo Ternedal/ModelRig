@@ -12,6 +12,8 @@ from .extraction import (
     MAX_CANDIDATE_VALUE_CHARS,
     MAX_MEMORY_CANDIDATES,
     MAX_SOURCE_REF_CHARS,
+    VERBATIM_USER_PREDICATE,
+    VERBATIM_USER_SUBJECT,
     MemoryCandidate,
 )
 
@@ -21,14 +23,8 @@ MAX_CONSOLIDATION_RECORDS = 200
 
 ACTION_CREATE = "create"
 ACTION_REUSE = "reuse"
-ACTION_SUPERSEDE = "supersede"
 ACTION_REVIEW = "review"
-CONSOLIDATION_ACTIONS = {
-    ACTION_CREATE,
-    ACTION_REUSE,
-    ACTION_SUPERSEDE,
-    ACTION_REVIEW,
-}
+CONSOLIDATION_ACTIONS = {ACTION_CREATE, ACTION_REUSE, ACTION_REVIEW}
 
 _ALLOWED_KINDS = {
     "fact",
@@ -56,13 +52,6 @@ class MemoryConsolidationError(RuntimeError):
 
 @dataclass(frozen=True)
 class ExistingMemorySnapshot:
-    """Storage-neutral active-row projection used by the W02 planner.
-
-    The projection deliberately excludes source references, protection envelopes,
-    database handles and mutation methods. `updated_at` is retained only as the
-    optimistic concurrency token required by a later explicit writer action.
-    """
-
     id: str
     subject: str
     predicate: str
@@ -87,7 +76,7 @@ class ConsolidationDecision:
 
     @property
     def mutates(self) -> bool:
-        return self.action in {ACTION_CREATE, ACTION_SUPERSEDE}
+        return self.action == ACTION_CREATE
 
 
 @dataclass(frozen=True)
@@ -106,14 +95,14 @@ class ConsolidationPlan:
 
 
 class MemoryConsolidator:
-    """Deterministic Memory 4.0 W02 duplicate/stale-fact planner.
+    """Deterministic W02 deduplication and stale-fact review boundary.
 
-    W02 performs no model call and owns no storage connection. It accepts the
-    already-bounded W01 candidate contract plus a bounded local-management view
-    of active durable memory and emits explicit create/reuse/supersede/review
-    decisions. Only a confirmed private `user_explicit` candidate can produce a
-    supersede decision; pending/model-derived candidates can never replace
-    durable reviewed state.
+    W01 #1201/#1202 intentionally removed model-owned structured semantics from
+    automatically confirmed candidates. W02 revalidates that contract instead of
+    recreating authority from model text. Confirmed inputs are therefore only
+    complete server-normalized verbatim-user notes. Structured interpretations
+    remain pending and a conflicting durable fact becomes an explicit review
+    handoff; W02 never calls a correction/supersede operation automatically.
     """
 
     def __init__(self, *, clock=time.time):
@@ -136,66 +125,42 @@ class MemoryConsolidator:
             MAX_CONSOLIDATION_RECORDS,
             "existing memory",
         )
-        validated_candidates = tuple(
-            self._candidate(candidate) for candidate in candidate_rows
-        )
-        snapshots = tuple(self._snapshot(record) for record in record_rows)
+        validated = tuple(self._candidate(item) for item in candidate_rows)
+        existing = tuple(self._snapshot(item) for item in record_rows)
         now = self._now()
 
-        slots: dict[tuple[str, str], list[MemoryCandidate]] = {}
-        slot_order: list[tuple[str, str]] = []
-        for candidate in validated_candidates:
-            slot = self._slot(candidate.subject, candidate.predicate)
-            if slot not in slots:
-                slots[slot] = []
-                slot_order.append(slot)
-            slots[slot].append(candidate)
-
-        existing_by_slot: dict[tuple[str, str], list[ExistingMemorySnapshot]] = {}
-        for record in snapshots:
-            slot = self._slot(record.subject, record.predicate)
-            existing_by_slot.setdefault(slot, []).append(record)
+        groups: dict[tuple[str, ...], list[MemoryCandidate]] = {}
+        order: list[tuple[str, ...]] = []
+        for candidate in validated:
+            slot = self._candidate_slot(candidate)
+            if slot not in groups:
+                groups[slot] = []
+                order.append(slot)
+            groups[slot].append(candidate)
 
         decisions: list[ConsolidationDecision] = []
-        for slot in slot_order:
-            cluster = slots[slot]
+        for slot in order:
+            cluster = groups[slot]
             unique = self._unique_candidates(cluster)
-            values = {candidate.value for candidate in unique}
-            if len(values) != 1:
-                for candidate in unique:
-                    decisions.append(
-                        self._decision(
-                            ACTION_REVIEW,
-                            candidate,
-                            reason="conflicting_candidate_values",
-                        )
-                    )
-                continue
             if len(unique) != 1:
-                # Same slot/value but conflicting provenance, sensitivity,
-                # review state, evidence or confidence is not an exact duplicate.
-                # Do not pick whichever representation happened to arrive last.
-                for candidate in unique:
-                    decisions.append(
-                        self._decision(
-                            ACTION_REVIEW,
-                            candidate,
-                            reason="conflicting_candidate_metadata",
-                        )
-                    )
+                reason = self._cluster_conflict_reason(unique)
+                decisions.extend(
+                    self._decision(ACTION_REVIEW, item, reason=reason)
+                    for item in unique
+                )
                 continue
 
             candidate = unique[0]
-            existing = existing_by_slot.get(slot, [])
-            decisions.append(self._for_slot(candidate, existing, now=now))
+            matches = self._matching_existing(candidate, existing)
+            decisions.append(self._for_candidate(candidate, matches, now=now))
 
         return ConsolidationPlan(
             decisions=tuple(decisions),
-            candidate_count=len(validated_candidates),
-            record_count=len(snapshots),
+            candidate_count=len(validated),
+            record_count=len(existing),
         )
 
-    def _for_slot(
+    def _for_candidate(
         self,
         candidate: MemoryCandidate,
         existing: list[ExistingMemorySnapshot],
@@ -203,24 +168,15 @@ class MemoryConsolidator:
         now: float,
     ) -> ConsolidationDecision:
         if not existing:
-            return self._decision(ACTION_CREATE, candidate, reason="new_memory_slot")
-
-        # Multiple active rows for one subject/predicate mean durable state is
-        # already ambiguous. W02 never guesses which row deserves supersession.
+            return self._decision(ACTION_CREATE, candidate, reason="new_memory")
         if len(existing) != 1:
             return self._decision(
                 ACTION_REVIEW,
                 candidate,
-                reason="ambiguous_existing_slot",
+                reason="ambiguous_existing_state",
             )
 
         current = existing[0]
-        candidate_rank = _SENSITIVITY_RANK[candidate.sensitivity]
-        current_rank = _SENSITIVITY_RANK[current.sensitivity]
-        current_expired = (
-            current.expires_at is not None and current.expires_at <= now
-        )
-
         if current.review_status == "rejected":
             return self._decision(
                 ACTION_REVIEW,
@@ -228,76 +184,64 @@ class MemoryConsolidator:
                 existing=current,
                 reason="existing_memory_rejected",
             )
-
-        # Reusing a less restrictive durable row would silently declassify the
-        # W01 proposal. A stricter exact duplicate may be reused, but a stale
-        # stricter value may not be replaced by a less restrictive candidate.
-        if current_rank < candidate_rank:
+        if current.kind != candidate.kind:
             return self._decision(
                 ACTION_REVIEW,
                 candidate,
                 existing=current,
-                reason="sensitivity_declassification",
+                reason="kind_mismatch",
+            )
+        if _SENSITIVITY_RANK[current.sensitivity] < _SENSITIVITY_RANK[candidate.sensitivity]:
+            return self._decision(
+                ACTION_REVIEW,
+                candidate,
+                existing=current,
+                reason="sensitivity_underclassified",
+            )
+        if current.expires_at is not None and current.expires_at <= now:
+            return self._decision(
+                ACTION_REVIEW,
+                candidate,
+                existing=current,
+                reason="expired_existing_requires_review",
             )
 
         if current.value == candidate.value:
-            if (
-                not current_expired
-                and current.review_status == "confirmed"
-            ):
+            if current.review_status == "confirmed":
                 return self._decision(
                     ACTION_REUSE,
                     candidate,
                     existing=current,
                     reason="existing_confirmed_duplicate",
                 )
-            if (
-                not current_expired
-                and current.review_status == "pending"
-                and candidate.review_status == "pending"
-            ):
+            if current.review_status == "pending" and candidate.review_status == "pending":
                 return self._decision(
                     ACTION_REUSE,
                     candidate,
                     existing=current,
                     reason="existing_pending_duplicate",
                 )
-            if self._may_supersede(candidate, current):
-                return self._decision(
-                    ACTION_SUPERSEDE,
-                    candidate,
-                    existing=current,
-                    reason=(
-                        "refresh_expired_duplicate"
-                        if current_expired
-                        else "upgrade_pending_duplicate"
-                    ),
-                )
             return self._decision(
                 ACTION_REVIEW,
                 candidate,
                 existing=current,
-                reason="duplicate_requires_review",
+                reason="duplicate_review_upgrade_required",
             )
 
-        # A pending candidate may coexist with one different durable value for
-        # later explicit review. It never supersedes the current row.
-        if candidate.review_status == "pending":
+        # Confirmed W01 values are complete verbatim statements. Two distinct
+        # statements are independent notes, not stale semantic versions merely
+        # because the server-owned subject/predicate is intentionally generic.
+        if self._is_confirmed_verbatim(candidate):
             return self._decision(
                 ACTION_CREATE,
                 candidate,
-                existing=current,
-                reason="pending_alternative_value",
+                reason="distinct_verbatim_statement",
             )
 
-        if self._may_supersede(candidate, current):
-            return self._decision(
-                ACTION_SUPERSEDE,
-                candidate,
-                existing=current,
-                reason="confirmed_explicit_stale_fact",
-            )
-
+        # Structured meaning is pending under hardened W01. A different value in
+        # an existing semantic slot is useful evidence of a possible stale fact,
+        # but not authority to mutate reviewed history. Bind the exact row/token
+        # into a review handoff and leave correction to local management.
         return self._decision(
             ACTION_REVIEW,
             candidate,
@@ -305,29 +249,12 @@ class MemoryConsolidator:
             reason="stale_fact_requires_review",
         )
 
-    @staticmethod
-    def _may_supersede(
-        candidate: MemoryCandidate,
-        current: ExistingMemorySnapshot,
-    ) -> bool:
-        return (
-            candidate.review_status == "confirmed"
-            and candidate.source_type == "user_explicit"
-            and candidate.sensitivity == "private"
-            and current.sensitivity == "private"
-            and current.review_status in {"pending", "confirmed"}
-        )
-
     @classmethod
     def _candidate(cls, value: Any) -> MemoryCandidate:
         if not isinstance(value, MemoryCandidate):
             raise MemoryConsolidationError("W02 requires MemoryCandidate inputs")
         cls._text("candidate subject", value.subject, MAX_CANDIDATE_SUBJECT_CHARS)
-        cls._text(
-            "candidate predicate",
-            value.predicate,
-            MAX_CANDIDATE_PREDICATE_CHARS,
-        )
+        cls._text("candidate predicate", value.predicate, MAX_CANDIDATE_PREDICATE_CHARS)
         cls._text("candidate value", value.value, MAX_CANDIDATE_VALUE_CHARS)
         cls._text("candidate source_ref", value.source_ref, MAX_SOURCE_REF_CHARS)
         if value.kind not in _ALLOWED_KINDS:
@@ -341,55 +268,44 @@ class MemoryConsolidator:
         if value.review_status not in {"pending", "confirmed"}:
             raise MemoryConsolidationError("candidate review_status is invalid")
         cls._confidence("candidate confidence", value.confidence)
-        if value.review_status == "confirmed":
-            if value.source_type != "user_explicit":
-                raise MemoryConsolidationError(
-                    "only user_explicit candidates may be confirmed"
-                )
-            if value.sensitivity != "private":
-                raise MemoryConsolidationError(
-                    "confirmed W02 candidates must be private"
-                )
-            if not isinstance(value.evidence, str) or value.value not in value.evidence:
-                raise MemoryConsolidationError(
-                    "confirmed candidate lost its exact-evidence binding"
-                )
+        if not isinstance(value.evidence, str):
+            raise MemoryConsolidationError("candidate evidence must be text")
+
+        if value.review_status == "confirmed" and not cls._is_confirmed_verbatim(value):
+            raise MemoryConsolidationError(
+                "confirmed W02 candidate violates hardened W01 verbatim authority"
+            )
         if value.sensitivity == "secret" and value.review_status != "pending":
             raise MemoryConsolidationError("secret candidate must remain pending")
         return value
+
+    @staticmethod
+    def _is_confirmed_verbatim(candidate: MemoryCandidate) -> bool:
+        return (
+            candidate.review_status == "confirmed"
+            and candidate.source_type == "user_explicit"
+            and candidate.subject == VERBATIM_USER_SUBJECT
+            and candidate.predicate == VERBATIM_USER_PREDICATE
+            and candidate.kind == "note"
+            and candidate.sensitivity == "private"
+            and candidate.confidence == 1.0
+            and candidate.evidence == candidate.value
+        )
 
     @classmethod
     def _snapshot(cls, raw: Any) -> ExistingMemorySnapshot:
         try:
             memory_id = cls._text("memory id", getattr(raw, "id"), 100)
-            subject = cls._text(
-                "memory subject",
-                getattr(raw, "subject"),
-                MAX_CANDIDATE_SUBJECT_CHARS,
-            )
-            predicate = cls._text(
-                "memory predicate",
-                getattr(raw, "predicate"),
-                MAX_CANDIDATE_PREDICATE_CHARS,
-            )
-            value = cls._text(
-                "memory value",
-                getattr(raw, "value"),
-                MAX_CANDIDATE_VALUE_CHARS,
-            )
+            subject = cls._text("memory subject", getattr(raw, "subject"), 200)
+            predicate = cls._text("memory predicate", getattr(raw, "predicate"), 200)
+            value = cls._text("memory value", getattr(raw, "value"), MAX_CANDIDATE_VALUE_CHARS)
             kind = getattr(raw, "kind")
             sensitivity = getattr(raw, "sensitivity")
             source_type = getattr(raw, "source_type")
-            confidence = cls._confidence(
-                "memory confidence",
-                getattr(raw, "confidence"),
-            )
+            confidence = cls._confidence("memory confidence", getattr(raw, "confidence"))
             review_status = getattr(raw, "review_status")
             lifecycle_status = getattr(raw, "lifecycle_status")
-            updated_at = cls._timestamp(
-                "memory updated_at",
-                getattr(raw, "updated_at"),
-            )
+            updated_at = cls._timestamp("memory updated_at", getattr(raw, "updated_at"))
             expires_raw = getattr(raw, "expires_at")
         except AttributeError as exc:
             raise MemoryConsolidationError(
@@ -405,13 +321,9 @@ class MemoryConsolidator:
         if review_status not in _ALLOWED_REVIEW:
             raise MemoryConsolidationError("existing memory review_status is invalid")
         if lifecycle_status != "active":
-            raise MemoryConsolidationError(
-                "W02 existing records must be active snapshots"
-            )
-        expires_at = (
-            None
-            if expires_raw is None
-            else cls._timestamp("memory expires_at", expires_raw)
+            raise MemoryConsolidationError("W02 existing records must be active snapshots")
+        expires_at = None if expires_raw is None else cls._timestamp(
+            "memory expires_at", expires_raw
         )
         return ExistingMemorySnapshot(
             id=memory_id,
@@ -428,6 +340,42 @@ class MemoryConsolidator:
             expires_at=expires_at,
         )
 
+    @classmethod
+    def _matching_existing(
+        cls,
+        candidate: MemoryCandidate,
+        existing: tuple[ExistingMemorySnapshot, ...],
+    ) -> list[ExistingMemorySnapshot]:
+        if cls._is_confirmed_verbatim(candidate):
+            return [
+                record
+                for record in existing
+                if record.subject == VERBATIM_USER_SUBJECT
+                and record.predicate == VERBATIM_USER_PREDICATE
+                and record.value == candidate.value
+            ]
+        subject = candidate.subject.casefold()
+        predicate = candidate.predicate.casefold()
+        return [
+            record
+            for record in existing
+            if record.subject.casefold() == subject
+            and record.predicate.casefold() == predicate
+        ]
+
+    @classmethod
+    def _candidate_slot(cls, candidate: MemoryCandidate) -> tuple[str, ...]:
+        if cls._is_confirmed_verbatim(candidate):
+            return ("verbatim", candidate.value)
+        return ("semantic", candidate.subject.casefold(), candidate.predicate.casefold())
+
+    @staticmethod
+    def _cluster_conflict_reason(candidates: list[MemoryCandidate]) -> str:
+        values = {candidate.value for candidate in candidates}
+        if len(values) > 1:
+            return "conflicting_candidate_values"
+        return "conflicting_candidate_metadata"
+
     @staticmethod
     def _decision(
         action: str,
@@ -442,28 +390,19 @@ class MemoryConsolidator:
             action=action,
             candidate=candidate,
             existing_id=None if existing is None else existing.id,
-            expected_updated_at=(
-                None if existing is None else existing.updated_at
-            ),
+            expected_updated_at=None if existing is None else existing.updated_at,
             reason=reason,
         )
 
     @staticmethod
-    def _unique_candidates(
-        candidates: list[MemoryCandidate],
-    ) -> list[MemoryCandidate]:
+    def _unique_candidates(candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
         result: list[MemoryCandidate] = []
         seen: set[MemoryCandidate] = set()
         for candidate in candidates:
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            result.append(candidate)
+            if candidate not in seen:
+                seen.add(candidate)
+                result.append(candidate)
         return result
-
-    @staticmethod
-    def _slot(subject: str, predicate: str) -> tuple[str, str]:
-        return (subject.casefold(), predicate.casefold())
 
     @staticmethod
     def _bounded(source: Iterable[Any], maximum: int, label: str) -> tuple[Any, ...]:
@@ -472,9 +411,7 @@ class MemoryConsolidator:
         except TypeError as exc:
             raise MemoryConsolidationError(f"{label} collection is invalid") from exc
         if len(values) > maximum:
-            raise MemoryConsolidationError(
-                f"{label} collection exceeds {maximum} records"
-            )
+            raise MemoryConsolidationError(f"{label} collection exceeds {maximum} records")
         return values
 
     def _now(self) -> float:
@@ -520,7 +457,5 @@ class MemoryConsolidator:
         except (TypeError, ValueError) as exc:
             raise MemoryConsolidationError(f"{name} must be numeric") from exc
         if not math.isfinite(parsed) or parsed < 0:
-            raise MemoryConsolidationError(
-                f"{name} must be finite and non-negative"
-            )
+            raise MemoryConsolidationError(f"{name} must be finite and non-negative")
         return parsed
