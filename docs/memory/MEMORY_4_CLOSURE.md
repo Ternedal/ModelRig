@@ -3,7 +3,8 @@
 This document is the authoritative landed-status addendum to
 [`MEMORY_4.md`](./MEMORY_4.md). The master document remains the detailed design
 history for R01-R05 and W01-W02; this addendum records the complete implementation
-state after W03, W04-A, W04-B and the W04-H1 request-boundary hardening.
+state after W03, W04-A, W04-B, the W04-H1 request-boundary hardening and the H2
+loopback-redirect hardening.
 
 **Status:** implementation complete for parent #1167. All normal-chat Memory 4
 read/write paths remain independently default-off. `production_activation=false`.
@@ -31,6 +32,7 @@ and retain its lifecycle/protection rules.
 | W04-A | loopback completed-turn write surface | #1234 | `8d6774ac02062d8b4b5a822374fe53b08b5f00b3` |
 | W04-B | stream-preserving normal-chat post-turn hook | #1237 | `a7d8fd000832826b54d82ae3c5c545a12ff0c517` |
 | W04-H1 | admission-before-read and redacted write-body validation | #1241 | `4604f6b95de2a5298b405f5f3a2aa73d38cf4180` |
+| H2 | refuse redirects on private loopback worker read/write egress | #1245 | `4eb8769695c413d93456dd8d877dcabe3385ac78` |
 
 ## Current architecture
 
@@ -38,7 +40,7 @@ and retain its lifecycle/protection rules.
 flowchart LR
     U[Current user turn] --> GO[Authenticated Go /api/v1/chat]
 
-    GO -->|R05 read flag| R04[R04 loopback context-for-turn]
+    GO -->|R05 read flag + H2 no-redirect client| R04[R04 loopback context-for-turn]
     R04 --> R02[R02 shared reader]
     R02 --> R01[R01 deterministic eligibility/ranking]
     R01 --> R03[Optional R03 local semantic ranker]
@@ -50,7 +52,7 @@ flowchart LR
 
     L -->|streamed assistant response| OBS[W04-B ResponseWriter observer]
     OBS --> CLIENT[Client]
-    OBS -->|2xx + bounded valid terminal turn| W04A[W04-A/H1 loopback completed-turn route]
+    OBS -->|2xx + bounded valid terminal turn; H2 no redirects| W04A[W04-A/H1 loopback completed-turn route]
     W04A --> W03[W03 completed-turn orchestration]
     W03 --> W01[W01 bounded extraction + authority]
     W01 --> W02A[W02-A deterministic plan]
@@ -62,7 +64,9 @@ flowchart LR
 The model never receives durable-write authority. W04-B supplies only one bounded
 completed turn to the worker. W04-H1 gates the worker request before body parsing;
 W01 decides candidate authority; W02 decides the permitted storage action against
-fresh durable state.
+fresh durable state. H2 keeps both private backend-to-worker POSTs on their
+original loopback authority boundary by refusing HTTP redirects rather than
+replaying query or completed-turn bodies to a redirect target.
 
 ## Activation contract
 
@@ -96,6 +100,8 @@ on `KALIV_AGENT3_ENABLED`.
 - R04 is loopback-only and returns a bounded context plus exact receipt/hash;
 - R05 verifies the complete pre-model receipt and keeps memory data at user-data
   authority rather than system-message authority;
+- H2 makes the R05 worker client refuse redirects, so a loopback context query is
+  never replayed to a redirect target;
 - the receipt itself never enters the model request;
 - retrieval cannot change tool risk, confirmation, sensitivity or egress policy.
 
@@ -159,10 +165,27 @@ inject memory context. Retrieved memory can therefore never be persisted as if i
 were the user's new statement. `source_ref` is generated server-side as a random
 chat provenance identifier.
 
-A W04-A refusal, timeout or invalid receipt after a successful terminal chat is
-non-fatal to that chat. W04-B never appends a memory error to the client stream,
-rewrites an already-successful status, launches a background retry or creates a
-queue/scheduler authority.
+A W04-A refusal, timeout, redirect or invalid receipt after a successful terminal
+chat is non-fatal to that chat. W04-B never appends a memory error to the client
+stream, rewrites an already-successful status, launches a background retry or
+creates a queue/scheduler authority.
+
+### H2 loopback egress boundary
+
+Both private backend-to-worker Memory 4 calls use a Memory 4-specific HTTP client
+whose redirect policy returns `http.ErrUseLastResponse`. A worker `30x` is thus
+handled as the existing non-200 worker refusal instead of being followed.
+
+This applies independently to:
+
+- R05 `context-for-turn`, whose payload contains the current-user memory query;
+- W04-B `commit-completed-turn`, whose payload contains bounded user text,
+  assistant text and server-created source provenance.
+
+Focused `307 Temporary Redirect` regressions require the redirect target to
+receive zero requests. Successful direct-loopback requests keep their existing
+timeouts, response-size limits and strict receipt validation. No generic proxy or
+worker URL policy was widened.
 
 ## Explicit non-goals at closure
 
@@ -188,7 +211,7 @@ hidden inside #1167.
 Parent #1167 is implementation-complete when this addendum is qualified and
 landed, because its stated goal was the architecture and guarded integration — not
 production activation. R01-R05 provide normal-chat retrieval/context; W01-W04 plus
-W04-H1 provide the bounded durable post-turn path; both remain independently
-opt-in and preserve the parent hard boundaries.
+W04-H1 and H2 provide the bounded durable post-turn path and hardened loopback
+egress; both remain independently opt-in and preserve the parent hard boundaries.
 
 `production_activation=false`
