@@ -44,8 +44,12 @@ def close_memory4_context(app: FastAPI) -> None:
     setattr(app.state, _MOUNTED_STATE, False)
 
 
-def compose_memory4_context_lifespan(inner_lifespan):
-    """Wrap the worker lifespan so R04 resources close after inner shutdown.
+def compose_memory4_context_lifespan(
+    inner_lifespan,
+    *,
+    extra_cleanup: Callable[[FastAPI], None] | None = None,
+):
+    """Wrap the worker lifespan so Memory 4 resources close after inner shutdown.
 
     Entrypoint owns the final process lifespan. Registering a legacy FastAPI
     ``shutdown`` event during mount is insufficient because entrypoint later
@@ -53,13 +57,15 @@ def compose_memory4_context_lifespan(inner_lifespan):
     part of that exact production lifecycle instead of relying on handler merge
     behaviour inside Starlette/FastAPI.
 
-    ``functools.wraps`` deliberately exposes ``__wrapped__`` as the exact inner
-    lifespan. Repository contract tests can therefore prove that scheduler
-    ownership remains intact instead of accepting any arbitrary wrapper that
-    happens to look like a lifespan.
+    W04 may supply one additional process-owned cleanup callback. Keeping that
+    callback inside this existing wrapper avoids creating a competing lifespan
+    layer. ``functools.wraps`` still exposes ``__wrapped__`` as the exact inner
+    scheduler lifespan, preserving the existing lifecycle contract.
     """
     if not callable(inner_lifespan):
         raise TypeError("inner lifespan must be callable")
+    if extra_cleanup is not None and not callable(extra_cleanup):
+        raise TypeError("extra cleanup must be callable")
 
     @wraps(inner_lifespan)
     @asynccontextmanager
@@ -68,7 +74,12 @@ def compose_memory4_context_lifespan(inner_lifespan):
             async with inner_lifespan(app):
                 yield
         finally:
-            close_memory4_context(app)
+            # The W04 writer must still close if the R04 reader cleanup raises.
+            try:
+                close_memory4_context(app)
+            finally:
+                if extra_cleanup is not None:
+                    extra_cleanup(app)
 
     return composed
 
