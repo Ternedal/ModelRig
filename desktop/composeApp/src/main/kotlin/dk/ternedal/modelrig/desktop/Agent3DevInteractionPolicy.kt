@@ -114,6 +114,7 @@ internal object Agent3DevInteractionPolicy {
         stepState: String?,
         busy: Boolean,
         nowEpochSeconds: Double,
+        confirmationConsumed: Boolean = false,
     ): KalivAgent3CockpitConfirmation = presentAgent3CockpitConfirmation(
         confirmationDigest = confirmationDigest,
         confirmationExpiresAt = confirmationExpiresAt,
@@ -121,6 +122,7 @@ internal object Agent3DevInteractionPolicy {
         stepState = stepState,
         busy = busy,
         nowEpochSeconds = nowEpochSeconds,
+        confirmationConsumed = confirmationConsumed,
     )
 
     fun canDecide(
@@ -130,6 +132,7 @@ internal object Agent3DevInteractionPolicy {
         stepState: String?,
         busy: Boolean,
         nowEpochSeconds: Double,
+        confirmationConsumed: Boolean = false,
     ): Boolean = confirmation(
         confirmationDigest = confirmationDigest,
         confirmationExpiresAt = confirmationExpiresAt,
@@ -137,5 +140,6 @@ internal object Agent3DevInteractionPolicy {
         stepState = stepState,
         busy = busy,
         nowEpochSeconds = nowEpochSeconds,
+        confirmationConsumed = confirmationConsumed,
     ).actionEnabled
 }

@@ -91,6 +91,7 @@ fun KalivAgentCockpitA3(
     var lastTotal by remember { mutableStateOf(0) }
     val log = remember { mutableStateListOf<String>() }
     var publicationEpoch by remember { mutableStateOf(0L) }
+    var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
 
     fun client() = Agent3Client(baseUrl, bearer.orEmpty())
 
@@ -192,22 +193,26 @@ fun KalivAgentCockpitA3(
     }
 
     fun decide(step: Agent3Step, approve: Boolean) {
-        val nowEpochSeconds = System.currentTimeMillis() / 1000.0
-        if (!canAgent3CockpitDecide(
-                confirmationDigest = step.confirmationDigest,
-                confirmationExpiresAt = step.confirmationExpiresAt,
-                runState = run?.state,
-                stepState = step.state,
-                busy = busy,
-                nowEpochSeconds = nowEpochSeconds,
-            )
-        ) return
         val r = run ?: return
         val sid = step.id ?: return
         val digest = step.confirmationDigest ?: return
+        val authority = Agent3ConfirmationAuthority.capture(r.id, sid, digest) ?: return
+        val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(authority, consumedConfirmation)
+        val nowEpochSeconds = System.currentTimeMillis() / 1000.0
+        if (!canAgent3CockpitDecide(
+                confirmationDigest = digest,
+                confirmationExpiresAt = step.confirmationExpiresAt,
+                runState = r.state,
+                stepState = step.state,
+                busy = busy,
+                nowEpochSeconds = nowEpochSeconds,
+                confirmationConsumed = confirmationConsumed,
+            )
+        ) return
         val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
+        consumedConfirmation = authority
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 runCatching { client().confirm(r.id, sid, digest, approve) }
@@ -216,7 +221,10 @@ fun KalivAgentCockpitA3(
                 res.onSuccess {
                     run = it
                     refresh(it.id, mutationEpoch)
-                }.onFailure { error = it.message }
+                }.onFailure {
+                    val detail = it.message ?: "Godkendelsen fejlede"
+                    error = "$detail. Beslutningen kan allerede være gennemført på serveren; den gamle godkendelse genbruges ikke. Opdatér run-status."
+                }
             }
             busy = false
         }
@@ -298,6 +306,7 @@ fun KalivAgentCockpitA3(
         rationale = ""
         revision = 1
         lastTotal = 0
+        consumedConfirmation = null
         log.clear()
         error = null
         input = ""
@@ -417,8 +426,10 @@ fun KalivAgentCockpitA3(
                     A3StepRow(
                         index = i + 1,
                         step = s,
+                        runId = run?.id,
                         runState = run?.state,
                         isCurrent = run?.currentStep == i,
+                        consumedConfirmation = consumedConfirmation,
                         onApprove = { decide(s, true) },
                         onReject = { decide(s, false) },
                         busy = busy,
@@ -477,8 +488,10 @@ internal fun statusOf(step: Agent3Step, isCurrent: Boolean): StepStatus =
 private fun A3StepRow(
     index: Int,
     step: Agent3Step,
+    runId: String?,
     runState: String?,
     isCurrent: Boolean,
+    consumedConfirmation: Agent3ConfirmationAuthority?,
     onApprove: () -> Unit,
     onReject: () -> Unit,
     busy: Boolean,
@@ -515,6 +528,8 @@ private fun A3StepRow(
         }
     }
 
+    val currentAuthority = Agent3ConfirmationAuthority.capture(runId, step.id, step.confirmationDigest)
+    val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(currentAuthority, consumedConfirmation)
     val confirmation = presentAgent3CockpitConfirmation(
         confirmationDigest = step.confirmationDigest,
         confirmationExpiresAt = step.confirmationExpiresAt,
@@ -522,6 +537,7 @@ private fun A3StepRow(
         stepState = step.state,
         busy = busy,
         nowEpochSeconds = confirmationNow,
+        confirmationConsumed = confirmationConsumed,
     )
 
     Row(Modifier.fillMaxWidth()) {
@@ -569,6 +585,14 @@ private fun A3StepRow(
                         onApprove = onApprove,
                         onReject = onReject,
                         enabled = confirmation.actionEnabled,
+                    )
+                }
+                Agent3CockpitConfirmationState.CONSUMED -> {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Beslutningen er allerede sendt. Samme godkendelse genbruges ikke; opdatér run-status for serverens aktuelle sandhed.",
+                        color = KalivTheme.colors.Warning,
+                        fontSize = 11.5.sp,
                     )
                 }
                 Agent3CockpitConfirmationState.EXPIRED -> {

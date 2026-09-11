@@ -72,6 +72,7 @@ fun Agent3DevApp() {
         var previewExpired by remember { mutableStateOf(false) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
         var runConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
+        var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
         var busy by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
 
@@ -216,6 +217,8 @@ fun Agent3DevApp() {
             val step = current.steps.getOrNull(current.currentStep) ?: return
             val stepId = step.id ?: return
             val digest = step.confirmationDigest ?: return
+            val authority = Agent3ConfirmationAuthority.capture(current.id, stepId, digest) ?: return
+            val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(authority, consumedConfirmation)
             if (!Agent3DevInteractionPolicy.canDecide(
                     confirmationDigest = digest,
                     confirmationExpiresAt = step.confirmationExpiresAt,
@@ -223,17 +226,22 @@ fun Agent3DevApp() {
                     stepState = step.state,
                     busy = busy,
                     nowEpochSeconds = System.currentTimeMillis() / 1000.0,
+                    confirmationConsumed = confirmationConsumed,
                 )
             ) return
             busy = true
             error = null
+            consumedConfirmation = authority
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching { client(connection).confirm(current.id, stepId, digest, approve) }
                 }
                 busy = false
                 result.onSuccess { run = it }
-                    .onFailure { error = it.message ?: "Godkendelsen fejlede" }
+                    .onFailure {
+                        val detail = it.message ?: "Godkendelsen fejlede"
+                        error = "$detail. Beslutningen kan allerede være gennemført på serveren; den gamle godkendelse genbruges ikke. Opdatér run-status."
+                    }
             }
         }
 
@@ -430,7 +438,15 @@ fun Agent3DevApp() {
 
             run?.let {
                 Spacer(Modifier.height(12.dp))
-                RunCard(it, busy, ::refreshRun, { decide(true) }, { decide(false) }, ::stopPlan)
+                RunCard(
+                    run = it,
+                    busy = busy,
+                    consumedConfirmation = consumedConfirmation,
+                    onRefresh = ::refreshRun,
+                    onApprove = { decide(true) },
+                    onDeny = { decide(false) },
+                    onStopPlan = ::stopPlan,
+                )
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -553,12 +569,15 @@ private fun PlanCard(
 private fun RunCard(
     run: Agent3Run,
     busy: Boolean,
+    consumedConfirmation: Agent3ConfirmationAuthority?,
     onRefresh: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     onStopPlan: () -> Unit,
 ) {
     val current = run.steps.getOrNull(run.currentStep)
+    val currentAuthority = Agent3ConfirmationAuthority.capture(run.id, current?.id, current?.confirmationDigest)
+    val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(currentAuthority, consumedConfirmation)
     var confirmationNow by remember(
         run.state,
         current?.id,
@@ -601,6 +620,7 @@ private fun RunCard(
         stepState = current?.state,
         busy = busy,
         nowEpochSeconds = confirmationNow,
+        confirmationConsumed = confirmationConsumed,
     )
     val termination = run.termination
     val stopPlanVisible = termination?.plan?.canRequest == true && !isTerminal(run.state)
@@ -638,6 +658,16 @@ private fun RunCard(
                     Button(enabled = confirmation.actionEnabled, onClick = onApprove) { Text("Godkend") }
                     OutlinedButton(enabled = confirmation.actionEnabled, onClick = onDeny) { Text("Afvis") }
                 }
+            }
+            Agent3CockpitConfirmationState.CONSUMED -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Beslutningen er allerede sendt. Samme godkendelse genbruges ikke; opdatér run-status for serverens aktuelle sandhed.",
+                    color = KalivTheme.colors.Warning,
+                    fontSize = 11.5.sp,
+                )
             }
             Agent3CockpitConfirmationState.EXPIRED -> {
                 Spacer(Modifier.height(12.dp))
