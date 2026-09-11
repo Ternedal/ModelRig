@@ -7,6 +7,7 @@ import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class Agent3ReplanApplyResponseBindingTest {
@@ -14,7 +15,7 @@ class Agent3ReplanApplyResponseBindingTest {
     private val rationale = "replace stale reads"
 
     @Test
-    fun reviewedApplyAcceptsExactConsumedPreviewAndReceipt() {
+    fun reviewedApplyAcceptsExactConsumedPreviewReceiptAndClearedCheckpoint() {
         val paths = Collections.synchronizedList(mutableListOf<String>())
         val server = server(applyBody(), paths)
         try {
@@ -25,6 +26,8 @@ class Agent3ReplanApplyResponseBindingTest {
             assertEquals(2, result.replan.fromRevision)
             assertEquals(3, result.replan.toRevision)
             assertEquals(5, result.replan.replanNumber)
+            assertTrue(result.readReview.enabled)
+            assertFalse(result.readReview.waiting)
             assertEquals(
                 listOf("/api/v1/experimental/agent3/replan-previews/preview-1/apply"),
                 paths.toList(),
@@ -41,6 +44,46 @@ class Agent3ReplanApplyResponseBindingTest {
             val result = Agent3ReplanClient(server.baseUrl(), "token")
                 .applyReviewed(reviewed(plannerModel = null))
             assertEquals(null, result.preview.plannerModel)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun reviewedApplyAcceptsWaitingCheckpointBoundToReturnedRun() {
+        val server = server(
+            applyBody(
+                runJson = waitingRunJson(),
+                readReviewJson = waitingReviewJson(),
+            )
+        )
+        try {
+            val result = Agent3ReplanClient(server.baseUrl(), "token")
+                .applyReviewed(reviewed())
+            assertTrue(result.readReview.enabled)
+            assertTrue(result.readReview.waiting)
+            assertEquals(1, result.readReview.windowStart)
+            assertEquals(2, result.readReview.windowEnd)
+            assertEquals(listOf("read-2"), result.readReview.removableStepIds)
+            assertEquals("read-1", result.readReview.completedStepId)
+            assertEquals("rig_status", result.readReview.completedTool)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun reviewedApplyAcceptsClearedDisabledCheckpoint() {
+        val server = server(
+            applyBody(
+                readReviewJson = """{"enabled":false,"waiting":false,"removable_step_ids":[]}""",
+            )
+        )
+        try {
+            val result = Agent3ReplanClient(server.baseUrl(), "token")
+                .applyReviewed(reviewed())
+            assertFalse(result.readReview.enabled)
+            assertFalse(result.readReview.waiting)
         } finally {
             server.stop(0)
         }
@@ -79,6 +122,76 @@ class Agent3ReplanApplyResponseBindingTest {
     }
 
     @Test
+    fun reviewedApplyRejectsMissingOrMalformedReadReviewEnvelope() {
+        listOf(
+            applyBody(includeReadReview = false),
+            applyBody(readReviewJson = """{"enabled":"true","waiting":false,"removable_step_ids":[]}"""),
+            applyBody(readReviewJson = """{"enabled":true,"waiting":"false","removable_step_ids":[]}"""),
+            applyBody(readReviewJson = """{"enabled":true,"waiting":false}"""),
+            applyBody(readReviewJson = """{"enabled":true,"waiting":false,"removable_step_ids":[7]}"""),
+        ).forEach { body ->
+            assertCheckpointFailure(body)
+        }
+    }
+
+    @Test
+    fun reviewedApplyRejectsWaitingCheckpointRunAndWindowDrift() {
+        listOf(
+            applyBody(
+                runJson = waitingRunJson(state = "completed"),
+                readReviewJson = waitingReviewJson(),
+            ),
+            applyBody(
+                runJson = waitingRunJson(),
+                readReviewJson = waitingReviewJson(windowStart = 0),
+            ),
+            applyBody(
+                runJson = waitingRunJson(),
+                readReviewJson = waitingReviewJson(windowEnd = 1),
+            ),
+            applyBody(
+                runJson = waitingRunJson(),
+                readReviewJson = waitingReviewJson(windowEnd = 4),
+            ),
+            applyBody(
+                runJson = waitingRunJson(windowRisk = "write"),
+                readReviewJson = waitingReviewJson(),
+            ),
+            applyBody(
+                runJson = waitingRunJson(windowState = "succeeded"),
+                readReviewJson = waitingReviewJson(),
+            ),
+            applyBody(
+                runJson = waitingRunJson(),
+                readReviewJson = waitingReviewJson(removableIds = "[\"other\"]"),
+            ),
+            applyBody(
+                runJson = waitingRunJson(),
+                readReviewJson = waitingReviewJson(completedStepId = ""),
+            ),
+            applyBody(
+                runJson = waitingRunJson(),
+                readReviewJson = waitingReviewJson(completedTool = ""),
+            ),
+        ).forEach { body ->
+            assertCheckpointFailure(body)
+        }
+    }
+
+    @Test
+    fun reviewedApplyRejectsStalePayloadWhenCheckpointIsCleared() {
+        listOf(
+            """{"enabled":true,"waiting":false,"window_start":1,"removable_step_ids":[]}""",
+            """{"enabled":true,"waiting":false,"window_end":2,"removable_step_ids":[]}""",
+            """{"enabled":true,"waiting":false,"removable_step_ids":["read-2"]}""",
+            """{"enabled":true,"waiting":false,"removable_step_ids":[],"completed_step_id":"read-1"}""",
+            """{"enabled":true,"waiting":false,"removable_step_ids":[],"completed_tool":"rig_status"}""",
+        ).forEach { review ->
+            assertCheckpointFailure(applyBody(readReviewJson = review))
+        }
+    }
+
+    @Test
     fun reviewedApplyRejectsRevisionOverflowBeforeNetworkIo() {
         val error = assertFailsWith<Agent3Exception> {
             Agent3ReplanClient("http://127.0.0.1:1", "token")
@@ -96,6 +209,8 @@ class Agent3ReplanApplyResponseBindingTest {
             assertEquals("", result.run.id)
             assertEquals("", result.preview.previewId)
             assertEquals(0, result.replan.fromRevision)
+            assertFalse(result.readReview.enabled)
+            assertFalse(result.readReview.waiting)
             assertEquals(
                 listOf("/api/v1/experimental/agent3/replan-previews/preview-1/apply"),
                 paths.toList(),
@@ -120,6 +235,18 @@ class Agent3ReplanApplyResponseBindingTest {
         }
     }
 
+    private fun assertCheckpointFailure(body: String) {
+        val server = server(body)
+        try {
+            val error = assertFailsWith<Agent3Exception> {
+                Agent3ReplanClient(server.baseUrl(), "token").applyReviewed(reviewed())
+            }
+            assertTrue(error.message.orEmpty().contains("authority mismatch"))
+        } finally {
+            server.stop(0)
+        }
+    }
+
     private fun reviewed(plannerModel: String? = "planner-a"): Agent3ReplanPreview =
         Agent3ReplanPreview(
             previewId = "preview-1",
@@ -134,6 +261,7 @@ class Agent3ReplanApplyResponseBindingTest {
     private fun applyBody(
         runId: String = "run-1",
         runIdValueOverride: String? = null,
+        runJson: String? = null,
         previewId: String = "preview-1",
         previewRunId: String = "run-1",
         plannerModelValue: String = "\"planner-a\"",
@@ -145,19 +273,24 @@ class Agent3ReplanApplyResponseBindingTest {
         includeFromRevision: Boolean = true,
         toRevisionValue: String = "3",
         replanNumberValue: String = "5",
+        readReviewJson: String = """{"enabled":true,"waiting":false,"removable_step_ids":[]}""",
+        includeReadReview: Boolean = true,
     ): String {
         val runIdField = runIdValueOverride ?: "\"$runId\""
+        val effectiveRun = runJson ?: "{\"id\":$runIdField}"
         val plannerField = if (includePlannerModel) "\"planner_model\":$plannerModelValue," else ""
         val fromRevisionField = if (includeFromRevision) "\"from_revision\":$fromRevisionValue," else ""
+        val readReviewField = if (includeReadReview) "\"read_review\":$readReviewJson," else ""
         return """
             {
-              "run": {"id": $runIdField},
+              "run": $effectiveRun,
               "replan": {
                 "reason": "$reason",
                 $fromRevisionField
                 "to_revision": $toRevisionValue,
                 "replan_number": $replanNumberValue
               },
+              $readReviewField
               "preview": {
                 "preview_id": "$previewId",
                 "run_id": "$previewRunId",
@@ -168,6 +301,41 @@ class Agent3ReplanApplyResponseBindingTest {
             }
         """.trimIndent()
     }
+
+    private fun waitingRunJson(
+        state: String = "running",
+        windowRisk: String = "read",
+        windowState: String = "pending",
+    ): String = """
+        {
+          "id":"run-1",
+          "state":"$state",
+          "current_step":1,
+          "steps":[
+            {"id":"read-1","tool":"rig_status","risk":"read","state":"succeeded"},
+            {"id":"read-2","tool":"list_models","risk":"$windowRisk","state":"$windowState"},
+            {"id":"write-1","tool":"note_append","risk":"write","state":"pending"}
+          ]
+        }
+    """.trimIndent()
+
+    private fun waitingReviewJson(
+        windowStart: Int = 1,
+        windowEnd: Int = 2,
+        removableIds: String = "[\"read-2\"]",
+        completedStepId: String = "read-1",
+        completedTool: String = "rig_status",
+    ): String = """
+        {
+          "enabled":true,
+          "waiting":true,
+          "window_start":$windowStart,
+          "window_end":$windowEnd,
+          "removable_step_ids":$removableIds,
+          "completed_step_id":"$completedStepId",
+          "completed_tool":"$completedTool"
+        }
+    """.trimIndent()
 
     private fun server(
         body: String,
