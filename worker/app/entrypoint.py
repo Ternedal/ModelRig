@@ -19,6 +19,10 @@ from .memory.context_mount import (
     compose_memory4_context_lifespan,
     mount_memory4_context,
 )
+from .memory.write_mount import (
+    compose_memory4_write_lifespan,
+    mount_memory4_write,
+)
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
@@ -64,6 +68,13 @@ install_termination_contract(fastapi_app)
 # registers no route. Normal /api/v1/chat remains unchanged until R05.
 mount_memory4_context(fastapi_app)
 
+# Memory 4 W04-A is a separate default-off, loopback-only completed-turn write
+# surface over the dormant W03 composition. Its own flag-off path returns before
+# opening a writer/provider and it does not inspect KALIV_AGENT3_ENABLED. This is
+# intentionally not a normal-chat hook; backend streaming integration remains a
+# later separately reviewed slice.
+mount_memory4_write(fastapi_app)
+
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
 # production surface; launchers do not add parallel routers.
@@ -94,10 +105,10 @@ mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
 
 # The raw route app stays inert for unit tests. Only the documented production
-# entrypoint owns process lifecycle. R04 cleanup is explicitly composed around
-# the existing scheduler lifespan so a custom lifespan cannot bypass closing the
-# query-only memory substrate.
-fastapi_app.router.lifespan_context = compose_memory4_context_lifespan(
-    scheduler_lifespan
+# entrypoint owns process lifecycle. Memory 4 query/write resources are composed
+# around the existing scheduler lifespan so process shutdown deterministically
+# closes both optional substrates without transferring lifecycle ownership.
+fastapi_app.router.lifespan_context = compose_memory4_write_lifespan(
+    compose_memory4_context_lifespan(scheduler_lifespan)
 )
 app = harden(fastapi_app)
