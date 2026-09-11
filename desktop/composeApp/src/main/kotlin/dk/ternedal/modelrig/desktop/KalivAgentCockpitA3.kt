@@ -83,6 +83,10 @@ fun KalivAgentCockpitA3(
     var planId by remember { mutableStateOf<String?>(null) }
     var previewSteps by remember { mutableStateOf<List<Agent3Step>>(emptyList()) }
     var rationale by remember { mutableStateOf("") }
+    var previewIntent by remember { mutableStateOf<KalivAgent3CockpitPreviewIntent?>(null) }
+    var previewConnection by remember { mutableStateOf<KalivAgent3CockpitPreviewConnection?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Run?>(null) }
     // A replan may replace the remaining pending read-suffix, so the total is
     // not eternal. The mockup's "2 af 4" becomes "Plan 2 · 2 af 5" when that
@@ -94,6 +98,27 @@ fun KalivAgentCockpitA3(
     var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
 
     fun client() = Agent3Client(baseUrl, bearer.orEmpty())
+
+    fun currentPreviewIntent(): KalivAgent3CockpitPreviewIntent? =
+        KalivAgent3CockpitPreviewIntent.capture(input)
+
+    fun currentPreviewConnection(): KalivAgent3CockpitPreviewConnection? =
+        KalivAgent3CockpitPreviewConnection.capture(baseUrl, bearer)
+
+    fun previewClient(connection: KalivAgent3CockpitPreviewConnection): Agent3Client =
+        Agent3Client(connection.baseUrl, connection.bearer)
+
+    fun clearPreviewAuthority() {
+        planId = null
+        previewSteps = emptyList()
+        rationale = ""
+        previewIntent = null
+        previewConnection = null
+        previewDeadlineMillis = null
+        previewExpired = false
+        revision = 1
+        lastTotal = 0
+    }
 
     fun advancePublicationEpoch(): Long {
         publicationEpoch = nextAgent3CockpitPublicationEpoch(publicationEpoch)
@@ -131,17 +156,46 @@ fun KalivAgentCockpitA3(
     }
 
     fun preview() {
-        val text = input.trim()
-        if (!canAgent3CockpitPreview(text, busy = busy, hasRun = run != null)) return
-        busy = true; error = null
+        val requestIntent = currentPreviewIntent() ?: return
+        if (!canAgent3CockpitPreview(requestIntent.message, busy = busy, hasRun = run != null)) return
+        val requestConnection = currentPreviewConnection()
+        if (requestConnection == null) {
+            error = "Forbindelsen er ugyldig"
+            return
+        }
+        val requestStartedAtMillis = System.nanoTime() / 1_000_000L
+        busy = true
+        error = null
+        clearPreviewAuthority()
         scope.launch {
             val r = withContext(Dispatchers.IO) {
-                runCatching { client().previewPlan(message = text) }
+                runCatching { previewClient(requestConnection).previewPlan(message = requestIntent.message) }
             }
             r.onSuccess { p ->
+                if (!KalivAgent3CockpitPreviewAuthorityPolicy.canPublish(
+                        requestIntent = requestIntent,
+                        currentIntent = currentPreviewIntent(),
+                        requestConnection = requestConnection,
+                        currentConnection = currentPreviewConnection(),
+                    )
+                ) {
+                    error = "Preview blev forældet, fordi opgaven eller forbindelsen ændrede sig"
+                    return@onSuccess
+                }
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    p.expiresInSeconds,
+                )
                 planId = p.planId
                 previewSteps = p.plan
                 rationale = p.rationale
+                previewIntent = requestIntent
+                previewConnection = requestConnection
+                previewDeadlineMillis = deadline
+                previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
                 lastTotal = p.plan.size
                 revision = 1
                 run = null
@@ -151,7 +205,25 @@ fun KalivAgentCockpitA3(
     }
 
     fun start() {
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+            previewDeadlineMillis,
+            System.nanoTime() / 1_000_000L,
+        )
+        if (!previewFresh) previewExpired = true
+        if (!KalivAgent3CockpitPreviewAuthorityPolicy.canStart(
+                planId = planId,
+                hasSteps = previewSteps.isNotEmpty(),
+                previewFresh = previewFresh,
+                busy = busy,
+                hasRun = run != null,
+                currentIntent = currentPreviewIntent(),
+                previewIntent = previewIntent,
+                currentConnection = currentPreviewConnection(),
+                previewConnection = previewConnection,
+            )
+        ) return
         val id = planId ?: return
+        val connection = previewConnection ?: return
         val presentation = presentAgent3CockpitInteraction(
             busy = busy,
             runState = run?.state,
@@ -159,24 +231,17 @@ fun KalivAgentCockpitA3(
             hasPreview = true,
         )
         if (!presentation.previewStartEnabled) return
-        val startClient = runCatching { client() }
-            .getOrElse {
-                error = it.message ?: "Forbindelsen er ugyldig"
-                return
-            }
         val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
         // The worker consumes plan_id before Start is guaranteed to return.
         // Once this request begins, the same local Preview must never become
         // retryable again after an uncertain/lost response.
-        planId = null
-        previewSteps = emptyList()
-        rationale = ""
-        revision = 1
-        lastTotal = 0
+        clearPreviewAuthority()
         scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { startClient.startPlan(id) } }
+            val r = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).startPlan(id) }
+            }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 r.onSuccess {
                     run = it
@@ -201,11 +266,7 @@ fun KalivAgentCockpitA3(
         if (!presentation.previewDiscardEnabled) return
         // Preview discard is local-only. No server run exists in this state, so
         // this must never be presented as cancellation of remote work.
-        planId = null
-        previewSteps = emptyList()
-        rationale = ""
-        revision = 1
-        lastTotal = 0
+        clearPreviewAuthority()
     }
 
     fun decide(step: Agent3Step, approve: Boolean) {
@@ -317,15 +378,32 @@ fun KalivAgentCockpitA3(
         // Local history reset only. The server run is already terminal; this
         // action never claims to cancel or mutate remote execution.
         run = null
-        planId = null
-        previewSteps = emptyList()
-        rationale = ""
-        revision = 1
-        lastTotal = 0
+        clearPreviewAuthority()
         consumedConfirmation = null
         log.clear()
         error = null
         input = ""
+    }
+
+    LaunchedEffect(planId, previewDeadlineMillis) {
+        val currentPlanId = planId ?: return@LaunchedEffect
+        val deadline = previewDeadlineMillis
+        if (deadline == null) {
+            previewExpired = true
+            return@LaunchedEffect
+        }
+        val remaining = deadline - (System.nanoTime() / 1_000_000L)
+        if (remaining > 0L) delay(remaining)
+        if (
+            planId == currentPlanId &&
+            previewDeadlineMillis == deadline &&
+            Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+        ) {
+            previewExpired = true
+        }
     }
 
     val interaction = presentAgent3CockpitInteraction(
@@ -336,6 +414,23 @@ fun KalivAgentCockpitA3(
         activeToolRequestState = run?.termination?.activeTool?.requestState,
         hasPreview = planId != null,
     )
+    val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+        previewDeadlineMillis,
+        System.nanoTime() / 1_000_000L,
+    )
+    val previewStartAuthorized = KalivAgent3CockpitPreviewAuthorityPolicy.canStart(
+        planId = planId,
+        hasSteps = previewSteps.isNotEmpty(),
+        previewFresh = previewFresh,
+        busy = busy,
+        hasRun = run != null,
+        currentIntent = currentPreviewIntent(),
+        previewIntent = previewIntent,
+        currentConnection = currentPreviewConnection(),
+        previewConnection = previewConnection,
+    )
+    val previewConnectionMatches =
+        previewConnection != null && currentPreviewConnection() == previewConnection
     val steps = run?.steps ?: previewSteps
     val doneCount = steps.count { isTerminal(it.state) }
 
@@ -361,8 +456,13 @@ fun KalivAgentCockpitA3(
                 }
             } else {
                 AgentComposer(
-                    value = input, onValue = { input = it },
-                    enabled = interaction.composerEnabled, placeholder = "Ny opgave \u2026",
+                    value = input,
+                    onValue = {
+                        input = it
+                        clearPreviewAuthority()
+                    },
+                    enabled = interaction.composerEnabled,
+                    placeholder = "Ny opgave \u2026",
                     onSend = { preview() },
                 )
                 if (rationale.isNotBlank()) {
@@ -373,8 +473,26 @@ fun KalivAgentCockpitA3(
                 }
                 if (planId != null) {
                     Spacer(Modifier.height(16.dp))
+                    if (previewExpired || !previewFresh) {
+                        Text(
+                            "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                            color = KalivTheme.colors.Warning,
+                            fontSize = 11.5.sp,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    } else if (!previewConnectionMatches) {
+                        Text(
+                            "Plan-previewet tilhører en anden forbindelse. Lav et nyt preview.",
+                            color = KalivTheme.colors.Warning,
+                            fontSize = 11.5.sp,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     Row {
-                        PrimaryButton("Start planen", enabled = interaction.previewStartEnabled) { start() }
+                        PrimaryButton(
+                            "Start planen",
+                            enabled = interaction.previewStartEnabled && previewStartAuthorized,
+                        ) { start() }
                         Spacer(Modifier.width(8.dp))
                         OutlineButton("Kassér", enabled = interaction.previewDiscardEnabled) { discardPreview() }
                     }
