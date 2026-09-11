@@ -186,16 +186,18 @@ def _replan(
 def _snapshot_query(
     candidates: tuple[MemoryCandidate, ...],
     plan: ConsolidationPlan,
+    *,
+    filter_verbatim_value: bool,
 ) -> tuple[str | None, tuple[object, ...]]:
     """Build a bounded exact-key lookup instead of scanning the whole memory DB.
 
     Structured W02-A decisions can depend on every row in the candidate's exact
     subject/predicate slot, so those slots are read in full (within the planner's
-    hard bound). The canonical verbatim slot is different by design: W02-A treats
-    different statement values as independent log entries, and only an exact value
-    can dedupe or take the narrow pending->confirmed promotion path. Filtering that
-    slot by exact value prevents an old statement log with >128 unrelated values
-    from blocking a new statement without changing any W02-A decision authority.
+    hard bound). In legacy/plaintext storage the canonical verbatim slot can be
+    narrowed by exact value because W02-A treats different statement values as
+    independent log entries. Protected rows intentionally have an empty plaintext
+    ``value`` column, so protected mode must keep the full exact-key selector and
+    let ProtectedMemoryReader decrypt values before W02-A replans.
 
     Trusted ids named by dedupe/supersede actions are also selected explicitly.
     """
@@ -206,7 +208,8 @@ def _snapshot_query(
                 item.predicate,
                 item.value
                 if (
-                    item.subject == VERBATIM_USER_SUBJECT
+                    filter_verbatim_value
+                    and item.subject == VERBATIM_USER_SUBJECT
                     and item.predicate == VERBATIM_USER_PREDICATE
                 )
                 else None,
@@ -243,7 +246,11 @@ def _legacy_snapshot_locked(
     candidates: tuple[MemoryCandidate, ...],
     plan: ConsolidationPlan,
 ) -> list[MemoryRecord]:
-    selectors, params = _snapshot_query(candidates, plan)
+    selectors, params = _snapshot_query(
+        candidates,
+        plan,
+        filter_verbatim_value=True,
+    )
     if selectors is None:
         return []
     rows = store._conn.execute(
@@ -260,7 +267,11 @@ def _protected_snapshot_locked(
     candidates: tuple[MemoryCandidate, ...],
     plan: ConsolidationPlan,
 ) -> list[MemoryRecord]:
-    selectors, params = _snapshot_query(candidates, plan)
+    selectors, params = _snapshot_query(
+        candidates,
+        plan,
+        filter_verbatim_value=False,
+    )
     if selectors is None:
         return []
     rows = reader._execute(
