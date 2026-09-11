@@ -1,104 +1,73 @@
-# Memory 4.0 — shared retrieval and normal-chat integration
+# Memory 4.0 — shared retrieval, normal-chat context and bounded writes
 
-Status: implementation track, default-off for normal chat.
+Status: implementation track. Normal-chat memory remains default-off unless an
+explicit server-owned feature flag enables a reviewed integration boundary.
 
-Memory 4.0 is the path from the existing Agent 3 Memory 3.0 substrate to one
-model-independent memory service that can serve normal Kaliv chat, Agent 3
-planning and future voice/agent surfaces without making any model own the durable
-memory state.
+Memory 4.0 builds one model-independent memory architecture for Kaliv/ModelRig.
+Durable memory remains outside model weights and outside any individual model's
+authority. The same substrate can serve normal chat, Agent 3 planning and future
+voice/agent surfaces without making normal chat depend on Agent 3 activation.
 
-## Current boundary
+## Current architecture
 
-The repository already has a substantial Memory 3.0 implementation under
-`worker/app/agent3/`:
+The landed substrate is deliberately split into narrow authority boundaries:
 
-- local SQLite memory with provenance, confidence, review state, lifecycle,
-  expiry and versioning;
-- protected-memory support;
-- privacy-aware context compilation;
-- explicit Agent 3 planner-memory receipts;
-- Android/Desktop developer memory administration.
-
-R01-R04 provide a shared, read-only Memory 4 retrieval and context service. R05
-adds a separately gated Go normal-chat integration, but that does not make Agent
-3 the owner of normal chat: `/api/v1/chat` remains the same authenticated backend
-route and the R05 flag is off by default. Agent 3 remains deliberately separate
-from the normal Android/Desktop `TurnRouter` flow.
-
-W01 adds bounded candidate extraction from a completed turn. W02 adds deterministic
-bounded consolidation planning and explicit persistence adapters over the existing
-legacy/protected writers. Neither slice automatically wires writes into normal
-chat, activates Agent 3, grants cloud authority or makes a model the owner of
-durable state.
-
-Memory 4.0 shares those primitives without turning normal chat into an implicit
-Agent 3 activation dependency.
-
-## Architecture
+- **R01** — deterministic reviewed-memory eligibility and lexical retrieval;
+- **R02** — storage-neutral bounded reader over the existing legacy/protected
+  Memory 3 substrate;
+- **R03** — optional local semantic ranking after deterministic eligibility;
+- **R04** — loopback, read-only context-for-turn service with an exact receipt;
+- **R05** — default-off Go `/api/v1/chat` integration that verifies the R04
+  receipt before attaching memory as untrusted user-data reference context;
+- **W01** — bounded local candidate extraction from a completed turn;
+- **W02** — deterministic candidate deduplication, safe create/reuse and
+  stale-fact review handoff. W02 does not automatically correct durable facts.
 
 ```mermaid
 flowchart LR
     U[User turn] --> GO[Go normal-chat backend]
-    GO -->|R05 enabled + bounded final text turn| R04[R04 context-for-turn service]
-    R04 --> Q[Memory query]
-    Q --> R[Deterministic R01 eligibility + lexical ranker]
-    S[(Existing reviewed memory substrate)] --> A[Neutral R02 shared read adapter]
-    A --> R
-    R --> H[Optional R03 hybrid semantic ranker]
-    O[Local Ollama embedding only] -. server-owned opt-in .-> H
-    H --> C[Privacy-aware context compiler]
-    R -. semantic disabled .-> C
+    GO -->|R05 flag on| R04[R04 context-for-turn]
+    S[(Memory 3 durable substrate)] --> R02[R02 neutral reader]
+    R02 --> R01[R01 deterministic retrieval]
+    R01 --> R03[R03 optional local semantics]
+    R03 --> C[privacy-aware context compiler]
     C --> R04
-    R04 --> B[Bounded untrusted memory data block]
-    R04 --> RCPT[Exact SHA-256 receipt\nsent_to_model=false]
-    GO --> V[R05 receipt/context verification]
-    R04 --> V
-    V -->|verified non-empty context| I[Attach memory reference inside final user data]
-    I --> L[Selected LLM]
-    GO -->|flag off / empty / unsupported turn| L
+    R04 -->|receipt verified| GO
+    GO --> L[Selected model]
 
-    LEG[Legacy query-only reader] --> S
-    PROT[Protected query-only reader / DPAPI] --> S
-    A3[Agent 3 planner] --> Q
-    T[Completed turn] --> W01[W01 bounded candidate extractor]
-    LO[Loopback Ollama chat only] -. proposal generation .-> W01
-    W01 --> W02[W02 deterministic consolidation planner]
-    W02 -. explicit legacy/protected persistence adapter .-> S
+    T[Completed turn] --> W01[W01 bounded local extractor]
+    O[Loopback Ollama] -. proposal only .-> W01
+    W01 --> W02[W02 deterministic consolidation]
+    W02 -->|create/reuse only| S
+    W02 -->|possible stale fact| REV[Explicit review handoff]
+    REV -->|existing local-management correction path| S
 ```
 
-R04 returns a bounded context block and a pre-model receipt. R05 is the separate
-backend action that may send the verified context to the selected model. The
-receipt itself is not model input, and memory data is never promoted to system
-message authority. A model swap must not erase, silently rewrite or change the
-authority of stored memory.
+The read path and write path are intentionally asymmetric. Retrieval may select
+only already-reviewed memory. Extraction may propose new memory, but model output
+never owns durable review, privacy, correction, deletion or supersede authority.
 
-## M4-R01 — shared retrieval kernel
+## R01 — shared retrieval kernel
 
-R01 landed on `main` through PR #1168. It is deliberately read-only and
-model-independent:
+R01 landed through PR #1168. `worker/app/memory/retrieval.py` is read-only and
+model-independent.
 
-- `worker/app/memory/retrieval.py` defines the shared retrieval contract;
-- it accepts record-like objects rather than importing Agent 3 storage classes;
-- only active, confirmed and unexpired records are selectable;
-- secret records are never selectable;
-- private records are local-only unless cloud use is explicitly allowed;
-- lexical relevance establishes that a record is related to the query;
-- subject affinity, recency, confidence and provenance only rank records that
-  are already relevant;
-- duplicate ids are removed;
-- ordering and tie-breaking are deterministic;
-- unknown privacy targets fail closed;
-- the selected records feed the existing `MemoryContextCompiler`, so this slice
-  creates no competing prompt format or escaping policy.
+Eligibility runs before ranking:
 
-No embedding model or LLM is called by this kernel. That is intentional: R01
-creates a deterministic authority boundary that semantic retrieval augments but
-never replaces.
+- lifecycle must be active;
+- review state must be confirmed;
+- expired rows are excluded;
+- secret rows are never eligible;
+- private rows are local-only unless a separate caller has explicit private-cloud
+  authority;
+- malformed privacy targets and malformed records fail closed.
 
-## Retrieval scoring
+Lexical relevance determines whether a record is related to the request. Subject
+affinity, recency, confidence and provenance can reorder related rows but cannot
+make an unrelated row relevant. Duplicate ids are removed and ordering is
+deterministic.
 
-R01 scores an already-eligible, lexically-related record from bounded
-components:
+The R01 scoring split is:
 
 ```text
 72% lexical relevance
@@ -108,511 +77,277 @@ components:
  3% provenance
 ```
 
-Recency/confidence/provenance can reorder related records but cannot make an
-unrelated record relevant. This prevents a recent high-confidence memory from
-appearing solely because it is recent.
+R01 returns records, not prompt text. Selected records still pass through the
+existing privacy-aware context compiler.
 
-R03 keeps the same non-relevance components and replaces lexical relevance with
-`max(lexical, semantic)` only after a record has independently passed all R01
-eligibility gates. A lexical miss requires semantic similarity at or above the
-explicit semantic threshold before it can become relevant.
+## R02 — neutral storage/read adapter
 
-## M4-R02 — neutral shared storage/read adapter
+R02 landed through PR #1174. `worker/app/memory/storage.py` accepts one injected
+bounded read callback from the composition root. The shared package does not open
+SQLite, invoke DPAPI, migrate data or expose writes.
 
-R02 landed on `main` through PR #1174. It adds
-`worker/app/memory/storage.py` as a storage-neutral read boundary over the
-existing Memory 3 substrate. It does **not** introduce a second database,
-perform migration, open SQLite, invoke DPAPI or import Agent 3 storage classes.
+Legacy mode delegates to the existing MemoryStore context reader. Protected mode
+delegates to the completed-migration `ProtectedMemoryReader`; decryption stays
+inside that boundary. The neutral projection strips `source_ref`, protection
+envelopes, supersede pointers, deletion metadata and storage handles.
 
-The Agent 3 composition root selects the real backing substrate and injects one
-read-only callback:
+The adapter independently revalidates lifecycle, review, expiry, sensitivity,
+privacy and duplicate-id constraints. The request is bounded to 200 source rows,
+50,000 source characters and 64 exact subject filters.
 
-- legacy mode delegates to `MemoryStore.context_records(...)`;
-- protected mode delegates to the already-migrated `ProtectedMemoryReader` with
-  exact `MemoryReadAccess.LOCAL_CONTEXT` authority;
-- protected mode therefore keeps encrypted-field opening inside the existing
-  DPAPI/protected-reader boundary;
-- the shared adapter projects backing records to `SharedMemoryRecord`, which has
-  no `source_ref`, protected envelope, supersede pointer, deletion metadata or
-  storage handle;
-- secret rows are invalid at the shared boundary;
-- private cloud reads are excluded at the backing query unless explicit boolean
-  authority is present, and R01 independently repeats that privacy check later;
-- returned rows are revalidated as active, confirmed, unexpired and bounded.
+## R03 — optional local semantic retrieval
 
-The read request has hard caps of 200 candidate records, 50,000 source
-characters and 64 exact subject filters. Malformed targets, authority flags,
-filters and bounds fail closed rather than broadening the read.
+R03 landed through PR #1176. Semantic retrieval is server-owned and off by
+default. Disabled mode is exact R01 parity and requires no embedder.
 
-R02 deliberately adds no HTTP endpoint, normal-chat injection, write method,
-new migration path or activation authority.
+When enabled:
 
-## M4-R03 — optional local semantic retrieval
+- all R01 eligibility/privacy gates run before an embedding call;
+- only the existing local Ollama embedding adapter is used;
+- no cloud embedding base URL/API-key surface is exposed;
+- there is no persistent Memory 4 vector store;
+- source rows, semantic candidates, text length and vector dimensions have hard
+  caps;
+- zero-norm, non-finite, malformed or dimension-changing vectors fail closed;
+- embedder failure does not silently downgrade an explicitly enabled semantic
+  request to lexical-only results.
 
-R03 landed on `main` through PR #1176. It adds a semantic layer without
-weakening R01 authority:
+Semantic similarity supplies relevance evidence only. It never grants review,
+privacy, lifecycle, storage or tool authority.
 
-- `worker/app/memory/semantic.py` contains a model-agnostic async hybrid ranker;
-- semantic mode is **off by default** and disabled mode requires no embedder;
-- disabled mode delegates to R01 and preserves ids, ordering, total scores and
-  every R01 component score exactly;
-- lifecycle, review, expiry, sensitivity, private-cloud policy and exact subject
-  filtering run before any memory value is sent to an embedder;
-- the semantic core has no HTTP/network/model dependency;
-- `worker/app/memory/local_embeddings.py` is the only ModelRig product adapter
-  in this slice and delegates only to the existing local
-  `ollama_client.embed()` path (`MODELRIG_OLLAMA_URL` / `MODELRIG_EMBED_MODEL`);
-- that adapter exposes no cloud base URL, API key or caller-selected upstream;
-- `app.memory` enters the local adapter lazily, so importing the shared package
-  with semantic mode off does not import the network/model client;
-- no memory embeddings are persisted in R03, so there is no second vector store,
-  migration or stale cross-model embedding corpus;
-- at most 200 source records are accepted, at most 32 eligible candidates are
-  semantically embedded, and both query and per-record embedding text are hard
-  capped at 4,096 characters;
-- embedding vectors are limited to 8,192 dimensions;
-- empty, zero-norm, non-finite, malformed or dimension-changing vectors fail
-  closed with `SemanticMemoryError`;
-- if semantic mode is explicitly enabled and the local embedder fails, retrieval
-  fails visibly instead of silently falling back to lexical results.
+## R04 — read-only context-for-turn service
 
-Semantic similarity never grants storage, privacy or lifecycle authority. It is
-only relevance evidence over rows that the deterministic boundary has already
-approved.
+R04 landed through PR #1181. The worker route is:
 
-R03 adds **no** worker HTTP endpoint, `/api/v1/chat` change, Android/Desktop
-routing change, Agent 3 activation, memory write path or production activation.
+`POST /experimental/memory4/context-for-turn`
 
-## M4-R04 — read-only context-for-turn service
+It is mounted only when `KALIV_MEMORY4_CONTEXT_ENABLED=1`, is loopback-only and
+opens no write surface. Protected mode reuses the existing protected reader; the
+service does not activate Agent 3 or create a management grant ledger.
 
-R04 landed on `main` through PR #1181. It adds a worker-owned pre-model context
-service while preserving an explicit model-egress boundary:
+The request is bounded and has no caller-controlled private-cloud grant. The
+response contains only a bounded context string and a receipt. Raw memory rows,
+`source_ref`, protected envelopes and storage metadata do not cross the service
+boundary.
 
-- route: `POST /experimental/memory4/context-for-turn`;
-- mount flag: `KALIV_MEMORY4_CONTEXT_ENABLED=1`, default off;
-- optional semantic flag: `KALIV_MEMORY4_SEMANTIC_ENABLED=1`, separately
-  server-owned and default off;
-- the route is loopback-only; a remote worker caller receives `403`;
-- the entrypoint calls the self-guarding mount unconditionally, but flag-off
-  imports open no memory database/provider and register no route;
-- the mount does **not** call `mount_agent3` and does not inspect
-  `KALIV_AGENT3_ENABLED`;
-- it reuses `KALIV_AGENT3_MEMORY_DB` and `KALIV_AGENT3_MEMORY_STORE` so there is
-  one durable memory substrate/format rather than a new R04 database;
-- legacy compatibility uses `LegacyMemoryReader`, an actual SQLite `mode=ro` +
-  `PRAGMA query_only=ON` reader that exposes no create/correct/delete methods and
-  never selects `source_ref`;
-- protected mode opens the existing completed migration through
-  `ProtectedMemoryReader` with exact `LOCAL_CONTEXT` authority and therefore
-  keeps protected-field opening inside the existing DPAPI boundary;
-- R04 protected reads require no Agent 3 gateway signing secret and create no
-  grant ledger because R04 mounts no Agent 3 management API;
-- missing/invalid storage causes an explicitly enabled R04 mount to fail closed
-  without leaving a partial route;
-- production entrypoint composes R04 cleanup around the existing scheduler
-  lifespan, so replacing FastAPI's default lifespan cannot bypass closing the
-  process-owned query-only memory reader.
+The receipt binds target, semantic mode, candidate/ranked counts, included ids,
+exclusion accounting, exact character count, UTF-8 byte count and SHA-256 of the
+exact context. Every R04 receipt reports `sent_to_model=false`; R04 itself never
+calls an LLM.
 
-The request contract contains only:
+## R05 — guarded normal-chat context integration
 
-- normalized query text, max 4,096 characters;
-- target: `local` or `cloud`;
-- up to 64 exact subject filters;
-- result limit, max 50;
-- context character budget, max 12,000.
+R05 landed through PR #1188. It changes only the existing authenticated
+`POST /api/v1/chat` implementation and is default-off behind
+`KALIV_MEMORY4_CHAT_ENABLED=1`.
 
-There is deliberately **no** `allow_private_cloud` request field. R04 always
-passes `allow_private_cloud=false` to storage, retrieval and compilation for a
-cloud target. R05 cannot turn a caller-supplied boolean into authority; any
-private-cloud design would need a separate authenticated policy boundary.
+Flag-off keeps the pre-R05 request path unchanged. Enabled R05 only considers a
+bounded final text user turn. Unsupported/multimodal-shaped turns bypass Memory
+4 rather than changing baseline chat semantics.
 
-R04 reads at most 100 reviewed candidates / 50,000 source characters, runs the
-landed R01/R03 retrieval path, and feeds selected records to the existing
-privacy-aware `MemoryContextCompiler`. The HTTP response exposes only:
+Before model egress, R05 verifies the R04 service/receipt schemas, target,
+counts, included-id uniqueness, byte/character lengths, SHA-256 and
+`sent_to_model=false`. A verified non-empty context is attached inside the final
+user message as explicitly untrusted reference data. It is never promoted to a
+system message, and the receipt itself is never sent to the model.
 
-- schema;
-- the bounded context string;
-- a receipt.
+R05 grants no memory write authority and no private-cloud exception.
 
-It never returns raw memory rows, `source_ref`, secret values, protected
-envelopes or storage metadata.
+## W01 — bounded candidate extraction
 
-The receipt is `kaliv-memory-context-receipt/v1` and binds:
+W01 landed through PR #1194 and was hardened by #1201/#1202.
+`worker/app/memory/extraction.py` owns the model-independent extraction contract;
+`worker/app/memory/local_extraction.py` is the only product adapter and may call
+only the configured loopback Ollama chat endpoint.
 
-- target;
-- whether server-owned semantic retrieval was actually enabled;
-- candidate/ranked counts;
-- included memory ids;
-- aggregate safe exclusion counts (`not_relevant_or_below_threshold` and
-  `context_budget`);
-- exact character count and UTF-8 byte count;
-- SHA-256 of the exact returned context bytes, including the deterministic empty
-  hash when no context fits;
-- `sent_to_model=false`.
+### Bounds and model authority
 
-R04 itself does not call an LLM, modify memory, activate Agent 3 or grant
-production authority.
+The completed user text and assistant text are each capped at 16,000 characters,
+caller-owned `source_ref` at 1,000 characters, model output at 64,000 characters,
+and one extraction result at 16 candidates. Candidate fields also have explicit
+per-field bounds. Unknown fields, malformed JSON and duplicate JSON keys fail
+closed.
 
-## M4-R05 — guarded Go normal-chat integration
+The extractor may propose subject, predicate, value, kind, sensitivity,
+provenance, confidence and evidence. It cannot supply `source_ref`, review state,
+ids, supersede targets, write operations, correction tokens or deletion
+authority.
 
-R05 is the first normal-chat consumer of R04. It changes only the implementation
-behind the existing authenticated `POST /api/v1/chat` route; clients do not gain
-a new route or authority surface.
+Sensitivity is conservative server policy. Obvious credential/key/token content
+is escalated to `secret`. Other non-secret W01 output is clamped to `private`.
+Secret candidates remain pending.
 
-- backend flag: `KALIV_MEMORY4_CHAT_ENABLED=1`, default off;
-- flag-off dispatches directly to the pre-R05 `handleChat` proxy without reading
-  or rewriting the request body and without contacting the memory worker;
-- enabled R05 only probes bounded normal text turns (2 MiB request probe, the
-  **final** message must be a `user` message with string content, canonical query
-  max 4,096 characters);
-- unsupported/multimodal-shaped, malformed-for-R05, non-user-final or oversized
-  turns bypass memory and continue through the existing Ollama proxy rather than
-  changing their pre-existing chat semantics;
-- the memory worker must be configured on loopback before any query is sent;
-- a loopback selected model is requested as R04 target `local`; every non-loopback
-  model destination is conservatively classified as `cloud`;
-- R05 sends no `allow_private_cloud` authority and R04 therefore continues to
-  exclude private memory from cloud-target context;
-- the backend requests at most 12 results and 12,000 context characters;
-- worker refusal/unavailability, oversized/malformed context response, missing
-  required receipt fields or receipt mismatch fails the chat request closed with
-  `503` before a model call;
-- an empty, correctly receipted context restores and forwards the original chat
-  body without memory injection;
-- a non-empty context is sent to the model only after R05 verifies service and
-  receipt schemas, target, count ordering/accounting, included-id uniqueness,
-  exact character count, UTF-8 byte count, SHA-256 and `sent_to_model=false`;
-- the R04 receipt is never included in the model request;
-- the exact R04 context is prepended **inside the final user message**, behind a
-  static server-authored reference prefix and ahead of explicit
-  `BEGIN/END CURRENT USER REQUEST` markers around the caller's original text;
-- memory data is never promoted into a system-role message; any existing system
-  messages remain semantically unchanged;
-- all other top-level Ollama request fields and earlier chat messages remain
-  semantically intact;
-- R05 does not add Android/Desktop routing, memory writes, Agent 3 activation,
-  private-cloud grants or production activation.
+### #1201/#1202 confirmed-authority hardening
 
-R04's `sent_to_model=false` is treated as an invariant to verify, not as model
-permission. The model egress is the explicit R05 backend action after receipt
-verification.
+Literal evidence does **not** prove model-authored semantics. A user saying
+`I live in Copenhagen` does not authorize the extractor to confirm a generated
+relation such as `favorite_city=Copenhagen` merely because `Copenhagen` is a
+literal substring.
 
-## M4-W01 — bounded memory candidate extraction
+Automatic confirmation therefore requires the candidate evidence to be the
+entire exact canonical user turn. For a qualifying non-secret proposal, the
+server discards the model's structured semantics and normalizes the confirmed
+memory to:
 
-W01 adds a model-independent proposal boundary in
-`worker/app/memory/extraction.py` and a separate ModelRig-local adapter in
-`worker/app/memory/local_extraction.py`.
+```text
+subject      = user
+predicate    = verbatim_user_statement
+value        = <entire exact user turn>
+kind         = note
+sensitivity  = private
+source_type  = user_explicit
+confidence   = 1.0
+review       = confirmed
+```
 
-The completed turn is validated **before** an extractor/model callback can see
-it. User text and assistant text are each capped at 16,000 characters and the
-caller-owned `source_ref` at 1,000 characters. Extractor output is capped at
-64,000 characters, uses exact schema `kaliv-memory-candidates/v1`, contains at
-most 16 candidates and rejects unknown top-level or candidate fields, including
-duplicate JSON keys.
+Entity-only evidence, structured interpretations, paraphrases, inferred,
+imported and tool-observed candidates remain pending. This rule is important to
+W02: downstream consolidation must not reconstruct the structured authority W01
+intentionally refused to grant.
 
-The model may propose only:
+W01 still performs no durable write by itself.
 
-- subject, predicate and value;
-- memory kind and sensitivity;
-- provenance (`user_explicit`, `inferred`, `tool_observation` or `imported`);
-- confidence;
-- evidence text.
+## W02 — bounded deduplication and stale-fact review consolidation
 
-The model cannot return `source_ref`, `review_status`, ids, supersede targets,
-operations, correction tokens or delete/write instructions. `source_ref` always
-comes from the trusted caller and review state is derived locally.
+W02 is implemented by:
 
-A `user_explicit` candidate can become `confirmed` only when its non-empty
-evidence is a literal substring of the completed **user** text and the candidate
-value is a literal substring of that evidence. This deliberately prefers false
-negatives over model normalization gaining authority. Explicit candidates with
-`secret` sensitivity remain `pending`.
+- `worker/app/memory/consolidation.py` — deterministic storage-neutral planner;
+- `worker/app/agent3/memory_consolidation.py` — composition with the existing
+  legacy/protected create/read APIs.
 
-`inferred`, `imported` and `tool_observation` candidates are always `pending`,
-regardless of confidence or what the extractor attempted to imply. Assistant
-claims cannot become user-explicit evidence.
+No model, embedding or network call participates in consolidation.
 
-Sensitivity is conservative server policy, not model authority. Model-proposed
-`secret` remains secret, obvious credential/key/token material is escalated to
-secret, and every other W01 candidate is clamped to `private` until a later
-trusted boundary explicitly changes classification.
+### Input authority and bounds
 
-The product adapter calls only the existing local `ollama_client.chat()` path,
-exposes no API-key, cloud-base-URL or caller-selected upstream argument, and
-verifies that the configured Ollama upstream is actually loopback before any
-completed-turn text can leave the worker process. The neutral boundary validates
-the turn before the adapter can call Ollama and validates returned JSON again
-afterward.
+One plan accepts at most 16 W01 candidates and 200 active durable records. W02
+revalidates candidate fields and the hardened W01 contract.
 
-W01 still performs **no durable write**. `MemoryCandidate.store_fields()` is only
-a create-shaped projection for later composition and contains no evidence/id,
-correction/delete/supersede authority. There is no automatic normal-chat
-extraction hook, no Agent 3 activation, no private-cloud grant and no production
-activation in this slice.
+A candidate claiming `review_status=confirmed` is accepted only if it exactly
+matches the server-owned verbatim shape from #1202: `user`,
+`verbatim_user_statement`, `note`, `private`, `user_explicit`, confidence `1.0`,
+and `evidence == value`. Handcrafted/model-semantic confirmed candidates fail
+closed.
 
-## M4-W02 — bounded deduplication and stale-fact consolidation
+Structured W01 interpretations remain pending. Secret candidates must remain
+pending. Malformed review/lifecycle/provenance/sensitivity values, non-finite
+numbers and bound violations fail closed.
 
-W02 adds `worker/app/memory/consolidation.py` as a deterministic, model-independent
-planner and `worker/app/agent3/memory_consolidation.py` as the product/storage
-composition layer. No LLM, embedding model or network call participates in W02
-planning.
+### Candidate identity and deduplication
 
-A single planning batch accepts at most 16 W01 candidates and 200 active durable
-records. Inputs are validated again at the consolidation boundary. Malformed
-lifecycle/review/provenance/sensitivity fields, non-finite timestamps/confidence,
-oversized values or a bound violation fail closed.
+Confirmed verbatim statements use exact statement value as part of their
+consolidation identity. This is deliberate: two different user statements are
+independent notes even though their conservative server-owned subject/predicate
+are the same.
 
-Candidates are grouped by case-insensitive `(subject, predicate)` slots:
+Therefore:
 
-- exact duplicate candidate objects collapse deterministically to one decision;
-- different values for the same slot in one batch produce `review` decisions;
-- the same value with conflicting candidate metadata also produces `review`
-  rather than choosing whichever candidate arrived last;
-- an exact existing confirmed duplicate is reused without a new durable row;
-- an exact existing pending duplicate may be reused only for another pending
-  candidate;
-- multiple active durable rows for one slot are ambiguous and always require
-  review.
+- exact duplicate confirmed statements collapse to one decision;
+- an exact durable confirmed statement is reused rather than written twice;
+- a different confirmed verbatim statement produces a separate create decision;
+- it never supersedes a previous statement simply because both use
+  `user/verbatim_user_statement`.
 
-Only a W01 candidate that is `confirmed`, `user_explicit` and `private` can
-produce an automatic `supersede` decision. It may supersede exactly one active
-private row for the same slot. The persistence adapter then uses the existing
-correction/version path, so the replacement receives `supersedes_id` and the old
-row becomes `superseded`; history is not overwritten.
+Pending structured candidates use case-insensitive `(subject, predicate)` as
+their semantic slot. Multiple candidate values or conflicting candidate metadata
+for one slot produce review decisions rather than order-dependent persistence.
 
-Pending inferred/imported/tool-observed candidates never supersede confirmed
-durable state. A different pending value may be persisted as a pending
-alternative for later review only while the slot is still unambiguous. Secret
-candidates remain pending and cannot drive automatic stale-fact replacement.
-Sensitivity mismatch that would reuse an under-classified durable row fails to
-review rather than silently declassifying the candidate.
+### Existing durable state
 
-Persistence remains outside the neutral core:
+For a single matching active record:
 
-- legacy mode reuses `MemoryStore.create()` / `MemoryStore.correct()`;
-- protected mode reads exact values only through
-  `ProtectedMemoryReader` with `LOCAL_MANAGEMENT` and writes only through
-  `ProtectedMemoryWriter` with `LOCAL_MANAGEMENT`;
-- W02 does not open SQLite, invoke DPAPI or handle protected envelopes itself;
-- protected private/secret writes therefore retain the existing encrypted-field
-  and version-history guarantees of the protected writer.
+- exact value + compatible kind/privacy/review may be reused;
+- kind mismatch fails to review;
+- reusing an under-classified durable sensitivity fails to review;
+- an expired match requires review;
+- a different structured value becomes `stale_fact_requires_review`, bound to
+  the exact existing memory id and its `updated_at` optimistic token.
 
-Every existing-slot apply re-reads the complete subject/predicate slot before a
-mutation and requires exactly one active row with the same id and `updated_at`
-optimistic token captured by the plan. New-slot create likewise verifies that the
-slot is still empty. A stale plan, newly ambiguous slot, deleted/superseded row or
-changed optimistic token fails closed before the W02 adapter intentionally calls
-the writer.
+W02 deliberately does **not** call `MemoryStore.correct()` or
+`ProtectedMemoryWriter.correct()` from raw W01 candidate authority. The review
+handoff identifies a possible stale fact; actual replacement continues through
+the existing explicit local-management correction/version/supersede path. That
+path creates a new row and preserves the old row as superseded history.
 
-W02 applies one decision at a time and deliberately makes no false claim of
-cross-decision transactionality. Each mutation uses the existing storage
-primitive's transaction. `review` and `reuse` decisions do not mutate durable
-state.
+This separation is the consequence of #1201: a model-produced pending relation
+may be useful enough to ask for review, but it is not authoritative enough to
+rewrite reviewed durable meaning.
 
-W02 adds no HTTP route, automatic `/api/v1/chat` extraction/write hook, Agent 3
-activation, private-cloud grant, model-owned memory, delete authority or
-production activation.
+### Persistence adapter
+
+Only `create`, `reuse` and `review` decisions exist in W02.
+
+Before `reuse`, the adapter re-reads the matching durable state and requires the
+same id, value, kind and exact `updated_at` token. Before `create`, it verifies
+that an equivalent candidate identity was not concurrently persisted. A stale
+plan fails closed.
+
+Legacy create uses the existing `MemoryStore.create()` path. Protected planning
+reads with exact `MemoryReadAccess.LOCAL_MANAGEMENT`; protected create writes with
+exact `MemoryWriteAccess.LOCAL_MANAGEMENT` through the existing
+`ProtectedMemoryWriter`. W02 itself does not open SQLite, decrypt DPAPI payloads
+or manipulate protection envelopes.
+
+W02 applies one decision at a time and makes no false cross-decision transaction
+claim. `reuse` and `review` do not mutate durable state.
+
+### Deliberately not activated
+
+W02 adds no automatic `/api/v1/chat` extraction/write hook, no new public HTTP
+write route, no Agent 3 activation, no private-cloud grant, no delete authority
+and no production activation.
 
 ## Memory classes
 
-Memory 4.0 should eventually distinguish these product concepts even if they
-share storage primitives:
+Memory 4.0 can share storage while keeping product concepts distinct:
 
-- **working memory** — recent turn context and compact conversation summary;
-- **semantic memory** — stable facts, preferences, constraints and project facts;
+- **working memory** — recent turn context and compact conversation state;
+- **semantic memory** — reviewed stable facts/preferences/constraints;
 - **episodic memory** — time-bound events and prior outcomes;
 - **procedural memory** — reviewed operating preferences/routines.
 
-Procedural memory must remain reference data, not a higher-priority instruction
-channel. It cannot bypass system policy, tool policy, confirmation, egress or
-runtime authority.
+Procedural memory remains reference data, never a higher-priority instruction
+channel. Memory cannot bypass system policy, tool policy, confirmation or egress.
 
 ## Hard invariants
 
 1. Memory is external to model weights.
-2. Retrieval never promotes pending/rejected/deleted/expired records.
-3. Secret memory never enters model context or semantic embedding.
-4. Private cloud memory requires explicit policy authority before embedding or
-   context use; R04/R05 grant no such authority.
+2. Pending/rejected/deleted/expired rows never enter normal model context.
+3. Secret memory never enters normal model context or semantic embedding.
+4. Private cloud use requires explicit policy authority; R04/R05 grant none.
 5. Memory values are untrusted reference data, not executable instructions.
 6. Retrieval cannot change tool risk, approval, sensitivity or egress.
-7. A memory write path cannot silently infer a durable fact as confirmed.
-8. Deletion/correction remain explicit lifecycle operations.
-9. Context has hard size/record bounds and an exact receipt before model use.
-10. Normal-chat memory is default-off, remains at user-data authority, and
-    enabling it neither activates Agent 3 nor changes memory write/tool authority.
-11. Candidate extraction cannot accept model-supplied provenance references,
-    review state, lifecycle operation or overwrite authority.
-12. W01 candidate extraction is not itself permission to persist memory.
-13. W02 consolidation contains no model call and cannot invent a durable value.
-14. Automatic W02 supersede requires one unambiguous active private slot plus a
-    confirmed private `user_explicit` W01 candidate and an unchanged optimistic
-    state token.
-15. W02 persistence versions/supersedes history; it never overwrites or deletes
-    the old fact in place.
-
-## R01 acceptance
-
-R01 was accepted after exact-head repository qualification proved:
-
-- shared module imports without Agent 3 storage dependency;
-- exact relevance ranking is deterministic;
-- unrelated records cannot enter through recency/confidence alone;
-- lifecycle/review/expiry/privacy rules fail closed;
-- secret and default-private-cloud memory cannot be selected;
-- explicit private-cloud consent is required;
-- duplicate ids and result bounds are enforced;
-- ranked records remain compatible with the existing context compiler;
-- normal chat, Agent 3 activation and production authority are unchanged.
-
-## R02 acceptance
-
-R02 was accepted after exact-head repository qualification proved:
-
-- legacy and protected modes expose the same read-only shared contract;
-- protected reads traverse the existing completed-migration, query-only reader
-  with exact local-context access rather than opening SQLite or DPAPI in the
-  shared package;
-- protected private records are not decrypted for cloud use by default;
-- explicit private-cloud authority is boolean and required;
-- secret values, `source_ref`, protection envelopes and storage internals never
-  cross the neutral projection;
-- inactive, unreviewed, expired, duplicate or over-budget backend output fails
-  closed;
-- malformed target/filter/bound inputs fail closed;
-- shutdown and failed startup clear the shared reader state;
-- no new persistent database, migration/fallback, write API, HTTP route, normal
-  chat wiring, Agent 3 activation or production authority is introduced.
-
-## R03 acceptance
-
-R03 was accepted after exact-head repository qualification proved:
-
-- semantic-disabled results are exact R01 ranking parity and no embedder is
-  required or called;
-- an eligible lexical miss can be recovered only by semantic evidence above the
-  configured threshold;
-- secret, pending, deleted, expired, subject-mismatched and default-private-cloud
-  rows are excluded before embedding;
-- explicit boolean private-cloud authority is required before a private value may
-  be locally embedded for a cloud-target retrieval;
-- semantic query/record text, input rows, semantic candidates and vector
-  dimensions all obey hard caps;
-- empty/zero-norm/non-finite/malformed/dimension-changing vectors fail closed;
-- enabled embedder failure cannot silently downgrade to lexical retrieval;
-- the product adapter calls only ModelRig's existing local Ollama embedding
-  client and introduces no cloud embedding path;
-- the shared package keeps that local adapter lazy when semantics are off;
-- no persistent vector store, HTTP route, normal-chat wiring, write authority,
-  Agent 3 activation or production activation is introduced.
-
-## R04 acceptance
-
-R04 was accepted after exact-head repository qualification proved:
-
-- flag-off production entrypoint creates no R04 route, memory database, provider
-  or storage side effect;
-- the legacy compatibility path is SQLite read-only/query-only, exposes no write
-  method and never selects `source_ref`;
-- protected R04 reads reuse the completed-migration protected reader without
-  Agent 3 activation, gateway signing material or a grant ledger;
-- the route is loopback-only and fails closed before any memory service call for
-  a denied caller;
-- no caller-supplied field can grant private-cloud memory authority;
-- local context can include relevant private memory while cloud context cannot;
-- secret/pending/inactive/expired memory and storage/protection internals never
-  enter the returned context;
-- query, subject, candidate, source-character, result and context budgets are
-  hard bounded;
-- receipt ids/counts agree with the actual retrieval/compiler result;
-- `context_sha256`, byte count and character count bind the exact returned UTF-8
-  context, including an empty result;
-- every receipt reports `sent_to_model=false`;
-- semantic use is controlled only by the separate server-owned flag and still
-  uses the landed local-only R03 adapter;
-- failed mount leaves no partial route/resource state;
-- production-shaped lifespan composition closes the owned query-only reader even
-  when the worker uses its explicit scheduler lifespan;
-- R04 acceptance remains inside an existing test file so CURRENT_STATE test
-  inventory does not drift merely because the slice was added;
-- `/api/v1/chat`, Go routing, Android/Desktop routing, memory writes, Agent 3
-  activation and production activation remained unchanged through R04.
-
-## R05 acceptance
-
-R05 is complete only when exact-head repository qualification proves:
-
-- flag-off `/api/v1/chat` reaches the same Ollama proxy with the exact original
-  request body and without any memory-worker call;
-- an empty valid R04 context likewise preserves the original model request body;
-- unsupported/non-string turns and requests whose final message is not a text
-  user turn bypass memory rather than broadening what R05 interprets as the
-  current user request;
-- unauthenticated `/api/v1/chat` is still rejected by the existing Bearer-token
-  middleware before any memory-worker access;
-- a configured non-loopback memory worker is rejected before memory or model
-  egress;
-- a non-loopback model destination causes R04 retrieval target `cloud`;
-- the backend never forwards the paired-device Authorization header to R04;
-- malformed, incomplete, oversized, schema-mismatched, target-mismatched,
-  count-inconsistent, duplicate-id, byte/character-mismatched or hash-mismatched
-  R04 output cannot reach the model;
-- `sent_to_model=true` from R04 is rejected because R04 receipts must describe
-  pre-model state, and omission of that field is rejected rather than defaulted;
-- verified non-empty context is attached exactly once inside the final user
-  message, with explicit untrusted-reference and current-request boundaries;
-- memory context never enters a system-role message and existing system messages
-  remain semantically unchanged;
-- the R04 receipt never enters the model payload;
-- R05 adds no private-cloud grant, memory write, Android/Desktop route, Agent 3
-  activation or production activation.
-
-## W01 acceptance
-
-W01 is complete only when exact-head repository qualification proves:
-
-- completed user and assistant turn text plus caller `source_ref` are hard-bounded
-  before the extractor callback can run;
-- output is exact-schema JSON with hard output, candidate-count and per-field
-  limits, unknown fields and duplicate JSON keys fail closed;
-- the extractor cannot supply or replace `source_ref`, `review_status`, ids,
-  supersede targets or write/correction/delete operations;
-- a non-secret `user_explicit` proposal is confirmed only when exact evidence is
-  present in the completed user turn and contains the exact candidate value;
-- explicit/model-detected credentials become secret/pending and all other
-  non-secret candidates are conservatively clamped to private;
-- inferred, imported and tool-observed proposals remain pending;
-- malformed/oversized output and fabricated explicit evidence fail closed;
-- the product adapter delegates only to the existing local Ollama chat client,
-  requires a loopback Ollama upstream and rejects an oversized turn before that
-  client is invoked;
-- W01 exposes no database write, correction/delete/supersede path, automatic
-  normal-chat persistence, Agent 3 activation, private-cloud grant or production
-  activation.
+7. Model output cannot assign durable review, correction, delete or supersede
+   authority.
+8. Automatic W01 confirmation means only the entire verbatim user statement;
+   model-authored structured semantics remain pending.
+9. W02 revalidates W01 authority and cannot turn pending structured meaning into
+   confirmed meaning.
+10. Distinct verbatim user statements are independent notes, not stale versions
+    of one generic server-owned slot.
+11. Stale structured facts require explicit review; W02 does not automatically
+    call correction/supersede.
+12. Durable correction preserves version/supersede history through the existing
+    local-management path.
+13. Context, extraction and consolidation all have hard bounds.
+14. Normal-chat memory remains default-off and does not activate Agent 3.
 
 ## W02 acceptance
 
-W02 is complete only when exact-head repository qualification proves:
+W02 is qualified only when the exact PR head proves:
 
-- consolidation contains no model/network call and accepts at most 16 candidates
-  plus 200 active existing records;
-- exact candidate duplicates collapse deterministically to one decision;
-- conflicting values or metadata in the same candidate slot fail closed to
-  review rather than producing order-dependent writes;
-- exact confirmed durable duplicates are reused without creating a new row;
-- pending/model-derived candidates never supersede confirmed durable memory;
-- secret candidates remain pending and cannot drive automatic stale-fact
-  replacement;
-- only a confirmed private `user_explicit` candidate can supersede exactly one
-  unambiguous active private row;
-- ambiguous slots, malformed snapshots and sensitivity under-classification fail
-  closed to review/error;
-- legacy and protected persistence revalidate slot identity and optimistic state
-  immediately before apply;
-- stale new-slot create or stale supersede plans are refused before the W02
-  adapter intentionally mutates storage;
-- supersede uses the existing versioning path and preserves old/new history;
-- protected planning/writes require exact `LOCAL_MANAGEMENT` authority and reuse
-  the existing encrypted `ProtectedMemoryReader`/`ProtectedMemoryWriter` path;
-- W02 adds no automatic normal-chat write hook, public write route, Agent 3
-  activation, private-cloud grant, delete authority or production activation.
+- the shared consolidation core has no model/network/storage dependency;
+- candidate and existing-record caps are enforced before unbounded work;
+- handcrafted structured confirmed candidates are rejected under the hardened
+  W01 contract;
+- exact verbatim duplicates collapse and reuse without duplicate durable rows;
+- distinct verbatim statements remain independent creates;
+- conflicting pending structured candidates fail closed to review;
+- stale structured values emit a review handoff bound to existing id/token and
+  do not mutate reviewed durable state;
+- kind mismatch and sensitivity under-classification fail closed;
+- create/reuse optimistic state is revalidated before persistence;
+- protected composition uses exact local-management read/write authority;
+- the existing protected writer remains the only encryption boundary;
+- existing W01 tests remain intact after rebasing onto #1202;
+- no automatic chat write hook, public write route, Agent 3 activation,
+  private-cloud grant, delete authority or production activation is introduced.
