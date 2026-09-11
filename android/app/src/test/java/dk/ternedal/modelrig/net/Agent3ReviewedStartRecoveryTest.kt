@@ -46,6 +46,103 @@ class Agent3ReviewedStartRecoveryTest {
     }
 
     @Test
+    fun recoveryPreservesStartBoundCapabilityWhenFreshGetOmitsIt() {
+        val expected = receipt()
+        val server = server(
+            startEnvelope(
+                answer = "rejected-start-payload",
+                reviewReads = true,
+                readReviewJson = "{\"enabled\":false,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(),
+            ),
+            runEnvelope(
+                answer = "fresh-run-truth",
+                readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+            ),
+        )
+        try {
+            val envelope = Agent3Client(server.url("/").toString(), "token")
+                .startReviewedPlanEnvelope(
+                    planId = "plan-1",
+                    expectedReviewReads = true,
+                    expectedCapabilityReceipt = expected,
+                )
+
+            assertEquals(expected, envelope.capabilityReceipt)
+            assertEquals("fresh-run-truth", envelope.run.answer)
+            assertEquals(2, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun rawModeConflictRecoveryPreservesStartBoundCapability() {
+        val expected = receipt()
+        val server = server(
+            startEnvelope(
+                answer = "rejected-mode-start-payload",
+                reviewReads = false,
+                readReviewJson = "{\"enabled\":false,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(),
+            ),
+            runEnvelope(
+                answer = "fresh-reviewed-truth",
+                readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+            ),
+        )
+        try {
+            val envelope = Agent3Client(server.url("/").toString(), "token")
+                .startReviewedPlanEnvelope(
+                    planId = "plan-1",
+                    expectedReviewReads = true,
+                    expectedCapabilityReceipt = expected,
+                )
+
+            assertEquals(expected, envelope.capabilityReceipt)
+            assertEquals("fresh-reviewed-truth", envelope.run.answer)
+            assertEquals(2, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun contradictoryFreshCapabilityFailsClosed() {
+        val expected = receipt()
+        val server = server(
+            startEnvelope(
+                answer = "rejected-start-payload",
+                reviewReads = true,
+                readReviewJson = "{\"enabled\":false,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(),
+            ),
+            runEnvelope(
+                answer = "fresh-but-contradictory",
+                readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(route = "other-route"),
+            ),
+        )
+        try {
+            val error = runCatching {
+                Agent3Client(server.url("/").toString(), "token")
+                    .startReviewedPlanEnvelope(
+                        planId = "plan-1",
+                        expectedReviewReads = true,
+                        expectedCapabilityReceipt = expected,
+                    )
+            }.exceptionOrNull()
+
+            assertTrue(error is ModelRigException)
+            assertTrue(error?.message?.contains("Frisk run-recovery fejlede") == true)
+            assertTrue(error?.message?.contains("capability receipt matcher ikke previewet") == true)
+            assertEquals(2, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun capabilityMismatchNeverUsesRunIdForRecovery() {
         val server = server(
             startEnvelope(
@@ -153,19 +250,26 @@ class Agent3ReviewedStartRecoveryTest {
     private fun runEnvelope(
         answer: String,
         readReviewJson: String,
-    ): String = """
-        {
-          "run": {
-            "id": "server-run",
-            "state": "completed",
-            "current_step": 0,
-            "steps": [],
-            "answer": "$answer"
-          },
-          "read_review": $readReviewJson,
-          "termination": ${terminationJson()}
-        }
-    """.trimIndent()
+        capabilityReceiptJson: String? = null,
+    ): String {
+        val capabilityField = capabilityReceiptJson
+            ?.let { "\"capability_receipt\":$it," }
+            .orEmpty()
+        return """
+            {
+              "run": {
+                "id": "server-run",
+                "state": "completed",
+                "current_step": 0,
+                "steps": [],
+                "answer": "$answer"
+              },
+              "read_review": $readReviewJson,
+              $capabilityField
+              "termination": ${terminationJson()}
+            }
+        """.trimIndent()
+    }
 
     private fun terminationJson(): String = """
         {
@@ -189,12 +293,24 @@ class Agent3ReviewedStartRecoveryTest {
         }
     """.trimIndent()
 
-    private fun receiptJson(): String = """
+    private fun receipt(route: String = "rig-tools"): Agent3Client.CapabilityReceipt =
+        Agent3Client.CapabilityReceipt(
+            schema = "kaliv-agent3-capability-receipt/v1",
+            graphSha256 = "a".repeat(64),
+            planSha256 = "b".repeat(64),
+            route = route,
+            allowed = true,
+            requiredCapabilityIds = listOf("tools"),
+            blockers = emptyList(),
+            productionActivation = false,
+        )
+
+    private fun receiptJson(route: String = "rig-tools"): String = """
         {
           "schema": "kaliv-agent3-capability-receipt/v1",
           "graph_sha256": "${"a".repeat(64)}",
           "plan_sha256": "${"b".repeat(64)}",
-          "route": "rig-tools",
+          "route": "$route",
           "allowed": true,
           "required_capability_ids": ["tools"],
           "blockers": [],
