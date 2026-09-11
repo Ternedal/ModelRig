@@ -57,7 +57,11 @@ def extraction_model_name() -> str | None:
     No request surface can select a model or upstream. An empty setting delegates
     to ModelRig's existing local Ollama generation default.
     """
-    raw = os.getenv(_MEMORY4_EXTRACTION_MODEL_ENV, "")
+    # Keep the literal at the read site so scripts/current_state.py can discover
+    # this dormant operator switch. Hiding it behind a constant would make the
+    # generated switch inventory incomplete even though the runtime behavior is
+    # otherwise identical.
+    raw = os.getenv("KALIV_MEMORY4_EXTRACTION_MODEL", "")
     if raw == "":
         return None
     cleaned = raw.strip()
