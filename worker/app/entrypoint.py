@@ -15,6 +15,10 @@ from .control_center_api import build_control_center_router
 from .file_capabilities_mount import mount_file_capabilities
 from .hardening import harden
 from .main import app as fastapi_app
+from .memory.context_mount import (
+    compose_memory4_context_lifespan,
+    mount_memory4_context,
+)
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
@@ -54,6 +58,12 @@ fastapi_app.include_router(build_body_session_router())
 # /experimental/agent3 prefix and cannot mount or activate a route.
 install_termination_contract(fastapi_app)
 
+# Memory 4 R04 is a separate default-off, loopback-only read surface. It reuses
+# the durable Memory 3 substrate but never calls mount_agent3 and does not inspect
+# KALIV_AGENT3_ENABLED. With its own flag off this call opens no DB/provider and
+# registers no route. Normal /api/v1/chat remains unchanged until R05.
+mount_memory4_context(fastapi_app)
+
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
 # production surface; launchers do not add parallel routers.
@@ -84,7 +94,10 @@ mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
 
 # The raw route app stays inert for unit tests. Only the documented production
-# entrypoint owns process lifecycle, and the hook itself creates no scheduler
-# resources unless KALIV_SCHEDULER is explicitly enabled.
-fastapi_app.router.lifespan_context = scheduler_lifespan
+# entrypoint owns process lifecycle. R04 cleanup is explicitly composed around
+# the existing scheduler lifespan so a custom lifespan cannot bypass closing the
+# query-only memory substrate.
+fastapi_app.router.lifespan_context = compose_memory4_context_lifespan(
+    scheduler_lifespan
+)
 app = harden(fastapi_app)

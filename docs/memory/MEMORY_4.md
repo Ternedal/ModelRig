@@ -23,8 +23,8 @@ That code is not normal-chat memory authority. Normal `/api/v1/chat` still goes
 through the Go backend directly to Ollama, and Agent 3 remains deliberately
 separate from the normal Android/Desktop `TurnRouter` flow.
 
-Memory 4.0 must therefore share primitives without turning normal chat into an
-implicit Agent 3 dependency.
+Memory 4.0 shares those primitives without turning normal chat into an implicit
+Agent 3 activation dependency.
 
 ## Architecture
 
@@ -35,28 +35,31 @@ flowchart LR
     S[(Existing reviewed memory substrate)] --> A[Neutral R02 shared read adapter]
     A --> R
     R --> H[Optional R03 hybrid semantic ranker]
-    O[Local Ollama embedding only] -. default-off .-> H
+    O[Local Ollama embedding only] -. server-owned opt-in .-> H
     H --> C[Privacy-aware context compiler]
     R -. semantic disabled .-> C
-    C --> B[Bounded memory data block]
-    B --> L[Selected LLM]
+    C --> R04[R04 context-for-turn service]
+    R04 --> B[Bounded memory data block]
+    R04 --> RCPT[Exact SHA-256 receipt\nsent_to_model=false]
 
-    LEG[Legacy MemoryStore] --> S
+    LEG[Legacy query-only reader] --> S
     PROT[Protected query-only reader / DPAPI] --> S
 
     A3[Agent 3 planner] --> Q
-    NC[Normal chat] -. future gated integration .-> Q
+    GO[Go normal-chat backend] -. future R05 .-> R04
+    GO -. future R05 only .-> L[Selected LLM]
 
     X[Memory extraction / consolidation] -. later write path .-> S
 ```
 
-The LLM receives a bounded context block. It never becomes the durable memory
-store. A model swap must not erase, silently rewrite or change the authority of
-stored memory.
+R04 returns a bounded context block and a receipt but does not send either to an
+LLM. The model remains downstream of a separately reviewed R05 integration.
+A model swap must not erase, silently rewrite or change the authority of stored
+memory.
 
 ## M4-R01 — shared retrieval kernel
 
-R01 is landed on `main` through PR #1168. It is deliberately read-only and
+R01 landed on `main` through PR #1168. It is deliberately read-only and
 model-independent:
 
 - `worker/app/memory/retrieval.py` defines the shared retrieval contract;
@@ -127,12 +130,12 @@ characters and 64 exact subject filters. Malformed targets, authority flags,
 filters and bounds fail closed rather than broadening the read.
 
 R02 deliberately adds no HTTP endpoint, normal-chat injection, write method,
-new migration path or activation authority. The shared reader is merely exposed
-from the existing composition root for later R03/R04 use.
+new migration path or activation authority.
 
 ## M4-R03 — optional local semantic retrieval
 
-R03 adds a semantic layer without weakening R01 authority:
+R03 landed on `main` through PR #1176. It adds a semantic layer without
+weakening R01 authority:
 
 - `worker/app/memory/semantic.py` contains a model-agnostic async hybrid ranker;
 - semantic mode is **off by default** and disabled mode requires no embedder;
@@ -145,6 +148,8 @@ R03 adds a semantic layer without weakening R01 authority:
   in this slice and delegates only to the existing local
   `ollama_client.embed()` path (`MODELRIG_OLLAMA_URL` / `MODELRIG_EMBED_MODEL`);
 - that adapter exposes no cloud base URL, API key or caller-selected upstream;
+- `app.memory` enters the local adapter lazily, so importing the shared package
+  with semantic mode off does not import the network/model client;
 - no memory embeddings are persisted in R03, so there is no second vector store,
   migration or stale cross-model embedding corpus;
 - at most 200 source records are accepted, at most 32 eligible candidates are
@@ -158,36 +163,94 @@ R03 adds a semantic layer without weakening R01 authority:
 
 Semantic similarity never grants storage, privacy or lifecycle authority. It is
 only relevance evidence over rows that the deterministic boundary has already
-approved. Secret, pending, rejected, deleted, expired or default-private-cloud
-memory must therefore be filtered before the query embedding is even requested
-when no eligible candidate remains.
+approved.
 
-R03 still adds **no** worker HTTP endpoint, `/api/v1/chat` change, Android/Desktop
+R03 adds **no** worker HTTP endpoint, `/api/v1/chat` change, Android/Desktop
 routing change, Agent 3 activation, memory write path or production activation.
+
+## M4-R04 — read-only context-for-turn service
+
+The R04 candidate adds a worker-owned pre-model context service while preserving
+the normal-chat boundary:
+
+- route: `POST /experimental/memory4/context-for-turn`;
+- mount flag: `KALIV_MEMORY4_CONTEXT_ENABLED=1`, default off;
+- optional semantic flag: `KALIV_MEMORY4_SEMANTIC_ENABLED=1`, separately
+  server-owned and default off;
+- the route is loopback-only; a remote worker caller receives `403`;
+- the entrypoint calls the self-guarding mount unconditionally, but flag-off
+  imports open no memory database/provider and register no route;
+- the mount does **not** call `mount_agent3` and does not inspect
+  `KALIV_AGENT3_ENABLED`;
+- it reuses `KALIV_AGENT3_MEMORY_DB` and `KALIV_AGENT3_MEMORY_STORE` so there is
+  one durable memory substrate/format rather than a new R04 database;
+- legacy compatibility uses `LegacyMemoryReader`, an actual SQLite `mode=ro` +
+  `PRAGMA query_only=ON` reader that exposes no create/correct/delete methods and
+  never selects `source_ref`;
+- protected mode opens the existing completed migration through
+  `ProtectedMemoryReader` with exact `LOCAL_CONTEXT` authority and therefore
+  keeps protected-field opening inside the existing DPAPI boundary;
+- R04 protected reads require no Agent 3 gateway signing secret and create no
+  grant ledger because R04 mounts no Agent 3 management API;
+- missing/invalid storage causes an explicitly enabled R04 mount to fail closed
+  without leaving a partial route;
+- production entrypoint composes R04 cleanup around the existing scheduler
+  lifespan, so replacing FastAPI's default lifespan cannot bypass closing the
+  process-owned query-only memory reader.
+
+The request contract contains only:
+
+- normalized query text, max 4,096 characters;
+- target: `local` or `cloud`;
+- up to 64 exact subject filters;
+- result limit, max 50;
+- context character budget, max 12,000.
+
+There is deliberately **no** `allow_private_cloud` request field. R04 always
+passes `allow_private_cloud=false` to storage, retrieval and compilation for a
+cloud target. A later R05 cannot turn a caller-supplied boolean into authority;
+any private-cloud design would need a separate authenticated policy boundary.
+
+R04 reads at most 100 reviewed candidates / 50,000 source characters, runs the
+landed R01/R03 retrieval path, and feeds selected records to the existing
+privacy-aware `MemoryContextCompiler`. The HTTP response exposes only:
+
+- schema;
+- the bounded context string;
+- a receipt.
+
+It never returns raw memory rows, `source_ref`, secret values, protected
+envelopes or storage metadata.
+
+The receipt is `kaliv-memory-context-receipt/v1` and binds:
+
+- target;
+- whether server-owned semantic retrieval was actually enabled;
+- candidate/ranked counts;
+- included memory ids;
+- aggregate safe exclusion counts (`not_relevant_or_below_threshold` and
+  `context_budget`);
+- exact character count and UTF-8 byte count;
+- SHA-256 of the exact returned context bytes, including the deterministic empty
+  hash when no context fits;
+- `sent_to_model=false`.
+
+R04 does not modify `/api/v1/chat`, Go routing, Android/Desktop routing, memory
+writes, Agent 3 activation or production activation.
 
 ## Planned slices
 
-### M4-R04 — normal-chat context service
-
-Add a read-only worker memory-context endpoint that accepts a normalized turn
-query and returns a bounded context block plus a receipt containing at least:
-
-- target (`local`/`cloud`);
-- included memory ids;
-- excluded count/reasons where safe;
-- character count;
-- SHA-256 of the exact context bytes;
-- `sent_to_model=false` at the worker boundary.
-
-Normal chat must not receive raw store rows, `source_ref`, secret values or
-unbounded history.
-
 ### M4-R05 — Go backend chat integration
 
-The Go `/api/v1/chat` path may request a memory context before calling Ollama.
-This requires a separate reviewed contract because the backend currently proxies
-chat directly. Initial integration must be feature-gated and preserve identical
-chat behavior when memory is disabled or no relevant memory exists.
+The Go `/api/v1/chat` path may request an R04 memory context before calling the
+selected model. This requires a separate reviewed contract because the backend
+currently proxies chat directly. Initial integration must be feature-gated and
+preserve identical chat behavior when memory is disabled or no relevant memory
+exists.
+
+R05 must verify the exact R04 receipt/context binding before model use and must
+not reinterpret `sent_to_model=false` as permission: changing that fact is a new
+backend action that needs its own routing/egress contract.
 
 ### M4-W01 — memory candidate extraction
 
@@ -224,7 +287,7 @@ runtime authority.
 2. Retrieval never promotes pending/rejected/deleted/expired records.
 3. Secret memory never enters model context or semantic embedding.
 4. Private cloud memory requires explicit policy authority before embedding or
-   context use.
+   context use; R04 grants no such authority.
 5. Memory values are untrusted reference data, not executable instructions.
 6. Retrieval cannot change tool risk, approval, sensitivity or egress.
 7. A memory write path cannot silently infer a durable fact as confirmed.
@@ -268,7 +331,7 @@ R02 was accepted after exact-head repository qualification proved:
 
 ## R03 acceptance
 
-R03 is complete only when exact-head repository qualification proves:
+R03 was accepted after exact-head repository qualification proved:
 
 - semantic-disabled results are exact R01 ranking parity and no embedder is
   required or called;
@@ -284,5 +347,38 @@ R03 is complete only when exact-head repository qualification proves:
 - enabled embedder failure cannot silently downgrade to lexical retrieval;
 - the product adapter calls only ModelRig's existing local Ollama embedding
   client and introduces no cloud embedding path;
+- the shared package keeps that local adapter lazy when semantics are off;
 - no persistent vector store, HTTP route, normal-chat wiring, write authority,
   Agent 3 activation or production activation is introduced.
+
+## R04 acceptance
+
+R04 is complete only when exact-head repository qualification proves:
+
+- flag-off production entrypoint creates no R04 route, memory database, provider
+  or storage side effect;
+- the legacy compatibility path is SQLite read-only/query-only, exposes no write
+  method and never selects `source_ref`;
+- protected R04 reads reuse the completed-migration protected reader without
+  Agent 3 activation, gateway signing material or a grant ledger;
+- the route is loopback-only and fails closed before any memory service call for
+  a denied caller;
+- no caller-supplied field can grant private-cloud memory authority;
+- local context can include relevant private memory while cloud context cannot;
+- secret/pending/inactive/expired memory and storage/protection internals never
+  enter the returned context;
+- query, subject, candidate, source-character, result and context budgets are
+  hard bounded;
+- receipt ids/counts agree with the actual retrieval/compiler result;
+- `context_sha256`, byte count and character count bind the exact returned UTF-8
+  context, including an empty result;
+- every receipt reports `sent_to_model=false`;
+- semantic use is controlled only by the separate server-owned flag and still
+  uses the landed local-only R03 adapter;
+- failed mount leaves no partial route/resource state;
+- production-shaped lifespan composition closes the owned query-only reader even
+  when the worker uses its explicit scheduler lifespan;
+- R04 acceptance remains inside an existing test file so CURRENT_STATE test
+  inventory does not drift merely because the slice was added;
+- `/api/v1/chat`, Go routing, Android/Desktop routing, memory writes, Agent 3
+  activation and production activation remain unchanged.
