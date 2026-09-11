@@ -1,3 +1,15 @@
+from .candidates import (
+    CANDIDATE_SCHEMA,
+    MAX_EXTRACTOR_RESPONSE_BYTES,
+    MAX_MEMORY_CANDIDATES,
+    MAX_TURN_CHARS,
+    CandidateBatch,
+    CompletedTurn,
+    MemoryCandidate,
+    MemoryCandidateError,
+    parse_candidate_batch,
+    prepare_completed_turn,
+)
 from .retrieval import MemoryRetrievalQuery, MemoryRetriever, RankedMemory
 from .semantic import (
     DEFAULT_MIN_SEMANTIC_SCORE,
@@ -32,8 +44,18 @@ async def embed_memory_text_local(text: str) -> list[float]:
     return await _embed(text)
 
 
+async def extract_memory_candidates_local(turn: CompletedTurn) -> CandidateBatch:
+    """Lazily enter the ModelRig-specific local W01A extraction adapter."""
+    from .local_extraction import extract_memory_candidates_local as _extract
+
+    return await _extract(turn)
+
+
 __all__ = [
+    "CANDIDATE_SCHEMA",
     "DEFAULT_MIN_SEMANTIC_SCORE",
+    "MAX_EXTRACTOR_RESPONSE_BYTES",
+    "MAX_MEMORY_CANDIDATES",
     "MAX_MEMORY_READ_CANDIDATES",
     "MAX_MEMORY_READ_CHARS",
     "MAX_MEMORY_READ_SUBJECTS",
@@ -41,7 +63,12 @@ __all__ = [
     "MAX_SEMANTIC_INPUT_RECORDS",
     "MAX_SEMANTIC_TEXT_CHARS",
     "MAX_SEMANTIC_VECTOR_DIMS",
+    "MAX_TURN_CHARS",
+    "CandidateBatch",
+    "CompletedTurn",
     "HybridMemoryRetriever",
+    "MemoryCandidate",
+    "MemoryCandidateError",
     "MemoryReadRequest",
     "MemoryRetrievalQuery",
     "MemoryRetriever",
@@ -53,4 +80,7 @@ __all__ = [
     "SharedMemoryReader",
     "SharedMemoryRecord",
     "embed_memory_text_local",
+    "extract_memory_candidates_local",
+    "parse_candidate_batch",
+    "prepare_completed_turn",
 ]
