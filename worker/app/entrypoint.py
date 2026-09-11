@@ -15,6 +15,7 @@ from .control_center_api import build_control_center_router
 from .file_capabilities_mount import mount_file_capabilities
 from .hardening import harden
 from .main import app as fastapi_app
+from .memory.candidate_mount import mount_memory4_candidates
 from .memory.context_mount import (
     compose_memory4_context_lifespan,
     mount_memory4_context,
@@ -61,8 +62,14 @@ install_termination_contract(fastapi_app)
 # Memory 4 R04 is a separate default-off, loopback-only read surface. It reuses
 # the durable Memory 3 substrate but never calls mount_agent3 and does not inspect
 # KALIV_AGENT3_ENABLED. With its own flag off this call opens no DB/provider and
-# registers no route. Normal /api/v1/chat remains unchanged until R05.
+# registers no route. R05's Go chat integration remains a separate backend flag.
 mount_memory4_context(fastapi_app)
+
+# Memory 4 W01 is a separate default-off, loopback-only extraction surface. It
+# owns no DB or writer: a request may ask the existing local Ollama client to
+# classify one completed user turn into bounded proposals, but W01 cannot persist
+# them. W02 is the separately reviewed durable-write/consolidation boundary.
+mount_memory4_candidates(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
@@ -96,7 +103,7 @@ mount_file_capabilities(fastapi_app)
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle. R04 cleanup is explicitly composed around
 # the existing scheduler lifespan so a custom lifespan cannot bypass closing the
-# query-only memory substrate.
+# query-only memory substrate. W01 owns no process resource and needs no lifespan.
 fastapi_app.router.lifespan_context = compose_memory4_context_lifespan(
     scheduler_lifespan
 )

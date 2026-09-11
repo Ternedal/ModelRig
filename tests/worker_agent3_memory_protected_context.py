@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
+from app import ollama_client as local_ollama_client  # noqa: E402
 from app.agent3.memory import MemoryStore  # noqa: E402
 from app.agent3.memory_context import ContextTarget, MemoryContext  # noqa: E402
 from app.agent3.memory_protected_context import (  # noqa: E402
@@ -24,6 +30,18 @@ from app.agent3.memory_protection import (  # noqa: E402
     MemoryProtectionError,
 )
 from app.agent3.memory_protection_migration import MemoryProtectionMigrator  # noqa: E402
+from app.memory.candidate_api import build_memory4_candidate_router  # noqa: E402
+from app.memory.candidate_mount import (  # noqa: E402
+    MEMORY4_CANDIDATES_FLAG,
+    mount_memory4_candidates,
+)
+from app.memory.candidates import (  # noqa: E402
+    CANDIDATE_RESULT_SCHEMA,
+    CandidateForTurnRequest,
+    MemoryCandidateExtractionError,
+    MemoryCandidateExtractor,
+    extract_memory_candidates_local,
+)
 
 
 class CountingAeadProvider:
@@ -295,11 +313,309 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-context-") as raw:
         "failed closed",
     )
 
+
+# Memory 4 W01 acceptance lives in this existing memory test so the generated
+# CURRENT_STATE test inventory does not drift just because a slice was added.
+def w01_candidate(
+    subject: str,
+    predicate: str,
+    value: str,
+    *,
+    kind: str = "fact",
+    sensitivity: str = "operational",
+    source_type: str = "user_explicit",
+    confidence: float = 0.9,
+    evidence_quote: str | None = None,
+) -> dict:
+    return {
+        "subject": subject,
+        "predicate": predicate,
+        "value": value,
+        "kind": kind,
+        "sensitivity": sensitivity,
+        "source_type": source_type,
+        "confidence": confidence,
+        "evidence_quote": value if evidence_quote is None else evidence_quote,
+    }
+
+
+w01_user_text = (
+    "Jeg foretrækker ingen fisk. Min rig har 96 GB RAM. "
+    "Jeg tror måske Qwen er bedst. Min API key er sk-THISISASECRET12345."
+)
+w01_rows = [
+    w01_candidate(
+        "anders",
+        "madpraeference",
+        "ingen fisk",
+        kind="preference",
+        sensitivity="private",
+        confidence=0.99,
+    ),
+    w01_candidate(
+        "rig",
+        "ram",
+        "96GB RAM",
+        evidence_quote="96 GB RAM",
+        confidence=0.95,
+    ),
+    w01_candidate(
+        "anders",
+        "modelpraeference",
+        "Qwen",
+        kind="preference",
+        source_type="inferred",
+        evidence_quote="Qwen",
+        confidence=0.65,
+    ),
+    w01_candidate(
+        "anders",
+        "api_key",
+        "sk-THISISASECRET12345",
+        sensitivity="public",
+        evidence_quote="sk-THISISASECRET12345",
+    ),
+    w01_candidate(
+        "rig",
+        "gpu",
+        "RTX 5090",
+        evidence_quote="RTX 5090",
+    ),
+    w01_candidate(
+        "anders",
+        "madpraeference",
+        "ingen fisk",
+        kind="preference",
+        sensitivity="private",
+        confidence=0.99,
+    ),
+]
+
+
+async def w01_fake_extract(text: str) -> str:
+    if text != w01_user_text:
+        raise RuntimeError("W01 extractor did not receive exact user turn")
+    return json.dumps({"candidates": w01_rows}, ensure_ascii=False)
+
+
+w01_extractor = MemoryCandidateExtractor(w01_fake_extract)
+w01_result = asyncio.run(
+    w01_extractor.candidates_for_turn(
+        CandidateForTurnRequest(turn_id="turn:w01-001", user_text=w01_user_text)
+    )
+)
+check(
+    "W01 explicit verbatim user fact may be proposed confirmed",
+    len(w01_result.candidates) == 3
+    and w01_result.candidates[0].value == "ingen fisk"
+    and w01_result.candidates[0].source_type == "user_explicit"
+    and w01_result.candidates[0].review_status == "confirmed",
+)
+check(
+    "W01 normalized explicit claim is downgraded to inferred pending",
+    w01_result.candidates[1].value == "96GB RAM"
+    and w01_result.candidates[1].source_type == "inferred"
+    and w01_result.candidates[1].review_status == "pending",
+)
+check(
+    "W01 inferred proposal remains pending",
+    w01_result.candidates[2].value == "Qwen"
+    and w01_result.candidates[2].source_type == "inferred"
+    and w01_result.candidates[2].review_status == "pending",
+)
+check(
+    "W01 server policy removes credentials hallucinated evidence and duplicates",
+    w01_result.receipt.exclusion_reasons
+    == {
+        "secret_or_credential": 1,
+        "unbound_evidence": 1,
+        "duplicate_candidate": 1,
+    }
+    and all("SECRET" not in item.value for item in w01_result.candidates),
+)
+check(
+    "W01 receipt binds exact completed user turn and proves no durable write",
+    w01_result.receipt.turn_id == "turn:w01-001"
+    and w01_result.receipt.user_text_sha256
+    == hashlib.sha256(w01_user_text.encode("utf-8")).hexdigest()
+    and w01_result.receipt.proposed_count == 6
+    and w01_result.receipt.included_count == 3
+    and w01_result.receipt.excluded_count == 3
+    and w01_result.receipt.sent_to_store is False,
+)
+
+
+async def w01_duplicate_json(_text: str) -> str:
+    return '{"candidates":[],"candidates":[]}'
+
+
+try:
+    asyncio.run(
+        MemoryCandidateExtractor(w01_duplicate_json).candidates_for_turn(
+            CandidateForTurnRequest(turn_id="turn:w01-bad", user_text="test")
+        )
+    )
+except MemoryCandidateExtractionError as exc:
+    check("W01 duplicate JSON keys fail closed", "invalid JSON" in str(exc))
+else:
+    check("W01 duplicate JSON keys fail closed", False)
+
+
+async def w01_bad_fields(_text: str) -> str:
+    return json.dumps({"candidates": [{"subject": "x"}]})
+
+
+try:
+    asyncio.run(
+        MemoryCandidateExtractor(w01_bad_fields).candidates_for_turn(
+            CandidateForTurnRequest(turn_id="turn:w01-fields", user_text="test")
+        )
+    )
+except MemoryCandidateExtractionError as exc:
+    check("W01 malformed candidate shape fails closed", "fields" in str(exc))
+else:
+    check("W01 malformed candidate shape fails closed", False)
+
+
+remote_hits = 0
+
+
+async def w01_remote_probe(_text: str) -> str:
+    global remote_hits
+    remote_hits += 1
+    return '{"candidates":[]}'
+
+
+remote_app = FastAPI()
+remote_app.include_router(
+    build_memory4_candidate_router(
+        MemoryCandidateExtractor(w01_remote_probe),
+        loopback_allowed=lambda _request: False,
+    )
+)
+with TestClient(remote_app) as remote_client:
+    remote_response = remote_client.post(
+        "/experimental/memory4/candidates-for-turn",
+        json={"turn_id": "turn:w01-remote", "user_text": "hello"},
+    )
+check(
+    "W01 remote caller is refused before model extraction",
+    remote_response.status_code == 403 and remote_hits == 0,
+)
+
+
+old_flag = os.environ.get(MEMORY4_CANDIDATES_FLAG)
+old_agent3 = os.environ.get("KALIV_AGENT3_ENABLED")
+old_db = os.environ.get("KALIV_AGENT3_MEMORY_DB")
+try:
+    os.environ.pop(MEMORY4_CANDIDATES_FLAG, None)
+    with tempfile.TemporaryDirectory(prefix="kaliv-memory4-w01-") as raw:
+        missing_db = Path(raw) / "must-not-exist.db"
+        os.environ["KALIV_AGENT3_ENABLED"] = "0"
+        os.environ["KALIV_AGENT3_MEMORY_DB"] = str(missing_db)
+        off_app = FastAPI()
+        off_routes = tuple(off_app.routes)
+        check(
+            "W01 mount is default-off and opens no DB or route",
+            mount_memory4_candidates(off_app, extract_fn=w01_fake_extract) is False
+            and tuple(off_app.routes) == off_routes
+            and not missing_db.exists(),
+        )
+
+        os.environ[MEMORY4_CANDIDATES_FLAG] = "1"
+        on_app = FastAPI()
+        check(
+            "W01 mounts independently with Agent 3 disabled",
+            mount_memory4_candidates(on_app, extract_fn=w01_fake_extract),
+        )
+        with TestClient(on_app) as on_client:
+            enabled = on_client.post(
+                "/experimental/memory4/candidates-for-turn",
+                json={"turn_id": "turn:w01-api", "user_text": w01_user_text},
+            )
+            extra = on_client.post(
+                "/experimental/memory4/candidates-for-turn",
+                json={
+                    "turn_id": "turn:w01-extra",
+                    "user_text": w01_user_text,
+                    "persist": True,
+                },
+            )
+        check(
+            "W01 API returns only proposals plus non-write receipt",
+            enabled.status_code == 200
+            and enabled.json()["schema"] == CANDIDATE_RESULT_SCHEMA
+            and enabled.json()["receipt"]["sent_to_store"] is False
+            and not missing_db.exists(),
+        )
+        check(
+            "W01 API rejects caller-supplied persistence authority",
+            extra.status_code == 422 and not missing_db.exists(),
+        )
+finally:
+    if old_flag is None:
+        os.environ.pop(MEMORY4_CANDIDATES_FLAG, None)
+    else:
+        os.environ[MEMORY4_CANDIDATES_FLAG] = old_flag
+    if old_agent3 is None:
+        os.environ.pop("KALIV_AGENT3_ENABLED", None)
+    else:
+        os.environ["KALIV_AGENT3_ENABLED"] = old_agent3
+    if old_db is None:
+        os.environ.pop("KALIV_AGENT3_MEMORY_DB", None)
+    else:
+        os.environ["KALIV_AGENT3_MEMORY_DB"] = old_db
+
+
+old_ollama_url = local_ollama_client.OLLAMA_URL
+old_chat = local_ollama_client.chat
+old_extract_model = os.environ.get("KALIV_MEMORY4_EXTRACT_MODEL")
+local_chat_calls: list[tuple[list[dict], str | None]] = []
+
+
+async def w01_local_chat(messages, model=None):
+    local_chat_calls.append((messages, model))
+    return '{"candidates":[]}'
+
+
+try:
+    local_ollama_client.chat = w01_local_chat
+    local_ollama_client.OLLAMA_URL = "https://models.example.invalid"
+    try:
+        asyncio.run(extract_memory_candidates_local("local-only probe"))
+    except MemoryCandidateExtractionError as exc:
+        check(
+            "W01 refuses a non-loopback configured model before user-text egress",
+            "loopback" in str(exc) and local_chat_calls == [],
+        )
+    else:
+        check("W01 refuses a non-loopback configured model before user-text egress", False)
+
+    local_ollama_client.OLLAMA_URL = "http://127.0.0.1:11434"
+    os.environ["KALIV_MEMORY4_EXTRACT_MODEL"] = "w01-test-model"
+    local_output = asyncio.run(extract_memory_candidates_local("local-only probe"))
+    check(
+        "W01 production adapter uses only existing local Ollama chat",
+        local_output == '{"candidates":[]}'
+        and len(local_chat_calls) == 1
+        and local_chat_calls[0][1] == "w01-test-model"
+        and local_chat_calls[0][0][-1]
+        == {"role": "user", "content": "local-only probe"},
+    )
+finally:
+    local_ollama_client.OLLAMA_URL = old_ollama_url
+    local_ollama_client.chat = old_chat
+    if old_extract_model is None:
+        os.environ.pop("KALIV_MEMORY4_EXTRACT_MODEL", None)
+    else:
+        os.environ["KALIV_MEMORY4_EXTRACT_MODEL"] = old_extract_model
+
+
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
     print(f"  {'PASS' if ok else 'FAIL'}: {label}")
 print(
-    f"\n===== T-033 PROTECTED LOCAL CONTEXT: "
+    f"\n===== T-033 PROTECTED CONTEXT + MEMORY 4 W01: "
     f"{len(checks) - len(failed)} passed, {len(failed)} failed ====="
 )
 raise SystemExit(1 if failed else 0)

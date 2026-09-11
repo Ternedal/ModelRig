@@ -1,6 +1,6 @@
 # Memory 4.0 — shared retrieval and normal-chat integration
 
-Status: implementation track, default-off for normal chat.
+Status: implementation track, default-off for normal chat and candidate extraction.
 
 Memory 4.0 is the path from the existing Agent 3 Memory 3.0 substrate to one
 model-independent memory service that can serve normal Kaliv chat, Agent 3
@@ -24,6 +24,12 @@ adds a separately gated Go normal-chat integration, but that does not make Agent
 3 the owner of normal chat: `/api/v1/chat` remains the same authenticated backend
 route and the R05 flag is off by default. Agent 3 remains deliberately separate
 from the normal Android/Desktop `TurnRouter` flow.
+
+The W01 candidate adds a separately gated, loopback-only proposal extractor over
+one completed **user** turn. It owns no memory database or writer, accepts no
+assistant output, and returns only bounded proposals plus a receipt that says
+`sent_to_store=false`. Durable dedupe/version/supersede/write authority remains a
+future W02 concern.
 
 Memory 4.0 shares those primitives without turning normal chat into an implicit
 Agent 3 activation dependency.
@@ -51,17 +57,22 @@ flowchart LR
     I --> L[Selected LLM]
     GO -->|flag off / empty / unsupported turn| L
 
+    TU[Completed user turn] -. explicit W01 request .-> W01[W01 bounded candidate extractor]
+    LO[Loopback Ollama chat only] -. server-owned model .-> W01
+    W01 --> P[Candidate proposals + evidence receipt\nsent_to_store=false]
+    P -. future W02 dedupe/review/version/write .-> S
+
     LEG[Legacy query-only reader] --> S
     PROT[Protected query-only reader / DPAPI] --> S
     A3[Agent 3 planner] --> Q
-    X[Memory extraction / consolidation] -. later write path .-> S
 ```
 
 R04 returns a bounded context block and a pre-model receipt. R05 is the separate
 backend action that may send the verified context to the selected model. The
 receipt itself is not model input, and memory data is never promoted to system
-message authority. A model swap must not erase, silently rewrite or change the
-authority of stored memory.
+message authority. W01 is independently default-off and proposal-only: its model
+may classify a completed user turn, but cannot write memory. A model swap must
+not erase, silently rewrite or change the authority of stored memory.
 
 ## M4-R01 — shared retrieval kernel
 
@@ -246,9 +257,9 @@ production authority.
 
 ## M4-R05 — guarded Go normal-chat integration
 
-R05 is the first normal-chat consumer of R04. It changes only the implementation
-behind the existing authenticated `POST /api/v1/chat` route; clients do not gain
-a new route or authority surface.
+R05 landed on `main` through PR #1188. It is the first normal-chat consumer of
+R04. It changes only the implementation behind the existing authenticated
+`POST /api/v1/chat` route; clients do not gain a new route or authority surface.
 
 - backend flag: `KALIV_MEMORY4_CHAT_ENABLED=1`, default off;
 - flag-off dispatches directly to the pre-R05 `handleChat` proxy without reading
@@ -288,22 +299,57 @@ R04's `sent_to_model=false` is treated as an invariant to verify, not as model
 permission. The model egress is the explicit R05 backend action after receipt
 verification.
 
+## M4-W01 — proposal-only memory candidate extraction
+
+The W01 candidate introduces a bounded extraction surface without introducing a
+memory write path:
+
+- route: `POST /experimental/memory4/candidates-for-turn`;
+- mount flag: `KALIV_MEMORY4_CANDIDATES_ENABLED=1`, default off;
+- the route is loopback-only and rejects a remote caller before extraction;
+- the request contains only a bounded canonical `turn_id` and one completed
+  `user_text`; there is no assistant text, tool result, persist flag, review flag
+  or caller-selected model/upstream;
+- production extraction uses the existing `ollama_client.chat()` only after the
+  configured `MODELRIG_OLLAMA_URL` is proven loopback; a non-loopback model URL
+  fails closed before user-text egress;
+- `KALIV_MEMORY4_EXTRACT_MODEL` may choose a model name on that same local
+  Ollama, but cannot choose another host;
+- model output is strict JSON with duplicate-key rejection, exact field sets,
+  at most 20 candidates and hard text/output bounds;
+- every proposal must carry an `evidence_quote` that is an exact substring of
+  the user-authored turn; unbound evidence is excluded;
+- `user_explicit` survives only when `value` is exactly the same verbatim text as
+  `evidence_quote`; normalization or interpretation is downgraded to
+  `source_type=inferred` and `review_status=pending`;
+- explicit verbatim proposals may carry `review_status=confirmed` **as proposal
+  metadata only**; W01 has no writer and therefore does not create confirmed
+  durable memory;
+- inferred proposals always remain pending;
+- `secret` proposals and server-detected credential-like password/token/API-key/
+  private-key material are excluded even if the model labels them public;
+- exact duplicate proposals are excluded deterministically;
+- the receipt binds the exact user turn with SHA-256, proposal/inclusion/
+  exclusion counts and safe exclusion reasons, and always reports
+  `sent_to_store=false`;
+- flag-off mount registers no route, opens no DB and invokes no model;
+- W01 neither calls `MemoryStore`/`ProtectedMemoryWriter` nor reads the protected
+  memory substrate;
+- W01 is not wired into normal chat, Android/Desktop routing or Agent 3 startup.
+
+This is intentionally one step before durable memory. W02 must separately decide
+how proposals are deduplicated against existing state, how corrections map to
+version/supersede semantics, and exactly which reviewed proposals may be
+committed.
+
 ## Planned slices
 
-### M4-W01 — memory candidate extraction
+### M4-W02 — consolidation and durable write boundary
 
-After read-path qualification, add candidate extraction from completed turns.
-Explicit user facts may become confirmed under the existing policy; inferred,
-imported and tool-observed candidates remain pending until review.
-
-The extractor cannot directly overwrite durable memory. Corrections must use
-version/supersede semantics.
-
-### M4-W02 — consolidation
-
-Add bounded duplicate clustering and stale-fact consolidation. Consolidation
-creates reviewed/versioned memory state; it does not rewrite history or invent
-facts from repeated model outputs.
+Add bounded duplicate clustering and stale-fact consolidation, then a separately
+reviewed durable commit boundary. Consolidation must create reviewed/versioned
+memory state; it cannot rewrite history, invent facts from repeated model output,
+or bypass the existing protected-writer/local-management rules.
 
 ## Memory classes
 
@@ -333,6 +379,10 @@ runtime authority.
 9. Context has hard size/record bounds and an exact receipt before model use.
 10. Normal-chat memory is default-off, remains at user-data authority, and
     enabling it neither activates Agent 3 nor changes memory write/tool authority.
+11. W01 candidate extraction is independently default-off, loopback-only and
+    cannot write durable memory; every W01 receipt must say `sent_to_store=false`.
+12. Assistant/model text is not user evidence for W01 and cannot become a
+    `user_explicit` proposal.
 
 ## R01 acceptance
 
@@ -423,7 +473,7 @@ R04 was accepted after exact-head repository qualification proved:
 
 ## R05 acceptance
 
-R05 is complete only when exact-head repository qualification proves:
+R05 was accepted after exact-head repository qualification proved:
 
 - flag-off `/api/v1/chat` reaches the same Ollama proxy with the exact original
   request body and without any memory-worker call;
@@ -449,3 +499,31 @@ R05 is complete only when exact-head repository qualification proves:
 - the R04 receipt never enters the model payload;
 - R05 adds no private-cloud grant, memory write, Android/Desktop route, Agent 3
   activation or production activation.
+
+## W01 acceptance
+
+W01 is complete only when exact-head repository qualification proves:
+
+- flag-off production entrypoint registers no W01 route and opens no memory DB or
+  model connection;
+- the route is loopback-only and denied callers cannot invoke extraction;
+- the production adapter refuses a configured non-loopback Ollama URL before
+  sending the user turn and otherwise calls only the existing local Ollama chat
+  client;
+- request bodies cannot supply persistence, review, model-host, assistant-text or
+  private authority fields;
+- malformed/duplicate-key/over-budget model output fails closed;
+- every surviving proposal has evidence bound to the exact user-authored turn;
+- only a verbatim value/evidence pair can retain `user_explicit` + proposed
+  `confirmed`; transformed claims are downgraded to inferred/pending;
+- inferred proposals remain pending;
+- secret and credential-like proposals are excluded independently of the model's
+  sensitivity label;
+- duplicate proposals are removed deterministically;
+- receipt counts/exclusion accounting and SHA-256 bind the exact input turn and
+  every receipt reports `sent_to_store=false`;
+- W01 exposes no `MemoryStore`, protected writer, DB migration, write route,
+  normal-chat wiring, Android/Desktop routing, Agent 3 activation or production
+  activation;
+- acceptance remains inside an existing test file so CURRENT_STATE test inventory
+  does not drift merely because the slice was added.
