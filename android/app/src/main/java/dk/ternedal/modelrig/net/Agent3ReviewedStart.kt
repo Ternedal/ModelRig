@@ -8,7 +8,9 @@ package dk.ternedal.modelrig.net
  * structure before exposing the raw top-level review mode separately. A raw mode
  * conflict therefore grants only a safely bound run id as recovery reference;
  * the rejected Start payload never becomes UI authority. Fresh server truth must
- * then independently prove the exact run id, reviewed mode and checkpoint.
+ * then independently prove the exact run id, reviewed mode and checkpoint. The
+ * already-proven Start capability receipt remains immutable review evidence across
+ * that recovery because generic run GET does not own or return Plan-Start evidence.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -27,6 +29,7 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
         return recoverReviewedStartEnvelope(
             recoveryRunId = envelope.run.id,
             expectedReviewReads = expectedReviewReads,
+            expectedCapabilityReceipt = expectedCapabilityReceipt,
             originalFailure = ModelRigException(
                 "Ugyldigt Agent 3.0 Start-svar: serverens Read review matcher ikke previewet; " +
                     "det baseline-validerede run-id er kun recovery-reference",
@@ -49,6 +52,7 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     return recoverReviewedStartEnvelope(
         recoveryRunId = envelope.run.id,
         expectedReviewReads = expectedReviewReads,
+        expectedCapabilityReceipt = expectedCapabilityReceipt,
         originalFailure = validationFailure,
     )
 }
@@ -56,6 +60,7 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
 private fun Agent3Client.recoverReviewedStartEnvelope(
     recoveryRunId: String,
     expectedReviewReads: Boolean,
+    expectedCapabilityReceipt: Agent3Client.CapabilityReceipt?,
     originalFailure: ModelRigException,
 ): Agent3Client.RunEnvelope {
     if (recoveryRunId.isBlank()) throw originalFailure
@@ -65,8 +70,16 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
         )
+        if (
+            fresh.capabilityReceipt != null &&
+            fresh.capabilityReceipt != expectedCapabilityReceipt
+        ) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 frisk run-status: capability receipt matcher ikke previewet",
+            )
+        }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
-        fresh
+        fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "det reviewede Start-svar blev afvist"
         val recovery = recoveryFailure.message ?: "frisk run-status kunne ikke valideres"
