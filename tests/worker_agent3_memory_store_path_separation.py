@@ -26,6 +26,20 @@ def check(label: str, condition: object) -> None:
     checks.append((label, bool(condition)))
 
 
+def run_support(name: str, filename: str) -> None:
+    ok = False
+    try:
+        runpy.run_path(
+            str(ROOT / "tests" / "support" / filename),
+            run_name="__main__",
+        )
+    except SystemExit as exc:
+        ok = exc.code in (None, 0)
+    except Exception as exc:
+        print(f"  {name} support suite raised {type(exc).__name__}: {exc}")
+    check(f"{name} focused storage qualification passes", ok)
+
+
 @contextmanager
 def environment(**values: str):
     previous = {name: os.environ.get(name) for name in values}
@@ -71,27 +85,22 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-path-separation-") as raw:
             not shared.exists(),
         )
 
-# W02-B has a large focused qualification, but keeping it under tests/support
-# avoids inventing another top-level suite merely to exercise one slice. The
-# existing storage test remains the CI/inventory entrypoint on Linux and on the
-# Windows protected-store gate.
-w02b_ok = False
-try:
-    runpy.run_path(
-        str(ROOT / "tests" / "support" / "worker_agent3_memory_consolidation_writer.py"),
-        run_name="__main__",
-    )
-except SystemExit as exc:
-    w02b_ok = exc.code in (None, 0)
-except Exception as exc:
-    print(f"  W02-B support suite raised {type(exc).__name__}: {exc}")
-check("W02-B focused storage qualification passes", w02b_ok)
+# Keep large/focused W02 qualifications under tests/support so the repository's
+# generated top-level test inventory does not change merely to exercise one slice.
+run_support(
+    "W02-B",
+    "worker_agent3_memory_consolidation_writer.py",
+)
+run_support(
+    "W02 exact-key",
+    "worker_memory_consolidation_exact_keys.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
     print(f"  {'PASS' if ok else 'FAIL'}: {label}")
 print(
-    f"\n===== T-033 STORE PATH SEPARATION + W02-B: "
+    f"\n===== T-033 STORE PATH SEPARATION + W02: "
     f"{len(checks) - len(failed)} passed, {len(failed)} failed ====="
 )
 raise SystemExit(1 if failed else 0)
