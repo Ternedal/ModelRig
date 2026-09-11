@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 from app.memory import (
     CONSOLIDATION_WRITE_RECEIPT_SCHEMA,
@@ -298,10 +299,10 @@ expect_error(
     "evidence",
 )
 
-# W01 credential escalation is rechecked before a custom extractor can disguise
-# a credential-like turn as a private confirmed note.
+# Credential escalation is rechecked on the bounded turn itself. This catches
+# label-like secrets even after a custom callback has neutralized subject/predicate.
 credential_turn = CompletedMemoryTurn(
-    user_text="min nøgle er sk-AbCdEfGh12345678",
+    user_text="mit password er hunter2-value",
     assistant_text="Modtaget.",
     source_ref="conversation:w03-credential",
 )
@@ -317,7 +318,7 @@ async def extract_disguised_credential(_turn):
 
 
 expect_error(
-    "W03-A cannot bypass W01 credential escalation with a private confirmed candidate",
+    "W03-A cannot disguise a password-like turn as a private confirmed candidate",
     CompletedTurnMemoryPersistence(
         extract_candidates=extract_disguised_credential,
         prepare_plan=prepare_canonical,
@@ -347,6 +348,30 @@ expect_error(
     "candidate count",
 )
 
+# Candidate identity is not enough: the W02-A receipt must bind every action
+# count and touched id exactly.
+def prepare_forged_receipt(candidates):
+    plan = MemoryConsolidator().plan(candidates, ())
+    return replace(
+        plan,
+        receipt=replace(
+            plan.receipt,
+            create_count=0,
+            skip_count=1,
+        ),
+    )
+
+
+expect_error(
+    "W03-A rejects a W02-A receipt whose action accounting was forged",
+    CompletedTurnMemoryPersistence(
+        extract_candidates=extract_canonical,
+        prepare_plan=prepare_forged_receipt,
+        apply_plan=lambda _plan: write_receipt(),
+    ).persist(turn),
+    "bind its actions exactly",
+)
+
 # W02-B receipt binding is validated again before W03-A reports persistence.
 expect_error(
     "W03-A rejects a write receipt that does not claim durable storage",
@@ -365,6 +390,19 @@ expect_error(
         apply_plan=lambda _plan: write_receipt(considered=2),
     ).persist(turn),
     "considered_count",
+)
+expect_error(
+    "W03-A rejects a write receipt that reuses one id as created and superseded",
+    CompletedTurnMemoryPersistence(
+        extract_candidates=extract_canonical,
+        prepare_plan=prepare_canonical,
+        apply_plan=lambda _plan: write_receipt(
+            created=("mem-same",),
+            superseded=("mem-same",),
+            superseding=("mem-same",),
+        ),
+    ).persist(turn),
+    "create and supersede roles",
 )
 
 
