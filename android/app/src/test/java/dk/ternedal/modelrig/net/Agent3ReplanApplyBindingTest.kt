@@ -20,6 +20,15 @@ class Agent3ReplanApplyBindingTest {
             assertEquals(2, result.replan.fromRevision)
             assertEquals(3, result.replan.toRevision)
             assertEquals(2, result.replan.replanNumber)
+            assertEquals(1, result.replan.start)
+            assertEquals(2, result.replan.oldEnd)
+            assertEquals(2, result.replan.newEnd)
+            assertEquals(listOf("step-old"), result.replan.removedStepIds)
+            assertEquals(listOf("list_models"), result.replan.removedTools)
+            assertEquals(listOf("step-new"), result.replan.addedStepIds)
+            assertEquals(listOf("current_datetime"), result.replan.addedTools)
+            assertEquals(listOf("step-1"), result.replan.immutablePrefixIds)
+            assertEquals(listOf("step-3"), result.replan.immutableTailIds)
             assertTrue(result.readReview.enabled)
             assertTrue(result.readReview.waiting)
             assertEquals(1, result.readReview.windowStart)
@@ -265,6 +274,10 @@ class Agent3ReplanApplyBindingTest {
                 .apply("preview-1")
             assertEquals("generic-run", result.run.id)
             assertEquals(0, result.replan.fromRevision)
+            assertEquals(0, result.replan.start)
+            assertTrue(result.replan.removedStepIds.isEmpty())
+            assertTrue(result.replan.addedStepIds.isEmpty())
+            assertTrue(result.replan.immutablePrefixIds.isEmpty())
             assertEquals("", result.preview.previewId)
             assertFalse(result.readReview.enabled)
             assertFalse(result.readReview.waiting)
@@ -295,6 +308,7 @@ class Agent3ReplanApplyBindingTest {
 
     private fun reviewedPreview(
         plannerModel: String? = "planner-a",
+        replacementId: String? = "step-new",
     ): Agent3ReplanClient.Preview = Agent3ReplanClient.Preview(
         previewId = "preview-1",
         expiresInSeconds = 300,
@@ -312,7 +326,21 @@ class Agent3ReplanApplyBindingTest {
             immutablePrefixIds = listOf("step-1"),
             immutableTailIds = listOf("step-3"),
         ),
-        plan = emptyList(),
+        plan = listOf(
+            Agent3Client.Step(
+                id = replacementId,
+                tool = "current_datetime",
+                args = "{}",
+                risk = "read",
+                sensitivity = "operational",
+                egress = "local",
+                summary = "replacement read",
+                state = null,
+                confirmationDigest = null,
+                confirmationExpiresAt = null,
+                error = null,
+            ),
+        ),
         executed = false,
     )
 
@@ -432,8 +460,14 @@ class Agent3ReplanApplyBindingTest {
                 $fromRevisionField
                 "to_revision": $toRevisionJson,
                 "replan_number": $replanNumberJson,
+                "start": 1,
+                "old_end": 2,
+                "new_end": 2,
+                "removed_step_ids": ["step-old"],
                 "removed_tools": ["list_models"],
+                "added_step_ids": ["step-new"],
                 "added_tools": ["current_datetime"],
+                "immutable_prefix_ids": ["step-1"],
                 "immutable_tail_ids": ["step-3"]
               },
               $readReviewField

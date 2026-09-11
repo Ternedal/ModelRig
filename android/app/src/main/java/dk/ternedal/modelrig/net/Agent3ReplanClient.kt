@@ -47,8 +47,14 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
         val fromRevision: Int,
         val toRevision: Int,
         val replanNumber: Int,
+        val start: Int,
+        val oldEnd: Int,
+        val newEnd: Int,
+        val removedStepIds: List<String>,
         val removedTools: List<String>,
+        val addedStepIds: List<String>,
         val addedTools: List<String>,
+        val immutablePrefixIds: List<String>,
         val immutableTailIds: List<String>,
     )
 
@@ -167,8 +173,11 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
         }
         val root = postApply(reviewedPreview.previewId)
         val readReviewObject = root.requireObject("read_review")
+        val receiptObject = root.requireObject("replan")
         validateReviewedApplyResponse(root, reviewedPreview)
+        val receiptAuthority = validateReviewedReplanReceiptShape(receiptObject, reviewedPreview)
         val result = parseApplyResult(root)
+        validateReviewedReplanReceiptBinding(receiptAuthority, result)
         validateReviewedReadReview(readReviewObject, result.run, result.readReview)
         return result
     }
@@ -188,8 +197,14 @@ class Agent3ReplanClient(baseUrl: String, private val token: String) {
                 fromRevision = receipt.optInt("from_revision"),
                 toRevision = receipt.optInt("to_revision"),
                 replanNumber = receipt.optInt("replan_number"),
+                start = receipt.optInt("start"),
+                oldEnd = receipt.optInt("old_end"),
+                newEnd = receipt.optInt("new_end"),
+                removedStepIds = receipt.optJSONArray("removed_step_ids").toStrings(),
                 removedTools = receipt.optJSONArray("removed_tools").toStrings(),
+                addedStepIds = receipt.optJSONArray("added_step_ids").toStrings(),
                 addedTools = receipt.optJSONArray("added_tools").toStrings(),
+                immutablePrefixIds = receipt.optJSONArray("immutable_prefix_ids").toStrings(),
                 immutableTailIds = receipt.optJSONArray("immutable_tail_ids").toStrings(),
             ),
             preview = AppliedPreview(
