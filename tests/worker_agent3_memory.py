@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import tempfile
 import time
 
 from app.agent3.memory import MemoryNotFound, MemoryStore, MemoryStoreError
+from app.memory import CompletedMemoryTurn, MEMORY_CANDIDATE_SCHEMA, MemoryCandidateExtractor
 
 passed = failed = 0
 
@@ -136,6 +139,88 @@ large = store.create(
 )
 small_budget = store.context_records(subjects=["budget"], max_chars=20)
 check(not small_budget, "context compiler respects max_chars for the first record")
+
+# Memory 4.0 W01 authority hardening (#1201): literal evidence proves only the
+# exact user statement, never model-authored semantics layered on top of it.
+def extraction_document(*candidates):
+    return json.dumps(
+        {"schema": MEMORY_CANDIDATE_SCHEMA, "candidates": list(candidates)},
+        ensure_ascii=False,
+    )
+
+
+def semantic_trap_row(*, evidence="I live in Copenhagen"):
+    return {
+        "subject": "anders",
+        "predicate": "favorite_city",
+        "value": "Copenhagen",
+        "kind": "preference",
+        "sensitivity": "public",
+        "source_type": "user_explicit",
+        "confidence": 0.99,
+        "evidence": evidence,
+    }
+
+
+authority_turn = CompletedMemoryTurn(
+    user_text="I live in Copenhagen",
+    assistant_text="Noted.",
+    source_ref="conversation:authority-hardening",
+)
+
+
+async def semantic_trap_extract(_turn):
+    return extraction_document(semantic_trap_row())
+
+
+hardened = asyncio.run(
+    MemoryCandidateExtractor(extract=semantic_trap_extract).extract(authority_turn)
+)[0]
+check(
+    hardened.review_status == "confirmed",
+    "full literal user-turn evidence may still gain confirmed review status",
+)
+check(
+    hardened.subject == "user"
+    and hardened.predicate == "verbatim_user_statement"
+    and hardened.value == authority_turn.user_text
+    and hardened.kind == "note"
+    and hardened.sensitivity == "private"
+    and hardened.confidence == 1.0,
+    "confirmed W01 memory discards model-authored semantic relation and classification",
+)
+check(
+    hardened.source_ref == "conversation:authority-hardening",
+    "authority hardening preserves caller-owned provenance",
+)
+
+
+async def partial_evidence_extract(_turn):
+    return extraction_document(semantic_trap_row(evidence="Copenhagen"))
+
+
+partial = asyncio.run(
+    MemoryCandidateExtractor(extract=partial_evidence_extract).extract(authority_turn)
+)[0]
+check(
+    partial.review_status == "pending"
+    and partial.predicate == "favorite_city"
+    and partial.value == "Copenhagen",
+    "entity-only literal evidence cannot auto-confirm a model-generated relation",
+)
+
+
+async def padded_evidence_extract(_turn):
+    return extraction_document(semantic_trap_row(evidence=" I live in Copenhagen "))
+
+
+padded = asyncio.run(
+    MemoryCandidateExtractor(extract=padded_evidence_extract).extract(authority_turn)
+)[0]
+check(
+    padded.review_status == "pending",
+    "extractor whitespace normalization cannot manufacture confirmed authority",
+)
 
 store.close()
 reopened = MemoryStore(path)

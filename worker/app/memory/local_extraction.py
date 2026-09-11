@@ -35,7 +35,13 @@ Schema:
 Rules:
 - Extract only information that is plausibly useful beyond this one turn.
 - For source_type=user_explicit, value MUST be a verbatim contiguous substring of
-  the user's text and evidence MUST be a verbatim user substring containing value.
+  the user's text and evidence MUST be verbatim user text containing value.
+- Use the ENTIRE exact user turn as evidence when the proposal is suitable for
+  automatic confirmation. Partial evidence may be returned, but it remains
+  pending because a substring cannot prove model-generated semantics.
+- The server owns confirmed meaning. Even when a user_explicit proposal qualifies,
+  subject/predicate/kind/sensitivity/confidence from this output are not trusted as
+  the confirmed claim; the server normalizes it to a private verbatim-user note.
 - If you normalize, summarize, combine, guess or infer anything, use source_type=inferred.
 - Sensitivity is only a proposal. Server policy may make it more restrictive.
 - Never return source_ref, review_status, ids, supersedes ids, operations or write instructions.

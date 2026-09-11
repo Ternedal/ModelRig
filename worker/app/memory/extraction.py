@@ -21,6 +21,8 @@ MAX_CANDIDATE_EVIDENCE_CHARS = 4_000
 KINDS = {"fact", "preference", "project", "relationship", "routine", "constraint", "note"}
 SENSITIVITIES = {"public", "operational", "private", "secret"}
 SOURCE_TYPES = {"user_explicit", "tool_observation", "imported", "inferred"}
+VERBATIM_USER_SUBJECT = "user"
+VERBATIM_USER_PREDICATE = "verbatim_user_statement"
 
 _CREDENTIAL_LABEL = re.compile(
     r"(?:^|[_\-\s])(?:password|passcode|passphrase|api[_\-\s]?key|"
@@ -121,10 +123,17 @@ class MemoryCandidateExtractor:
     supplied by the caller, and review_status is derived locally. The extractor
     cannot return ids, supersede targets or a write/correction/delete operation.
 
-    Sensitivity is also server-conservative: a model may cause an escalation to
+    Sensitivity is server-conservative: a model may cause an escalation to
     ``secret``, but it cannot declassify extracted user data. Every non-secret W01
     candidate is emitted as ``private`` until a later trusted review boundary
     deliberately changes that classification.
+
+    A further W01 authority rule applies to automatically confirmed memories:
+    literal grounding proves only what the user actually said, not model-authored
+    semantics. Therefore a confirmed candidate is normalized to a conservative
+    verbatim-user note whose value is the entire canonical user turn. Structured
+    subject/predicate/kind/confidence proposals remain pending unless a trusted
+    later review boundary approves them.
     """
 
     _TOP_LEVEL_KEYS = {"schema", "candidates"}
@@ -269,11 +278,13 @@ class MemoryCandidateExtractor:
             else "private"
         )
 
-        # The model never decides review authority. A user_explicit candidate can
-        # be confirmed only when both its evidence and exact value are literal
-        # substrings of the completed user turn. This intentionally sacrifices
-        # recall for authority: normalized/paraphrased/model-inferred values stay
-        # pending. Secret candidates are also review-pending even when explicit.
+        # The model never decides review authority. user_explicit proposals still
+        # need literal evidence and value containment, but those checks only prove
+        # the quoted user text. They do NOT prove a model-proposed relation such as
+        # "favorite_city=Copenhagen". Automatic confirmation therefore requires
+        # the evidence to be the entire canonical completed user turn. The server
+        # then discards model-owned semantics and confirms only that verbatim user
+        # statement as a conservative private note.
         review_status = "pending"
         if source_type == "user_explicit":
             if not evidence:
@@ -288,7 +299,18 @@ class MemoryCandidateExtractor:
                 raise MemoryExtractionError(
                     "user_explicit value is not present in its exact user evidence"
                 )
-            if sensitivity != "secret":
+
+            exact_entire_turn = (
+                raw.get("evidence") == evidence
+                and evidence == turn.user_text
+            )
+            if sensitivity != "secret" and exact_entire_turn:
+                subject = VERBATIM_USER_SUBJECT
+                predicate = VERBATIM_USER_PREDICATE
+                value = evidence
+                kind = "note"
+                sensitivity = "private"
+                confidence = 1.0
                 review_status = "confirmed"
 
         return MemoryCandidate(
