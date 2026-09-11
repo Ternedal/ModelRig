@@ -29,17 +29,22 @@ internal object Agent3ReplanPreviewPolicy {
     fun canApply(
         previewId: String,
         previewRunId: String,
+        previewFresh: Boolean,
         busy: Boolean,
         currentIntent: Agent3ReplanPreviewIntent?,
         previewIntent: Agent3ReplanPreviewIntent?,
         currentConnection: Agent3DevConnectionBinding?,
         previewConnection: Agent3DevConnectionBinding?,
     ): Boolean =
-        !busy &&
+        previewFresh &&
+            !busy &&
             previewId.isNotBlank() &&
             previewIntent != null &&
             currentIntent == previewIntent &&
             previewRunId == previewIntent.runId &&
             currentConnection != null &&
             currentConnection == previewConnection
+
+    fun shouldMarkExpired(previewId: String, previewFresh: Boolean): Boolean =
+        previewId.isNotBlank() && !previewFresh
 }
