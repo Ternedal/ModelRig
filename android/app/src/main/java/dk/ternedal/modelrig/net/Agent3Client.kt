@@ -143,6 +143,15 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val capabilityReceipt: CapabilityReceipt?,
     )
 
+    internal sealed interface ReviewedStartTransportResult {
+        data class Accepted(val envelope: RunEnvelope) : ReviewedStartTransportResult
+
+        data class RawReviewConflict(
+            val runId: String,
+            val returnedReviewReads: Boolean?,
+        ) : ReviewedStartTransportResult
+    }
+
     data class Event(
         val timestamp: Double,
         val kind: String,
@@ -218,6 +227,32 @@ class Agent3Client(baseUrl: String, private val token: String) {
         return envelope
     }
 
+    internal fun startReviewedPlanTransport(
+        planId: String,
+        expectedReviewReads: Boolean,
+        expectedCapabilityReceipt: CapabilityReceipt?,
+    ): ReviewedStartTransportResult {
+        val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
+        val envelope = parseRunEnvelope(root)
+        if (envelope.planId.isNullOrBlank() || envelope.planId != planId) {
+            throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")
+        }
+        if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 Start-svar: capability receipt matcher ikke previewet",
+            )
+        }
+        val returnedReviewReads = strictRawReviewReads(root)
+        return if (returnedReviewReads == expectedReviewReads) {
+            ReviewedStartTransportResult.Accepted(envelope)
+        } else {
+            ReviewedStartTransportResult.RawReviewConflict(
+                runId = envelope.run.id,
+                returnedReviewReads = returnedReviewReads,
+            )
+        }
+    }
+
     fun startPlan(planId: String): Run = startPlanEnvelope(planId).run
 
     fun getRun(runId: String): Run = getRunEnvelope(runId).run
@@ -231,6 +266,20 @@ class Agent3Client(baseUrl: String, private val token: String) {
             parseRunEnvelope(root, expectedRunId = runId),
             expectedReviewReads,
         )
+    }
+
+    internal fun getReviewedRunEnvelopeStrict(
+        runId: String,
+        expectedReviewReads: Boolean,
+    ): RunEnvelope {
+        val root = get("/api/v1/experimental/agent3/runs/${seg(runId)}")
+        val envelope = parseRunEnvelope(root, expectedRunId = runId)
+        if (strictRawReviewReads(root) != expectedReviewReads) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 run-svar: serverens Read review matcher ikke runnet",
+            )
+        }
+        return bindRunEnvelopeReview(envelope, expectedReviewReads)
     }
 
     fun listRuns(): List<Run> {
@@ -323,6 +372,9 @@ class Agent3Client(baseUrl: String, private val token: String) {
         }
         return envelope
     }
+
+    private fun strictRawReviewReads(root: JSONObject): Boolean? =
+        root.opt("review_reads").takeIf { it is Boolean } as? Boolean
 
     private fun get(path: String): JSONObject = execute(
         Request.Builder().url(base + path).get().header("Authorization", "Bearer $token").build(),
