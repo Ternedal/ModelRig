@@ -153,9 +153,7 @@ class CompletedTurnMemoryPersistence:
         self._validate_candidate_batch(candidates, bounded_turn)
 
         eligible = tuple(
-            item
-            for item in candidates
-            if _auto_persistable(item, bounded_turn)
+            item for item in candidates if _auto_persistable(item, bounded_turn)
         )
         deferred_count = len(candidates) - len(eligible)
         if not eligible:
@@ -308,11 +306,22 @@ def _auto_persistable(
         or candidate.evidence != turn.user_text
     ):
         return False
-    return not _looks_like_credential(
+    if _looks_like_credential(
         subject=candidate.subject,
         predicate=candidate.predicate,
         value=candidate.value,
         evidence=candidate.evidence,
+    ):
+        return False
+    # A custom extractor no longer carries the model-proposed subject/predicate
+    # labels that W01 used before normalizing a confirmed statement. Re-scan the
+    # bounded turn text as label-bearing input too. This is deliberately more
+    # conservative than auto-storing a password/token statement as private.
+    return not _looks_like_credential(
+        subject=turn.user_text,
+        predicate="",
+        value=turn.user_text,
+        evidence=turn.user_text,
     )
 
 
@@ -334,9 +343,28 @@ def _validate_plan_binding(
         raise CompletedTurnPersistenceError(
             "W03-A W02-A plan changed eligible candidate identity"
         )
-    if plan.receipt.considered_count != len(eligible):
+
+    counts = Counter(action.decision for action in plan.actions)
+    touched = tuple(
+        sorted(
+            {
+                action.existing_id
+                for action in plan.actions
+                if action.existing_id is not None
+            }
+        )
+    )
+    receipt = plan.receipt
+    if (
+        receipt.considered_count != len(eligible)
+        or receipt.create_count != counts["create"]
+        or receipt.dedupe_count != counts["dedupe"]
+        or receipt.supersede_count != counts["supersede"]
+        or receipt.skip_count != counts["skip"]
+        or receipt.touched_existing_ids != touched
+    ):
         raise CompletedTurnPersistenceError(
-            "W03-A W02-A receipt does not bind the eligible candidate count"
+            "W03-A W02-A receipt does not bind its actions exactly"
         )
 
 
@@ -410,6 +438,10 @@ def _parse_write_receipt(raw: Any, *, expected_count: int) -> CompletedTurnWrite
     if set(superseded_ids) & set(deduped_ids):
         raise CompletedTurnPersistenceError(
             "W03-A write receipt reuses superseded ids as dedupe ids"
+        )
+    if set(created_ids) & set(superseded_ids):
+        raise CompletedTurnPersistenceError(
+            "W03-A write receipt reuses a durable id across create and supersede roles"
         )
 
     replayed = raw.get("replayed")
