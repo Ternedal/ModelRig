@@ -91,15 +91,24 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         val current = preview ?: return
         val id = current.planId ?: return
         if (current.capabilityReceipt?.allowed == false || busy) return
+        val startClient = runCatching { client() }
+            .getOrElse {
+                error = it.message ?: "Forbindelsen er ugyldig"
+                return
+            }
         busy = true
         error = null
+        preview = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().startPlan(id) }
+                runCatching { startClient.startPlan(id) }
             }
             busy = false
             result.onSuccess { run = it }
-                .onFailure { error = it.message ?: "Kunne ikke starte planen" }
+                .onFailure {
+                    val detail = it.message ?: "Kunne ikke starte planen"
+                    error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
+                }
         }
     }
 
