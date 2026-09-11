@@ -100,6 +100,10 @@ run_support(
     "M4 protected exact lookup",
     "worker_agent3_memory_protected_exact_lookup.py",
 )
+run_support(
+    "M4 protected lookup drift",
+    "worker_agent3_memory_protected_lookup_drift.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
