@@ -30,10 +30,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.logic.Agent3ReadReviewResumeAuthority
 import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
 import dk.ternedal.modelrig.logic.Agent3ReviewPreviewIntent
 import dk.ternedal.modelrig.logic.Agent3ReviewPreviewPolicy
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
+import dk.ternedal.modelrig.logic.isAgent3ReadReviewResumeConsumed
 import dk.ternedal.modelrig.net.Agent3Client
 import dk.ternedal.modelrig.net.startReviewedPlanEnvelope
 import dk.ternedal.modelrig.ui.theme.KalivTheme
@@ -58,6 +60,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var runConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
     var runReviewReads by remember { mutableStateOf<Boolean?>(null) }
     var review by remember { mutableStateOf<Agent3Client.ReadReview?>(null) }
+    var consumedResumeAuthority by remember { mutableStateOf<Agent3ReadReviewResumeAuthority?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var resultBody by remember { mutableStateOf<String?>(null) }
@@ -144,6 +147,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 runConnection = null
                 runReviewReads = null
                 review = null
+                consumedResumeAuthority = null
                 resultBody = null
                 replanPreview = null
             }.onFailure { error = it.message ?: "Plan-preview fejlede" }
@@ -197,6 +201,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 runConnection = connection
                 runReviewReads = expectedReviewReads
                 review = it.readReview
+                consumedResumeAuthority = null
             }.onFailure {
                 val detail = it.message ?: "Planen kunne ikke startes"
                 error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
@@ -368,6 +373,14 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
 
             run?.let { current ->
                 val checkpoint = review
+                val resumeAuthority = Agent3ReadReviewResumeAuthority.capture(
+                    current.id,
+                    checkpoint?.completedStepId,
+                )
+                val resumeConsumed = isAgent3ReadReviewResumeConsumed(
+                    resumeAuthority,
+                    consumedResumeAuthority,
+                )
                 Spacer(Modifier.height(16.dp))
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
@@ -447,24 +460,41 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     )
                 }
                 if (checkpoint?.waiting == true) {
+                    if (resumeConsumed) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Fortsæt er allerede sendt for dette checkpoint. Samme checkpoint genbruges ikke; Replan eller Stop er stadig tilgængelig.",
+                            color = KalivTheme.colors.caps,
+                            fontSize = 12.sp,
+                        )
+                    }
                     Spacer(Modifier.height(14.dp))
                     dk.ternedal.modelrig.ui.chat.Agent3CheckpointActions(
                         busy = busy,
+                        continueEnabled = !resumeConsumed,
                         onContinue = {
                             val connection = runConnection
                             val expectedReviewReads = runReviewReads
+                            val authority = resumeAuthority
                             if (connection == null) {
                                 error = "Run-forbindelsen mangler"
                             } else if (expectedReviewReads == null) {
                                 error = "Run review-mode mangler"
+                            } else if (authority == null) {
+                                error = "Read-checkpoint-authority mangler; opdatér run-status"
+                            } else if (resumeConsumed) {
+                                error = "Fortsæt er allerede sendt for dette checkpoint; opdatér run-status"
                             } else if (!busy) {
+                                consumedResumeAuthority = authority
                                 busy = true
+                                error = null
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
                                         runCatching {
                                             client(connection).resumeRunEnvelope(
-                                                current.id,
-                                                expectedReviewReads,
+                                                runId = current.id,
+                                                expectedReviewReads = expectedReviewReads,
+                                                expectedCompletedStepId = authority.completedStepId,
                                             )
                                         }
                                     }
@@ -474,7 +504,10 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                                         resultBody = null
                                         replanPreview = null
                                         error = null
-                                    }.onFailure { error = it.message }
+                                    }.onFailure {
+                                        val detail = it.message ?: "Kunne ikke fortsætte runnet"
+                                        error = "$detail. Resume-resultatet kan allerede være ændret på serveren; dette checkpoint er forbrugt lokalt og kan ikke genbruges. Opdatér run-status."
+                                    }
                                     val fresh = withContext(Dispatchers.IO) {
                                         runCatching {
                                             client(connection).getRunEnvelope(
