@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 
 from ..netguard import is_loopback
 from .context_api import MEMORY4_CONTEXT_PREFIX
@@ -42,6 +42,23 @@ def _require_loopback(request: Request, allowed: LoopbackPolicy) -> None:
         )
 
 
+async def _strict_body(request: Request) -> CompletedTurnWriteBody:
+    """Validate without reflecting private invalid input through FastAPI's 422 body."""
+    try:
+        payload = await request.json()
+        return CompletedTurnWriteBody.model_validate(payload)
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="invalid memory write request",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="invalid memory write request",
+        ) from exc
+
+
 def build_memory4_write_router(
     service: MemoryCompletedTurnWriteService,
     *,
@@ -55,11 +72,10 @@ def build_memory4_write_router(
     router = APIRouter(prefix=MEMORY4_CONTEXT_PREFIX, tags=["experimental-memory4"])
 
     @router.post(MEMORY4_WRITE_ROUTE)
-    async def write_completed_turn(
-        body: CompletedTurnWriteBody,
-        request: Request,
-    ) -> dict[str, object]:
+    async def write_completed_turn(request: Request) -> dict[str, object]:
+        # Admission happens before reading/parsing the request body.
         _require_loopback(request, loopback_allowed)
+        body = await _strict_body(request)
         try:
             receipt = await service.commit_completed_turn(
                 CompletedMemoryTurn(
