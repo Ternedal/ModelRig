@@ -74,6 +74,11 @@ internal fun presentAgent3CockpitInteraction(
     )
 }
 
+internal fun shouldBlockAgent3CockpitForCurrentConnection(
+    currentConnectionUnavailable: Boolean,
+    hasRun: Boolean,
+): Boolean = currentConnectionUnavailable && !hasRun
+
 internal fun isAgent3CockpitWaitingForConfirmation(runState: String?): Boolean =
     runState?.lowercase() in setOf("waiting_confirmation", "awaiting_confirmation")
 
