@@ -26,7 +26,7 @@ internal fun validateReviewedReplanCheckpointShape(raw: JsonObject) {
  * This surface does not carry immutable pre-Apply review-mode authority, so an
  * idle checkpoint may legitimately be enabled or disabled. A waiting checkpoint
  * is authoritative only when it exactly describes the returned run's pending
- * read window.
+ * read window and preserves the successful read checkpoint immediately before it.
  */
 internal fun validateReviewedReplanCheckpoint(
     raw: JsonObject,
@@ -69,7 +69,7 @@ internal fun validateReviewedReplanCheckpoint(
         review.windowStart != start ||
         review.windowEnd != end ||
         start != run.currentStep ||
-        start < 0 ||
+        start <= 0 ||
         end <= start ||
         end > run.steps.size
     ) {
@@ -92,6 +92,17 @@ internal fun validateReviewedReplanCheckpoint(
         review.completedTool != completedTool
     ) {
         checkpointMismatch("read_review completed checkpoint")
+    }
+
+    val completed = run.steps.getOrNull(start - 1)
+    if (
+        completed == null ||
+        completed.id != completedStepId ||
+        completed.tool != completedTool ||
+        completed.risk != "read" ||
+        completed.state != "succeeded"
+    ) {
+        checkpointMismatch("read_review completed checkpoint run binding")
     }
 }
 
