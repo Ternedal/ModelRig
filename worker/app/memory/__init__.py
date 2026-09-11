@@ -1,3 +1,11 @@
+from .completed_turn import (
+    COMPLETED_TURN_PERSISTENCE_RECEIPT_SCHEMA,
+    CONSOLIDATION_WRITE_RECEIPT_SCHEMA,
+    CompletedTurnMemoryPersistence,
+    CompletedTurnPersistenceError,
+    CompletedTurnPersistenceReceipt,
+    CompletedTurnWriteReceipt,
+)
 from .consolidation import (
     MAX_CONSOLIDATION_CANDIDATES,
     MAX_CONSOLIDATION_EXISTING,
@@ -70,6 +78,12 @@ async def extract_memory_candidates_local(
 
 
 __all__ = [
+    "COMPLETED_TURN_PERSISTENCE_RECEIPT_SCHEMA",
+    "CONSOLIDATION_WRITE_RECEIPT_SCHEMA",
+    "CompletedTurnMemoryPersistence",
+    "CompletedTurnPersistenceError",
+    "CompletedTurnPersistenceReceipt",
+    "CompletedTurnWriteReceipt",
     "ConsolidationAction",
     "ConsolidationPlan",
     "ConsolidationReceipt",
