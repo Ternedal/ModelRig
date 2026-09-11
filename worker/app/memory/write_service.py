@@ -10,10 +10,13 @@ from .consolidation import (
     MemoryConsolidator,
 )
 from .extraction import (
+    VERBATIM_USER_PREDICATE,
+    VERBATIM_USER_SUBJECT,
     CompletedMemoryTurn,
     MemoryCandidate,
     MemoryCandidateExtractor,
     MemoryExtractionError,
+    _looks_like_credential,
 )
 
 
@@ -104,8 +107,9 @@ class MemoryCompletedTurnWriteService:
     storage-specific W02 composition. This class owns neither model nor storage
     configuration. It validates the completed turn with W01's exact hard bounds
     before the extractor can see it, revalidates the extracted candidate batch
-    through W02-A before the committer can see it, then validates the value-free
-    durable receipt before exposing a W03 receipt.
+    through W02-A and rebinds provenance/confirmed authority to that exact turn
+    before the committer can see it, then validates the value-free durable receipt
+    before exposing a W03 receipt.
     """
 
     def __init__(
@@ -162,6 +166,13 @@ class MemoryCompletedTurnWriteService:
                 "W01 candidates are outside the W02 authority boundary"
             ) from exc
 
+        # W02 deliberately does not know which completed turn produced a candidate.
+        # Reconstruct the W01 invariants that can be proven from this bounded turn
+        # before an injected committer gets durable-write authority. This prevents a
+        # custom/faulty extractor from replaying another turn's source_ref or from
+        # manufacturing a canonical-looking confirmed statement for different text.
+        self._validate_candidate_binding(candidates, bounded_turn)
+
         if not candidates:
             return CompletedTurnWriteReceipt(
                 schema=TURN_WRITE_RECEIPT_SCHEMA,
@@ -198,6 +209,66 @@ class MemoryCompletedTurnWriteService:
             replayed=validated.replayed,
             sent_to_store=validated.sent_to_store,
         )
+
+    @staticmethod
+    def _validate_candidate_binding(
+        candidates: tuple[MemoryCandidate, ...],
+        turn: CompletedMemoryTurn,
+    ) -> None:
+        for candidate in candidates:
+            if candidate.source_ref != turn.source_ref:
+                raise MemoryTurnWriteError(
+                    "candidate source_ref is not bound to the completed turn"
+                )
+
+            if candidate.source_type == "user_explicit":
+                if not candidate.evidence or candidate.evidence not in turn.user_text:
+                    raise MemoryTurnWriteError(
+                        "user-explicit evidence is not grounded in the completed turn"
+                    )
+                if candidate.value not in candidate.evidence:
+                    raise MemoryTurnWriteError(
+                        "user-explicit value is not grounded in its evidence"
+                    )
+
+            if candidate.review_status != "confirmed":
+                continue
+
+            canonical_confirmed = (
+                candidate.subject == VERBATIM_USER_SUBJECT
+                and candidate.predicate == VERBATIM_USER_PREDICATE
+                and candidate.kind == "note"
+                and candidate.sensitivity == "private"
+                and candidate.source_type == "user_explicit"
+                and candidate.source_ref == turn.source_ref
+                and not isinstance(candidate.confidence, bool)
+                and float(candidate.confidence) == 1.0
+                and candidate.value == candidate.evidence
+                and candidate.evidence == turn.user_text
+            )
+            if not canonical_confirmed:
+                raise MemoryTurnWriteError(
+                    "confirmed candidate is not bound to W01 verbatim turn authority"
+                )
+
+            # W01 examines proposed labels before canonicalizing a confirmed
+            # verbatim statement. A custom extractor can hide those labels, so W03
+            # conservatively rechecks both candidate fields and the bounded turn
+            # text before allowing confirmed durable authority.
+            if _looks_like_credential(
+                subject=candidate.subject,
+                predicate=candidate.predicate,
+                value=candidate.value,
+                evidence=candidate.evidence,
+            ) or _looks_like_credential(
+                subject=turn.user_text,
+                predicate="",
+                value=turn.user_text,
+                evidence=turn.user_text,
+            ):
+                raise MemoryTurnWriteError(
+                    "credential-like completed turn cannot gain confirmed memory authority"
+                )
 
     @classmethod
     def _validate_durable_write(
