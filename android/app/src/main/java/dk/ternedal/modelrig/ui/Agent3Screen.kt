@@ -58,17 +58,10 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
     var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
     var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
+    var runConnection by remember { mutableStateOf<Agent3PreviewConnection?>(null) }
     var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-
-    fun client(): Agent3Client {
-        val base = store.baseUrl?.takeIf { it.isNotBlank() }
-            ?: error("Ingen rig-URL er gemt")
-        val token = store.token?.takeIf { it.isNotBlank() }
-            ?: error("Ingen device-token er gemt")
-        return Agent3Client(base, token)
-    }
 
     fun currentConnection(): Agent3PreviewConnection =
         requireNotNull(Agent3PreviewConnection.capture(store.baseUrl, store.token)) {
@@ -101,6 +94,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         busy = true
         error = null
         run = null
+        runConnection = null
         clearPreviewAuthority()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -167,22 +161,29 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
                 runCatching { client(connection).startPlan(id) }
             }
             busy = false
-            result.onSuccess { run = it }
-                .onFailure {
-                    val detail = it.message ?: "Kunne ikke starte planen"
-                    error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
-                }
+            result.onSuccess { started ->
+                run = started
+                runConnection = connection
+            }.onFailure {
+                val detail = it.message ?: "Kunne ikke starte planen"
+                error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
+            }
         }
     }
 
     fun refreshRun() {
         val id = run?.id ?: return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler; opdatering er afvist lokalt"
+            return
+        }
         if (busy) return
         busy = true
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().getRun(id) }
+                runCatching { client(connection).getRun(id) }
             }
             busy = false
             result.onSuccess { run = it }
@@ -196,13 +197,18 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         val stepId = step.id ?: return
         val digest = step.confirmationDigest ?: return
         val authority = Agent3ConfirmationAuthority.capture(current.id, stepId, digest) ?: return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler; godkendelsen er afvist lokalt"
+            return
+        }
         if (busy || isAgent3ConfirmationAuthorityConsumed(authority, consumedConfirmation)) return
         busy = true
         error = null
         consumedConfirmation = authority
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().confirm(current.id, stepId, digest, approve) }
+                runCatching { client(connection).confirm(current.id, stepId, digest, approve) }
             }
             busy = false
             result.onSuccess { run = it }
@@ -215,12 +221,17 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
 
     fun stopPlan() {
         val id = run?.id ?: return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler; stop er afvist lokalt"
+            return
+        }
         if (busy) return
         busy = true
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().cancel(id) }
+                runCatching { client(connection).cancel(id) }
             }
             busy = false
             result.onSuccess { run = it }
