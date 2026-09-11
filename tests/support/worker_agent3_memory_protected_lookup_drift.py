@@ -7,7 +7,12 @@ import tempfile
 from pathlib import Path
 
 from app.agent3.memory import MemoryStore
-from app.agent3.memory_protected_lookup import LOOKUP_COLUMN
+from app.agent3.memory_protected_leak_gate import scan_sensitive_schema_objects
+from app.agent3.memory_protected_lookup import (
+    LOOKUP_COLUMN,
+    LOOKUP_INSERT_GUARD,
+    LOOKUP_UPDATE_GUARD,
+)
 from app.agent3.memory_protected_lookup_migration import ProtectedMemoryLookupMigrator
 from app.agent3.memory_protected_writer import (
     ProtectedMemoryWriteError,
@@ -101,6 +106,19 @@ def codec() -> MemoryProtectionCodec:
     return MemoryProtectionCodec(DriftAeadProvider())
 
 
+def raw_guarded_update(path: Path, sql: str, args: tuple[object, ...]) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        try:
+            connection.execute(sql, args)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+    finally:
+        connection.close()
+
+
 with tempfile.TemporaryDirectory(prefix="kaliv-w02c-drift-") as raw:
     path = Path(raw) / "memory.db"
     store = MemoryStore(str(path))
@@ -133,19 +151,63 @@ with tempfile.TemporaryDirectory(prefix="kaliv-w02c-drift-") as raw:
             f"SELECT {LOOKUP_COLUMN} FROM agent_memories WHERE id=?",
             (row.id,),
         ).fetchone()[0]
-        connection.execute(
-            f"UPDATE agent_memories SET {LOOKUP_COLUMN}=NULL WHERE id=?",
-            (row.id,),
-        )
-        connection.commit()
+        triggers = {
+            item[0]
+            for item in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+        }
     finally:
         connection.close()
     check(
         isinstance(before, str) and len(before) == 64,
         "completed lookup begins with a durable digest",
     )
+    check(
+        {LOOKUP_INSERT_GUARD, LOOKUP_UPDATE_GUARD}.issubset(triggers),
+        "completed migration installs both lookup guard triggers",
+    )
+    check(
+        scan_sensitive_schema_objects(path) == [],
+        "lookup guards reference no protected/plaintext payload columns",
+    )
+
     expect_error(
-        "writer refuses completed lookup state with a missing active-private digest",
+        "guard blocks removal of an active-private lookup digest",
+        lambda: raw_guarded_update(
+            path,
+            f"UPDATE agent_memories SET {LOOKUP_COLUMN}=NULL WHERE id=?",
+            (row.id,),
+        ),
+        sqlite3.IntegrityError,
+    )
+    expect_error(
+        "guard blocks lifecycle drift that would retain lookup authority",
+        lambda: raw_guarded_update(
+            path,
+            "UPDATE agent_memories SET lifecycle_status='superseded' WHERE id=?",
+            (row.id,),
+        ),
+        sqlite3.IntegrityError,
+    )
+
+    connection = sqlite3.connect(path)
+    try:
+        after = connection.execute(
+            f"SELECT lifecycle_status,{LOOKUP_COLUMN} FROM agent_memories WHERE id=?",
+            (row.id,),
+        ).fetchone()
+        connection.execute(f"DROP TRIGGER {LOOKUP_INSERT_GUARD}")
+        connection.commit()
+    finally:
+        connection.close()
+    check(
+        after[0] == "active" and after[1] == before,
+        "failed drift attempts leave the protected row unchanged",
+    )
+
+    expect_error(
+        "writer refuses a completed lookup whose guard schema was removed",
         lambda: ProtectedMemoryWriter(path, codec()),
         ProtectedMemoryWriteError,
     )
@@ -153,26 +215,11 @@ with tempfile.TemporaryDirectory(prefix="kaliv-w02c-drift-") as raw:
     repaired = ProtectedMemoryLookupMigrator(path, codec()).migrate()
     check(
         repaired.complete and repaired.remaining_rows == 0,
-        "offline lookup migration repairs missing digest without replacing the store",
+        "offline lookup migration reinstalls missing guards with the same store",
     )
     repaired_writer = ProtectedMemoryWriter(path, codec())
     repaired_writer.close()
-    check(True, "writer reopens after offline lookup repair")
-
-    connection = sqlite3.connect(path)
-    try:
-        connection.execute(
-            f"UPDATE agent_memories SET lifecycle_status='superseded' WHERE id=?",
-            (row.id,),
-        )
-        connection.commit()
-    finally:
-        connection.close()
-    expect_error(
-        "writer refuses an ineligible row that still retains a lookup digest",
-        lambda: ProtectedMemoryWriter(path, codec()),
-        ProtectedMemoryWriteError,
-    )
+    check(True, "writer reopens after offline lookup guard repair")
 
 print(f"\n===== M4 PROTECTED LOOKUP DRIFT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
