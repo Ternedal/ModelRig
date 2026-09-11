@@ -92,7 +92,7 @@ class Agent3ReplanRemovedToolsEvidenceTest {
         ),
         plan = listOf(
             Agent3Step(
-                id = "proposal-read",
+                id = "read-2",
                 tool = "list_models",
                 risk = "read",
                 sensitivity = "internal",

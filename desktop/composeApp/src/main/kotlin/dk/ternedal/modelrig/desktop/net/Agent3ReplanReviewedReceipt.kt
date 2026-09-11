@@ -25,6 +25,11 @@ internal data class ReviewedReplanReceiptAuthority(
  * worker still derives removed ids and tools from the same ordered removed-step
  * list, so reviewed Apply can prove typed/nonblank shape plus exact cardinality
  * and raw-to-typed preservation without inventing exact name authority.
+ *
+ * Normal server-authored reviewed Previews also expose the replacement step ids.
+ * When that complete ordered id list is present, Apply must preserve it exactly.
+ * Directly constructed compatibility previews may omit ids, in which case the
+ * existing cardinality plus committed-run binding remains fail-closed evidence.
  */
 internal fun validateReviewedReplanReceiptShape(
     raw: JsonObject,
@@ -38,6 +43,10 @@ internal fun validateReviewedReplanReceiptShape(
     }
     val expectedNewEnd = expectedNewEndLong.toInt()
     val expectedAddedTools = reviewed.plan.map { it.tool }
+    val reviewedAddedStepIds = reviewed.plan.mapNotNull { step ->
+        step.id?.takeIf { it.isNotBlank() }
+    }
+    val hasCompleteReviewedAddedStepIds = reviewedAddedStepIds.size == reviewed.plan.size
 
     val start = raw.requireReceiptInt("start")
     val oldEnd = raw.requireReceiptInt("old_end")
@@ -65,6 +74,9 @@ internal fun validateReviewedReplanReceiptShape(
         receiptMismatch("replan.immutable_tail_ids")
     }
     if (addedStepIds.size != reviewed.plan.size) {
+        receiptMismatch("replan.added_step_ids")
+    }
+    if (hasCompleteReviewedAddedStepIds && addedStepIds != reviewedAddedStepIds) {
         receiptMismatch("replan.added_step_ids")
     }
     if (addedTools != expectedAddedTools) {
