@@ -1,8 +1,9 @@
 # Agent 4 identity and ownership contract
 
 **Owner:** Sol  
-**Runtime status:** dormant and caller-driven  
-**Authoritative branch prefix:** `agent/a4-*`
+**Runtime status:** dormant, caller-driven and default-off  
+**Authoritative branch prefix:** `agent/a4-*`  
+**Status reviewed:** 2026-09-11
 
 ## Ownership
 
@@ -15,7 +16,7 @@ Sol owns:
 Host/backend/client integration outside those paths remains Claude-owned. Shared
 integration boundaries and `HANDOFF.md` require parity evidence and coordination.
 
-## Stable work identities
+## Foundation identities
 
 | ID | Scope |
 |---|---|
@@ -33,30 +34,66 @@ integration boundaries and `HANDOFF.md` require parity evidence and coordination
 | `A4-12` | first-class directly addressable evidence records bound to validated timeline heads |
 | `A4-13` | bounded hash-bound evidence query paging and transport-independent operator reads |
 
+These IDs remain the foundation, but **they are no longer the end of the implemented chain**.
+
+## Current read-product and snapshot chain
+
+The later Agent 4 work moved the dormant foundation into a narrow, still-default-off product-read path without granting writer activation.
+
+```mermaid
+flowchart LR
+    F["A4-01…A4-13\nfoundation + evidence"]
+    P["A4-15\nproduction-read bootstrap"]
+    R["A4-18R\nphysical read-product campaign"]
+    C["A4-19 / A4-20\nsnapshot-bound paging\n+ stale-response invalidation"]
+    N["A4-21\nnarrow production read context\nno mutation runtime exposed"]
+    S["A4-25a…e\nserver-side immutable snapshot authority\n+ Android snapshot/race consumer"]
+    Q["A4-25f\nphysical Windows + Pixel qualification"]
+    GO["separate human GO / activation decision"]
+
+    F --> P --> R --> C --> N --> S --> Q --> GO
+
+    classDef pending stroke-dasharray: 5 3;
+    class Q pending;
+    class GO pending;
+```
+
+Key current documents:
+
+- `AGENT_4_A4_15_PRODUCTION_READ_BOOTSTRAP.md` — production-read integration boundary;
+- `AGENT_4_A4_19_CAMPAIGN_LIST_PAGING.md` — server-verified, hash-bound snapshot paging;
+- `AGENT_4_A4_25_SERVER_SNAPSHOT_AUTHORITY.md` — immutable server-side snapshot authority and the concurrency boundary;
+- `agent4/A4-18R_PHYSICAL_READ_PRODUCT.md` — physical read-product qualification runbook;
+- `agent4/A4-25F_PHYSICAL_QUALIFICATION_RUNBOOK.md` — isolated snapshot-authority physical qualification.
+
+A4-25a through A4-25e are software/contract work. A4-25f is deliberately different: it is physical qualification evidence. Passing software CI does not synthesize that evidence.
+
+## Production-read boundary
+
+The only production-shaped Agent 4 surface remains **read-only and opt-in**:
+
+- `KALIV_AGENT4_OPERATOR_API` is default-off;
+- the backend only proxies the narrow read surface;
+- a paired device additionally needs the explicit `agent4:read` grant;
+- A4-21 production composition exposes a narrow `Agent4OperatorReadContext`, not the full lifecycle/scheduler/resource/handoff/recovery runtime;
+- snapshot reads are bound to server-side immutable authority roots rather than client-created consistency claims.
+
+No import, constructor or read request starts a cadence, dispatches Agent 3 work or grants lifecycle mutation authority.
+
+## Physical acceptance is still separate
+
+The A4-18R and A4-25f runbooks are **qualification procedures, not proof that a physical campaign has happened**. A completed run must be bound to the exact qualified repository revision, real Windows/Pixel execution, cleanup evidence and an explicit human GO/NO-GO decision.
+
+Historical qualified target SHAs remain useful evidence for the campaigns they describe, but they are not automatically authority for a later `main`. Re-anchoring a future physical campaign to a newer release/current-main candidate is a separate qualification step, not a documentation shortcut.
+
 ## Retired aliases
 
-Early draft PRs used ModelRig task numbers `T-030` through `T-034` for the five
-Agent 4 scopes. Those numbers already belong to unrelated Agent 3/ROADMAP work
-and are retired as Agent 4 identities.
+Early draft PRs used ModelRig task numbers `T-030` through `T-034` for Agent 4 scopes. Those numbers already belong to unrelated Agent 3/ROADMAP work and are retired as Agent 4 identities.
 
-Historical PR numbers and Git branch refs remain useful provenance, but they do
-not define the work identity. New branches, docs, reviews and follow-on slices
-must use the `A4-*` IDs and `agent/a4-*` prefix.
+Historical PR numbers and Git branch refs remain provenance, but they do not define the work identity. New Agent 4 work uses the `A4-*` identity family and must fit the single reference architecture in `AGENT_4_ARCHITECTURE_DECISIONS.md`.
 
-## Activation boundary
+## Dormancy invariant
 
-The Agent 4 package remains dormant. Importing it starts no thread, timer, host
-cadence, network request or Agent 3 work. A4-06 adds explicit filesystem and
-caller-driven delivery operations; A4-07 adds read-only query composition;
-A4-08 adds only a bounded caller-driven batch wrapper; A4-09 wires these with the
-lifecycle services but performs no recovery, dispatch or intervention itself;
-A4-10 adds only bounded read composition over the same object graph; A4-11 stores
-audit-projection intents with authoritative campaign state and reconciles them
-only when a caller invokes a state-writing service or `reconcile_projections()`;
-A4-12 stores first-class evidence records only when a caller explicitly invokes
-`record(...)`, and it mounts no route or collection cadence; A4-13 adds only
-bounded, hash-bound reads over those existing records and persists no cursor or
-operator state.
-None subscribes to the event bus, mounts a runtime or activates recurring work.
-Any future host integration or recurring loop is a separate integration decision
-and must be tested against the existing dormant contracts.
+The Agent 4 package remains dormant. Importing it starts no thread, timer, host cadence, network request or Agent 3 work. Storage does not own subscribers, application-driven polling remains forbidden, and side effects require explicit caller action through the governed handoff boundary.
+
+Physical qualification, product activation and recurring orchestration are separate authorities. None is implied by the existence of the software stack.
