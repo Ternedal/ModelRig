@@ -130,7 +130,9 @@ class Agent3ReviewedStartReadReviewBindingTest {
                 )
         }
         assertEquals(
-            "Invalid Agent 3.0 Start envelope: read_review state does not match reviewed intent",
+            "Invalid Agent 3.0 Start envelope: read_review state does not match reviewed intent. " +
+                "Fresh run recovery failed: Invalid Agent 3.0 run envelope: " +
+                "read_review state does not match reviewed run",
             error.message,
         )
     }
