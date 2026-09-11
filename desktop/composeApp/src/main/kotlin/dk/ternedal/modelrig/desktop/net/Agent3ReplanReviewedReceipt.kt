@@ -9,6 +9,7 @@ internal data class ReviewedReplanReceiptAuthority(
     val oldEnd: Int,
     val newEnd: Int,
     val removedStepIds: List<String>,
+    val removedTools: List<String>,
     val addedStepIds: List<String>,
     val addedTools: List<String>,
     val immutablePrefixIds: List<String>,
@@ -18,6 +19,12 @@ internal data class ReviewedReplanReceiptAuthority(
 /**
  * Bind every deterministic Apply-receipt field that the reviewed Preview can
  * prove before Kotlin DTO defaults are allowed to represent the server result.
+ *
+ * `removedTools` is intentionally weaker evidence than the other fields: the
+ * Preview exposes removable step ids but not their original tool names. The
+ * worker still derives removed ids and tools from the same ordered removed-step
+ * list, so reviewed Apply can prove typed/nonblank shape plus exact cardinality
+ * and raw-to-typed preservation without inventing exact name authority.
  */
 internal fun validateReviewedReplanReceiptShape(
     raw: JsonObject,
@@ -36,6 +43,7 @@ internal fun validateReviewedReplanReceiptShape(
     val oldEnd = raw.requireReceiptInt("old_end")
     val newEnd = raw.requireReceiptInt("new_end")
     val removedStepIds = raw.requireReceiptStringArray("removed_step_ids")
+    val removedTools = raw.requireReceiptStringArray("removed_tools")
     val addedStepIds = raw.requireReceiptStringArray("added_step_ids")
     val addedTools = raw.requireReceiptStringArray("added_tools")
     val immutablePrefixIds = raw.requireReceiptStringArray("immutable_prefix_ids")
@@ -46,6 +54,9 @@ internal fun validateReviewedReplanReceiptShape(
     if (newEnd != expectedNewEnd) receiptMismatch("replan.new_end")
     if (removedStepIds != reviewed.window.removableStepIds) {
         receiptMismatch("replan.removed_step_ids")
+    }
+    if (removedTools.size != removedStepIds.size) {
+        receiptMismatch("replan.removed_tools")
     }
     if (immutablePrefixIds != reviewed.window.immutablePrefixIds) {
         receiptMismatch("replan.immutable_prefix_ids")
@@ -65,6 +76,7 @@ internal fun validateReviewedReplanReceiptShape(
         oldEnd = oldEnd,
         newEnd = newEnd,
         removedStepIds = removedStepIds,
+        removedTools = removedTools,
         addedStepIds = addedStepIds,
         addedTools = addedTools,
         immutablePrefixIds = immutablePrefixIds,
@@ -73,8 +85,9 @@ internal fun validateReviewedReplanReceiptShape(
 }
 
 /**
- * Prove that the typed receipt preserved the raw authority and that its newly
- * added step ids/tools are exactly the committed replacement slice in the run.
+ * Prove that the typed receipt preserved the raw authority/evidence and that its
+ * newly added step ids/tools are exactly the committed replacement slice in the
+ * run.
  */
 internal fun validateReviewedReplanReceiptBinding(
     authority: ReviewedReplanReceiptAuthority,
@@ -86,6 +99,7 @@ internal fun validateReviewedReplanReceiptBinding(
         receipt.oldEnd != authority.oldEnd ||
         receipt.newEnd != authority.newEnd ||
         receipt.removedStepIds != authority.removedStepIds ||
+        receipt.removedTools != authority.removedTools ||
         receipt.addedStepIds != authority.addedStepIds ||
         receipt.addedTools != authority.addedTools ||
         receipt.immutablePrefixIds != authority.immutablePrefixIds ||
