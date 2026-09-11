@@ -80,7 +80,7 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/models/unload", s.authMW(http.HandlerFunc(s.handleModelsUnload)))
 	s.mux.Handle("POST /api/v1/models/pull", s.authMW(http.HandlerFunc(s.handleModelsPull)))
 	s.mux.Handle("DELETE /api/v1/models/delete", s.authMW(http.HandlerFunc(s.handleModelsDelete)))
-	s.mux.Handle("POST /api/v1/chat", s.authMW(http.HandlerFunc(s.handleChat)))
+	s.mux.Handle("POST /api/v1/chat", s.authMW(http.HandlerFunc(s.handleMemory4Chat)))
 	s.mux.Handle("POST /api/v1/rag/query", s.authMW(http.HandlerFunc(s.handleRagQuery)))
 	s.mux.Handle("POST /api/v1/rag/ingest", s.authMW(http.HandlerFunc(s.handleRagIngest)))
 	s.mux.Handle("POST /api/v1/rag/ingest/pdf", s.authMW(http.HandlerFunc(s.handleRagIngestPdf)))
