@@ -176,26 +176,31 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         ) return
         val planId = currentPreview.planId ?: return
         val connection = boundConnection ?: return
+        val expectedReviewReads = currentPreview.reviewReads
+        val expectedCapabilityReceipt = currentPreview.capabilityReceipt
         busy = true
         error = null
+        clearPreviewAuthority()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     client(connection).startReviewedPlanEnvelope(
                         planId = planId,
-                        expectedReviewReads = currentPreview.reviewReads,
-                        expectedCapabilityReceipt = currentPreview.capabilityReceipt,
+                        expectedReviewReads = expectedReviewReads,
+                        expectedCapabilityReceipt = expectedCapabilityReceipt,
                     )
                 }
             }
             busy = false
             result.onSuccess {
-                clearPreviewAuthority()
                 run = it.run
                 runConnection = connection
-                runReviewReads = currentPreview.reviewReads
+                runReviewReads = expectedReviewReads
                 review = it.readReview
-            }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
+            }.onFailure {
+                val detail = it.message ?: "Planen kunne ikke startes"
+                error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
+            }
         }
     }
 
