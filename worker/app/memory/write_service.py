@@ -9,7 +9,12 @@ from .consolidation import (
     MemoryConsolidationError,
     MemoryConsolidator,
 )
-from .extraction import CompletedMemoryTurn, MemoryCandidate, MemoryExtractionError
+from .extraction import (
+    CompletedMemoryTurn,
+    MemoryCandidate,
+    MemoryCandidateExtractor,
+    MemoryExtractionError,
+)
 
 
 TURN_WRITE_RECEIPT_SCHEMA = "kaliv-memory-completed-turn-write-receipt/v1"
@@ -97,9 +102,10 @@ class MemoryCompletedTurnWriteService:
 
     The extractor must be a W01-shaped adapter and the committer must be a
     storage-specific W02 composition. This class owns neither model nor storage
-    configuration. It revalidates the extracted candidate batch through W02-A
-    before the committer can see it, then validates the value-free durable receipt
-    before exposing a W03 receipt.
+    configuration. It validates the completed turn with W01's exact hard bounds
+    before the extractor can see it, revalidates the extracted candidate batch
+    through W02-A before the committer can see it, then validates the value-free
+    durable receipt before exposing a W03 receipt.
     """
 
     def __init__(
@@ -122,8 +128,17 @@ class MemoryCompletedTurnWriteService:
         if not isinstance(turn, CompletedMemoryTurn):
             raise MemoryTurnWriteError("completed turn has invalid type")
 
+        # Reuse W01's canonical turn validation before an injected extractor gets
+        # access to any completed-turn data. Product extraction validates again;
+        # the duplicate check is intentional so a faulty adapter cannot widen
+        # W01's user/assistant/source_ref bounds.
         try:
-            extracted = self._extract(turn)
+            bounded_turn = MemoryCandidateExtractor._validate_turn(turn)
+        except MemoryExtractionError as exc:
+            raise MemoryTurnWriteError("completed turn is outside W01 bounds") from exc
+
+        try:
+            extracted = self._extract(bounded_turn)
             if not inspect.isawaitable(extracted):
                 raise MemoryTurnWriteError("completed-turn extractor must be async")
             candidates = await extracted
@@ -202,11 +217,15 @@ class MemoryCompletedTurnWriteService:
             raise MemoryTurnWriteError(
                 "durable receipt does not cover the extracted candidate batch"
             )
-        if isinstance(value.skipped_count, bool) or not isinstance(
-            value.skipped_count, int
-        ) or value.skipped_count < 0:
+        if (
+            isinstance(value.skipped_count, bool)
+            or not isinstance(value.skipped_count, int)
+            or value.skipped_count < 0
+        ):
             raise MemoryTurnWriteError("durable skipped_count is invalid")
-        if not isinstance(value.replayed, bool) or not isinstance(value.sent_to_store, bool):
+        if not isinstance(value.replayed, bool) or not isinstance(
+            value.sent_to_store, bool
+        ):
             raise MemoryTurnWriteError("durable receipt boolean fields are invalid")
         if not value.sent_to_store:
             raise MemoryTurnWriteError(
@@ -224,6 +243,8 @@ class MemoryCompletedTurnWriteService:
             raise MemoryTurnWriteError(
                 "durable superseding ids must be part of created ids"
             )
+        if set(created) & set(superseded):
+            raise MemoryTurnWriteError("durable created/superseded ids overlap")
         if set(created) & set(deduped):
             raise MemoryTurnWriteError("durable created/deduped ids overlap")
         if set(superseded) & set(deduped):
