@@ -1,6 +1,6 @@
 # Memory 4.0 — shared retrieval and normal-chat integration
 
-Status: implementation track, default-off for normal chat.
+Status: implementation track, default-off for normal chat and write activation.
 
 Memory 4.0 is the path from the existing Agent 3 Memory 3.0 substrate to one
 model-independent memory service that can serve normal Kaliv chat, Agent 3
@@ -25,10 +25,17 @@ adds a separately gated Go normal-chat integration, but that does not make Agent
 route and the R05 flag is off by default. Agent 3 remains deliberately separate
 from the normal Android/Desktop `TurnRouter` flow.
 
-W01 adds the first shared write-side primitive: bounded candidate extraction from
-a completed turn. It is still only a proposal boundary. W01 itself does not open
-a database, persist a candidate, correct/delete memory, wire extraction into
-normal chat or grant a model durable-write authority.
+W01 adds bounded candidate extraction from a completed turn. W01 itself is only
+a proposal boundary: it opens no database and grants no durable-write authority.
+After the #1202 authority hardening, automatic confirmation represents only the
+server-owned complete verbatim user statement; model-authored semantic
+subject/predicate/kind meaning remains pending.
+
+W02 is split deliberately. W02-A is a bounded, deterministic, storage-neutral
+consolidation planner whose receipts always say `sent_to_store=false`. W02-B is a
+separate default-off local storage composition that may execute only a still-current
+W02-A plan after rerunning the planner under the existing write transaction. It
+adds no normal-chat persistence hook, scheduler or public write route.
 
 Memory 4.0 shares those primitives without turning normal chat into an implicit
 Agent 3 activation dependency.
@@ -61,7 +68,9 @@ flowchart LR
     A3[Agent 3 planner] --> Q
     T[Completed turn] --> W01[W01 bounded candidate extractor]
     LO[Local Ollama chat only] -. proposal generation .-> W01
-    W01 -. later persistence/consolidation boundary .-> S
+    W01 --> W02A[W02-A deterministic pre-store plan]
+    W02A -->|sent_to_store=false| W02B[W02-B atomic local writer]
+    W02B -->|explicit composition only| S
 ```
 
 R04 returns a bounded context block and a pre-model receipt. R05 is the separate
@@ -317,17 +326,27 @@ The model may propose only:
 
 The model cannot return `source_ref`, `review_status`, ids, supersede targets,
 operations, correction tokens or delete/write instructions. `source_ref` always
-comes from the trusted caller and review state is derived locally.
+comes from the trusted caller and review state is derived locally. Non-secret
+candidate sensitivity is conservatively clamped to `private`; credential-shaped
+material is escalated to `secret` and remains pending.
 
-A `user_explicit` candidate can become `confirmed` only when its non-empty
-evidence is a literal substring of the completed **user** text and the candidate
-value is a literal substring of that evidence. This deliberately prefers false
-negatives over model normalization gaining authority. Explicit candidates with
-`secret` sensitivity remain `pending`.
+After #1202, a `user_explicit` proposal gains automatic `confirmed` status only
+when the extractor's raw evidence is exactly the entire canonical completed user
+turn (not merely a substring) and contains the proposed value. Even then, literal
+grounding proves only what the user said, not model-authored semantics. The
+server therefore discards the model's subject/predicate/kind/sensitivity/
+confidence interpretation and emits the fixed canonical private note:
 
-`inferred`, `imported` and `tool_observation` candidates are always `pending`,
-regardless of confidence or what the extractor attempted to imply. Assistant
-claims cannot become user-explicit evidence.
+- `subject=user`;
+- `predicate=verbatim_user_statement`;
+- `kind=note`;
+- `sensitivity=private`;
+- `confidence=1.0`;
+- `value=evidence=<entire canonical user turn>`.
+
+Partial literal evidence, paraphrases, structured interpretations,
+`inferred`, `imported`, `tool_observation` and all explicit secret candidates
+remain `pending`. Assistant claims cannot become user-explicit evidence.
 
 The product adapter calls only the existing local `ollama_client.chat()` path and
 exposes no API-key, cloud-base-URL or caller-selected upstream argument. The
@@ -338,16 +357,57 @@ W01 still performs **no durable write**. `MemoryCandidate.store_fields()` is onl
 a create-shaped projection for later composition and contains no evidence/id,
 correction/delete/supersede authority. There is no automatic normal-chat
 extraction hook, no Agent 3 activation, no private-cloud grant and no production
-activation in this slice. Corrections must continue to use the existing
-version/supersede lifecycle once a later persistence slice is introduced.
+activation in this slice.
 
-## Planned slices
+## M4-W02 — authority-safe consolidation and durable storage composition
 
-### M4-W02 — consolidation
+W02 is split into two boundaries. The full authority/storage contract is in
+`docs/memory/MEMORY_4_W02.md`.
 
-Add bounded duplicate clustering and stale-fact consolidation. Consolidation
-creates reviewed/versioned memory state; it does not rewrite history or invent
-facts from repeated model outputs.
+### W02-A — deterministic pre-store planning
+
+W02-A landed through PR #1206 in `worker/app/memory/consolidation.py`.
+
+- at most 16 W01 candidates, 128 active snapshot rows and 64,000 aggregate input
+  characters are accepted;
+- every candidate is revalidated, including the hardened canonical confirmed
+  shape from #1202;
+- storage keys are exact strings; case normalization does not gain semantic merge
+  authority;
+- exact duplicates may dedupe, secret candidates skip, and new pending/confirmed
+  verbatim candidates may create;
+- different canonical verbatim statements are independent log entries;
+- the only supersede W02-A may plan is exact pending-to-confirmed promotion of the
+  same canonical verbatim statement;
+- semantic stale-fact replacement remains deferred to a trusted review boundary;
+- the public plan/receipt omits values/evidence/source_ref and always reports
+  `sent_to_store=false`.
+
+### W02-B — atomic local writer
+
+W02-B composes the existing legacy/protected stores without adding an activation
+surface.
+
+- it accepts only a W02-A plan with an internally consistent pre-store receipt;
+- under the existing `BEGIN IMMEDIATE` storage transaction it takes a fresh
+  bounded relevant snapshot and reruns W02-A before mutation;
+- stale/forged plans fail closed; exact replay is a no-op only after a strict
+  durable-field/link proof;
+- create preserves the candidate's kind, sensitivity, provenance, confidence,
+  source reference and review state exactly;
+- dedupe/skip write nothing;
+- the narrow W02-A supersede inserts a new row with `supersedes_id=<old id>` and
+  atomically marks the old pending row superseded;
+- generic `correct()` is deliberately not reused because it represents different
+  explicit-correction authority and forces `user_explicit + confirmed`;
+- protected writes require exact `LOCAL_MANAGEMENT` authority and reuse the
+  existing migration/codec/envelope path; plaintext value/source_ref never enter
+  protected SQLite columns;
+- legacy verbatim lookup may safely filter by exact plaintext value; protected
+  lookup remains bounded and decrypts through `ProtectedMemoryReader`, with the
+  >128 protected-history scaling problem tracked separately in #1216;
+- no model/network call, HTTP route, normal-chat write hook, scheduler, Agent 3
+  activation, cloud grant, delete authority or production activation is added.
 
 ## Memory classes
 
@@ -380,6 +440,10 @@ runtime authority.
 11. Candidate extraction cannot accept model-supplied provenance references,
     review state, lifecycle operation or overwrite authority.
 12. W01 candidate extraction is not itself permission to persist memory.
+13. Automatic W01 confirmation represents only the server-owned complete verbatim
+    user statement, never a model-authored semantic relation.
+14. W02-B cannot turn a pre-store plan into durable authority without rerunning
+    W02-A against current bounded storage state under the write transaction.
 
 ## R01 acceptance
 
@@ -499,7 +563,8 @@ R05 is complete only when exact-head repository qualification proves:
 
 ## W01 acceptance
 
-W01 is complete only when exact-head repository qualification proves:
+W01 was accepted after exact-head repository qualification and #1202 hardening
+proved:
 
 - completed user and assistant turn text plus caller `source_ref` are hard-bounded
   before the extractor callback can run;
@@ -507,12 +572,42 @@ W01 is complete only when exact-head repository qualification proves:
   limits, and unknown fields fail closed;
 - the extractor cannot supply or replace `source_ref`, `review_status`, ids,
   supersede targets or write/correction/delete operations;
-- a non-secret `user_explicit` proposal is confirmed only when exact evidence is
-  present in the completed user turn and contains the exact candidate value;
-- explicit secret, inferred, imported and tool-observed proposals remain pending;
+- non-secret candidates are conservatively private and credential-shaped material
+  escalates to secret;
+- automatic `confirmed` authority requires exact whole-turn raw evidence and is
+  normalized to the fixed private `user/verbatim_user_statement` note rather than
+  trusting model-authored semantic fields;
+- partial explicit evidence, structured interpretations, explicit secret,
+  inferred, imported and tool-observed proposals remain pending;
 - malformed/oversized output and fabricated explicit evidence fail closed;
 - the product adapter delegates only to the existing local Ollama chat client and
   an oversized turn is rejected before that client is invoked;
 - W01 exposes no database write, correction/delete/supersede path, automatic
   normal-chat persistence, Agent 3 activation, private-cloud grant or production
   activation.
+
+## W02 acceptance
+
+W02-A landed after exact-head qualification proved the bounded planner and
+hardened W01 authority boundary. W02-B is complete only when its final exact head
+proves:
+
+- plans/receipts are internally valid and rerun under the storage write
+  transaction against current bounded relevant state;
+- storage keys remain exact and no case normalization gains semantic authority;
+- stale or forged plans fail closed;
+- create preserves candidate provenance, privacy and review fields exactly;
+- dedupe/skip do not mutate storage;
+- exact replay requires a full durable-field match, and supersede replay also
+  proves the original trusted version link;
+- exact pending-to-confirmed canonical verbatim promotion inserts a new version
+  and atomically supersedes the old pending row;
+- late failures roll back the complete legacy or protected mutating batch;
+- protected writes require exact local-management authority and never place
+  value/source provenance in plaintext protected columns;
+- legacy relevant lookup remains bounded even with large unrelated/verbatim
+  history, while protected lookup fails closed at its explicit bound pending
+  #1216;
+- write receipts expose ids/counts only, not values/evidence/source references;
+- no model/network call, HTTP route, chat write hook, scheduler, Agent 3
+  activation, cloud grant, delete authority or production activation is added.
