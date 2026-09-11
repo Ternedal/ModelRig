@@ -11,7 +11,13 @@ from app import ollama_client as local_ollama_client
 from app.agent3.memory import MemoryStore
 from app.agent3.memory_context import ContextTarget, MemoryContextCompiler
 from app.memory import (
+    MAX_COMPLETED_TURN_CHARS,
+    MAX_MEMORY_CANDIDATES,
+    MEMORY_CANDIDATE_SCHEMA,
+    CompletedMemoryTurn,
     HybridMemoryRetriever,
+    MemoryCandidateExtractor,
+    MemoryExtractionError,
     MemoryReadRequest,
     MemoryRetrievalQuery,
     MemoryRetriever,
@@ -20,6 +26,7 @@ from app.memory import (
     SharedMemoryReadError,
     SharedMemoryReader,
     embed_memory_text_local,
+    extract_memory_candidates_local,
 )
 
 passed = failed = 0
@@ -50,6 +57,17 @@ def expect_semantic_error(name, awaitable, contains=None):
     try:
         asyncio.run(awaitable)
     except SemanticMemoryError as exc:
+        check(contains is None or contains in str(exc), name)
+    except Exception:
+        check(False, name)
+    else:
+        check(False, name)
+
+
+def expect_extraction_error(name, awaitable, contains=None):
+    try:
+        asyncio.run(awaitable)
+    except MemoryExtractionError as exc:
         check(contains is None or contains in str(exc), name)
     except Exception:
         check(False, name)
@@ -620,6 +638,271 @@ check(
     and local_adapter_calls == [("memory adapter probe", None)],
     "Memory 4 local adapter delegates only to the existing local Ollama embed client",
 )
+
+# Memory 4.0 W01: extraction is a proposal boundary, not durable write authority.
+# The model can propose content/provenance only inside a bounded versioned JSON
+# contract. Source reference and review authority are derived by trusted code.
+def candidate_json(*candidates):
+    return json.dumps(
+        {"schema": MEMORY_CANDIDATE_SCHEMA, "candidates": list(candidates)},
+        ensure_ascii=False,
+    )
+
+
+def candidate_row(
+    *,
+    subject="modelrig",
+    predicate="gpu",
+    value="RTX 3060 12GB",
+    kind="fact",
+    sensitivity="operational",
+    source_type="user_explicit",
+    confidence=0.95,
+    evidence="Jeg bruger RTX 3060 12GB til ModelRig.",
+):
+    return {
+        "subject": subject,
+        "predicate": predicate,
+        "value": value,
+        "kind": kind,
+        "sensitivity": sensitivity,
+        "source_type": source_type,
+        "confidence": confidence,
+        "evidence": evidence,
+    }
+
+
+explicit_turn = CompletedMemoryTurn(
+    user_text="Jeg bruger RTX 3060 12GB til ModelRig.",
+    assistant_text="Det giver mening til den lokale rig.",
+    source_ref="conversation:turn-42",
+)
+
+
+async def explicit_extract(_turn):
+    return candidate_json(candidate_row())
+
+
+explicit_candidates = asyncio.run(
+    MemoryCandidateExtractor(extract=explicit_extract).extract(explicit_turn)
+)
+check(
+    len(explicit_candidates) == 1
+    and explicit_candidates[0].review_status == "confirmed"
+    and explicit_candidates[0].source_ref == "conversation:turn-42",
+    "W01 confirms only literal user-explicit evidence and keeps source_ref caller-owned",
+)
+explicit_store = explicit_candidates[0].store_fields()
+check(
+    "evidence" not in explicit_store
+    and "id" not in explicit_store
+    and "supersedes_id" not in explicit_store
+    and "operation" not in explicit_store,
+    "W01 store projection carries no overwrite correction delete or model-evidence authority",
+)
+
+
+async def pending_extract(_turn):
+    return candidate_json(
+        candidate_row(
+            subject="modelrig",
+            predicate="likely_model",
+            value="qwen",
+            source_type="inferred",
+            confidence=1.0,
+            evidence="",
+        ),
+        candidate_row(
+            subject="modelrig",
+            predicate="tool_state",
+            value="running",
+            source_type="tool_observation",
+            confidence=1.0,
+            evidence="",
+        ),
+        candidate_row(
+            subject="modelrig",
+            predicate="imported_note",
+            value="legacy",
+            source_type="imported",
+            confidence=1.0,
+            evidence="",
+        ),
+    )
+
+
+pending_candidates = asyncio.run(
+    MemoryCandidateExtractor(extract=pending_extract).extract(explicit_turn)
+)
+check(
+    {item.source_type for item in pending_candidates}
+    == {"inferred", "tool_observation", "imported"}
+    and all(item.review_status == "pending" for item in pending_candidates),
+    "W01 forces inferred imported and tool-observed candidates pending regardless of confidence",
+)
+
+
+async def secret_explicit_extract(_turn):
+    return candidate_json(
+        candidate_row(
+            subject="anders",
+            predicate="secret_phrase",
+            value="min hemmelige kode",
+            sensitivity="secret",
+            evidence="min hemmelige kode",
+        )
+    )
+
+
+secret_explicit = asyncio.run(
+    MemoryCandidateExtractor(extract=secret_explicit_extract).extract(
+        CompletedMemoryTurn(
+            user_text="min hemmelige kode",
+            assistant_text="Modtaget.",
+            source_ref="conversation:secret",
+        )
+    )
+)
+check(
+    secret_explicit[0].review_status == "pending",
+    "W01 never auto-confirms secret candidates even when the user stated them literally",
+)
+
+
+async def fabricated_evidence_extract(_turn):
+    return candidate_json(candidate_row(evidence="Brugeren ejer RTX 3060 12GB."))
+
+
+expect_extraction_error(
+    "W01 rejects user-explicit evidence fabricated outside the completed user turn",
+    MemoryCandidateExtractor(extract=fabricated_evidence_extract).extract(explicit_turn),
+    "not present",
+)
+
+
+async def injected_authority_extract(_turn):
+    row = candidate_row()
+    row["source_ref"] = "model:forged"
+    return candidate_json(row)
+
+
+expect_extraction_error(
+    "W01 rejects model attempts to inject source_ref authority",
+    MemoryCandidateExtractor(extract=injected_authority_extract).extract(explicit_turn),
+    "invalid fields",
+)
+
+
+async def injected_review_extract(_turn):
+    row = candidate_row(source_type="inferred", evidence="")
+    row["review_status"] = "confirmed"
+    return candidate_json(row)
+
+
+expect_extraction_error(
+    "W01 rejects model attempts to inject confirmed review status",
+    MemoryCandidateExtractor(extract=injected_review_extract).extract(explicit_turn),
+    "invalid fields",
+)
+
+pre_model_calls = 0
+
+
+async def counted_extract(_turn):
+    global pre_model_calls
+    pre_model_calls += 1
+    return candidate_json()
+
+
+expect_extraction_error(
+    "W01 rejects oversized completed turns before any extractor/model call",
+    MemoryCandidateExtractor(extract=counted_extract).extract(
+        CompletedMemoryTurn(
+            user_text="u" * (MAX_COMPLETED_TURN_CHARS + 1),
+            assistant_text="a",
+            source_ref="conversation:oversized",
+        )
+    ),
+    "exceeds",
+)
+check(pre_model_calls == 0, "W01 oversized turn validation is pre-model, not post-hoc")
+
+
+async def too_many_extract(_turn):
+    return candidate_json(
+        *[
+            candidate_row(
+                subject=f"subject-{idx}",
+                predicate="note",
+                value=f"value-{idx}",
+                source_type="inferred",
+                evidence="",
+            )
+            for idx in range(MAX_MEMORY_CANDIDATES + 1)
+        ]
+    )
+
+
+expect_extraction_error(
+    "W01 hard-caps candidate count",
+    MemoryCandidateExtractor(extract=too_many_extract).extract(explicit_turn),
+    "exceeds",
+)
+
+
+async def malformed_extract(_turn):
+    return '{"schema":"kaliv-memory-candidates/v1","candidates":['
+
+
+expect_extraction_error(
+    "W01 malformed extractor JSON fails closed",
+    MemoryCandidateExtractor(extract=malformed_extract).extract(explicit_turn),
+    "invalid JSON",
+)
+
+original_local_chat = local_ollama_client.chat
+local_extraction_calls = []
+
+
+async def fake_local_chat(messages, model=None):
+    local_extraction_calls.append((messages, model))
+    return candidate_json(candidate_row())
+
+
+try:
+    local_ollama_client.chat = fake_local_chat
+    local_extracted = asyncio.run(
+        extract_memory_candidates_local(explicit_turn, model="local-memory-probe")
+    )
+    check(
+        len(local_extracted) == 1
+        and local_extracted[0].review_status == "confirmed"
+        and local_extracted[0].source_ref == "conversation:turn-42"
+        and len(local_extraction_calls) == 1
+        and local_extraction_calls[0][1] == "local-memory-probe"
+        and local_extraction_calls[0][0][0]["role"] == "system"
+        and local_extraction_calls[0][0][1]["role"] == "user",
+        "W01 product adapter delegates extraction only through existing local Ollama chat client",
+    )
+
+    calls_before_oversized = len(local_extraction_calls)
+    expect_extraction_error(
+        "W01 local adapter also bounds turns before local Ollama is called",
+        extract_memory_candidates_local(
+            CompletedMemoryTurn(
+                user_text="x" * (MAX_COMPLETED_TURN_CHARS + 1),
+                assistant_text="a",
+                source_ref="conversation:local-oversized",
+            )
+        ),
+        "exceeds",
+    )
+    check(
+        len(local_extraction_calls) == calls_before_oversized,
+        "W01 local adapter cannot leak oversized turn text into model extraction",
+    )
+finally:
+    local_ollama_client.chat = original_local_chat
 
 store.close()
 print(f"\n{passed} passed, {failed} failed")

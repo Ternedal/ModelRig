@@ -1,3 +1,18 @@
+from .extraction import (
+    MAX_CANDIDATE_EVIDENCE_CHARS,
+    MAX_CANDIDATE_PREDICATE_CHARS,
+    MAX_CANDIDATE_SUBJECT_CHARS,
+    MAX_CANDIDATE_VALUE_CHARS,
+    MAX_COMPLETED_TURN_CHARS,
+    MAX_MEMORY_CANDIDATES,
+    MAX_MODEL_OUTPUT_CHARS,
+    MAX_SOURCE_REF_CHARS,
+    MEMORY_CANDIDATE_SCHEMA,
+    CompletedMemoryTurn,
+    MemoryCandidate,
+    MemoryCandidateExtractor,
+    MemoryExtractionError,
+)
 from .retrieval import MemoryRetrievalQuery, MemoryRetriever, RankedMemory
 from .semantic import (
     DEFAULT_MIN_SEMANTIC_SCORE,
@@ -32,16 +47,40 @@ async def embed_memory_text_local(text: str) -> list[float]:
     return await _embed(text)
 
 
+async def extract_memory_candidates_local(
+    turn: CompletedMemoryTurn,
+    *,
+    model: str | None = None,
+) -> tuple[MemoryCandidate, ...]:
+    """Lazily enter the local-only Memory 4 candidate extraction adapter."""
+    from .local_extraction import extract_memory_candidates_local as _extract
+
+    return await _extract(turn, model=model)
+
+
 __all__ = [
     "DEFAULT_MIN_SEMANTIC_SCORE",
+    "MAX_CANDIDATE_EVIDENCE_CHARS",
+    "MAX_CANDIDATE_PREDICATE_CHARS",
+    "MAX_CANDIDATE_SUBJECT_CHARS",
+    "MAX_CANDIDATE_VALUE_CHARS",
+    "MAX_COMPLETED_TURN_CHARS",
+    "MAX_MEMORY_CANDIDATES",
     "MAX_MEMORY_READ_CANDIDATES",
     "MAX_MEMORY_READ_CHARS",
     "MAX_MEMORY_READ_SUBJECTS",
+    "MAX_MODEL_OUTPUT_CHARS",
     "MAX_SEMANTIC_CANDIDATES",
     "MAX_SEMANTIC_INPUT_RECORDS",
     "MAX_SEMANTIC_TEXT_CHARS",
     "MAX_SEMANTIC_VECTOR_DIMS",
+    "MAX_SOURCE_REF_CHARS",
+    "MEMORY_CANDIDATE_SCHEMA",
+    "CompletedMemoryTurn",
     "HybridMemoryRetriever",
+    "MemoryCandidate",
+    "MemoryCandidateExtractor",
+    "MemoryExtractionError",
     "MemoryReadRequest",
     "MemoryRetrievalQuery",
     "MemoryRetriever",
@@ -53,4 +92,5 @@ __all__ = [
     "SharedMemoryReader",
     "SharedMemoryRecord",
     "embed_memory_text_local",
+    "extract_memory_candidates_local",
 ]
