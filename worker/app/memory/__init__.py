@@ -1,3 +1,14 @@
+from .consolidation import (
+    MAX_CONSOLIDATION_CANDIDATES,
+    MAX_CONSOLIDATION_EXISTING,
+    MAX_CONSOLIDATION_TEXT_CHARS,
+    ConsolidationAction,
+    ConsolidationPlan,
+    ConsolidationReceipt,
+    ExistingMemory,
+    MemoryConsolidationError,
+    MemoryConsolidator,
+)
 from .extraction import (
     MAX_CANDIDATE_EVIDENCE_CHARS,
     MAX_CANDIDATE_PREDICATE_CHARS,
@@ -59,12 +70,19 @@ async def extract_memory_candidates_local(
 
 
 __all__ = [
+    "ConsolidationAction",
+    "ConsolidationPlan",
+    "ConsolidationReceipt",
     "DEFAULT_MIN_SEMANTIC_SCORE",
+    "ExistingMemory",
     "MAX_CANDIDATE_EVIDENCE_CHARS",
     "MAX_CANDIDATE_PREDICATE_CHARS",
     "MAX_CANDIDATE_SUBJECT_CHARS",
     "MAX_CANDIDATE_VALUE_CHARS",
     "MAX_COMPLETED_TURN_CHARS",
+    "MAX_CONSOLIDATION_CANDIDATES",
+    "MAX_CONSOLIDATION_EXISTING",
+    "MAX_CONSOLIDATION_TEXT_CHARS",
     "MAX_MEMORY_CANDIDATES",
     "MAX_MEMORY_READ_CANDIDATES",
     "MAX_MEMORY_READ_CHARS",
@@ -80,6 +98,8 @@ __all__ = [
     "HybridMemoryRetriever",
     "MemoryCandidate",
     "MemoryCandidateExtractor",
+    "MemoryConsolidationError",
+    "MemoryConsolidator",
     "MemoryExtractionError",
     "MemoryReadRequest",
     "MemoryRetrievalQuery",
