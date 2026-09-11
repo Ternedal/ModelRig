@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from ..memory.consolidation import ConsolidationPlan, MemoryConsolidator
+from ..memory.consolidation import (
+    ConsolidationPlan,
+    MemoryConsolidationError,
+    MemoryConsolidator,
+)
 from ..memory.extraction import MemoryCandidate
 from ..memory.write_service import DurableCandidateWrite
-from .memory import MemoryRecord, MemoryStore
+from .memory import MemoryStore
 from .memory_consolidation_indexed import (
     _indexed_snapshot_locked,
     _sync_created_actions_locked,
@@ -18,7 +22,10 @@ from .memory_consolidation_writer import (
     _protected_snapshot_locked,
     _replan,
 )
-from .memory_protected_lookup import ProtectedMemoryLookupError, ProtectedMemoryVerbatimLookup
+from .memory_protected_lookup import (
+    ProtectedMemoryLookupError,
+    ProtectedMemoryVerbatimLookup,
+)
 from .memory_protected_reader import ProtectedMemoryReader
 from .memory_protected_writer import MemoryWriteAccess, ProtectedMemoryWriter
 
@@ -27,7 +34,7 @@ def _seed_plan(candidates: tuple[MemoryCandidate, ...]) -> ConsolidationPlan:
     """Validate one W01 candidate batch and derive selectors without storage authority."""
     try:
         return MemoryConsolidator().plan(candidates, ())
-    except Exception as exc:
+    except MemoryConsolidationError as exc:
         raise MemoryConsolidationWriteError(
             "W03 candidate batch is outside the W02-A boundary"
         ) from exc
