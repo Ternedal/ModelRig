@@ -204,7 +204,7 @@ func (s *server) requestMemory4Context(r *http.Request, query, target string) (m
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	resp, err := memory4WorkerHTTPClient(timeout).Do(req)
 	if err != nil {
 		return out, err
 	}
