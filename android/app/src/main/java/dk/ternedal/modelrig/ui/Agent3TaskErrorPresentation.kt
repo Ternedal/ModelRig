@@ -35,7 +35,8 @@ internal fun presentAgent3TaskScreenError(
             Agent3TaskFailureOperation.START_REFUSED ->
                 "Opgaven blev ikke accepteret. Lav et nyt plan-preview."
             Agent3TaskFailureOperation.STATUS -> "Task-status kunne ikke hentes."
-            Agent3TaskFailureOperation.STOP_PLAN -> "Planen kunne ikke stoppes."
+            Agent3TaskFailureOperation.STOP_PLAN ->
+                "Stop-resultatet kunne ikke bekræftes. Planen kan allerede være stoppet på serveren. Opdatér task-status før du konkluderer eller prøver igen."
             Agent3TaskFailureOperation.AUTOMATIC_STATUS -> "Automatisk task-status kunne ikke hentes."
             Agent3TaskFailureOperation.LOCAL_REFERENCE ->
                 "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben."

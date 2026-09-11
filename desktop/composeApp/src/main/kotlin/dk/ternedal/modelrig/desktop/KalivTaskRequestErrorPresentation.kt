@@ -35,7 +35,8 @@ internal fun presentTaskRequestError(operation: TaskRequestOperation, rawError: 
             TaskRequestOperation.START_REFUSED ->
                 "Opgaven blev ikke accepteret. Lav et nyt plan-preview."
             TaskRequestOperation.STATUS -> "Task-status kunne ikke hentes."
-            TaskRequestOperation.STOP_PLAN -> "Planen kunne ikke stoppes."
+            TaskRequestOperation.STOP_PLAN ->
+                "Stop-resultatet kunne ikke bekræftes. Planen kan allerede være stoppet på serveren. Opdatér task-status før du konkluderer eller prøver igen."
             TaskRequestOperation.POLLING -> "Automatisk task-status kunne ikke hentes."
             TaskRequestOperation.LOCAL_REFERENCE ->
                 "Task-referencen kunne ikke gemmes lokalt. Hold taskfladen åben."
