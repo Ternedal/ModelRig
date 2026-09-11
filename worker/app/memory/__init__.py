@@ -24,6 +24,14 @@ from .extraction import (
     MemoryCandidateExtractor,
     MemoryExtractionError,
 )
+from .orchestration import (
+    COMPLETED_TURN_PERSISTENCE_SCHEMA,
+    W02_WRITE_RECEIPT_SCHEMA,
+    CompletedTurnMemoryOrchestrator,
+    CompletedTurnPersistenceReceipt,
+    DurableWriteReceipt,
+    MemoryOrchestrationError,
+)
 from .retrieval import MemoryRetrievalQuery, MemoryRetriever, RankedMemory
 from .semantic import (
     DEFAULT_MIN_SEMANTIC_SCORE,
@@ -77,13 +85,17 @@ async def extract_memory_candidates_local(
 
 
 __all__ = [
+    "COMPLETED_TURN_PERSISTENCE_SCHEMA",
     "CompletedMemoryTurn",
+    "CompletedTurnMemoryOrchestrator",
+    "CompletedTurnPersistenceReceipt",
     "CompletedTurnWriteReceipt",
     "ConsolidationAction",
     "ConsolidationPlan",
     "ConsolidationReceipt",
     "DEFAULT_MIN_SEMANTIC_SCORE",
     "DurableCandidateWrite",
+    "DurableWriteReceipt",
     "ExistingMemory",
     "HybridMemoryRetriever",
     "MAX_CANDIDATE_EVIDENCE_CHARS",
@@ -111,6 +123,7 @@ __all__ = [
     "MemoryConsolidationError",
     "MemoryConsolidator",
     "MemoryExtractionError",
+    "MemoryOrchestrationError",
     "MemoryReadRequest",
     "MemoryRetrievalQuery",
     "MemoryRetriever",
@@ -123,6 +136,7 @@ __all__ = [
     "SharedMemoryReader",
     "SharedMemoryRecord",
     "TURN_WRITE_RECEIPT_SCHEMA",
+    "W02_WRITE_RECEIPT_SCHEMA",
     "embed_memory_text_local",
     "extract_memory_candidates_local",
 ]

@@ -107,6 +107,14 @@ run_support(
     "W03 completed-turn write",
     "worker_memory4_completed_turn_write.py",
 )
+run_support(
+    "W03-A strict auto-persistence gate",
+    "worker_memory_completed_turn_orchestration.py",
+)
+run_support(
+    "W03-A supersede receipt",
+    "worker_memory_completed_turn_orchestration_supersede.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
