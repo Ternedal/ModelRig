@@ -25,10 +25,11 @@ adds a separately gated Go normal-chat integration, but that does not make Agent
 route and the R05 flag is off by default. Agent 3 remains deliberately separate
 from the normal Android/Desktop `TurnRouter` flow.
 
-W01 adds the first shared write-side primitive: bounded candidate extraction from
-a completed turn. It is still only a proposal boundary. W01 itself does not open
-a database, persist a candidate, correct/delete memory, wire extraction into
-normal chat or grant a model durable-write authority.
+W01 adds bounded candidate extraction from a completed turn. W02 adds deterministic
+bounded consolidation planning and explicit persistence adapters over the existing
+legacy/protected writers. Neither slice automatically wires writes into normal
+chat, activates Agent 3, grants cloud authority or makes a model the owner of
+durable state.
 
 Memory 4.0 shares those primitives without turning normal chat into an implicit
 Agent 3 activation dependency.
@@ -60,8 +61,9 @@ flowchart LR
     PROT[Protected query-only reader / DPAPI] --> S
     A3[Agent 3 planner] --> Q
     T[Completed turn] --> W01[W01 bounded candidate extractor]
-    LO[Local Ollama chat only] -. proposal generation .-> W01
-    W01 -. later persistence/consolidation boundary .-> S
+    LO[Loopback Ollama chat only] -. proposal generation .-> W01
+    W01 --> W02[W02 deterministic consolidation planner]
+    W02 -. explicit legacy/protected persistence adapter .-> S
 ```
 
 R04 returns a bounded context block and a pre-model receipt. R05 is the separate
@@ -305,7 +307,8 @@ The completed turn is validated **before** an extractor/model callback can see
 it. User text and assistant text are each capped at 16,000 characters and the
 caller-owned `source_ref` at 1,000 characters. Extractor output is capped at
 64,000 characters, uses exact schema `kaliv-memory-candidates/v1`, contains at
-most 16 candidates and rejects unknown top-level or candidate fields.
+most 16 candidates and rejects unknown top-level or candidate fields, including
+duplicate JSON keys.
 
 The model may propose only:
 
@@ -329,25 +332,86 @@ negatives over model normalization gaining authority. Explicit candidates with
 regardless of confidence or what the extractor attempted to imply. Assistant
 claims cannot become user-explicit evidence.
 
-The product adapter calls only the existing local `ollama_client.chat()` path and
-exposes no API-key, cloud-base-URL or caller-selected upstream argument. The
-neutral boundary validates the turn before the adapter can call Ollama and
-validates the returned JSON again afterward.
+Sensitivity is conservative server policy, not model authority. Model-proposed
+`secret` remains secret, obvious credential/key/token material is escalated to
+secret, and every other W01 candidate is clamped to `private` until a later
+trusted boundary explicitly changes classification.
+
+The product adapter calls only the existing local `ollama_client.chat()` path,
+exposes no API-key, cloud-base-URL or caller-selected upstream argument, and
+verifies that the configured Ollama upstream is actually loopback before any
+completed-turn text can leave the worker process. The neutral boundary validates
+the turn before the adapter can call Ollama and validates returned JSON again
+afterward.
 
 W01 still performs **no durable write**. `MemoryCandidate.store_fields()` is only
 a create-shaped projection for later composition and contains no evidence/id,
 correction/delete/supersede authority. There is no automatic normal-chat
 extraction hook, no Agent 3 activation, no private-cloud grant and no production
-activation in this slice. Corrections must continue to use the existing
-version/supersede lifecycle once a later persistence slice is introduced.
+activation in this slice.
 
-## Planned slices
+## M4-W02 — bounded deduplication and stale-fact consolidation
 
-### M4-W02 — consolidation
+W02 adds `worker/app/memory/consolidation.py` as a deterministic, model-independent
+planner and `worker/app/agent3/memory_consolidation.py` as the product/storage
+composition layer. No LLM, embedding model or network call participates in W02
+planning.
 
-Add bounded duplicate clustering and stale-fact consolidation. Consolidation
-creates reviewed/versioned memory state; it does not rewrite history or invent
-facts from repeated model outputs.
+A single planning batch accepts at most 16 W01 candidates and 200 active durable
+records. Inputs are validated again at the consolidation boundary. Malformed
+lifecycle/review/provenance/sensitivity fields, non-finite timestamps/confidence,
+oversized values or a bound violation fail closed.
+
+Candidates are grouped by case-insensitive `(subject, predicate)` slots:
+
+- exact duplicate candidate objects collapse deterministically to one decision;
+- different values for the same slot in one batch produce `review` decisions;
+- the same value with conflicting candidate metadata also produces `review`
+  rather than choosing whichever candidate arrived last;
+- an exact existing confirmed duplicate is reused without a new durable row;
+- an exact existing pending duplicate may be reused only for another pending
+  candidate;
+- multiple active durable rows for one slot are ambiguous and always require
+  review.
+
+Only a W01 candidate that is `confirmed`, `user_explicit` and `private` can
+produce an automatic `supersede` decision. It may supersede exactly one active
+private row for the same slot. The persistence adapter then uses the existing
+correction/version path, so the replacement receives `supersedes_id` and the old
+row becomes `superseded`; history is not overwritten.
+
+Pending inferred/imported/tool-observed candidates never supersede confirmed
+durable state. A different pending value may be persisted as a pending
+alternative for later review only while the slot is still unambiguous. Secret
+candidates remain pending and cannot drive automatic stale-fact replacement.
+Sensitivity mismatch that would reuse an under-classified durable row fails to
+review rather than silently declassifying the candidate.
+
+Persistence remains outside the neutral core:
+
+- legacy mode reuses `MemoryStore.create()` / `MemoryStore.correct()`;
+- protected mode reads exact values only through
+  `ProtectedMemoryReader` with `LOCAL_MANAGEMENT` and writes only through
+  `ProtectedMemoryWriter` with `LOCAL_MANAGEMENT`;
+- W02 does not open SQLite, invoke DPAPI or handle protected envelopes itself;
+- protected private/secret writes therefore retain the existing encrypted-field
+  and version-history guarantees of the protected writer.
+
+Every existing-slot apply re-reads the complete subject/predicate slot before a
+mutation and requires exactly one active row with the same id and `updated_at`
+optimistic token captured by the plan. New-slot create likewise verifies that the
+slot is still empty. A stale plan, newly ambiguous slot, deleted/superseded row or
+changed optimistic token fails closed before the W02 adapter intentionally calls
+the writer.
+
+W02 applies one decision at a time and deliberately makes no false claim of
+cross-decision transactionality. Each mutation uses the existing storage
+primitive's transaction. `review` and `reuse` decisions do not mutate durable
+state.
+
+W02 adds no HTTP route, automatic `/api/v1/chat` extraction/write hook, Agent 3
+activation, private-cloud grant, model-owned memory, delete authority or
+production activation.
 
 ## Memory classes
 
@@ -380,6 +444,12 @@ runtime authority.
 11. Candidate extraction cannot accept model-supplied provenance references,
     review state, lifecycle operation or overwrite authority.
 12. W01 candidate extraction is not itself permission to persist memory.
+13. W02 consolidation contains no model call and cannot invent a durable value.
+14. Automatic W02 supersede requires one unambiguous active private slot plus a
+    confirmed private `user_explicit` W01 candidate and an unchanged optimistic
+    state token.
+15. W02 persistence versions/supersedes history; it never overwrites or deletes
+    the old fact in place.
 
 ## R01 acceptance
 
@@ -504,15 +574,45 @@ W01 is complete only when exact-head repository qualification proves:
 - completed user and assistant turn text plus caller `source_ref` are hard-bounded
   before the extractor callback can run;
 - output is exact-schema JSON with hard output, candidate-count and per-field
-  limits, and unknown fields fail closed;
+  limits, unknown fields and duplicate JSON keys fail closed;
 - the extractor cannot supply or replace `source_ref`, `review_status`, ids,
   supersede targets or write/correction/delete operations;
 - a non-secret `user_explicit` proposal is confirmed only when exact evidence is
   present in the completed user turn and contains the exact candidate value;
-- explicit secret, inferred, imported and tool-observed proposals remain pending;
+- explicit/model-detected credentials become secret/pending and all other
+  non-secret candidates are conservatively clamped to private;
+- inferred, imported and tool-observed proposals remain pending;
 - malformed/oversized output and fabricated explicit evidence fail closed;
-- the product adapter delegates only to the existing local Ollama chat client and
-  an oversized turn is rejected before that client is invoked;
+- the product adapter delegates only to the existing local Ollama chat client,
+  requires a loopback Ollama upstream and rejects an oversized turn before that
+  client is invoked;
 - W01 exposes no database write, correction/delete/supersede path, automatic
   normal-chat persistence, Agent 3 activation, private-cloud grant or production
   activation.
+
+## W02 acceptance
+
+W02 is complete only when exact-head repository qualification proves:
+
+- consolidation contains no model/network call and accepts at most 16 candidates
+  plus 200 active existing records;
+- exact candidate duplicates collapse deterministically to one decision;
+- conflicting values or metadata in the same candidate slot fail closed to
+  review rather than producing order-dependent writes;
+- exact confirmed durable duplicates are reused without creating a new row;
+- pending/model-derived candidates never supersede confirmed durable memory;
+- secret candidates remain pending and cannot drive automatic stale-fact
+  replacement;
+- only a confirmed private `user_explicit` candidate can supersede exactly one
+  unambiguous active private row;
+- ambiguous slots, malformed snapshots and sensitivity under-classification fail
+  closed to review/error;
+- legacy and protected persistence revalidate slot identity and optimistic state
+  immediately before apply;
+- stale new-slot create or stale supersede plans are refused before the W02
+  adapter intentionally mutates storage;
+- supersede uses the existing versioning path and preserves old/new history;
+- protected planning/writes require exact `LOCAL_MANAGEMENT` authority and reuse
+  the existing encrypted `ProtectedMemoryReader`/`ProtectedMemoryWriter` path;
+- W02 adds no automatic normal-chat write hook, public write route, Agent 3
+  activation, private-cloud grant, delete authority or production activation.
