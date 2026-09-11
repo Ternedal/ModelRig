@@ -261,13 +261,16 @@ def _validated_record(value: Any) -> ExistingMemory:
 
 
 def _key(subject: str, predicate: str) -> tuple[str, str]:
-    return (subject.casefold(), predicate.casefold())
+    # Storage keys are exact strings. Case normalization would be semantic merge
+    # authority and cannot be reproduced by the bounded indexed storage lookup
+    # without scanning unrelated durable rows.
+    return (subject, predicate)
 
 
 def _candidate_identity(candidate: MemoryCandidate) -> tuple[str, str, str, str, str]:
     return (
-        candidate.subject.casefold(),
-        candidate.predicate.casefold(),
+        candidate.subject,
+        candidate.predicate,
         candidate.value,
         candidate.source_type,
         candidate.review_status,
@@ -276,8 +279,8 @@ def _candidate_identity(candidate: MemoryCandidate) -> tuple[str, str, str, str,
 
 def _candidate_sort_key(candidate: MemoryCandidate) -> tuple[str, str, str, int, str, str]:
     return (
-        candidate.subject.casefold(),
-        candidate.predicate.casefold(),
+        candidate.subject,
+        candidate.predicate,
         candidate.value,
         0 if candidate.review_status == "confirmed" else 1,
         candidate.source_type,
