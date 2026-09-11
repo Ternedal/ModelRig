@@ -31,6 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.logic.Agent3ConfirmationAuthority
+import dk.ternedal.modelrig.logic.isAgent3ConfirmationAuthorityConsumed
 import dk.ternedal.modelrig.net.Agent3Client
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +48,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
     var memorySubjects by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
+    var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -132,16 +135,21 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
         val step = current.steps.getOrNull(current.currentStep) ?: return
         val stepId = step.id ?: return
         val digest = step.confirmationDigest ?: return
-        if (busy) return
+        val authority = Agent3ConfirmationAuthority.capture(current.id, stepId, digest) ?: return
+        if (busy || isAgent3ConfirmationAuthorityConsumed(authority, consumedConfirmation)) return
         busy = true
         error = null
+        consumedConfirmation = authority
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching { client().confirm(current.id, stepId, digest, approve) }
             }
             busy = false
             result.onSuccess { run = it }
-                .onFailure { error = it.message ?: "Godkendelsen fejlede" }
+                .onFailure {
+                    val detail = it.message ?: "Godkendelsen fejlede"
+                    error = "$detail. Beslutningen kan allerede være gennemført på serveren; den gamle godkendelse genbruges ikke. Opdatér run-status."
+                }
         }
     }
 
@@ -266,6 +274,7 @@ fun Agent3Screen(store: TokenStore, onClose: () -> Unit) {
                 Agent3RunCard(
                     run = r,
                     busy = busy,
+                    consumedConfirmation = consumedConfirmation,
                     onRefresh = { refreshRun() },
                     onApprove = { decide(true) },
                     onDeny = { decide(false) },
@@ -361,6 +370,7 @@ private fun Agent3PlanCard(
 private fun Agent3RunCard(
     run: Agent3Client.Run,
     busy: Boolean,
+    consumedConfirmation: Agent3ConfirmationAuthority?,
     onRefresh: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
@@ -368,6 +378,8 @@ private fun Agent3RunCard(
 ) {
     val current = run.steps.getOrNull(run.currentStep)
     val waiting = run.state == "waiting_confirmation" && current?.confirmationDigest != null && current.id != null
+    val currentAuthority = Agent3ConfirmationAuthority.capture(run.id, current?.id, current?.confirmationDigest)
+    val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(currentAuthority, consumedConfirmation)
     val termination = run.termination
     val canStopPlan = termination?.plan?.canRequest == true
 
@@ -405,9 +417,17 @@ private fun Agent3RunCard(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = !busy, onClick = onApprove) { Text("Godkend") }
-                    OutlinedButton(enabled = !busy, onClick = onDeny) { Text("Afvis") }
+                if (confirmationConsumed) {
+                    Text(
+                        "Beslutningen er allerede sendt. Samme godkendelse genbruges ikke; opdatér run-status for serverens aktuelle sandhed.",
+                        color = KalivTheme.colors.danger,
+                        fontSize = 11.sp,
+                    )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = !busy, onClick = onApprove) { Text("Godkend") }
+                        OutlinedButton(enabled = !busy, onClick = onDeny) { Text("Afvis") }
+                    }
                 }
             }
 

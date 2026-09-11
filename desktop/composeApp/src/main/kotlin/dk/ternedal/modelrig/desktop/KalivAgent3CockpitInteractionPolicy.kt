@@ -29,6 +29,7 @@ internal data class KalivAgent3CockpitInteraction(
 internal enum class Agent3CockpitConfirmationState {
     HIDDEN,
     LIVE,
+    CONSUMED,
     EXPIRED,
     INVALID,
 }
@@ -83,6 +84,7 @@ internal fun presentAgent3CockpitConfirmation(
     stepState: String?,
     busy: Boolean,
     nowEpochSeconds: Double,
+    confirmationConsumed: Boolean = false,
 ): KalivAgent3CockpitConfirmation {
     if (
         !isAgent3CockpitWaitingForConfirmation(runState) ||
@@ -91,6 +93,12 @@ internal fun presentAgent3CockpitConfirmation(
     ) {
         return KalivAgent3CockpitConfirmation(
             state = Agent3CockpitConfirmationState.HIDDEN,
+            actionEnabled = false,
+        )
+    }
+    if (confirmationConsumed) {
+        return KalivAgent3CockpitConfirmation(
+            state = Agent3CockpitConfirmationState.CONSUMED,
             actionEnabled = false,
         )
     }
@@ -120,6 +128,7 @@ internal fun canAgent3CockpitDecide(
     stepState: String?,
     busy: Boolean,
     nowEpochSeconds: Double,
+    confirmationConsumed: Boolean = false,
 ): Boolean = presentAgent3CockpitConfirmation(
     confirmationDigest = confirmationDigest,
     confirmationExpiresAt = confirmationExpiresAt,
@@ -127,6 +136,7 @@ internal fun canAgent3CockpitDecide(
     stepState = stepState,
     busy = busy,
     nowEpochSeconds = nowEpochSeconds,
+    confirmationConsumed = confirmationConsumed,
 ).actionEnabled
 
 internal fun canAgent3CockpitPreview(
