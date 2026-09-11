@@ -8,6 +8,8 @@ package dk.ternedal.modelrig.desktop.net
  * only the already-bound nonblank run id as recovery reference; the rejected
  * Start payload never becomes UI authority. Fresh server truth must independently
  * prove the exact run id, expected review mode and checkpoint before publication.
+ * Capability evidence is preserved only from the already-proven Preview/Start
+ * binding because generic run GET does not own that Start evidence.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -26,6 +28,7 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
         return recoverReviewedStartEnvelope(
             recoveryRunId = envelope.run.id,
             expectedReviewReads = expectedReviewReads,
+            reviewedCapabilityReceipt = expectedCapabilityReceipt,
             originalFailure = Agent3Exception(
                 "Invalid Agent 3.0 Start envelope: server review_reads does not match reviewed intent; " +
                     "the baseline-validated run id is recovery-only"
@@ -48,6 +51,7 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     return recoverReviewedStartEnvelope(
         recoveryRunId = envelope.run.id,
         expectedReviewReads = expectedReviewReads,
+        reviewedCapabilityReceipt = expectedCapabilityReceipt,
         originalFailure = validationFailure,
     )
 }
@@ -55,6 +59,7 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
 private fun Agent3Client.recoverReviewedStartEnvelope(
     recoveryRunId: String,
     expectedReviewReads: Boolean,
+    reviewedCapabilityReceipt: Agent3CapabilityReceipt?,
     originalFailure: Agent3Exception,
 ): Agent3RunEnvelope {
     if (recoveryRunId.isBlank()) throw originalFailure
@@ -64,8 +69,14 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
         )
+        val freshCapabilityReceipt = fresh.capabilityReceipt
+        if (freshCapabilityReceipt != null && freshCapabilityReceipt != reviewedCapabilityReceipt) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 run envelope: capability receipt contradicts reviewed Preview"
+            )
+        }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
-        fresh
+        fresh.copy(capabilityReceipt = reviewedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "the reviewed Start envelope was rejected"
         val recovery = recoveryFailure.message ?: "fresh run status could not be validated"
