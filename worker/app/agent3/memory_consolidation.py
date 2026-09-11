@@ -10,11 +10,10 @@ from ..memory.consolidation import (
     ACTION_SUPERSEDE,
     ConsolidationDecision,
     ConsolidationPlan,
-    MemoryConsolidationError,
     MemoryConsolidator,
 )
 from ..memory.extraction import MemoryCandidate
-from .memory import MemoryConflict, MemoryRecord, MemoryStore
+from .memory import MemoryRecord, MemoryStore
 from .memory_protected_reader import MemoryReadAccess, ProtectedMemoryReader
 from .memory_protected_writer import (
     MemoryWriteAccess,
