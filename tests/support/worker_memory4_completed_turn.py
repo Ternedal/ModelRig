@@ -4,6 +4,7 @@ import asyncio
 
 from app.memory import (
     CONSOLIDATION_WRITE_RECEIPT_SCHEMA,
+    MAX_COMPLETED_TURN_CHARS,
     CompletedMemoryTurn,
     CompletedTurnMemoryPersistence,
     CompletedTurnPersistenceError,
@@ -56,7 +57,7 @@ def pending_semantic(
     *,
     source_type="inferred",
     sensitivity="private",
-    source_ref="conversation:w03-pending",
+    source_ref="conversation:w03-a",
 ):
     return MemoryCandidate(
         subject="modelrig",
@@ -151,21 +152,18 @@ check(
 )
 
 # Pending/secret/model-semantic proposals are deferred before either storage callback.
-secret_pending = pending_semantic(
-    sensitivity="secret",
-    source_ref="conversation:w03-secret",
-)
+secret_pending = pending_semantic(sensitivity="secret")
 user_pending = MemoryCandidate(
     subject="modelrig",
-    predicate="gpu",
-    value="RTX 3060",
+    predicate="product_name",
+    value="ModelRig",
     kind="fact",
     sensitivity="private",
     source_type="user_explicit",
-    source_ref="conversation:w03-user-pending",
+    source_ref=turn.source_ref,
     confidence=0.8,
     review_status="pending",
-    evidence="Jeg bruger RTX 3060.",
+    evidence=turn.user_text,
 )
 no_write_calls = []
 
@@ -173,7 +171,7 @@ no_write_calls = []
 async def extract_deferred(_turn):
     return (
         pending_semantic(),
-        pending_semantic(source_type="tool_observation", source_ref="conversation:w03-tool"),
+        pending_semantic(source_type="tool_observation"),
         secret_pending,
         user_pending,
     )
@@ -243,7 +241,7 @@ forged_confirmed = MemoryCandidate(
     kind="preference",
     sensitivity="private",
     source_type="user_explicit",
-    source_ref="conversation:w03-forged",
+    source_ref=turn.source_ref,
     confidence=1.0,
     review_status="confirmed",
     evidence="RTX 3060",
@@ -264,10 +262,74 @@ expect_error(
     "W01/W02 contract",
 )
 
+# The extractor cannot forge provenance for any candidate, even a deferred one.
+async def extract_forged_source(_turn):
+    return (pending_semantic(source_ref="model:forged-source"),)
+
+
+expect_error(
+    "W03-A rejects candidate source_ref not owned by the completed turn",
+    CompletedTurnMemoryPersistence(
+        extract_candidates=extract_forged_source,
+        prepare_plan=must_not_prepare,
+        apply_plan=must_not_apply,
+    ).persist(turn),
+    "source_ref",
+)
+
+# A custom extractor cannot claim a different full user statement as canonical
+# confirmed merely by manufacturing a MemoryCandidate object.
+async def extract_wrong_turn(_turn):
+    return (
+        canonical(
+            "Jeg bruger en helt anden model.",
+            source_ref=turn.source_ref,
+        ),
+    )
+
+
+expect_error(
+    "W03-A binds confirmed verbatim content to the exact completed user turn",
+    CompletedTurnMemoryPersistence(
+        extract_candidates=extract_wrong_turn,
+        prepare_plan=prepare_canonical,
+        apply_plan=apply_canonical,
+    ).persist(turn),
+    "evidence",
+)
+
+# W01 credential escalation is rechecked before a custom extractor can disguise
+# a credential-like turn as a private confirmed note.
+credential_turn = CompletedMemoryTurn(
+    user_text="min nøgle er sk-AbCdEfGh12345678",
+    assistant_text="Modtaget.",
+    source_ref="conversation:w03-credential",
+)
+
+
+async def extract_disguised_credential(_turn):
+    return (
+        canonical(
+            credential_turn.user_text,
+            source_ref=credential_turn.source_ref,
+        ),
+    )
+
+
+expect_error(
+    "W03-A cannot bypass W01 credential escalation with a private confirmed candidate",
+    CompletedTurnMemoryPersistence(
+        extract_candidates=extract_disguised_credential,
+        prepare_plan=prepare_canonical,
+        apply_plan=apply_canonical,
+    ).persist(credential_turn),
+    "authority shape",
+)
+
 # The plan callback cannot add/replace eligible candidates.
 extra_candidate = canonical(
     "Jeg bruger også en anden model.",
-    "conversation:w03-extra",
+    turn.source_ref,
 )
 
 
@@ -326,7 +388,7 @@ async def extract_too_many(_turn):
     return tuple(
         canonical(
             f"W03 bounded statement {index}",
-            f"conversation:w03-bounded-{index}",
+            turn.source_ref,
         )
         for index in range(17)
     )
@@ -340,6 +402,72 @@ expect_error(
         apply_plan=apply_canonical,
     ).persist(turn),
     "candidate bound",
+)
+
+# The exact W01 completed-turn bounds apply before the injected extractor sees
+# the turn. This protects even custom extraction callbacks that bypass W01.
+pre_extract_calls = 0
+
+
+async def counted_extract(_turn):
+    global pre_extract_calls
+    pre_extract_calls += 1
+    return ()
+
+
+expect_error(
+    "W03-A rejects oversized completed turns before the extraction callback",
+    CompletedTurnMemoryPersistence(
+        extract_candidates=counted_extract,
+        prepare_plan=prepare_canonical,
+        apply_plan=apply_canonical,
+    ).persist(
+        CompletedMemoryTurn(
+            user_text="x" * (MAX_COMPLETED_TURN_CHARS + 1),
+            assistant_text="a",
+            source_ref="conversation:w03-oversized",
+        )
+    ),
+    "pre-model boundary",
+)
+check(
+    pre_extract_calls == 0,
+    "W03-A oversized turn cannot leak into a custom extraction callback",
+)
+
+# W01 canonicalization is applied before extraction, not after model/callback
+# observation.
+seen_bounded_turns = []
+
+
+async def observe_bounded_turn(seen_turn):
+    seen_bounded_turns.append(seen_turn)
+    return ()
+
+
+trimmed = asyncio.run(
+    CompletedTurnMemoryPersistence(
+        extract_candidates=observe_bounded_turn,
+        prepare_plan=must_not_prepare,
+        apply_plan=must_not_apply,
+    ).persist(
+        CompletedMemoryTurn(
+            user_text="  bruger tekst  ",
+            assistant_text="  svar  ",
+            source_ref="  conversation:w03-trim  ",
+        )
+    )
+)
+check(
+    not trimmed.sent_to_store
+    and len(seen_bounded_turns) == 1
+    and seen_bounded_turns[0]
+    == CompletedMemoryTurn(
+        user_text="bruger tekst",
+        assistant_text="svar",
+        source_ref="conversation:w03-trim",
+    ),
+    "W03-A passes only the W01-canonicalized completed turn to extraction",
 )
 
 # Extraction must remain async; W03-A must not reinterpret a synchronous model
