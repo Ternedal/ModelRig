@@ -9,23 +9,20 @@ from ..memory.consolidation import (
     ConsolidationAction,
     ConsolidationPlan,
     ConsolidationReceipt,
+    MemoryConsolidationError,
     MemoryConsolidator,
 )
 from ..memory.extraction import MemoryCandidate
 from .memory import MemoryConflict, MemoryRecord, MemoryStore
 from .memory_protected_reader import MemoryReadAccess, ProtectedMemoryReader
-from .memory_protected_writer import (
-    MemoryWriteAccess,
-    ProtectedMemoryWriteError,
-    ProtectedMemoryWriter,
-)
+from .memory_protected_writer import MemoryWriteAccess, ProtectedMemoryWriter
 
 
 WRITE_RECEIPT_SCHEMA = "kaliv-memory-consolidation-write-receipt/v1"
 
 
 class MemoryConsolidationWriteError(RuntimeError):
-    """A W02-A plan cannot be applied without broadening its storage authority."""
+    """A W02-A plan cannot be applied without broadening storage authority."""
 
 
 @dataclass(frozen=True)
@@ -76,8 +73,8 @@ def apply_legacy_consolidation_plan(
     """Atomically execute one still-current W02-A plan against legacy storage."""
     candidates = _validate_plan(plan)
     with store._transaction():
-        snapshot = _legacy_snapshot_locked(store)
-        fresh = MemoryConsolidator().plan(candidates, snapshot)
+        snapshot = _legacy_snapshot_locked(store, candidates, plan)
+        fresh = _replan(candidates, snapshot)
         if fresh != plan:
             replay = _legacy_replay_receipt_locked(store, plan, fresh)
             if replay is not None:
@@ -85,7 +82,11 @@ def apply_legacy_consolidation_plan(
             raise MemoryConsolidationWriteError(
                 "legacy consolidation plan is stale or was not produced by W02-A"
             )
-        return _apply_legacy_fresh_locked(store, fresh)
+        return _apply_legacy_fresh_locked(
+            store,
+            fresh,
+            {record.id: record for record in snapshot},
+        )
 
 
 def apply_protected_consolidation_plan(
@@ -104,8 +105,8 @@ def apply_protected_consolidation_plan(
             writer.codec,
             busy_timeout_ms=writer.busy_timeout_ms,
         ) as reader:
-            snapshot = _protected_snapshot_locked(reader)
-            fresh = MemoryConsolidator().plan(candidates, snapshot)
+            snapshot = _protected_snapshot_locked(reader, candidates, plan)
+            fresh = _replan(candidates, snapshot)
             if fresh != plan:
                 replay = _protected_replay_receipt_locked(reader, plan, fresh)
                 if replay is not None:
@@ -113,7 +114,11 @@ def apply_protected_consolidation_plan(
                 raise MemoryConsolidationWriteError(
                     "protected consolidation plan is stale or was not produced by W02-A"
                 )
-        return _apply_protected_fresh_locked(writer, fresh)
+        return _apply_protected_fresh_locked(
+            writer,
+            fresh,
+            {record.id: record for record in snapshot},
+        )
 
 
 def _validate_plan(plan: ConsolidationPlan) -> tuple[MemoryCandidate, ...]:
@@ -130,6 +135,8 @@ def _validate_plan(plan: ConsolidationPlan) -> tuple[MemoryCandidate, ...]:
     for action in plan.actions:
         if not isinstance(action, ConsolidationAction):
             raise MemoryConsolidationWriteError("invalid consolidation action")
+        if action.decision not in counts:
+            raise MemoryConsolidationWriteError("invalid consolidation decision")
         counts[action.decision] += 1
         candidates.append(action.candidate)
         if action.existing_id is not None:
@@ -146,25 +153,95 @@ def _validate_plan(plan: ConsolidationPlan) -> tuple[MemoryCandidate, ...]:
     )
     if plan.receipt != expected:
         raise MemoryConsolidationWriteError("consolidation receipt does not match actions")
-    return tuple(candidates)
+
+    candidate_rows = tuple(candidates)
+    # Validate the candidate authority/bounds before using subject/predicate as
+    # storage selectors. The empty snapshot is validation-only; the authoritative
+    # plan is rerun under the write lock against current durable state below.
+    try:
+        MemoryConsolidator().plan(candidate_rows, ())
+    except MemoryConsolidationError as exc:
+        raise MemoryConsolidationWriteError(
+            "consolidation plan contains an invalid W02-A candidate"
+        ) from exc
+    return candidate_rows
 
 
-def _legacy_snapshot_locked(store: MemoryStore) -> list[MemoryRecord]:
+def _replan(
+    candidates: tuple[MemoryCandidate, ...],
+    snapshot: list[MemoryRecord],
+) -> ConsolidationPlan:
+    try:
+        return MemoryConsolidator().plan(candidates, snapshot)
+    except MemoryConsolidationError as exc:
+        raise MemoryConsolidationWriteError(
+            "current durable state is outside the W02-A consolidation boundary"
+        ) from exc
+
+
+def _snapshot_query(
+    candidates: tuple[MemoryCandidate, ...],
+    plan: ConsolidationPlan,
+) -> tuple[str | None, tuple[object, ...]]:
+    """Build a bounded exact-key lookup instead of scanning the whole memory DB.
+
+    W02-A decisions can depend only on rows for candidate subject/predicate slots
+    plus the trusted ids named by dedupe/supersede actions. Restricting the fresh
+    snapshot to those selectors keeps W02-B usable when the store has far more
+    than MAX_CONSOLIDATION_EXISTING total memories while still failing closed if
+    the relevant set itself exceeds the planner bound.
+    """
+    keys = sorted({(item.subject, item.predicate) for item in candidates})
+    touched = sorted(
+        {
+            action.existing_id
+            for action in plan.actions
+            if action.existing_id is not None
+        }
+    )
+    selectors: list[str] = []
+    params: list[object] = []
+    for subject, predicate in keys:
+        selectors.append("(subject=? AND predicate=?)")
+        params.extend((subject, predicate))
+    if touched:
+        selectors.append("id IN (" + ",".join("?" for _ in touched) + ")")
+        params.extend(touched)
+    if not selectors:
+        return None, ()
+    return " OR ".join(selectors), tuple(params)
+
+
+def _legacy_snapshot_locked(
+    store: MemoryStore,
+    candidates: tuple[MemoryCandidate, ...],
+    plan: ConsolidationPlan,
+) -> list[MemoryRecord]:
+    selectors, params = _snapshot_query(candidates, plan)
+    if selectors is None:
+        return []
     rows = store._conn.execute(
         "SELECT * FROM agent_memories WHERE lifecycle_status='active' "
         "AND review_status IN ('pending','confirmed') AND sensitivity!='secret' "
-        "ORDER BY id LIMIT ?",
-        (MAX_CONSOLIDATION_EXISTING + 1,),
+        f"AND ({selectors}) ORDER BY id LIMIT ?",
+        (*params, MAX_CONSOLIDATION_EXISTING + 1),
     ).fetchall()
     return [store._record(row) for row in rows]
 
 
-def _protected_snapshot_locked(reader: ProtectedMemoryReader) -> list[MemoryRecord]:
+def _protected_snapshot_locked(
+    reader: ProtectedMemoryReader,
+    candidates: tuple[MemoryCandidate, ...],
+    plan: ConsolidationPlan,
+) -> list[MemoryRecord]:
+    selectors, params = _snapshot_query(candidates, plan)
+    if selectors is None:
+        return []
     rows = reader._execute(
         "SELECT * FROM agent_memories WHERE lifecycle_status='active' "
         "AND review_status IN ('pending','confirmed') AND sensitivity!='secret' "
-        "ORDER BY id LIMIT ?",
-        (MAX_CONSOLIDATION_EXISTING + 1,),
+        f"AND ({selectors}) ORDER BY id LIMIT ?",
+        (*params, MAX_CONSOLIDATION_EXISTING + 1),
     ).fetchall()
     return [
         reader._record(row, access=MemoryReadAccess.LOCAL_MANAGEMENT)
@@ -226,7 +303,10 @@ def _replay_receipt(
         durable = active_get(current.existing_id)
         if durable is None or not _full_match(durable, original.candidate):
             return None
-        if original.decision == "supersede":
+        if original.decision == "create":
+            if durable.supersedes_id is not None:
+                return None
+        else:
             if original.reason != "exact_verbatim_authority_promotion":
                 return None
             if durable.supersedes_id != original.existing_id:
@@ -307,6 +387,7 @@ def _protected_replay_receipt_locked(
 def _apply_legacy_fresh_locked(
     store: MemoryStore,
     plan: ConsolidationPlan,
+    snapshot_by_id: dict[str, MemoryRecord],
 ) -> ConsolidationWriteReceipt:
     created: list[str] = []
     superseded: list[str] = []
@@ -334,20 +415,24 @@ def _apply_legacy_fresh_locked(
         if action.reason != "exact_verbatim_authority_promotion" or not action.existing_id:
             raise MemoryConsolidationWriteError("supersede authority is invalid")
 
+        previous = snapshot_by_id.get(action.existing_id)
+        if previous is None:
+            raise MemoryConsolidationWriteError("supersede target is outside fresh snapshot")
+        _verify_promotion_target(previous, action.candidate)
         old = store._conn.execute(
-            "SELECT * FROM agent_memories WHERE id=? AND lifecycle_status='active'",
+            "SELECT * FROM agent_memories WHERE id=? AND lifecycle_status='active' "
+            "AND review_status='pending'",
             (action.existing_id,),
         ).fetchone()
         if old is None:
-            raise MemoryConsolidationWriteError("supersede target is no longer active")
-        _verify_promotion_target(store._record(old), action.candidate)
+            raise MemoryConsolidationWriteError("supersede target is no longer pending/active")
         replacement = store._insert_locked(
             **fields,
             supersedes_id=action.existing_id,
         )
         changed = store._conn.execute(
             "UPDATE agent_memories SET lifecycle_status='superseded',updated_at=? "
-            "WHERE id=? AND lifecycle_status='active'",
+            "WHERE id=? AND lifecycle_status='active' AND review_status='pending'",
             (replacement.updated_at, action.existing_id),
         ).rowcount
         if changed != 1:
@@ -371,6 +456,7 @@ def _apply_legacy_fresh_locked(
 def _apply_protected_fresh_locked(
     writer: ProtectedMemoryWriter,
     plan: ConsolidationPlan,
+    snapshot_by_id: dict[str, MemoryRecord],
 ) -> ConsolidationWriteReceipt:
     created: list[str] = []
     superseded: list[str] = []
@@ -420,20 +506,18 @@ def _apply_protected_fresh_locked(
         if action.reason != "exact_verbatim_authority_promotion" or not action.existing_id:
             raise MemoryConsolidationWriteError("supersede authority is invalid")
 
+        previous = snapshot_by_id.get(action.existing_id)
+        if previous is None:
+            raise MemoryConsolidationWriteError("supersede target is outside fresh snapshot")
+        _verify_promotion_target(previous, action.candidate)
         old = writer._row_locked(action.existing_id)
-        if old is None or old["lifecycle_status"] != "active":
-            raise MemoryConsolidationWriteError("supersede target is no longer active")
+        if (
+            old is None
+            or old["lifecycle_status"] != "active"
+            or old["review_status"] != "pending"
+        ):
+            raise MemoryConsolidationWriteError("supersede target is no longer pending/active")
         writer._validate_protected_row(old)
-        with ProtectedMemoryReader(
-            writer.path,
-            writer.codec,
-            busy_timeout_ms=writer.busy_timeout_ms,
-        ) as reader:
-            old_record = reader.get(
-                action.existing_id,
-                access=MemoryReadAccess.LOCAL_MANAGEMENT,
-            )
-        _verify_promotion_target(old_record, action.candidate)
         writer._insert_locked(
             memory_id=memory_id,
             fields=fields,
@@ -445,7 +529,7 @@ def _apply_protected_fresh_locked(
         )
         changed = writer._execute(
             "UPDATE agent_memories SET lifecycle_status='superseded',updated_at=? "
-            "WHERE id=? AND lifecycle_status='active'",
+            "WHERE id=? AND lifecycle_status='active' AND review_status='pending'",
             (now, action.existing_id),
         ).rowcount
         if changed != 1:
