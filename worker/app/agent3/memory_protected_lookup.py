@@ -94,6 +94,31 @@ class ProtectedMemoryExactLookup:
                 "protected exact lookup migration receipt is missing"
             )
         _validate_state_row(row, codec, require_completed=True)
+
+        # A completed receipt is not enough authority to trust an equality
+        # selector forever. A database could later be touched by older code,
+        # manual repair or a partial restore. Prove the cheap metadata invariant
+        # at writer startup: every currently eligible row has a digest and no
+        # ineligible row retains one. This performs no decryption and prevents a
+        # missing index entry from becoming a false "no exact match" result.
+        missing = conn.execute(
+            f"SELECT 1 FROM agent_memories WHERE sensitivity='private' "
+            "AND lifecycle_status='active' AND protection_state='protected' "
+            f"AND {LOOKUP_COLUMN} IS NULL LIMIT 1"
+        ).fetchone()
+        if missing is not None:
+            raise ProtectedMemoryLookupError(
+                "completed protected exact lookup has an unindexed active private row"
+            )
+        stale = conn.execute(
+            f"SELECT 1 FROM agent_memories WHERE {LOOKUP_COLUMN} IS NOT NULL AND NOT ("
+            "sensitivity='private' AND lifecycle_status='active' "
+            "AND protection_state='protected') LIMIT 1"
+        ).fetchone()
+        if stale is not None:
+            raise ProtectedMemoryLookupError(
+                "completed protected exact lookup retains an ineligible digest"
+            )
         return cls(_unwrap_lookup_key(codec, row))
 
     def close(self) -> None:
