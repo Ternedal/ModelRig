@@ -348,10 +348,12 @@ expect_write_error(
 )
 check(commit_calls == 0, "W03 failed extraction paths make no commit call")
 
-receipt_candidate = confirmed(
-    "W03 receipt candidate",
-    "conversation:w03-receipt",
+receipt_turn = CompletedMemoryTurn(
+    user_text="W03 receipt candidate",
+    assistant_text="Okay",
+    source_ref="conversation:w03-receipt",
 )
+receipt_candidate = confirmed(receipt_turn.user_text, receipt_turn.source_ref)
 
 
 async def receipt_extract(_turn: CompletedMemoryTurn) -> tuple[MemoryCandidate, ...]:
@@ -377,7 +379,7 @@ mismatch_service = MemoryCompletedTurnWriteService(
 )
 expect_write_error(
     "W03 rejects durable receipts that do not cover the candidate batch",
-    lambda: mismatch_service.commit_completed_turn(turn),
+    lambda: mismatch_service.commit_completed_turn(receipt_turn),
     "does not cover",
 )
 
@@ -392,7 +394,7 @@ write_failure_service = MemoryCompletedTurnWriteService(
 )
 expect_write_error(
     "W03 surfaces storage failure as a fail-closed orchestration error",
-    lambda: write_failure_service.commit_completed_turn(turn),
+    lambda: write_failure_service.commit_completed_turn(receipt_turn),
     "write failed",
 )
 

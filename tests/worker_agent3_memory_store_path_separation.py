@@ -107,6 +107,10 @@ run_support(
     "W03 completed-turn write",
     "worker_memory4_completed_turn_write.py",
 )
+run_support(
+    "W03-H1 turn authority",
+    "worker_memory4_w03_turn_authority.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
