@@ -33,6 +33,8 @@ Structured subject/predicate interpretations remain `pending`. W02-A independent
 
 W02-A accepts at most 16 candidates and 128 active durable rows, with a 64,000-character aggregate text budget. It validates every candidate/record again and canonicalizes candidate order before planning.
 
+Storage keys are exact strings. W02 does not case-fold or otherwise normalize model-authored `subject`/`predicate` values into a shared semantic identity. `Anders/Project_Status` and `anders/project_status` therefore remain distinct unless a later trusted review boundary explicitly says otherwise. Silent case normalization would itself be semantic merge authority.
+
 Its decisions are:
 
 - `create` — a new pending proposal or a new confirmed verbatim statement may be stored;
@@ -60,6 +62,8 @@ Before mutation W02-B:
 3. reads a fresh bounded active, pending/confirmed, non-secret snapshot while the write transaction is held;
 4. reruns `MemoryConsolidator`;
 5. requires the fresh plan to equal the supplied plan exactly, unless the durable state proves an exact idempotent replay of a previously successful execution.
+
+The fresh snapshot is not a whole-database scan. Structured candidates read every active non-secret pending/confirmed row in their exact `subject`/`predicate` slot, plus any trusted ids already named by the plan. Canonical verbatim candidates are narrower: because different verbatim values are independent log entries by W02-A contract, their snapshot selector also requires the exact candidate value. This keeps the 128-row safety bound meaningful without allowing 128+ unrelated historical user statements to block a new statement write.
 
 No raw model JSON, caller-supplied operation, correction token or caller-selected supersede target enters this boundary.
 
@@ -92,7 +96,7 @@ W02-B introduces no new protection format, key store, migration or fallback path
 
 A stale plan normally fails closed. One exception exists for exact replay after a successful W02-B batch.
 
-A former `create` may replay as a no-op only when the current active row full-matches the original candidate, including subject, predicate, value, kind, sensitivity, source type, `source_ref`, confidence, review status and absence of candidate-owned expiry.
+A former `create` may replay as a no-op only when the current active row full-matches the original candidate, including subject, predicate, value, kind, sensitivity, source type, `source_ref`, confidence, review status and absence of candidate-owned expiry. The matching row must itself be an original create, not a later version carrying a `supersedes_id`.
 
 A former `supersede` additionally requires that the current full-match row has `supersedes_id` equal to the exact original trusted W02-A target and that the target is now `superseded`.
 
@@ -122,8 +126,11 @@ The writer remains an explicit local composition primitive until a later product
 W02-B is accepted only when exact-head repository qualification proves:
 
 - W02-A plans are rerun under the write transaction and stale/forged plans fail closed;
+- exact storage keys remain distinct and no case-normalization gains merge authority;
+- unrelated durable rows do not consume the bounded relevant snapshot;
+- 128+ different canonical verbatim statements cannot exhaust a new independent statement write;
 - create preserves candidate authority/provenance fields exactly;
-- exact create replay is idempotent only on a full durable-field match;
+- exact create replay is idempotent only on a full durable-field match and never through a later superseding version;
 - exact pending-to-confirmed verbatim promotion creates a new version, links `supersedes_id` and preserves history;
 - supersede replay additionally proves the original trusted target link;
 - a late legacy mutation failure rolls back earlier writes in the same batch;
