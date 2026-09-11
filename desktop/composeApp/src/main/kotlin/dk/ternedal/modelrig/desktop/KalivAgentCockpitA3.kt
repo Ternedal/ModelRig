@@ -462,6 +462,10 @@ fun KalivAgentCockpitA3(
     )
     val previewConnectionMatches =
         previewConnection != null && currentPreviewConnection() == previewConnection
+    val currentConnectionBlocksCockpit = shouldBlockAgent3CockpitForCurrentConnection(
+        currentConnectionUnavailable = unavailable != null,
+        hasRun = run != null,
+    )
     val steps = run?.steps ?: previewSteps
     val doneCount = steps.count { isTerminal(it.state) }
 
@@ -481,7 +485,7 @@ fun KalivAgentCockpitA3(
             )
             Spacer(Modifier.height(16.dp))
 
-            if (unavailable != null) {
+            if (currentConnectionBlocksCockpit) {
                 KalivCard {
                     Text(unavailable!!, color = KalivTheme.colors.Warning, fontSize = 12.5.sp)
                 }
@@ -581,7 +585,7 @@ fun KalivAgentCockpitA3(
 
             if (steps.isEmpty()) {
                 Text(
-                    if (unavailable != null) "\u2014" else
+                    if (currentConnectionBlocksCockpit) "\u2014" else
                         "Skriv en opgave til venstre.\nAgent 3 planlægger hele forløbet, " +
                             "og du godkender hver skrivning.",
                     color = KalivTheme.colors.TextMuted, fontSize = 13.sp,
