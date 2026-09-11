@@ -1,3 +1,11 @@
+from .completed_turn_persistence import (
+    TURN_PERSISTENCE_RECEIPT_SCHEMA,
+    W02_WRITE_RECEIPT_SCHEMA,
+    MemoryTurnPersistenceError,
+    MemoryTurnPersistenceOrchestrator,
+    MemoryTurnPersistenceReceipt,
+    MemoryTurnWriteReceipt,
+)
 from .consolidation import (
     MAX_CONSOLIDATION_CANDIDATES,
     MAX_CONSOLIDATION_EXISTING,
@@ -94,6 +102,8 @@ __all__ = [
     "MAX_SEMANTIC_VECTOR_DIMS",
     "MAX_SOURCE_REF_CHARS",
     "MEMORY_CANDIDATE_SCHEMA",
+    "TURN_PERSISTENCE_RECEIPT_SCHEMA",
+    "W02_WRITE_RECEIPT_SCHEMA",
     "CompletedMemoryTurn",
     "HybridMemoryRetriever",
     "MemoryCandidate",
@@ -104,6 +114,10 @@ __all__ = [
     "MemoryReadRequest",
     "MemoryRetrievalQuery",
     "MemoryRetriever",
+    "MemoryTurnPersistenceError",
+    "MemoryTurnPersistenceOrchestrator",
+    "MemoryTurnPersistenceReceipt",
+    "MemoryTurnWriteReceipt",
     "RankedMemory",
     "SemanticMemoryConfig",
     "SemanticMemoryError",
