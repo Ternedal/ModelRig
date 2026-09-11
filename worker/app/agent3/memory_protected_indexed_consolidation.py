@@ -91,7 +91,13 @@ def _indexed_snapshot_locked(
 ) -> list[MemoryRecord]:
     canonical = tuple(candidate for candidate in candidates if _is_verbatim(candidate))
     if not canonical:
-        return _bounded_snapshot_query(reader, candidates, plan, lookup_ids=())
+        return _bounded_snapshot_query(
+            reader,
+            candidates,
+            plan,
+            lookup_ids=(),
+            exclude_verbatim_touched=False,
+        )
 
     matched_ids: set[str] = set()
     for value in sorted({candidate.value for candidate in canonical}):
@@ -104,7 +110,13 @@ def _indexed_snapshot_locked(
         if ids is None:
             # Optional sidecar has never been installed. Preserve the landed W02-B
             # behavior rather than silently changing storage semantics.
-            return _bounded_snapshot_query(reader, candidates, plan, lookup_ids=())
+            return _bounded_snapshot_query(
+                reader,
+                candidates,
+                plan,
+                lookup_ids=(),
+                exclude_verbatim_touched=False,
+            )
         matched_ids.update(ids)
         if len(matched_ids) > MAX_CONSOLIDATION_EXISTING:
             raise MemoryConsolidationWriteError(
@@ -117,6 +129,7 @@ def _indexed_snapshot_locked(
         structured,
         plan,
         lookup_ids=tuple(sorted(matched_ids)),
+        exclude_verbatim_touched=True,
     )
 
 
@@ -126,10 +139,27 @@ def _bounded_snapshot_query(
     plan: ConsolidationPlan,
     *,
     lookup_ids: tuple[str, ...],
+    exclude_verbatim_touched: bool,
 ) -> list[MemoryRecord]:
+    selector_plan = plan
+    if exclude_verbatim_touched:
+        # Once the sidecar exists, canonical verbatim targets must be rediscovered
+        # through the keyed selector. Keeping their plan-supplied existing_id in
+        # `_snapshot_query()` would let a stale/forged dedupe or supersede target
+        # bypass the exact-match sidecar entirely. Structured targets retain the
+        # landed W02-B trusted-id selector.
+        selector_plan = ConsolidationPlan(
+            actions=tuple(
+                action
+                for action in plan.actions
+                if not _is_verbatim(action.candidate)
+            ),
+            receipt=plan.receipt,
+        )
+
     selectors, params = _snapshot_query(
         candidates,
-        plan,
+        selector_plan,
         filter_verbatim_value=False,
     )
     selector_parts: list[str] = []
