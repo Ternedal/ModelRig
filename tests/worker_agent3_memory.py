@@ -7,7 +7,15 @@ import tempfile
 import time
 
 from app.agent3.memory import MemoryNotFound, MemoryStore, MemoryStoreError
-from app.memory import CompletedMemoryTurn, MEMORY_CANDIDATE_SCHEMA, MemoryCandidateExtractor
+from app.memory import (
+    MAX_CONSOLIDATION_CANDIDATES,
+    CompletedMemoryTurn,
+    MEMORY_CANDIDATE_SCHEMA,
+    MemoryCandidate,
+    MemoryCandidateExtractor,
+    MemoryConsolidationError,
+    MemoryConsolidator,
+)
 
 passed = failed = 0
 
@@ -220,6 +228,216 @@ padded = asyncio.run(
 check(
     padded.review_status == "pending",
     "extractor whitespace normalization cannot manufacture confirmed authority",
+)
+
+# Memory 4.0 W02-A: consolidation plans only; hardened W01 confirmed output is a
+# verbatim statement, not a model-authored semantic fact that may replace another.
+consolidator = MemoryConsolidator()
+existing_verbatim = store.create(
+    subject=hardened.subject,
+    predicate=hardened.predicate,
+    value=hardened.value,
+    kind=hardened.kind,
+    sensitivity=hardened.sensitivity,
+    source_type=hardened.source_type,
+    source_ref=hardened.source_ref,
+    confidence=hardened.confidence,
+)
+exact_plan = consolidator.plan([hardened], [existing_verbatim])
+check(
+    exact_plan.actions[0].decision == "dedupe"
+    and exact_plan.actions[0].existing_id == existing_verbatim.id
+    and exact_plan.receipt.dedupe_count == 1
+    and exact_plan.receipt.sent_to_store is False,
+    "W02 exact confirmed verbatim replay dedupes without writing",
+)
+
+second_turn = CompletedMemoryTurn(
+    user_text="I work in Copenhagen",
+    assistant_text="Noted.",
+    source_ref="conversation:second-verbatim",
+)
+
+
+async def second_full_turn_extract(_turn):
+    row = semantic_trap_row(evidence=second_turn.user_text)
+    row["value"] = "Copenhagen"
+    return extraction_document(row)
+
+
+second_hardened = asyncio.run(
+    MemoryCandidateExtractor(extract=second_full_turn_extract).extract(second_turn)
+)[0]
+separate_statement = consolidator.plan(
+    [second_hardened],
+    [existing_verbatim],
+)
+check(
+    separate_statement.actions[0].decision == "create"
+    and separate_statement.actions[0].existing_id is None,
+    "W02 never treats different confirmed verbatim statements as stale versions of one semantic fact",
+)
+
+legacy_pending_same = store.create(
+    subject=hardened.subject,
+    predicate=hardened.predicate,
+    value=hardened.value,
+    kind="note",
+    sensitivity="private",
+    source_type="inferred",
+    source_ref="run:legacy-pending-verbatim",
+)
+promotion = consolidator.plan([hardened], [legacy_pending_same])
+check(
+    promotion.actions[0].decision == "supersede"
+    and promotion.actions[0].existing_id == legacy_pending_same.id
+    and promotion.actions[0].reason == "normalize_exact_value_to_confirmed_verbatim",
+    "W02 may version the exact same value from pending legacy form to hardened confirmed verbatim form",
+)
+
+semantic_confirmed = store.create(
+    subject="anders",
+    predicate="favorite_city",
+    value="Odense",
+    kind="preference",
+    sensitivity="private",
+    source_type="user_explicit",
+)
+pending_semantic = consolidator.plan([partial], [semantic_confirmed])
+check(
+    pending_semantic.actions[0].decision == "create"
+    and pending_semantic.actions[0].existing_id is None,
+    "W02 pending model semantics cannot supersede a confirmed structured fact",
+)
+
+semantic_pending_exact = store.create(
+    subject=partial.subject,
+    predicate=partial.predicate,
+    value=partial.value,
+    kind=partial.kind,
+    sensitivity="private",
+    source_type="inferred",
+    source_ref="run:semantic-pending",
+)
+pending_exact = consolidator.plan([partial], [semantic_pending_exact])
+check(
+    pending_exact.actions[0].decision == "dedupe"
+    and pending_exact.actions[0].existing_id == semantic_pending_exact.id,
+    "W02 exact pending semantics dedupe without gaining authority",
+)
+
+forged_confirmed = MemoryCandidate(
+    subject="anders",
+    predicate="favorite_city",
+    value="Copenhagen",
+    kind="preference",
+    sensitivity="private",
+    source_type="user_explicit",
+    source_ref="conversation:forged",
+    confidence=1.0,
+    review_status="confirmed",
+    evidence="Copenhagen",
+)
+try:
+    consolidator.plan([forged_confirmed], [])
+    forged_rejected = False
+except MemoryConsolidationError:
+    forged_rejected = True
+check(
+    forged_rejected,
+    "W02 rejects confirmed candidates that bypass hardened W01 verbatim normalization",
+)
+
+secret_candidate = MemoryCandidate(
+    subject="anders",
+    predicate="secret_note",
+    value="top-secret",
+    kind="note",
+    sensitivity="secret",
+    source_type="user_explicit",
+    source_ref="conversation:secret-candidate",
+    confidence=0.9,
+    review_status="pending",
+    evidence="top-secret",
+)
+secret_plan = consolidator.plan([secret_candidate], [])
+check(
+    secret_plan.actions[0].decision == "skip"
+    and secret_plan.actions[0].reason == "secret_candidate",
+    "W02 skips secret candidates before consolidation",
+)
+
+multi_verbatim = store.create(
+    subject="user",
+    predicate="verbatim_user_statement",
+    value="A different exact user statement",
+    kind="note",
+    sensitivity="private",
+    source_type="user_explicit",
+)
+check(
+    consolidator.plan([second_hardened], [existing_verbatim, multi_verbatim]).actions[0].decision
+    == "create",
+    "W02 allows multiple independent confirmed verbatim statements under the generic hardened key",
+)
+
+structured_conflict_a = store.create(
+    subject="w02",
+    predicate="structured_conflict",
+    value="a",
+    sensitivity="private",
+    source_type="user_explicit",
+)
+structured_conflict_b = store.create(
+    subject="w02",
+    predicate="structured_conflict",
+    value="b",
+    sensitivity="private",
+    source_type="user_explicit",
+)
+structured_pending = MemoryCandidate(
+    subject="w02",
+    predicate="structured_conflict",
+    value="c",
+    kind="fact",
+    sensitivity="private",
+    source_type="inferred",
+    source_ref="run:structured-conflict",
+    confidence=0.5,
+    review_status="pending",
+    evidence="",
+)
+try:
+    consolidator.plan(
+        [structured_pending],
+        [structured_conflict_a, structured_conflict_b],
+    )
+    ambiguous_rejected = False
+except MemoryConsolidationError:
+    ambiguous_rejected = True
+check(
+    ambiguous_rejected,
+    "W02 fails closed on ambiguous confirmed structured state",
+)
+
+try:
+    consolidator.plan([hardened] * (MAX_CONSOLIDATION_CANDIDATES + 1), [])
+    oversized_rejected = False
+except MemoryConsolidationError:
+    oversized_rejected = True
+check(oversized_rejected, "W02 hard-bounds candidate iterator consumption")
+
+try:
+    consolidator.plan([hardened], [secret])
+    secret_snapshot_rejected = False
+except MemoryConsolidationError:
+    secret_snapshot_rejected = True
+check(secret_snapshot_rejected, "W02 refuses secret records in its trusted snapshot")
+
+receipt_text = json.dumps(exact_plan.to_dict(), ensure_ascii=False)
+check(
+    hardened.value not in receipt_text and hardened.source_ref not in receipt_text,
+    "W02 serialized plan receipt does not leak private candidate value or source_ref",
 )
 
 store.close()
