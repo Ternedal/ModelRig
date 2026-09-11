@@ -45,6 +45,13 @@ from .storage import (
     SharedMemoryReader,
     SharedMemoryRecord,
 )
+from .write_service import (
+    TURN_WRITE_RECEIPT_SCHEMA,
+    CompletedTurnWriteReceipt,
+    DurableCandidateWrite,
+    MemoryCompletedTurnWriteService,
+    MemoryTurnWriteError,
+)
 
 
 async def embed_memory_text_local(text: str) -> list[float]:
@@ -70,11 +77,15 @@ async def extract_memory_candidates_local(
 
 
 __all__ = [
+    "CompletedMemoryTurn",
+    "CompletedTurnWriteReceipt",
     "ConsolidationAction",
     "ConsolidationPlan",
     "ConsolidationReceipt",
     "DEFAULT_MIN_SEMANTIC_SCORE",
+    "DurableCandidateWrite",
     "ExistingMemory",
+    "HybridMemoryRetriever",
     "MAX_CANDIDATE_EVIDENCE_CHARS",
     "MAX_CANDIDATE_PREDICATE_CHARS",
     "MAX_CANDIDATE_SUBJECT_CHARS",
@@ -94,16 +105,16 @@ __all__ = [
     "MAX_SEMANTIC_VECTOR_DIMS",
     "MAX_SOURCE_REF_CHARS",
     "MEMORY_CANDIDATE_SCHEMA",
-    "CompletedMemoryTurn",
-    "HybridMemoryRetriever",
     "MemoryCandidate",
     "MemoryCandidateExtractor",
+    "MemoryCompletedTurnWriteService",
     "MemoryConsolidationError",
     "MemoryConsolidator",
     "MemoryExtractionError",
     "MemoryReadRequest",
     "MemoryRetrievalQuery",
     "MemoryRetriever",
+    "MemoryTurnWriteError",
     "RankedMemory",
     "SemanticMemoryConfig",
     "SemanticMemoryError",
@@ -111,6 +122,7 @@ __all__ = [
     "SharedMemoryReadError",
     "SharedMemoryReader",
     "SharedMemoryRecord",
+    "TURN_WRITE_RECEIPT_SCHEMA",
     "embed_memory_text_local",
     "extract_memory_candidates_local",
 ]
