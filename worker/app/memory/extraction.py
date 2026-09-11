@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import math
+import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -21,9 +22,52 @@ KINDS = {"fact", "preference", "project", "relationship", "routine", "constraint
 SENSITIVITIES = {"public", "operational", "private", "secret"}
 SOURCE_TYPES = {"user_explicit", "tool_observation", "imported", "inferred"}
 
+_CREDENTIAL_LABEL = re.compile(
+    r"(?:^|[_\-\s])(?:password|passcode|passphrase|api[_\-\s]?key|"
+    r"access[_\-\s]?token|auth[_\-\s]?token|refresh[_\-\s]?token|secret|"
+    r"private[_\-\s]?key|otp|one[_\-\s]?time[_\-\s]?code|pin)(?:$|[_\-\s])",
+    re.IGNORECASE,
+)
+_CREDENTIAL_VALUE_PATTERNS = (
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+\-/]+=*", re.IGNORECASE),
+)
+
 
 class MemoryExtractionError(RuntimeError):
     """A completed turn could not produce a bounded trustworthy candidate batch."""
+
+
+class _DuplicateJSONKey(ValueError):
+    pass
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJSONKey(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _looks_like_credential(
+    *,
+    subject: str,
+    predicate: str,
+    value: str,
+    evidence: str,
+) -> bool:
+    if _CREDENTIAL_LABEL.search(f"{subject} {predicate}"):
+        return True
+    for text in (value, evidence):
+        if any(pattern.search(text) for pattern in _CREDENTIAL_VALUE_PATTERNS):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -76,6 +120,11 @@ class MemoryCandidateExtractor:
     fields that matter to durable memory: provenance is validated, source_ref is
     supplied by the caller, and review_status is derived locally. The extractor
     cannot return ids, supersede targets or a write/correction/delete operation.
+
+    Sensitivity is also server-conservative: a model may cause an escalation to
+    ``secret``, but it cannot declassify extracted user data. Every non-secret W01
+    candidate is emitted as ``private`` until a later trusted review boundary
+    deliberately changes that classification.
     """
 
     _TOP_LEVEL_KEYS = {"schema", "candidates"}
@@ -144,8 +193,8 @@ class MemoryCandidateExtractor:
         if len(raw) > MAX_MODEL_OUTPUT_CHARS:
             raise MemoryExtractionError("candidate extractor output exceeds hard bound")
         try:
-            document = json.loads(raw)
-        except json.JSONDecodeError as exc:
+            document = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+        except (json.JSONDecodeError, _DuplicateJSONKey) as exc:
             raise MemoryExtractionError("candidate extractor returned invalid JSON") from exc
         if not isinstance(document, dict) or set(document) != cls._TOP_LEVEL_KEYS:
             raise MemoryExtractionError("candidate document has invalid fields")
@@ -195,7 +244,7 @@ class MemoryCandidateExtractor:
             MAX_CANDIDATE_VALUE_CHARS,
         )
         kind = cls._choice("candidate kind", raw.get("kind"), KINDS)
-        sensitivity = cls._choice(
+        proposed_sensitivity = cls._choice(
             "candidate sensitivity",
             raw.get("sensitivity"),
             SENSITIVITIES,
@@ -207,6 +256,18 @@ class MemoryCandidateExtractor:
         )
         confidence = cls._confidence(raw.get("confidence"))
         evidence = cls._evidence(raw.get("evidence"))
+
+        credential_like = _looks_like_credential(
+            subject=subject,
+            predicate=predicate,
+            value=value,
+            evidence=evidence,
+        )
+        sensitivity = (
+            "secret"
+            if proposed_sensitivity == "secret" or credential_like
+            else "private"
+        )
 
         # The model never decides review authority. A user_explicit candidate can
         # be confirmed only when both its evidence and exact value are literal
