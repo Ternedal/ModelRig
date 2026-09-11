@@ -70,12 +70,23 @@ type memory4ContextReceipt struct {
 	SentToModel      bool           `json:"sent_to_model"`
 }
 
-// handleMemory4Chat is the only R05 integration point. Flag-off and turns that
+// handleMemory4Chat keeps the original R05 read path byte-for-byte when W04-B is
+// disabled. Exact W04-B opt-in adds only the response observer/post-turn write
+// boundary and delegates all model/context semantics to handleMemory4ChatRead.
+func (s *server) handleMemory4Chat(w http.ResponseWriter, r *http.Request) {
+	if memory4ChatWriteEnabled() {
+		s.handleMemory4ChatWrite(w, r)
+		return
+	}
+	s.handleMemory4ChatRead(w, r)
+}
+
+// handleMemory4ChatRead is the R05 integration point. Flag-off and turns that
 // cannot produce a bounded canonical text query use the pre-R05 chat path
 // byte-for-byte: no worker call and no body rewrite. When enabled for a normal
 // text turn, the backend obtains an R04 context from the loopback worker,
 // verifies its exact receipt binding, and only then creates a new model request.
-func (s *server) handleMemory4Chat(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleMemory4ChatRead(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv(memory4ChatFlag) != "1" {
 		s.handleChat(w, r)
 		return
