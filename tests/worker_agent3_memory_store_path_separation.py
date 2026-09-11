@@ -99,6 +99,10 @@ run_support(
     "W02 protected exact lookup",
     "worker_agent3_memory_protected_exact_lookup.py",
 )
+run_support(
+    "W02 protected exact lookup tamper",
+    "worker_agent3_memory_protected_exact_lookup_tamper.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
