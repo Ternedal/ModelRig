@@ -154,6 +154,8 @@ fun AgentRunPanelHost(
     var reachable by remember(boundRunId) { mutableStateOf(true) }
     var stopArmed by remember(boundRunId) { mutableStateOf(false) }
     var stopping by remember(boundRunId) { mutableStateOf(false) }
+    var stopUncertain by remember(boundRunId) { mutableStateOf(false) }
+    var publicationEpoch by remember(boundRunId) { mutableStateOf(0L) }
     // Fladen og begrundelsen kommer fra riggens egen readiness -- panelet
     // kendte kun planens rutenavn, så operatøren kunne ikke se hvilken flade
     // der kørte, hvorfor, eller at den var faldet tilbage til agent2.
@@ -181,11 +183,17 @@ fun AgentRunPanelHost(
     LaunchedEffect(boundRunId, baseUrl, token) {
         var keepAsking = true
         while (keepAsking) {
+            val requestEpoch = publicationEpoch
             val res = withContext(Dispatchers.IO) {
                 runCatching { Agent3Client(baseUrl, token).listRuns() }
             }
+            if (!AgentRunPresentation.canPublishRunPanelPoll(requestEpoch, publicationEpoch)) {
+                if (keepAsking) delay(5_000)
+                continue
+            }
             res.onSuccess { runs ->
                 reachable = true
+                stopUncertain = false
                 val visible = AgentRunPresentation.visibleRun(runs, boundRunId)
                 run = visible
                 if (visible != null) {
@@ -229,30 +237,41 @@ fun AgentRunPanelHost(
             )
             Spacer(Modifier.height(6.dp))
         }
-        val plan = current.termination?.plan
         AgentRunCard(
             steps = AgentRunPresentation.steps(current),
             title = AgentRunPresentation.title(current),
             onStop = { stopArmed = true },
             onOpen = onOpenCheckpoint,
-            canStop = plan?.canRequest ?: true,
-            stopBlockedReason = plan?.reason,
+            canStop = AgentRunPresentation.canRequestStop(current),
+            stopBlockedReason = AgentRunPresentation.stopBlockedReason(current),
         )
+        if (stopUncertain) {
+            Spacer(Modifier.height(6.dp))
+            AgentRunStopUncertainNote()
+        }
         if (stopArmed) {
             Spacer(Modifier.height(6.dp))
             AgentRunStopConfirm(
                 busy = stopping,
                 onCancel = { stopArmed = false },
                 onConfirm = {
+                    val stopEpoch = AgentRunPresentation.nextRunPanelPublicationEpoch(publicationEpoch)
+                    publicationEpoch = stopEpoch
                     stopping = true
+                    stopUncertain = false
                     scope.launch {
                         val res = withContext(Dispatchers.IO) {
                             runCatching { Agent3Client(baseUrl, token).cancel(current.id) }
                         }
                         stopping = false
                         stopArmed = false
-                        // RIGGENS svar bestemmer — ikke vores håb.
+                        if (!AgentRunPresentation.canPublishRunPanelPoll(stopEpoch, publicationEpoch)) {
+                            return@launch
+                        }
+                        // RIGGENS svar bestemmer — ikke vores håb. Et tabt
+                        // svar er derfor UNKNOWN, ikke "Stop fejlede".
                         res.onSuccess { updated ->
+                            stopUncertain = false
                             if (AgentRunPresentation.isTerminal(updated)) {
                                 // Samme regel som når kørslen slutter af sig
                                 // selv: kortet går væk, udfaldet bliver.
@@ -262,11 +281,45 @@ fun AgentRunPanelHost(
                             } else {
                                 run = updated
                             }
+                        }.onFailure {
+                            stopUncertain = true
                         }
                     }
                 },
             )
         }
+    }
+}
+
+/**
+ * Når et Stop-kald ikke gav et autoritativt svar tilbage.
+ *
+ * Serveren kan have persisteret CANCELLED før transporten fejlede, så UI'et
+ * må hverken sige "stoppet" eller "Stop fejlede". Polling henter frisk truth;
+ * indtil da er udfaldet eksplicit ukendt. Stop er server-idempotent og kan
+ * forsøges igen, hvis den friske termination-plan fortsat tillader det.
+ */
+@Composable
+private fun AgentRunStopUncertainNote(modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(KalivTokens.Radius.card)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(KalivTheme.colors.surfaceDim, shape)
+            .border(KalivTokens.Layout.hairline, KalivTheme.colors.hairline, shape)
+            .padding(horizontal = 15.dp, vertical = 12.dp),
+    ) {
+        Text(
+            "Stop-resultatet er ukendt",
+            style = TextStyle(fontFamily = KalivType.Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp),
+            color = KalivTheme.colors.textHigh,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            "Riggen kan allerede have stoppet kørslen. Panelet afventer frisk run-status fra riggen; hvis Stop stadig er tilladt bagefter, kan du prøve igen.",
+            style = TextStyle(fontFamily = KalivType.Inter, fontSize = 13.sp),
+            color = KalivTheme.colors.textMuted,
+        )
     }
 }
 
