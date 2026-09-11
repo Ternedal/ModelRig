@@ -3,9 +3,9 @@
 Status: implementation track, default-off for normal chat.
 
 Memory 4.0 is the path from the existing Agent 3 Memory 3.0 substrate to one
-model-independent memory service that can eventually serve normal Kaliv chat,
-Agent 3 planning and future voice/agent surfaces without making any model own
-the durable memory state.
+model-independent memory service that can serve normal Kaliv chat, Agent 3
+planning and future voice/agent surfaces without making any model own the durable
+memory state.
 
 ## Current boundary
 
@@ -19,9 +19,11 @@ The repository already has a substantial Memory 3.0 implementation under
 - explicit Agent 3 planner-memory receipts;
 - Android/Desktop developer memory administration.
 
-That code is not normal-chat memory authority. Normal `/api/v1/chat` still goes
-through the Go backend directly to Ollama, and Agent 3 remains deliberately
-separate from the normal Android/Desktop `TurnRouter` flow.
+R01-R04 provide a shared, read-only Memory 4 retrieval and context service. R05
+adds a separately gated Go normal-chat integration, but that does not make Agent
+3 the owner of normal chat: `/api/v1/chat` remains the same authenticated backend
+route and the R05 flag is off by default. Agent 3 remains deliberately separate
+from the normal Android/Desktop `TurnRouter` flow.
 
 Memory 4.0 shares those primitives without turning normal chat into an implicit
 Agent 3 activation dependency.
@@ -30,7 +32,9 @@ Agent 3 activation dependency.
 
 ```mermaid
 flowchart LR
-    U[User turn] --> Q[Memory query]
+    U[User turn] --> GO[Go normal-chat backend]
+    GO -->|R05 enabled + bounded final text turn| R04[R04 context-for-turn service]
+    R04 --> Q[Memory query]
     Q --> R[Deterministic R01 eligibility + lexical ranker]
     S[(Existing reviewed memory substrate)] --> A[Neutral R02 shared read adapter]
     A --> R
@@ -38,24 +42,26 @@ flowchart LR
     O[Local Ollama embedding only] -. server-owned opt-in .-> H
     H --> C[Privacy-aware context compiler]
     R -. semantic disabled .-> C
-    C --> R04[R04 context-for-turn service]
-    R04 --> B[Bounded memory data block]
+    C --> R04
+    R04 --> B[Bounded untrusted memory data block]
     R04 --> RCPT[Exact SHA-256 receipt\nsent_to_model=false]
+    GO --> V[R05 receipt/context verification]
+    R04 --> V
+    V -->|verified non-empty context| I[Attach memory reference inside final user data]
+    I --> L[Selected LLM]
+    GO -->|flag off / empty / unsupported turn| L
 
     LEG[Legacy query-only reader] --> S
     PROT[Protected query-only reader / DPAPI] --> S
-
     A3[Agent 3 planner] --> Q
-    GO[Go normal-chat backend] -. future R05 .-> R04
-    GO -. future R05 only .-> L[Selected LLM]
-
     X[Memory extraction / consolidation] -. later write path .-> S
 ```
 
-R04 returns a bounded context block and a receipt but does not send either to an
-LLM. The model remains downstream of a separately reviewed R05 integration.
-A model swap must not erase, silently rewrite or change the authority of stored
-memory.
+R04 returns a bounded context block and a pre-model receipt. R05 is the separate
+backend action that may send the verified context to the selected model. The
+receipt itself is not model input, and memory data is never promoted to system
+message authority. A model swap must not erase, silently rewrite or change the
+authority of stored memory.
 
 ## M4-R01 — shared retrieval kernel
 
@@ -170,8 +176,8 @@ routing change, Agent 3 activation, memory write path or production activation.
 
 ## M4-R04 — read-only context-for-turn service
 
-The R04 candidate adds a worker-owned pre-model context service while preserving
-the normal-chat boundary:
+R04 landed on `main` through PR #1181. It adds a worker-owned pre-model context
+service while preserving an explicit model-egress boundary:
 
 - route: `POST /experimental/memory4/context-for-turn`;
 - mount flag: `KALIV_MEMORY4_CONTEXT_ENABLED=1`, default off;
@@ -208,8 +214,8 @@ The request contract contains only:
 
 There is deliberately **no** `allow_private_cloud` request field. R04 always
 passes `allow_private_cloud=false` to storage, retrieval and compilation for a
-cloud target. A later R05 cannot turn a caller-supplied boolean into authority;
-any private-cloud design would need a separate authenticated policy boundary.
+cloud target. R05 cannot turn a caller-supplied boolean into authority; any
+private-cloud design would need a separate authenticated policy boundary.
 
 R04 reads at most 100 reviewed candidates / 50,000 source characters, runs the
 landed R01/R03 retrieval path, and feeds selected records to the existing
@@ -235,22 +241,54 @@ The receipt is `kaliv-memory-context-receipt/v1` and binds:
   hash when no context fits;
 - `sent_to_model=false`.
 
-R04 does not modify `/api/v1/chat`, Go routing, Android/Desktop routing, memory
-writes, Agent 3 activation or production activation.
+R04 itself does not call an LLM, modify memory, activate Agent 3 or grant
+production authority.
+
+## M4-R05 — guarded Go normal-chat integration
+
+R05 is the first normal-chat consumer of R04. It changes only the implementation
+behind the existing authenticated `POST /api/v1/chat` route; clients do not gain
+a new route or authority surface.
+
+- backend flag: `KALIV_MEMORY4_CHAT_ENABLED=1`, default off;
+- flag-off dispatches directly to the pre-R05 `handleChat` proxy without reading
+  or rewriting the request body and without contacting the memory worker;
+- enabled R05 only probes bounded normal text turns (2 MiB request probe, the
+  **final** message must be a `user` message with string content, canonical query
+  max 4,096 characters);
+- unsupported/multimodal-shaped, malformed-for-R05, non-user-final or oversized
+  turns bypass memory and continue through the existing Ollama proxy rather than
+  changing their pre-existing chat semantics;
+- the memory worker must be configured on loopback before any query is sent;
+- a loopback selected model is requested as R04 target `local`; every non-loopback
+  model destination is conservatively classified as `cloud`;
+- R05 sends no `allow_private_cloud` authority and R04 therefore continues to
+  exclude private memory from cloud-target context;
+- the backend requests at most 12 results and 12,000 context characters;
+- worker refusal/unavailability, oversized/malformed context response, missing
+  required receipt fields or receipt mismatch fails the chat request closed with
+  `503` before a model call;
+- an empty, correctly receipted context restores and forwards the original chat
+  body without memory injection;
+- a non-empty context is sent to the model only after R05 verifies service and
+  receipt schemas, target, count ordering/accounting, included-id uniqueness,
+  exact character count, UTF-8 byte count, SHA-256 and `sent_to_model=false`;
+- the R04 receipt is never included in the model request;
+- the exact R04 context is prepended **inside the final user message**, behind a
+  static server-authored reference prefix and ahead of explicit
+  `BEGIN/END CURRENT USER REQUEST` markers around the caller's original text;
+- memory data is never promoted into a system-role message; any existing system
+  messages remain semantically unchanged;
+- all other top-level Ollama request fields and earlier chat messages remain
+  semantically intact;
+- R05 does not add Android/Desktop routing, memory writes, Agent 3 activation,
+  private-cloud grants or production activation.
+
+R04's `sent_to_model=false` is treated as an invariant to verify, not as model
+permission. The model egress is the explicit R05 backend action after receipt
+verification.
 
 ## Planned slices
-
-### M4-R05 — Go backend chat integration
-
-The Go `/api/v1/chat` path may request an R04 memory context before calling the
-selected model. This requires a separate reviewed contract because the backend
-currently proxies chat directly. Initial integration must be feature-gated and
-preserve identical chat behavior when memory is disabled or no relevant memory
-exists.
-
-R05 must verify the exact R04 receipt/context binding before model use and must
-not reinterpret `sent_to_model=false` as permission: changing that fact is a new
-backend action that needs its own routing/egress contract.
 
 ### M4-W01 — memory candidate extraction
 
@@ -287,14 +325,14 @@ runtime authority.
 2. Retrieval never promotes pending/rejected/deleted/expired records.
 3. Secret memory never enters model context or semantic embedding.
 4. Private cloud memory requires explicit policy authority before embedding or
-   context use; R04 grants no such authority.
+   context use; R04/R05 grant no such authority.
 5. Memory values are untrusted reference data, not executable instructions.
 6. Retrieval cannot change tool risk, approval, sensitivity or egress.
 7. A memory write path cannot silently infer a durable fact as confirmed.
 8. Deletion/correction remain explicit lifecycle operations.
 9. Context has hard size/record bounds and an exact receipt before model use.
-10. Agent 3 dormancy and normal-chat routing boundaries remain unchanged until a
-    later explicitly reviewed integration slice.
+10. Normal-chat memory is default-off, remains at user-data authority, and
+    enabling it neither activates Agent 3 nor changes memory write/tool authority.
 
 ## R01 acceptance
 
@@ -353,7 +391,7 @@ R03 was accepted after exact-head repository qualification proved:
 
 ## R04 acceptance
 
-R04 is complete only when exact-head repository qualification proves:
+R04 was accepted after exact-head repository qualification proved:
 
 - flag-off production entrypoint creates no R04 route, memory database, provider
   or storage side effect;
@@ -381,4 +419,33 @@ R04 is complete only when exact-head repository qualification proves:
 - R04 acceptance remains inside an existing test file so CURRENT_STATE test
   inventory does not drift merely because the slice was added;
 - `/api/v1/chat`, Go routing, Android/Desktop routing, memory writes, Agent 3
-  activation and production activation remain unchanged.
+  activation and production activation remained unchanged through R04.
+
+## R05 acceptance
+
+R05 is complete only when exact-head repository qualification proves:
+
+- flag-off `/api/v1/chat` reaches the same Ollama proxy with the exact original
+  request body and without any memory-worker call;
+- an empty valid R04 context likewise preserves the original model request body;
+- unsupported/non-string turns and requests whose final message is not a text
+  user turn bypass memory rather than broadening what R05 interprets as the
+  current user request;
+- unauthenticated `/api/v1/chat` is still rejected by the existing Bearer-token
+  middleware before any memory-worker access;
+- a configured non-loopback memory worker is rejected before memory or model
+  egress;
+- a non-loopback model destination causes R04 retrieval target `cloud`;
+- the backend never forwards the paired-device Authorization header to R04;
+- malformed, incomplete, oversized, schema-mismatched, target-mismatched,
+  count-inconsistent, duplicate-id, byte/character-mismatched or hash-mismatched
+  R04 output cannot reach the model;
+- `sent_to_model=true` from R04 is rejected because R04 receipts must describe
+  pre-model state, and omission of that field is rejected rather than defaulted;
+- verified non-empty context is attached exactly once inside the final user
+  message, with explicit untrusted-reference and current-request boundaries;
+- memory context never enters a system-role message and existing system messages
+  remain semantically unchanged;
+- the R04 receipt never enters the model payload;
+- R05 adds no private-cloud grant, memory write, Android/Desktop route, Agent 3
+  activation or production activation.
