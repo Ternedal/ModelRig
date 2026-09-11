@@ -31,10 +31,13 @@ implicit Agent 3 dependency.
 ```mermaid
 flowchart LR
     U[User turn] --> Q[Memory query]
-    Q --> R[Shared retrieval kernel]
-    S[(Existing reviewed memory substrate)] --> A[Neutral shared read adapter]
+    Q --> R[Deterministic R01 eligibility + lexical ranker]
+    S[(Existing reviewed memory substrate)] --> A[Neutral R02 shared read adapter]
     A --> R
-    R --> C[Privacy-aware context compiler]
+    R --> H[Optional R03 hybrid semantic ranker]
+    O[Local Ollama embedding only] -. default-off .-> H
+    H --> C[Privacy-aware context compiler]
+    R -. semantic disabled .-> C
     C --> B[Bounded memory data block]
     B --> L[Selected LLM]
 
@@ -71,8 +74,8 @@ model-independent:
   creates no competing prompt format or escaping policy.
 
 No embedding model or LLM is called by this kernel. That is intentional: R01
-creates a deterministic authority boundary that later semantic retrieval can
-augment rather than replace.
+creates a deterministic authority boundary that semantic retrieval augments but
+never replaces.
 
 ## Retrieval scoring
 
@@ -91,14 +94,16 @@ Recency/confidence/provenance can reorder related records but cannot make an
 unrelated record relevant. This prevents a recent high-confidence memory from
 appearing solely because it is recent.
 
-The formula is a first-stage deterministic ranker, not the final semantic
-retrieval design. Later hybrid retrieval may add embeddings, but privacy,
-lifecycle and review eligibility remain hard gates outside the embedding model.
+R03 keeps the same non-relevance components and replaces lexical relevance with
+`max(lexical, semantic)` only after a record has independently passed all R01
+eligibility gates. A lexical miss requires semantic similarity at or above the
+explicit semantic threshold before it can become relevant.
 
 ## M4-R02 — neutral shared storage/read adapter
 
-R02 adds `worker/app/memory/storage.py` as a storage-neutral read boundary over
-the existing Memory 3 substrate. It does **not** introduce a second database,
+R02 landed on `main` through PR #1174. It adds
+`worker/app/memory/storage.py` as a storage-neutral read boundary over the
+existing Memory 3 substrate. It does **not** introduce a second database,
 perform migration, open SQLite, invoke DPAPI or import Agent 3 storage classes.
 
 The Agent 3 composition root selects the real backing substrate and injects one
@@ -125,14 +130,42 @@ R02 deliberately adds no HTTP endpoint, normal-chat injection, write method,
 new migration path or activation authority. The shared reader is merely exposed
 from the existing composition root for later R03/R04 use.
 
+## M4-R03 — optional local semantic retrieval
+
+R03 adds a semantic layer without weakening R01 authority:
+
+- `worker/app/memory/semantic.py` contains a model-agnostic async hybrid ranker;
+- semantic mode is **off by default** and disabled mode requires no embedder;
+- disabled mode delegates to R01 and preserves ids, ordering, total scores and
+  every R01 component score exactly;
+- lifecycle, review, expiry, sensitivity, private-cloud policy and exact subject
+  filtering run before any memory value is sent to an embedder;
+- the semantic core has no HTTP/network/model dependency;
+- `worker/app/memory/local_embeddings.py` is the only ModelRig product adapter
+  in this slice and delegates only to the existing local
+  `ollama_client.embed()` path (`MODELRIG_OLLAMA_URL` / `MODELRIG_EMBED_MODEL`);
+- that adapter exposes no cloud base URL, API key or caller-selected upstream;
+- no memory embeddings are persisted in R03, so there is no second vector store,
+  migration or stale cross-model embedding corpus;
+- at most 200 source records are accepted, at most 32 eligible candidates are
+  semantically embedded, and both query and per-record embedding text are hard
+  capped at 4,096 characters;
+- embedding vectors are limited to 8,192 dimensions;
+- empty, zero-norm, non-finite, malformed or dimension-changing vectors fail
+  closed with `SemanticMemoryError`;
+- if semantic mode is explicitly enabled and the local embedder fails, retrieval
+  fails visibly instead of silently falling back to lexical results.
+
+Semantic similarity never grants storage, privacy or lifecycle authority. It is
+only relevance evidence over rows that the deterministic boundary has already
+approved. Secret, pending, rejected, deleted, expired or default-private-cloud
+memory must therefore be filtered before the query embedding is even requested
+when no eligible candidate remains.
+
+R03 still adds **no** worker HTTP endpoint, `/api/v1/chat` change, Android/Desktop
+routing change, Agent 3 activation, memory write path or production activation.
+
 ## Planned slices
-
-### M4-R03 — semantic retrieval
-
-Add optional local embedding similarity behind the deterministic eligibility
-boundary. Hybrid ranking should combine lexical + semantic relevance with
-recency/confidence/provenance. Embedding failure must not grant access to an
-ineligible record or weaken privacy policy.
 
 ### M4-R04 — normal-chat context service
 
@@ -189,8 +222,9 @@ runtime authority.
 
 1. Memory is external to model weights.
 2. Retrieval never promotes pending/rejected/deleted/expired records.
-3. Secret memory never enters model context.
-4. Private cloud memory requires explicit policy authority.
+3. Secret memory never enters model context or semantic embedding.
+4. Private cloud memory requires explicit policy authority before embedding or
+   context use.
 5. Memory values are untrusted reference data, not executable instructions.
 6. Retrieval cannot change tool risk, approval, sensitivity or egress.
 7. A memory write path cannot silently infer a durable fact as confirmed.
@@ -215,7 +249,7 @@ R01 was accepted after exact-head repository qualification proved:
 
 ## R02 acceptance
 
-R02 is complete only when repository CI proves:
+R02 was accepted after exact-head repository qualification proved:
 
 - legacy and protected modes expose the same read-only shared contract;
 - protected reads traverse the existing completed-migration, query-only reader
@@ -231,3 +265,24 @@ R02 is complete only when repository CI proves:
 - shutdown and failed startup clear the shared reader state;
 - no new persistent database, migration/fallback, write API, HTTP route, normal
   chat wiring, Agent 3 activation or production authority is introduced.
+
+## R03 acceptance
+
+R03 is complete only when exact-head repository qualification proves:
+
+- semantic-disabled results are exact R01 ranking parity and no embedder is
+  required or called;
+- an eligible lexical miss can be recovered only by semantic evidence above the
+  configured threshold;
+- secret, pending, deleted, expired, subject-mismatched and default-private-cloud
+  rows are excluded before embedding;
+- explicit boolean private-cloud authority is required before a private value may
+  be locally embedded for a cloud-target retrieval;
+- semantic query/record text, input rows, semantic candidates and vector
+  dimensions all obey hard caps;
+- empty/zero-norm/non-finite/malformed/dimension-changing vectors fail closed;
+- enabled embedder failure cannot silently downgrade to lexical retrieval;
+- the product adapter calls only ModelRig's existing local Ollama embedding
+  client and introduces no cloud embedding path;
+- no persistent vector store, HTTP route, normal-chat wiring, write authority,
+  Agent 3 activation or production activation is introduced.

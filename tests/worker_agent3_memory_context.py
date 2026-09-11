@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 import json
 import os
 import tempfile
 import time
 
+from app import ollama_client as local_ollama_client
 from app.agent3.memory import MemoryStore
 from app.agent3.memory_context import ContextTarget, MemoryContextCompiler
 from app.memory import (
+    HybridMemoryRetriever,
     MemoryReadRequest,
     MemoryRetrievalQuery,
     MemoryRetriever,
+    SemanticMemoryConfig,
+    SemanticMemoryError,
     SharedMemoryReadError,
     SharedMemoryReader,
+    embed_memory_text_local,
 )
 
 passed = failed = 0
@@ -33,6 +39,17 @@ def expect_shared_error(name, reader, request, contains=None):
     try:
         reader.read_candidates(request)
     except SharedMemoryReadError as exc:
+        check(contains is None or contains in str(exc), name)
+    except Exception:
+        check(False, name)
+    else:
+        check(False, name)
+
+
+def expect_semantic_error(name, awaitable, contains=None):
+    try:
+        asyncio.run(awaitable)
+    except SemanticMemoryError as exc:
         check(contains is None or contains in str(exc), name)
     except Exception:
         check(False, name)
@@ -334,6 +351,274 @@ expect_shared_error(
     SharedMemoryReader(mode="legacy", read_context=broken_backend),
     MemoryReadRequest(),
     "backend read failed",
+)
+
+# Memory 4.0 R03: semantic similarity is an optional local augmentation after
+# R01 eligibility. Disabled mode is exact baseline parity and needs no embedder.
+baseline_query = MemoryRetrievalQuery("modelrig gpu", now=now)
+baseline_ranked = retriever.rank([operational, public], baseline_query)
+disabled_ranked = asyncio.run(HybridMemoryRetriever().rank([operational, public], baseline_query))
+check(
+    [
+        (
+            item.record.id,
+            item.score,
+            item.lexical_score,
+            item.subject_score,
+            item.recency_score,
+            item.confidence_score,
+            item.provenance_score,
+            item.semantic_score,
+        )
+        for item in disabled_ranked
+    ]
+    == [
+        (
+            item.record.id,
+            item.score,
+            item.lexical_score,
+            item.subject_score,
+            item.recency_score,
+            item.confidence_score,
+            item.provenance_score,
+            0.0,
+        )
+        for item in baseline_ranked
+    ],
+    "disabled semantic retrieval is exact R01 ranking parity without an embedder",
+)
+
+semantic_calls = []
+
+
+async def semantic_embed(text):
+    semantic_calls.append(text)
+    lowered = text.casefold()
+    if "graphics accelerator" in lowered or "rtx 3060" in lowered:
+        return [1.0, 0.0, 0.0]
+    return [0.0, 1.0, 0.0]
+
+
+semantic = HybridMemoryRetriever(
+    embed=semantic_embed,
+    config=SemanticMemoryConfig(enabled=True, min_semantic_score=0.60),
+)
+semantic_calls.clear()
+semantic_only = asyncio.run(
+    semantic.rank(
+        [operational, public],
+        MemoryRetrievalQuery("graphics accelerator", now=now),
+    )
+)
+check(
+    bool(semantic_only)
+    and semantic_only[0].record.id == public.id
+    and semantic_only[0].lexical_score == 0.0
+    and semantic_only[0].semantic_score > 0.99,
+    "semantic similarity can recover an eligible lexical miss",
+)
+check(
+    len(semantic_calls) == 3,
+    "enabled semantic retrieval embeds one query plus each bounded eligible candidate",
+)
+
+semantic_calls.clear()
+blocked = asyncio.run(
+    semantic.rank(
+        [secret, pending, expired, private],
+        MemoryRetrievalQuery("anything", target="cloud", now=now),
+    )
+)
+check(blocked == [] and semantic_calls == [], "privacy lifecycle review and expiry gates run before every embedding call")
+
+semantic_calls.clear()
+asyncio.run(
+    semantic.rank(
+        [private, operational],
+        MemoryRetrievalQuery("system software", target="cloud", now=now),
+    )
+)
+check(
+    semantic_calls
+    and all("ingen fisk" not in item.casefold() for item in semantic_calls),
+    "default cloud semantic retrieval never embeds private memory values",
+)
+
+semantic_calls.clear()
+asyncio.run(
+    semantic.rank(
+        [private],
+        MemoryRetrievalQuery(
+            "food preference",
+            target="cloud",
+            allow_private_cloud=True,
+            now=now,
+        ),
+    )
+)
+check(
+    any("ingen fisk" in item.casefold() for item in semantic_calls),
+    "explicit private-cloud authority is required before private memory can be locally embedded for retrieval",
+)
+
+semantic_calls.clear()
+asyncio.run(
+    semantic.rank(
+        [private, public],
+        MemoryRetrievalQuery("hardware", subjects=("modelrig",), now=now),
+    )
+)
+check(
+    semantic_calls
+    and all("ingen fisk" not in item.casefold() for item in semantic_calls),
+    "exact subject eligibility is applied before semantic embedding",
+)
+
+bounded_inputs = []
+
+
+async def bounded_embed(text):
+    bounded_inputs.append(text)
+    return [1.0, 0.0]
+
+
+bounded_semantic = HybridMemoryRetriever(
+    embed=bounded_embed,
+    config=SemanticMemoryConfig(enabled=True, max_text_chars=128),
+)
+long_record = replace(public, id="memory-r03-long", value="x" * 10_000)
+asyncio.run(
+    bounded_semantic.rank(
+        [long_record],
+        MemoryRetrievalQuery("query " + ("q" * 10_000), now=now),
+    )
+)
+check(
+    bounded_inputs and max(len(item) for item in bounded_inputs) <= 128,
+    "query and record embedding inputs obey the configured hard character cap",
+)
+
+candidate_calls = []
+
+
+async def candidate_embed(text):
+    candidate_calls.append(text)
+    return [1.0, 0.0]
+
+
+candidate_limited = HybridMemoryRetriever(
+    embed=candidate_embed,
+    config=SemanticMemoryConfig(enabled=True, max_candidates=1),
+)
+asyncio.run(
+    candidate_limited.rank(
+        [public, operational],
+        MemoryRetrievalQuery("modelrig", now=now),
+    )
+)
+check(len(candidate_calls) == 2, "semantic candidate cap limits embedding work to query plus configured rows")
+
+oversized_records = [replace(public, id=f"memory-r03-{idx}") for idx in range(201)]
+expect_semantic_error(
+    "semantic input record cap fails closed before embedding",
+    semantic.rank(oversized_records, MemoryRetrievalQuery("gpu", now=now)),
+    "exceeds 200",
+)
+
+
+async def zero_embed(_text):
+    return [0.0, 0.0]
+
+
+expect_semantic_error(
+    "zero-norm semantic vectors fail closed",
+    HybridMemoryRetriever(embed=zero_embed, config=SemanticMemoryConfig(enabled=True)).rank(
+        [public], MemoryRetrievalQuery("gpu", now=now)
+    ),
+    "non-zero norm",
+)
+
+
+async def nan_embed(_text):
+    return [1.0, float("nan")]
+
+
+expect_semantic_error(
+    "non-finite semantic vectors fail closed",
+    HybridMemoryRetriever(embed=nan_embed, config=SemanticMemoryConfig(enabled=True)).rank(
+        [public], MemoryRetrievalQuery("gpu", now=now)
+    ),
+    "finite",
+)
+
+dimension_calls = 0
+
+
+async def dimension_embed(_text):
+    global dimension_calls
+    dimension_calls += 1
+    return [1.0, 0.0] if dimension_calls == 1 else [1.0, 0.0, 0.0]
+
+
+expect_semantic_error(
+    "dimension changes inside one semantic retrieval fail closed",
+    HybridMemoryRetriever(embed=dimension_embed, config=SemanticMemoryConfig(enabled=True)).rank(
+        [public], MemoryRetrievalQuery("gpu", now=now)
+    ),
+    "dimensions changed",
+)
+
+
+def sync_embed(_text):
+    return [1.0, 0.0]
+
+
+expect_semantic_error(
+    "semantic embedder must be async",
+    HybridMemoryRetriever(embed=sync_embed, config=SemanticMemoryConfig(enabled=True)).rank(
+        [public], MemoryRetrievalQuery("gpu", now=now)
+    ),
+    "must be async",
+)
+
+
+async def broken_embed(_text):
+    raise RuntimeError("embedding backend unavailable")
+
+
+expect_semantic_error(
+    "enabled semantic embedding failure does not silently downgrade to lexical",
+    HybridMemoryRetriever(embed=broken_embed, config=SemanticMemoryConfig(enabled=True)).rank(
+        [public], MemoryRetrievalQuery("gpu", now=now)
+    ),
+    "local semantic embedding failed",
+)
+
+try:
+    HybridMemoryRetriever(config=SemanticMemoryConfig(enabled=True))
+except SemanticMemoryError as exc:
+    check("requires an embedder" in str(exc), "enabled semantic mode requires an explicit embedder")
+else:
+    check(False, "enabled semantic mode requires an explicit embedder")
+
+original_local_embed = local_ollama_client.embed
+local_adapter_calls = []
+
+
+async def fake_local_embed(text, model=None):
+    local_adapter_calls.append((text, model))
+    return [0.25, 0.75]
+
+
+try:
+    local_ollama_client.embed = fake_local_embed
+    local_adapter_vector = asyncio.run(embed_memory_text_local("memory adapter probe"))
+finally:
+    local_ollama_client.embed = original_local_embed
+check(
+    local_adapter_vector == [0.25, 0.75]
+    and local_adapter_calls == [("memory adapter probe", None)],
+    "Memory 4 local adapter delegates only to the existing local Ollama embed client",
 )
 
 store.close()
