@@ -83,7 +83,7 @@ class Agent3ReviewedStartBindingTest {
     }
 
     @Test
-    fun reviewedStartRejectsReadReviewStateMismatch() {
+    fun reviewedStartFailsClosedWhenFreshReadReviewStillMismatches() {
         listOf(
             true to false,
             false to true,
@@ -103,7 +103,7 @@ class Agent3ReviewedStartBindingTest {
     }
 
     @Test
-    fun reviewedStartRejectsMissingReadReviewState() {
+    fun reviewedStartFailsClosedWhenMissingReadReviewCannotBeRecovered() {
         val server = server(startEnvelope(reviewReads = true, readReviewJson = null))
         try {
             assertReadReviewFailure(server, true)
@@ -113,7 +113,7 @@ class Agent3ReviewedStartBindingTest {
     }
 
     @Test
-    fun reviewedStartRejectsUnusableReadReviewState() {
+    fun reviewedStartFailsClosedWhenUnusableReadReviewCannotBeRecovered() {
         val server = server(
             startEnvelope(
                 reviewReads = true,
@@ -143,15 +143,28 @@ class Agent3ReviewedStartBindingTest {
     }
 
     private fun assertReadReviewFailure(server: MockWebServer, expected: Boolean) {
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody(
+                    startEnvelope(
+                        reviewReads = expected,
+                        readReviewJson = "{\"enabled\":${!expected},\"waiting\":false}",
+                    ),
+                ),
+        )
         val error = runCatching {
             Agent3Client(server.url("/").toString(), "token")
                 .startReviewedPlanEnvelope("plan-1", expected, null)
         }.exceptionOrNull()
         assertTrue(error is ModelRigException)
-        assertEquals(
-            "Ugyldigt Agent 3.0 Start-svar: Read review-state matcher ikke previewet",
-            error?.message,
+        assertTrue(
+            error?.message?.contains(
+                "Ugyldigt Agent 3.0 Start-svar: Read review-state matcher ikke previewet",
+            ) == true,
         )
+        assertTrue(error?.message?.contains("Frisk run-recovery fejlede") == true)
+        assertEquals(2, server.requestCount)
     }
 
     private fun receipt(route: String = "rig-tools"): Agent3Client.CapabilityReceipt =
