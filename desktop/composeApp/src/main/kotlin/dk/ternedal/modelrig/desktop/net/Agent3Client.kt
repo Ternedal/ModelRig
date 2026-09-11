@@ -203,6 +203,11 @@ data class Agent3RunEnvelope(
     val termination: Agent3TerminationReceipt? = null,
 )
 
+internal data class Agent3ReviewedStartTransportEnvelope(
+    val envelope: Agent3RunEnvelope,
+    val responseReviewReads: Boolean,
+)
+
 @Serializable
 private data class RunsEnvelope(val runs: List<Agent3Run> = emptyList())
 
@@ -299,6 +304,33 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             }
         }
         return decodeRunEnvelope(body, expectedPlanId = planId)
+    }
+
+    /**
+     * Reviewed-only Start transport boundary. The baseline envelope is decoded
+     * and bound to the requested plan before the raw boolean review mode is
+     * exposed separately. A raw mode conflict can therefore yield only a safe
+     * run-id recovery reference, never normal reviewed Start authority.
+     */
+    internal fun startReviewedPlanTransport(planId: String): Agent3ReviewedStartTransportEnvelope {
+        val body = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
+        val envelope = decodeRunEnvelope(body, expectedPlanId = planId)
+        val responseReviewReads = runCatching {
+            val root = json.parseToJsonElement(body) as? JsonObject
+            val raw = root?.get("review_reads") as? JsonPrimitive
+            when {
+                raw == null || raw.isString -> null
+                raw.content == "true" -> true
+                raw.content == "false" -> false
+                else -> null
+            }
+        }.getOrNull() ?: throw Agent3Exception(
+            "Invalid Agent 3.0 Start envelope: server review_reads is not a boolean binding"
+        )
+        return Agent3ReviewedStartTransportEnvelope(
+            envelope = envelope,
+            responseReviewReads = responseReviewReads,
+        )
     }
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
