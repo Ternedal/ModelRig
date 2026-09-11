@@ -85,8 +85,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-path-separation-") as raw:
             not shared.exists(),
         )
 
-# Keep large/focused W02 qualifications under tests/support so the repository's
-# generated top-level test inventory does not change merely to exercise one slice.
+# Keep large/focused Memory 4 qualifications under tests/support so the
+# repository's generated top-level test inventory does not change merely to
+# exercise one slice.
 run_support(
     "W02-B",
     "worker_agent3_memory_consolidation_writer.py",
@@ -103,12 +104,16 @@ run_support(
     "W02 protected blind-index cross-store",
     "worker_agent3_memory_protected_lookup_cross_store.py",
 )
+run_support(
+    "W03-A completed-turn orchestration",
+    "worker_memory4_completed_turn.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
     print(f"  {'PASS' if ok else 'FAIL'}: {label}")
 print(
-    f"\n===== T-033 STORE PATH SEPARATION + W02: "
+    f"\n===== T-033 STORE PATH SEPARATION + MEMORY 4: "
     f"{len(checks) - len(failed)} passed, {len(failed)} failed ====="
 )
 raise SystemExit(1 if failed else 0)
