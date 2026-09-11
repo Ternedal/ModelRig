@@ -303,11 +303,23 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
 
     fun startPlan(planId: String): Agent3Run = startPlanEnvelope(planId).run
 
-    fun getRun(runId: String): Agent3Run =
-        decodeRunEnvelope(
+    fun getRun(runId: String): Agent3Run = getRunEnvelope(runId).run
+
+    internal fun getRunEnvelope(
+        runId: String,
+        expectedReviewReads: Boolean? = null,
+    ): Agent3RunEnvelope {
+        val envelope = decodeRunEnvelope(
             get("/api/v1/experimental/agent3/runs/${seg(runId)}"),
             expectedRunId = runId,
-        ).run
+        )
+        if (expectedReviewReads != null && envelope.readReview.enabled != expectedReviewReads) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 run envelope: read_review state does not match reviewed run"
+            )
+        }
+        return envelope
+    }
 
     fun listRuns(): List<Agent3Run> =
         decode<RunsEnvelope>(get("/api/v1/experimental/agent3/runs")).runs
