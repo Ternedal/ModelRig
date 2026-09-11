@@ -33,6 +33,21 @@ def candidate(subject: str, predicate: str, source_ref: str) -> MemoryCandidate:
     )
 
 
+def confirmed_statement(value: str, source_ref: str) -> MemoryCandidate:
+    return MemoryCandidate(
+        subject="user",
+        predicate="verbatim_user_statement",
+        value=value,
+        kind="note",
+        sensitivity="private",
+        source_type="user_explicit",
+        source_ref=source_ref,
+        confidence=1.0,
+        review_status="confirmed",
+        evidence=value,
+    )
+
+
 upper = candidate("Anders", "Project_Status", "conversation:upper")
 lower = candidate("anders", "project_status", "conversation:lower")
 
@@ -60,6 +75,29 @@ check(
     "case-distinct storage keys remain independent durable records",
 )
 store.close()
+
+# Canonical verbatim memory is a statement log, not a singleton semantic slot.
+# A large history of different statements therefore must not consume the entire
+# W02-A snapshot budget for one new independent statement.
+log_store = MemoryStore(":memory:")
+for index in range(140):
+    historical = confirmed_statement(
+        f"Historical statement {index}",
+        f"conversation:historical-{index}",
+    )
+    log_store.create(**historical.store_fields())
+new_statement = confirmed_statement(
+    "I prefer bounded exact statement lookup",
+    "conversation:new-verbatim",
+)
+new_plan = MemoryConsolidator().plan([new_statement], [])
+new_receipt = apply_legacy_consolidation_plan(log_store, new_plan)
+check(
+    new_receipt.created_count == 1
+    and log_store.get(new_receipt.created_ids[0]).value == new_statement.value,
+    "W02-B does not let 128+ unrelated verbatim statements exhaust a new statement write",
+)
+log_store.close()
 
 print(f"\n{passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)
