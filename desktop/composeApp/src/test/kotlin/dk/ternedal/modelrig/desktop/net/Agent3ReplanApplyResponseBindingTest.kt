@@ -26,12 +26,45 @@ class Agent3ReplanApplyResponseBindingTest {
             assertEquals(2, result.replan.fromRevision)
             assertEquals(3, result.replan.toRevision)
             assertEquals(5, result.replan.replanNumber)
+            assertEquals(1, result.replan.start)
+            assertEquals(2, result.replan.oldEnd)
+            assertEquals(2, result.replan.newEnd)
+            assertEquals(listOf("old-read"), result.replan.removedStepIds)
+            assertEquals(listOf("read-2"), result.replan.addedStepIds)
+            assertEquals(listOf("list_models"), result.replan.addedTools)
+            assertEquals(listOf("read-1"), result.replan.immutablePrefixIds)
+            assertEquals(listOf("write-1"), result.replan.immutableTailIds)
             assertTrue(result.readReview.enabled)
             assertFalse(result.readReview.waiting)
             assertEquals(
                 listOf("/api/v1/experimental/agent3/replan-previews/preview-1/apply"),
                 paths.toList(),
             )
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun reviewedApplyAcceptsEmptyReplacementPlanReceipt() {
+        val server = server(
+            applyBody(
+                runJson = committedRunJson(
+                    replacementId = null,
+                    replacementTool = null,
+                ),
+                newEndValue = "1",
+                addedStepIdsJson = "[]",
+                addedToolsJson = "[]",
+            )
+        )
+        try {
+            val result = Agent3ReplanClient(server.baseUrl(), "token")
+                .applyReviewed(reviewed(plan = emptyList()))
+            assertEquals(1, result.run.currentStep)
+            assertEquals(listOf("read-1", "write-1"), result.run.steps.mapNotNull { it.id })
+            assertTrue(result.replan.addedStepIds.isEmpty())
+            assertTrue(result.replan.addedTools.isEmpty())
         } finally {
             server.stop(0)
         }
@@ -90,7 +123,7 @@ class Agent3ReplanApplyResponseBindingTest {
     }
 
     @Test
-    fun reviewedApplyRejectsRunPreviewAndReceiptDrift() {
+    fun reviewedApplyRejectsRunPreviewAndRevisionReceiptDrift() {
         val bodies = listOf(
             applyBody(runId = "other-run"),
             applyBody(previewId = "other-preview"),
@@ -109,6 +142,35 @@ class Agent3ReplanApplyResponseBindingTest {
     }
 
     @Test
+    fun reviewedApplyRejectsDerivedReceiptDrift() {
+        listOf(
+            applyBody(startValue = "0"),
+            applyBody(oldEndValue = "3"),
+            applyBody(newEndValue = "3"),
+            applyBody(removedStepIdsJson = "[\"other\"]"),
+            applyBody(addedStepIdsJson = "[]"),
+            applyBody(addedToolsJson = "[\"other_tool\"]"),
+            applyBody(immutablePrefixIdsJson = "[\"other\"]"),
+            applyBody(immutableTailIdsJson = "[\"other\"]"),
+        ).forEach { body ->
+            assertReviewedFailure(body)
+        }
+    }
+
+    @Test
+    fun reviewedApplyRejectsReturnedRunPlanDriftFromReceipt() {
+        listOf(
+            committedRunJson(currentStep = 0),
+            committedRunJson(prefixId = "other-prefix"),
+            committedRunJson(replacementId = "other-added"),
+            committedRunJson(replacementTool = "other_tool"),
+            committedRunJson(tailId = "other-tail"),
+        ).forEach { runJson ->
+            assertReviewedFailure(applyBody(runJson = runJson))
+        }
+    }
+
+    @Test
     fun reviewedApplyRejectsMissingOrWrongTypedAuthorityFields() {
         listOf(
             applyBody(includeFromRevision = false),
@@ -116,6 +178,11 @@ class Agent3ReplanApplyResponseBindingTest {
             applyBody(includePlannerModel = false),
             applyBody(plannerModelValue = "7"),
             applyBody(runIdValueOverride = "7"),
+            applyBody(includeStart = false),
+            applyBody(startValue = "\"1\""),
+            applyBody(addedStepIdsJson = "7"),
+            applyBody(addedStepIdsJson = "[7]"),
+            applyBody(addedToolsJson = "[\"\"]"),
         ).forEach { body ->
             assertReviewedFailure(body)
         }
@@ -247,16 +314,26 @@ class Agent3ReplanApplyResponseBindingTest {
         }
     }
 
-    private fun reviewed(plannerModel: String? = "planner-a"): Agent3ReplanPreview =
-        Agent3ReplanPreview(
-            previewId = "preview-1",
-            runId = "run-1",
-            revision = 2,
-            replanCount = 4,
-            rationale = rationale,
-            plannerModel = plannerModel,
-            promptSha256 = promptHash,
-        )
+    private fun reviewed(
+        plannerModel: String? = "planner-a",
+        plan: List<Agent3Step> = listOf(Agent3Step(tool = "list_models")),
+    ): Agent3ReplanPreview = Agent3ReplanPreview(
+        previewId = "preview-1",
+        runId = "run-1",
+        revision = 2,
+        replanCount = 4,
+        rationale = rationale,
+        plannerModel = plannerModel,
+        promptSha256 = promptHash,
+        window = Agent3ReplanWindow(
+            start = 1,
+            end = 2,
+            removableStepIds = listOf("old-read"),
+            immutablePrefixIds = listOf("read-1"),
+            immutableTailIds = listOf("write-1"),
+        ),
+        plan = plan,
+    )
 
     private fun applyBody(
         runId: String = "run-1",
@@ -273,13 +350,23 @@ class Agent3ReplanApplyResponseBindingTest {
         includeFromRevision: Boolean = true,
         toRevisionValue: String = "3",
         replanNumberValue: String = "5",
+        startValue: String = "1",
+        includeStart: Boolean = true,
+        oldEndValue: String = "2",
+        newEndValue: String = "2",
+        removedStepIdsJson: String = "[\"old-read\"]",
+        addedStepIdsJson: String = "[\"read-2\"]",
+        addedToolsJson: String = "[\"list_models\"]",
+        immutablePrefixIdsJson: String = "[\"read-1\"]",
+        immutableTailIdsJson: String = "[\"write-1\"]",
         readReviewJson: String = """{"enabled":true,"waiting":false,"removable_step_ids":[]}""",
         includeReadReview: Boolean = true,
     ): String {
         val runIdField = runIdValueOverride ?: "\"$runId\""
-        val effectiveRun = runJson ?: "{\"id\":$runIdField}"
+        val effectiveRun = runJson ?: committedRunJson(runIdValue = runIdField)
         val plannerField = if (includePlannerModel) "\"planner_model\":$plannerModelValue," else ""
         val fromRevisionField = if (includeFromRevision) "\"from_revision\":$fromRevisionValue," else ""
+        val startField = if (includeStart) "\"start\":$startValue," else ""
         val readReviewField = if (includeReadReview) "\"read_review\":$readReviewJson," else ""
         return """
             {
@@ -288,7 +375,16 @@ class Agent3ReplanApplyResponseBindingTest {
                 "reason": "$reason",
                 $fromRevisionField
                 "to_revision": $toRevisionValue,
-                "replan_number": $replanNumberValue
+                "replan_number": $replanNumberValue,
+                $startField
+                "old_end": $oldEndValue,
+                "new_end": $newEndValue,
+                "removed_step_ids": $removedStepIdsJson,
+                "removed_tools": ["old_tool"],
+                "added_step_ids": $addedStepIdsJson,
+                "added_tools": $addedToolsJson,
+                "immutable_prefix_ids": $immutablePrefixIdsJson,
+                "immutable_tail_ids": $immutableTailIdsJson
               },
               $readReviewField
               "preview": {
@@ -302,22 +398,44 @@ class Agent3ReplanApplyResponseBindingTest {
         """.trimIndent()
     }
 
+    private fun committedRunJson(
+        runIdValue: String = "\"run-1\"",
+        state: String = "running",
+        currentStep: Int = 1,
+        prefixId: String = "read-1",
+        replacementId: String? = "read-2",
+        replacementTool: String? = "list_models",
+        tailId: String = "write-1",
+        replacementRisk: String = "read",
+        replacementState: String = "pending",
+    ): String {
+        val replacement = if (replacementId == null || replacementTool == null) {
+            ""
+        } else {
+            """,{"id":"$replacementId","tool":"$replacementTool","risk":"$replacementRisk","state":"$replacementState"}"""
+        }
+        return """
+            {
+              "id":$runIdValue,
+              "state":"$state",
+              "current_step":$currentStep,
+              "steps":[
+                {"id":"$prefixId","tool":"rig_status","risk":"read","state":"succeeded"}$replacement,
+                {"id":"$tailId","tool":"note_append","risk":"write","state":"pending"}
+              ]
+            }
+        """.trimIndent()
+    }
+
     private fun waitingRunJson(
         state: String = "running",
         windowRisk: String = "read",
         windowState: String = "pending",
-    ): String = """
-        {
-          "id":"run-1",
-          "state":"$state",
-          "current_step":1,
-          "steps":[
-            {"id":"read-1","tool":"rig_status","risk":"read","state":"succeeded"},
-            {"id":"read-2","tool":"list_models","risk":"$windowRisk","state":"$windowState"},
-            {"id":"write-1","tool":"note_append","risk":"write","state":"pending"}
-          ]
-        }
-    """.trimIndent()
+    ): String = committedRunJson(
+        state = state,
+        replacementRisk = windowRisk,
+        replacementState = windowState,
+    )
 
     private fun waitingReviewJson(
         windowStart: Int = 1,
