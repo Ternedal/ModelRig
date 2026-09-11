@@ -11,6 +11,12 @@ Current version: see `VERSION`. For what actually exists right now — tools wit
 risk/sensitivity, the dormant switches and their defaults, design-doc status — see
 **CURRENT_STATE.md**, which is GENERATED from the code and CI-checked for drift.
 
+For body-domain ownership, standalone **`Ternedal/BodyRig` is the authority** for
+`.mrbody`, BodyPrint, Movement Identity, Motor State and body realization semantics.
+ModelRig owns reasoning and semantic BodyRig-facing intent; its internal `bodyrig`
+package and mirrored contracts are compatibility/integration consumers. See
+`docs/BODYRIG_AUTHORITY.md`.
+
 **The 2.0 line (August 2026)** rebuilt the Android client against a design
 authority (`docs/design/DDR-001`, tokens generated from a single JSON source)
 and added the things a phone-first client actually needs:
@@ -54,14 +60,17 @@ flowchart TB
         Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam<br/>web_research: risk=read + network=public<br/>gated KALIV_WEB_RESEARCH_ENABLED"]
         Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
         A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
-        A4["Agent 4 — campaign orchestration (A4-01…A4-14)<br/>on main, dormant: operator reads only behind a default-off flag<br/>timeline · delivery · query · composition · evidence chain<br/>ADR-A4-008 handoff: deterministic dispatch ids · durable intents<br/>real Agent 3 receiver adapter · caller-driven recovery<br/>one B-reference architecture enforced by CI gates"]
+        A4["Agent 4 — campaign/read architecture<br/>A4-01…A4-25 software chain<br/>DORMANT + default-off operator reads<br/>narrow A4-21 read context · immutable A4-25 snapshot roots<br/>A4-25f physical Windows/Pixel qualification remains separate"]
+        BC["BodyRig integration boundary<br/>semantic BodyCue producer + compatibility adapters<br/>standalone Ternedal/BodyRig owns body-domain contracts"]
         CU["Computer Use (Tier B)<br/>I3 see · I4 propose — DORMANT unless KALIV_COMPUTER_USE=1<br/>signed screenshot contract · local-only vision bridge<br/>I5 act: not built"]
         Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>workflow completion, not tool choice"]
     end
 
+    Dev["KalivDev / DevControl<br/>DC-L01…DC-L14 landed core<br/>DORMANT · local-only authority chain<br/>empty default registry/catalog<br/>DC-L15 physical I0b + DC-L16 product pilot pending"]
     Human(["human"])
     Ollama["Ollama :11434<br/>local — ALWAYS for embeddings"]
     DB[("SQLite<br/>RAG (documents + corpus_meta) · audit · schedules")]
+    BodyRig["Ternedal/BodyRig<br/>AUTHORITATIVE body-domain repository<br/>.mrbody · BodyPrint · Movement Identity<br/>Motor State · body realization"]
     Cloud["Ollama Cloud<br/>(optional)<br/>text model ≠ voice model<br/>(cloudModel / voiceCloudModel)"]
     GH["GitHub Releases<br/>kaliv-latest.apk (stable asset URL)<br/>no API, no token"]
 
@@ -81,14 +90,14 @@ flowchart TB
     Worker -- "embeddings + generation<br/>embeddings ALWAYS local" --> Ollama
     Worker --> DB
     Worker -. "voice LLM step only ·<br/>explicit toggle · keep_alive<br/>NEVER sent to cloud" .-> Cloud
+    BC -- "semantic contract / compatibility" --> BodyRig
+    Human -. "separate physical/human authority gates" .-> BodyRig
+    Human -. "separate L15/L16 GO gates" .-> Dev
 
     classDef ext stroke-dasharray: 6 4;
-    class Cloud ext;
-    class GH ext;
+    class Cloud,GH,BodyRig ext;
     classDef dormant stroke-dasharray: 4 3;
-    class A3 dormant;
-    class A4 dormant;
-    class CU dormant;
+    class A3,A4,CU,Dev dormant;
 ```
 
 **Two cloud roads, and they are not the same thing.**
@@ -113,33 +122,42 @@ card says who asked: *"Cloud-modellen foreslår: …"*
 (Piper, Danish) always run on the rig. Only the transcribed question may go to
 the cloud, and only with the toggle on.
 
-**Agent 4** — the caller-driven campaign layer (A4-01…A4-14) sits on `main` in
-deliberate dormancy: nothing runs on its own, and the only surface that can be
-reached is a read-only operator API that exists solely while
-`KALIV_AGENT4_OPERATOR_API=1` — off by default, in both the worker and the
-backend proxy, and additionally gated per device by an explicit `agent4:read`
-grant. The B-reference architecture now includes durable lifecycle state, an
-append-only verified timeline, at-least-once delivery, hash-bound query paging,
-explicit runtime composition, a bounded read-only operator model, and the
-complete ADR-A4-008 external side-effect handoff: deterministic dispatch and
-signal identities, durable intents written before any external call, a real
-Agent 3 receiver adapter with a SQLite dedup/tombstone registry, and
-caller-driven recovery that never redispatches on its own. Orchestrating real
-side effects additionally requires physical rig evidence bound to an exact SHA
-and a separate, explicit activation decision.
+**Agent 4** — the campaign/read stack now extends beyond the original A4-14
+summary. The foundation, product-read and immutable snapshot-authority software
+is on `main`, while the runtime remains deliberately dormant and default-off.
+The production-shaped surface is read-only, backend-proxied, requires a paired
+device plus explicit `agent4:read`, and composes the narrow A4-21 read context
+rather than exposing lifecycle/scheduler/resource/handoff/recovery mutation.
+A4-19 snapshot-bound paging and A4-20 stale-response invalidation protect the
+read product; A4-25a–e establish server-side immutable snapshot authority and
+Android snapshot/race handling. **A4-25f remains a separate physical
+Windows+Pixel qualification campaign followed by a human GO/NO-GO; CI does not
+stand in for that evidence.** See `docs/AGENT_4_IDENTITY.md`,
+`docs/AGENT_4_A4_25_SERVER_SNAPSHOT_AUTHORITY.md` and the physical runbooks.
+
 Its architecture is fixed by ADR before behaviour ships; storage must not know
 subscribers, and application-driven polling is forbidden. Those boundaries are
 not prose alone: CI gates scan the package on every run
-(`AGENT_4_ARCHITECTURE_DECISIONS.md` is the authoritative source).
+(`AGENT_4_ARCHITECTURE_DECISIONS.md` remains the decision authority).
 
-**DevControl** — a separate, dormant authority chain for controlled
-self-development, governed by `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md`.
-It is deliberately **not** part of the product runtime: nothing under `worker/`,
-`backend/`, `desktop/` or `android/` imports it, merge and publication authority
-stay human and cannot be delegated, and any actual publication capability
-requires its own ADR. The implementation is not on `main`; the decision that
-governs it is, on purpose — so the code is reviewed against the boundary rather
-than the boundary described from the code.
+**DevControl / KalivDev** — DC-L01 through **DC-L14 are landed on `main`** as a
+separate dormant authority chain for controlled local self-development. The
+core includes task/scope authority, Windows containment, signed physical-evidence
+contracts, verified local execution, trusted local-only Git, semantic review,
+one-time authorization/recovery, local-only candidate materialization and final
+package/authority closure. It still has **no normal Kaliv product entrypoint,
+no non-empty default registry/catalog and no remote Git/GitHub mutation,
+merge/release/deploy authority**. DC-L15 is the fresh physical I0b campaign and
+human decision packet; DC-L16 is the later, tightly allowlisted product pilot.
+`docs/devcontrol/dc-l14/independent-review-verdict.md` also records that an
+independent human DC-L14 verdict has not been recorded; do not synthesize one
+from merge status. See `devcontrol/README.md`.
+
+**BodyRig boundary** — `Ternedal/BodyRig` is the source of truth for `.mrbody`,
+BodyPrint, Movement Identity, Motor State and body realization. ModelRig owns
+semantic assistant intent and BodyRig-facing cue production. The internal
+`bodyrig` package and mirrored schemas are compatibility/integration layers, not
+a second product authority. See `docs/BODYRIG_AUTHORITY.md`.
 
 **Tools** — the model proposes; the gate decides. Reads run. Writes stop at a
 confirmation card and execute the arguments that were shown: the worker parks
@@ -207,6 +225,24 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
   Each of those four files carries a banner saying so.
 - **contracts/** — the versioned capability schema and its fixtures, shared by
   the worker and both clients.
+
+## Repository scale
+
+The deterministic `loc-metrics` workflow is now the canonical way to measure
+repository source size. At the exact 2026-09-11 landing candidate for #1139,
+ModelRig contained **305,666 nonblank tracked source/config lines** and **338,619
+physical source/config lines** across 1,472 files: 141,677 product, 105,688 tests,
+48,122 scripts and 10,179 config (nonblank counts). Documentation, vendor, build,
+generated and common lock/minified files are excluded from that metric.
+
+Run the same definition locally with:
+
+```bash
+python scripts/loc_metrics.py
+```
+
+CI publishes JSON + Markdown artifacts for PR/main runs, so future documentation
+should reference a measured run rather than hand-maintaining a guessed LOC total.
 
 ## Scheduler (delivery model)
 
