@@ -87,7 +87,19 @@ class ReadReviewStore:
         if changed != 1:
             raise ReadReviewError("read review is not enabled for this run")
 
-    def resume(self, run_id: str) -> dict | None:
+    def resume(
+        self,
+        run_id: str,
+        *,
+        expected_completed_step_id: str | None = None,
+    ) -> dict | None:
+        """Consume one waiting checkpoint, optionally bound to its exact step.
+
+        The expected step check deliberately lives inside the same IMMEDIATE
+        transaction as clearing `waiting`. A stale or concurrent Resume for an
+        older checkpoint therefore cannot validate checkpoint A and later clear
+        checkpoint B after another request has already advanced the run.
+        """
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -96,6 +108,11 @@ class ReadReviewStore:
                     "completed_step_id,completed_tool FROM agent_read_reviews WHERE run_id=?",
                     (run_id,),
                 ).fetchone()
+                if expected_completed_step_id is not None:
+                    if row is None or row[0] != 1 or row[1] != 1:
+                        raise ReadReviewError("read review checkpoint is no longer waiting")
+                    if row[5] != expected_completed_step_id:
+                        raise ReadReviewError("read review checkpoint authority is stale")
                 if row is None or row[0] != 1 or row[1] != 1:
                     self._conn.commit()
                     return None
@@ -277,14 +294,29 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             end += 1
         return (start, end) if end > start else None
 
-    def advance(self, run_id: str) -> AgentRun:
+    def advance(
+        self,
+        run_id: str,
+        *,
+        expected_review_step_id: str | None = None,
+    ) -> AgentRun:
         run = self._require(run_id)
+        if expected_review_step_id is not None and run.state in {
+            RunState.COMPLETED,
+            RunState.FAILED,
+            RunState.CANCELLED,
+            RunState.WAITING_CONFIRMATION,
+        }:
+            raise ReadReviewError("read review checkpoint is no longer resumable")
         if run.state in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}:
             return run
         if run.state == RunState.WAITING_CONFIRMATION:
             return run
 
-        resumed = self.review_store.resume(run_id)
+        resumed = self.review_store.resume(
+            run_id,
+            expected_completed_step_id=expected_review_step_id,
+        )
         if resumed is not None:
             self.store.event(
                 run.id,

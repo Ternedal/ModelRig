@@ -8,6 +8,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+internal class Agent3TaskHttpException(
+    val statusCode: Int,
+    val reasonCode: String?,
+    message: String,
+) : RuntimeException(message)
+
 /**
  * Normal-client transport for the readiness-bound Agent 3 read-only task surface.
  *
@@ -170,17 +176,21 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             throw ModelRigException("Ugyldig task-preview: ruten er ikke lokal read-only")
         }
         val steps = parseSteps(root.optJSONArray("plan") ?: JSONArray())
-        validateSteps(steps)
+        validateSteps(steps, preview = true)
         val planId = root.nullableString("plan_id")
+        val expiresInSeconds = root.nullableInt("expires_in_seconds")
         if (steps.isNotEmpty() && (planId == null || !OPAQUE_ID.matches(planId))) {
             throw ModelRigException("Ugyldig task-preview: executable plan mangler single-use id")
+        }
+        if (steps.isNotEmpty() && (expiresInSeconds == null || expiresInSeconds <= 0)) {
+            throw ModelRigException("Ugyldig task-preview: executable plan mangler gyldig udløbstid")
         }
         if (steps.isEmpty() && planId != null) {
             throw ModelRigException("Ugyldig task-preview: tom plan må ikke have start-token")
         }
         return Preview(
             planId = planId,
-            expiresInSeconds = root.nullableInt("expires_in_seconds"),
+            expiresInSeconds = expiresInSeconds,
             rationale = root.optString("rationale"),
             steps = steps,
             evidence = parseEvidence(root.requireObject("readiness_binding")),
@@ -197,7 +207,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         if (run.routeKind != ROUTE) {
             throw ModelRigException("Ugyldigt read-only task-run: route er ændret")
         }
-        validateSteps(run.steps)
+        validateSteps(run.steps, preview = false)
         val terminal = root.requireBoolean("terminal")
         if (terminal != (run.state in TERMINAL_STATES)) {
             throw ModelRigException("Ugyldigt read-only task-run: terminal-status matcher ikke run-state")
@@ -277,7 +287,7 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         }
     }
 
-    private fun validateSteps(steps: List<Step>) {
+    private fun validateSteps(steps: List<Step>, preview: Boolean) {
         if (steps.any {
                 it.tool.isBlank() ||
                     it.risk != "read" ||
@@ -286,6 +296,14 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             }
         ) {
             throw ModelRigException("Ugyldig read-only task-kontrakt: kun lokale idempotente reads er tilladt")
+        }
+        val invalidState = if (preview) {
+            steps.any { it.state != null && it.state != "pending" }
+        } else {
+            steps.any { it.state == null || it.state !in TASK_STEP_STATES }
+        }
+        if (invalidState) {
+            throw ModelRigException("Ugyldig read-only task-kontrakt: step-state er uden for task-surface")
         }
     }
 
@@ -489,14 +507,22 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
         http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
+                var reasonCode: String? = null
                 val detail = runCatching {
                     val root = JSONObject(text)
                     when (val raw = root.opt("detail")) {
-                        is JSONObject -> raw.optString("reason").ifBlank { raw.toString() }
+                        is JSONObject -> {
+                            reasonCode = raw.optString("reason").ifBlank { null }
+                            reasonCode ?: raw.toString()
+                        }
                         else -> root.optString("error").ifBlank { raw?.toString().orEmpty() }
                     }
                 }.getOrNull()?.ifBlank { null } ?: text.take(500)
-                throw ModelRigException("Read-only task fejlede (${response.code}): $detail")
+                throw Agent3TaskHttpException(
+                    response.code,
+                    reasonCode,
+                    "Read-only task fejlede (${response.code}): $detail",
+                )
             }
             return runCatching { JSONObject(text) }
                 .getOrElse { throw ModelRigException("Read-only task returnerede ugyldig JSON") }
@@ -546,6 +572,14 @@ class Agent3ReadonlyTaskClient(baseUrl: String, private val token: String) {
             "cancelled",
         )
         private val TERMINAL_STATES = setOf("blocked", "completed", "failed", "cancelled")
+        private val TASK_STEP_STATES = setOf(
+            "pending",
+            "executing",
+            "succeeded",
+            "completed_after_cancel",
+            "blocked",
+            "failed",
+        )
         private val PLAN_TERMINATION_STATES = setOf("available", "terminal")
         private val PLAN_EFFECTS = setOf(
             "prevent_future_steps",

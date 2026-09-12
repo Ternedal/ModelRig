@@ -5,6 +5,58 @@ data class ChatResult(val content: String, val source: Source) {
     enum class Source { LOCAL, CLOUD }
 }
 
+private const val LEGACY_LOCAL_IDENTITY =
+    "Du er Kaliv, en personlig AI-assistent der kører på Anders' egen maskine. "
+
+private const val LEGACY_LOCAL_TOOL_CLAIM =
+    "- Du er en lokal assistent med værktøjer (bl.a. læse riggens status og " +
+        "tilføje noter) når de er slået til. Kald et værktøj når det giver mening."
+
+private const val CLOUD_EXECUTION_IDENTITY =
+    "KØRSELSIDENTITET: Denne modelkørsel foregår via en cloud-model. " +
+        "Den foregår ikke på brugerens egen maskine; påstå ikke at den gør."
+
+private const val CLOUD_TOOL_BOUNDARY =
+    "- Brug kun værktøjer, hvis den aktuelle kørselsvej eksplicit stiller dem til rådighed."
+
+/**
+ * Build the messages for the source that is actually about to execute.
+ *
+ * The normal desktop chat owns exactly one product system prompt per route. A
+ * fallback therefore replaces the preferred route's system identity instead of
+ * reusing it. Arbitrary configured prose is preserved. Only the two exact
+ * product-owned legacy local claims are rewritten on cloud, so old defaults do
+ * not instruct a cloud model to claim local execution.
+ */
+internal fun messagesForChatSource(
+    source: ChatResult.Source,
+    conversation: List<ChatMessage>,
+    localSystem: String,
+    cloudSystem: String,
+): List<ChatMessage> {
+    val configured = when (source) {
+        ChatResult.Source.LOCAL -> localSystem.trim()
+        ChatResult.Source.CLOUD -> cloudSystem.trim()
+    }
+    val system = when (source) {
+        ChatResult.Source.LOCAL -> configured
+        ChatResult.Source.CLOUD -> {
+            val cloudSafe = configured
+                .replace(LEGACY_LOCAL_IDENTITY, "Du er Kaliv, en personlig AI-assistent. ")
+                .replace(LEGACY_LOCAL_TOOL_CLAIM, CLOUD_TOOL_BOUNDARY)
+                .trim()
+            listOf(CLOUD_EXECUTION_IDENTITY, cloudSafe)
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
+        }
+    }
+
+    return buildList {
+        if (system.isNotBlank()) add(ChatMessage("system", system))
+        addAll(conversation.filterNot { it.role == "system" })
+    }
+}
+
 /**
  * Local-first router with Ollama Cloud fallback.
  *
@@ -14,6 +66,10 @@ data class ChatResult(val content: String, val source: Source) {
  * conversation to cloud by default -- the error is surfaced and the user chooses.
  * When the user has explicitly preferred cloud (preferLocal=false), cloud is
  * their choice and local is the fallback.
+ *
+ * When route systems are supplied, each attempt receives messages rebuilt for
+ * the source that is actually executing. This keeps execution identity truthful
+ * across local -> cloud and cloud -> local fallback.
  */
 class ChatRouter(
     private val local: OllamaClient?,
@@ -28,8 +84,21 @@ class ChatRouter(
     // When RAG matches, the turn stays local. See ROADMAP + the worker gate in
     // main.py (_rag_cloud_allowed), pinned by tests/worker_d4_auto_routing.py.
     private val autoFallback: Boolean = false,
+    private val localSystem: String? = null,
+    private val cloudSystem: String? = null,
 ) {
     private enum class Target { LOCAL, CLOUD }
+
+    private fun messagesFor(target: Target, messages: List<ChatMessage>): List<ChatMessage> {
+        val localPrompt = localSystem
+        val cloudPrompt = cloudSystem
+        if (localPrompt == null || cloudPrompt == null) return messages
+        val source = when (target) {
+            Target.LOCAL -> ChatResult.Source.LOCAL
+            Target.CLOUD -> ChatResult.Source.CLOUD
+        }
+        return messagesForChatSource(source, messages, localPrompt, cloudPrompt)
+    }
 
     fun chat(messages: List<ChatMessage>): ChatResult {
         val order =
@@ -47,7 +116,7 @@ class ChatRouter(
             }
             if (client == null) continue
             try {
-                return ChatResult(client.chat(model, messages), src)
+                return ChatResult(client.chat(model, messagesFor(t, messages)), src)
             } catch (e: Exception) {
                 lastError = e
             }
@@ -77,7 +146,7 @@ class ChatRouter(
             if (client == null) continue
             var emitted = 0
             try {
-                client.chatStream(model, messages) { d -> emitted++; onDelta(src, d) }
+                client.chatStream(model, messagesFor(t, messages)) { d -> emitted++; onDelta(src, d) }
                 return src
             } catch (e: Exception) {
                 lastError = e

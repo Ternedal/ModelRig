@@ -34,6 +34,15 @@ data class KalivColors(
     val Success: Color,
     val Warning: Color,
     val Danger: Color,
+    // Agent 3 desktop shell roles retained from the qualified #1272 stack.
+    // Light-mode token ownership below remains current-main authority.
+    val ShellTitleBar: Color,
+    val ShellRail: Color,
+    val ShellPanel: Color,
+    val ShellTitleText: Color,
+    val ShellSubtitleText: Color,
+    val ShellInactiveText: Color,
+    val ShellLiveText: Color,
     val isDark: Boolean,
 )
 
@@ -60,6 +69,13 @@ val KalivDark = KalivColors(
     Success = KalivTokens.Semantic.success,
     Warning = KalivTokens.Semantic.warning,
     Danger = KalivTokens.Semantic.danger,
+    ShellTitleBar = Color(0x990B0A09),
+    ShellRail = Color(0x8C14110E),
+    ShellPanel = Color(0x8014110E),
+    ShellTitleText = Color(0xFFE9DFCE),
+    ShellSubtitleText = KalivTokens.Light.muted,
+    ShellInactiveText = Color(0xFFC3B8A8),
+    ShellLiveText = Color(0xFFD09A55),
     isDark = true,
 )
 
@@ -82,6 +98,13 @@ val KalivLight = KalivColors(
     Success = KalivTokens.Light.ok,
     Warning = KalivTokens.Light.warn,
     Danger = KalivTokens.Light.danger,
+    ShellTitleBar = KalivTokens.Light.surfaceDim,
+    ShellRail = KalivTokens.Light.surface,
+    ShellPanel = KalivTokens.Light.surface,
+    ShellTitleText = KalivTokens.Light.text,
+    ShellSubtitleText = KalivTokens.Light.muted,
+    ShellInactiveText = KalivTokens.Light.muted,
+    ShellLiveText = KalivTokens.Light.warn,
     isDark = false,
 )
 
@@ -104,9 +127,7 @@ fun KalivTheme(dark: Boolean, content: @Composable () -> Unit) {
         surfaceContainer = c.SurfaceHigh, surfaceContainerHigh = c.SurfaceHigh,
         surfaceContainerHighest = c.SurfaceHigh, surfaceContainerLow = c.Surface,
     ) else lightColorScheme(
-        // The old light branch used deprecated brand.bronze as primary. Ivory
-        // text on that background was only ~4.0:1; Light.accent brings the
-        // normal-text pair above AA while keeping Kaliv's warm hue.
+        // Current main owns light-mode contrast semantics.
         primary = c.Signal, onPrimary = Color(0xFFF7F4EF),
         secondary = c.Amber, onSecondary = Color(0xFFF7F4EF),
         background = c.Graphite, onBackground = c.TextHigh,
@@ -114,8 +135,6 @@ fun KalivTheme(dark: Boolean, content: @Composable () -> Unit) {
         surfaceVariant = c.SurfaceHigh, onSurfaceVariant = c.TextMuted,
         outline = c.Border, outlineVariant = c.Border,
         error = c.Danger, onError = Color(0xFFF7F4EF),
-        // Bind fields/cards/menus to Kaliv's own light hierarchy instead of
-        // Material's default grey/lavender container ladder (#779 pkt. 5).
         surfaceContainer = c.Surface,
         surfaceContainerHigh = c.SurfaceHigh,
         surfaceContainerHighest = c.SurfaceHigh,

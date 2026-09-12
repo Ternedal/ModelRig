@@ -171,6 +171,10 @@ fun App() {
         var showSettings by remember { mutableStateOf(true) }
         var toolsMode by remember { mutableStateOf(db.getSetting("toolsMode") == "true") }
         var pendingCard by remember { mutableStateOf<ToolTurn?>(null) }
+        // In-memory only: a confirmation continues under the exact endpoint/auth
+        // snapshot that minted it. This is never persisted or rendered.
+        var pendingCardTurnConfig by remember { mutableStateOf<KalivChatTurnConfig?>(null) }
+        var pendingCardError by remember { mutableStateOf<String?>(null) }
         var showAudit by remember { mutableStateOf(false) }
         var showControlCenter by remember { mutableStateOf(false) }
         var auditRows by remember { mutableStateOf(listOf<AuditEntry>()) }
@@ -193,6 +197,14 @@ fun App() {
         val messages = remember { mutableStateListOf<UiMessage>() }
         var input by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf(false) }
+        val chatConfirmationPresentation = presentChatConfirmation(
+            hasPendingConfirmation = pendingCard != null,
+            busy = busy,
+        )
+        val conversationBrowserPresentation = presentConversationBrowser(
+            busy = busy,
+            hasPendingConfirmation = pendingCard != null,
+        )
         var lastSource by remember { mutableStateOf<ChatResult.Source?>(null) }
         var models by remember { mutableStateOf(listOf<String>()) }
         var modelMenuOpen by remember { mutableStateOf(false) }
@@ -215,16 +227,24 @@ fun App() {
         var agent3Cockpit by remember { mutableStateOf(db.getSetting("agent3Cockpit") == "true") }
         val scope = rememberCoroutineScope()
         var convId by remember { mutableStateOf<Long?>(null) }
+        val conversationPublicationEpoch = remember { KalivConversationPublicationEpoch() }
+        val startupConversationEpoch = remember { conversationPublicationEpoch.capture() }
 
-        // Silently resume the latest conversation on startup, if any. No
-        // conversation *browser* yet (list/switch/delete) -- next increment.
+        // Resume the latest conversation only while startup still owns the
+        // initial context. Any newer turn/open/new/reset invalidates this read;
+        // the IO may finish, but stale bytes never replace newer UI state.
         LaunchedEffect(Unit) {
             val latest = withContext(Dispatchers.IO) { db.latestConversationId() }
             if (latest != null) {
                 val loaded = withContext(Dispatchers.IO) { db.loadMessages(latest) }
-                messages.clear()
-                loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
-                convId = latest
+                if (conversationPublicationEpoch.mayPublish(startupConversationEpoch)) {
+                    // Source badge belongs to the previous visible context, never
+                    // to a conversation restored/replaced by this publication.
+                    lastSource = null
+                    messages.clear()
+                    loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                    convId = latest
+                }
             }
         }
 
@@ -252,7 +272,27 @@ fun App() {
 
         fun send() {
             val text = input.trim()
-            if (text.isEmpty() || busy) return
+            if (text.isEmpty() || busy || pendingCard != null) return
+            // Capture every execution-authority input before the turn can
+            // suspend. Settings remain editable, but changes belong to the next turn.
+            val turnConfig = KalivChatTurnConfig(
+                localUrl = localUrl,
+                localPath = localPath,
+                localModel = localModel,
+                deviceToken = deviceToken,
+                cloudKey = cloudKey,
+                cloudModel = cloudModel,
+                localSystem = localSystem,
+                cloudSystem = cloudSystem,
+                preferLocal = preferLocal,
+                autoCloudFallback = autoCloudFallback,
+                toolsMode = toolsMode,
+                ragMode = ragMode,
+                ragSourceFilter = ragSourceFilter,
+            )
+            // A new user turn owns the visible conversation context. Invalidate
+            // any startup/open DB read that began before this action.
+            conversationPublicationEpoch.advance()
             // History for the tools path: the turns BEFORE this message --
             // the worker gets the new message in its own field (Android parity).
             val priorPairs = messages
@@ -261,25 +301,25 @@ fun App() {
             messages.add(UiMessage("user", text))
             input = ""
             busy = true
-            if (toolsMode) {
+            if (turnConfig.toolsMode) {
                 // V5 on the desktop: non-streaming by necessity (the worker
                 // must see the whole response to detect a tool call), the
                 // confirmation card enforced by the WORKER -- this client can
                 // only render it, never bypass it.
-                val sysT = localSystem.trim().takeIf { it.isNotEmpty() }
+                val sysT = turnConfig.localSystem.trim().takeIf { it.isNotEmpty() }
                 val assistantIdxT = messages.size
                 messages.add(UiMessage("assistant", "", null, streaming = true, status = KalivStatus.TOOLS))
                 scope.launch {
                     val cid = withContext(Dispatchers.IO) {
-                        val id = convId ?: db.newConversation(source = "tools", model = localModel, title = text)
+                        val id = convId ?: db.newConversation(source = "tools", model = turnConfig.localModel, title = text)
                         db.addMessage(id, "user", text)
                         id
                     }
                     if (convId == null) convId = cid
                     val res = withContext(Dispatchers.IO) {
                         runCatching {
-                            ToolsClient(localUrl, deviceToken.ifBlank { null })
-                                .toolsChatStream(text, localModel, priorPairs, sysT) { name ->
+                            ToolsClient(turnConfig.localUrl, turnConfig.deviceToken.ifBlank { null })
+                                .toolsChatStream(text, turnConfig.localModel, priorPairs, sysT) { name ->
                                     // Riggens egen fase undervejs. En vaerktoejstur
                                     // var foer en lukket doer: een statisk tekst og
                                     // ingen tegn paa liv foer svaret landede.
@@ -295,12 +335,17 @@ fun App() {
                         }
                     }
                     res.onSuccess { turn ->
+                        // Tools is served by the rig/backend. Only a successful
+                        // worker response may become the latest reply-source truth.
+                        lastSource = ChatResult.Source.LOCAL
                         when (turn.status) {
                             "confirmation_required" -> {
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
                                     streaming = false,
                                 )
+                                pendingCardError = null
+                                pendingCardTurnConfig = turnConfig
                                 pendingCard = turn
                             }
                             else -> {
@@ -318,32 +363,26 @@ fun App() {
                 }
                 return
             }
-            // System prompt reflects the PREFERRED source (preferLocal), not
-            // necessarily whichever one ends up answering after a fallback —
-            // a known simplification since the router picks the actual source
-            // only at call time. Fine for the common case; a mid-call switch
-            // is the rare edge case (rig went down mid-session). Irrelevant in
-            // RAG mode -- the worker sets its own system prompt.
-            val sys = (if (preferLocal) localSystem else cloudSystem).trim()
-            val history = buildList {
-                if (sys.isNotEmpty()) add(ChatMessage("system", sys))
-                addAll(
-                    messages.filter { it.role == "user" || it.role == "assistant" }
-                        .map { ChatMessage(it.role, it.text) },
-                )
-            }
-            val useRag = ragMode
-            val srcFilter = ragSourceFilter
+            // Conversation history is route-neutral. ChatRouter injects the
+            // product system identity for the source that ACTUALLY executes,
+            // so a fallback can never inherit the preferred source's identity.
+            // RAG stays on the worker path and owns its own system prompt.
+            val history = messages
+                .filter { it.role == "user" || it.role == "assistant" }
+                .map { ChatMessage(it.role, it.text) }
+            val useRag = turnConfig.ragMode
+            val srcFilter = turnConfig.ragSourceFilter
             val assistantIdx = messages.size
             messages.add(UiMessage("assistant", "", null, streaming = true, status = if (useRag) KalivStatus.RAG else KalivStatus.THINKING))
             scope.launch {
-                // Best-effort source label for the DB row: since ChatRouter can
-                // fall back dynamically, we label by the PREFERRED source
-                // (preferLocal), same known simplification as the system prompt.
+                // Normal Chat starts unresolved; its source/model is finalized
+                // only after ChatRouter identifies the source that actually answered.
+                // RAG executes through the local worker, so its metadata is the
+                // captured local model regardless of normal-chat route preference.
                 val cid = withContext(Dispatchers.IO) {
                     val id = convId ?: db.newConversation(
-                        source = if (useRag) "rag" else if (preferLocal) "rig" else "cloud",
-                        model = if (preferLocal) localModel else cloudModel,
+                        source = if (useRag) "rag" else PendingChatConversationProvenance.source,
+                        model = if (useRag) turnConfig.ragConversationModel() else PendingChatConversationProvenance.model,
                         title = text,
                     )
                     db.addMessage(id, "user", text)
@@ -351,6 +390,7 @@ fun App() {
                 }
                 if (convId == null) convId = cid
 
+                var answeredSource: ChatResult.Source? = null
                 val err = withContext(Dispatchers.IO) {
                     runCatching {
                         if (useRag) {
@@ -373,8 +413,8 @@ fun App() {
                                     }
                                 }
                             }
-                            RagClient(localUrl, deviceToken.ifBlank { null })
-                                .chatStream(text, localModel, srcFilter, onSources = onSources,
+                            RagClient(turnConfig.localUrl, turnConfig.deviceToken.ifBlank { null })
+                                .chatStream(text, turnConfig.localModel, srcFilter, onSources = onSources,
                                     onPhase = onPhase) { delta ->
                                     scope.launch {
                                         lastSource = ChatResult.Source.LOCAL
@@ -383,11 +423,25 @@ fun App() {
                                     }
                                 }
                         } else {
-                            val local = OllamaClient(baseUrl = localUrl, chatPath = localPath, bearer = deviceToken.ifBlank { null })
-                            val cloud = if (cloudKey.isNotBlank())
-                                OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey, think = false)
+                            val local = OllamaClient(
+                                baseUrl = turnConfig.localUrl,
+                                chatPath = turnConfig.localPath,
+                                bearer = turnConfig.deviceToken.ifBlank { null },
+                            )
+                            val cloud = if (turnConfig.cloudKey.isNotBlank())
+                                OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = turnConfig.cloudKey, think = false)
                             else null
-                            ChatRouter(local, localModel, cloud, cloudModel, preferLocal, autoCloudFallback).chatStream(history) { src, delta ->
+                            answeredSource = ChatRouter(
+                                local = local,
+                                localModel = turnConfig.localModel,
+                                cloud = cloud,
+                                cloudModel = turnConfig.cloudModel,
+                                preferLocal = turnConfig.preferLocal,
+                                autoFallback = turnConfig.autoCloudFallback,
+                                localSystem = turnConfig.localSystem,
+                                cloudSystem = turnConfig.cloudSystem,
+                            ).chatStream(history) { src, delta ->
+                                answeredSource = src
                                 scope.launch {
                                     lastSource = src
                                     val cur = messages[assistantIdx]
@@ -405,11 +459,31 @@ fun App() {
                 messages[assistantIdx] = cur.copy(text = msg, streaming = false)
                 if (err == null || cancelled) {
                     val finalText = messages[assistantIdx].text
-                    withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+                    withContext(Dispatchers.IO) {
+                        db.addMessage(cid, "assistant", finalText)
+                        answeredSource?.let { source ->
+                            val provenance = turnConfig.completedProvenance(source)
+                            // Provenance failure must not relabel an already-produced answer as interrupted.
+                            // Leaving pending/previous provenance is safer than persisting a guessed route.
+                            runCatching {
+                                db.updateConversationRoute(cid, provenance.source, provenance.model)
+                            }
+                        }
+                    }
                 }
                 busy = false
             }
         }
+
+        // One presentation authority feeds both the wide rail and Chat title.
+        // The shell must never claim local-only while configured routing says cloud.
+        val chatRouteStatus = presentSidebarStatus(
+            preferLocal = preferLocal,
+            autoCloudFallback = autoCloudFallback,
+            cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
+            localModel = localModel,
+            cloudModel = cloudModel,
+        )
 
         // Shell from the mockup: a 40dp custom title bar spans the FULL width,
         // and the three columns live below it. Each direction carries its own
@@ -421,7 +495,7 @@ fun App() {
             subtitle = when (activeScreen) {
                 KalivScreen.AGENT -> "\u2014 agent"
                 KalivScreen.COMPUTER -> "\u2014 computer-use"
-                else -> "\u2014 lokal AI p\u00e5 din maskine"
+                else -> chatRouteStatus.titleSubtitle
             },
             // Mockup 1c: an amber "Kaliv styrer skærmen" badge sits next to the
             // subtitle while a computer-use task is actually running.
@@ -434,7 +508,7 @@ fun App() {
         Row(Modifier.fillMaxWidth().weight(1f)) {
             if (activeScreen == KalivScreen.CHAT) {
             KalivNavRail(
-                active = activeScreen,
+                active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                 onSelect = { screen ->
                     activeScreen = screen
                     // MODELS/DOCS/SETTINGS reuse the existing panels rather than
@@ -451,17 +525,14 @@ fun App() {
                         else -> {}
                     }
                 },
-                modelName = localModel,
-                // VRAM is not queried live here; show the model's headline budget
-                // for the reference rig (RTX 3060 12GB). A live figure would come
-                // from /health/full -- left as a follow-up so this stays honest.
-                vramUsedGb = 6.2,
-                vramTotalGb = 12.0,
-                modelBackend = if (localPath.contains("/api/v1/")) "llama.cpp" else "Ollama",
+                status = chatRouteStatus,
+                // No live VRAM authority is wired into the desktop shell yet.
+                // Missing measurement stays explicit instead of using reference data.
+                vram = KalivVramTelemetry.Unavailable,
             )
             } else {
                 KalivIconRail(
-                    active = activeScreen,
+                    active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                     onSelect = { screen ->
                         activeScreen = screen
                         when (screen) {
@@ -515,10 +586,6 @@ fun App() {
                 }
             } else if (activeScreen == KalivScreen.COMPUTER) {
                 KalivComputerUse(
-                    baseUrl = localUrl,
-                    bearer = deviceToken.ifBlank { null },
-                    model = localModel,
-                    system = localSystem.trim().takeIf { it.isNotEmpty() },
                     onRunningChange = { computerRunning = it },
                 )
             } else {
@@ -534,8 +601,14 @@ fun App() {
             // changed, mirroring the Android header's chips.
             val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                ToolbarChip(CONVERSATION_BROWSER_LABEL, active = showConvos, filled = false) {
+                    showConvos = true
+                    showSettings = false
+                    showModels = false
+                }
+                Spacer(Modifier.width(6.dp))
                 Box {
-                    ToolbarChip("Model: $localModel \u25be", filled = false) { modelMenuOpen = true }
+                    ToolbarChip(presentLocalModelSelectorLabel(localModel), filled = false) { modelMenuOpen = true }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("\u21bb Genindl\u00e6s modeller", color = KalivTheme.colors.Signal, fontSize = 13.sp) },
@@ -640,23 +713,48 @@ fun App() {
                         ConversationsPanel(
                             db = db,
                             activeConvId = convId,
-                            onActiveDeleted = {
-                                convId = null
-                                messages.clear()
+                            presentation = conversationBrowserPresentation,
+                            onDeleted = { deletedId ->
+                                if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    // Any successful delete may target a conversation whose
+                                    // DB load is still in flight. Invalidate it even when the
+                                    // deleted row has not become active yet.
+                                    conversationPublicationEpoch.advance()
+                                    if (convId == deletedId) {
+                                        lastSource = null
+                                        convId = null
+                                        messages.clear()
+                                    }
+                                }
                             },
                             onOpen = { id ->
-                                scope.launch {
-                                    val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
-                                    messages.clear()
-                                    loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
-                                    convId = id
-                                    showConvos = false
+                                if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    val openEpoch = conversationPublicationEpoch.advance()
+                                    scope.launch {
+                                        val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
+                                        if (
+                                            conversationPublicationEpoch.mayPublish(openEpoch) &&
+                                            presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled
+                                        ) {
+                                            // Only the winning publication may clear the old
+                                            // reply-source badge; stale loads leave UI state alone.
+                                            lastSource = null
+                                            messages.clear()
+                                            loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                                            convId = id
+                                            showConvos = false
+                                        }
+                                    }
                                 }
                             },
                             onNew = {
-                                messages.clear()
-                                convId = null
-                                showConvos = false
+                                if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    conversationPublicationEpoch.advance()
+                                    lastSource = null
+                                    messages.clear()
+                                    convId = null
+                                    showConvos = false
+                                }
                             },
                         )
                         Spacer(Modifier.height(8.dp))
@@ -736,12 +834,12 @@ fun App() {
                         onValueChange = { input = it },
                         modifier = Modifier.weight(1f).heightIn(min = 88.dp),
                         placeholder = { Text("Skriv til Kaliv …", color = KalivTheme.colors.TextMuted) },
-                        enabled = !busy,
+                        enabled = chatConfirmationPresentation.newTurnEnabled,
                         maxLines = 5,
                         shape = RoundedCornerShape(20.dp),
                     )
                     Spacer(Modifier.width(10.dp))
-                    val canSend = !busy && input.isNotBlank()
+                    val canSend = chatConfirmationPresentation.newTurnEnabled && input.isNotBlank()
                     Box(
                         Modifier.size(44.dp)
                             .clip(RoundedCornerShape(16.dp))
@@ -773,12 +871,9 @@ fun App() {
                         RagDocRow(kind = kind, name = s, size = "")
                     },
                     onAddDocument = { ragMode = true; loadRagSources() },
-                    // Tokens/sec + response time would come from the last stream's
-                    // timing; shown as the reference figures until wired to real
-                    // measurement, so the panel is honest about being illustrative.
-                    tokensPerSec = 512,
-                    responseSeconds = 0.83,
-                    sparkline = listOf(3f, 5f, 4f, 7f, 6f, 9f, 7f, 10f, 8f, 11f),
+                    // There is no response-performance measurement pipeline yet.
+                    // Missing evidence is an explicit state, never demo telemetry.
+                    performance = KalivPerformanceTelemetry.Unavailable,
                 )
             }
         } // end Row (three columns)
@@ -789,41 +884,72 @@ fun App() {
         // cannot skip it. Deny is a first-class action, not a dismiss.
         pendingCard?.let { card ->
             fun decide(approve: Boolean) {
+                if (busy) return
                 val id = card.confirmation_id
-                pendingCard = null
+                val confirmationConfig = pendingCardTurnConfig
+                if (confirmationConfig == null) {
+                    pendingCardError = "Bekræftelsen mangler sin oprindelige forbindelseskontekst. Start opgaven igen."
+                    return
+                }
+                pendingCardError = null
                 busy = true
                 scope.launch {
                     val res = withContext(Dispatchers.IO) {
                         runCatching {
-                            ToolsClient(localUrl, deviceToken.ifBlank { null })
-                                .toolsConfirm(id, approve)
+                            ToolsClient(
+                                confirmationConfig.localUrl,
+                                confirmationConfig.deviceToken.ifBlank { null },
+                            ).toolsConfirm(id, approve)
                         }
                     }
-                    val next = res.getOrNull()
-                    if (next?.status == "confirmation_required") {
-                        // Agent v2: an approved write may continue the chain, and the
-                        // next write returns as its own card. Show it -- one approval
-                        // never authorises the next write.
-                        pendingCard = next
-                        busy = false
-                    } else {
-                        val text = res.fold(
-                            onSuccess = { it.answer.ifBlank { if (approve) "Udført." else "Afvist." } },
-                            onFailure = { "Fejl: ${apiErrorHint(it.message)}" },
-                        )
-                        messages.add(UiMessage("assistant", text))
-                        val cid = convId
-                        if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
-                        busy = false
+                    res.onSuccess { next ->
+                        // Approve/deny and chained confirmations are served by
+                        // the same rig endpoint captured for the originating turn.
+                        lastSource = ChatResult.Source.LOCAL
+                        if (next.status == "confirmation_required") {
+                            // A chained write gets its own authoritative card. One
+                            // approval never authorises the next write.
+                            pendingCard = next
+                            pendingCardError = null
+                        } else {
+                            // Only a successful worker acknowledgement may clear the card.
+                            pendingCard = null
+                            pendingCardTurnConfig = null
+                            pendingCardError = null
+                            val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
+                            messages.add(UiMessage("assistant", text))
+                            val cid = convId
+                            if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
+                        }
+                    }.onFailure { e ->
+                        // Worker authority is unresolved: keep the card visible for retry/deny.
+                        pendingCardError = apiErrorHint(e.message)
                     }
+                    busy = false
                 }
             }
             AlertDialog(
                 onDismissRequest = { /* et kort lukkes med et VALG, ikke et klik udenfor */ },
                 title = { Text("Kaliv vil bruge et værktøj", fontWeight = FontWeight.SemiBold) },
-                text = { Text(card.summary.ifBlank { card.tool }) },
-                confirmButton = { Button(onClick = { decide(true) }) { Text("Godkend") } },
-                dismissButton = { OutlinedButton(onClick = { decide(false) }) { Text("Afvis") } },
+                text = {
+                    Column {
+                        Text(card.summary.ifBlank { card.tool })
+                        pendingCardError?.let { err ->
+                            Spacer(Modifier.height(8.dp))
+                            Text("Fejl: $err", color = KalivTheme.colors.Danger, fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(enabled = chatConfirmationPresentation.decisionEnabled, onClick = { decide(true) }) {
+                        Text("Godkend")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(enabled = chatConfirmationPresentation.decisionEnabled, onClick = { decide(false) }) {
+                        Text("Afvis")
+                    }
+                },
             )
         }
 
@@ -863,7 +989,14 @@ fun App() {
  * browse, switch, or clean up older ones.
  */
 @Composable
-private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (Long) -> Unit, onNew: () -> Unit, onActiveDeleted: () -> Unit) {
+private fun ConversationsPanel(
+    db: DesktopChatDb,
+    activeConvId: Long?,
+    presentation: KalivConversationBrowserPresentation,
+    onOpen: (Long) -> Unit,
+    onNew: () -> Unit,
+    onDeleted: (Long) -> Unit,
+) {
     var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
     var panelError by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -884,9 +1017,18 @@ private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Samtaler", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onNew) { Text("+ Ny", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
+                TextButton(
+                    enabled = presentation.contextMutationEnabled,
+                    onClick = { if (presentation.contextMutationEnabled) onNew() },
+                ) {
+                    Text("+ Ny", color = if (presentation.contextMutationEnabled) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                }
             }
             panelError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+            presentation.lockMessage?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = query, onValueChange = { query = it },
@@ -921,11 +1063,15 @@ private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (
                     } else {
                         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(
-                                Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable { onOpen(c.id) }.padding(vertical = 4.dp),
+                                Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).clickable(
+                                    enabled = presentation.contextMutationEnabled,
+                                ) {
+                                    if (presentation.contextMutationEnabled) onOpen(c.id)
+                                }.padding(vertical = 4.dp),
                             ) {
                                 Text(c.title.ifBlank { "(uden titel)" }, color = KalivTheme.colors.TextHigh, fontSize = 13.sp, maxLines = 1)
                                 Text(
-                                    "${c.source} · ${fmt.format(Date(c.updatedAt))}",
+                                    "${presentConversationSource(c.source)} · ${fmt.format(Date(c.updatedAt))}",
                                     color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
                                 )
                             }
@@ -940,20 +1086,26 @@ private fun ConversationsPanel(db: DesktopChatDb, activeConvId: Long?, onOpen: (
                             }) {
                                 Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = KalivTheme.colors.Signal, fontSize = 12.sp)
                             }
-                            TextButton(onClick = {
-                                runCatching {
-                                    db.deleteConversation(c.id)
-                                    // If we just deleted the conversation we're
-                                    // standing in, tell the parent to drop the
-                                    // dangling convId and clear the view. Otherwise
-                                    // an in-flight send (or a streaming reply
-                                    // finalizing) calls addMessage() against a gone
-                                    // conversation -> SQLITE_CONSTRAINT_FOREIGNKEY
-                                    // crash. Seen on-device 12/7.
-                                    if (activeConvId == c.id) onActiveDeleted()
-                                    convos = db.listConversations()
-                                }.onFailure { panelError = it.message }
-                            }) { Text("Slet", color = KalivTheme.colors.Danger, fontSize = 12.sp) }
+                            TextButton(
+                                enabled = presentation.contextMutationEnabled,
+                                onClick = {
+                                    if (presentation.contextMutationEnabled) {
+                                        runCatching {
+                                            db.deleteConversation(c.id)
+                                            // Every successful delete invalidates pending conversation
+                                            // loads; the parent clears the view as well when this was active.
+                                            onDeleted(c.id)
+                                            convos = db.listConversations()
+                                        }.onFailure { panelError = it.message }
+                                    }
+                                },
+                            ) {
+                                Text(
+                                    "Slet",
+                                    color = if (presentation.contextMutationEnabled) KalivTheme.colors.Danger else KalivTheme.colors.TextMuted,
+                                    fontSize = 12.sp,
+                                )
+                            }
                         }
                     }
                 }
