@@ -6,6 +6,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -208,6 +209,42 @@ internal data class Agent3ReviewedStartTransportEnvelope(
     val responseReviewReads: Boolean,
 )
 
+internal data class Agent3RunCapabilityEvidence(
+    val runId: String,
+    val receipt: Agent3CapabilityReceipt,
+)
+
+@Serializable
+private data class StrictCapabilityReceipt(
+    val schema: String,
+    @SerialName("graph_sha256") val graphSha256: String,
+    @SerialName("plan_sha256") val planSha256: String,
+    val route: String,
+    val allowed: Boolean,
+    @SerialName("required_capability_ids") val requiredCapabilityIds: List<String>,
+    val blockers: List<Agent3CapabilityBlocker>,
+    @SerialName("production_activation") val productionActivation: Boolean,
+) {
+    fun toReceipt(): Agent3CapabilityReceipt = Agent3CapabilityReceipt(
+        schema = schema,
+        graphSha256 = graphSha256,
+        planSha256 = planSha256,
+        route = route,
+        allowed = allowed,
+        requiredCapabilityIds = requiredCapabilityIds,
+        blockers = blockers,
+        productionActivation = productionActivation,
+    )
+}
+
+@Serializable
+private data class RunCapabilityEvidenceWire(
+    @SerialName("run_id") val runId: String,
+    val receipt: StrictCapabilityReceipt,
+    val evaluated: Boolean,
+    val executed: Boolean,
+)
+
 @Serializable
 private data class RunsEnvelope(val runs: List<Agent3Run> = emptyList())
 
@@ -351,6 +388,93 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             )
         }
         return envelope
+    }
+
+    internal fun getRunCapabilityEvidence(runId: String): Agent3RunCapabilityEvidence {
+        val body = get("/api/v1/experimental/agent3/runs/${seg(runId)}/capability-receipt")
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            ?: throw Agent3Exception("Invalid Agent 3.0 capability evidence: response is not an object")
+
+        fun stringField(objectValue: JsonObject, name: String): String? {
+            val raw = objectValue[name] as? JsonPrimitive ?: return null
+            return raw.takeIf { it.isString }?.content
+        }
+        fun booleanField(objectValue: JsonObject, name: String): Boolean? {
+            val raw = objectValue[name] as? JsonPrimitive ?: return null
+            if (raw.isString) return null
+            return when (raw.content) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+        }
+
+        val returnedRunId = stringField(root, "run_id")
+        if (returnedRunId.isNullOrBlank() || returnedRunId != runId) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 capability evidence: server returned another run id"
+            )
+        }
+        if (booleanField(root, "evaluated") != true || booleanField(root, "executed") != false) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 capability evidence: evaluated/executed binding is invalid"
+            )
+        }
+
+        val rawReceipt = root["receipt"] as? JsonObject
+            ?: throw Agent3Exception("Invalid Agent 3.0 capability evidence: receipt is missing")
+        for (field in listOf("schema", "graph_sha256", "plan_sha256", "route")) {
+            if (stringField(rawReceipt, field) == null) {
+                throw Agent3Exception(
+                    "Invalid Agent 3.0 capability evidence: receipt.$field has the wrong type"
+                )
+            }
+        }
+        if (
+            booleanField(rawReceipt, "allowed") == null ||
+            booleanField(rawReceipt, "production_activation") == null
+        ) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 capability evidence: receipt boolean binding is invalid"
+            )
+        }
+
+        val requiredIds = rawReceipt["required_capability_ids"] as? JsonArray
+            ?: throw Agent3Exception(
+                "Invalid Agent 3.0 capability evidence: required capability ids are missing"
+            )
+        if (requiredIds.any { value ->
+                val raw = value as? JsonPrimitive
+                raw == null || !raw.isString
+            }
+        ) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 capability evidence: required capability ids have the wrong type"
+            )
+        }
+
+        val blockers = rawReceipt["blockers"] as? JsonArray
+            ?: throw Agent3Exception("Invalid Agent 3.0 capability evidence: blockers are missing")
+        blockers.forEach { value ->
+            val blocker = value as? JsonObject
+                ?: throw Agent3Exception(
+                    "Invalid Agent 3.0 capability evidence: blocker has the wrong type"
+                )
+            if (
+                stringField(blocker, "capability_id") == null ||
+                stringField(blocker, "state") == null ||
+                stringField(blocker, "reason") == null
+            ) {
+                throw Agent3Exception(
+                    "Invalid Agent 3.0 capability evidence: blocker is incomplete"
+                )
+            }
+        }
+
+        val wire = decode<RunCapabilityEvidenceWire>(body)
+        val receipt = wire.receipt.toReceipt()
+        validateCapabilityReceipt(receipt)
+        return Agent3RunCapabilityEvidence(runId = returnedRunId, receipt = receipt)
     }
 
     fun listRuns(): List<Agent3Run> =

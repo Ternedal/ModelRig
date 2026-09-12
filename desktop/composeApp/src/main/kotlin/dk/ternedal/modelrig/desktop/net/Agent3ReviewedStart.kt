@@ -78,12 +78,34 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             )
         }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
+        if (expectedCapabilityReceipt != null) {
+            val evidence = getRunCapabilityEvidence(recoveryRunId)
+            validateRecoveredCapabilityPlan(
+                current = evidence.receipt,
+                reviewed = expectedCapabilityReceipt,
+            )
+        }
         fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "the reviewed Start envelope was rejected"
         val recovery = recoveryFailure.message ?: "fresh run status could not be validated"
         throw Agent3Exception(
             "$original. Fresh run recovery failed: $recovery"
+        )
+    }
+}
+
+private fun validateRecoveredCapabilityPlan(
+    current: Agent3CapabilityReceipt,
+    reviewed: Agent3CapabilityReceipt,
+) {
+    if (
+        current.planSha256 != reviewed.planSha256 ||
+        current.route != reviewed.route ||
+        current.requiredCapabilityIds != reviewed.requiredCapabilityIds
+    ) {
+        throw Agent3Exception(
+            "Invalid Agent 3.0 capability evidence: current run plan does not match reviewed Preview"
         )
     }
 }
