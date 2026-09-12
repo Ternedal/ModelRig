@@ -19,6 +19,7 @@ Run: python3 tests/workflow_design_token_contrast.py
 from __future__ import annotations
 
 import json
+import runpy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -126,6 +127,21 @@ sab["dark"]["text"] = sab["dark"]["canvas"]          # tekst = baggrund -> ratio
 sab_below = {n for n, fg, bg, need in pairs(sab) if contrast(fg, bg) < need}
 check("dark.text on dark.canvas" in sab_below,
       "tekst i baggrundsfarve fanges som under AA")
+
+# #1270 er en desktop binding-kontrakt, ikke et nyt top-level testinventar.
+# Koer den fokuserede suite herfra, saa CURRENT_STATE's genererede tests/*.py
+# liste forbliver uændret, mens CI stadig ejer regressionen.
+support_ok = False
+try:
+    runpy.run_path(
+        str(ROOT / "tests" / "support" / "workflow_desktop_light_theme.py"),
+        run_name="__main__",
+    )
+except SystemExit as exc:
+    support_ok = exc.code in (None, 0)
+except Exception as exc:
+    print(f"  desktop light-theme support suite raised {type(exc).__name__}: {exc}")
+check(support_ok, "desktop light-theme authority/contrast support gate passer")
 
 print(f"\ndesign token contrast: {passed} passed, {failed} failed")
 if failed:
