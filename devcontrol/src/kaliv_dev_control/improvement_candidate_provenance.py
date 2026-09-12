@@ -1,22 +1,12 @@
 """Evidence-only binding from a materialized RSI candidate to measured runtime code.
 
-The previous regression layer deliberately keeps Git identity and the Agent 3
-``backend.code_sha256`` measurement separate.  This module closes that gap
-without adding execution authority:
+A complete candidate-tree snapshot must reproduce the root tree from
+LocalCandidateMaterializationReceipt. The worker/app Python subset is then hashed
+with the same semantics as worker/app/build_identity.py and must equal the exact
+Agent 3 eval identity already accepted by CandidateRegressionProof.
 
-* one verified LocalCandidateMaterializationReceipt supplies the candidate commit,
-  root tree and task identity;
-* a complete, caller-supplied snapshot is hashed with Git's object rules and must
-  reproduce the materialized root tree exactly;
-* the worker/app Python subset is fingerprinted with the same algorithm used by
-  ``worker/app/build_identity.py``;
-* the candidate eval must report that exact fingerprint and the exact eval digest
-  already accepted by CandidateRegressionProof.
-
-The module performs no filesystem I/O, subprocess execution, network access, Git
-mutation, publication, merge, release, deployment or activation.  Snapshot bytes
-are inputs; producing them from the local bare candidate repository remains a
-separate read-only collection concern.
+No filesystem I/O, subprocess, network, Git mutation, publication, merge,
+release, deployment or activation is performed here.
 """
 from __future__ import annotations
 
@@ -34,7 +24,6 @@ from .local_candidate_materialization import LocalCandidateMaterializationReceip
 PROVENANCE_SCHEMA = "kaliv-rsi-candidate-runtime-provenance/v1"
 PROVENANCE_AUTHORITY = "evidence-only"
 PROVENANCE_MERGE_AUTHORITY = "human"
-
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
 _ALLOWED_MODES = {"100644", "100755", "120000"}
@@ -71,7 +60,9 @@ def _path(value: Any) -> str:
     if not isinstance(value, str) or not value or value.strip() != value:
         raise CandidateProvenanceError("snapshot path is invalid")
     if "\\" in value or value.startswith("/") or "\x00" in value:
-        raise CandidateProvenanceError("snapshot path must be canonical repository-relative POSIX")
+        raise CandidateProvenanceError(
+            "snapshot path must be canonical repository-relative POSIX"
+        )
     parts = value.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise CandidateProvenanceError("snapshot path is non-canonical")
@@ -192,13 +183,7 @@ def _build_tree(entries: Mapping[str, SnapshotEntry]) -> str:
             if isinstance(value, SnapshotEntry):
                 oid = _git_object_sha1(b"blob", value.content)
                 sort_key = name_bytes
-                record = (
-                    value.mode.encode("ascii")
-                    + b" "
-                    + name_bytes
-                    + b"\0"
-                    + oid
-                )
+                record = value.mode.encode("ascii") + b" " + name_bytes + b"\0" + oid
             else:
                 oid = tree_oid(value)
                 sort_key = name_bytes + b"/"
@@ -211,11 +196,11 @@ def _build_tree(entries: Mapping[str, SnapshotEntry]) -> str:
 
 
 def worker_code_sha256(entries: tuple[SnapshotEntry, ...]) -> str:
-    """Match worker/app/build_identity.py::_hash_source_tree exactly."""
+    """Match worker/app/build_identity.py::_hash_source_tree semantics."""
 
     mapped = _snapshot_map(entries)
     prefix = "worker/app/"
-    selected = []
+    selected: list[tuple[str, bytes]] = []
     for path, entry in mapped.items():
         if not path.startswith(prefix) or not path.endswith(".py"):
             continue
@@ -223,9 +208,18 @@ def worker_code_sha256(entries: tuple[SnapshotEntry, ...]) -> str:
         parts = relative.split("/")
         if "__pycache__" in parts or parts[-1] == "_build_stamp.py":
             continue
+        # Git stores a symlink's target string while Path.read_bytes() follows
+        # the link. Without a separately verified resolved target, pretending
+        # those byte domains are equivalent would create a false binding.
+        if entry.mode == "120000":
+            raise CandidateProvenanceError(
+                "worker Python symlink cannot be fingerprinted from Git blob bytes"
+            )
         selected.append((relative, entry.content))
     if not selected:
-        raise CandidateProvenanceError("candidate snapshot contains no worker/app Python source")
+        raise CandidateProvenanceError(
+            "candidate snapshot contains no worker/app Python source"
+        )
     digest = hashlib.sha256()
     for relative, content in sorted(selected, key=lambda item: item[0]):
         canonical = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
