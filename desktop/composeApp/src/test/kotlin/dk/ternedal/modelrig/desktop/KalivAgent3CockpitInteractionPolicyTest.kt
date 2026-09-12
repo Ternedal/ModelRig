@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.desktop
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -136,5 +137,39 @@ class KalivAgent3CockpitInteractionPolicyTest {
         assertFalse(p.previewDiscardEnabled)
         assertFalse(p.stopPlanEnabled)
         assertFalse(p.clearTerminalRunEnabled)
+    }
+
+    @Test
+    fun currentRefreshMayPublishRunEventsAndFailureState() {
+        assertTrue(canPublishAgent3CockpitResponse(requestEpoch = 7L, currentEpoch = 7L))
+    }
+
+    @Test
+    fun newerConfirmInvalidatesOlderRefreshPublication() {
+        val refreshEpoch = 12L
+        val confirmEpoch = nextAgent3CockpitPublicationEpoch(refreshEpoch)
+        assertEquals(13L, confirmEpoch)
+        assertFalse(canPublishAgent3CockpitResponse(refreshEpoch, confirmEpoch))
+        assertTrue(canPublishAgent3CockpitResponse(confirmEpoch, confirmEpoch))
+    }
+
+    @Test
+    fun newerStopInvalidatesOlderRefreshPublication() {
+        val refreshEpoch = 31L
+        val stopEpoch = nextAgent3CockpitPublicationEpoch(refreshEpoch)
+        assertFalse(canPublishAgent3CockpitResponse(refreshEpoch, stopEpoch))
+    }
+
+    @Test
+    fun staleSuccessAndFailureUseTheSameFailClosedPublicationRule() {
+        val staleRequestEpoch = 4L
+        val currentEpoch = 5L
+        assertFalse(canPublishAgent3CockpitResponse(staleRequestEpoch, currentEpoch))
+        assertFalse(canPublishAgent3CockpitResponse(staleRequestEpoch, currentEpoch))
+    }
+
+    @Test
+    fun publicationEpochWrapsWithoutReusingTheCurrentMaxValue() {
+        assertEquals(1L, nextAgent3CockpitPublicationEpoch(Long.MAX_VALUE))
     }
 }

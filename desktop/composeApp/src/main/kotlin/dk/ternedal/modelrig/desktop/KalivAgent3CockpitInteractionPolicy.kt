@@ -11,6 +11,11 @@ package dk.ternedal.modelrig.desktop
  * and is never inferred from a merely non-terminal local run state. A terminal
  * run can be cleared locally only after it is actually terminal and no request
  * is in flight; that local reset never claims remote cancellation.
+ *
+ * Publication epochs are local ordering authority only. They never cancel or
+ * reinterpret a server request; they only prevent an older asynchronous
+ * refresh from publishing run, log or error state after a newer mutation/reset
+ * has already taken ownership of the cockpit.
  */
 internal data class KalivAgent3CockpitInteraction(
     val composerEnabled: Boolean,
@@ -51,3 +56,11 @@ internal fun canAgent3CockpitPreview(
     busy = busy,
     hasRun = hasRun,
 )
+
+internal fun nextAgent3CockpitPublicationEpoch(current: Long): Long =
+    if (current == Long.MAX_VALUE) 1L else current + 1L
+
+internal fun canPublishAgent3CockpitResponse(
+    requestEpoch: Long,
+    currentEpoch: Long,
+): Boolean = requestEpoch == currentEpoch
