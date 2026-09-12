@@ -12,12 +12,8 @@ def once(src: str, old: str, new: str, label: str) -> str:
     return src.replace(old, new, 1)
 
 src = GATE.read_text(encoding="utf-8")
-src = once(
-    src,
-    "import json\nfrom pathlib import Path\n",
-    "import json\nfrom pathlib import Path\n\nfrom source_code import code_of\n",
-    "code_of import",
-)
+if "from source_code import code_of" not in src:
+    raise SystemExit("code_of import missing from support gate")
 src = once(src, 'brand = BRAND.read_text(encoding="utf-8")', 'brand = code_of(BRAND)', "brand source")
 src = once(src, 'app = APP.read_text(encoding="utf-8")', 'app = code_of(APP)', "app source")
 src = once(src, 'shell = SHELL.read_text(encoding="utf-8") if SHELL.exists() else ""', 'shell = code_of(SHELL) if SHELL.exists() else ""', "shell source")
