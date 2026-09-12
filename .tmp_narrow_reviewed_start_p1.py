@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Temporary qualification helper. Removed before the retained product commit.
 path = Path("worker/app/agent3/planner.py")
 text = path.read_text(encoding="utf-8")
 old = '''            if state == "accepted":
