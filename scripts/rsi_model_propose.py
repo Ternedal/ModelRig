@@ -22,13 +22,13 @@ sys.path.insert(0, str(ROOT / "devcontrol" / "src"))
 sys.path.insert(0, str(ROOT / "worker"))
 
 from app import ollama_client as oc  # noqa: E402
+from kaliv_dev_control.improvement_evidence import (  # noqa: E402
+    build_verified_agent3_improvement_brief,
+)
 from kaliv_dev_control.improvement_model import (  # noqa: E402
     generate_bound_improvement_proposal,
 )
-from kaliv_dev_control.improvement_proposal import (  # noqa: E402
-    ImprovementProposalError,
-    build_agent3_improvement_brief,
-)
+from kaliv_dev_control.improvement_proposal import ImprovementProposalError  # noqa: E402
 
 
 def _read_json(path: Path) -> dict:
@@ -82,7 +82,14 @@ def _require_loopback_ollama(url: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--eval-report", type=Path, required=True)
-    parser.add_argument("--base-sha", required=True)
+    parser.add_argument(
+        "--base-sha",
+        required=True,
+        help=(
+            "exact repository Git SHA supplied by repository authority; "
+            "the Agent 3 eval itself carries code_sha256, not a Git SHA"
+        ),
+    )
     parser.add_argument("--repository", default="Ternedal/ModelRig")
     parser.add_argument("--model", required=True)
     parser.add_argument("--brief-out", type=Path)
@@ -93,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_seen: dict[str, str] = {}
     try:
         report = _read_json(args.eval_report)
-        brief = build_agent3_improvement_brief(
+        brief = build_verified_agent3_improvement_brief(
             report,
             repository=args.repository,
             base_sha=args.base_sha,
