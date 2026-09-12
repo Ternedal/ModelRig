@@ -1,4 +1,4 @@
-"""Source/runtime identity and RSI materialized-candidate provenance contracts.
+"""Source/runtime identity plus RSI provenance and snapshot collector contracts.
 
 Run: PYTHONPATH=worker python3 tests/worker_build_identity.py
 """
@@ -24,6 +24,11 @@ from kaliv_dev_control.improvement_candidate_provenance import (  # noqa: E402
     candidate_tree_sha,
     worker_code_sha256,
 )
+from kaliv_dev_control.improvement_candidate_snapshot import (  # noqa: E402
+    CandidateSnapshotError,
+    SnapshotBudget,
+    _collect_with_reader,
+)
 from kaliv_dev_control.improvement_proposal import (  # noqa: E402
     AGENT3_EVAL_SCHEMA,
     canonical_sha256,
@@ -33,30 +38,35 @@ from kaliv_dev_control.improvement_regression import CandidateRegressionProof  #
 passed = failed = 0
 
 
-def check(cond, msg):
+def check(condition, message):
     global passed, failed
-    if cond:
+    if condition:
         passed += 1
-        print(f"  PASS: {msg}")
+        print(f"  PASS: {message}")
     else:
         failed += 1
-        print(f"  FAIL: {msg}")
+        print(f"  FAIL: {message}")
 
 
-def expect_provenance_error(fragment, fn, msg):
+def expect_error(error_type, fragment, fn, message):
     try:
         fn()
-    except CandidateProvenanceError as exc:
-        check(fragment in str(exc), msg)
+    except error_type as exc:
+        check(fragment in str(exc), message)
     else:
-        check(False, msg)
+        check(False, message)
 
 
 def _hash(path: Path) -> str:
     return hashlib.sha256(_canonical_bytes(path)).hexdigest()
 
 
-# Existing F-726 contract: logical source identity ignores checkout EOL only.
+def _blob_oid(payload: bytes) -> str:
+    header = b"blob " + str(len(payload)).encode("ascii") + b"\0"
+    return hashlib.sha1(header + payload).hexdigest()
+
+
+# Existing F-726 source identity contract.
 _d = Path(tempfile.mkdtemp(prefix="kaliv-eol-"))
 _lf = _d / "lf.py"
 _lf.write_bytes(b"def f():\n    return 1\n")
@@ -78,38 +88,53 @@ _ga = ROOT / ".gitattributes"
 check(_ga.exists(), ".gitattributes exists")
 if _ga.exists():
     _text = _ga.read_text(encoding="utf-8")
-    check("*.py    text eol=lf" in _text or "*.py text eol=lf" in _text,
-          ".gitattributes pins Python source to LF")
+    check(
+        "*.py    text eol=lf" in _text or "*.py text eol=lf" in _text,
+        ".gitattributes pins Python source to LF",
+    )
     for _ext in ("*.go", "*.kt", "*.json"):
         check(_ext in _text, f".gitattributes pins {_ext}")
 
 
-# RSI bridge: exact materialized Git tree -> worker fingerprint -> exact eval.
+# RSI provenance bridge: exact materialized Git tree -> worker fingerprint -> eval.
 _snapshot_lf = (
     SnapshotEntry("README.md", "100644", b"candidate\n"),
     SnapshotEntry("worker/app/__init__.py", "100644", b""),
-    SnapshotEntry("worker/app/planner.py", "100644", b"def choose():\n    return 'rig_status'\n"),
+    SnapshotEntry(
+        "worker/app/planner.py",
+        "100644",
+        b"def choose():\n    return 'rig_status'\n",
+    ),
     SnapshotEntry("worker/app/nested/tool.py", "100755", b"VALUE = 1\n"),
     SnapshotEntry("worker/app/_build_stamp.py", "100644", b"CODE_SHA256 = 'x'\n"),
 )
 _snapshot_crlf = tuple(
     SnapshotEntry(entry.path, entry.mode, entry.content.replace(b"\n", b"\r\n"))
-    if entry.path.endswith(".py") else entry
+    if entry.path.endswith(".py")
+    else entry
     for entry in _snapshot_lf
 )
 _code = worker_code_sha256(_snapshot_lf)
-check(_code == worker_code_sha256(_snapshot_crlf),
-      "RSI bridge matches checkout-independent worker fingerprint semantics")
-check(candidate_tree_sha(_snapshot_lf) == "a08d9d197ceab8b88a70518521e1f57b8fd87318",
-      "candidate tree hashing matches a git write-tree reference vector")
-check(candidate_tree_sha(_snapshot_lf) != candidate_tree_sha(_snapshot_crlf),
-      "Git tree identity remains byte-exact while runtime identity normalizes EOL")
-expect_provenance_error(
+check(
+    _code == worker_code_sha256(_snapshot_crlf),
+    "RSI bridge matches checkout-independent worker fingerprint semantics",
+)
+check(
+    candidate_tree_sha(_snapshot_lf) == "a08d9d197ceab8b88a70518521e1f57b8fd87318",
+    "candidate tree hashing matches a git write-tree reference vector",
+)
+check(
+    candidate_tree_sha(_snapshot_lf) != candidate_tree_sha(_snapshot_crlf),
+    "Git tree identity remains byte-exact while runtime identity normalizes EOL",
+)
+expect_error(
+    CandidateProvenanceError,
     "symlink",
     lambda: worker_code_sha256(
-        _snapshot_lf + (SnapshotEntry("worker/app/link.py", "120000", b"planner.py"),)
+        _snapshot_lf
+        + (SnapshotEntry("worker/app/link.py", "120000", b"planner.py"),)
     ),
-    "worker Python symlinks fail closed instead of confusing Git blob bytes with resolved runtime bytes",
+    "worker Python symlinks fail closed",
 )
 
 _task_sha = "2" * 64
@@ -119,7 +144,10 @@ _materialized = MaterializedCandidateIdentity(
     commit_sha="4" * 40,
     tree_sha=candidate_tree_sha(_snapshot_lf),
 )
-_candidate_report = {"schema": AGENT3_EVAL_SCHEMA, "backend": {"code_sha256": _code}}
+_candidate_report = {
+    "schema": AGENT3_EVAL_SCHEMA,
+    "backend": {"code_sha256": _code},
+}
 _eval_sha = canonical_sha256(_candidate_report)
 _regression = CandidateRegressionProof(
     proposal_id="RSI_A3_001",
@@ -135,7 +163,12 @@ _regression = CandidateRegressionProof(
     candidate_code_sha256=_code,
     baseline_planner_model="incumbent",
     candidate_planner_model="candidate",
-    task_set={"schema": "kaliv-agent3-model-eval-task-set/v1", "name": "t", "version": "1", "task_count": 1},
+    task_set={
+        "schema": "kaliv-agent3-model-eval-task-set/v1",
+        "name": "t",
+        "version": "1",
+        "task_count": 1,
+    },
     repetitions=1,
     baseline_exact_match_rate=0.0,
     candidate_exact_match_rate=1.0,
@@ -163,17 +196,21 @@ check(
     and _provenance.accepted_regression is True
     and _provenance.authority == "evidence-only"
     and _provenance.merge_authority == "human",
-    "accepted RSI provenance binds commit/tree, worker fingerprint and exact eval without authority",
+    "accepted RSI provenance binds commit/tree, worker fingerprint and exact eval",
 )
 
 _tree_tampered = tuple(
     SnapshotEntry(entry.path, entry.mode, b"tampered\n")
-    if entry.path == "README.md" else entry
+    if entry.path == "README.md"
+    else entry
     for entry in _snapshot_lf
 )
-check(worker_code_sha256(_tree_tampered) == _code,
-      "non-worker edits do not falsely change worker runtime identity")
-expect_provenance_error(
+check(
+    worker_code_sha256(_tree_tampered) == _code,
+    "non-worker edits do not falsely change worker runtime identity",
+)
+expect_error(
+    CandidateProvenanceError,
     "does not reproduce the materialized Git tree",
     lambda: build_candidate_runtime_provenance(
         materialized=_materialized,
@@ -181,12 +218,16 @@ expect_provenance_error(
         candidate_report=_candidate_report,
         regression_proof=_regression,
     ),
-    "non-worker mutation is caught by exact materialized Git-tree binding",
+    "non-worker mutation is caught by exact Git-tree binding",
 )
-
 _worker_tampered = tuple(
-    SnapshotEntry(entry.path, entry.mode, b"def choose():\n    return 'model_list'\n")
-    if entry.path == "worker/app/planner.py" else entry
+    SnapshotEntry(
+        entry.path,
+        entry.mode,
+        b"def choose():\n    return 'model_list'\n",
+    )
+    if entry.path == "worker/app/planner.py"
+    else entry
     for entry in _snapshot_lf
 )
 _worker_identity = MaterializedCandidateIdentity(
@@ -195,7 +236,8 @@ _worker_identity = MaterializedCandidateIdentity(
     commit_sha="b" * 40,
     tree_sha=candidate_tree_sha(_worker_tampered),
 )
-expect_provenance_error(
+expect_error(
+    CandidateProvenanceError,
     "measured different worker code",
     lambda: build_candidate_runtime_provenance(
         materialized=_worker_identity,
@@ -205,9 +247,13 @@ expect_provenance_error(
     ),
     "changed worker tree cannot reuse an eval from the old worker code",
 )
-
-_wrong_eval = {"schema": AGENT3_EVAL_SCHEMA, "backend": {"code_sha256": _code}, "extra": True}
-expect_provenance_error(
+_wrong_eval = {
+    "schema": AGENT3_EVAL_SCHEMA,
+    "backend": {"code_sha256": _code},
+    "extra": True,
+}
+expect_error(
+    CandidateProvenanceError,
     "not the report accepted by regression proof",
     lambda: build_candidate_runtime_provenance(
         materialized=_materialized,
@@ -217,9 +263,9 @@ expect_provenance_error(
     ),
     "same fingerprint cannot substitute a different eval payload",
 )
-
 _rejected = replace(_regression, findings=("candidate regressed",), accepted=False)
-expect_provenance_error(
+expect_error(
+    CandidateProvenanceError,
     "regression proof is not accepted",
     lambda: build_candidate_runtime_provenance(
         materialized=_materialized,
@@ -227,16 +273,16 @@ expect_provenance_error(
         candidate_report=_candidate_report,
         regression_proof=_rejected,
     ),
-    "runtime provenance cannot turn a rejected candidate into an accepted one",
+    "runtime provenance cannot elevate a rejected candidate",
 )
-
 _wrong_task = MaterializedCandidateIdentity(
     materialization_receipt_sha256="c" * 64,
     task_sha256="d" * 64,
     commit_sha="e" * 40,
     tree_sha=candidate_tree_sha(_snapshot_lf),
 )
-expect_provenance_error(
+expect_error(
+    CandidateProvenanceError,
     "task does not match regression task",
     lambda: build_candidate_runtime_provenance(
         materialized=_wrong_task,
@@ -244,13 +290,204 @@ expect_provenance_error(
         candidate_report=_candidate_report,
         regression_proof=_regression,
     ),
-    "another DevelopmentTask's materialization cannot attach to this regression proof",
+    "another DevelopmentTask cannot attach to this regression proof",
 )
-expect_provenance_error(
+expect_error(
+    CandidateProvenanceError,
     "requires LocalCandidateMaterializationReceipt",
     lambda: MaterializedCandidateIdentity.from_receipt(object()),
-    "materialization adapter refuses arbitrary unverified objects",
+    "materialization adapter refuses arbitrary objects",
 )
 
-print(f"\n===== BUILD IDENTITY: {passed} passed, {failed} failed =====")
+
+# Read-only collector core. Production wiring uses the staged TrustedGitRunner;
+# this fake isolates parsing, object binding and budgets from runtime staging.
+_COLLECT_SNAPSHOT = (
+    SnapshotEntry("README.md", "100644", b"candidate\n"),
+    SnapshotEntry("worker/app/__init__.py", "100644", b""),
+    SnapshotEntry(
+        "worker/app/planner.py",
+        "100644",
+        b"def choose():\n    return 'rig_status'\n",
+    ),
+)
+_COLLECT_COMMIT = "4" * 40
+_COLLECT_TREE = candidate_tree_sha(_COLLECT_SNAPSHOT)
+_COLLECT_IDENTITY = MaterializedCandidateIdentity(
+    materialization_receipt_sha256="3" * 64,
+    task_sha256="2" * 64,
+    commit_sha=_COLLECT_COMMIT,
+    tree_sha=_COLLECT_TREE,
+)
+
+
+class _FakeReader:
+    def __init__(
+        self,
+        entries=_COLLECT_SNAPSHOT,
+        *,
+        tree=_COLLECT_TREE,
+        listing_override=None,
+        size_override=None,
+        payload_override=None,
+    ):
+        self.entries = entries
+        self.tree = tree
+        self.listing_override = listing_override
+        self.size_override = size_override or {}
+        self.payload_override = payload_override or {}
+        self.blob_reads = 0
+        self.by_oid = {_blob_oid(entry.content): entry for entry in entries}
+
+    def listing(self):
+        if self.listing_override is not None:
+            return self.listing_override
+        rows = []
+        for entry in self.entries:
+            oid = _blob_oid(entry.content)
+            rows.append(
+                entry.mode.encode("ascii")
+                + b" blob "
+                + oid.encode("ascii")
+                + b"\t"
+                + entry.path.encode("utf-8")
+                + b"\0"
+            )
+        return b"".join(rows)
+
+    def run(self, args, *, cwd, maximum, **kwargs):
+        del cwd, maximum, kwargs
+        command = args[2:]
+        if command == ("rev-parse", f"{_COLLECT_COMMIT}^{{commit}}"):
+            return (_COLLECT_COMMIT + "\n").encode("ascii")
+        if command == ("rev-parse", f"{_COLLECT_COMMIT}^{{tree}}"):
+            return (self.tree + "\n").encode("ascii")
+        if command == ("ls-tree", "-r", "-z", "--full-tree", _COLLECT_COMMIT):
+            return self.listing()
+        if len(command) == 3 and command[:2] == ("cat-file", "-s"):
+            oid = command[2]
+            size = self.size_override.get(oid, len(self.by_oid[oid].content))
+            return (str(size) + "\n").encode("ascii")
+        if len(command) == 3 and command[:2] == ("cat-file", "blob"):
+            self.blob_reads += 1
+            oid = command[2]
+            return self.payload_override.get(oid, self.by_oid[oid].content)
+        raise AssertionError(f"unexpected fake Git command: {command!r}")
+
+
+def _collect(reader, *, budget=SnapshotBudget()):
+    return _collect_with_reader(
+        reader=reader,
+        repository=Path("candidate.git"),
+        operation_root=Path("collector"),
+        identity=_COLLECT_IDENTITY,
+        git_runtime_manifest_sha256="a" * 64,
+        git_executable_sha256="b" * 64,
+        budget=budget,
+    )
+
+
+_reader = _FakeReader()
+_collected = _collect(_reader)
+check(_collected.entries == _COLLECT_SNAPSHOT, "collector returns exact candidate bytes")
+check(
+    _collected.receipt.candidate_commit_sha == _COLLECT_COMMIT
+    and _collected.receipt.candidate_tree_sha == _COLLECT_TREE
+    and _collected.receipt.file_count == len(_COLLECT_SNAPSHOT)
+    and _collected.receipt.total_bytes
+    == sum(len(entry.content) for entry in _COLLECT_SNAPSHOT),
+    "collector receipt binds commit/tree plus exact count and bytes",
+)
+check(
+    _collected.receipt.network_performed is False
+    and _collected.receipt.repository_mutated is False
+    and _collected.receipt.authority == "evidence-only"
+    and _collected.receipt.merge_authority == "human",
+    "collector receipt is offline, read-only and non-authorizing",
+)
+_collected.verify()
+check(_reader.blob_reads == len(_COLLECT_SNAPSHOT), "collector reads each sized blob once")
+
+_gitlink = (
+    b"160000 commit "
+    + ("c" * 40).encode("ascii")
+    + b"\tvendor/submodule\0"
+)
+expect_error(
+    CandidateSnapshotError,
+    "unsupported object type or mode",
+    lambda: _collect(_FakeReader(listing_override=_gitlink)),
+    "gitlinks/submodules fail closed",
+)
+expect_error(
+    CandidateSnapshotError,
+    "file-count budget",
+    lambda: _collect(
+        _FakeReader(),
+        budget=SnapshotBudget(max_files=2, max_file_bytes=1024, max_total_bytes=4096),
+    ),
+    "file-count budget rejects oversized trees",
+)
+_large_oid = _blob_oid(_COLLECT_SNAPSHOT[0].content)
+_large_reader = _FakeReader(size_override={_large_oid: 100})
+expect_error(
+    CandidateSnapshotError,
+    "per-file budget",
+    lambda: _collect(
+        _large_reader,
+        budget=SnapshotBudget(max_files=10, max_file_bytes=32, max_total_bytes=256),
+    ),
+    "per-file budget rejects before payload reads",
+)
+check(_large_reader.blob_reads == 0, "per-file rejection performs no payload reads")
+_total_reader = _FakeReader(
+    size_override={_blob_oid(entry.content): 20 for entry in _COLLECT_SNAPSHOT}
+)
+expect_error(
+    CandidateSnapshotError,
+    "total byte budget",
+    lambda: _collect(
+        _total_reader,
+        budget=SnapshotBudget(max_files=10, max_file_bytes=32, max_total_bytes=40),
+    ),
+    "aggregate byte budget rejects before payload reads",
+)
+check(_total_reader.blob_reads == 0, "aggregate rejection performs no payload reads")
+_target_oid = _blob_oid(_COLLECT_SNAPSHOT[0].content)
+_count_tamper = _FakeReader(payload_override={_target_oid: b"tampered!!\n"})
+expect_error(
+    CandidateSnapshotError,
+    "byte count changed",
+    lambda: _collect(_count_tamper),
+    "mid-collection blob length mutation fails closed",
+)
+_same_size_tamper = b"candidate?"
+check(
+    len(_same_size_tamper) == len(_COLLECT_SNAPSHOT[0].content),
+    "same-size tamper fixture is stable",
+)
+_hash_tamper = _FakeReader(payload_override={_target_oid: _same_size_tamper})
+expect_error(
+    CandidateSnapshotError,
+    "do not match Git object identity",
+    lambda: _collect(_hash_tamper),
+    "same-size mutation is caught by Git blob identity",
+)
+expect_error(
+    CandidateSnapshotError,
+    "commit/tree identity changed",
+    lambda: _collect(_FakeReader(tree="d" * 40)),
+    "candidate root tree cannot move before collection",
+)
+_truncated = (
+    b"100644 blob " + ("e" * 40).encode("ascii") + b"\tREADME.md"
+)
+expect_error(
+    CandidateSnapshotError,
+    "not NUL terminated",
+    lambda: _collect(_FakeReader(listing_override=_truncated)),
+    "truncated ls-tree output fails closed",
+)
+
+print(f"\n===== BUILD IDENTITY + RSI PROVENANCE: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
