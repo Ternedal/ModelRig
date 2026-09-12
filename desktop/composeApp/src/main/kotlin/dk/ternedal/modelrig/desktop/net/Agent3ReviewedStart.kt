@@ -17,7 +17,23 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     expectedReviewReads: Boolean,
     expectedCapabilityReceipt: Agent3CapabilityReceipt? = null,
 ): Agent3RunEnvelope {
-    val transport = startReviewedPlanTransport(planId)
+    val transport = try {
+        startReviewedPlanTransport(
+            planId = planId,
+            expectedCapabilityReceiptPresent = expectedCapabilityReceipt != null,
+        )
+    } catch (failure: Agent3Exception) {
+        val message = failure.message.orEmpty()
+        if (
+            message.contains("reviewed Start capability evidence: receipt is missing") ||
+            message.contains("server returned unexpected capability evidence")
+        ) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 Start envelope: capability receipt does not match reviewed Preview"
+            )
+        }
+        throw failure
+    }
     val envelope = transport.envelope
     if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
         throw Agent3Exception(
