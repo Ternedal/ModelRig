@@ -139,10 +139,6 @@ check(
     f"historical brand.bronze paa light canvas demonstrerer defekten ({historical:.2f}:1)",
 )
 
-# L2a: default CHAT shell gets exact-arity overloads. App currently supplies
-# exactly these argument counts, while the handoff implementations have one
-# extra defaulted argument. Kotlin therefore selects this bounded migration;
-# desktop compilation is the executable authority for overload resolution.
 check(SHELL.exists(), "L2a shell source findes")
 shell = SHELL.read_text(encoding="utf-8") if SHELL.exists() else ""
 for signature in (
@@ -182,7 +178,7 @@ check(not shell_light_boundary(sabotaged), "unconditional dark titlebar sabotage
 
 
 # L2b: source assertions operate on comments-stripped Kotlin so a commented-out
-# binding cannot satisfy the gate. This also pays the repo's raw-source-check ratchet.
+# binding cannot satisfy the gate. Boundaries therefore use Kotlin symbols only.
 screens = code_of(SCREENS)
 
 
@@ -193,7 +189,7 @@ def _block(start: str, end: str | None = None) -> str:
 
 
 icon = _block("fun KalivIconRail(", "@Composable\nprivate fun IconRailItem")
-icon_item = _block("private fun IconRailItem(", "/**\n * The 246dp left navigation rail")
+icon_item = _block("private fun IconRailItem(", "@Composable\nfun KalivNavRail(")
 agent = _block("fun KalivAgentCockpit(", "@Composable\nprivate fun AgentIdlePrompt")
 agent_idle = _block("private fun AgentIdlePrompt()", "@Composable\nprivate fun AgentBubble")
 agent_bubble = _block("private fun AgentBubble(", "@Composable\ninternal fun AgentComposer")
@@ -262,7 +258,6 @@ check(
     "L2b Computer resultatbar bruger Success/Danger roller",
 )
 
-# Measure the two small-text decisions that motivated the source bindings.
 text_on_elevated = contrast(light_text, elevated)
 warn_on_elevated = contrast(light_warn, elevated)
 check(
