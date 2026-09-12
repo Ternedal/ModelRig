@@ -171,6 +171,9 @@ fun App() {
         var showSettings by remember { mutableStateOf(true) }
         var toolsMode by remember { mutableStateOf(db.getSetting("toolsMode") == "true") }
         var pendingCard by remember { mutableStateOf<ToolTurn?>(null) }
+        // In-memory only: a confirmation continues under the exact endpoint/auth
+        // snapshot that minted it. This is never persisted or rendered.
+        var pendingCardTurnConfig by remember { mutableStateOf<KalivChatTurnConfig?>(null) }
         var pendingCardError by remember { mutableStateOf<String?>(null) }
         var showAudit by remember { mutableStateOf(false) }
         var showControlCenter by remember { mutableStateOf(false) }
@@ -267,6 +270,23 @@ fun App() {
         fun send() {
             val text = input.trim()
             if (text.isEmpty() || busy || pendingCard != null) return
+            // Capture every execution-authority input before the turn can
+            // suspend. Settings remain editable, but changes belong to the next turn.
+            val turnConfig = KalivChatTurnConfig(
+                localUrl = localUrl,
+                localPath = localPath,
+                localModel = localModel,
+                deviceToken = deviceToken,
+                cloudKey = cloudKey,
+                cloudModel = cloudModel,
+                localSystem = localSystem,
+                cloudSystem = cloudSystem,
+                preferLocal = preferLocal,
+                autoCloudFallback = autoCloudFallback,
+                toolsMode = toolsMode,
+                ragMode = ragMode,
+                ragSourceFilter = ragSourceFilter,
+            )
             // A new user turn owns the visible conversation context. Invalidate
             // any startup/open DB read that began before this action.
             conversationPublicationEpoch.advance()
@@ -278,25 +298,25 @@ fun App() {
             messages.add(UiMessage("user", text))
             input = ""
             busy = true
-            if (toolsMode) {
+            if (turnConfig.toolsMode) {
                 // V5 on the desktop: non-streaming by necessity (the worker
                 // must see the whole response to detect a tool call), the
                 // confirmation card enforced by the WORKER -- this client can
                 // only render it, never bypass it.
-                val sysT = localSystem.trim().takeIf { it.isNotEmpty() }
+                val sysT = turnConfig.localSystem.trim().takeIf { it.isNotEmpty() }
                 val assistantIdxT = messages.size
                 messages.add(UiMessage("assistant", "", null, streaming = true, status = KalivStatus.TOOLS))
                 scope.launch {
                     val cid = withContext(Dispatchers.IO) {
-                        val id = convId ?: db.newConversation(source = "tools", model = localModel, title = text)
+                        val id = convId ?: db.newConversation(source = "tools", model = turnConfig.localModel, title = text)
                         db.addMessage(id, "user", text)
                         id
                     }
                     if (convId == null) convId = cid
                     val res = withContext(Dispatchers.IO) {
                         runCatching {
-                            ToolsClient(localUrl, deviceToken.ifBlank { null })
-                                .toolsChatStream(text, localModel, priorPairs, sysT) { name ->
+                            ToolsClient(turnConfig.localUrl, turnConfig.deviceToken.ifBlank { null })
+                                .toolsChatStream(text, turnConfig.localModel, priorPairs, sysT) { name ->
                                     // Riggens egen fase undervejs. En vaerktoejstur
                                     // var foer en lukket doer: een statisk tekst og
                                     // ingen tegn paa liv foer svaret landede.
@@ -319,6 +339,7 @@ fun App() {
                                     streaming = false,
                                 )
                                 pendingCardError = null
+                                pendingCardTurnConfig = turnConfig
                                 pendingCard = turn
                             }
                             else -> {
@@ -343,18 +364,19 @@ fun App() {
             val history = messages
                 .filter { it.role == "user" || it.role == "assistant" }
                 .map { ChatMessage(it.role, it.text) }
-            val useRag = ragMode
-            val srcFilter = ragSourceFilter
+            val useRag = turnConfig.ragMode
+            val srcFilter = turnConfig.ragSourceFilter
             val assistantIdx = messages.size
             messages.add(UiMessage("assistant", "", null, streaming = true, status = if (useRag) KalivStatus.RAG else KalivStatus.THINKING))
             scope.launch {
                 // Normal Chat starts unresolved; its source/model is finalized
                 // only after ChatRouter identifies the source that actually answered.
-                // RAG keeps its existing explicit metadata in this narrow slice.
+                // RAG executes through the local worker, so its metadata is the
+                // captured local model regardless of normal-chat route preference.
                 val cid = withContext(Dispatchers.IO) {
                     val id = convId ?: db.newConversation(
                         source = if (useRag) "rag" else PendingChatConversationProvenance.source,
-                        model = if (useRag) (if (preferLocal) localModel else cloudModel) else PendingChatConversationProvenance.model,
+                        model = if (useRag) turnConfig.ragConversationModel() else PendingChatConversationProvenance.model,
                         title = text,
                     )
                     db.addMessage(id, "user", text)
@@ -385,8 +407,8 @@ fun App() {
                                     }
                                 }
                             }
-                            RagClient(localUrl, deviceToken.ifBlank { null })
-                                .chatStream(text, localModel, srcFilter, onSources = onSources,
+                            RagClient(turnConfig.localUrl, turnConfig.deviceToken.ifBlank { null })
+                                .chatStream(text, turnConfig.localModel, srcFilter, onSources = onSources,
                                     onPhase = onPhase) { delta ->
                                     scope.launch {
                                         lastSource = ChatResult.Source.LOCAL
@@ -395,19 +417,23 @@ fun App() {
                                     }
                                 }
                         } else {
-                            val local = OllamaClient(baseUrl = localUrl, chatPath = localPath, bearer = deviceToken.ifBlank { null })
-                            val cloud = if (cloudKey.isNotBlank())
-                                OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey, think = false)
+                            val local = OllamaClient(
+                                baseUrl = turnConfig.localUrl,
+                                chatPath = turnConfig.localPath,
+                                bearer = turnConfig.deviceToken.ifBlank { null },
+                            )
+                            val cloud = if (turnConfig.cloudKey.isNotBlank())
+                                OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = turnConfig.cloudKey, think = false)
                             else null
                             answeredSource = ChatRouter(
                                 local = local,
-                                localModel = localModel,
+                                localModel = turnConfig.localModel,
                                 cloud = cloud,
-                                cloudModel = cloudModel,
-                                preferLocal = preferLocal,
-                                autoFallback = autoCloudFallback,
-                                localSystem = localSystem,
-                                cloudSystem = cloudSystem,
+                                cloudModel = turnConfig.cloudModel,
+                                preferLocal = turnConfig.preferLocal,
+                                autoFallback = turnConfig.autoCloudFallback,
+                                localSystem = turnConfig.localSystem,
+                                cloudSystem = turnConfig.cloudSystem,
                             ).chatStream(history) { src, delta ->
                                 answeredSource = src
                                 scope.launch {
@@ -430,7 +456,7 @@ fun App() {
                     withContext(Dispatchers.IO) {
                         db.addMessage(cid, "assistant", finalText)
                         answeredSource?.let { source ->
-                            val provenance = completedChatConversationProvenance(source, localModel, cloudModel)
+                            val provenance = turnConfig.completedProvenance(source)
                             // Provenance failure must not relabel an already-produced answer as interrupted.
                             // Leaving pending/previous provenance is safer than persisting a guessed route.
                             runCatching {
@@ -847,13 +873,20 @@ fun App() {
             fun decide(approve: Boolean) {
                 if (busy) return
                 val id = card.confirmation_id
+                val confirmationConfig = pendingCardTurnConfig
+                if (confirmationConfig == null) {
+                    pendingCardError = "Bekræftelsen mangler sin oprindelige forbindelseskontekst. Start opgaven igen."
+                    return
+                }
                 pendingCardError = null
                 busy = true
                 scope.launch {
                     val res = withContext(Dispatchers.IO) {
                         runCatching {
-                            ToolsClient(localUrl, deviceToken.ifBlank { null })
-                                .toolsConfirm(id, approve)
+                            ToolsClient(
+                                confirmationConfig.localUrl,
+                                confirmationConfig.deviceToken.ifBlank { null },
+                            ).toolsConfirm(id, approve)
                         }
                     }
                     res.onSuccess { next ->
@@ -865,6 +898,7 @@ fun App() {
                         } else {
                             // Only a successful worker acknowledgement may clear the card.
                             pendingCard = null
+                            pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
                             messages.add(UiMessage("assistant", text))
