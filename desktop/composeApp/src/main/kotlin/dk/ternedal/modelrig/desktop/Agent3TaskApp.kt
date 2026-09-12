@@ -583,13 +583,20 @@ private fun DesktopStepCard(index: Int, step: Agent3ReadonlyTaskStep) {
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            step.state?.let {
-                Text(it, color = desktopRunColor(it), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            step.state?.let { rawState ->
+                presentTaskStepState(rawState)?.let { label ->
+                    Text(
+                        label,
+                        color = desktopRunColor(rawState),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
         Text("tool: ${step.tool}", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         Text(
-            "risk=${step.risk} · egress=${step.egress} · idempotent=${step.idempotent}",
+            presentTaskStepReadOnlyMetadata(step.risk, step.egress, step.idempotent),
             color = KalivTheme.colors.TextMuted,
             fontSize = 10.sp,
         )
