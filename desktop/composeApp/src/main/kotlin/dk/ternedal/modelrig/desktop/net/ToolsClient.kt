@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.desktop.net
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -74,8 +75,13 @@ data class AuditEntry(
     val risk: String = "",
     val outcome: String = "",
     val origin: String = "local",
-    val result_summary: String = "",
-)
+    @SerialName("result_summary")
+    val rawResultSummary: String = "",
+) {
+    /** Operator-facing copy. Raw server evidence stays available above. */
+    val result_summary: String
+        get() = desktopAuditOperatorSummary(tool, rawResultSummary)
+}
 
 @Serializable
 private data class AuditResponse(val entries: List<AuditEntry> = emptyList())
