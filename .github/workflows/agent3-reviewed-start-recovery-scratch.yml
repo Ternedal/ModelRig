@@ -21,15 +21,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Apply reviewed Start client core patch
-        run: python .github/scripts/agent3_reviewed_start_client_core_patch.py
-      - name: Commit client core patch
+      - name: Apply reviewed Start UI recovery patch
+        run: python .github/scripts/agent3_reviewed_start_ui_patch.py
+      - name: Commit UI recovery patch
         run: |
           git config user.name "Agent3 recovery patch"
           git config user.email "actions@users.noreply.github.com"
-          git add android/app/src/main android/app/src/test desktop/composeApp/src/main desktop/composeApp/src/test
+          git add android/app/src/main/java/dk/ternedal/modelrig/ui/Agent3ReviewScreen.kt desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3ReviewDevApp.kt
           git diff --cached --quiet && exit 0
-          git commit -m "fix(agent3): retain reviewed Start recovery authority (#1309)"
+          git commit -m "fix(agent3): recover reviewed Start across client restart (#1309)"
           git push origin HEAD:fix/agent3-reviewed-start-durable-recovery-1309
       - name: Install worker dependencies
         run: python -m pip install -r worker/requirements.txt
@@ -46,12 +46,12 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
-      - name: Run focused Android reviewed Start tests
+      - name: Compile Android and run reviewed Start tests
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
           ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --tests 'dk.ternedal.modelrig.net.Agent3ReviewedStartDurableRecoveryTest' --tests 'dk.ternedal.modelrig.data.Agent3ReviewedStartRecoveryStoreTest' --no-daemon --console=plain
-      - name: Run focused desktop reviewed Start tests
+      - name: Compile desktop and run reviewed Start tests
         working-directory: desktop
         run: ./gradlew :composeApp:test --tests 'dk.ternedal.modelrig.desktop.net.Agent3ReviewedStartDurableRecoveryTest' --tests 'dk.ternedal.modelrig.desktop.data.Agent3ReviewedStartRecoveryStoreTest' --no-daemon --console=plain
       - name: Syntax and diff gate
