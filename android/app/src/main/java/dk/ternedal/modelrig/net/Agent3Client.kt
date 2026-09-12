@@ -148,6 +148,11 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val responseReviewReads: Boolean,
     )
 
+    internal data class RunCapabilityEvidence(
+        val runId: String,
+        val receipt: CapabilityReceipt,
+    )
+
     data class Event(
         val timestamp: Double,
         val kind: String,
@@ -261,6 +266,76 @@ class Agent3Client(baseUrl: String, private val token: String) {
         return bindRunEnvelopeReview(
             parseRunEnvelope(root, expectedRunId = runId),
             expectedReviewReads,
+        )
+    }
+
+    internal fun getRunCapabilityEvidence(runId: String): RunCapabilityEvidence {
+        val root = get("/api/v1/experimental/agent3/runs/${seg(runId)}/capability-receipt")
+        val returnedRunId = root.opt("run_id")
+        if (returnedRunId !is String || returnedRunId.isBlank() || returnedRunId != runId) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 capability-evidence: serveren returnerede et andet run-id",
+            )
+        }
+        val evaluated = root.opt("evaluated")
+        val executed = root.opt("executed")
+        if (evaluated !is Boolean || !evaluated || executed !is Boolean || executed) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 capability-evidence: evaluated/executed-binding er ugyldig",
+            )
+        }
+
+        val rawReceipt = root.opt("receipt") as? JSONObject
+            ?: throw ModelRigException("Ugyldigt Agent 3.0 capability-evidence: receipt mangler")
+        for (field in listOf("schema", "graph_sha256", "plan_sha256", "route")) {
+            if (rawReceipt.opt(field) !is String) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 capability-evidence: receipt.$field har forkert type",
+                )
+            }
+        }
+        if (
+            rawReceipt.opt("allowed") !is Boolean ||
+            rawReceipt.opt("production_activation") !is Boolean
+        ) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 capability-evidence: receipt boolean-binding er ugyldig",
+            )
+        }
+        val requiredIds = rawReceipt.opt("required_capability_ids") as? JSONArray
+            ?: throw ModelRigException(
+                "Ugyldigt Agent 3.0 capability-evidence: required_capability_ids mangler",
+            )
+        for (index in 0 until requiredIds.length()) {
+            if (requiredIds.opt(index) !is String) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 capability-evidence: required_capability_ids har forkert type",
+                )
+            }
+        }
+        val blockers = rawReceipt.opt("blockers") as? JSONArray
+            ?: throw ModelRigException("Ugyldigt Agent 3.0 capability-evidence: blockers mangler")
+        for (index in 0 until blockers.length()) {
+            val blocker = blockers.opt(index) as? JSONObject
+                ?: throw ModelRigException(
+                    "Ugyldigt Agent 3.0 capability-evidence: blocker har forkert type",
+                )
+            if (
+                blocker.opt("capability_id") !is String ||
+                blocker.opt("state") !is String ||
+                blocker.opt("reason") !is String
+            ) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 capability-evidence: blocker er ufuldstændig",
+                )
+            }
+        }
+
+        val receipt = parseCapabilityReceipt(rawReceipt)
+            ?: throw ModelRigException("Ugyldigt Agent 3.0 capability-evidence: receipt mangler")
+        return RunCapabilityEvidence(
+            runId = returnedRunId,
+            receipt = receipt,
         )
     }
 

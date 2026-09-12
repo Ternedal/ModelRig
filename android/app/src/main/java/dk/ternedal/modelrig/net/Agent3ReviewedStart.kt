@@ -10,7 +10,7 @@ package dk.ternedal.modelrig.net
  * the rejected Start payload never becomes UI authority. Fresh server truth must
  * then independently prove the exact run id, reviewed mode and checkpoint. The
  * already-proven Start capability receipt remains immutable review evidence across
- * that recovery because generic run GET does not own or return Plan-Start evidence.
+ * that recovery only after current stored run evidence re-proves the same plan identity.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -79,6 +79,20 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             )
         }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
+
+        if (expectedCapabilityReceipt != null) {
+            val current = getRunCapabilityEvidence(recoveryRunId).receipt
+            if (
+                current.planSha256 != expectedCapabilityReceipt.planSha256 ||
+                current.route != expectedCapabilityReceipt.route ||
+                current.requiredCapabilityIds != expectedCapabilityReceipt.requiredCapabilityIds
+            ) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 capability-evidence: frisk run-plan matcher ikke previewet",
+                )
+            }
+        }
+
         fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "det reviewede Start-svar blev afvist"
