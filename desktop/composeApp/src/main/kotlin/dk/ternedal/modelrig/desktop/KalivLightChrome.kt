@@ -24,6 +24,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -85,21 +88,6 @@ fun KalivTitleBar(
     }
 }
 
-private data class LightShellNavItem(
-    val screen: KalivScreen,
-    val label: String,
-    val glyph: String,
-)
-
-private val lightShellNavItems = listOf(
-    LightShellNavItem(KalivScreen.CHAT, "Chat", "\u25AC"),
-    LightShellNavItem(KalivScreen.AGENT, "Agent", "\u25C8"),
-    LightShellNavItem(KalivScreen.COMPUTER, "Computer-use", "\u25A6"),
-    LightShellNavItem(KalivScreen.MODELS, "Modeller", "\u25F0"),
-    LightShellNavItem(KalivScreen.DOCS, "Dokumenter", "\u25A4"),
-    LightShellNavItem(KalivScreen.SETTINGS, "Indstillinger", "\u2699"),
-)
-
 @Composable
 fun KalivNavRail(
     active: KalivScreen,
@@ -119,11 +107,11 @@ fun KalivNavRail(
             .background(railBackground)
             .padding(horizontal = 14.dp, vertical = 16.dp),
     ) {
-        lightShellNavItems.forEach { item ->
+        kalivNavDestinations.forEach { destination ->
             LightShellNavRow(
-                item = item,
-                active = item.screen == active,
-                onClick = { onSelect(item.screen) },
+                destination = destination,
+                active = destination.isSelected(active),
+                onClick = { onSelect(destination.screen) },
             )
             Spacer(Modifier.height(4.dp))
         }
@@ -137,7 +125,7 @@ fun KalivNavRail(
 
 @Composable
 private fun LightShellNavRow(
-    item: LightShellNavItem,
+    destination: KalivNavDestination,
     active: Boolean,
     onClick: () -> Unit,
 ) {
@@ -146,7 +134,8 @@ private fun LightShellNavRow(
     val base = Modifier
         .fillMaxWidth()
         .clip(shape)
-        .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
+        .semantics { selected = active }
+        .clickable(onClickLabel = destination.label, role = Role.Tab, onClick = onClick)
     val decorated = if (active) {
         val start = if (c.isDark) Color(0x389A7136) else c.Signal.copy(alpha = 0.12f)
         val end = if (c.isDark) Color(0x0F9A7136) else c.Signal.copy(alpha = 0.04f)
@@ -164,14 +153,14 @@ private fun LightShellNavRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            item.glyph,
+            destination.wideGlyph,
             color = if (active) c.Highlight else c.TextMuted,
             fontSize = 15.sp,
-            modifier = Modifier.width(24.dp),
+            modifier = Modifier.width(24.dp).clearAndSetSemantics { },
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            item.label,
+            destination.label,
             color = if (active) c.TextHigh else inactiveInk,
             fontSize = 13.5.sp,
             fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,

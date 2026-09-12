@@ -434,7 +434,7 @@ fun App() {
         Row(Modifier.fillMaxWidth().weight(1f)) {
             if (activeScreen == KalivScreen.CHAT) {
             KalivNavRail(
-                active = activeScreen,
+                active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                 onSelect = { screen ->
                     activeScreen = screen
                     // MODELS/DOCS/SETTINGS reuse the existing panels rather than
@@ -461,7 +461,7 @@ fun App() {
             )
             } else {
                 KalivIconRail(
-                    active = activeScreen,
+                    active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                     onSelect = { screen ->
                         activeScreen = screen
                         when (screen) {
