@@ -26,9 +26,9 @@ data class KalivColors(
     val SurfaceHigh: Color,  // elevated (menus, chips, composer)
     val CodeSurface: Color,
     val Border: Color,       // 1dp borders on chips/bubbles/composer
-    val Signal: Color,       // brand.bronze — actions/links
-    val Amber: Color,        // brand.gold — accents
-    val Highlight: Color,    // brand.highlight
+    val Signal: Color,       // primary action/link color
+    val Amber: Color,        // secondary accent
+    val Highlight: Color,    // highlighted accent
     val TextHigh: Color,
     val TextMuted: Color,
     val Success: Color,
@@ -63,20 +63,25 @@ val KalivDark = KalivColors(
     isDark = true,
 )
 
+// #779 pkt. 5 / #1270: light mode maa ikke arve de deprecated, tema-uafhaengige
+// brand/semantic-farver. Light.accent er bevidst moerkere end brand.bronze og
+// holder almindelig action/link-tekst over AA paa baade canvas og surface.
+// Statusfarverne kommer tilsvarende fra light-paletten, som er designet og
+// kontrast-gatet mod de lyse flader.
 val KalivLight = KalivColors(
     Graphite = KalivTokens.Light.canvas,
     Surface = KalivTokens.Light.surface,
     SurfaceHigh = KalivTokens.Light.elevated,
     CodeSurface = Color(0xFFEDE7DA),
     Border = KalivTokens.Light.border,
-    Signal = KalivTokens.Brand.bronze,
-    Amber = KalivTokens.Brand.gold,
-    Highlight = KalivTokens.Brand.highlight,
+    Signal = KalivTokens.Light.accent,
+    Amber = KalivTokens.Light.accentSoft,
+    Highlight = KalivTokens.Light.accentSoft,
     TextHigh = KalivTokens.Light.text,
     TextMuted = KalivTokens.Light.muted,
-    Success = KalivTokens.Semantic.success,
-    Warning = KalivTokens.Semantic.warning,
-    Danger = KalivTokens.Semantic.danger,
+    Success = KalivTokens.Light.ok,
+    Warning = KalivTokens.Light.warn,
+    Danger = KalivTokens.Light.danger,
     isDark = false,
 )
 
@@ -99,11 +104,22 @@ fun KalivTheme(dark: Boolean, content: @Composable () -> Unit) {
         surfaceContainer = c.SurfaceHigh, surfaceContainerHigh = c.SurfaceHigh,
         surfaceContainerHighest = c.SurfaceHigh, surfaceContainerLow = c.Surface,
     ) else lightColorScheme(
+        // The old light branch used deprecated brand.bronze as primary. Ivory
+        // text on that background was only ~4.0:1; Light.accent brings the
+        // normal-text pair above AA while keeping Kaliv's warm hue.
         primary = c.Signal, onPrimary = Color(0xFFF7F4EF),
-        secondary = c.Amber, background = c.Graphite, onBackground = c.TextHigh,
-        surface = c.Surface, onSurface = c.TextHigh, error = c.Danger,
-        surfaceContainer = c.SurfaceHigh, surfaceContainerHigh = c.SurfaceHigh,
-        surfaceContainerHighest = c.SurfaceHigh, surfaceContainerLow = c.Surface,
+        secondary = c.Amber, onSecondary = Color(0xFFF7F4EF),
+        background = c.Graphite, onBackground = c.TextHigh,
+        surface = c.Surface, onSurface = c.TextHigh,
+        surfaceVariant = c.SurfaceHigh, onSurfaceVariant = c.TextMuted,
+        outline = c.Border, outlineVariant = c.Border,
+        error = c.Danger, onError = Color(0xFFF7F4EF),
+        // Bind fields/cards/menus to Kaliv's own light hierarchy instead of
+        // Material's default grey/lavender container ladder (#779 pkt. 5).
+        surfaceContainer = c.Surface,
+        surfaceContainerHigh = c.SurfaceHigh,
+        surfaceContainerHighest = c.SurfaceHigh,
+        surfaceContainerLow = c.Graphite,
     )
     CompositionLocalProvider(LocalKalivColors provides c) {
         MaterialTheme(colorScheme = scheme, content = content)
