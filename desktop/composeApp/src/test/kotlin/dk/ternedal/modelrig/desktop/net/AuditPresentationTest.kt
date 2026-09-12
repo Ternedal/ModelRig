@@ -80,7 +80,7 @@ class AuditPresentationTest {
     @Test
     fun wireFieldStillDecodesAsResultSummary() {
         val entry = Json { ignoreUnknownKeys = true }.decodeFromString<AuditEntry>(
-            """{"ts":"2026-09-12T10:00:00Z","tool":"rig_status","risk":"read","outcome":"executed","origin":"local","result_summary":"disk_free_gb=100.0\\nasr_available=False"}""",
+            """{"ts":"2026-09-12T10:00:00Z","tool":"rig_status","risk":"read","outcome":"executed","origin":"local","result_summary":"disk_free_gb=100.0\nasr_available=False"}""",
         )
 
         assertEquals("disk_free_gb=100.0\nasr_available=False", entry.rawResultSummary)
