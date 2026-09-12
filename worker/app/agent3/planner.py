@@ -424,7 +424,8 @@ def build_planner_router(
     def _reviewed_start_error(reason: str, message: str, status_code: int = 409) -> HTTPException:
         return HTTPException(
             status_code=status_code,
-            detail={"reason": reason, "message": message},
+            detail=message,
+            headers={"X-ModelRig-Agent3-Reason": reason},
         )
 
     @router.post("/plans/{plan_id}/start")
