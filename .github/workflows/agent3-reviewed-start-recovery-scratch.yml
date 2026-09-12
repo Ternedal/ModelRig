@@ -21,19 +21,19 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Apply compatible machine-readable reason patch
-        run: python .github/scripts/agent3_reviewed_start_error_compat_patch.py
-      - name: Commit compatibility patch
+      - name: Apply reviewed Start client core patch
+        run: python .github/scripts/agent3_reviewed_start_client_core_patch.py
+      - name: Commit client core patch
         run: |
           git config user.name "Agent3 recovery patch"
           git config user.email "actions@users.noreply.github.com"
-          git add worker/app/agent3/planner.py
+          git add android/app/src/main android/app/src/test desktop/composeApp/src/main desktop/composeApp/src/test
           git diff --cached --quiet && exit 0
-          git commit -m "fix(agent3): preserve reviewed Start error detail contract (#1309)"
+          git commit -m "fix(agent3): retain reviewed Start recovery authority (#1309)"
           git push origin HEAD:fix/agent3-reviewed-start-durable-recovery-1309
       - name: Install worker dependencies
         run: python -m pip install -r worker/requirements.txt
-      - name: Run focused reviewed Start recovery tests
+      - name: Run focused worker recovery tests
         env:
           PYTHONPATH: worker
         run: |
@@ -41,6 +41,19 @@ jobs:
           python tests/worker_agent3_plan_store.py
           python tests/worker_agent3_planner_review.py
           python tests/worker_agent3_planner_capability_binding.py
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+      - name: Run focused Android reviewed Start tests
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest --tests 'dk.ternedal.modelrig.net.Agent3ReviewedStartDurableRecoveryTest' --tests 'dk.ternedal.modelrig.data.Agent3ReviewedStartRecoveryStoreTest' --no-daemon --console=plain
+      - name: Run focused desktop reviewed Start tests
+        working-directory: desktop
+        run: ./gradlew :composeApp:test --tests 'dk.ternedal.modelrig.desktop.net.Agent3ReviewedStartDurableRecoveryTest' --tests 'dk.ternedal.modelrig.desktop.data.Agent3ReviewedStartRecoveryStoreTest' --no-daemon --console=plain
       - name: Syntax and diff gate
         run: |
           python -m py_compile worker/app/agent3/plan_store.py worker/app/agent3/core.py worker/app/agent3/review_orchestrator.py worker/app/agent3/planner.py tests/worker_agent3_reviewed_start_recovery.py
