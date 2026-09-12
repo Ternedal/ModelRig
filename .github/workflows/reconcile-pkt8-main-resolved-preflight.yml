@@ -21,7 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "93f735e93cb6714f4cb3df1eca8bc33adec24e2f"
+          git merge-base --is-ancestor 93f735e93cb6714f4cb3df1eca8bc33adec24e2f HEAD
+          test -z "$(git diff --name-only 93f735e93cb6714f4cb3df1eca8bc33adec24e2f..HEAD -- . ':(exclude).github/workflows/reconcile-pkt8-main-resolved-preflight.yml')"
           git fetch origin main
           test "$(git rev-parse origin/main)" = "f8ee567d5f7d11cee30d2780ea4a3705fa880667"
 
@@ -88,11 +89,9 @@ jobs:
                   out.extend(ours if side == 'ours' else theirs)
               p.write_text(''.join(out), encoding='utf-8', newline='')
 
-          # Preserve auto-merged surrounding work, choosing only the audited conflict hunk.
           resolve_markers('desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3TaskApp.kt', 'theirs')
           resolve_markers('desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/App.kt', 'ours')
 
-          # Current main's cockpit is a strict authority/recovery superset of the older pkt. 8 cockpit.
           take_main = [
               'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivAgentCockpitA3.kt',
               'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivAgent3CockpitInteractionPolicy.kt',
@@ -113,7 +112,6 @@ jobs:
           for path in take_main:
               subprocess.run(['git','checkout','--theirs','--',path], check=True)
 
-          # Pkt. 8 side is the strict superset for blank model-name presentation and invalid telemetry tests.
           take_candidate = [
               'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivSidebarStatusPolicy.kt',
               'desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/KalivSidebarStatusPolicyTest.kt',
@@ -122,13 +120,10 @@ jobs:
           for path in take_candidate:
               subprocess.run(['git','checkout','--ours','--',path], check=True)
 
-          # #1278's current-main adapter was only a bridge while main lacked the pkt. 8 overloads.
-          # The integrated candidate already contains the real KalivLightChrome overloads, so retaining
-          # this shim would duplicate KalivNavRail/KalivContextPanel and fail compilation.
           shim = Path('desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivPkt8IntegrationChrome.kt')
           if not shim.exists():
               raise SystemExit('expected current-main pkt8 integration shim is missing')
-          subprocess.run(['git','rm','--',str(shim)], check=True)
+          subprocess.run(['git','rm','-f','--',str(shim)], check=True)
 
           checks = {
               'desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/App.kt': [
@@ -174,7 +169,7 @@ jobs:
 
       - name: Remove temporary preflight workflow from candidate tree
         shell: bash
-        run: git rm .github/workflows/reconcile-pkt8-main-resolved-preflight.yml
+        run: git rm -f .github/workflows/reconcile-pkt8-main-resolved-preflight.yml
 
       - name: Set up Java 21
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
