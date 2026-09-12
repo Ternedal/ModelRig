@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-promotion-authorization-v1.schema.json",
+  "title": "ModelRig RSI promotion authorization v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "proposal_id",
+    "proposal_sha256",
+    "repository",
+    "base_sha",
+    "task",
+    "required_evals",
+    "authority"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-promotion-authorization/v1"},
+    "proposal_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "proposal_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repository": {"type": "string", "pattern": "^[^/\\\\s]+/[^/\\\\s]+$", "maxLength": 200},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "task": {"$ref": "https://modelrig.local/schemas/kaliv-development-task-v1.json"},
+    "required_evals": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+    },
+    "authority": {"const": "human-signed-promotion"}
+  }
+}
