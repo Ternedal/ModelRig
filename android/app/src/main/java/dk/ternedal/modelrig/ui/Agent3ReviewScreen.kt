@@ -26,9 +26,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.data.Agent3ReviewedStartRecoveryStore
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.logic.Agent3ReadReviewResumeAuthority
 import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
@@ -37,6 +39,8 @@ import dk.ternedal.modelrig.logic.Agent3ReviewPreviewPolicy
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.logic.isAgent3ReadReviewResumeConsumed
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.net.Agent3ReviewedStartRecoveryAuthority
+import dk.ternedal.modelrig.net.shouldRetainReviewedStartRecovery
 import dk.ternedal.modelrig.net.startReviewedPlanEnvelope
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +53,12 @@ import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 @Composable
 fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current.applicationContext
+    val recoveryStore = remember { Agent3ReviewedStartRecoveryStore(context) }
+    val initialRecoveryRaw = remember(store.baseUrl) { recoveryStore.read(store.baseUrl) }
+    val initialRecovery = remember(initialRecoveryRaw) {
+        Agent3ReviewedStartRecoveryAuthority.decode(initialRecoveryRaw)
+    }
     var message by remember { mutableStateOf("") }
     var reviewReads by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
@@ -65,6 +75,14 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var resultBody by remember { mutableStateOf<String?>(null) }
     var replanPreview by remember { mutableStateOf<dk.ternedal.modelrig.net.Agent3ReplanClient.Preview?>(null) }
+    var pendingStartRecovery by remember(initialRecoveryRaw) { mutableStateOf(initialRecovery) }
+
+    LaunchedEffect(initialRecoveryRaw, store.baseUrl) {
+        if (initialRecoveryRaw != null && initialRecovery == null) {
+            recoveryStore.write(store.baseUrl, null)
+            error = "En ugyldig lokal Start-recovery blev ryddet; lav et nyt preview."
+        }
+    }
 
     fun currentConnection(): Agent3ReviewConnectionBinding {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
@@ -88,6 +106,10 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     }
 
     fun createPreview() {
+        if (pendingStartRecovery != null) {
+            error = "Et tidligere Start har uklart udfald. Gendan samme Start før et nyt preview."
+            return
+        }
         val requestIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads) ?: return
         val currentRun = run
         val termination = currentRun?.termination
@@ -154,6 +176,78 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         }
     }
 
+    fun publishReviewedStart(
+        envelope: Agent3Client.RunEnvelope,
+        connection: Agent3ReviewConnectionBinding,
+        authority: Agent3ReviewedStartRecoveryAuthority,
+    ) {
+        run = envelope.run
+        runConnection = connection
+        runReviewReads = authority.expectedReviewReads
+        review = envelope.readReview
+        consumedResumeAuthority = null
+        if (recoveryStore.write(connection.baseUrl, null)) {
+            pendingStartRecovery = null
+        } else {
+            pendingStartRecovery = authority
+            error = "Run blev valideret, men den lokale Start-recovery kunne ikke ryddes. Samme plan kan sikkert gendannes igen."
+        }
+    }
+
+    fun publishReviewedStartFailure(
+        failure: Throwable,
+        connection: Agent3ReviewConnectionBinding,
+        authority: Agent3ReviewedStartRecoveryAuthority,
+    ) {
+        val detail = failure.message ?: "Planen kunne ikke startes"
+        if (!shouldRetainReviewedStartRecovery(failure)) {
+            val cleared = recoveryStore.write(connection.baseUrl, null)
+            if (cleared) pendingStartRecovery = null
+            error = if (cleared) {
+                "$detail. Serveren afviste Start definitivt; lav et nyt preview."
+            } else {
+                "$detail. Serveren afviste Start definitivt, men lokal recovery kunne ikke ryddes."
+            }
+            return
+        }
+        pendingStartRecovery = authority
+        error = "$detail. Start-resultatet er uklart; brug Gendan samme Start i stedet for at lave et nyt preview."
+    }
+
+    fun recoverPendingStart() {
+        if (busy || run != null) return
+        val connection = runCatching { currentConnection() }
+            .getOrElse {
+                error = it.message ?: "Forbindelsen er ugyldig"
+                return
+            }
+        val raw = recoveryStore.read(connection.baseUrl)
+        val authority = Agent3ReviewedStartRecoveryAuthority.decode(raw)
+        if (authority == null) {
+            if (raw != null) recoveryStore.write(connection.baseUrl, null)
+            pendingStartRecovery = null
+            error = "Der er ingen gyldig Start-recovery for denne rig."
+            return
+        }
+        pendingStartRecovery = authority
+        busy = true
+        error = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    client(connection).startReviewedPlanEnvelope(
+                        planId = authority.planId,
+                        expectedReviewReads = authority.expectedReviewReads,
+                        expectedCapabilityReceipt = authority.expectedCapabilityReceipt,
+                    )
+                }
+            }
+            busy = false
+            result.onSuccess { publishReviewedStart(it, connection, authority) }
+                .onFailure { publishReviewedStartFailure(it, connection, authority) }
+        }
+    }
+
     fun startPreview() {
         val currentPreview = preview ?: return
         val boundConnection = previewConnection
@@ -178,10 +272,22 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 previewReviewReads = currentPreview.reviewReads,
             )
         ) return
+        if (pendingStartRecovery != null) return
         val planId = currentPreview.planId ?: return
         val connection = boundConnection ?: return
-        val expectedReviewReads = currentPreview.reviewReads
-        val expectedCapabilityReceipt = currentPreview.capabilityReceipt
+        val authority = Agent3ReviewedStartRecoveryAuthority.capture(
+            planId = planId,
+            expectedReviewReads = currentPreview.reviewReads,
+            expectedCapabilityReceipt = currentPreview.capabilityReceipt,
+        ) ?: run {
+            error = "Det reviewede preview kunne ikke bindes til en sikker Start-recovery."
+            return
+        }
+        if (!recoveryStore.write(connection.baseUrl, authority.encode())) {
+            error = "Start blev ikke sendt, fordi recovery-authority ikke kunne gemmes sikkert lokalt."
+            return
+        }
+        pendingStartRecovery = authority
         busy = true
         error = null
         clearPreviewAuthority()
@@ -189,23 +295,15 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     client(connection).startReviewedPlanEnvelope(
-                        planId = planId,
-                        expectedReviewReads = expectedReviewReads,
-                        expectedCapabilityReceipt = expectedCapabilityReceipt,
+                        planId = authority.planId,
+                        expectedReviewReads = authority.expectedReviewReads,
+                        expectedCapabilityReceipt = authority.expectedCapabilityReceipt,
                     )
                 }
             }
             busy = false
-            result.onSuccess {
-                run = it.run
-                runConnection = connection
-                runReviewReads = expectedReviewReads
-                review = it.readReview
-                consumedResumeAuthority = null
-            }.onFailure {
-                val detail = it.message ?: "Planen kunne ikke startes"
-                error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
-            }
+            result.onSuccess { publishReviewedStart(it, connection, authority) }
+                .onFailure { publishReviewedStartFailure(it, connection, authority) }
         }
     }
 
@@ -301,7 +399,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     activeToolState = termination?.activeTool?.state,
                     activeToolRequestState = termination?.activeTool?.requestState,
                 )
-                Button(enabled = canCreatePreview, onClick = { createPreview() }) {
+                Button(enabled = canCreatePreview && pendingStartRecovery == null, onClick = { createPreview() }) {
                     Text(if (busy) "Arbejder…" else "Lav preview")
                 }
             }
@@ -309,6 +407,27 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             error?.let {
                 Spacer(Modifier.height(12.dp))
                 ReviewSurface { Text(it, color = KalivTheme.colors.danger) }
+            }
+
+            pendingStartRecovery?.let { authority ->
+                Spacer(Modifier.height(12.dp))
+                ReviewSurface {
+                    Text("Uafklaret Start", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold)
+                    Text(
+                        "plan=${authority.planId} · review_reads=${authority.expectedReviewReads}",
+                        color = KalivTheme.colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                    Text(
+                        "Kun samme plan-id gendannes. Serveren må ikke oprette et nyt run.",
+                        color = KalivTheme.colors.textMuted,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(enabled = !busy && run == null, onClick = { recoverPendingStart() }) {
+                        Text(if (busy) "Arbejder…" else "Gendan samme Start")
+                    }
+                }
             }
 
             preview?.let { plan ->
