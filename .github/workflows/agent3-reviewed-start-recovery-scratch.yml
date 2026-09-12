@@ -1,0 +1,611 @@
+name: agent3-reviewed-start-recovery-scratch
+
+on:
+  push:
+    branches:
+      - fix/agent3-reviewed-start-durable-recovery-1309
+    paths:
+      - .github/workflows/agent3-reviewed-start-recovery-scratch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/agent3-reviewed-start-durable-recovery-1309
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply guarded server recovery patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one exact anchor, got {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          plan_store = 'worker/app/agent3/plan_store.py'
+          replace_once(
+              plan_store,
+              '''            if "start_terminal_at" not in columns:\n                connection.execute(\n                    "ALTER TABLE agent_plans ADD COLUMN start_terminal_at REAL"\n                )\n            connection.commit()\n''',
+              '''            if "start_terminal_at" not in columns:\n                connection.execute(\n                    "ALTER TABLE agent_plans ADD COLUMN start_terminal_at REAL"\n                )\n            connection.execute(\n                "CREATE TABLE IF NOT EXISTS agent_reviewed_starts ("\n                "plan_id TEXT PRIMARY KEY, state TEXT NOT NULL, run_id TEXT, "\n                "owner TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL, "\n                "expires_at REAL NOT NULL)"\n            )\n            connection.commit()\n''',
+          )
+
+          reviewed_methods = r'''
+    def reviewed_start_recovery(
+        self,
+        plan_id: str,
+    ) -> tuple[str, str | None, str | None] | None:
+        """Return durable reviewed-Start state without granting new execution authority."""
+        with self._lock:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT state,run_id,owner,expires_at FROM agent_reviewed_starts WHERE plan_id=?",
+                    (plan_id,),
+                ).fetchone()
+        if row is None:
+            return None
+        state, run_id, owner_raw, expires_at = row
+        if time.time() > float(expires_at):
+            return "refused", None, None
+        if state == "refused":
+            return "refused", None, None
+        if state not in {"pending", "accepted"}:
+            raise PlanStoreError("reviewed Start has invalid state")
+        if not isinstance(run_id, str) or not run_id:
+            raise PlanStoreError("reviewed Start is missing its reserved run id")
+        return str(state), run_id, self._owner_value(owner_raw)
+
+    def claim_reviewed_start(self, plan_id: str, run_id: str) -> str:
+        """Atomically consume one plan and bind a reserved reviewed-run id before execution."""
+        if not run_id:
+            raise PlanStoreError("reviewed Start run id is missing")
+        now = time.time()
+        recovery_expires = now + max(self.ttl_seconds, 3600)
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    existing = connection.execute(
+                        "SELECT state FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if existing is not None:
+                        raise PlanStoreError("reviewed Start is already claimed")
+                    row = connection.execute(
+                        "SELECT payload,expires_at,consumed_at,start_result FROM agent_plans WHERE id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("plan not found")
+                    payload, expires_at, consumed_at, task_start_result = row
+                    if consumed_at is not None or task_start_result is not None:
+                        raise PlanStoreError("plan already used")
+                    if now > float(expires_at):
+                        connection.execute(
+                            "UPDATE agent_plans SET consumed_at=? WHERE id=? AND consumed_at IS NULL",
+                            (now, plan_id),
+                        )
+                        connection.commit()
+                        raise PlanStoreError("plan expired")
+                    changed = connection.execute(
+                        "UPDATE agent_plans SET consumed_at=?,expires_at=? "
+                        "WHERE id=? AND consumed_at IS NULL AND start_result IS NULL",
+                        (now, max(float(expires_at), recovery_expires), plan_id),
+                    ).rowcount
+                    if changed != 1:
+                        raise PlanStoreError("plan already used")
+                    connection.execute(
+                        "INSERT INTO agent_reviewed_starts("
+                        "plan_id,state,run_id,owner,created_at,updated_at,expires_at) "
+                        "VALUES(?,'pending',?,?,?,?,?)",
+                        (
+                            plan_id,
+                            run_id,
+                            self._start_owner,
+                            now,
+                            now,
+                            recovery_expires,
+                        ),
+                    )
+                    connection.commit()
+                    return str(payload)
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def reviewed_start_materialization(self, plan_id: str, run_id: str) -> str:
+        """Return the immutable reviewed plan bound to one reserved/accepted run."""
+        with self._lock:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT p.payload,r.state,r.run_id FROM agent_plans p "
+                    "JOIN agent_reviewed_starts r ON r.plan_id=p.id WHERE p.id=?",
+                    (plan_id,),
+                ).fetchone()
+        if row is None:
+            raise PlanStoreError("reviewed Start plan not found")
+        payload, state, existing_run_id = row
+        if state not in {"pending", "accepted"} or existing_run_id != run_id:
+            raise PlanStoreError("plan is not materializable for this reviewed run")
+        return str(payload)
+
+    def claim_reviewed_start_recovery(
+        self,
+        plan_id: str,
+        run_id: str,
+        previous_owner: str | None,
+    ) -> bool:
+        """Transfer a pending reviewed Start only from a dead worker generation."""
+        now = time.time()
+        recovery_expires = now + max(self.ttl_seconds, 3600)
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT state,run_id,owner,expires_at FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("reviewed Start recovery not found")
+                    state, existing_run_id, owner_raw, expires_at = row
+                    if state != "pending" or existing_run_id != run_id:
+                        raise PlanStoreError("reviewed Start is not pending for this run")
+                    owner = self._owner_value(owner_raw)
+                    if owner == self._start_owner or owner != previous_owner:
+                        connection.commit()
+                        return False
+                    connection.execute(
+                        "UPDATE agent_reviewed_starts SET owner=?,updated_at=?,expires_at=? "
+                        "WHERE plan_id=? AND state='pending' AND run_id=?",
+                        (
+                            self._start_owner,
+                            now,
+                            max(float(expires_at), recovery_expires),
+                            plan_id,
+                            run_id,
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE agent_plans SET expires_at=MAX(expires_at,?) WHERE id=?",
+                        (recovery_expires, plan_id),
+                    )
+                    connection.commit()
+                    return True
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def mark_reviewed_start_accepted(self, plan_id: str, run_id: str) -> None:
+        """Publish same-plan recovery only for the exact reserved run id."""
+        now = time.time()
+        recovery_expires = now + max(self.ttl_seconds, 3600)
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT state,run_id,expires_at FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("reviewed Start recovery not found")
+                    state, existing_run_id, expires_at = row
+                    if existing_run_id != run_id:
+                        raise PlanStoreError("reviewed Start is bound to another run")
+                    if state == "accepted":
+                        connection.commit()
+                        return
+                    if state != "pending":
+                        raise PlanStoreError("reviewed Start is not pending")
+                    connection.execute(
+                        "UPDATE agent_reviewed_starts SET state='accepted',owner=?,updated_at=?,expires_at=? "
+                        "WHERE plan_id=? AND run_id=?",
+                        (
+                            self._start_owner,
+                            now,
+                            max(float(expires_at), recovery_expires),
+                            plan_id,
+                            run_id,
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE agent_plans SET expires_at=MAX(expires_at,?) WHERE id=?",
+                        (recovery_expires, plan_id),
+                    )
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def mark_reviewed_start_refused(self, plan_id: str, run_id: str) -> None:
+        """Finalize a claimed reviewed Start only if its reserved run never existed."""
+        now = time.time()
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT state,run_id FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        connection.commit()
+                        return
+                    state, existing_run_id = row
+                    if state == "accepted":
+                        raise PlanStoreError("accepted reviewed Start cannot be refused")
+                    if existing_run_id != run_id:
+                        raise PlanStoreError("reviewed Start refusal targets another run")
+                    connection.execute(
+                        "UPDATE agent_reviewed_starts SET state='refused',run_id=NULL,owner=NULL,updated_at=? "
+                        "WHERE plan_id=? AND state='pending'",
+                        (now, plan_id),
+                    )
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+
+'''
+          p = Path(plan_store)
+          text = p.read_text(encoding='utf-8')
+          anchor = '    def claim_task_start(self, plan_id: str, run_id: str, prepared_run: str) -> None:\n'
+          if text.count(anchor) != 1:
+              raise SystemExit('plan_store claim_task_start anchor drift')
+          p.write_text(text.replace(anchor, reviewed_methods + anchor, 1), encoding='utf-8')
+
+          replace_once(
+              plan_store,
+              '''                cursor = connection.execute(\n                    "DELETE FROM agent_plans WHERE expires_at < ? AND ("\n''',
+              '''                connection.execute(\n                    "DELETE FROM agent_reviewed_starts WHERE expires_at < ?",\n                    (now,),\n                )\n                cursor = connection.execute(\n                    "DELETE FROM agent_plans WHERE expires_at < ? AND ("\n''',
+          )
+
+          core = Path('worker/app/agent3/core.py')
+          text = core.read_text(encoding='utf-8')
+          old = '''    def start_with_steps(\n        self,\n        request: TurnRequest,\n        caps: CapabilitySnapshot,\n        steps: Iterable[AgentStep],\n        *,\n        proactive: bool = False,\n        allow_private_cloud: bool = False,\n    ) -> AgentRun:\n        route = self.router.route(request, caps)\n        if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:\n            return self._blocked_run(request, route, route.reason, proactive, allow_private_cloud)\n        return self._start_routed(request, route, list(steps), proactive, allow_private_cloud)\n'''
+          new = '''    def start_with_steps(\n        self,\n        request: TurnRequest,\n        caps: CapabilitySnapshot,\n        steps: Iterable[AgentStep],\n        *,\n        proactive: bool = False,\n        allow_private_cloud: bool = False,\n        run_id: str | None = None,\n    ) -> AgentRun:\n        route = self.router.route(request, caps)\n        if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:\n            return self._blocked_run(\n                request, route, route.reason, proactive, allow_private_cloud, run_id=run_id\n            )\n        return self._start_routed(\n            request, route, list(steps), proactive, allow_private_cloud, run_id=run_id\n        )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('core start_with_steps anchor drift')
+          text = text.replace(old, new, 1)
+          old = '''    def _start_routed(\n        self,\n        request: TurnRequest,\n        route: RoutePlan,\n        steps: list[AgentStep],\n        proactive: bool,\n        allow_private_cloud: bool,\n    ) -> AgentRun:\n'''
+          new = '''    def _start_routed(\n        self,\n        request: TurnRequest,\n        route: RoutePlan,\n        steps: list[AgentStep],\n        proactive: bool,\n        allow_private_cloud: bool,\n        *,\n        run_id: str | None = None,\n    ) -> AgentRun:\n'''
+          if text.count(old) != 1:
+              raise SystemExit('core _start_routed anchor drift')
+          text = text.replace(old, new, 1)
+          old = '''        run = AgentRun(\n            request=request,\n            route=route,\n            steps=steps,\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n        )\n'''
+          new = '''        run = AgentRun(\n            request=request,\n            route=route,\n            steps=steps,\n            id=run_id or str(uuid.uuid4()),\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n        )\n'''
+          if text.count(old) < 1:
+              raise SystemExit('core AgentRun routed anchor drift')
+          text = text.replace(old, new, 1)
+          old = '''    def _blocked_run(\n        self,\n        request: TurnRequest,\n        route: RoutePlan,\n        reason: str,\n        proactive: bool,\n        allow_private_cloud: bool,\n        steps: list[AgentStep] | None = None,\n    ) -> AgentRun:\n'''
+          new = '''    def _blocked_run(\n        self,\n        request: TurnRequest,\n        route: RoutePlan,\n        reason: str,\n        proactive: bool,\n        allow_private_cloud: bool,\n        steps: list[AgentStep] | None = None,\n        *,\n        run_id: str | None = None,\n    ) -> AgentRun:\n'''
+          if text.count(old) != 1:
+              raise SystemExit('core _blocked_run anchor drift')
+          text = text.replace(old, new, 1)
+          blocked_ctor = '''        run = AgentRun(\n            request=request,\n            route=route,\n            steps=steps or [],\n            state=RunState.BLOCKED,\n            error=reason,\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n        )\n'''
+          blocked_new = '''        run = AgentRun(\n            request=request,\n            route=route,\n            steps=steps or [],\n            state=RunState.BLOCKED,\n            id=run_id or str(uuid.uuid4()),\n            error=reason,\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n        )\n'''
+          if text.count(blocked_ctor) != 1:
+              raise SystemExit('core blocked AgentRun anchor drift')
+          text = text.replace(blocked_ctor, blocked_new, 1)
+          core.write_text(text, encoding='utf-8')
+
+          review = Path('worker/app/agent3/review_orchestrator.py')
+          text = review.read_text(encoding='utf-8')
+          old = '''    def start_with_steps(\n        self,\n        request: TurnRequest,\n        caps: CapabilitySnapshot,\n        steps: Iterable[AgentStep],\n        *,\n        proactive: bool = False,\n        allow_private_cloud: bool = False,\n        review_reads: bool = False,\n    ) -> AgentRun:\n        route = self.router.route(request, caps)\n        if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:\n            return self._blocked_run(request, route, route.reason, proactive, allow_private_cloud)\n        return self._start_reviewed(\n            request,\n            route,\n            list(steps),\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n            review_reads=review_reads,\n        )\n'''
+          new = '''    def start_with_steps(\n        self,\n        request: TurnRequest,\n        caps: CapabilitySnapshot,\n        steps: Iterable[AgentStep],\n        *,\n        proactive: bool = False,\n        allow_private_cloud: bool = False,\n        review_reads: bool = False,\n        run_id: str | None = None,\n    ) -> AgentRun:\n        route = self.router.route(request, caps)\n        if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:\n            return self._blocked_run(\n                request, route, route.reason, proactive, allow_private_cloud, run_id=run_id\n            )\n        return self._start_reviewed(\n            request,\n            route,\n            list(steps),\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n            review_reads=review_reads,\n            run_id=run_id,\n        )\n'''
+          if text.count(old) != 1:
+              raise SystemExit('review start_with_steps anchor drift')
+          text = text.replace(old, new, 1)
+          old = '''    def _start_reviewed(\n        self,\n        request: TurnRequest,\n        route,\n        steps: list[AgentStep],\n        *,\n        proactive: bool,\n        allow_private_cloud: bool,\n        review_reads: bool,\n    ) -> AgentRun:\n'''
+          new = '''    def _start_reviewed(\n        self,\n        request: TurnRequest,\n        route,\n        steps: list[AgentStep],\n        *,\n        proactive: bool,\n        allow_private_cloud: bool,\n        review_reads: bool,\n        run_id: str | None = None,\n    ) -> AgentRun:\n'''
+          if text.count(old) != 1:
+              raise SystemExit('review _start_reviewed anchor drift')
+          text = text.replace(old, new, 1)
+          ctor = '''        run = AgentRun(\n            request=request,\n            route=route,\n            steps=steps,\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n        )\n'''
+          ctor_new = '''        run = AgentRun(\n            request=request,\n            route=route,\n            steps=steps,\n            id=run_id or str(uuid.uuid4()),\n            proactive=proactive,\n            allow_private_cloud=allow_private_cloud,\n        )\n'''
+          if text.count(ctor) != 1:
+              raise SystemExit('review AgentRun anchor drift')
+          text = text.replace(ctor, ctor_new, 1)
+          # review_orchestrator did not previously need uuid directly.
+          text = text.replace('import time\n', 'import time\nimport uuid\n', 1)
+          review.write_text(text, encoding='utf-8')
+
+          planner = Path('worker/app/agent3/planner.py')
+          text = planner.read_text(encoding='utf-8')
+          if 'import uuid\n' not in text:
+              text = text.replace('import re\n', 'import re\nimport uuid\n', 1)
+          start = text.index('    @router.post("/plans/{plan_id}/start")\n')
+          end = text.index('\n    return router', start)
+          replacement = r'''    def _reviewed_start_response(
+        plan_id: str,
+        stored: dict[str, Any],
+        run: AgentRun,
+    ) -> dict[str, Any]:
+        review_reads = bool(stored.get("review_reads", False))
+        read_review = (
+            orchestrator.review_store.get(run.id)
+            if reviewing
+            else {"enabled": False, "waiting": False}
+        )
+        response: dict[str, Any] = {
+            "run": json.loads(run.to_json()),
+            "plan_id": plan_id,
+            "memory_context": stored.get("memory_context", _empty_memory_receipt()),
+            "review_reads": review_reads,
+            "read_review": read_review,
+        }
+        stored_receipt = stored.get("capability_receipt")
+        if stored_receipt is not None:
+            response["capability_receipt"] = stored_receipt
+        return response
+
+    def _reviewed_start_error(reason: str, message: str, status_code: int = 409) -> HTTPException:
+        return HTTPException(
+            status_code=status_code,
+            detail={"reason": reason, "message": message},
+        )
+
+    @router.post("/plans/{plan_id}/start")
+    def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
+        if orchestrator is None:
+            raise _reviewed_start_error(
+                "reviewed_start_executor_unavailable",
+                "plan execution is not mounted",
+                status_code=501,
+            )
+
+        recovery = plan_store.reviewed_start_recovery(plan_id)
+        payload: str
+        reserved_run_id: str
+        if recovery is not None:
+            state, recovered_run_id, owner = recovery
+            if state == "refused":
+                raise _reviewed_start_error(
+                    "reviewed_start_refused",
+                    "reviewed Start is no longer recoverable",
+                )
+            if recovered_run_id is None:
+                raise _reviewed_start_error(
+                    "reviewed_start_refused",
+                    "reviewed Start is missing its bound run",
+                )
+            reserved_run_id = recovered_run_id
+            existing = orchestrator.store.load(reserved_run_id)
+            if existing is not None:
+                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+                stored = json.loads(
+                    plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
+                )
+                return _reviewed_start_response(plan_id, stored, existing)
+            if state == "accepted":
+                raise _reviewed_start_error(
+                    "reviewed_start_refused",
+                    "accepted reviewed Start is missing its bound run",
+                )
+            if owner == plan_store.start_owner:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed Start is still materializing in this worker",
+                )
+            if not plan_store.claim_reviewed_start_recovery(
+                plan_id,
+                reserved_run_id,
+                owner,
+            ):
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed Start recovery changed concurrently",
+                )
+            payload = plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
+        else:
+            reserved_run_id = str(uuid.uuid4())
+            try:
+                payload = plan_store.claim_reviewed_start(plan_id, reserved_run_id)
+            except PlanStoreError as exc:
+                raise _reviewed_start_error("reviewed_start_refused", str(exc)) from exc
+
+        try:
+            envelope = json.loads(payload)
+            template = AgentRun.from_json(envelope["run"])
+            stored_caps = CapabilitySnapshot(**envelope["capabilities"])
+            review_reads = bool(envelope.get("review_reads", False))
+            stored_capability_receipt = envelope.get("capability_receipt")
+        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "stored plan is invalid",
+            ) from exc
+
+        if review_reads and not reviewing:
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "read review is not mounted",
+            )
+
+        try:
+            current_capability_receipt: dict[str, Any] | None = None
+            if stored_capability_receipt is not None:
+                if not isinstance(stored_capability_receipt, dict):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "stored capability receipt is invalid",
+                    )
+                if capability_graph_provider is None:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "capability receipt validation is not mounted",
+                    )
+                if stored_capability_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "stored capability receipt does not match the plan",
+                    )
+                current_capability_receipt = capability_receipt(template)
+                if current_capability_receipt != stored_capability_receipt:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "capability receipt is stale; preview the plan again",
+                    )
+                if not bool(current_capability_receipt.get("allowed", False)):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "plan is blocked by current capabilities",
+                    )
+
+            caps = CapabilitySnapshot(
+                rig_reachable=stored_caps.rig_reachable,
+                worker_ready=stored_caps.worker_ready,
+                tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
+                cloud_ready=stored_caps.cloud_ready,
+                rag_ready=stored_caps.rag_ready,
+                voice_ready=stored_caps.voice_ready,
+            )
+            kwargs: dict[str, Any] = {
+                "proactive": template.proactive,
+                "allow_private_cloud": template.allow_private_cloud,
+                "run_id": reserved_run_id,
+            }
+            if reviewing:
+                kwargs["review_reads"] = review_reads
+            run = orchestrator.start_with_steps(
+                template.request,
+                caps,
+                _clone_steps(template),
+                **kwargs,
+            )
+            plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+            return _reviewed_start_response(plan_id, envelope, run)
+        except HTTPException:
+            existing = orchestrator.store.load(reserved_run_id)
+            if existing is not None:
+                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+                return _reviewed_start_response(plan_id, envelope, existing)
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise
+        except Exception:
+            existing = orchestrator.store.load(reserved_run_id)
+            if existing is not None:
+                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+                return _reviewed_start_response(plan_id, envelope, existing)
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise
+'''
+          text = text[:start] + replacement + text[end:]
+          planner.write_text(text, encoding='utf-8')
+
+          test = Path('tests/worker_agent3_plan_store.py')
+          text = test.read_text(encoding='utf-8')
+          old = '''reused = client.post(f"/experimental/agent3/plans/{plan_id}/start")\ncheck(reused.status_code == 409, "plan_id is single-use")\n'''
+          new = '''reused = client.post(f"/experimental/agent3/plans/{plan_id}/start")\ncheck(reused.status_code == 200, "same reviewed plan id replays the accepted Start")\ncheck(reused.json()["run"]["id"] == run["id"], "same-plan replay returns the exact bound run")\ncheck(len(run_store.recent(10)) == 1, "same-plan replay never creates a second run")\n'''
+          if text.count(old) != 1:
+              raise SystemExit('worker_agent3_plan_store replay expectation drift')
+          test.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          recovery_test = Path('tests/worker_agent3_reviewed_start_recovery.py')
+          recovery_test.write_text(r'''from __future__ import annotations
+
+import os
+import tempfile
+
+from app.agent3.plan_store import PlanStore, PlanStoreError
+
+passed = failed = 0
+
+
+def check(cond, name):
+    global passed, failed
+    if cond:
+        passed += 1
+        print(f"  PASS: {name}")
+    else:
+        failed += 1
+        print(f"  FAIL: {name}")
+
+
+root = tempfile.mkdtemp(prefix="agent3-reviewed-start-recovery-")
+path = os.path.join(root, "plans.db")
+first = PlanStore(path, ttl_seconds=30)
+plan_id, _ = first.save("reviewed-payload")
+first.claim_reviewed_start(plan_id, "reviewed-run")
+old_owner = first.start_owner
+check(
+    first.reviewed_start_recovery(plan_id) == ("pending", "reviewed-run", old_owner),
+    "first worker durably binds the exact reserved run before execution",
+)
+first.close()
+
+second = PlanStore(path, ttl_seconds=30)
+check(second.start_owner != old_owner, "worker restart creates a new reviewed-Start generation")
+check(
+    second.reviewed_start_recovery(plan_id) == ("pending", "reviewed-run", old_owner),
+    "restart preserves pending plan-to-run authority from the dead generation",
+)
+check(
+    second.claim_reviewed_start_recovery(plan_id, "reviewed-run", old_owner),
+    "new generation can claim only the exact pending reviewed run",
+)
+check(
+    second.reviewed_start_materialization(plan_id, "reviewed-run") == "reviewed-payload",
+    "recovery retains the immutable reviewed plan payload",
+)
+second.mark_reviewed_start_accepted(plan_id, "reviewed-run")
+check(
+    second.reviewed_start_recovery(plan_id)[0:2] == ("accepted", "reviewed-run"),
+    "accepted reviewed Start remains bound to the same run",
+)
+try:
+    second.claim_task_start(plan_id, "task-run", "task-payload")
+    cross_surface = True
+except PlanStoreError:
+    cross_surface = False
+check(not cross_surface, "reviewed Start cannot be replayed through the task surface")
+second.close()
+
+other = PlanStore(os.path.join(root, "other.db"), ttl_seconds=30)
+task_plan, _ = other.save("task")
+other.claim_task_start(task_plan, "task-run", "prepared")
+try:
+    other.claim_reviewed_start(task_plan, "reviewed-run")
+    reverse_cross_surface = True
+except PlanStoreError:
+    reverse_cross_surface = False
+check(not reverse_cross_surface, "task Start cannot be replayed through reviewed Start")
+other.close()
+
+print(f"\n{passed} passed, {failed} failed")
+raise SystemExit(1 if failed else 0)
+''', encoding='utf-8')
+          PY
+      - name: Python syntax gate
+        run: |
+          python -m py_compile \
+            worker/app/agent3/plan_store.py \
+            worker/app/agent3/core.py \
+            worker/app/agent3/review_orchestrator.py \
+            worker/app/agent3/planner.py \
+            tests/worker_agent3_reviewed_start_recovery.py
+          git diff --check
+      - name: Commit guarded patch
+        run: |
+          git config user.name "Agent3 recovery patch"
+          git config user.email "actions@users.noreply.github.com"
+          git add worker/app/agent3/plan_store.py worker/app/agent3/core.py worker/app/agent3/review_orchestrator.py worker/app/agent3/planner.py tests/worker_agent3_plan_store.py tests/worker_agent3_reviewed_start_recovery.py
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(agent3): make reviewed Start same-plan recoverable (#1309)"
+          git push origin HEAD:fix/agent3-reviewed-start-durable-recovery-1309
