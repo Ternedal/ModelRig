@@ -109,6 +109,29 @@ fun KalivNavRail(
     vramTotalGb: Double,
     modelBackend: String,
 ) {
+    // Compatibility surface for older explicit callers and the L2a overload gate.
+    // Supplied numeric values are treated as observations; no defaults are invented.
+    KalivNavRail(
+        active = active,
+        onSelect = onSelect,
+        status = KalivSidebarStatus(
+            modelName = modelName.ifBlank { "Lokal model ikke valgt" },
+            modelAuthority = "Lokal · $modelBackend",
+            privacyTitle = "Chat: kun lokal",
+            privacyDetail = "Legacy-kald uden cloud-routing authority",
+            localOnly = true,
+        ),
+        vram = KalivVramTelemetry.Measured(vramUsedGb, vramTotalGb),
+    )
+}
+
+@Composable
+fun KalivNavRail(
+    active: KalivScreen,
+    onSelect: (KalivScreen) -> Unit,
+    status: KalivSidebarStatus,
+    vram: KalivVramTelemetry,
+) {
     val c = KalivTheme.colors
     val railBackground = if (c.isDark) Color(0x8C14110E) else c.Surface
 
@@ -129,9 +152,9 @@ fun KalivNavRail(
         }
 
         Spacer(Modifier.weight(1f))
-        LightShellActiveModelCard(modelName, vramUsedGb, vramTotalGb, modelBackend)
+        LightShellActiveModelCard(status, vram)
         Spacer(Modifier.height(12.dp))
-        LightShellPrivacySeal()
+        LightShellPrivacySeal(status)
     }
 }
 
@@ -181,14 +204,13 @@ private fun LightShellNavRow(
 
 @Composable
 private fun LightShellActiveModelCard(
-    modelName: String,
-    usedGb: Double,
-    totalGb: Double,
-    backend: String,
+    status: KalivSidebarStatus,
+    vram: KalivVramTelemetry,
 ) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
     val border = if (c.isDark) Color(0x33785A37) else c.Border
+    val vramPresentation = presentVram(vram)
     Column(
         Modifier
             .fillMaxWidth()
@@ -197,21 +219,25 @@ private fun LightShellActiveModelCard(
             .border(1.dp, border, shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
     ) {
-        SectionLabel("Aktiv model")
+        SectionLabel("Primær model")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(c.Success))
+            Box(
+                Modifier.size(7.dp).clip(CircleShape)
+                    .background(if (status.localOnly) c.Success else c.Amber),
+            )
             Spacer(Modifier.width(7.dp))
-            Text(modelName, color = c.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(status.modelName, color = c.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = c.TextMuted, fontSize = 11.5.sp)
-        Spacer(Modifier.height(9.dp))
-        val fraction = if (totalGb > 0.0) (usedGb / totalGb).toFloat() else 0f
-        LightShellMetaBar(fraction)
+        Text(status.modelAuthority, color = c.TextMuted, fontSize = 11.5.sp)
+        vramPresentation.fraction?.let { fraction ->
+            Spacer(Modifier.height(9.dp))
+            LightShellMetaBar(fraction)
+        }
         Spacer(Modifier.height(5.dp))
         Text(
-            "VRAM ${lightShellFmtGb(usedGb)} / ${lightShellFmtGb(totalGb)} GB",
+            vramPresentation.label,
             color = c.TextMuted,
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
@@ -241,7 +267,7 @@ private fun LightShellMetaBar(fraction: Float) {
 }
 
 @Composable
-private fun LightShellPrivacySeal() {
+private fun LightShellPrivacySeal(status: KalivSidebarStatus) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
     val background = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
@@ -257,11 +283,11 @@ private fun LightShellPrivacySeal() {
             .padding(horizontal = 13.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("\uD83D\uDD12", color = c.Highlight, fontSize = 15.sp)
+        Text(if (status.localOnly) "\uD83D\uDD12" else "\u2197", color = c.Highlight, fontSize = 15.sp)
         Spacer(Modifier.width(9.dp))
         Column {
-            Text("100 % lokal", color = headline, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-            Text("Intet forlader maskinen", color = c.TextMuted, fontSize = 10.5.sp)
+            Text(status.privacyTitle, color = headline, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text(status.privacyDetail, color = c.TextMuted, fontSize = 10.5.sp)
         }
     }
 }
