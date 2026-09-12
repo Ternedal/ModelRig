@@ -335,6 +335,9 @@ fun App() {
                         }
                     }
                     res.onSuccess { turn ->
+                        // Tools is served by the rig/backend. Only a successful
+                        // worker response may become the latest reply-source truth.
+                        lastSource = ChatResult.Source.LOCAL
                         when (turn.status) {
                             "confirmation_required" -> {
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
@@ -898,6 +901,9 @@ fun App() {
                         }
                     }
                     res.onSuccess { next ->
+                        // Approve/deny and chained confirmations are served by
+                        // the same rig endpoint captured for the originating turn.
+                        lastSource = ChatResult.Source.LOCAL
                         if (next.status == "confirmation_required") {
                             // A chained write gets its own authoritative card. One
                             // approval never authorises the next write.
