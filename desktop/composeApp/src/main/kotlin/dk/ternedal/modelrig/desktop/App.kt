@@ -342,6 +342,7 @@ fun App() {
                             "confirmation_required" -> {
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
+                                    source = ChatResult.Source.LOCAL,
                                     streaming = false,
                                 )
                                 pendingCardError = null
@@ -350,7 +351,11 @@ fun App() {
                             }
                             else -> {
                                 val ans = turn.answer.ifBlank { "(tomt svar, status: ${turn.status})" }
-                                messages[assistantIdxT] = messages[assistantIdxT].copy(text = ans, streaming = false)
+                                messages[assistantIdxT] = messages[assistantIdxT].copy(
+                                    text = ans,
+                                    source = ChatResult.Source.LOCAL,
+                                    streaming = false,
+                                )
                                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", ans) }
                             }
                         }
@@ -915,7 +920,7 @@ fun App() {
                             pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
-                            messages.add(UiMessage("assistant", text))
+                            messages.add(UiMessage("assistant", text, source = ChatResult.Source.LOCAL))
                             val cid = convId
                             if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
                         }
