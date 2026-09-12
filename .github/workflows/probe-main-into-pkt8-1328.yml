@@ -1,0 +1,65 @@
+name: probe-main-into-pkt8-1328
+
+on:
+  push:
+    branches:
+      - probe/main-into-pkt8-1328-conflicts
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout candidate probe branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Assert candidate ancestry anchor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "93f735e93cb6714f4cb3df1eca8bc33adec24e2f"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "f8ee567d5f7d11cee30d2780ea4a3705fa880667"
+
+      - name: Probe merge and capture conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set +e
+          git merge --no-commit --no-ff origin/main > /tmp/merge.log 2>&1
+          status=$?
+          set -e
+          echo "merge_exit=$status"
+          cat /tmp/merge.log
+          mkdir -p /tmp/pkt8-merge-conflicts
+          git diff --name-only --diff-filter=U | tee /tmp/pkt8-merge-conflicts/CONFLICTS.txt
+          git ls-files -u > /tmp/pkt8-merge-conflicts/INDEX_STAGES.txt
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            safe=$(printf '%s' "$file" | sed 's#[/\\]#__#g')
+            git show ":1:$file" > "/tmp/pkt8-merge-conflicts/${safe}.base" 2>/dev/null || true
+            git show ":2:$file" > "/tmp/pkt8-merge-conflicts/${safe}.candidate" 2>/dev/null || true
+            git show ":3:$file" > "/tmp/pkt8-merge-conflicts/${safe}.main" 2>/dev/null || true
+            git diff --cc -- "$file" > "/tmp/pkt8-merge-conflicts/${safe}.cc.diff" || true
+          done < /tmp/pkt8-merge-conflicts/CONFLICTS.txt
+          cp /tmp/merge.log /tmp/pkt8-merge-conflicts/MERGE.log
+          echo "--- conflict count ---"
+          wc -l /tmp/pkt8-merge-conflicts/CONFLICTS.txt
+          echo "--- index stages ---"
+          cat /tmp/pkt8-merge-conflicts/INDEX_STAGES.txt
+          if [ "$status" -eq 0 ]; then
+            echo "Unexpected clean merge; no conflict resolution required."
+          fi
+
+      - name: Upload conflict bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pkt8-main-conflicts
+          path: /tmp/pkt8-merge-conflicts
+          if-no-files-found: error
