@@ -428,6 +428,16 @@ def build_planner_router(
             headers={"X-ModelRig-Agent3-Reason": reason},
         )
 
+    def _reconcile_reviewed_start_run(run_id: str) -> AgentRun:
+        try:
+            return orchestrator.advance(run_id)
+        except Exception as exc:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start requires recovery retry",
+                status_code=503,
+            ) from exc
+
     @router.post("/plans/{plan_id}/start")
     def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
         if orchestrator is None:
@@ -454,17 +464,16 @@ def build_planner_router(
                 )
             reserved_run_id = recovered_run_id
             existing = orchestrator.store.load(reserved_run_id)
-            if existing is not None:
-                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+            if state == "accepted":
+                if existing is None:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "accepted reviewed Start is missing its bound run",
+                    )
                 stored = json.loads(
                     plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
                 )
                 return _reviewed_start_response(plan_id, stored, existing)
-            if state == "accepted":
-                raise _reviewed_start_error(
-                    "reviewed_start_refused",
-                    "accepted reviewed Start is missing its bound run",
-                )
             if owner == plan_store.start_owner:
                 raise _reviewed_start_error(
                     "reviewed_start_pending",
@@ -480,6 +489,11 @@ def build_planner_router(
                     "reviewed Start recovery changed concurrently",
                 )
             payload = plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
+            if existing is not None:
+                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
+                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+                stored = json.loads(payload)
+                return _reviewed_start_response(plan_id, stored, reconciled)
         else:
             reserved_run_id = str(uuid.uuid4())
             try:
@@ -570,15 +584,17 @@ def build_planner_router(
         except HTTPException:
             existing = orchestrator.store.load(reserved_run_id)
             if existing is not None:
+                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
                 plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
-                return _reviewed_start_response(plan_id, envelope, existing)
+                return _reviewed_start_response(plan_id, envelope, reconciled)
             plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
             raise
         except Exception:
             existing = orchestrator.store.load(reserved_run_id)
             if existing is not None:
+                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
                 plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
-                return _reviewed_start_response(plan_id, envelope, existing)
+                return _reviewed_start_response(plan_id, envelope, reconciled)
             plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
             raise
 

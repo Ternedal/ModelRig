@@ -79,20 +79,22 @@ fun Agent3ReviewDevApp() {
         var review by remember { mutableStateOf(Agent3ReadReview()) }
         var busy by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
-        var pendingStartRecovery by remember {
-            mutableStateOf(
-                Agent3ReviewedStartRecoveryAuthority.decode(recoveryStore.read(baseUrl))
-            )
+        val initialRecoveryRaw = remember(baseUrl) { recoveryStore.read(baseUrl) }
+        var pendingStartRecovery by remember(initialRecoveryRaw) {
+            mutableStateOf(Agent3ReviewedStartRecoveryAuthority.decode(initialRecoveryRaw))
+        }
+        var startRecoveryUnresolved by remember(initialRecoveryRaw) {
+            mutableStateOf(Agent3ReviewedStartRecoveryAuthority.hasUnresolvedRecord(initialRecoveryRaw))
         }
 
-        LaunchedEffect(baseUrl) {
+        LaunchedEffect(baseUrl, initialRecoveryRaw) {
             val raw = recoveryStore.read(baseUrl)
             val decoded = Agent3ReviewedStartRecoveryAuthority.decode(raw)
-            if (raw != null && decoded == null) {
-                recoveryStore.write(baseUrl, null)
-                error = "En ugyldig lokal Start-recovery blev ryddet; lav et nyt preview."
-            }
             pendingStartRecovery = decoded
+            startRecoveryUnresolved = Agent3ReviewedStartRecoveryAuthority.hasUnresolvedRecord(raw)
+            if (startRecoveryUnresolved && decoded == null) {
+                error = "Den lokale Start-recovery kan ikke læses sikkert. Nye previews er blokeret; recovery-recorden er bevaret til operatørkontrol."
+            }
         }
 
         fun currentConnection(): Agent3DevConnectionBinding {
@@ -113,8 +115,12 @@ fun Agent3ReviewDevApp() {
         }
 
         fun createPreview() {
-            if (pendingStartRecovery != null) {
-                error = "Et tidligere Start har uklart udfald. Gendan samme Start før et nyt preview."
+            if (startRecoveryUnresolved) {
+                error = if (pendingStartRecovery != null) {
+                    "Et tidligere Start har uklart udfald. Gendan samme Start før et nyt preview."
+                } else {
+                    "En lokal Start-recovery kan ikke valideres. Nyt preview er blokeret, indtil recorden kan afklares sikkert."
+                }
                 return
             }
             val requestIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads) ?: return
@@ -176,8 +182,10 @@ fun Agent3ReviewDevApp() {
             review = envelope.readReview
             if (recoveryStore.write(connection.baseUrl, null)) {
                 pendingStartRecovery = null
+                startRecoveryUnresolved = false
             } else {
                 pendingStartRecovery = authority
+                startRecoveryUnresolved = true
                 error = "Run blev valideret, men den lokale Start-recovery kunne ikke ryddes. Samme plan kan sikkert gendannes igen."
             }
         }
@@ -190,7 +198,12 @@ fun Agent3ReviewDevApp() {
             val detail = failure.message ?: "Planen kunne ikke startes"
             if (!shouldRetainReviewedStartRecovery(failure)) {
                 val cleared = recoveryStore.write(connection.baseUrl, null)
-                if (cleared) pendingStartRecovery = null
+                if (cleared) {
+                    pendingStartRecovery = null
+                    startRecoveryUnresolved = false
+                } else {
+                    startRecoveryUnresolved = true
+                }
                 error = if (cleared) {
                     "$detail. Serveren afviste Start definitivt; lav et nyt preview."
                 } else {
@@ -199,6 +212,7 @@ fun Agent3ReviewDevApp() {
                 return
             }
             pendingStartRecovery = authority
+            startRecoveryUnresolved = true
             error = "$detail. Start-resultatet er uklart; brug Gendan samme Start i stedet for at lave et nyt preview."
         }
 
@@ -212,12 +226,17 @@ fun Agent3ReviewDevApp() {
             val raw = recoveryStore.read(connection.baseUrl)
             val authority = Agent3ReviewedStartRecoveryAuthority.decode(raw)
             if (authority == null) {
-                if (raw != null) recoveryStore.write(connection.baseUrl, null)
                 pendingStartRecovery = null
-                error = "Der er ingen gyldig Start-recovery for denne rig."
+                startRecoveryUnresolved = Agent3ReviewedStartRecoveryAuthority.hasUnresolvedRecord(raw)
+                error = if (startRecoveryUnresolved) {
+                    "Start-recovery-recorden kan ikke valideres og er bevaret. Nyt preview forbliver blokeret."
+                } else {
+                    "Der er ingen Start-recovery for denne rig."
+                }
                 return
             }
             pendingStartRecovery = authority
+            startRecoveryUnresolved = true
             busy = true
             error = null
             scope.launch {
@@ -264,7 +283,7 @@ fun Agent3ReviewDevApp() {
                     previewIntent = previewIntent,
                 )
             ) return
-            if (pendingStartRecovery != null) return
+            if (startRecoveryUnresolved) return
             val planId = reviewedPreview.planId ?: return
             val connection = boundConnection ?: return
             val authority = Agent3ReviewedStartRecoveryAuthority.capture(
@@ -280,6 +299,7 @@ fun Agent3ReviewDevApp() {
                 return
             }
             pendingStartRecovery = authority
+            startRecoveryUnresolved = true
             busy = true
             error = null
             clearPreviewAuthority()
@@ -413,7 +433,7 @@ fun Agent3ReviewDevApp() {
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                Button(enabled = !busy && message.isNotBlank() && pendingStartRecovery == null, onClick = ::createPreview) {
+                Button(enabled = !busy && message.isNotBlank() && !startRecoveryUnresolved, onClick = ::createPreview) {
                     Text(if (busy) "Arbejder…" else "Lav preview")
                 }
             }

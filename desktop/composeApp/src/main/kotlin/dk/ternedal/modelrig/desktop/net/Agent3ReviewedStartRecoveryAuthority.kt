@@ -56,6 +56,8 @@ internal data class Agent3ReviewedStartRecoveryAuthority(
             return capture(wire.planId, wire.reviewReads, wire.capabilityReceipt)
         }
 
+        fun hasUnresolvedRecord(raw: String?): Boolean = !raw.isNullOrBlank()
+
         private fun validReceipt(receipt: Agent3CapabilityReceipt): Boolean =
             receipt.schema == "kaliv-agent3-capability-receipt/v1" &&
                 !receipt.productionActivation &&
