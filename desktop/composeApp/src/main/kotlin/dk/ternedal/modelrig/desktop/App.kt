@@ -224,16 +224,21 @@ fun App() {
         var agent3Cockpit by remember { mutableStateOf(db.getSetting("agent3Cockpit") == "true") }
         val scope = rememberCoroutineScope()
         var convId by remember { mutableStateOf<Long?>(null) }
+        val conversationPublicationEpoch = remember { KalivConversationPublicationEpoch() }
+        val startupConversationEpoch = remember { conversationPublicationEpoch.capture() }
 
-        // Silently resume the latest conversation on startup, if any. No
-        // conversation *browser* yet (list/switch/delete) -- next increment.
+        // Resume the latest conversation only while startup still owns the
+        // initial context. Any newer turn/open/new/reset invalidates this read;
+        // the IO may finish, but stale bytes never replace newer UI state.
         LaunchedEffect(Unit) {
             val latest = withContext(Dispatchers.IO) { db.latestConversationId() }
             if (latest != null) {
                 val loaded = withContext(Dispatchers.IO) { db.loadMessages(latest) }
-                messages.clear()
-                loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
-                convId = latest
+                if (conversationPublicationEpoch.mayPublish(startupConversationEpoch)) {
+                    messages.clear()
+                    loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                    convId = latest
+                }
             }
         }
 
@@ -262,6 +267,9 @@ fun App() {
         fun send() {
             val text = input.trim()
             if (text.isEmpty() || busy || pendingCard != null) return
+            // A new user turn owns the visible conversation context. Invalidate
+            // any startup/open DB read that began before this action.
+            conversationPublicationEpoch.advance()
             // History for the tools path: the turns BEFORE this message --
             // the worker gets the new message in its own field (Android parity).
             val priorPairs = messages
@@ -672,17 +680,27 @@ fun App() {
                             db = db,
                             activeConvId = convId,
                             presentation = conversationBrowserPresentation,
-                            onActiveDeleted = {
+                            onDeleted = { deletedId ->
                                 if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
-                                    convId = null
-                                    messages.clear()
+                                    // Any successful delete may target a conversation whose
+                                    // DB load is still in flight. Invalidate it even when the
+                                    // deleted row has not become active yet.
+                                    conversationPublicationEpoch.advance()
+                                    if (convId == deletedId) {
+                                        convId = null
+                                        messages.clear()
+                                    }
                                 }
                             },
                             onOpen = { id ->
                                 if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    val openEpoch = conversationPublicationEpoch.advance()
                                     scope.launch {
                                         val loaded = withContext(Dispatchers.IO) { db.loadMessages(id) }
-                                        if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                        if (
+                                            conversationPublicationEpoch.mayPublish(openEpoch) &&
+                                            presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled
+                                        ) {
                                             messages.clear()
                                             loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
                                             convId = id
@@ -693,6 +711,7 @@ fun App() {
                             },
                             onNew = {
                                 if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
+                                    conversationPublicationEpoch.advance()
                                     messages.clear()
                                     convId = null
                                     showConvos = false
@@ -954,7 +973,7 @@ private fun ConversationsPanel(
     presentation: KalivConversationBrowserPresentation,
     onOpen: (Long) -> Unit,
     onNew: () -> Unit,
-    onActiveDeleted: () -> Unit,
+    onDeleted: (Long) -> Unit,
 ) {
     var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
     var panelError by remember { mutableStateOf<String?>(null) }
@@ -1051,9 +1070,9 @@ private fun ConversationsPanel(
                                     if (presentation.contextMutationEnabled) {
                                         runCatching {
                                             db.deleteConversation(c.id)
-                                            // Conversation deletion is an identity mutation. It is
-                                            // locked while a turn/confirmation owns the current context.
-                                            if (activeConvId == c.id) onActiveDeleted()
+                                            // Every successful delete invalidates pending conversation
+                                            // loads; the parent clears the view as well when this was active.
+                                            onDeleted(c.id)
                                             convos = db.listConversations()
                                         }.onFailure { panelError = it.message }
                                     }
