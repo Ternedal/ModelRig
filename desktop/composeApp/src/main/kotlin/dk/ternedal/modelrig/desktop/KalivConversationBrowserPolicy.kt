@@ -35,3 +35,24 @@ fun presentConversationBrowser(
         lockMessage = null,
     )
 }
+
+
+/**
+ * Local publication order for asynchronous conversation loads.
+ *
+ * Capturing an epoch gives a DB read permission to publish only while no newer
+ * user action has advanced the conversation context. Advancing invalidates old
+ * reads; it does not cancel their IO or claim any remote mutation.
+ */
+class KalivConversationPublicationEpoch(initial: Long = 0L) {
+    private var epoch: Long = initial
+
+    fun capture(): Long = epoch
+
+    fun advance(): Long {
+        epoch = if (epoch == Long.MAX_VALUE) Long.MIN_VALUE else epoch + 1L
+        return epoch
+    }
+
+    fun mayPublish(captured: Long): Boolean = captured == epoch
+}
