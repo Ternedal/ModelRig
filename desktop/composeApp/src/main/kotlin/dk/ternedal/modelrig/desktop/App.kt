@@ -1097,7 +1097,7 @@ private fun ConversationsPanel(
                             ) {
                                 Text(c.title.ifBlank { "(uden titel)" }, color = KalivTheme.colors.TextHigh, fontSize = 13.sp, maxLines = 1)
                                 Text(
-                                    "${c.source} · ${fmt.format(Date(c.updatedAt))}",
+                                    "${presentConversationSource(c.source)} · ${fmt.format(Date(c.updatedAt))}",
                                     color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
                                 )
                             }
