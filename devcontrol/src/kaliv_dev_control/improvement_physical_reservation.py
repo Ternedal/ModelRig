@@ -1,9 +1,13 @@
-"""Trusted local-main observation and durable one-time DC-L15 request reservation.
+"""Authenticated host-local reservation boundary before DC-L15 execution.
 
-This boundary proves that a trusted local ``refs/heads/main`` observation matched
-the SHA named by one human-signed physical-qualification request when that
-request was irreversibly reserved. It does not claim main stays frozen and it
-does not start a physical campaign.
+The authority-bearing path in this module is intentionally narrow. It derives
+its own wall-clock time, reads ``refs/heads/main`` through ``TrustedGitRuntime``
+after the irreversible create-once lock is acquired, re-verifies the signed
+human request at that time, and only then commits a canonical reservation.
+
+A reservation proves one canonical *host-local* replay guard. It deliberately
+does not claim distributed/global replay safety, a persistent frozen main,
+physical campaign completion, pilot GO, publication, or activation authority.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from .asymmetric_authority import (
     DetachedEd25519AuthoritySignature,
@@ -34,6 +38,7 @@ from .trusted_git_runtime_staging import TrustedGitRuntime
 MAIN_OBSERVATION_SCHEMA = "kaliv-rsi-local-main-head-observation/v1"
 RESERVATION_SCHEMA = "kaliv-rsi-physical-qualification-reservation/v1"
 RESERVATION_AUTHORITY = "consumed-request-evidence-only"
+LEDGER_SCOPE = "canonical-host-local-v1"
 MAIN_REF = "refs/heads/main"
 _MAX_OBSERVATION_AGE = timedelta(minutes=5)
 _MAX_ARTIFACT_BYTES = 256 * 1024
@@ -46,7 +51,7 @@ _UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
 class PhysicalQualificationReservationError(ValueError):
-    """The main-head observation or one-time reservation is invalid."""
+    """The trusted observation or host-local reservation is invalid."""
 
 
 def _canonical(value: Mapping[str, Any]) -> str:
@@ -109,6 +114,12 @@ def _utc(value: Any, *, name: str) -> datetime:
         raise PhysicalQualificationReservationError(f"{name} is invalid") from exc
 
 
+def _now_utc_seconds() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
 def _safe_root(path: Path, *, name: str) -> Path:
     root = Path(path)
     if not root.is_absolute() or not root.is_dir() or _has_linkish_component(root):
@@ -118,8 +129,51 @@ def _safe_root(path: Path, *, name: str) -> Path:
     return root.resolve()
 
 
+def _ensure_link_free_directory(path: Path, *, name: str) -> Path:
+    target = Path(path)
+    if not target.is_absolute():
+        raise PhysicalQualificationReservationError(f"{name} must be absolute")
+    cursor = target
+    missing: list[Path] = []
+    while not cursor.exists():
+        if cursor.parent == cursor:
+            raise PhysicalQualificationReservationError(f"{name} has no existing parent")
+        missing.append(cursor)
+        cursor = cursor.parent
+    if not cursor.is_dir() or _has_linkish_component(cursor):
+        raise PhysicalQualificationReservationError(f"{name} parent is unsafe")
+    for directory in reversed(missing):
+        try:
+            directory.mkdir()
+        except FileExistsError:
+            pass
+        if not directory.is_dir() or directory.is_symlink():
+            raise PhysicalQualificationReservationError(f"{name} creation raced")
+    return _safe_root(target, name=name)
+
+
 def _path_sha256(path: Path) -> str:
     return _sha256_bytes(os.fsencode(os.fspath(path)))
+
+
+def _canonical_host_ledger_root() -> Path:
+    """Return the single production ledger location for this host.
+
+    There is intentionally no public root/ID parameter. Tests use the private
+    transaction helper with a temporary root instead of weakening production
+    authority. Host-local state still cannot prove distributed/global replay
+    exclusion, which is why every receipt keeps ``global_replay_safe=false``.
+    """
+
+    if os.name == "nt":
+        root = Path(r"C:\ProgramData\ModelRig\DevControl\rsi-physical-request-ledger-v1")
+    elif os.name == "posix":
+        root = Path("/var/lib/modelrig/devcontrol/rsi-physical-request-ledger-v1")
+    else:
+        raise PhysicalQualificationReservationError(
+            "canonical physical request ledger is unsupported on this platform"
+        )
+    return _ensure_link_free_directory(root, name="canonical physical request ledger")
 
 
 _OBSERVATION_FIELDS = {
@@ -139,6 +193,8 @@ _OBSERVATION_FIELDS = {
 
 @dataclass(frozen=True, slots=True)
 class LocalMainHeadObservation:
+    """Serializable evidence only; this type by itself grants no authority."""
+
     repository: str
     repository_root_path_sha256: str
     observed_sha: str
@@ -179,7 +235,9 @@ class LocalMainHeadObservation:
 
     @classmethod
     def from_mapping(cls, value: Any) -> "LocalMainHeadObservation":
-        return cls(**_strict(value, fields=_OBSERVATION_FIELDS, name="main-head observation"))
+        return cls(
+            **_strict(value, fields=_OBSERVATION_FIELDS, name="main-head observation")
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -255,7 +313,7 @@ def observe_local_main_head(
     observed_at_utc: str,
     repository: str = "Ternedal/ModelRig",
 ) -> LocalMainHeadObservation:
-    """Read only ``refs/heads/main`` through the staged trusted Git runtime."""
+    """Collect read-only observation evidence; does not itself authorize consume."""
 
     if not isinstance(trusted_git, TrustedGitRuntime):
         raise PhysicalQualificationReservationError(
@@ -278,7 +336,8 @@ def observe_local_main_head(
 
 _RESERVATION_FIELDS = {
     "schema",
-    "ledger_id",
+    "ledger_scope",
+    "ledger_root_path_sha256",
     "request_id",
     "request_sha256",
     "qualification_packet_sha256",
@@ -293,7 +352,8 @@ _RESERVATION_FIELDS = {
     "approver_actor_id",
     "main_head_match_confirmed",
     "request_consumed",
-    "replay_safe",
+    "host_replay_guard_committed",
+    "global_replay_safe",
     "frozen_main_confirmed",
     "physical_campaign_completed",
     "campaign_start_authorized",
@@ -306,7 +366,9 @@ _RESERVATION_FIELDS = {
 
 @dataclass(frozen=True, slots=True)
 class PhysicalQualificationReservation:
-    ledger_id: str
+    """Parseable final receipt; authority requires canonical-ledger load."""
+
+    ledger_root_path_sha256: str
     request_id: str
     request_sha256: str
     qualification_packet_sha256: str
@@ -319,9 +381,11 @@ class PhysicalQualificationReservation:
     consumed_at_utc: str
     collector_actor_id: str
     approver_actor_id: str
+    ledger_scope: str = LEDGER_SCOPE
     main_head_match_confirmed: bool = True
     request_consumed: bool = True
-    replay_safe: bool = True
+    host_replay_guard_committed: bool = True
+    global_replay_safe: bool = False
     frozen_main_confirmed: bool = False
     physical_campaign_completed: bool = False
     campaign_start_authorized: bool = False
@@ -332,13 +396,13 @@ class PhysicalQualificationReservation:
     schema: str = RESERVATION_SCHEMA
 
     def __post_init__(self) -> None:
-        if self.schema != RESERVATION_SCHEMA:
+        if self.schema != RESERVATION_SCHEMA or self.ledger_scope != LEDGER_SCOPE:
             raise PhysicalQualificationReservationError(
-                "physical reservation schema is unsupported"
+                "physical reservation schema/ledger scope is unsupported"
             )
-        _identifier(self.ledger_id, name="ledger_id")
         _identifier(self.request_id, name="request_id")
         for name, value, pattern in (
+            ("ledger_root_path_sha256", self.ledger_root_path_sha256, _HEX64),
             ("request_sha256", self.request_sha256, _HEX64),
             ("qualification_packet_sha256", self.qualification_packet_sha256, _HEX64),
             ("signature_sha256", self.signature_sha256, _HEX64),
@@ -348,8 +412,12 @@ class PhysicalQualificationReservation:
         ):
             _hex(value, name=name, pattern=pattern)
         _actor(self.requester_actor_id, name="requester_actor_id")
-        _actor(self.collector_actor_id, name="collector_actor_id")
-        _actor(self.approver_actor_id, name="approver_actor_id")
+        collector = _actor(self.collector_actor_id, name="collector_actor_id")
+        approver = _actor(self.approver_actor_id, name="approver_actor_id")
+        if collector == approver:
+            raise PhysicalQualificationReservationError(
+                "physical collector and approver must remain different actors"
+            )
         observed = _utc(self.observed_at_utc, name="observed_at_utc")
         consumed = _utc(self.consumed_at_utc, name="consumed_at_utc")
         if observed > consumed or consumed - observed > _MAX_OBSERVATION_AGE:
@@ -363,10 +431,11 @@ class PhysicalQualificationReservation:
         if (
             self.main_head_match_confirmed is not True
             or self.request_consumed is not True
-            or self.replay_safe is not True
+            or self.host_replay_guard_committed is not True
+            or self.global_replay_safe is not False
         ):
             raise PhysicalQualificationReservationError(
-                "reservation must preserve exact-match and one-time-consume evidence"
+                "reservation replay scope/consume evidence is invalid"
             )
         if (
             self.frozen_main_confirmed is not False
@@ -383,12 +452,15 @@ class PhysicalQualificationReservation:
 
     @classmethod
     def from_mapping(cls, value: Any) -> "PhysicalQualificationReservation":
-        return cls(**_strict(value, fields=_RESERVATION_FIELDS, name="physical reservation"))
+        return cls(
+            **_strict(value, fields=_RESERVATION_FIELDS, name="physical reservation")
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
-            "ledger_id": self.ledger_id,
+            "ledger_scope": self.ledger_scope,
+            "ledger_root_path_sha256": self.ledger_root_path_sha256,
             "request_id": self.request_id,
             "request_sha256": self.request_sha256,
             "qualification_packet_sha256": self.qualification_packet_sha256,
@@ -403,7 +475,8 @@ class PhysicalQualificationReservation:
             "approver_actor_id": self.approver_actor_id,
             "main_head_match_confirmed": self.main_head_match_confirmed,
             "request_consumed": self.request_consumed,
-            "replay_safe": self.replay_safe,
+            "host_replay_guard_committed": self.host_replay_guard_committed,
+            "global_replay_safe": self.global_replay_safe,
             "frozen_main_confirmed": self.frozen_main_confirmed,
             "physical_campaign_completed": self.physical_campaign_completed,
             "campaign_start_authorized": self.campaign_start_authorized,
@@ -421,12 +494,12 @@ class PhysicalQualificationReservation:
         return _sha256_text(self.canonical_json())
 
 
-class PhysicalQualificationRequestLedger:
-    """Create-once ledger; every uncertain state remains consumed fail-closed."""
+class _PhysicalQualificationRequestLedger:
+    """Private create-once persistence primitive for one canonical host ledger."""
 
-    def __init__(self, *, root: Path, ledger_id: str) -> None:
+    def __init__(self, root: Path) -> None:
         self.root = _safe_root(root, name="physical request ledger root")
-        self.ledger_id = _identifier(ledger_id, name="ledger_id")
+        self.root_sha256 = _path_sha256(self.root)
 
     def _paths(self, request_sha256: str) -> tuple[Path, Path, Path]:
         digest = _hex(request_sha256, name="request_sha256", pattern=_HEX64)
@@ -442,9 +515,9 @@ class PhysicalQualificationRequestLedger:
                 "physical reservation final artifact is missing or unsafe"
             )
         payload = path.read_bytes()
-        if len(payload) > _MAX_ARTIFACT_BYTES:
+        if not payload or len(payload) > _MAX_ARTIFACT_BYTES:
             raise PhysicalQualificationReservationError(
-                "physical reservation final artifact exceeds byte bound"
+                "physical reservation final artifact size is invalid"
             )
         try:
             value = json.loads(payload.decode("utf-8", errors="strict"))
@@ -457,9 +530,9 @@ class PhysicalQualificationRequestLedger:
             raise PhysicalQualificationReservationError(
                 "physical reservation final artifact is not canonical"
             )
-        if receipt.ledger_id != self.ledger_id:
+        if receipt.ledger_root_path_sha256 != self.root_sha256:
             raise PhysicalQualificationReservationError(
-                "physical reservation belongs to another ledger"
+                "physical reservation belongs to another host ledger root"
             )
         return receipt
 
@@ -469,147 +542,272 @@ class PhysicalQualificationRequestLedger:
             return self._load_final(final)
         if pending.exists() or pending.is_symlink() or lock.exists() or lock.is_symlink():
             raise PhysicalQualificationReservationError(
-                "physical request is consumed but reservation requires recovery"
+                "physical request is host-locally consumed but reservation requires recovery"
             )
         raise PhysicalQualificationReservationError(
-            "physical request reservation is missing"
+            "physical request reservation is missing from canonical host ledger"
         )
 
-    def consume_once(
+    def acquire_lock(self, request_sha256: str) -> None:
+        final, pending, lock = self._paths(request_sha256)
+        if any(path.exists() or path.is_symlink() for path in (final, pending, lock)):
+            raise PhysicalQualificationReservationError(
+                "physical request has already been host-locally consumed or requires recovery"
+            )
+        marker = _canonical(
+            {
+                "schema": "kaliv-rsi-physical-qualification-reservation-lock/v1",
+                "ledger_scope": LEDGER_SCOPE,
+                "ledger_root_path_sha256": self.root_sha256,
+                "request_sha256": request_sha256,
+            }
+        ).encode("utf-8")
+        try:
+            create_once_file(lock, marker)
+        except (FileExistsError, DurablePublicationError) as exc:
+            raise PhysicalQualificationReservationError(
+                "physical request could not be durably host-reserved"
+            ) from exc
+
+    def commit_locked_mapping(
         self,
-        reservation: PhysicalQualificationReservation,
+        *,
+        request_sha256: str,
+        mapping: Mapping[str, Any],
     ) -> PhysicalQualificationReservation:
-        if not isinstance(reservation, PhysicalQualificationReservation):
+        final, pending, lock = self._paths(request_sha256)
+        if not lock.is_file() or _has_linkish_component(lock):
             raise PhysicalQualificationReservationError(
-                "physical reservation ledger requires reservation evidence"
+                "physical request lock is missing after host-local consumption"
             )
-        if reservation.ledger_id != self.ledger_id:
+        if final.exists() or final.is_symlink() or pending.exists() or pending.is_symlink():
             raise PhysicalQualificationReservationError(
-                "physical reservation ledger ID mismatch"
+                "physical reservation commit state already exists"
             )
-        payload = reservation.canonical_json().encode("utf-8")
+        payload = _canonical(mapping).encode("utf-8")
         if len(payload) > _MAX_ARTIFACT_BYTES:
             raise PhysicalQualificationReservationError(
                 "physical reservation exceeds byte bound"
             )
-        final, pending, lock = self._paths(reservation.request_sha256)
-        if any(path.exists() or path.is_symlink() for path in (final, pending, lock)):
-            raise PhysicalQualificationReservationError(
-                "physical request has already been consumed or requires recovery"
-            )
-        reservation_marker = _canonical(
-            {
-                "schema": "kaliv-rsi-physical-qualification-reservation-lock/v1",
-                "ledger_id": self.ledger_id,
-                "request_sha256": reservation.request_sha256,
-                "reservation_sha256": reservation.sha256,
-            }
-        ).encode("utf-8")
-        try:
-            create_once_file(lock, reservation_marker)
-        except (FileExistsError, DurablePublicationError) as exc:
-            raise PhysicalQualificationReservationError(
-                "physical request could not be durably reserved"
-            ) from exc
         try:
             create_once_file(pending, payload)
             create_once_file(final, payload)
             verified = self._load_final(final)
-            if verified.canonical_json() != reservation.canonical_json():
-                raise PhysicalQualificationReservationError(
-                    "physical reservation post-write verification mismatch"
-                )
             unlink_durable(pending)
             unlink_durable(lock)
         except Exception as exc:
             raise PhysicalQualificationReservationError(
-                "physical request consumption is durable but requires recovery"
+                "physical request is durably host-consumed but reservation requires recovery"
             ) from exc
         return verified
 
 
-def build_physical_qualification_reservation(
+def _verify_request_at(
     *,
     request: PhysicalQualificationRequest,
     qualification: QualificationPacket,
     signature: DetachedEd25519AuthoritySignature,
     verifier: Ed25519AuthorityVerifier,
-    observation: LocalMainHeadObservation,
-    ledger_id: str,
-    consumed_at_utc: str,
-) -> PhysicalQualificationReservation:
-    """Reverify the request and bind it to one fresh local-main observation."""
-
-    if not isinstance(observation, LocalMainHeadObservation):
-        raise PhysicalQualificationReservationError(
-            "physical reservation requires LocalMainHeadObservation"
-        )
+    at_utc: str,
+):
     try:
-        request_receipt = verify_physical_qualification_request(
+        return verify_physical_qualification_request(
             request=request,
             qualification=qualification,
             signature=signature,
             verifier=verifier,
-            verified_at_utc=consumed_at_utc,
+            verified_at_utc=at_utc,
         )
     except PhysicalQualificationRequestError as exc:
         raise PhysicalQualificationReservationError(
             f"physical request re-verification failed: {exc}"
         ) from exc
+
+
+def _require_requested_main(
+    observation: LocalMainHeadObservation,
+    request: PhysicalQualificationRequest,
+) -> None:
     if observation.repository != request.repository:
         raise PhysicalQualificationReservationError(
-            "main-head observation belongs to another repository"
-        )
-    consumed = _utc(consumed_at_utc, name="consumed_at_utc")
-    observed = _utc(observation.observed_at_utc, name="observed_at_utc")
-    if observed > consumed or consumed - observed > _MAX_OBSERVATION_AGE:
-        raise PhysicalQualificationReservationError(
-            "main-head observation is future-dated or stale at consumption"
+            "trusted main observation belongs to another repository"
         )
     if observation.observed_sha != request.requested_frozen_main_sha:
         raise PhysicalQualificationReservationError(
             "observed main head does not match the human-requested main SHA"
         )
-    return PhysicalQualificationReservation(
-        ledger_id=ledger_id,
-        request_id=request.request_id,
-        request_sha256=request.sha256,
-        qualification_packet_sha256=qualification.sha256,
-        signature_sha256=signature.sha256,
-        requester_actor_id=request_receipt.requester_actor_id,
-        requested_main_sha=request.requested_frozen_main_sha,
-        observed_main_sha=observation.observed_sha,
-        main_observation_sha256=observation.sha256,
-        observed_at_utc=observation.observed_at_utc,
-        consumed_at_utc=consumed_at_utc,
-        collector_actor_id=request.collector_actor_id,
-        approver_actor_id=request.approver_actor_id,
-    )
 
 
-def consume_physical_qualification_request_once(
+def _reservation_mapping(
     *,
-    ledger: PhysicalQualificationRequestLedger,
+    ledger: _PhysicalQualificationRequestLedger,
+    request: PhysicalQualificationRequest,
+    qualification: QualificationPacket,
+    signature: DetachedEd25519AuthoritySignature,
+    requester_actor_id: str,
+    observation: LocalMainHeadObservation,
+    consumed_at_utc: str,
+) -> dict[str, Any]:
+    # This mapping is created only after the irreversible lock exists. The final
+    # receipt object itself is minted only by read-back from the committed file.
+    return {
+        "schema": RESERVATION_SCHEMA,
+        "ledger_scope": LEDGER_SCOPE,
+        "ledger_root_path_sha256": ledger.root_sha256,
+        "request_id": request.request_id,
+        "request_sha256": request.sha256,
+        "qualification_packet_sha256": qualification.sha256,
+        "signature_sha256": signature.sha256,
+        "requester_actor_id": requester_actor_id,
+        "requested_main_sha": request.requested_frozen_main_sha,
+        "observed_main_sha": observation.observed_sha,
+        "main_observation_sha256": observation.sha256,
+        "observed_at_utc": observation.observed_at_utc,
+        "consumed_at_utc": consumed_at_utc,
+        "collector_actor_id": request.collector_actor_id,
+        "approver_actor_id": request.approver_actor_id,
+        "main_head_match_confirmed": True,
+        "request_consumed": True,
+        "host_replay_guard_committed": True,
+        "global_replay_safe": False,
+        "frozen_main_confirmed": False,
+        "physical_campaign_completed": False,
+        "campaign_start_authorized": False,
+        "pilot_go_authorized": False,
+        "activation_authorized": False,
+        "remote_publication_authorized": False,
+        "authority": RESERVATION_AUTHORITY,
+    }
+
+
+def _consume_physical_qualification_request_once(
+    *,
+    ledger_root: Path,
+    trusted_git: TrustedGitRuntime,
+    repository_root: Path,
+    operation_root: Path,
     request: PhysicalQualificationRequest,
     qualification: QualificationPacket,
     signature: DetachedEd25519AuthoritySignature,
     verifier: Ed25519AuthorityVerifier,
-    observation: LocalMainHeadObservation,
-    consumed_at_utc: str,
+    now_provider: Callable[[], str],
 ) -> PhysicalQualificationReservation:
-    """Build and durably consume one request without authorizing campaign start."""
+    """Private injectable transaction used by production and deterministic tests."""
 
-    if not isinstance(ledger, PhysicalQualificationRequestLedger):
+    if not isinstance(trusted_git, TrustedGitRuntime):
         raise PhysicalQualificationReservationError(
-            "physical request consumption requires its dedicated ledger"
+            "physical request consumption requires TrustedGitRuntime"
         )
-    reservation = build_physical_qualification_reservation(
+    ledger = _PhysicalQualificationRequestLedger(
+        _safe_root(ledger_root, name="physical request ledger root")
+    )
+
+    # Preflight before taking the irreversible lock avoids burning an obviously
+    # stale/mismatched request. Neither preflight evidence nor time is accepted
+    # from the caller of the public authority API.
+    preflight_at = now_provider()
+    _utc(preflight_at, name="trusted preflight time")
+    _verify_request_at(
         request=request,
         qualification=qualification,
         signature=signature,
         verifier=verifier,
-        observation=observation,
-        ledger_id=ledger.ledger_id,
-        consumed_at_utc=consumed_at_utc,
+        at_utc=preflight_at,
     )
-    return ledger.consume_once(reservation)
+    preflight_observation = observe_local_main_head(
+        trusted_git=trusted_git,
+        repository_root=repository_root,
+        operation_root=operation_root,
+        observed_at_utc=preflight_at,
+        repository=request.repository,
+    )
+    _require_requested_main(preflight_observation, request)
+
+    # From here onward every failure is fail-closed: the request has been
+    # irreversibly taken out of this host's replay pool.
+    ledger.acquire_lock(request.sha256)
+    try:
+        observed_at = now_provider()
+        _utc(observed_at, name="trusted post-lock observation time")
+        observation = observe_local_main_head(
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
+            observed_at_utc=observed_at,
+            repository=request.repository,
+        )
+        _require_requested_main(observation, request)
+
+        consumed_at = now_provider()
+        consumed = _utc(consumed_at, name="trusted consumption time")
+        observed = _utc(observation.observed_at_utc, name="observed_at_utc")
+        if observed > consumed or consumed - observed > _MAX_OBSERVATION_AGE:
+            raise PhysicalQualificationReservationError(
+                "trusted main observation is future-dated or stale at consumption"
+            )
+        request_receipt = _verify_request_at(
+            request=request,
+            qualification=qualification,
+            signature=signature,
+            verifier=verifier,
+            at_utc=consumed_at,
+        )
+        mapping = _reservation_mapping(
+            ledger=ledger,
+            request=request,
+            qualification=qualification,
+            signature=signature,
+            requester_actor_id=request_receipt.requester_actor_id,
+            observation=observation,
+            consumed_at_utc=consumed_at,
+        )
+        return ledger.commit_locked_mapping(
+            request_sha256=request.sha256,
+            mapping=mapping,
+        )
+    except PhysicalQualificationReservationError:
+        raise
+    except Exception as exc:
+        raise PhysicalQualificationReservationError(
+            "physical request is durably host-consumed but reservation requires recovery"
+        ) from exc
+
+
+def consume_physical_qualification_request_once(
+    *,
+    trusted_git: TrustedGitRuntime,
+    repository_root: Path,
+    operation_root: Path,
+    request: PhysicalQualificationRequest,
+    qualification: QualificationPacket,
+    signature: DetachedEd25519AuthoritySignature,
+    verifier: Ed25519AuthorityVerifier,
+) -> PhysicalQualificationReservation:
+    """Authenticate, observe, and host-reserve one request exactly once.
+
+    Callers cannot supply observation evidence, time, ledger ID, ledger root, or
+    a prebuilt receipt. The returned receipt is loaded from the one canonical
+    host-local ledger only after the create-once transaction commits.
+    """
+
+    root = _canonical_host_ledger_root()
+    return _consume_physical_qualification_request_once(
+        ledger_root=root,
+        trusted_git=trusted_git,
+        repository_root=repository_root,
+        operation_root=operation_root,
+        request=request,
+        qualification=qualification,
+        signature=signature,
+        verifier=verifier,
+        now_provider=_now_utc_seconds,
+    )
+
+
+def load_physical_qualification_reservation(
+    request_sha256: str,
+) -> PhysicalQualificationReservation:
+    """Load authority-bearing evidence only from the canonical host ledger."""
+
+    root = _canonical_host_ledger_root()
+    return _PhysicalQualificationRequestLedger(root).load(request_sha256)
