@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -397,87 +398,204 @@ def build_planner_router(
             response["capability_receipt"] = capability_receipt_payload
         return response
 
-    @router.post("/plans/{plan_id}/start")
-    def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
-        if orchestrator is None:
-            raise HTTPException(status_code=501, detail="plan execution is not mounted")
-        try:
-            envelope = json.loads(plan_store.consume(plan_id))
-            template = AgentRun.from_json(envelope["run"])
-            stored_caps = CapabilitySnapshot(**envelope["capabilities"])
-            memory_receipt = envelope.get("memory_context", _empty_memory_receipt())
-            review_reads = bool(envelope.get("review_reads", False))
-            stored_capability_receipt = envelope.get("capability_receipt")
-        except PlanStoreError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
-            raise HTTPException(status_code=409, detail="stored plan is invalid") from exc
-
-        if review_reads and not reviewing:
-            raise HTTPException(status_code=409, detail="read review is not mounted")
-
-        current_capability_receipt: dict[str, Any] | None = None
-        if stored_capability_receipt is not None:
-            if not isinstance(stored_capability_receipt, dict):
-                raise HTTPException(status_code=409, detail="stored capability receipt is invalid")
-            if capability_graph_provider is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="capability receipt validation is not mounted",
-                )
-            if stored_capability_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
-                raise HTTPException(
-                    status_code=409,
-                    detail="stored capability receipt does not match the plan",
-                )
-            current_capability_receipt = capability_receipt(template)
-            if current_capability_receipt != stored_capability_receipt:
-                raise HTTPException(
-                    status_code=409,
-                    detail="capability receipt is stale; preview the plan again",
-                )
-            if not bool(current_capability_receipt.get("allowed", False)):
-                raise HTTPException(
-                    status_code=409,
-                    detail="plan is blocked by current capabilities",
-                )
-
-        # Recheck the gate at start time. A kill-switch decision made after the
-        # preview wins over the earlier plan.
-        caps = CapabilitySnapshot(
-            rig_reachable=stored_caps.rig_reachable,
-            worker_ready=stored_caps.worker_ready,
-            tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
-            cloud_ready=stored_caps.cloud_ready,
-            rag_ready=stored_caps.rag_ready,
-            voice_ready=stored_caps.voice_ready,
-        )
-        kwargs: dict[str, Any] = {
-            "proactive": template.proactive,
-            "allow_private_cloud": template.allow_private_cloud,
-        }
-        if reviewing:
-            kwargs["review_reads"] = review_reads
-        run = orchestrator.start_with_steps(
-            template.request,
-            caps,
-            _clone_steps(template),
-            **kwargs,
-        )
+    def _reviewed_start_response(
+        plan_id: str,
+        stored: dict[str, Any],
+        run: AgentRun,
+    ) -> dict[str, Any]:
+        review_reads = bool(stored.get("review_reads", False))
         read_review = (
             orchestrator.review_store.get(run.id)
             if reviewing
             else {"enabled": False, "waiting": False}
         )
-        response = {
+        response: dict[str, Any] = {
             "run": json.loads(run.to_json()),
             "plan_id": plan_id,
-            "memory_context": memory_receipt,
+            "memory_context": stored.get("memory_context", _empty_memory_receipt()),
             "review_reads": review_reads,
             "read_review": read_review,
         }
-        if current_capability_receipt is not None:
-            response["capability_receipt"] = current_capability_receipt
+        stored_receipt = stored.get("capability_receipt")
+        if stored_receipt is not None:
+            response["capability_receipt"] = stored_receipt
         return response
+
+    def _reviewed_start_error(reason: str, message: str, status_code: int = 409) -> HTTPException:
+        return HTTPException(
+            status_code=status_code,
+            detail=message,
+            headers={"X-ModelRig-Agent3-Reason": reason},
+        )
+
+    def _reconcile_reviewed_start_run(run_id: str) -> AgentRun:
+        try:
+            return orchestrator.advance(run_id)
+        except Exception as exc:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start requires recovery retry",
+                status_code=503,
+            ) from exc
+
+    @router.post("/plans/{plan_id}/start")
+    def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
+        if orchestrator is None:
+            raise _reviewed_start_error(
+                "reviewed_start_executor_unavailable",
+                "plan execution is not mounted",
+                status_code=501,
+            )
+
+        recovery = plan_store.reviewed_start_recovery(plan_id)
+        payload: str
+        reserved_run_id: str
+        if recovery is not None:
+            state, recovered_run_id, owner = recovery
+            if state == "refused":
+                raise _reviewed_start_error(
+                    "reviewed_start_refused",
+                    "reviewed Start is no longer recoverable",
+                )
+            if recovered_run_id is None:
+                raise _reviewed_start_error(
+                    "reviewed_start_refused",
+                    "reviewed Start is missing its bound run",
+                )
+            reserved_run_id = recovered_run_id
+            existing = orchestrator.store.load(reserved_run_id)
+            if state == "accepted":
+                if existing is None:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "accepted reviewed Start is missing its bound run",
+                    )
+                stored = json.loads(
+                    plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
+                )
+                return _reviewed_start_response(plan_id, stored, existing)
+            if owner == plan_store.start_owner:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed Start is still materializing in this worker",
+                )
+            if not plan_store.claim_reviewed_start_recovery(
+                plan_id,
+                reserved_run_id,
+                owner,
+            ):
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed Start recovery changed concurrently",
+                )
+            payload = plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
+            if existing is not None:
+                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
+                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+                stored = json.loads(payload)
+                return _reviewed_start_response(plan_id, stored, reconciled)
+        else:
+            reserved_run_id = str(uuid.uuid4())
+            try:
+                payload = plan_store.claim_reviewed_start(plan_id, reserved_run_id)
+            except PlanStoreError as exc:
+                raise _reviewed_start_error("reviewed_start_refused", str(exc)) from exc
+
+        try:
+            envelope = json.loads(payload)
+            template = AgentRun.from_json(envelope["run"])
+            stored_caps = CapabilitySnapshot(**envelope["capabilities"])
+            review_reads = bool(envelope.get("review_reads", False))
+            stored_capability_receipt = envelope.get("capability_receipt")
+        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "stored plan is invalid",
+            ) from exc
+
+        if review_reads and not reviewing:
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "read review is not mounted",
+            )
+
+        try:
+            if stored_capability_receipt is not None:
+                if not isinstance(stored_capability_receipt, dict):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "stored capability receipt is invalid",
+                    )
+                if capability_graph_provider is None:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "capability receipt validation is not mounted",
+                    )
+                if stored_capability_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "stored capability receipt does not match the plan",
+                    )
+                current_capability_receipt = capability_receipt(template)
+                if current_capability_receipt != stored_capability_receipt:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "capability receipt is stale; preview the plan again",
+                    )
+                if not bool(current_capability_receipt.get("allowed", False)):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "plan is blocked by current capabilities",
+                    )
+
+            caps = CapabilitySnapshot(
+                rig_reachable=stored_caps.rig_reachable,
+                worker_ready=stored_caps.worker_ready,
+                tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
+                cloud_ready=stored_caps.cloud_ready,
+                rag_ready=stored_caps.rag_ready,
+                voice_ready=stored_caps.voice_ready,
+            )
+            kwargs: dict[str, Any] = {
+                "proactive": template.proactive,
+                "allow_private_cloud": template.allow_private_cloud,
+                "run_id": reserved_run_id,
+            }
+            if reviewing:
+                kwargs["review_reads"] = review_reads
+                # A reviewed run must never become externally observable without
+                # its read-review policy. ReviewingAgent3Orchestrator already
+                # configures normal routed runs before saving them, but its
+                # blocked-route path uses the base blocked-run helper. Persist the
+                # policy here before either path can materialize the reserved run.
+                orchestrator.review_store.configure(reserved_run_id, review_reads)
+            run = orchestrator.start_with_steps(
+                template.request,
+                caps,
+                _clone_steps(template),
+                **kwargs,
+            )
+            if run.id != reserved_run_id:
+                raise RuntimeError("reviewed Start materialized a different run id")
+            plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+            return _reviewed_start_response(plan_id, envelope, run)
+        except HTTPException:
+            existing = orchestrator.store.load(reserved_run_id)
+            if existing is not None:
+                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
+                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+                return _reviewed_start_response(plan_id, envelope, reconciled)
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise
+        except Exception:
+            existing = orchestrator.store.load(reserved_run_id)
+            if existing is not None:
+                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
+                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+                return _reviewed_start_response(plan_id, envelope, reconciled)
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise
 
     return router
