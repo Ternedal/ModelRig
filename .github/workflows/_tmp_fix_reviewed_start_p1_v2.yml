@@ -85,13 +85,17 @@ jobs:
           git rm .tmp_fix_reviewed_start_p1.py
           git rm .tmp_narrow_reviewed_start_p1.py
           git add -A
-          if git diff --cached --name-only | grep -q '^\.github/workflows/_tmp_'; then
+          if git diff --cached --diff-filter=ACMR --name-only | grep -q '^\.github/workflows/_tmp_'; then
             echo "temporary workflow leaked into retained tree" >&2
             exit 1
           fi
-          if git diff --cached --name-only | grep -q '^\.tmp_'; then
+          if git diff --cached --diff-filter=ACMR --name-only | grep -q '^\.tmp_'; then
             echo "temporary helper leaked into retained tree" >&2
             exit 1
           fi
+          test ! -e .github/workflows/_tmp_fix_reviewed_start_p1.yml
+          test ! -e .github/workflows/_tmp_fix_reviewed_start_p1_v2.yml
+          test ! -e .tmp_fix_reviewed_start_p1.py
+          test ! -e .tmp_narrow_reviewed_start_p1.py
           git commit -m "fix(agent3): fail closed during reviewed Start recovery [reviewed-start-p1]"
           git push origin HEAD:fix/agent3-reviewed-start-recovery-p1-20260912
