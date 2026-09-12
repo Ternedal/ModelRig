@@ -755,6 +755,7 @@ fun KalivAgentCockpit(
     fun startTask() {
         val text = input.trim()
         if (text.isEmpty() || busy) return
+        errorText = null
         turns.add("user" to text)
         input = ""
         busy = true
@@ -771,6 +772,7 @@ fun KalivAgentCockpit(
 
     fun decide(approve: Boolean) {
         val card = pending ?: return
+        errorText = null
         pending = null
         busy = true
         // Mark the active step's outcome.
@@ -796,12 +798,13 @@ fun KalivAgentCockpit(
         }
     }
 
-    fun abortTask() {
+    fun clearCompletedTask() {
+        // No worker cancellation contract exists. A local clear is only safe
+        // after the authoritative request/confirmation has reached a known terminal state.
+        if (busy || pending != null || errorText != null) return
         taskStarted = false
         plan.clear()
         turns.clear()
-        pending = null
-        busy = false
     }
 
     Row(modifier.fillMaxSize()) {
@@ -815,8 +818,14 @@ fun KalivAgentCockpit(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text("Opgave", color = KalivTheme.colors.TextHigh, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                if (taskStarted) {
-                    OutlineChip("\u2715 Afbryd", onClick = { abortTask() })
+                val clearPresentation = presentAgentClear(
+                    taskStarted = taskStarted,
+                    busy = busy,
+                    hasPendingConfirmation = pending != null,
+                    hasError = errorText != null,
+                )
+                if (clearPresentation.visible) {
+                    OutlineChip(clearPresentation.label.orEmpty(), onClick = { clearCompletedTask() })
                 }
             }
             Spacer(Modifier.height(14.dp))
