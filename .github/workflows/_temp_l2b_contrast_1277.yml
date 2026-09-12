@@ -25,14 +25,13 @@ jobs:
           python tests/workflow_gates_read_code.py
       - name: Remove temporary patch machinery
         run: |
-          rm .github/l2b_meta_patch_1277.py
-          rm .github/workflows/_temp_l2b_meta_1277.yml
-          rm .github/workflows/_temp_l2b_contrast_1277.yml
+          rm -f .github/l2b_meta_patch_1277.py
+          rm -f .github/workflows/_temp_l2b_contrast_1277.yml
       - name: Commit correction
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/support/workflow_desktop_light_theme.py .github/l2b_meta_patch_1277.py .github/workflows/_temp_l2b_meta_1277.yml .github/workflows/_temp_l2b_contrast_1277.yml
+          git add -A tests/support/workflow_desktop_light_theme.py .github/l2b_meta_patch_1277.py .github/workflows/_temp_l2b_contrast_1277.yml
           git diff --cached --check
           git commit -m "test(desktop): inspect L2b source as code (#1277)"
           git push origin HEAD:fix/desktop-light-chrome-l2b-1277-sol
