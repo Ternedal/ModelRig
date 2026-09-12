@@ -1,0 +1,67 @@
+name: review-desktop-ux-1328-exact
+
+on:
+  push:
+    branches:
+      - review/desktop-ux-1328-exact-build
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-review-artifact:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact integrated candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 93f735e93cb6714f4cb3df1eca8bc33adec24e2f
+          fetch-depth: 1
+
+      - name: Assert exact candidate authority
+        shell: pwsh
+        run: |
+          $expected = '93f735e93cb6714f4cb3df1eca8bc33adec24e2f'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "Wrong review candidate: expected=$expected actual=$actual" }
+          if (git status --porcelain) { throw 'Exact candidate checkout is not clean' }
+          if ((Get-Content VERSION -Raw).Trim() -ne '2.0.13') { throw 'Review candidate VERSION is not 2.0.13' }
+
+      - name: Set up Java 21
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build Windows-native desktop uber jar
+        shell: pwsh
+        working-directory: desktop
+        run: .\gradlew.bat :composeApp:packageUberJarForCurrentOS --no-daemon --console=plain
+
+      - name: Stage candidate-bound review package
+        shell: pwsh
+        run: |
+          $expected = '93f735e93cb6714f4cb3df1eca8bc33adec24e2f'
+          $jars = @(Get-ChildItem 'desktop\composeApp\build\compose\jars' -Filter '*.jar' -File)
+          if ($jars.Count -ne 1) { throw "Expected exactly one packaged jar; found $($jars.Count)" }
+          New-Item -ItemType Directory -Force -Path 'review-artifact' | Out-Null
+          $out = 'review-artifact\Kaliv-windows-x64-2.0.13-review-93f735e93cb6.jar'
+          Copy-Item -LiteralPath $jars[0].FullName -Destination $out
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $out).Hash.ToLowerInvariant()
+          @(
+            'schema=kaliv-desktop-ux-review-artifact/v1',
+            "candidate_sha=$expected",
+            'version=2.0.13',
+            "jar_sha256=$hash",
+            "source_jar=$($jars[0].Name)",
+            'production_activation=false'
+          ) | Set-Content -Encoding utf8 'review-artifact\REVIEW_MANIFEST.txt'
+          "$hash  Kaliv-windows-x64-2.0.13-review-93f735e93cb6.jar" | Set-Content -Encoding ascii 'review-artifact\SHA256SUMS.txt'
+
+      - name: Upload exact-head Windows review artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: kaliv-desktop-ux-review-93f735e93cb6
+          path: review-artifact/
+          if-no-files-found: error
+          retention-days: 3
