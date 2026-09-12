@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-local-main-head-observation-v1.schema.json",
+  "title": "ModelRig RSI local main-head observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "repository_root_path_sha256",
+    "ref",
+    "observed_sha",
+    "observed_at_utc",
+    "git_runtime_manifest_sha256",
+    "git_executable_sha256",
+    "network_performed",
+    "repository_mutated",
+    "authority"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-local-main-head-observation/v1"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "repository_root_path_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ref": {"const": "refs/heads/main"},
+    "observed_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "observed_at_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "git_runtime_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_executable_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "network_performed": {"const": false},
+    "repository_mutated": {"const": false},
+    "authority": {"const": "evidence-only"}
+  }
+}
