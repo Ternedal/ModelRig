@@ -1,9 +1,9 @@
 """Trusted local-main observation and durable one-time DC-L15 request reservation.
 
-This boundary closes replay and proves that the locally observed ``main`` head
-matched the SHA named by one human-signed physical-qualification request at the
-time the request was consumed.  It deliberately does *not* claim that main is
-frozen for the duration of a physical campaign and does not start any process.
+This boundary proves that a trusted local ``refs/heads/main`` observation matched
+the SHA named by one human-signed physical-qualification request when that
+request was irreversibly reserved. It does not claim main stays frozen and it
+does not start a physical campaign.
 """
 from __future__ import annotations
 
@@ -20,11 +20,7 @@ from .asymmetric_authority import (
     DetachedEd25519AuthoritySignature,
     Ed25519AuthorityVerifier,
 )
-from .durable_publication import (
-    DurablePublicationError,
-    create_once_file,
-    unlink_durable,
-)
+from .durable_publication import DurablePublicationError, create_once_file, unlink_durable
 from .improvement_physical_request import (
     PhysicalQualificationRequest,
     PhysicalQualificationRequestError,
@@ -45,6 +41,7 @@ _MAX_ARTIFACT_BYTES = 256 * 1024
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$")
+_ACTOR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$")
 _UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
@@ -87,6 +84,12 @@ def _identifier(value: Any, *, name: str) -> str:
     return value
 
 
+def _actor(value: Any, *, name: str) -> str:
+    if not isinstance(value, str) or _ACTOR.fullmatch(value) is None:
+        raise PhysicalQualificationReservationError(f"{name} is invalid")
+    return value
+
+
 def _hex(value: Any, *, name: str, pattern: re.Pattern[str]) -> str:
     if not isinstance(value, str) or pattern.fullmatch(value) is None:
         raise PhysicalQualificationReservationError(f"{name} is invalid")
@@ -108,20 +111,21 @@ def _utc(value: Any, *, name: str) -> datetime:
 
 def _safe_root(path: Path, *, name: str) -> Path:
     root = Path(path)
-    if (
-        not root.is_absolute()
-        or not root.is_dir()
-        or _has_linkish_component(root)
-    ):
+    if not root.is_absolute() or not root.is_dir() or _has_linkish_component(root):
         raise PhysicalQualificationReservationError(
             f"{name} must be an absolute link-free directory"
         )
     return root.resolve()
 
 
+def _path_sha256(path: Path) -> str:
+    return _sha256_bytes(os.fsencode(os.fspath(path)))
+
+
 _OBSERVATION_FIELDS = {
     "schema",
     "repository",
+    "repository_root_path_sha256",
     "ref",
     "observed_sha",
     "observed_at_utc",
@@ -136,6 +140,7 @@ _OBSERVATION_FIELDS = {
 @dataclass(frozen=True, slots=True)
 class LocalMainHeadObservation:
     repository: str
+    repository_root_path_sha256: str
     observed_sha: str
     observed_at_utc: str
     git_runtime_manifest_sha256: str
@@ -155,18 +160,14 @@ class LocalMainHeadObservation:
             raise PhysicalQualificationReservationError(
                 "main-head observation repository/ref is unsupported"
             )
-        _hex(self.observed_sha, name="observed_sha", pattern=_HEX40)
+        for name, value, pattern in (
+            ("repository_root_path_sha256", self.repository_root_path_sha256, _HEX64),
+            ("observed_sha", self.observed_sha, _HEX40),
+            ("git_runtime_manifest_sha256", self.git_runtime_manifest_sha256, _HEX64),
+            ("git_executable_sha256", self.git_executable_sha256, _HEX64),
+        ):
+            _hex(value, name=name, pattern=pattern)
         _utc(self.observed_at_utc, name="observed_at_utc")
-        _hex(
-            self.git_runtime_manifest_sha256,
-            name="git_runtime_manifest_sha256",
-            pattern=_HEX64,
-        )
-        _hex(
-            self.git_executable_sha256,
-            name="git_executable_sha256",
-            pattern=_HEX64,
-        )
         if (
             self.network_performed is not False
             or self.repository_mutated is not False
@@ -184,6 +185,7 @@ class LocalMainHeadObservation:
         return {
             "schema": self.schema,
             "repository": self.repository,
+            "repository_root_path_sha256": self.repository_root_path_sha256,
             "ref": self.ref,
             "observed_sha": self.observed_sha,
             "observed_at_utc": self.observed_at_utc,
@@ -203,7 +205,14 @@ class LocalMainHeadObservation:
 
 
 class _GitReader(Protocol):
-    def run(self, args: tuple[str, ...], *, cwd: Path, maximum: int, **kwargs: Any) -> bytes: ...
+    def run(
+        self,
+        args: tuple[str, ...],
+        *,
+        cwd: Path,
+        maximum: int,
+        **kwargs: Any,
+    ) -> bytes: ...
 
 
 def _observe_with_reader(
@@ -230,6 +239,7 @@ def _observe_with_reader(
     _hex(observed_sha, name="observed main SHA", pattern=_HEX40)
     return LocalMainHeadObservation(
         repository=repository,
+        repository_root_path_sha256=_path_sha256(root),
         observed_sha=observed_sha,
         observed_at_utc=observed_at_utc,
         git_runtime_manifest_sha256=git_runtime_manifest_sha256,
@@ -337,9 +347,9 @@ class PhysicalQualificationReservation:
             ("main_observation_sha256", self.main_observation_sha256, _HEX64),
         ):
             _hex(value, name=name, pattern=pattern)
-        _identifier(self.requester_actor_id, name="requester_actor_id")
-        _identifier(self.collector_actor_id, name="collector_actor_id")
-        _identifier(self.approver_actor_id, name="approver_actor_id")
+        _actor(self.requester_actor_id, name="requester_actor_id")
+        _actor(self.collector_actor_id, name="collector_actor_id")
+        _actor(self.approver_actor_id, name="approver_actor_id")
         observed = _utc(self.observed_at_utc, name="observed_at_utc")
         consumed = _utc(self.consumed_at_utc, name="consumed_at_utc")
         if observed > consumed or consumed - observed > _MAX_OBSERVATION_AGE:
@@ -528,7 +538,7 @@ def build_physical_qualification_reservation(
     ledger_id: str,
     consumed_at_utc: str,
 ) -> PhysicalQualificationReservation:
-    """Reverify the human request and bind it to one fresh local-main observation."""
+    """Reverify the request and bind it to one fresh local-main observation."""
 
     if not isinstance(observation, LocalMainHeadObservation):
         raise PhysicalQualificationReservationError(
@@ -587,7 +597,7 @@ def consume_physical_qualification_request_once(
     observation: LocalMainHeadObservation,
     consumed_at_utc: str,
 ) -> PhysicalQualificationReservation:
-    """Build and durably consume one request, without authorizing campaign start."""
+    """Build and durably consume one request without authorizing campaign start."""
 
     if not isinstance(ledger, PhysicalQualificationRequestLedger):
         raise PhysicalQualificationReservationError(
