@@ -56,7 +56,7 @@ jobs:
           git rm .github/workflows/_tmp_fix_reviewed_start_p1c.yml
           git rm .tmp_fix_reviewed_start_p1c.py
           git add -A
-          retained_paths="$(git diff --cached --name-status | awk '$1 != "D" {print $2}')"
+          retained_paths="$(git diff --cached --diff-filter=ACMRTUXB --name-only)"
           if printf '%s\n' "$retained_paths" | grep -q '^\.github/workflows/_tmp_'; then
             echo "temporary workflow leaked into retained tree" >&2
             exit 1
