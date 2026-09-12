@@ -48,7 +48,11 @@ class Agent3ReviewedStartCapabilityBindingTest {
         val returned = expected.copy(planSha256 = "c".repeat(64))
         val server = server(startEnvelope(capabilityReceiptJson = receiptJson(returned)))
         try {
-            assertCapabilityFailure(server, expected)
+            assertCapabilityFailure(
+                server = server,
+                expected = expected,
+                expectedMessage = "Invalid Agent 3.0 Start envelope: capability receipt does not match reviewed Preview",
+            )
         } finally {
             server.stop(0)
         }
@@ -58,7 +62,11 @@ class Agent3ReviewedStartCapabilityBindingTest {
     fun reviewedStartRejectsMissingCapabilityReceipt() {
         val server = server(startEnvelope(capabilityReceiptJson = null))
         try {
-            assertCapabilityFailure(server, receipt())
+            assertCapabilityFailure(
+                server = server,
+                expected = receipt(),
+                expectedMessage = "Invalid Agent 3.0 reviewed Start capability evidence: receipt is missing",
+            )
         } finally {
             server.stop(0)
         }
@@ -68,7 +76,11 @@ class Agent3ReviewedStartCapabilityBindingTest {
     fun reviewedStartRejectsUnexpectedCapabilityReceipt() {
         val server = server(startEnvelope(capabilityReceiptJson = receiptJson(receipt())))
         try {
-            assertCapabilityFailure(server, expected = null)
+            assertCapabilityFailure(
+                server = server,
+                expected = null,
+                expectedMessage = "Invalid Agent 3.0 reviewed Start capability evidence: receipt was not expected",
+            )
         } finally {
             server.stop(0)
         }
@@ -77,6 +89,7 @@ class Agent3ReviewedStartCapabilityBindingTest {
     private fun assertCapabilityFailure(
         server: HttpServer,
         expected: Agent3CapabilityReceipt?,
+        expectedMessage: String,
     ) {
         val error = assertFailsWith<Agent3Exception> {
             Agent3Client(server.baseUrl(), "token")
@@ -86,10 +99,7 @@ class Agent3ReviewedStartCapabilityBindingTest {
                     expectedCapabilityReceipt = expected,
                 )
         }
-        assertEquals(
-            "Invalid Agent 3.0 Start envelope: capability receipt does not match reviewed Preview",
-            error.message,
-        )
+        assertEquals(expectedMessage, error.message)
     }
 
     private fun receipt(): Agent3CapabilityReceipt = Agent3CapabilityReceipt(
