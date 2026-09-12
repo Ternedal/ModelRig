@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import sys
@@ -32,19 +33,25 @@ from kaliv_dev_control.improvement_physical_request import (  # noqa: E402
     PhysicalQualificationRequest,
     build_physical_qualification_request,
 )
+import kaliv_dev_control.improvement_physical_reservation as reservation_module  # noqa: E402
 from kaliv_dev_control.improvement_physical_reservation import (  # noqa: E402
     LocalMainHeadObservation,
-    PhysicalQualificationRequestLedger,
     PhysicalQualificationReservation,
     PhysicalQualificationReservationError,
+    _PhysicalQualificationRequestLedger,
+    _consume_physical_qualification_request_once,
     _observe_with_reader,
-    build_physical_qualification_reservation,
     consume_physical_qualification_request_once,
 )
 from kaliv_dev_control.improvement_proposal import AGENT3_EVAL_SCHEMA  # noqa: E402
 from kaliv_dev_control.improvement_qualification_packet import (  # noqa: E402
     MISSING_PHYSICAL_GATES,
     QualificationPacket,
+)
+from kaliv_dev_control.trusted_git_runtime import (  # noqa: E402
+    TrustedGitRuntime,
+    capture_trusted_git_runtime_manifest,
+    stage_trusted_git_runtime,
 )
 
 
@@ -326,7 +333,85 @@ def _expect_reservation_error(fragment: str, fn) -> None:
     except PhysicalQualificationReservationError as exc:
         assert fragment in str(exc), str(exc)
     else:
-        raise AssertionError(f"expected PhysicalQualificationReservationError containing {fragment!r}")
+        raise AssertionError(
+            f"expected PhysicalQualificationReservationError containing {fragment!r}"
+        )
+
+
+_TRUSTED_GIT_SCRIPT = b'''#!/bin/sh
+while [ "$#" -ge 2 ] && [ "$1" = "-c" ]; do
+    shift 2
+done
+case "$1" in
+    --version)
+        printf 'git version modelrig-rsi-test-1\n'
+        ;;
+    rev-parse)
+        if [ "$2" = "--verify" ]; then
+            cat .modelrig-main-sha
+        else
+            exit 8
+        fi
+        ;;
+    *)
+        exit 9
+        ;;
+esac
+'''
+
+_TRUSTED_GIT_HELPER = b'''#!/bin/sh
+exit 0
+'''
+
+
+def _trusted_git_fixture(root: Path, main_sha: str):
+    if os.name == "nt":
+        return None
+    source = root / "trusted-git-source"
+    (source / "bin").mkdir(parents=True)
+    (source / "libexec" / "git-core").mkdir(parents=True)
+    (source / "lib").mkdir(parents=True)
+    executable = source / "bin" / "git"
+    helper = source / "libexec" / "git-core" / "git-helper"
+    executable.write_bytes(_TRUSTED_GIT_SCRIPT)
+    helper.write_bytes(_TRUSTED_GIT_HELPER)
+    (source / "lib" / "runtime.so").write_bytes(b"rsi-test-runtime")
+    executable.chmod(0o755)
+    helper.chmod(0o755)
+    manifest = capture_trusted_git_runtime_manifest(
+        source.resolve(),
+        executable_relative_path="bin/git",
+        exec_path_relative_path="libexec/git-core",
+        path_relative_directories=("bin", "libexec/git-core", "lib"),
+    )
+    staging = root / "trusted-git-staging"
+    staging.mkdir()
+    transaction = stage_trusted_git_runtime(
+        manifest,
+        source_root=source.resolve(),
+        staging_root=staging.resolve(),
+    )
+    operation = root / "trusted-git-operation"
+    operation.mkdir()
+    repository = root / "repository"
+    repository.mkdir()
+    (repository / ".modelrig-main-sha").write_text(main_sha + "\n", encoding="ascii")
+    return TrustedGitRuntime(transaction.resolve()), operation.resolve(), repository.resolve()
+
+
+class _SequenceClock:
+    def __init__(self, values: list[str], *, mutate=None) -> None:
+        self.values = list(values)
+        self.calls = 0
+        self.mutate = mutate
+
+    def __call__(self) -> str:
+        if self.calls >= len(self.values):
+            raise AssertionError("test clock exhausted")
+        self.calls += 1
+        if self.mutate is not None:
+            self.mutate(self.calls)
+        return self.values[self.calls - 1]
 
 
 def reservation_contract() -> None:
@@ -335,6 +420,8 @@ def reservation_contract() -> None:
     signature, verifier = _sign_request(request)
     main_sha = request.requested_frozen_main_sha
 
+    # The serializable observation model is still useful as evidence, but class
+    # membership is explicitly not provenance for the authority-bearing consume API.
     with tempfile.TemporaryDirectory() as directory:
         repo_root = Path(directory).resolve()
         reader = _FakeMainReader(main_sha)
@@ -351,164 +438,253 @@ def reservation_contract() -> None:
             (("rev-parse", "--verify", "refs/heads/main^{commit}"), repo_root, 4096)
         ]
         assert observation.repository_root_path_sha256 == expected_path_hash
-        assert observation.network_performed is False
-        assert observation.repository_mutated is False
         assert LocalMainHeadObservation.from_mapping(
             observation.to_dict()
         ).canonical_json() == observation.canonical_json()
 
-        reservation = build_physical_qualification_reservation(
+    public_parameters = set(inspect.signature(consume_physical_qualification_request_once).parameters)
+    assert "observation" not in public_parameters
+    assert "consumed_at_utc" not in public_parameters
+    assert "ledger" not in public_parameters
+    assert "ledger_root" not in public_parameters
+    assert not hasattr(reservation_module, "build_physical_qualification_reservation")
+    assert not hasattr(reservation_module, "PhysicalQualificationRequestLedger")
+
+    # Synthetic TrustedGitRuntime is POSIX-only; the exact same production API is
+    # exercised in Linux CI while the evidence model assertions above remain portable.
+    if os.name == "nt":
+        return
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        fixture = _trusted_git_fixture(root, main_sha)
+        assert fixture is not None
+        trusted_git, operation_root, repository_root = fixture
+        ledger_root = root / "ledger"
+        ledger_root.mkdir()
+        clock = _SequenceClock(
+            [
+                "2026-09-12T19:11:00Z",
+                "2026-09-12T19:11:01Z",
+                "2026-09-12T19:11:02Z",
+            ]
+        )
+        consumed = _consume_physical_qualification_request_once(
+            ledger_root=ledger_root,
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
             request=request,
             qualification=qualification,
             signature=signature,
             verifier=verifier,
-            observation=observation,
-            ledger_id="rsi-dc-l15-ledger-v1",
-            consumed_at_utc="2026-09-12T19:12:00Z",
+            now_provider=clock,
         )
-        assert reservation.main_head_match_confirmed is True
-        assert reservation.request_consumed is True
-        assert reservation.replay_safe is True
-        assert reservation.requester_actor_id == "anders.requester"
-        assert reservation.requested_main_sha == main_sha
-        assert reservation.observed_main_sha == main_sha
-        assert reservation.frozen_main_confirmed is False
-        assert reservation.physical_campaign_completed is False
-        assert reservation.campaign_start_authorized is False
-        assert reservation.pilot_go_authorized is False
-        assert reservation.activation_authorized is False
-        assert reservation.remote_publication_authorized is False
+        assert consumed.main_head_match_confirmed is True
+        assert consumed.request_consumed is True
+        assert consumed.host_replay_guard_committed is True
+        assert consumed.global_replay_safe is False
+        assert consumed.requester_actor_id == "anders.requester"
+        assert consumed.requested_main_sha == main_sha
+        assert consumed.observed_main_sha == main_sha
+        assert consumed.frozen_main_confirmed is False
+        assert consumed.physical_campaign_completed is False
+        assert consumed.campaign_start_authorized is False
+        assert consumed.pilot_go_authorized is False
+        assert consumed.activation_authorized is False
+        assert consumed.remote_publication_authorized is False
         assert PhysicalQualificationReservation.from_mapping(
-            reservation.to_dict()
-        ).canonical_json() == reservation.canonical_json()
+            consumed.to_dict()
+        ).canonical_json() == consumed.canonical_json()
 
-        wrong_main = LocalMainHeadObservation.from_mapping(
-            {**observation.to_dict(), "observed_sha": "e" * 40}
+        ledger = _PhysicalQualificationRequestLedger(ledger_root)
+        loaded = ledger.load(request.sha256)
+        assert loaded.canonical_json() == consumed.canonical_json()
+
+        duplicate_clock = _SequenceClock(
+            [
+                "2026-09-12T19:12:00Z",
+                "2026-09-12T19:12:01Z",
+                "2026-09-12T19:12:02Z",
+            ]
         )
         _expect_reservation_error(
-            "does not match the human-requested main SHA",
-            lambda: build_physical_qualification_reservation(
+            "already been host-locally consumed",
+            lambda: _consume_physical_qualification_request_once(
+                ledger_root=ledger_root,
+                trusted_git=trusted_git,
+                repository_root=repository_root,
+                operation_root=operation_root,
                 request=request,
                 qualification=qualification,
                 signature=signature,
                 verifier=verifier,
-                observation=wrong_main,
-                ledger_id="rsi-dc-l15-ledger-v1",
-                consumed_at_utc="2026-09-12T19:12:00Z",
+                now_provider=duplicate_clock,
             ),
         )
 
-        stale = LocalMainHeadObservation.from_mapping(
-            {**observation.to_dict(), "observed_at_utc": "2026-09-12T19:06:59Z"}
-        )
-        _expect_reservation_error(
-            "stale at consumption",
-            lambda: build_physical_qualification_reservation(
-                request=request,
-                qualification=qualification,
-                signature=signature,
-                verifier=verifier,
-                observation=stale,
-                ledger_id="rsi-dc-l15-ledger-v1",
-                consumed_at_utc="2026-09-12T19:12:00Z",
-            ),
-        )
-
-        fresh_but_expired = LocalMainHeadObservation.from_mapping(
-            {**observation.to_dict(), "observed_at_utc": "2026-09-12T20:09:59Z"}
-        )
-        _expect_reservation_error(
-            "request re-verification failed",
-            lambda: build_physical_qualification_reservation(
-                request=request,
-                qualification=qualification,
-                signature=signature,
-                verifier=verifier,
-                observation=fresh_but_expired,
-                ledger_id="rsi-dc-l15-ledger-v1",
-                consumed_at_utc="2026-09-12T20:10:01Z",
-            ),
-        )
-
-        elevated = reservation.to_dict()
+        elevated = consumed.to_dict()
         elevated["campaign_start_authorized"] = True
         _expect_reservation_error(
             "may not claim freeze, campaign, pilot, publication or activation authority",
             lambda: PhysicalQualificationReservation.from_mapping(elevated),
         )
+        global_claim = consumed.to_dict()
+        global_claim["global_replay_safe"] = True
+        _expect_reservation_error(
+            "replay scope/consume evidence is invalid",
+            lambda: PhysicalQualificationReservation.from_mapping(global_claim),
+        )
 
-        with tempfile.TemporaryDirectory() as ledger_directory:
-            ledger = PhysicalQualificationRequestLedger(
-                root=Path(ledger_directory), ledger_id="rsi-dc-l15-ledger-v1"
-            )
-            consumed = consume_physical_qualification_request_once(
-                ledger=ledger,
+    # Main moving after preflight but before the post-lock trusted read burns the
+    # local request and leaves an explicit recovery-required lock.
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        fixture = _trusted_git_fixture(root, main_sha)
+        assert fixture is not None
+        trusted_git, operation_root, repository_root = fixture
+        ledger_root = root / "ledger"
+        ledger_root.mkdir()
+
+        def move_main(call: int) -> None:
+            if call == 2:
+                (repository_root / ".modelrig-main-sha").write_text(
+                    "e" * 40 + "\n", encoding="ascii"
+                )
+
+        moving_clock = _SequenceClock(
+            ["2026-09-12T19:13:00Z", "2026-09-12T19:13:01Z"],
+            mutate=move_main,
+        )
+        _expect_reservation_error(
+            "does not match the human-requested main SHA",
+            lambda: _consume_physical_qualification_request_once(
+                ledger_root=ledger_root,
+                trusted_git=trusted_git,
+                repository_root=repository_root,
+                operation_root=operation_root,
                 request=request,
                 qualification=qualification,
                 signature=signature,
                 verifier=verifier,
-                observation=observation,
-                consumed_at_utc="2026-09-12T19:12:00Z",
-            )
-            loaded = ledger.load(request.sha256)
-            assert loaded.canonical_json() == consumed.canonical_json()
-            _expect_reservation_error(
-                "already been consumed or requires recovery",
-                lambda: consume_physical_qualification_request_once(
-                    ledger=ledger,
-                    request=request,
-                    qualification=qualification,
-                    signature=signature,
-                    verifier=verifier,
-                    observation=observation,
-                    consumed_at_utc="2026-09-12T19:12:01Z",
-                ),
-            )
+                now_provider=moving_clock,
+            ),
+        )
+        _expect_reservation_error(
+            "host-locally consumed but reservation requires recovery",
+            lambda: _PhysicalQualificationRequestLedger(ledger_root).load(request.sha256),
+        )
 
-        with tempfile.TemporaryDirectory() as crash_directory:
-            crash_root = Path(crash_directory)
-            crash_ledger = PhysicalQualificationRequestLedger(
-                root=crash_root, ledger_id="rsi-dc-l15-crash-ledger-v1"
-            )
-            crash_lock = crash_root / f".{request.sha256}.lock"
-            crash_lock.write_text("simulated durable reservation", encoding="utf-8")
-            _expect_reservation_error(
-                "consumed but reservation requires recovery",
-                lambda: crash_ledger.load(request.sha256),
-            )
-            _expect_reservation_error(
-                "already been consumed or requires recovery",
-                lambda: consume_physical_qualification_request_once(
-                    ledger=crash_ledger,
-                    request=request,
-                    qualification=qualification,
-                    signature=signature,
-                    verifier=verifier,
-                    observation=observation,
-                    consumed_at_utc="2026-09-12T19:12:02Z",
-                ),
-            )
-
-        with tempfile.TemporaryDirectory() as tamper_directory:
-            tamper_root = Path(tamper_directory)
-            tamper_ledger = PhysicalQualificationRequestLedger(
-                root=tamper_root, ledger_id="rsi-dc-l15-tamper-ledger-v1"
-            )
-            consumed = consume_physical_qualification_request_once(
-                ledger=tamper_ledger,
+    # Caller backdating is impossible on the public API; crossing expiry after
+    # lock is re-verified against the injected trusted test clock and stays consumed.
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        fixture = _trusted_git_fixture(root, main_sha)
+        assert fixture is not None
+        trusted_git, operation_root, repository_root = fixture
+        ledger_root = root / "ledger"
+        ledger_root.mkdir()
+        expiry_clock = _SequenceClock(
+            [
+                "2026-09-12T20:09:59Z",
+                "2026-09-12T20:10:00Z",
+                "2026-09-12T20:10:01Z",
+            ]
+        )
+        _expect_reservation_error(
+            "request re-verification failed",
+            lambda: _consume_physical_qualification_request_once(
+                ledger_root=ledger_root,
+                trusted_git=trusted_git,
+                repository_root=repository_root,
+                operation_root=operation_root,
                 request=request,
                 qualification=qualification,
                 signature=signature,
                 verifier=verifier,
-                observation=observation,
-                consumed_at_utc="2026-09-12T19:12:03Z",
+                now_provider=expiry_clock,
+            ),
+        )
+        _expect_reservation_error(
+            "host-locally consumed but reservation requires recovery",
+            lambda: _PhysicalQualificationRequestLedger(ledger_root).load(request.sha256),
+        )
+
+    # Two independent private roots can each reserve the request, which is exactly
+    # why the final receipt MUST NOT claim distributed/global replay safety.
+    receipts = []
+    for index in (1, 2):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            fixture = _trusted_git_fixture(root, main_sha)
+            assert fixture is not None
+            trusted_git, operation_root, repository_root = fixture
+            ledger_root = root / "ledger"
+            ledger_root.mkdir()
+            clock = _SequenceClock(
+                [
+                    f"2026-09-12T19:2{index}:00Z",
+                    f"2026-09-12T19:2{index}:01Z",
+                    f"2026-09-12T19:2{index}:02Z",
+                ]
             )
-            final_path = tamper_root / f"{request.sha256}.json"
-            final_path.write_bytes(consumed.canonical_json().encode("utf-8") + b"\n")
-            _expect_reservation_error(
-                "not canonical",
-                lambda: tamper_ledger.load(request.sha256),
+            receipts.append(
+                _consume_physical_qualification_request_once(
+                    ledger_root=ledger_root,
+                    trusted_git=trusted_git,
+                    repository_root=repository_root,
+                    operation_root=operation_root,
+                    request=request,
+                    qualification=qualification,
+                    signature=signature,
+                    verifier=verifier,
+                    now_provider=clock,
+                )
             )
+    assert all(receipt.global_replay_safe is False for receipt in receipts)
+    assert receipts[0].ledger_root_path_sha256 != receipts[1].ledger_root_path_sha256
+
+    # A crash-left lock is never interpreted as a reusable request.
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        ledger = _PhysicalQualificationRequestLedger(root)
+        ledger.acquire_lock(request.sha256)
+        _expect_reservation_error(
+            "host-locally consumed but reservation requires recovery",
+            lambda: ledger.load(request.sha256),
+        )
+
+    # Canonical final receipts are fail-closed against byte-level tampering.
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        fixture = _trusted_git_fixture(root, main_sha)
+        assert fixture is not None
+        trusted_git, operation_root, repository_root = fixture
+        ledger_root = root / "ledger"
+        ledger_root.mkdir()
+        consumed = _consume_physical_qualification_request_once(
+            ledger_root=ledger_root,
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
+            request=request,
+            qualification=qualification,
+            signature=signature,
+            verifier=verifier,
+            now_provider=_SequenceClock(
+                [
+                    "2026-09-12T19:30:00Z",
+                    "2026-09-12T19:30:01Z",
+                    "2026-09-12T19:30:02Z",
+                ]
+            ),
+        )
+        final_path = ledger_root / f"{request.sha256}.json"
+        final_path.write_bytes(consumed.canonical_json().encode("utf-8") + b"\n")
+        _expect_reservation_error(
+            "not canonical",
+            lambda: _PhysicalQualificationRequestLedger(ledger_root).load(request.sha256),
+        )
 
 
 def main() -> None:
@@ -566,7 +742,7 @@ def main() -> None:
         assert any("candidate.git_sha" in error for error in report["summary"]["errors"])
 
     reservation_contract()
-    print("physical validation final eight-proof gate + RSI request reservation: PASS")
+    print("physical validation final eight-proof gate + RSI host-local reservation: PASS")
 
 
 if __name__ == "__main__":
