@@ -320,4 +320,91 @@ assert second_payload["run"]["state"] == first_payload["run"]["state"] == "runni
 list_payload = snapshot_client.get("/experimental/agent3/runs").json()
 assert "capability_receipt" not in list_payload
 
-print("42 passed, 0 failed")
+# #1258: pin the documented production composition order. The middleware is
+# installed while Agent 3 is still dormant, then the full mount supplies runtime
+# authority later. Request-time lookup must still produce exact-run evidence.
+from app.agent3.production_mount import close_agent3, mount_agent3
+
+with tempfile.TemporaryDirectory(prefix="agent3-production-composition-") as composition_root:
+    composition_env = {
+        "KALIV_AGENT3_ENABLED": "1",
+        "KALIV_AGENT3_DB": os.path.join(composition_root, "runs.db"),
+        "KALIV_AGENT3_REVIEW_DB": os.path.join(composition_root, "reviews.db"),
+        "KALIV_AGENT3_REPLAN_DB": os.path.join(composition_root, "replans.db"),
+        "KALIV_AGENT3_MEMORY_DB": os.path.join(composition_root, "memory.db"),
+        "KALIV_AGENT3_PLAN_DB": os.path.join(composition_root, "plans.db"),
+        "KALIV_AGENT3_TASK_PLAN_DB": os.path.join(composition_root, "task-plans.db"),
+        "KALIV_AGENT3_APPROVAL_DB": os.path.join(composition_root, "approvals.db"),
+        "KALIV_AGENT3_MEMORY_STORE": "legacy",
+        "KALIV_AGENT3_TASK_WORKERS": "1",
+    }
+    old_env = {name: os.environ.get(name) for name in composition_env}
+    try:
+        os.environ.update(composition_env)
+        composition_app = FastAPI(version="test-version")
+        assert not getattr(composition_app.state, "agent3_mounted", False)
+
+        install_termination_contract(composition_app)
+        early_middleware_count = len(composition_app.user_middleware)
+        assert early_middleware_count == 1
+        assert getattr(composition_app.state, "agent3_termination_contract_mounted", False)
+        assert not getattr(composition_app.state, "agent3_mounted", False)
+
+        assert mount_agent3(composition_app) is True
+        assert getattr(composition_app.state, "agent3_mounted", False)
+        assert len(composition_app.user_middleware) == early_middleware_count
+
+        composition_run = AgentRun(
+            request=TurnRequest(
+                "production composition receipt",
+                mode="rig",
+                tools=False,
+                conversation_id="conv-production-composition",
+            ),
+            route=RoutePlan(
+                RouteKind.DIRECT_RIG,
+                "production composition route",
+                uses_cloud=False,
+                uses_rig=True,
+                uses_tools=False,
+                uses_rag=False,
+            ),
+            steps=[],
+        )
+        composition_app.state.agent3_orchestrator.store.save(composition_run)
+        composition_client = TestClient(composition_app)
+        try:
+            exact_get = composition_client.get(
+                f"/experimental/agent3/runs/{composition_run.id}"
+            )
+            assert exact_get.status_code == 200, exact_get.text
+            exact_payload = exact_get.json()
+            assert "capability_receipt" in exact_payload
+            exact_returned_run = AgentRun.from_json(
+                json.dumps(exact_payload["run"], ensure_ascii=False, sort_keys=True)
+            )
+            assert (
+                exact_payload["capability_receipt"]["plan_sha256"]
+                == agent_run_plan_sha256(exact_returned_run)
+            )
+            assert exact_payload["capability_receipt"]["production_activation"] is False
+
+            events_get = composition_client.get(
+                f"/experimental/agent3/runs/{composition_run.id}/events"
+            )
+            assert events_get.status_code == 200, events_get.text
+            assert "capability_receipt" not in events_get.json()
+        finally:
+            composition_client.close()
+            close_agent3(composition_app)
+
+        assert composition_app.state.agent3_resources_closed is True
+        assert composition_app.state.agent3_mounted is False
+    finally:
+        for name, previous in old_env.items():
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
+
+print("53 passed, 0 failed")
