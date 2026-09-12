@@ -39,3 +39,57 @@ opfundet forbedringsarbejde. Promotion til en rigtig udviklingsopgave forbliver
 et separat authority-step under ADR-DC-001.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-002_RSI_IMPROVEMENT_PROPOSAL_BOUNDARY.md`
+
+## ADR-DC-003 — Signeret promotion fra RSI-forslag til DevelopmentTask
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Gør proposal → `DevelopmentTask` til en separat, human-signed authority-grænse.
+Hele task-scope, commands, budget, risk og acceptance criteria skal ligge i det
+signerede authorization-artifact; intet execution scope må arves implicit fra
+modellens suggestions.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-003_RSI_PROPOSAL_PROMOTION_BOUNDARY.md`
+
+## ADR-DC-004 — Candidate-vs-incumbent regression proof for RSI
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Binder incumbent til proposalets originale evidence digest og kræver identisk
+eval-univers for candidate. En kandidat accepteres kun ved målbar forbedring
+uden request-, discipline- eller risk-regression og uden at give ny authority.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-004_RSI_CANDIDATE_REGRESSION_PROOF.md`
+
+## ADR-DC-005 — RSI candidate runtime provenance
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Lukker provenance-kløften mellem DC-L13's materialiserede candidate commit/tree
+og den runtime-kode, som Agent 3-evalen faktisk målte. Exact Git-tree,
+worker-fingerprint, candidate-eval og accepted regression proof bindes uden
+publication-, merge- eller activation-authority.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-005_RSI_CANDIDATE_RUNTIME_PROVENANCE.md`
+
+## ADR-DC-006 — Read-only RSI candidate snapshot collection
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Indsamler tracked candidate-bytes fra DC-L13's local-only bare repository gennem
+staged `TrustedGitRuntime`, med objektbinding og budgets. Collection er offline,
+read-only, re-verificerer materialization og tilføjer ingen Git/GitHub write-
+eller execution-authority.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-006_RSI_CANDIDATE_SNAPSHOT_COLLECTION.md`
+
+## ADR-DC-007 — RSI pre-physical qualification packet før DC-L15/DC-L16
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Samler hele software-RSI chain-of-custody i et evidence-only qualification
+packet, men holder de fysiske og menneskelige gates eksplicit åbne. Et packet
+kan derfor bevise softwarekæden uden at erklære GO, starte DC-L15/DC-L16 eller
+autorisere publication/activation.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-007_RSI_PRE_PHYSICAL_QUALIFICATION_PACKET.md`

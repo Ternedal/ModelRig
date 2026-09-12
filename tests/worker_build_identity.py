@@ -1,11 +1,10 @@
-"""Source/runtime identity plus RSI provenance and snapshot collector contracts.
+"""Source/runtime identity plus RSI provenance, collection and qualification contracts.
 
 Run: PYTHONPATH=worker python3 tests/worker_build_identity.py
 """
 from __future__ import annotations
 
 import hashlib
-import os
 import sys
 import tempfile
 from dataclasses import replace
@@ -26,12 +25,26 @@ from kaliv_dev_control.improvement_candidate_provenance import (  # noqa: E402
 )
 from kaliv_dev_control.improvement_candidate_snapshot import (  # noqa: E402
     CandidateSnapshotError,
+    CandidateSnapshotReceipt,
     SnapshotBudget,
     _collect_with_reader,
 )
+from kaliv_dev_control.improvement_promotion import (  # noqa: E402
+    PROMOTION_AUTHORITY,
+    PROMOTION_ISSUER_SYSTEM_ID,
+    PromotionReceipt,
+    proposal_sha256,
+)
 from kaliv_dev_control.improvement_proposal import (  # noqa: E402
     AGENT3_EVAL_SCHEMA,
+    ImprovementProposal,
     canonical_sha256,
+)
+from kaliv_dev_control.improvement_qualification_packet import (  # noqa: E402
+    MISSING_PHYSICAL_GATES,
+    QualificationPacket,
+    QualificationPacketError,
+    build_qualification_packet,
 )
 from kaliv_dev_control.improvement_regression import CandidateRegressionProof  # noqa: E402
 
@@ -479,9 +492,7 @@ expect_error(
     lambda: _collect(_FakeReader(tree="d" * 40)),
     "candidate root tree cannot move before collection",
 )
-_truncated = (
-    b"100644 blob " + ("e" * 40).encode("ascii") + b"\tREADME.md"
-)
+_truncated = b"100644 blob " + ("e" * 40).encode("ascii") + b"\tREADME.md"
 expect_error(
     CandidateSnapshotError,
     "not NUL terminated",
@@ -489,5 +500,172 @@ expect_error(
     "truncated ls-tree output fails closed",
 )
 
-print(f"\n===== BUILD IDENTITY + RSI PROVENANCE: {passed} passed, {failed} failed =====")
+
+# Pre-physical qualification: a complete software chain still cannot become GO.
+_qual_proposal = ImprovementProposal.from_mapping(
+    {
+        "schema": "kaliv-rsi-improvement-proposal/v1",
+        "proposal_id": "RSI_QUAL_001",
+        "repository": "Ternedal/ModelRig",
+        "base_sha": "7" * 40,
+        "source_schema": AGENT3_EVAL_SCHEMA,
+        "evidence_sha256": "8" * 64,
+        "finding_ids": ["A3-QUAL-001"],
+        "title": "Qualification chain fixture",
+        "problem": "Candidate skal bindes til fysisk gate uden auto-activation.",
+        "hypothesis": "En komplet softwarekæde kan bevises uden at tildele GO.",
+        "expected_gain": "Qualification bliver auditable og fail-closed.",
+        "implementation_strategy": "Bind proposal, promotion, snapshot, regression og provenance.",
+        "suggested_paths": ["worker/app/planner.py"],
+        "suggested_tests": ["python tests/worker_build_identity.py"],
+        "acceptance_criteria": ["software chain complete men GO forbliver false"],
+        "required_evals": [AGENT3_EVAL_SCHEMA],
+        "risk": "medium",
+        "authority": "proposal-only",
+        "merge_authority": "human",
+    }
+)
+_qual_proposal_sha = proposal_sha256(_qual_proposal)
+_qual_promotion = PromotionReceipt.from_mapping(
+    {
+        "schema": "kaliv-rsi-promotion-receipt/v1",
+        "proposal_id": _qual_proposal.proposal_id,
+        "proposal_sha256": _qual_proposal_sha,
+        "authorization_sha256": "a" * 64,
+        "authorization_signature_sha256": "b" * 64,
+        "task_id": "RSI_TASK_QUAL_001",
+        "task_sha256": _task_sha,
+        "repository": _qual_proposal.repository,
+        "base_sha": _qual_proposal.base_sha,
+        "reviewer_actor_id": "anders.test",
+        "issuer_system_id": PROMOTION_ISSUER_SYSTEM_ID,
+        "verified_at_utc": "2026-09-12T19:01:00Z",
+        "required_evals": list(_qual_proposal.required_evals),
+        "authority": PROMOTION_AUTHORITY,
+    }
+)
+_qual_regression = replace(
+    _regression,
+    proposal_id=_qual_proposal.proposal_id,
+    proposal_sha256=_qual_proposal_sha,
+    promotion_receipt_sha256=_qual_promotion.sha256,
+    task_id=_qual_promotion.task_id,
+    task_sha256=_qual_promotion.task_sha256,
+    repository=_qual_promotion.repository,
+    base_sha=_qual_promotion.base_sha,
+    baseline_eval_sha256=_qual_proposal.evidence_sha256,
+)
+_qual_provenance = build_candidate_runtime_provenance(
+    materialized=_materialized,
+    snapshot=_snapshot_lf,
+    candidate_report=_candidate_report,
+    regression_proof=_qual_regression,
+)
+_qual_snapshot = CandidateSnapshotReceipt(
+    materialization_receipt_sha256=_materialized.materialization_receipt_sha256,
+    task_sha256=_qual_promotion.task_sha256,
+    candidate_commit_sha=_materialized.commit_sha,
+    candidate_tree_sha=_materialized.tree_sha,
+    file_count=len(_snapshot_lf),
+    total_bytes=sum(len(entry.content) for entry in _snapshot_lf),
+    manifest_sha256="c" * 64,
+    git_runtime_manifest_sha256="d" * 64,
+    git_executable_sha256="e" * 64,
+)
+_qual_packet = build_qualification_packet(
+    proposal=_qual_proposal,
+    promotion=_qual_promotion,
+    snapshot=_qual_snapshot,
+    regression=_qual_regression,
+    provenance=_qual_provenance,
+)
+check(
+    _qual_packet.software_chain_complete is True
+    and _qual_packet.ready_for_human_go is False
+    and _qual_packet.activation_authorized is False
+    and _qual_packet.automatic_activation is False
+    and _qual_packet.remote_publication_authorized is False,
+    "complete RSI software chain remains non-authorizing before physical gates",
+)
+check(
+    _qual_packet.fresh_physical_evidence_required is True
+    and _qual_packet.independent_collector_approver_required is True
+    and _qual_packet.missing_physical_gates == MISSING_PHYSICAL_GATES,
+    "qualification preserves every DC-L15/DC-L16 external gate",
+)
+check(
+    QualificationPacket.from_json(_qual_packet.canonical_json()).canonical_json()
+    == _qual_packet.canonical_json(),
+    "qualification packet canonical JSON roundtrips exactly",
+)
+
+_qual_mapping = _qual_packet.to_dict()
+_qual_mapping["ready_for_human_go"] = True
+expect_error(
+    QualificationPacketError,
+    "may not grant pilot or activation authority",
+    lambda: QualificationPacket.from_mapping(_qual_mapping),
+    "serialized qualification cannot be flipped into human GO",
+)
+_qual_mapping = _qual_packet.to_dict()
+_qual_mapping["missing_physical_gates"] = list(MISSING_PHYSICAL_GATES[:-1])
+expect_error(
+    QualificationPacketError,
+    "must preserve all external physical/human gates",
+    lambda: QualificationPacket.from_mapping(_qual_mapping),
+    "qualification cannot delete the final human pilot decision",
+)
+_qual_mapping = _qual_packet.to_dict()
+_qual_mapping["activation_token"] = "go"
+expect_error(
+    QualificationPacketError,
+    "fields mismatch",
+    lambda: QualificationPacket.from_mapping(_qual_mapping),
+    "unknown activation fields fail closed",
+)
+expect_error(
+    QualificationPacketError,
+    "another task",
+    lambda: build_qualification_packet(
+        proposal=_qual_proposal,
+        promotion=_qual_promotion,
+        snapshot=replace(_qual_snapshot, task_sha256="f" * 64),
+        regression=_qual_regression,
+        provenance=_qual_provenance,
+    ),
+    "snapshot from another DevelopmentTask cannot enter the packet",
+)
+expect_error(
+    QualificationPacketError,
+    "runtime provenance is not bound",
+    lambda: build_qualification_packet(
+        proposal=_qual_proposal,
+        promotion=_qual_promotion,
+        snapshot=_qual_snapshot,
+        regression=_qual_regression,
+        provenance=replace(_qual_provenance, candidate_tree_sha="f" * 40),
+    ),
+    "runtime provenance cannot swap the materialized candidate tree",
+)
+expect_error(
+    QualificationPacketError,
+    "accepted regression proof",
+    lambda: build_qualification_packet(
+        proposal=_qual_proposal,
+        promotion=_qual_promotion,
+        snapshot=_qual_snapshot,
+        regression=replace(
+            _qual_regression,
+            accepted=False,
+            findings=("candidate regressed",),
+        ),
+        provenance=_qual_provenance,
+    ),
+    "rejected candidate can never be packaged as qualified software evidence",
+)
+
+print(
+    f"\n===== BUILD IDENTITY + RSI PROVENANCE/QUALIFICATION: "
+    f"{passed} passed, {failed} failed ====="
+)
 raise SystemExit(1 if failed else 0)
