@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError
 
 from ..netguard import is_loopback
 from .context_service import (
@@ -22,6 +22,8 @@ from .storage import SharedMemoryReadError
 
 
 MEMORY4_CONTEXT_PREFIX = "/experimental/memory4"
+MAX_MEMORY4_CONTEXT_BODY_BYTES = 256 * 1024
+_INVALID_CONTEXT_BODY_DETAIL = "invalid memory context request"
 LoopbackPolicy = Callable[[Request], bool]
 
 
@@ -56,6 +58,43 @@ def _require_loopback(request: Request, allowed: LoopbackPolicy) -> None:
         )
 
 
+def _invalid_context_body() -> HTTPException:
+    return HTTPException(status_code=422, detail=_INVALID_CONTEXT_BODY_DETAIL)
+
+
+async def _read_context_for_turn_body(request: Request) -> ContextForTurnBody:
+    """Read one bounded JSON body without reflecting private validation input."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError):
+            raise _invalid_context_body() from None
+        if declared_length < 0 or declared_length > MAX_MEMORY4_CONTEXT_BODY_BYTES:
+            raise _invalid_context_body() from None
+
+    raw = bytearray()
+    try:
+        async for chunk in request.stream():
+            if len(raw) + len(chunk) > MAX_MEMORY4_CONTEXT_BODY_BYTES:
+                raise _invalid_context_body()
+            raw.extend(chunk)
+    except HTTPException:
+        raise
+    except Exception:
+        raise _invalid_context_body() from None
+
+    if not raw:
+        raise _invalid_context_body() from None
+
+    try:
+        return ContextForTurnBody.model_validate_json(bytes(raw))
+    except ValidationError:
+        # Pydantic validation errors can include the rejected ``input``. Never
+        # expose that structure at this private context-for-turn boundary.
+        raise _invalid_context_body() from None
+
+
 def build_memory4_context_router(
     service: MemoryContextForTurnService,
     *,
@@ -69,8 +108,11 @@ def build_memory4_context_router(
     router = APIRouter(prefix=MEMORY4_CONTEXT_PREFIX, tags=["experimental-memory4"])
 
     @router.post("/context-for-turn")
-    async def context_for_turn(body: ContextForTurnBody, request: Request) -> dict:
+    async def context_for_turn(request: Request) -> dict:
+        # Admission deliberately precedes request-body consumption. A remote
+        # caller cannot make this route parse private memory-query material.
         _require_loopback(request, loopback_allowed)
+        body = await _read_context_for_turn_body(request)
         try:
             result = await service.context_for_turn(
                 ContextForTurnRequest(

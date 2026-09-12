@@ -123,6 +123,10 @@ run_support(
     "W04-H1 validation privacy",
     "worker_memory4_w04_validation_privacy.py",
 )
+run_support(
+    "R04-H1 validation privacy",
+    "worker_memory4_r04_validation_privacy.py",
+)
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
