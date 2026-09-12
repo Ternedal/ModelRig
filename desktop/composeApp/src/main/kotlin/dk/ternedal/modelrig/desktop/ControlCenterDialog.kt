@@ -59,6 +59,43 @@ internal fun desktopControlCenterStateLabel(state: String): String = when (state
     else -> "Ukendt"
 }
 
+internal fun desktopControlCenterReasonLabel(raw: String?): String? {
+    val reason = raw?.trim().orEmpty()
+    if (reason.isEmpty()) return null
+    return when (reason) {
+        "missing_source" -> "Ingen statuskilde har rapporteret endnu."
+        "missing_or_invalid_observed_at" -> "Måletidspunktet mangler eller er ugyldigt."
+        "observation_from_future" -> "Måletidspunktet ligger foran riggens ur."
+        "observation_too_old" -> "Statusmålingen er for gammel."
+        "disabled_by_configuration" -> "Slået fra i riggens konfiguration."
+        "source_reported_unavailable" -> "Kilden rapporterer utilgængelig."
+        "missing_boolean_verdict" -> "Kilden leverede ikke en entydig status."
+        "agent3_disabled_by_configuration" -> "Agent 3 er slået fra i riggens konfiguration."
+        "unknown_surface" -> "Routing bruger en ukendt surface."
+        "fallback_reason_missing" -> "Fallback mangler serverens begrundelse."
+        "server_selected_fallback" -> "Serveren valgte fallback."
+        "unsupported_route_transition" -> "Routingovergangen understøttes ikke."
+        else -> "Teknisk årsag ukendt."
+    }
+}
+
+internal fun desktopControlCenterSurfaceLabel(raw: String?): String {
+    val surface = raw?.trim().orEmpty()
+    return when (surface) {
+        "agent_v2" -> "Agent 2"
+        "agent3_developer" -> "Agent 3 · udvikler"
+        "disabled" -> "Slået fra"
+        "" -> "Ikke oplyst"
+        else -> "Ukendt surface"
+    }
+}
+
+internal fun desktopControlCenterTechnicalDetail(raw: String?): String? =
+    raw?.trim()?.takeIf { it.isNotEmpty() }?.let { "Teknisk detalje: $it" }
+
+internal fun desktopControlCenterFallbackEvidence(raw: String?): String? =
+    raw?.trim()?.takeIf { it.isNotEmpty() }?.let { "Serverens fallbackkode: $it" }
+
 internal fun desktopControlCenterTitle(name: String): String = when (name) {
     "backend" -> "Backend"
     "worker" -> "Worker"
@@ -105,7 +142,7 @@ internal fun desktopControlCenterError(raw: String?): String {
             message.contains("ConnectException") ->
             "Kan ikke nå riggen. Tjek URL og at serveren kører."
         message.isBlank() -> "Control Center-status kunne ikke hentes."
-        else -> message.take(300)
+        else -> "Control Center-status kunne ikke hentes på grund af en ukendt klientfejl."
     }
 }
 
@@ -121,7 +158,7 @@ internal fun desktopControlCenterCapabilityError(raw: String?): String {
             message.contains("ConnectException") ->
             "Kan ikke nå riggen for capability-metadata."
         message.isBlank() -> "Capabilities kunne ikke hentes."
-        else -> message.take(300)
+        else -> "Capabilities kunne ikke hentes på grund af en ukendt klientfejl."
     }
 }
 
@@ -319,12 +356,12 @@ private fun DesktopControlCenterComponentCard(component: ControlCenterComponent)
         desktopControlCenterAge(component.ageSeconds)?.let {
             Text(it, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         }
-        component.detail?.let {
-            Text(it, color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+        desktopControlCenterTechnicalDetail(component.detail)?.let { detail ->
+            Text(detail, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         }
-        component.reason?.let {
+        desktopControlCenterReasonLabel(component.reason)?.let { reason ->
             Text(
-                "Årsag: $it",
+                "Årsag: $reason",
                 color = desktopControlCenterStateColor(component.state),
                 fontSize = 11.sp,
             )
@@ -336,28 +373,28 @@ private fun DesktopControlCenterComponentCard(component: ControlCenterComponent)
 private fun DesktopControlCenterRoutingCard(routing: ControlCenterRouting) {
     DesktopControlCenterCard("Routing", routing.state) {
         Text(
-            "Konfigureret: ${routing.configuredSurface ?: "ukendt"}",
+            "Konfigureret: ${desktopControlCenterSurfaceLabel(routing.configuredSurface)}",
             color = KalivTheme.colors.TextMuted,
             fontSize = 12.sp,
         )
         Text(
-            "Aktiv: ${routing.activeSurface ?: "ukendt"}",
+            "Aktiv: ${desktopControlCenterSurfaceLabel(routing.activeSurface)}",
             color = KalivTheme.colors.TextMuted,
             fontSize = 12.sp,
         )
         desktopControlCenterAge(routing.ageSeconds)?.let {
             Text(it, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         }
-        routing.fallbackReason?.let {
+        desktopControlCenterFallbackEvidence(routing.fallbackReason)?.let { evidence ->
             Text(
-                "Serverens fallback-årsag: $it",
-                color = KalivTheme.colors.TextHigh,
-                fontSize = 11.sp,
+                evidence,
+                color = KalivTheme.colors.TextMuted,
+                fontSize = 10.sp,
             )
         }
-        routing.reason?.let {
+        desktopControlCenterReasonLabel(routing.reason)?.let { reason ->
             Text(
-                "Årsag: $it",
+                "Årsag: $reason",
                 color = desktopControlCenterStateColor(routing.state),
                 fontSize = 11.sp,
             )
