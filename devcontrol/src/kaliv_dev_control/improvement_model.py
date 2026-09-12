@@ -8,6 +8,7 @@ belong to a later, separately governed slice.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -16,7 +17,6 @@ from .improvement_binding import proposal_from_model_json
 from .improvement_proposal import (
     ImprovementProposal,
     ImprovementProposalError,
-    canonical_sha256,
     render_improvement_prompt,
 )
 
@@ -27,6 +27,7 @@ ChatFn = Callable[[list[dict[str, str]], str], Awaitable[str]]
 class ImprovementModelResult:
     model: str
     proposal: ImprovementProposal
+    raw_response: str
     raw_response_sha256: str
 
 
@@ -71,5 +72,6 @@ async def generate_bound_improvement_proposal(
     return ImprovementModelResult(
         model=model,
         proposal=proposal,
-        raw_response_sha256=canonical_sha256(raw),
+        raw_response=raw,
+        raw_response_sha256=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
     )
