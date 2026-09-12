@@ -417,11 +417,19 @@ fun App() {
         // App.kt's old tall Header is gone (it duplicated the KALIV wordmark
         // and was the reason none of the three screens read like the design).
         Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite)) {
+        val chatRouteStatus = presentSidebarStatus(
+            preferLocal = preferLocal,
+            autoCloudFallback = autoCloudFallback,
+            cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
+            localModel = localModel,
+            cloudModel = cloudModel,
+        )
+
         KalivTitleBar(
             subtitle = when (activeScreen) {
                 KalivScreen.AGENT -> "\u2014 agent"
                 KalivScreen.COMPUTER -> "\u2014 computer-use"
-                else -> "\u2014 lokal AI p\u00e5 din maskine"
+                else -> chatRouteStatus.titleSubtitle
             },
             // Mockup 1c: an amber "Kaliv styrer skærmen" badge sits next to the
             // subtitle while a computer-use task is actually running.
@@ -433,13 +441,6 @@ fun App() {
         )
         Row(Modifier.fillMaxWidth().weight(1f)) {
             if (activeScreen == KalivScreen.CHAT) {
-            val sidebarStatus = presentSidebarStatus(
-                preferLocal = preferLocal,
-                autoCloudFallback = autoCloudFallback,
-                cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
-                localModel = localModel,
-                cloudModel = cloudModel,
-            )
             KalivNavRail(
                 active = activeScreen,
                 onSelect = { screen ->
@@ -458,7 +459,7 @@ fun App() {
                         else -> {}
                     }
                 },
-                status = sidebarStatus,
+                status = chatRouteStatus,
                 // No live VRAM authority is wired into the desktop shell yet.
                 // Missing measurement stays explicit instead of using reference data.
                 vram = KalivVramTelemetry.Unavailable,
@@ -535,7 +536,7 @@ fun App() {
             val toolsReady = localPath.contains("/api/v1/") && deviceToken.isNotBlank()
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Box {
-                    ToolbarChip("Model: $localModel \u25be", filled = false) { modelMenuOpen = true }
+                    ToolbarChip(presentLocalModelSelectorLabel(localModel), filled = false) { modelMenuOpen = true }
                     DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("\u21bb Genindl\u00e6s modeller", color = KalivTheme.colors.Signal, fontSize = 13.sp) },
