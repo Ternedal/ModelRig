@@ -93,3 +93,16 @@ kan derfor bevise softwarekæden uden at erklære GO, starte DC-L15/DC-L16 eller
 autorisere publication/activation.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-007_RSI_PRE_PHYSICAL_QUALIFICATION_PACKET.md`
+
+## ADR-DC-008 — Human-signed RSI request før DC-L15 fysisk qualification
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Indfører et kortlivet, Ed25519-verificeret human request-artifact, der binder én
+pre-physical qualification-pakke til en ønsket frozen-main SHA, det eksisterende
+11-probe I0b-univers og forskellige collector/approver-aktører. Verifikation
+beviser kun den menneskelige anmodning; den bekræfter ikke frozen `main`,
+forbruger ikke requesten og giver ikke campaign-start, pilot, publication eller
+activation authority.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDARY.md`

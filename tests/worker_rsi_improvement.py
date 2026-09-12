@@ -1,4 +1,4 @@
-"""RSI proposal/promotion/regression tests outside the landed DC-L01–L14 set.
+"""RSI proposal/promotion/regression and physical-request tests outside landed DC-L01–L14.
 
 The RSI ADRs are still proposed, so these tests run through the repository's
 ordinary worker_*.py CI surface rather than silently extending the fixed
@@ -31,6 +31,14 @@ from kaliv_dev_control.improvement_evidence import (
     build_verified_agent3_improvement_brief,
 )
 from kaliv_dev_control.improvement_model import generate_bound_improvement_proposal
+from kaliv_dev_control.improvement_physical_request import (
+    PHYSICAL_REQUEST_ISSUER_SYSTEM_ID,
+    PhysicalQualificationRequest,
+    PhysicalQualificationRequestError,
+    PhysicalQualificationRequestReceipt,
+    build_physical_qualification_request,
+    verify_physical_qualification_request,
+)
 from kaliv_dev_control.improvement_promotion import (
     PROMOTION_AUTHORITY,
     PROMOTION_AUTHORIZATION_SCHEMA,
@@ -48,11 +56,16 @@ from kaliv_dev_control.improvement_proposal import (
     canonical_sha256,
     render_improvement_prompt,
 )
+from kaliv_dev_control.improvement_qualification_packet import (
+    MISSING_PHYSICAL_GATES,
+    QualificationPacket,
+)
 from kaliv_dev_control.improvement_regression import (
     REGRESSION_AUTHORITY,
     ImprovementRegressionError,
     build_candidate_regression_proof,
 )
+from kaliv_dev_control.physical_isolation import REQUIRED_PROBES
 
 BASE_SHA = "a" * 40
 CODE_SHA = "1" * 64
@@ -82,6 +95,15 @@ def expect_regression_error(fragment: str, fn, message: str) -> None:
     try:
         fn()
     except ImprovementRegressionError as exc:
+        check(fragment in str(exc), message)
+    else:
+        check(False, message)
+
+
+def expect_physical_request_error(fragment: str, fn, message: str) -> None:
+    try:
+        fn()
+    except PhysicalQualificationRequestError as exc:
         check(fragment in str(exc), message)
     else:
         check(False, message)
@@ -274,6 +296,53 @@ def signed_promotion(
         payload_sha256=hashlib.sha256(payload).hexdigest(),
         signature_hex=private.sign(message).hex(),
         signed_at_utc="2026-09-12T19:00:00Z",
+    )
+    verifier = Ed25519AuthorityVerifier(
+        {key.key_id: key}, minimum_keyring_epoch=1
+    )
+    return signature, verifier
+
+
+def signed_physical_request(
+    request: PhysicalQualificationRequest,
+    *,
+    issuer_system_id: str = PHYSICAL_REQUEST_ISSUER_SYSTEM_ID,
+    signed_at_utc: str = "2026-09-12T19:11:00Z",
+):
+    private = Ed25519PrivateKey.generate()
+    public_hex = private.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+    policy_hash = asymmetric_authority_key_custody_policy_sha256()
+    key = TrustedEd25519AuthorityKey(
+        key_id="rsi-physical-request-test-key",
+        issuer_actor_id="anders.requester",
+        issuer_system_id=issuer_system_id,
+        public_key_hex=public_hex,
+        valid_from_utc="2026-09-12T00:00:00Z",
+        valid_until_utc="2026-09-13T00:00:00Z",
+        keyring_epoch=1,
+        custody_policy_sha256=policy_hash,
+    )
+    payload = request.canonical_json().encode("utf-8")
+    message = authority_signing_message(
+        key_id=key.key_id,
+        issuer_actor_id=key.issuer_actor_id,
+        issuer_system_id=key.issuer_system_id,
+        keyring_epoch=key.keyring_epoch,
+        custody_policy_sha256=key.custody_policy_sha256,
+        payload=payload,
+    )
+    signature = DetachedEd25519AuthoritySignature(
+        key_id=key.key_id,
+        issuer_actor_id=key.issuer_actor_id,
+        issuer_system_id=key.issuer_system_id,
+        keyring_epoch=key.keyring_epoch,
+        custody_policy_sha256=key.custody_policy_sha256,
+        payload_sha256=hashlib.sha256(payload).hexdigest(),
+        signature_hex=private.sign(message).hex(),
+        signed_at_utc=signed_at_utc,
     )
     verifier = Ed25519AuthorityVerifier(
         {key.key_id: key}, minimum_keyring_epoch=1
@@ -687,6 +756,195 @@ expect_regression_error(
     ),
     "et andet incumbent-run kan ikke erstatte proposalets originale evidence digest",
 )
+
+# Human-signed request before DC-L15 physical execution. A verified request is
+# deliberately still not campaign-start, freeze, pilot or activation authority.
+qualification = QualificationPacket.from_mapping(
+    {
+        "schema": "kaliv-rsi-qualification-packet/v1",
+        "phase": "pre-dc-l15-physical-qualification",
+        "proposal_id": "RSI_A3_001",
+        "repository": "Ternedal/ModelRig",
+        "base_sha": BASE_SHA,
+        "proposal_sha256": "1" * 64,
+        "promotion_receipt_sha256": "2" * 64,
+        "task_id": "RSI_TASK_001",
+        "task_sha256": "3" * 64,
+        "materialization_receipt_sha256": "4" * 64,
+        "snapshot_receipt_sha256": "5" * 64,
+        "candidate_commit_sha": "b" * 40,
+        "candidate_tree_sha": "c" * 40,
+        "worker_code_sha256": "6" * 64,
+        "baseline_eval_sha256": "7" * 64,
+        "candidate_eval_sha256": "8" * 64,
+        "regression_proof_sha256": "9" * 64,
+        "runtime_provenance_sha256": "a" * 64,
+        "required_evals": [AGENT3_EVAL_SCHEMA],
+        "software_chain_complete": True,
+        "ready_for_human_go": False,
+        "activation_authorized": False,
+        "automatic_activation": False,
+        "remote_publication_authorized": False,
+        "fresh_physical_evidence_required": True,
+        "independent_collector_approver_required": True,
+        "missing_physical_gates": list(MISSING_PHYSICAL_GATES),
+        "authority": "evidence-only",
+        "merge_authority": "human",
+    }
+)
+physical_request = build_physical_qualification_request(
+    qualification=qualification,
+    request_id="rsi-dc-l15-request-001",
+    requested_frozen_main_sha="d" * 40,
+    collector_actor_id="collector.one",
+    approver_actor_id="approver.two",
+    requested_at_utc="2026-09-12T19:10:00Z",
+    expires_at_utc="2026-09-12T20:10:00Z",
+)
+check(
+    physical_request.required_probes == tuple(probe.value for probe in REQUIRED_PROBES)
+    and len(physical_request.required_probes) == 11,
+    "DC-L15 request binder det eksakte eksisterende 11-probe-univers",
+)
+check(
+    physical_request.automatic_start is False
+    and physical_request.exact_frozen_main_confirmed is False
+    and physical_request.physical_evidence_present is False
+    and physical_request.pilot_authority is False
+    and physical_request.activation_authority is False
+    and physical_request.remote_publication_authority is False,
+    "unsigned physical request kan hverken starte, fryse, bevise eller aktivere",
+)
+physical_signature, physical_verifier = signed_physical_request(physical_request)
+physical_receipt = verify_physical_qualification_request(
+    request=physical_request,
+    qualification=qualification,
+    signature=physical_signature,
+    verifier=physical_verifier,
+    verified_at_utc="2026-09-12T19:12:00Z",
+)
+check(
+    physical_receipt.human_request_verified is True
+    and physical_receipt.requester_actor_id == "anders.requester"
+    and physical_receipt.request_sha256 == physical_request.sha256
+    and physical_receipt.qualification_packet_sha256 == qualification.sha256,
+    "verifikation binder human identity, request og qualification packet",
+)
+check(
+    physical_receipt.replay_guard_required is True
+    and physical_receipt.request_consumed is False
+    and physical_receipt.exact_frozen_main_confirmed is False
+    and physical_receipt.physical_campaign_completed is False
+    and physical_receipt.campaign_start_authorized is False
+    and physical_receipt.pilot_go_authorized is False
+    and physical_receipt.activation_authorized is False
+    and physical_receipt.remote_publication_authorized is False,
+    "gyldig human-signatur giver stadig ingen campaign/pilot/publication/activation authority",
+)
+check(
+    PhysicalQualificationRequest.from_json(physical_request.canonical_json()).canonical_json()
+    == physical_request.canonical_json()
+    and PhysicalQualificationRequestReceipt.from_mapping(
+        physical_receipt.to_dict()
+    ).canonical_json()
+    == physical_receipt.canonical_json(),
+    "physical request og verification receipt roundtripper canonicalt",
+)
+
+same_actor = physical_request.to_dict()
+same_actor["approver_actor_id"] = same_actor["collector_actor_id"]
+expect_physical_request_error(
+    "must be different actors",
+    lambda: PhysicalQualificationRequest.from_mapping(same_actor),
+    "collector og approver kan ikke være samme aktør",
+)
+probe_drift = physical_request.to_dict()
+probe_drift["required_probes"] = probe_drift["required_probes"][:-1]
+expect_physical_request_error(
+    "exact DC-L15 probe set",
+    lambda: PhysicalQualificationRequest.from_mapping(probe_drift),
+    "request kan ikke droppe en af de elleve fysiske probes",
+)
+probe_reordered = physical_request.to_dict()
+probe_reordered["required_probes"] = list(reversed(probe_reordered["required_probes"]))
+expect_physical_request_error(
+    "exact DC-L15 probe set",
+    lambda: PhysicalQualificationRequest.from_mapping(probe_reordered),
+    "request kan ikke ændre canonical probe-univers/rækkefølge",
+)
+for field in ("automatic_start", "exact_frozen_main_confirmed", "physical_evidence_present"):
+    elevated = physical_request.to_dict()
+    elevated[field] = True
+    expect_physical_request_error(
+        "may not claim execution, freeze, evidence",
+        lambda elevated=elevated: PhysicalQualificationRequest.from_mapping(elevated),
+        f"request kan ikke flippe {field} til true",
+    )
+long_window = physical_request.to_dict()
+long_window["expires_at_utc"] = "2026-09-13T20:10:01Z"
+expect_physical_request_error(
+    "validity window",
+    lambda: PhysicalQualificationRequest.from_mapping(long_window),
+    "physical request må højst være gyldig i 24 timer",
+)
+foreign_request_sig, foreign_request_verifier = signed_physical_request(
+    physical_request, issuer_system_id="some-other-authority"
+)
+expect_physical_request_error(
+    "another authority system",
+    lambda: verify_physical_qualification_request(
+        request=physical_request,
+        qualification=qualification,
+        signature=foreign_request_sig,
+        verifier=foreign_request_verifier,
+        verified_at_utc="2026-09-12T19:12:00Z",
+    ),
+    "gyldig Ed25519-signatur fra forkert authority-system giver ingen DC-L15 request authority",
+)
+wrong_binding = physical_request.to_dict()
+wrong_binding["candidate_tree_sha"] = "e" * 40
+wrong_binding_request = PhysicalQualificationRequest.from_mapping(wrong_binding)
+wrong_binding_sig, wrong_binding_verifier = signed_physical_request(wrong_binding_request)
+expect_physical_request_error(
+    "not bound to qualification packet",
+    lambda: verify_physical_qualification_request(
+        request=wrong_binding_request,
+        qualification=qualification,
+        signature=wrong_binding_sig,
+        verifier=wrong_binding_verifier,
+        verified_at_utc="2026-09-12T19:12:00Z",
+    ),
+    "en signeret request kan ikke bytte qualification-pakkens candidate tree",
+)
+expect_physical_request_error(
+    "has expired",
+    lambda: verify_physical_qualification_request(
+        request=physical_request,
+        qualification=qualification,
+        signature=physical_signature,
+        verifier=physical_verifier,
+        verified_at_utc="2026-09-12T20:10:01Z",
+    ),
+    "udløbet physical request fejler før campaign-start",
+)
+for field in (
+    "request_consumed",
+    "exact_frozen_main_confirmed",
+    "physical_campaign_completed",
+    "campaign_start_authorized",
+    "pilot_go_authorized",
+    "activation_authorized",
+    "remote_publication_authorized",
+):
+    elevated_receipt = physical_receipt.to_dict()
+    elevated_receipt[field] = True
+    expect_physical_request_error(
+        "may not claim campaign, pilot, publication or activation",
+        lambda elevated_receipt=elevated_receipt: PhysicalQualificationRequestReceipt.from_mapping(
+            elevated_receipt
+        ),
+        f"verification receipt kan ikke flippe {field} til true",
+    )
 
 print(f"\n===== RSI IMPROVEMENT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
