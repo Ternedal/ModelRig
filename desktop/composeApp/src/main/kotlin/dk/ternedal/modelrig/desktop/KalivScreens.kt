@@ -754,7 +754,7 @@ fun KalivAgentCockpit(
 
     fun startTask() {
         val text = input.trim()
-        if (text.isEmpty() || busy) return
+        if (text.isEmpty() || busy || pending != null) return
         errorText = null
         turns.add("user" to text)
         input = ""
@@ -772,28 +772,30 @@ fun KalivAgentCockpit(
 
     fun decide(approve: Boolean) {
         val card = pending ?: return
+        if (busy) return
         errorText = null
-        pending = null
         busy = true
-        // Mark the active step's outcome.
-        val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
-        if (idx >= 0 && !approve) {
-            plan[idx] = plan[idx].copy(status = StepStatus.DONE, resultSummary = "Afvist \u2014 intet \u00e6ndret")
-            // The prototype halts the whole run on a rejection (agentPhase
-            // "stopped"), and that matches the project's posture: a declined
-            // write should not leave the plan looking like the remaining steps
-            // are still coming. Mark them cancelled rather than pending.
-            for (i in plan.indices) {
-                if (plan[i].status == StepStatus.PENDING) {
-                    plan[i] = plan[i].copy(status = StepStatus.CANCELLED, resultSummary = "Ikke udf\u00f8rt \u2014 kørslen blev stoppet")
-                }
-            }
-        }
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 runCatching { ToolsClient(baseUrl, bearer).toolsConfirm(card.confirmation_id, approve) }
             }
-            res.onSuccess { applyTurn(it) }.onFailure { errorText = it.message }
+            res.onSuccess { turn ->
+                // Only an authoritative worker response may clear or replace
+                // the unresolved confirmation.
+                applyTurn(turn)
+                if (!approve && turn.status != "confirmation_required") {
+                    // The worker acknowledged the rejection, so remaining
+                    // not-yet-run plan steps can now be shown as cancelled.
+                    for (i in plan.indices) {
+                        if (plan[i].status == StepStatus.PENDING) {
+                            plan[i] = plan[i].copy(
+                                status = StepStatus.CANCELLED,
+                                resultSummary = "Ikke udf\u00f8rt \u2014 kørslen blev stoppet",
+                            )
+                        }
+                    }
+                }
+            }.onFailure { errorText = it.message }
             busy = false
         }
     }
@@ -806,6 +808,11 @@ fun KalivAgentCockpit(
         plan.clear()
         turns.clear()
     }
+
+    val confirmationPresentation = presentAgentConfirmation(
+        hasPendingConfirmation = pending != null,
+        busy = busy,
+    )
 
     Row(modifier.fillMaxSize()) {
         // --- Chat column (360dp) ---
@@ -840,7 +847,7 @@ fun KalivAgentCockpit(
             AgentComposer(
                 value = input,
                 onValue = { input = it },
-                enabled = !busy,
+                enabled = confirmationPresentation.newTurnEnabled,
                 placeholder = if (taskStarted) "F\u00f8lg op \u2026" else "Ny opgave \u2026",
                 onSend = { startTask() },
             )
@@ -893,7 +900,8 @@ fun KalivAgentCockpit(
                             index = i + 1,
                             step = step,
                             isLast = i == plan.lastIndex,
-                            card = if (step.status == StepStatus.ACTIVE) pending else null,
+                            card = if (step.status == StepStatus.ACTIVE && confirmationPresentation.showCard) pending else null,
+                            decisionEnabled = confirmationPresentation.decisionEnabled,
                             onApprove = { decide(true) },
                             onDeny = { decide(false) },
                         )
@@ -1035,6 +1043,7 @@ private fun PlanRow(
     step: PlanStep,
     isLast: Boolean,
     card: ToolTurn?,
+    decisionEnabled: Boolean,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
 ) {
@@ -1072,7 +1081,7 @@ private fun PlanRow(
             // Inline approval card for the active write step.
             if (card != null) {
                 Spacer(Modifier.height(10.dp))
-                ApprovalCard(card = card, onApprove = onApprove, onDeny = onDeny)
+                ApprovalCard(card = card, enabled = decisionEnabled, onApprove = onApprove, onDeny = onDeny)
             }
         }
     }
@@ -1123,7 +1132,7 @@ internal fun StatusCircle(index: Int, status: StepStatus) {
  * 50/50 Godkend/Afvis buttons. The gate is in the worker; this only renders.
  */
 @Composable
-internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> Unit) {
+internal fun ApprovalCard(card: ToolTurn, enabled: Boolean = true, onApprove: () -> Unit, onDeny: () -> Unit) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(14.dp)
     val surface = if (c.isDark) {
@@ -1169,7 +1178,7 @@ internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> U
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
                     .background(approveSurface)
-                    .clickable(onClick = onApprove)
+                    .clickable(enabled = enabled, onClick = onApprove)
                     .padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
             ) { Text("Godkend", color = kalivPrimaryInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
@@ -1178,7 +1187,7 @@ internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> U
                 Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
                     .background(c.SurfaceHigh)
                     .border(1.dp, rejectBorder, RoundedCornerShape(10.dp))
-                    .clickable(onClick = onDeny)
+                    .clickable(enabled = enabled, onClick = onDeny)
                     .padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
             ) { Text("Afvis", color = c.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
