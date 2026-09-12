@@ -1,4 +1,4 @@
-# ADR-DC-009 — Exact-main observation og one-time reservation før DC-L15
+# ADR-DC-009 — Authenticated host-local request-reservation før DC-L15
 
 **Dato:** 12/09-2026  
 **Status:** foreslået til beslutning  
@@ -6,119 +6,134 @@
 
 ## Kontekst
 
-ADR-DC-008 indfører et kortlivet, human-signeret request-artifact før DC-L15. En gyldig signatur beviser imidlertid kun, at en identificeret human authority bad om én bounded fysisk qualification mod en bestemt ønsket `main`-SHA. Den beviser ikke, at den lokalt observerede `main` faktisk matcher den ønskede SHA, og den forbruger ikke requesten.
+ADR-DC-008 indfører et kortlivet, human-signeret request-artifact før DC-L15. En gyldig signatur beviser kun, at en identificeret human authority bad om én bounded fysisk qualification mod en bestemt ønsket `main`-SHA. Den beviser ikke, at `main` matcher SHA'en på reservationstidspunktet, og den forbruger ikke requesten.
 
-Før en fysisk campaign overhovedet kan overvejes, mangler derfor to uafhængige egenskaber:
-
-1. en trusted, lokal og read-only observation af `refs/heads/main`, og
-2. en crash-durable one-time reservation, så samme request ikke kan genbruges.
-
-Disse egenskaber må ikke forveksles med en vedvarende freeze eller campaign-start authority.
+Reservation-laget skal derfor både lukke provenance-hullet og være præcist om sin egen rækkevidde. En lokal create-once ledger kan bevise one-time consumption på den konkrete fysiske host, men den kan ikke uden distribueret koordinering bevise global replay-eksklusion på tværs af flere hosts.
 
 ## Beslutning
 
-Der foreslås et separat evidence-only reservation-led mellem den signerede request og en senere fysisk runner:
+Der foreslås et separat evidence-only reservation-led:
 
-`verified human request → trusted local main observation → exact SHA match → durable one-time consume`
+`verified human request → trusted preflight → irreversible host lock → trusted main re-read → signed-chain reverify → canonical host receipt`
 
-### 1. Trusted lokal main-observation
+### 1. Caller leverer ikke authority-evidence
 
-Observationen skal:
+Den authority-bærende public consume-path må ikke acceptere:
 
-- læse præcis `refs/heads/main^{commit}` gennem den staged `TrustedGitRuntime`,
-- være lokal og read-only,
-- udføre ingen network-operation,
-- mutere intet repository,
-- binde repository-identiteten `Ternedal/ModelRig`,
-- binde SHA-256 af den konkrete resolved lokale repository-path,
-- binde Trusted Git runtime-manifest og executable digest,
-- have canonical UTC timestamp,
-- være højst fem minutter gammel ved reservation.
+- et caller-konstrueret `LocalMainHeadObservation`;
+- et caller-valgt `consumed_at_utc`;
+- caller-valgt ledger-root eller ledger-ID;
+- et prebuilt reservation-receipt til persistence.
 
-Observationen er `evidence-only`.
+Observationer er fortsat serialiserbar `evidence-only` data, men typen eller schema-validitet er ikke provenance. Authority-pathen foretager selv den trusted Git-observation og tidsaflæsning.
 
-### 2. Exact-main match
+### 2. Trusted main læses efter den irreversible lock
 
-Reservation må kun konstrueres, hvis den observerede lokale `main`-SHA er byte-for-byte identisk med `requested_frozen_main_sha` i den human-signerede request.
+Et preflight-read må bruges til at undgå at brænde en åbenlyst mismatchende request. Den authority-bærende observation foretages imidlertid først **efter** create-once reservation-locken er durably oprettet.
 
-Navnet `requested_frozen_main_sha` er fortsat et mål fra request-kontrakten. Én observation må **ikke** fortolkes som bevis for, at `main` forbliver frozen over tid.
+Den post-lock observation skal:
 
-Et gyldigt reservation-receipt må derfor sige:
+- læse præcis `refs/heads/main^{commit}` gennem staged `TrustedGitRuntime`;
+- være lokal og read-only;
+- udføre ingen network-operation;
+- mutere intet repository;
+- binde repository `Ternedal/ModelRig`;
+- binde resolved repository-path, Trusted Git runtime-manifest og executable digest;
+- bruge timestamp afledt internt ved write-boundary'en.
 
-- `main_head_match_confirmed=true`
-- `request_consumed=true`
-- `replay_safe=true`
+Hvis `main` flytter mellem preflight og post-lock read, fejler operationen **efter requesten er host-lokalt consumed**. Den bliver ikke automatisk genbrugelig.
 
-men skal stadig sige:
+### 3. Signatur og expiry re-verificeres efter lock
 
-- `frozen_main_confirmed=false`
-- `physical_campaign_completed=false`
-- `campaign_start_authorized=false`
-- `pilot_go_authorized=false`
-- `activation_authorized=false`
-- `remote_publication_authorized=false`
+Human request-signaturen og qualification-bindingen re-verificeres igen ved et internt current-time timestamp efter lock og post-lock observation.
 
-### 3. Re-verifikation af human request
+Caller kan derfor ikke backdate consumption for at genbruge en udløbet request. Hvis requesten udløber efter lock men før final commit, forbliver lock-state fail-closed/recovery-required.
 
-Request-signaturen og qualification-bindingen re-verificeres på consumption-tidspunktet. Reservationen kan ikke bygges ud fra et gammelt verification receipt alene.
+### 4. Final receipt mintes kun gennem den authenticated transaction
 
-Det betyder blandt andet, at requestens expiry stadig håndhæves ved reservation.
+Der findes ingen public ledger-write API, som accepterer et allerede konstrueret `PhysicalQualificationReservation`.
 
-### 4. Crash-durable one-time consume
+Den canonical rækkefølge er:
 
-Der anvendes en dedikeret create-once ledger keyed af requestens canonical SHA-256.
+1. trusted preflight af request + `main`;
+2. create-once host-local lock keyed af requestens canonical SHA-256;
+3. trusted post-lock `main` observation;
+4. trusted-current-time re-verifikation af signed request + qualification;
+5. create-once pending payload;
+6. create-once final canonical payload;
+7. canonical read-back, som først dér mintes som `PhysicalQualificationReservation`;
+8. durable cleanup af pending/lock.
 
-Consumption følger fail-closed rækkefølgen:
+Hvis noget fejler efter trin 2, må requesten ikke genbruges på samme canonical host ledger uden en separat eksplicit recovery-procedure.
 
-1. create-once lock/reservation marker,
-2. create-once pending artifact,
-3. create-once final canonical reservation,
-4. read-back og canonical verifikation,
-5. cleanup af pending/lock.
+### 5. Replay-scope er host-local, ikke global
 
-Hvis processen crasher eller cleanup fejler efter reservationen er begyndt, må requesten **ikke** blive genbrugelig. Presence af final, pending eller lock betyder consumed eller explicit recovery-required. Der findes ingen implicit rollback til reusable state.
+Produktionens public API bruger én canonical host-local ledger-location og eksponerer ingen root/ID-selector. Receipt binder SHA-256 af den konkrete ledger-root.
 
-Denne ADR tilføjer ikke en recovery-procedure; usikker state forbliver fail-closed.
+Et gyldigt receipt har altid:
 
-### 5. Ingen fysisk execution authority
+- `ledger_scope=canonical-host-local-v1`;
+- `main_head_match_confirmed=true`;
+- `request_consumed=true`;
+- `host_replay_guard_committed=true`;
+- `global_replay_safe=false`.
+
+`global_replay_safe=false` er en vigtig sandhed, ikke en mangel der må skjules. En lokal filesystem-ledger kan ikke bevise, at den samme signed request ikke er præsenteret på en anden host. En senere campaign-admission boundary skal derfor binde den autoriserede fysiske host/runner-identitet, før requesten kan bruges til faktisk execution.
+
+### 6. Exact-main er stadig ikke persistent freeze
+
+Post-lock observationen beviser kun, at `refs/heads/main` matchede `requested_frozen_main_sha` på det konkrete observationstidspunkt.
+
+Receipt skal derfor fortsat have:
+
+- `frozen_main_confirmed=false`;
+- `physical_campaign_completed=false`;
+- `campaign_start_authorized=false`;
+- `pilot_go_authorized=false`;
+- `activation_authorized=false`;
+- `remote_publication_authorized=false`.
+
+En senere campaign-admission boundary skal re-verificere relevant frozen-main/host evidence omkring selve fysiske runner-starten.
+
+### 7. Ingen fysisk execution authority
 
 Reservation-leddet må ikke:
 
-- starte de 11 DC-L15 probes,
-- oprette background cadence,
-- erklære vedvarende `main` freeze,
-- generere fysisk isolation-evidens,
-- erklære DC-L15 completed,
-- autorisere pilot-GO,
-- autorisere merge, push, release, deploy eller remote publication,
+- starte de 11 DC-L15 probes;
+- oprette background cadence;
+- erklære vedvarende `main` freeze;
+- generere fysisk isolation-evidens;
+- erklære DC-L15 completed;
+- autorisere pilot-GO;
+- autorisere merge, push, release, deploy eller remote publication;
 - aktivere DC-L16.
-
-En senere fysisk runner skal have sin egen kontrakt og skal re-verificere relevant main/freeze-evidens omkring selve campaignen.
 
 ## Artefakter
 
-- `kaliv-rsi-local-main-head-observation/v1`
-- `kaliv-rsi-physical-qualification-reservation/v1`
-- `PhysicalQualificationRequestLedger`
+- `kaliv-rsi-local-main-head-observation/v1` — parsebar evidence-only observation;
+- `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local reservation receipt;
+- `consume_physical_qualification_request_once(...)` — eneste public authority-bearing write-path;
+- `load_physical_qualification_reservation(...)` — loader kun fra canonical host-local ledger.
 
 Reservationens authority er fast `consumed-request-evidence-only`.
 
 ## Fail-closed krav
 
-Implementationen skal mindst afvise:
+Implementationen skal mindst afvise eller fail-close ved:
 
-1. forkert eller malformed `main` SHA,
-2. observation af anden ref/repository,
-3. stale eller future-dated observation,
-4. observation hvis SHA ikke matcher den signerede request,
-5. expired eller ugyldig human request ved consumption,
-6. duplicate consumption af samme request,
-7. enhver eksisterende pending/lock-state som genbrugelig request,
-8. tampering med canonical final reservation,
-9. receipt-forsøg på at flippe freeze/campaign/pilot/publication/activation authority til `true`.
+1. forged/caller-supplied observation i authority-pathen;
+2. caller-supplied/backdated consumption time;
+3. forkert eller malformed `main` SHA;
+4. `main` der flytter mellem preflight og post-lock read;
+5. expired eller ugyldig human request ved post-lock re-verifikation;
+6. duplicate consumption i canonical host ledger;
+7. enhver eksisterende final/pending/lock-state som genbrugelig request;
+8. direct persistence af prebuilt/fabricated final receipt;
+9. tampering med canonical final reservation;
+10. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
 ## Konsekvenser
 
-Efter denne boundary kan DevControl bevise, at en specifik human-signeret request blev re-verificeret, matchede den lokalt observerede `main`-head på reservationstidspunktet og blev irreversibelt taget ud af replay-puljen.
+Efter denne boundary kan DevControl sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret, matchede en trusted post-lock observation af lokal `main`, og blev taget ud af replay-puljen på den canonical fysiske host.
 
-Det er stadig **ikke** bevis for en vedvarende frozen-main campaign og stadig **ikke** tilladelse til at starte fysisk execution.
+Det er fortsat **ikke** global replay-bevis, vedvarende frozen-main-bevis eller tilladelse til at starte fysisk execution. Det næste authority-led skal være en separat host/freeze/campaign-admission boundary.
