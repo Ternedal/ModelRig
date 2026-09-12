@@ -28,6 +28,9 @@ from kaliv_dev_control.asymmetric_authority import (  # noqa: E402
     asymmetric_authority_key_custody_policy_sha256,
     authority_signing_message,
 )
+from kaliv_dev_control.improvement_candidate_snapshot import (  # noqa: E402
+    CandidateSnapshotReceipt,
+)
 from kaliv_dev_control.improvement_physical_request import (  # noqa: E402
     PHYSICAL_REQUEST_ISSUER_SYSTEM_ID,
     PhysicalQualificationRequest,
@@ -229,7 +232,7 @@ def evaluate(module, root: Path, candidate: dict, campaign: Path, attestation: P
     )
 
 
-def _qualification_fixture() -> QualificationPacket:
+def _qualification_fixture(snapshot_receipt_sha256: str = "5" * 64) -> QualificationPacket:
     return QualificationPacket.from_mapping(
         {
             "schema": "kaliv-rsi-qualification-packet/v1",
@@ -242,7 +245,7 @@ def _qualification_fixture() -> QualificationPacket:
             "task_id": "RSI_TASK_001",
             "task_sha256": "3" * 64,
             "materialization_receipt_sha256": "4" * 64,
-            "snapshot_receipt_sha256": "5" * 64,
+            "snapshot_receipt_sha256": snapshot_receipt_sha256,
             "candidate_commit_sha": "b" * 40,
             "candidate_tree_sha": "c" * 40,
             "worker_code_sha256": "6" * 64,
@@ -364,7 +367,7 @@ exit 0
 '''
 
 
-def _trusted_git_fixture(root: Path, main_sha: str):
+def _trusted_git_fixture(root: Path, main_sha: str, *, runtime_marker: bytes = b"rsi-test-runtime"):
     if os.name == "nt":
         return None
     source = root / "trusted-git-source"
@@ -375,7 +378,7 @@ def _trusted_git_fixture(root: Path, main_sha: str):
     helper = source / "libexec" / "git-core" / "git-helper"
     executable.write_bytes(_TRUSTED_GIT_SCRIPT)
     helper.write_bytes(_TRUSTED_GIT_HELPER)
-    (source / "lib" / "runtime.so").write_bytes(b"rsi-test-runtime")
+    (source / "lib" / "runtime.so").write_bytes(runtime_marker)
     executable.chmod(0o755)
     helper.chmod(0o755)
     manifest = capture_trusted_git_runtime_manifest(
@@ -399,6 +402,26 @@ def _trusted_git_fixture(root: Path, main_sha: str):
     return TrustedGitRuntime(transaction.resolve()), operation.resolve(), repository.resolve()
 
 
+def _snapshot_receipt_fixture(trusted_git: TrustedGitRuntime) -> CandidateSnapshotReceipt:
+    manifest = trusted_git.receipt.manifest
+    executable = next(
+        item
+        for item in manifest.files
+        if item.relative_path == manifest.executable_relative_path
+    )
+    return CandidateSnapshotReceipt(
+        materialization_receipt_sha256="4" * 64,
+        task_sha256="3" * 64,
+        candidate_commit_sha="b" * 40,
+        candidate_tree_sha="c" * 40,
+        file_count=1,
+        total_bytes=1,
+        manifest_sha256="f" * 64,
+        git_runtime_manifest_sha256=manifest.sha256,
+        git_executable_sha256=executable.sha256,
+    )
+
+
 class _SequenceClock:
     def __init__(self, values: list[str], *, mutate=None) -> None:
         self.values = list(values)
@@ -415,10 +438,7 @@ class _SequenceClock:
 
 
 def reservation_contract() -> None:
-    qualification = _qualification_fixture()
-    request = _request_fixture(qualification)
-    signature, verifier = _sign_request(request)
-    main_sha = request.requested_frozen_main_sha
+    main_sha = "d" * 40
 
     # The serializable observation model is still useful as evidence, but class
     # membership is explicitly not provenance for the authority-bearing consume API.
@@ -447,11 +467,14 @@ def reservation_contract() -> None:
     assert "consumed_at_utc" not in public_parameters
     assert "ledger" not in public_parameters
     assert "ledger_root" not in public_parameters
+    assert "repository_root" not in public_parameters
+    assert "operation_root" not in public_parameters
+    assert "snapshot_receipt" in public_parameters
     assert not hasattr(reservation_module, "build_physical_qualification_reservation")
     assert not hasattr(reservation_module, "PhysicalQualificationRequestLedger")
 
-    # Synthetic TrustedGitRuntime is POSIX-only; the exact same production API is
-    # exercised in Linux CI while the evidence model assertions above remain portable.
+    # Synthetic TrustedGitRuntime is POSIX-only. Exact-head Linux CI exercises
+    # the transaction; portable assertions above still run on Windows jobs.
     if os.name == "nt":
         return
 
@@ -460,15 +483,12 @@ def reservation_contract() -> None:
         fixture = _trusted_git_fixture(root, main_sha)
         assert fixture is not None
         trusted_git, operation_root, repository_root = fixture
+        snapshot_receipt = _snapshot_receipt_fixture(trusted_git)
+        qualification = _qualification_fixture(snapshot_receipt.sha256)
+        request = _request_fixture(qualification)
+        signature, verifier = _sign_request(request)
         ledger_root = root / "ledger"
         ledger_root.mkdir()
-        clock = _SequenceClock(
-            [
-                "2026-09-12T19:11:00Z",
-                "2026-09-12T19:11:01Z",
-                "2026-09-12T19:11:02Z",
-            ]
-        )
         consumed = _consume_physical_qualification_request_once(
             ledger_root=ledger_root,
             trusted_git=trusted_git,
@@ -476,14 +496,24 @@ def reservation_contract() -> None:
             operation_root=operation_root,
             request=request,
             qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
             signature=signature,
             verifier=verifier,
-            now_provider=clock,
+            now_provider=_SequenceClock(
+                [
+                    "2026-09-12T19:11:00Z",
+                    "2026-09-12T19:11:01Z",
+                    "2026-09-12T19:11:02Z",
+                ]
+            ),
         )
         assert consumed.main_head_match_confirmed is True
         assert consumed.request_consumed is True
         assert consumed.host_replay_guard_committed is True
         assert consumed.global_replay_safe is False
+        assert consumed.snapshot_receipt_sha256 == snapshot_receipt.sha256
+        assert consumed.git_runtime_manifest_sha256 == snapshot_receipt.git_runtime_manifest_sha256
+        assert consumed.git_executable_sha256 == snapshot_receipt.git_executable_sha256
         assert consumed.requester_actor_id == "anders.requester"
         assert consumed.requested_main_sha == main_sha
         assert consumed.observed_main_sha == main_sha
@@ -501,13 +531,6 @@ def reservation_contract() -> None:
         loaded = ledger.load(request.sha256)
         assert loaded.canonical_json() == consumed.canonical_json()
 
-        duplicate_clock = _SequenceClock(
-            [
-                "2026-09-12T19:12:00Z",
-                "2026-09-12T19:12:01Z",
-                "2026-09-12T19:12:02Z",
-            ]
-        )
         _expect_reservation_error(
             "already been host-locally consumed",
             lambda: _consume_physical_qualification_request_once(
@@ -517,9 +540,16 @@ def reservation_contract() -> None:
                 operation_root=operation_root,
                 request=request,
                 qualification=qualification,
+                snapshot_receipt=snapshot_receipt,
                 signature=signature,
                 verifier=verifier,
-                now_provider=duplicate_clock,
+                now_provider=_SequenceClock(
+                    [
+                        "2026-09-12T19:12:00Z",
+                        "2026-09-12T19:12:01Z",
+                        "2026-09-12T19:12:02Z",
+                    ]
+                ),
             ),
         )
 
@@ -534,6 +564,35 @@ def reservation_contract() -> None:
         _expect_reservation_error(
             "replay scope/consume evidence is invalid",
             lambda: PhysicalQualificationReservation.from_mapping(global_claim),
+        )
+
+    # A different staged Git package is integrity-valid, but not authority-valid:
+    # its runtime identity is not the one bound by the signed snapshot receipt.
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        fixture = _trusted_git_fixture(root, main_sha, runtime_marker=b"different-runtime")
+        assert fixture is not None
+        other_git, operation_root, repository_root = fixture
+        ledger_root = root / "ledger"
+        ledger_root.mkdir()
+        _expect_reservation_error(
+            "does not match the signed snapshot runtime identity",
+            lambda: _consume_physical_qualification_request_once(
+                ledger_root=ledger_root,
+                trusted_git=other_git,
+                repository_root=repository_root,
+                operation_root=operation_root,
+                request=request,
+                qualification=qualification,
+                snapshot_receipt=snapshot_receipt,
+                signature=signature,
+                verifier=verifier,
+                now_provider=_SequenceClock(["2026-09-12T19:12:30Z"]),
+            ),
+        )
+        _expect_reservation_error(
+            "reservation is missing",
+            lambda: _PhysicalQualificationRequestLedger(ledger_root).load(request.sha256),
         )
 
     # Main moving after preflight but before the post-lock trusted read burns the
@@ -565,6 +624,7 @@ def reservation_contract() -> None:
                 operation_root=operation_root,
                 request=request,
                 qualification=qualification,
+                snapshot_receipt=snapshot_receipt,
                 signature=signature,
                 verifier=verifier,
                 now_provider=moving_clock,
@@ -600,6 +660,7 @@ def reservation_contract() -> None:
                 operation_root=operation_root,
                 request=request,
                 qualification=qualification,
+                snapshot_receipt=snapshot_receipt,
                 signature=signature,
                 verifier=verifier,
                 now_provider=expiry_clock,
@@ -621,13 +682,6 @@ def reservation_contract() -> None:
             trusted_git, operation_root, repository_root = fixture
             ledger_root = root / "ledger"
             ledger_root.mkdir()
-            clock = _SequenceClock(
-                [
-                    f"2026-09-12T19:2{index}:00Z",
-                    f"2026-09-12T19:2{index}:01Z",
-                    f"2026-09-12T19:2{index}:02Z",
-                ]
-            )
             receipts.append(
                 _consume_physical_qualification_request_once(
                     ledger_root=ledger_root,
@@ -636,9 +690,16 @@ def reservation_contract() -> None:
                     operation_root=operation_root,
                     request=request,
                     qualification=qualification,
+                    snapshot_receipt=snapshot_receipt,
                     signature=signature,
                     verifier=verifier,
-                    now_provider=clock,
+                    now_provider=_SequenceClock(
+                        [
+                            f"2026-09-12T19:2{index}:00Z",
+                            f"2026-09-12T19:2{index}:01Z",
+                            f"2026-09-12T19:2{index}:02Z",
+                        ]
+                    ),
                 )
             )
     assert all(receipt.global_replay_safe is False for receipt in receipts)
@@ -669,6 +730,7 @@ def reservation_contract() -> None:
             operation_root=operation_root,
             request=request,
             qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
             signature=signature,
             verifier=verifier,
             now_provider=_SequenceClock(
