@@ -297,19 +297,27 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             ),
         )
         if (reviewReads != null) {
-            val responseReviewReads = runCatching {
-                val root = json.parseToJsonElement(body) as? JsonObject
-                val raw = root?.get("review_reads") as? JsonPrimitive
-                when {
-                    raw == null || raw.isString -> null
-                    raw.content == "true" -> true
-                    raw.content == "false" -> false
-                    else -> null
-                }
-            }.getOrNull()
+            val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+                ?: throw Agent3Exception(
+                    "Invalid Agent 3.0 reviewed Preview envelope: response is not an object"
+                )
+            val raw = root["review_reads"] as? JsonPrimitive
+            val responseReviewReads = when {
+                raw == null || raw.isString -> null
+                raw.content == "true" -> true
+                raw.content == "false" -> false
+                else -> null
+            }
             if (responseReviewReads != reviewReads) {
                 throw Agent3Exception(
                     "Invalid Agent 3.0 Preview envelope: server review_reads does not match reviewed intent"
+                )
+            }
+            val rawCapability = root["capability_receipt"]
+            if (rawCapability != null && rawCapability !is JsonNull) {
+                requireRawCapabilityReceipt(
+                    rawCapability,
+                    context = "reviewed Preview capability evidence",
                 )
             }
         }
@@ -349,19 +357,35 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
      * exposed separately. A raw mode conflict can therefore yield only a safe
      * run-id recovery reference, never normal reviewed Start authority.
      */
-    internal fun startReviewedPlanTransport(planId: String): Agent3ReviewedStartTransportEnvelope {
+    internal fun startReviewedPlanTransport(
+        planId: String,
+        expectedCapabilityReceiptPresent: Boolean? = null,
+    ): Agent3ReviewedStartTransportEnvelope {
         val body = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
-        val envelope = decodeRunEnvelope(body, expectedPlanId = planId)
-        val responseReviewReads = runCatching {
-            val root = json.parseToJsonElement(body) as? JsonObject
-            val raw = root?.get("review_reads") as? JsonPrimitive
-            when {
-                raw == null || raw.isString -> null
-                raw.content == "true" -> true
-                raw.content == "false" -> false
-                else -> null
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            ?: throw Agent3Exception("Invalid Agent 3.0 Start envelope: response is not an object")
+        if (expectedCapabilityReceiptPresent != null) {
+            val rawCapability = root["capability_receipt"]
+            val present = rawCapability != null && rawCapability !is JsonNull
+            if (expectedCapabilityReceiptPresent) {
+                requireRawCapabilityReceipt(
+                    rawCapability,
+                    context = "reviewed Start capability evidence",
+                )
+            } else if (present) {
+                throw Agent3Exception(
+                    "Invalid Agent 3.0 Start envelope: server returned unexpected capability evidence"
+                )
             }
-        }.getOrNull() ?: throw Agent3Exception(
+        }
+        val envelope = decodeRunEnvelope(body, expectedPlanId = planId)
+        val raw = root["review_reads"] as? JsonPrimitive
+        val responseReviewReads = when {
+            raw == null || raw.isString -> null
+            raw.content == "true" -> true
+            raw.content == "false" -> false
+            else -> null
+        } ?: throw Agent3Exception(
             "Invalid Agent 3.0 Start envelope: server review_reads is not a boolean binding"
         )
         return Agent3ReviewedStartTransportEnvelope(

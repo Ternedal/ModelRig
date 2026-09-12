@@ -20,7 +20,23 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     expectedReviewReads: Boolean,
     expectedCapabilityReceipt: Agent3Client.CapabilityReceipt?,
 ): Agent3Client.RunEnvelope {
-    val transport = startReviewedPlanTransport(planId)
+    val transport = try {
+        startReviewedPlanTransport(
+            planId = planId,
+            expectedCapabilityReceiptPresent = expectedCapabilityReceipt != null,
+        )
+    } catch (failure: ModelRigException) {
+        val message = failure.message.orEmpty()
+        if (
+            message.contains("reviewed Start capability-evidence: receipt mangler") ||
+            message.contains("serveren returnerede uventet capability evidence")
+        ) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 Start-svar: capability receipt matcher ikke previewet",
+            )
+        }
+        throw failure
+    }
     val envelope = transport.envelope
     if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
         throw ModelRigException(
