@@ -36,3 +36,24 @@ internal fun presentTaskStepReadOnlyMetadata(
 } else {
     "Sikkerhedsmetadata ukendt"
 }
+
+/**
+ * Human-facing error copy for the normal read-only task card. The persisted
+ * worker/tool diagnostic remains untouched; arbitrary exception text is never
+ * promoted to primary UI copy.
+ */
+internal fun presentTaskStepError(state: String?, rawError: String?): String? {
+    val error = rawError?.trim().orEmpty()
+    if (error.isEmpty()) return null
+    val normalizedError = error.lowercase()
+    val normalizedState = state?.trim()?.lowercase()
+    return when {
+        normalizedError == "read-only task policy drifted outside execute" ->
+            "Trinnet blev blokeret af read-only-politikken."
+        normalizedError == "run changed before execution could start" ->
+            "Trinnet kunne ikke starte, fordi kørslens tilstand ændrede sig."
+        normalizedState == "blocked" -> "Trinnet blev blokeret på riggen."
+        normalizedState == "failed" -> "Trinnet fejlede på riggen."
+        else -> "Riggen rapporterede et problem med trinnet."
+    }
+}
