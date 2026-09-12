@@ -1,17 +1,4 @@
-"""The source fingerprint must identify the SOURCE, not the checkout (F-726).
-
-The Windows appliance hashes its source tree and the code-identity gate compares
-that hash to what a source checkout produces (F-607). The whole binding rests on
-one assumption: byte-identical logical source produces an identical hash no
-matter where it was checked out. Git breaks that assumption on its own -- with
-core.autocrlf=true a file lands as CRLF on Windows and LF on the Linux CI runner
--- so without normalization the gate reports validated_code_mismatch on the rig
-for a file nobody changed, and physical validation (F-701) cannot pass for a
-spurious reason. That failure would look exactly like a real mismatch.
-
-The RSI provenance extension reuses the same identity rule to prove that an
-accepted candidate eval measured the worker code from one exact materialized Git
-tree, without granting any execution or publication authority.
+"""Source/runtime identity and RSI materialized-candidate provenance contracts.
 
 Run: PYTHONPATH=worker python3 tests/worker_build_identity.py
 """
@@ -21,6 +8,7 @@ import hashlib
 import os
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,9 +28,7 @@ from kaliv_dev_control.improvement_proposal import (  # noqa: E402
     AGENT3_EVAL_SCHEMA,
     canonical_sha256,
 )
-from kaliv_dev_control.improvement_regression import (  # noqa: E402
-    CandidateRegressionProof,
-)
+from kaliv_dev_control.improvement_regression import CandidateRegressionProof  # noqa: E402
 
 passed = failed = 0
 
@@ -70,7 +56,7 @@ def _hash(path: Path) -> str:
     return hashlib.sha256(_canonical_bytes(path)).hexdigest()
 
 
-# --- the same logical source hashes the same under any line ending ----------
+# Existing F-726 contract: logical source identity ignores checkout EOL only.
 _d = Path(tempfile.mkdtemp(prefix="kaliv-eol-"))
 _lf = _d / "lf.py"
 _lf.write_bytes(b"def f():\n    return 1\n")
@@ -78,54 +64,32 @@ _crlf = _d / "crlf.py"
 _crlf.write_bytes(b"def f():\r\n    return 1\r\n")
 _cr = _d / "cr.py"
 _cr.write_bytes(b"def f():\r    return 1\r")
-
-check(_hash(_lf) == _hash(_crlf),
-      "LF and CRLF of identical source hash the same -- a Windows autocrlf "
-      "checkout matches the CI checkout")
-check(_hash(_lf) == _hash(_cr),
-      "a lone CR (old-Mac style) normalizes too, so no checkout style leaks "
-      "into the identity")
-
-# --- normalization must not erase a REAL difference -------------------------
+check(_hash(_lf) == _hash(_crlf), "LF and CRLF logical source hash identically")
+check(_hash(_lf) == _hash(_cr), "lone CR normalizes to the same source identity")
 _changed = _d / "changed.py"
 _changed.write_bytes(b"def f():\n    return 2\n")
-check(_hash(_lf) != _hash(_changed),
-      "a real content change still changes the hash -- normalization ignores "
-      "line endings, not logic")
-
+check(_hash(_lf) != _hash(_changed), "real content changes still change identity")
 _blankline = _d / "blank.py"
 _blankline.write_bytes(b"def f():\n\n    return 1\n")
-check(_hash(_lf) != _hash(_blankline),
-      "adding a blank line changes the hash -- only the CR/LF bytes are "
-      "normalized, not the presence of lines")
+check(_hash(_lf) != _hash(_blankline), "real whitespace/source changes remain visible")
+check(b"\r" not in _canonical_bytes(_crlf), "canonical worker bytes contain no CR")
 
-# --- the bytes are actually normalized, not just compared -------------------
-check(b"\r" not in _canonical_bytes(_crlf),
-      "the canonical bytes contain no CR, so anything hashing them is "
-      "checkout-independent by construction")
-
-# --- .gitattributes is the on-disk half, and must exist ---------------------
 _ga = ROOT / ".gitattributes"
-check(_ga.exists(), ".gitattributes exists -- the working tree is pinned to LF, "
-                    "not left to each machine's autocrlf")
+check(_ga.exists(), ".gitattributes exists")
 if _ga.exists():
     _text = _ga.read_text(encoding="utf-8")
     check("*.py    text eol=lf" in _text or "*.py text eol=lf" in _text,
-          ".gitattributes pins *.py to LF -- the files the fingerprint reads "
-          "cannot arrive as CRLF")
+          ".gitattributes pins Python source to LF")
     for _ext in ("*.go", "*.kt", "*.json"):
-        check(_ext in _text,
-              f".gitattributes pins {_ext} too -- every source language the "
-              "generators scan is covered")
+        check(_ext in _text, f".gitattributes pins {_ext}")
 
-# --- RSI materialized-tree -> measured runtime provenance -------------------
+
+# RSI bridge: exact materialized Git tree -> worker fingerprint -> exact eval.
 _snapshot_lf = (
     SnapshotEntry("README.md", "100644", b"candidate\n"),
     SnapshotEntry("worker/app/__init__.py", "100644", b""),
     SnapshotEntry("worker/app/planner.py", "100644", b"def choose():\n    return 'rig_status'\n"),
     SnapshotEntry("worker/app/nested/tool.py", "100755", b"VALUE = 1\n"),
-    # A build stamp is generated from the worker fingerprint and must never
-    # recursively change the fingerprint it carries.
     SnapshotEntry("worker/app/_build_stamp.py", "100644", b"CODE_SHA256 = 'x'\n"),
 )
 _snapshot_crlf = tuple(
@@ -133,12 +97,11 @@ _snapshot_crlf = tuple(
     if entry.path.endswith(".py") else entry
     for entry in _snapshot_lf
 )
-
 _code = worker_code_sha256(_snapshot_lf)
 check(_code == worker_code_sha256(_snapshot_crlf),
-      "RSI provenance uses the exact checkout-independent worker fingerprint rule")
+      "RSI bridge matches checkout-independent worker fingerprint semantics")
 check(candidate_tree_sha(_snapshot_lf) != candidate_tree_sha(_snapshot_crlf),
-      "Git tree identity remains byte-exact even though worker runtime identity normalizes EOL")
+      "Git tree identity remains byte-exact while runtime identity normalizes EOL")
 
 _task_sha = "2" * 64
 _materialized = MaterializedCandidateIdentity(
@@ -147,10 +110,7 @@ _materialized = MaterializedCandidateIdentity(
     commit_sha="4" * 40,
     tree_sha=candidate_tree_sha(_snapshot_lf),
 )
-_candidate_report = {
-    "schema": AGENT3_EVAL_SCHEMA,
-    "backend": {"code_sha256": _code},
-}
+_candidate_report = {"schema": AGENT3_EVAL_SCHEMA, "backend": {"code_sha256": _code}}
 _eval_sha = canonical_sha256(_candidate_report)
 _regression = CandidateRegressionProof(
     proposal_id="RSI_A3_001",
@@ -194,11 +154,9 @@ check(
     and _provenance.accepted_regression is True
     and _provenance.authority == "evidence-only"
     and _provenance.merge_authority == "human",
-    "accepted provenance binds materialized commit/tree, worker fingerprint and exact regression eval without authority",
+    "accepted RSI provenance binds commit/tree, worker fingerprint and exact eval without authority",
 )
 
-# Change a non-worker file: runtime fingerprint is identical but Git tree no
-# longer matches the materialized candidate, so the provenance chain must stop.
 _tree_tampered = tuple(
     SnapshotEntry(entry.path, entry.mode, b"tampered\n")
     if entry.path == "README.md" else entry
@@ -214,11 +172,9 @@ expect_provenance_error(
         candidate_report=_candidate_report,
         regression_proof=_regression,
     ),
-    "a non-worker tree mutation is still caught by exact materialized Git-tree binding",
+    "non-worker mutation is caught by exact materialized Git-tree binding",
 )
 
-# Change worker source and update the claimed Git tree: the runtime eval must
-# independently report the new worker fingerprint or the bridge refuses it.
 _worker_tampered = tuple(
     SnapshotEntry(entry.path, entry.mode, b"def choose():\n    return 'model_list'\n")
     if entry.path == "worker/app/planner.py" else entry
@@ -238,7 +194,7 @@ expect_provenance_error(
         candidate_report=_candidate_report,
         regression_proof=_regression,
     ),
-    "a materialized worker change cannot reuse an eval collected from the old worker code",
+    "changed worker tree cannot reuse an eval from the old worker code",
 )
 
 _wrong_eval = {"schema": AGENT3_EVAL_SCHEMA, "backend": {"code_sha256": _code}, "extra": True}
@@ -250,38 +206,10 @@ expect_provenance_error(
         candidate_report=_wrong_eval,
         regression_proof=_regression,
     ),
-    "runtime binding cannot substitute a different eval payload with the same code fingerprint",
+    "same fingerprint cannot substitute a different eval payload",
 )
 
-_rejected = CandidateRegressionProof(
-    **{**_regression.__dict__} if hasattr(_regression, "__dict__") else {
-        "proposal_id": _regression.proposal_id,
-        "proposal_sha256": _regression.proposal_sha256,
-        "promotion_receipt_sha256": _regression.promotion_receipt_sha256,
-        "task_id": _regression.task_id,
-        "task_sha256": _regression.task_sha256,
-        "repository": _regression.repository,
-        "base_sha": _regression.base_sha,
-        "baseline_eval_sha256": _regression.baseline_eval_sha256,
-        "candidate_eval_sha256": _regression.candidate_eval_sha256,
-        "baseline_code_sha256": _regression.baseline_code_sha256,
-        "candidate_code_sha256": _regression.candidate_code_sha256,
-        "baseline_planner_model": _regression.baseline_planner_model,
-        "candidate_planner_model": _regression.candidate_planner_model,
-        "task_set": _regression.task_set,
-        "repetitions": _regression.repetitions,
-        "baseline_exact_match_rate": _regression.baseline_exact_match_rate,
-        "candidate_exact_match_rate": _regression.candidate_exact_match_rate,
-        "baseline_discipline_rate": _regression.baseline_discipline_rate,
-        "candidate_discipline_rate": _regression.candidate_discipline_rate,
-        "exact_improvements": _regression.exact_improvements,
-        "exact_regressions": _regression.exact_regressions,
-        "discipline_regressions": _regression.discipline_regressions,
-        "risk_score_regressions": _regression.risk_score_regressions,
-        "findings": ("candidate regressed",),
-        "accepted": False,
-    }
-)
+_rejected = replace(_regression, findings=("candidate regressed",), accepted=False)
 expect_provenance_error(
     "regression proof is not accepted",
     lambda: build_candidate_runtime_provenance(
@@ -290,7 +218,7 @@ expect_provenance_error(
         candidate_report=_candidate_report,
         regression_proof=_rejected,
     ),
-    "runtime provenance can never turn a rejected candidate into an accepted one",
+    "runtime provenance cannot turn a rejected candidate into an accepted one",
 )
 
 _wrong_task = MaterializedCandidateIdentity(
@@ -307,13 +235,12 @@ expect_provenance_error(
         candidate_report=_candidate_report,
         regression_proof=_regression,
     ),
-    "materialization from another DevelopmentTask cannot be attached to this regression proof",
+    "another DevelopmentTask's materialization cannot attach to this regression proof",
 )
-
 expect_provenance_error(
     "requires LocalCandidateMaterializationReceipt",
     lambda: MaterializedCandidateIdentity.from_receipt(object()),
-    "materialization adapter refuses unverified arbitrary objects",
+    "materialization adapter refuses arbitrary unverified objects",
 )
 
 print(f"\n===== BUILD IDENTITY: {passed} passed, {failed} failed =====")
