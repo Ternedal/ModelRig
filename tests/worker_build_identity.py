@@ -100,8 +100,17 @@ _snapshot_crlf = tuple(
 _code = worker_code_sha256(_snapshot_lf)
 check(_code == worker_code_sha256(_snapshot_crlf),
       "RSI bridge matches checkout-independent worker fingerprint semantics")
+check(candidate_tree_sha(_snapshot_lf) == "a08d9d197ceab8b88a70518521e1f57b8fd87318",
+      "candidate tree hashing matches a git write-tree reference vector")
 check(candidate_tree_sha(_snapshot_lf) != candidate_tree_sha(_snapshot_crlf),
       "Git tree identity remains byte-exact while runtime identity normalizes EOL")
+expect_provenance_error(
+    "symlink",
+    lambda: worker_code_sha256(
+        _snapshot_lf + (SnapshotEntry("worker/app/link.py", "120000", b"planner.py"),)
+    ),
+    "worker Python symlinks fail closed instead of confusing Git blob bytes with resolved runtime bytes",
+)
 
 _task_sha = "2" * 64
 _materialized = MaterializedCandidateIdentity(
