@@ -377,9 +377,21 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     internal fun getRunEnvelope(
         runId: String,
         expectedReviewReads: Boolean? = null,
+        requireStrictCapabilityReceipt: Boolean = false,
     ): Agent3RunEnvelope {
+        val body = get("/api/v1/experimental/agent3/runs/${seg(runId)}")
+        if (requireStrictCapabilityReceipt) {
+            val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+                ?: throw Agent3Exception(
+                    "Invalid Agent 3.0 same-snapshot capability evidence: response is not an object"
+                )
+            requireRawCapabilityReceipt(
+                root["capability_receipt"],
+                context = "same-snapshot capability evidence",
+            )
+        }
         val envelope = decodeRunEnvelope(
-            get("/api/v1/experimental/agent3/runs/${seg(runId)}"),
+            body,
             expectedRunId = runId,
         )
         if (expectedReviewReads != null && envelope.readReview.enabled != expectedReviewReads) {
@@ -395,20 +407,6 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
             ?: throw Agent3Exception("Invalid Agent 3.0 capability evidence: response is not an object")
 
-        fun stringField(objectValue: JsonObject, name: String): String? {
-            val raw = objectValue[name] as? JsonPrimitive ?: return null
-            return raw.takeIf { it.isString }?.content
-        }
-        fun booleanField(objectValue: JsonObject, name: String): Boolean? {
-            val raw = objectValue[name] as? JsonPrimitive ?: return null
-            if (raw.isString) return null
-            return when (raw.content) {
-                "true" -> true
-                "false" -> false
-                else -> null
-            }
-        }
-
         val returnedRunId = stringField(root, "run_id")
         if (returnedRunId.isNullOrBlank() || returnedRunId != runId) {
             throw Agent3Exception(
@@ -421,56 +419,10 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             )
         }
 
-        val rawReceipt = root["receipt"] as? JsonObject
-            ?: throw Agent3Exception("Invalid Agent 3.0 capability evidence: receipt is missing")
-        for (field in listOf("schema", "graph_sha256", "plan_sha256", "route")) {
-            if (stringField(rawReceipt, field) == null) {
-                throw Agent3Exception(
-                    "Invalid Agent 3.0 capability evidence: receipt.$field has the wrong type"
-                )
-            }
-        }
-        if (
-            booleanField(rawReceipt, "allowed") == null ||
-            booleanField(rawReceipt, "production_activation") == null
-        ) {
-            throw Agent3Exception(
-                "Invalid Agent 3.0 capability evidence: receipt boolean binding is invalid"
-            )
-        }
-
-        val requiredIds = rawReceipt["required_capability_ids"] as? JsonArray
-            ?: throw Agent3Exception(
-                "Invalid Agent 3.0 capability evidence: required capability ids are missing"
-            )
-        if (requiredIds.any { value ->
-                val raw = value as? JsonPrimitive
-                raw == null || !raw.isString
-            }
-        ) {
-            throw Agent3Exception(
-                "Invalid Agent 3.0 capability evidence: required capability ids have the wrong type"
-            )
-        }
-
-        val blockers = rawReceipt["blockers"] as? JsonArray
-            ?: throw Agent3Exception("Invalid Agent 3.0 capability evidence: blockers are missing")
-        blockers.forEach { value ->
-            val blocker = value as? JsonObject
-                ?: throw Agent3Exception(
-                    "Invalid Agent 3.0 capability evidence: blocker has the wrong type"
-                )
-            if (
-                stringField(blocker, "capability_id") == null ||
-                stringField(blocker, "state") == null ||
-                stringField(blocker, "reason") == null
-            ) {
-                throw Agent3Exception(
-                    "Invalid Agent 3.0 capability evidence: blocker is incomplete"
-                )
-            }
-        }
-
+        requireRawCapabilityReceipt(
+            root["receipt"],
+            context = "capability evidence",
+        )
         val wire = decode<RunCapabilityEvidenceWire>(body)
         val receipt = wire.receipt.toReceipt()
         validateCapabilityReceipt(receipt)
@@ -645,6 +597,75 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             throw Agent3Exception("Invalid termination receipt: available tool control cannot be requested")
         }
         return value
+    }
+
+    private fun stringField(objectValue: JsonObject, name: String): String? {
+        val raw = objectValue[name] as? JsonPrimitive ?: return null
+        return raw.takeIf { it.isString }?.content
+    }
+
+    private fun booleanField(objectValue: JsonObject, name: String): Boolean? {
+        val raw = objectValue[name] as? JsonPrimitive ?: return null
+        if (raw.isString) return null
+        return when (raw.content) {
+            "true" -> true
+            "false" -> false
+            else -> null
+        }
+    }
+
+    private fun requireRawCapabilityReceipt(
+        value: JsonElement?,
+        context: String,
+    ): JsonObject {
+        val rawReceipt = value as? JsonObject
+            ?: throw Agent3Exception("Invalid Agent 3.0 $context: receipt is missing")
+        for (field in listOf("schema", "graph_sha256", "plan_sha256", "route")) {
+            if (stringField(rawReceipt, field) == null) {
+                throw Agent3Exception(
+                    "Invalid Agent 3.0 $context: receipt.$field has the wrong type"
+                )
+            }
+        }
+        if (
+            booleanField(rawReceipt, "allowed") == null ||
+            booleanField(rawReceipt, "production_activation") == null
+        ) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 $context: receipt boolean binding is invalid"
+            )
+        }
+
+        val requiredIds = rawReceipt["required_capability_ids"] as? JsonArray
+            ?: throw Agent3Exception(
+                "Invalid Agent 3.0 $context: required capability ids are missing"
+            )
+        if (requiredIds.any { item ->
+                val raw = item as? JsonPrimitive
+                raw == null || !raw.isString
+            }
+        ) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 $context: required capability ids have the wrong type"
+            )
+        }
+
+        val blockers = rawReceipt["blockers"] as? JsonArray
+            ?: throw Agent3Exception("Invalid Agent 3.0 $context: blockers are missing")
+        blockers.forEach { item ->
+            val blocker = item as? JsonObject
+                ?: throw Agent3Exception(
+                    "Invalid Agent 3.0 $context: blocker has the wrong type"
+                )
+            if (
+                stringField(blocker, "capability_id") == null ||
+                stringField(blocker, "state") == null ||
+                stringField(blocker, "reason") == null
+            ) {
+                throw Agent3Exception("Invalid Agent 3.0 $context: blocker is incomplete")
+            }
+        }
+        return rawReceipt
     }
 
     private fun validateCapabilityReceipt(receipt: Agent3CapabilityReceipt?) {

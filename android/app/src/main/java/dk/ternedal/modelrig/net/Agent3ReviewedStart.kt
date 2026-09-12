@@ -72,6 +72,7 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
         val fresh = getRunEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
+            requireStrictCapabilityReceipt = expectedCapabilityReceipt != null,
         )
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
 
