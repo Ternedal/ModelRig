@@ -238,6 +238,9 @@ fun App() {
             if (latest != null) {
                 val loaded = withContext(Dispatchers.IO) { db.loadMessages(latest) }
                 if (conversationPublicationEpoch.mayPublish(startupConversationEpoch)) {
+                    // Source badge belongs to the previous visible context, never
+                    // to a conversation restored/replaced by this publication.
+                    lastSource = null
                     messages.clear()
                     loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
                     convId = latest
@@ -713,6 +716,7 @@ fun App() {
                                     // deleted row has not become active yet.
                                     conversationPublicationEpoch.advance()
                                     if (convId == deletedId) {
+                                        lastSource = null
                                         convId = null
                                         messages.clear()
                                     }
@@ -727,6 +731,9 @@ fun App() {
                                             conversationPublicationEpoch.mayPublish(openEpoch) &&
                                             presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled
                                         ) {
+                                            // Only the winning publication may clear the old
+                                            // reply-source badge; stale loads leave UI state alone.
+                                            lastSource = null
                                             messages.clear()
                                             loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
                                             convId = id
@@ -738,6 +745,7 @@ fun App() {
                             onNew = {
                                 if (presentConversationBrowser(busy, pendingCard != null).contextMutationEnabled) {
                                     conversationPublicationEpoch.advance()
+                                    lastSource = null
                                     messages.clear()
                                     convId = null
                                     showConvos = false
