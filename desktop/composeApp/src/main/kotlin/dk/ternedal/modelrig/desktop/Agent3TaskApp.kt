@@ -603,8 +603,8 @@ private fun DesktopStepCard(index: Int, step: Agent3ReadonlyTaskStep) {
         if (step.args.isNotEmpty()) {
             Text("args: ${step.args.toString().take(420)}", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         }
-        step.error?.takeIf { it.isNotBlank() }?.let {
-            Text(it, color = KalivTheme.colors.Danger, fontSize = 10.sp)
+        presentTaskStepError(step.state, step.error)?.let { message ->
+            Text(message, color = KalivTheme.colors.Danger, fontSize = 10.sp)
         }
     }
 }
