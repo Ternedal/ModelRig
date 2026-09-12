@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-candidate-regression-proof-v1.schema.json",
+  "title": "ModelRig RSI candidate regression proof v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "proposal_id",
+    "proposal_sha256",
+    "promotion_receipt_sha256",
+    "task_id",
+    "task_sha256",
+    "repository",
+    "base_sha",
+    "baseline_eval_sha256",
+    "candidate_eval_sha256",
+    "baseline_code_sha256",
+    "candidate_code_sha256",
+    "baseline_planner_model",
+    "candidate_planner_model",
+    "task_set",
+    "repetitions",
+    "baseline_exact_match_rate",
+    "candidate_exact_match_rate",
+    "baseline_discipline_rate",
+    "candidate_discipline_rate",
+    "exact_improvements",
+    "exact_regressions",
+    "discipline_regressions",
+    "risk_score_regressions",
+    "findings",
+    "accepted",
+    "authority",
+    "merge_authority"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-candidate-regression-proof/v1"},
+    "proposal_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "proposal_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "promotion_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repository": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$", "maxLength": 200},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "baseline_eval_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_eval_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "baseline_code_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_code_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "baseline_planner_model": {"type": ["string", "null"], "minLength": 1},
+    "candidate_planner_model": {"type": ["string", "null"], "minLength": 1},
+    "task_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "name", "version", "task_count"],
+      "properties": {
+        "schema": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "task_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "repetitions": {"type": "integer", "minimum": 1},
+    "baseline_exact_match_rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "candidate_exact_match_rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "baseline_discipline_rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "candidate_discipline_rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "exact_improvements": {"$ref": "#/$defs/caseIds"},
+    "exact_regressions": {"$ref": "#/$defs/caseIds"},
+    "discipline_regressions": {"$ref": "#/$defs/caseIds"},
+    "risk_score_regressions": {"$ref": "#/$defs/caseIds"},
+    "findings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "accepted": {"type": "boolean"},
+    "authority": {"const": "evidence-only"},
+    "merge_authority": {"const": "human"}
+  },
+  "$defs": {
+    "caseIds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 3, "maxLength": 256}
+    }
+  }
+}
