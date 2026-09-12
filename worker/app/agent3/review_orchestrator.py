@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -219,10 +220,13 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
         proactive: bool = False,
         allow_private_cloud: bool = False,
         review_reads: bool = False,
+        run_id: str | None = None,
     ) -> AgentRun:
         route = self.router.route(request, caps)
         if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:
-            return self._blocked_run(request, route, route.reason, proactive, allow_private_cloud)
+            return self._blocked_run(
+                request, route, route.reason, proactive, allow_private_cloud, run_id=run_id
+            )
         return self._start_reviewed(
             request,
             route,
@@ -230,6 +234,7 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
             review_reads=review_reads,
+            run_id=run_id,
         )
 
     def _start_reviewed(
@@ -241,6 +246,7 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
         proactive: bool,
         allow_private_cloud: bool,
         review_reads: bool,
+        run_id: str | None = None,
     ) -> AgentRun:
         if len(steps) > self.max_steps:
             return self._blocked_run(
@@ -250,11 +256,13 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                 proactive,
                 allow_private_cloud,
                 steps[: self.max_steps],
+                run_id=run_id,
             )
         run = AgentRun(
             request=request,
             route=route,
             steps=steps,
+            id=run_id or str(uuid.uuid4()),
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
