@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Triggered only after the temporary workflow exists on the branch.
 ROOT = Path(__file__).resolve().parents[1]
 GATE = ROOT / "tests/support/workflow_desktop_light_theme.py"
 
