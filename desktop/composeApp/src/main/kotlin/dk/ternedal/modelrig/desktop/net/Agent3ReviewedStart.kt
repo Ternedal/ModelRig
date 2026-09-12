@@ -69,6 +69,7 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
         val fresh = getRunEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
+            requireStrictCapabilityReceipt = expectedCapabilityReceipt != null,
         )
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
         if (expectedCapabilityReceipt != null) {
@@ -87,7 +88,14 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
         fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "the reviewed Start envelope was rejected"
-        val recovery = recoveryFailure.message ?: "fresh run status could not be validated"
+        val rawRecovery = recoveryFailure.message ?: "fresh run status could not be validated"
+        val recovery = if (
+            rawRecovery.contains("same-snapshot capability evidence: receipt is missing")
+        ) {
+            "Invalid Agent 3.0 fresh run envelope: same-snapshot capability evidence is missing"
+        } else {
+            rawRecovery
+        }
         throw Agent3Exception(
             "$original. Fresh run recovery failed: $recovery"
         )
