@@ -281,8 +281,32 @@ fun KalivContextPanel(
     responseSeconds: Double,
     sparkline: List<Float>,
 ) {
+    // Compatibility surface: callers supplying observations are explicitly
+    // declaring them measured. The normal App path uses the typed overload.
+    KalivContextPanel(
+        ragOn = ragOn,
+        onToggleRag = onToggleRag,
+        docs = docs,
+        onAddDocument = onAddDocument,
+        performance = KalivPerformanceTelemetry.Measured(
+            tokensPerSecond = tokensPerSec,
+            responseSeconds = responseSeconds,
+            sparkline = sparkline,
+        ),
+    )
+}
+
+@Composable
+fun KalivContextPanel(
+    ragOn: Boolean,
+    onToggleRag: () -> Unit,
+    docs: List<RagDocRow>,
+    onAddDocument: () -> Unit,
+    performance: KalivPerformanceTelemetry,
+) {
     val c = KalivTheme.colors
     val panelBackground = if (c.isDark) Color(0x8014110E) else c.Surface
+    val performancePresentation = presentPerformance(performance)
 
     Column(
         Modifier
@@ -301,9 +325,9 @@ fun KalivContextPanel(
             Spacer(Modifier.height(8.dp))
             Text(
                 if (ragOn) {
-                    "Dokumenter indg\u00e5r i svar. Kun lokalt \u2014 intet sendes til sky uden dit samtykke."
+                    "Dokumenter indgår i svar. Kun lokalt — intet sendes til sky uden dit samtykke."
                 } else {
-                    "RAG er sl\u00e5et fra. Sl\u00e5 til for at lade Kaliv svare ud fra dine dokumenter."
+                    "RAG er slået fra. Slå til for at lade Kaliv svare ud fra dine dokumenter."
                 },
                 color = c.TextMuted,
                 fontSize = 12.sp,
@@ -346,7 +370,7 @@ fun KalivContextPanel(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            LightShellOutlineChip("+ Tilf\u00f8j dokument", onAddDocument)
+            LightShellOutlineChip("+ Tilføj dokument", onAddDocument)
         }
 
         LightShellCard {
@@ -355,19 +379,34 @@ fun KalivContextPanel(
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
                     Text("Tokens / sek.", color = c.TextMuted, fontSize = 11.sp)
-                    Text("$tokensPerSec", color = c.Highlight, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        performancePresentation.tokensPerSecondText,
+                        color = if (performancePresentation.measured) c.Highlight else c.TextMuted,
+                        fontSize = if (performancePresentation.measured) 22.sp else 12.5.sp,
+                        fontWeight = if (performancePresentation.measured) FontWeight.SemiBold else FontWeight.Normal,
+                    )
                 }
-                Sparkline(sparkline, Modifier.width(120.dp).height(34.dp))
+                performancePresentation.sparkline?.let { points ->
+                    Sparkline(points, Modifier.width(120.dp).height(34.dp))
+                }
             }
             Spacer(Modifier.height(10.dp))
             Row {
                 Text("Svartid", color = c.TextMuted, fontSize = 11.sp)
                 Spacer(Modifier.weight(1f))
                 Text(
-                    String.format(java.util.Locale.US, "%.2f", responseSeconds).replace('.', ',') + " s",
-                    color = c.TextHigh,
+                    performancePresentation.responseTimeText,
+                    color = if (performancePresentation.measured) c.TextHigh else c.TextMuted,
                     fontSize = 12.5.sp,
                     fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (!performancePresentation.measured) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Vises først, når en rigtig svartur er målt.",
+                    color = c.TextMuted,
+                    fontSize = 10.5.sp,
                 )
             }
         }
