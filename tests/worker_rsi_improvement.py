@@ -1,25 +1,45 @@
-"""RSI proposal-layer contract tests outside the landed DC-L01–L14 module set.
+"""RSI proposal/promotion contract tests outside the landed DC-L01–L14 set.
 
-ADR-DC-002 is still proposed, so these tests run through the repository's
-ordinary worker_*.py CI surface rather than silently extending the fixed
-DC-L01–L14 DevControl test-module inventory.
+ADR-DC-002 and the promotion follow-up are still proposed, so these tests run
+through the repository's ordinary worker_*.py CI surface rather than silently
+extending the fixed DC-L01–L14 DevControl test-module inventory.
 """
 from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import sys
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "devcontrol" / "src"))
 
+from kaliv_dev_control.asymmetric_authority import (
+    DetachedEd25519AuthoritySignature,
+    Ed25519AuthorityVerifier,
+    TrustedEd25519AuthorityKey,
+    asymmetric_authority_key_custody_policy_sha256,
+    authority_signing_message,
+)
 from kaliv_dev_control.improvement_binding import proposal_from_model_json
 from kaliv_dev_control.improvement_evidence import (
     build_verified_agent3_improvement_brief,
 )
 from kaliv_dev_control.improvement_model import generate_bound_improvement_proposal
+from kaliv_dev_control.improvement_promotion import (
+    PROMOTION_AUTHORITY,
+    PROMOTION_AUTHORIZATION_SCHEMA,
+    PROMOTION_ISSUER_SYSTEM_ID,
+    ImprovementPromotionError,
+    PromotionAuthorization,
+    promote_improvement_proposal,
+    proposal_sha256,
+)
 from kaliv_dev_control.improvement_proposal import (
     AGENT3_EVAL_SCHEMA,
     ImprovementProposal,
@@ -47,7 +67,7 @@ def check(condition: bool, message: str) -> None:
 def expect_error(fragment: str, fn, message: str) -> None:
     try:
         fn()
-    except ImprovementProposalError as exc:
+    except (ImprovementProposalError, ImprovementPromotionError) as exc:
         check(fragment in str(exc), message)
     else:
         check(False, message)
@@ -131,6 +151,91 @@ def proposal_data(source: dict) -> dict:
         "authority": "proposal-only",
         "merge_authority": "human",
     }
+
+
+def promotion_authorization_data(proposal: ImprovementProposal) -> dict:
+    return {
+        "schema": PROMOTION_AUTHORIZATION_SCHEMA,
+        "proposal_id": proposal.proposal_id,
+        "proposal_sha256": proposal_sha256(proposal),
+        "repository": proposal.repository,
+        "base_sha": proposal.base_sha,
+        "task": {
+            "schema": "kaliv-development-task/v1",
+            "task_id": "RSI_TASK_001",
+            "repository": proposal.repository,
+            "base_sha": proposal.base_sha,
+            "goal": "Forbedr Agent 3 tool-valg og bevis regressionen.",
+            "acceptance_criteria": list(proposal.acceptance_criteria) + [
+                "den eksisterende fulde Python-suite forbliver grøn"
+            ],
+            "risk": "medium",
+            "allowed_paths": ["worker/app/agent3/planner.py"],
+            "protected_paths": [".github/**", "devcontrol/**"],
+            "allowed_command_ids": ["python.tests"],
+            "required_tests": [
+                "python tests/worker_agent3_planner.py",
+                "python scripts/agent3_model_eval.py --planner-model <candidate>",
+            ],
+            "budget": {
+                "max_changed_files": 4,
+                "max_added_lines": 500,
+                "max_deleted_lines": 500,
+                "max_attempts": 2,
+                "max_runtime_seconds": 1800,
+                "max_output_bytes": 1000000,
+            },
+            "merge_authority": "human",
+        },
+        "required_evals": list(proposal.required_evals),
+        "authority": PROMOTION_AUTHORITY,
+    }
+
+
+def signed_promotion(
+    authorization: PromotionAuthorization,
+    *,
+    issuer_system_id: str = PROMOTION_ISSUER_SYSTEM_ID,
+):
+    private = Ed25519PrivateKey.generate()
+    public_hex = private.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+    policy_hash = asymmetric_authority_key_custody_policy_sha256()
+    key = TrustedEd25519AuthorityKey(
+        key_id="rsi-human-test-key",
+        issuer_actor_id="anders.test",
+        issuer_system_id=issuer_system_id,
+        public_key_hex=public_hex,
+        valid_from_utc="2026-09-12T00:00:00Z",
+        valid_until_utc="2026-09-13T00:00:00Z",
+        keyring_epoch=1,
+        custody_policy_sha256=policy_hash,
+    )
+    payload = authorization.canonical_json().encode("utf-8")
+    message = authority_signing_message(
+        key_id=key.key_id,
+        issuer_actor_id=key.issuer_actor_id,
+        issuer_system_id=key.issuer_system_id,
+        keyring_epoch=key.keyring_epoch,
+        custody_policy_sha256=key.custody_policy_sha256,
+        payload=payload,
+    )
+    signature = DetachedEd25519AuthoritySignature(
+        key_id=key.key_id,
+        issuer_actor_id=key.issuer_actor_id,
+        issuer_system_id=key.issuer_system_id,
+        keyring_epoch=key.keyring_epoch,
+        custody_policy_sha256=key.custody_policy_sha256,
+        payload_sha256=hashlib.sha256(payload).hexdigest(),
+        signature_hex=private.sign(message).hex(),
+        signed_at_utc="2026-09-12T19:00:00Z",
+    )
+    verifier = Ed25519AuthorityVerifier(
+        {key.key_id: key}, minimum_keyring_epoch=1
+    )
+    return signature, verifier
 
 
 # Deterministic failure extraction and clean-evidence stop.
@@ -264,6 +369,134 @@ async def model_contracts() -> None:
 
 
 asyncio.run(model_contracts())
+
+# Signed proposal -> DevelopmentTask promotion boundary.
+promotion_proposal = ImprovementProposal.from_mapping(proposal_data(first))
+authorization = PromotionAuthorization.from_mapping(
+    promotion_authorization_data(promotion_proposal)
+)
+signature, verifier = signed_promotion(authorization)
+task, receipt = promote_improvement_proposal(
+    proposal=promotion_proposal,
+    authorization=authorization,
+    signature=signature,
+    verifier=verifier,
+    verified_at_utc="2026-09-12T19:01:00Z",
+)
+check(
+    task.allowed_paths == ("worker/app/agent3/planner.py",)
+    and task.allowed_paths != promotion_proposal.suggested_paths,
+    "execution scope kommer kun fra den signerede authorization, ikke proposal suggestions",
+)
+check(
+    receipt.proposal_sha256 == proposal_sha256(promotion_proposal)
+    and receipt.authorization_sha256 == authorization.sha256
+    and receipt.task_id == task.task_id,
+    "promotion receipt binder proposal, authorization og DevelopmentTask",
+)
+check(
+    receipt.reviewer_actor_id == "anders.test"
+    and receipt.issuer_system_id == PROMOTION_ISSUER_SYSTEM_ID,
+    "promotion receipt bevarer den verificerede eksterne reviewer-identitet",
+)
+
+# Proposal binding cannot be swapped after human authorization.
+wrong = promotion_authorization_data(promotion_proposal)
+wrong["proposal_sha256"] = "e" * 64
+wrong_auth = PromotionAuthorization.from_mapping(wrong)
+wrong_sig, wrong_verifier = signed_promotion(wrong_auth)
+expect_error(
+    "proposal_sha256 is not bound",
+    lambda: promote_improvement_proposal(
+        proposal=promotion_proposal,
+        authorization=wrong_auth,
+        signature=wrong_sig,
+        verifier=wrong_verifier,
+        verified_at_utc="2026-09-12T19:01:00Z",
+    ),
+    "en signer kan ikke autorisere et andet proposal-digest end det aktuelle proposal",
+)
+
+# Required eval proof and proposal acceptance criteria survive promotion.
+wrong = promotion_authorization_data(promotion_proposal)
+wrong["required_evals"] = ["some-other-eval/v1"]
+wrong_auth = PromotionAuthorization.from_mapping(wrong)
+wrong_sig, wrong_verifier = signed_promotion(wrong_auth)
+expect_error(
+    "required_evals exactly",
+    lambda: promote_improvement_proposal(
+        proposal=promotion_proposal,
+        authorization=wrong_auth,
+        signature=wrong_sig,
+        verifier=wrong_verifier,
+        verified_at_utc="2026-09-12T19:01:00Z",
+    ),
+    "human promotion kan ikke droppe proposalets krævede regression-eval",
+)
+wrong = promotion_authorization_data(promotion_proposal)
+wrong["task"]["acceptance_criteria"] = ["kun en ny, løs acceptregel"]
+wrong_auth = PromotionAuthorization.from_mapping(wrong)
+wrong_sig, wrong_verifier = signed_promotion(wrong_auth)
+expect_error(
+    "dropped proposal acceptance criteria",
+    lambda: promote_improvement_proposal(
+        proposal=promotion_proposal,
+        authorization=wrong_auth,
+        signature=wrong_sig,
+        verifier=wrong_verifier,
+        verified_at_utc="2026-09-12T19:01:00Z",
+    ),
+    "promotion kan ikke fjerne modellens evidensbundne acceptance criteria",
+)
+
+# Promotion may raise risk, but never silently lower it.
+wrong = promotion_authorization_data(promotion_proposal)
+wrong["task"]["risk"] = "low"
+wrong_auth = PromotionAuthorization.from_mapping(wrong)
+wrong_sig, wrong_verifier = signed_promotion(wrong_auth)
+expect_error(
+    "may not silently downgrade",
+    lambda: promote_improvement_proposal(
+        proposal=promotion_proposal,
+        authorization=wrong_auth,
+        signature=wrong_sig,
+        verifier=wrong_verifier,
+        verified_at_utc="2026-09-12T19:01:00Z",
+    ),
+    "promotion kan ikke nedklassificere proposalets risiko",
+)
+
+# A signature from another authority system is not an RSI human approval.
+foreign_sig, foreign_verifier = signed_promotion(
+    authorization, issuer_system_id="some-other-authority"
+)
+expect_error(
+    "human-review authority system",
+    lambda: promote_improvement_proposal(
+        proposal=promotion_proposal,
+        authorization=authorization,
+        signature=foreign_sig,
+        verifier=foreign_verifier,
+        verified_at_utc="2026-09-12T19:01:00Z",
+    ),
+    "en gyldig Ed25519-signatur fra et andet authority-system giver ingen RSI-promotion",
+)
+
+# Authorization bytes are signature-bound: post-signature authority changes fail.
+tampered = promotion_authorization_data(promotion_proposal)
+tampered["task"]["allowed_paths"] = ["worker/app/agent3/planner.py", "backend/**"]
+tampered_auth = PromotionAuthorization.from_mapping(tampered)
+expect_error(
+    "signature is not trusted",
+    lambda: promote_improvement_proposal(
+        proposal=promotion_proposal,
+        authorization=tampered_auth,
+        signature=signature,
+        verifier=verifier,
+        verified_at_utc="2026-09-12T19:01:00Z",
+    ),
+    "scope kan ikke udvides efter human-signaturen er lavet",
+)
 
 print(f"\n===== RSI IMPROVEMENT: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
