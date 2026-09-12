@@ -107,15 +107,19 @@ activation authority.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDARY.md`
 
-## ADR-DC-009 — Exact-main observation og one-time reservation før DC-L15
+## ADR-DC-009 — Authenticated host-local request-reservation før DC-L15
 
 **Dato 12/09-2026. Status: foreslået til beslutning.**
 
-Binder den signerede DC-L15-request til en frisk, lokal og read-only observation
-af `refs/heads/main` gennem staged Trusted Git og kræver exact SHA-match. Derefter
-forbruges requesten i en crash-durable create-once ledger, så replay fejler
-lukket. Reservationen beviser kun match ved consumption-tidspunktet; den hævder
-ikke vedvarende frozen `main` og giver ingen campaign-start, pilot, publication
-eller activation authority.
+Gør request-reservation til én authenticated host-local transaction: public
+consume-pathen tager først en irreversible create-once lock, genlæser derefter
+`refs/heads/main` gennem staged Trusted Git og re-verificerer den signerede
+request mod internt current time før final receipt commit. Caller kan ikke
+indsprøjte observation, timestamp, ledger-root eller prebuilt receipt.
+
+Receipt beviser kun host-local replay guard (`host_replay_guard_committed=true`)
+og siger eksplicit `global_replay_safe=false`; en lokal ledger kan ikke bevise
+distribueret replay-eksklusion. Vedvarende frozen `main`, campaign-start, pilot,
+publication og activation forbliver separate authority-gates.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
