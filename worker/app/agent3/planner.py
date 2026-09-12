@@ -551,6 +551,12 @@ def build_planner_router(
             }
             if reviewing:
                 kwargs["review_reads"] = review_reads
+                # A reviewed run must never become externally observable without
+                # its read-review policy. ReviewingAgent3Orchestrator already
+                # configures normal routed runs before saving them, but its
+                # blocked-route path uses the base blocked-run helper. Persist the
+                # policy here before either path can materialize the reserved run.
+                orchestrator.review_store.configure(reserved_run_id, review_reads)
             run = orchestrator.start_with_steps(
                 template.request,
                 caps,
