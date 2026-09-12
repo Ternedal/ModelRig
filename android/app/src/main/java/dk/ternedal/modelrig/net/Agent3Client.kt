@@ -199,6 +199,12 @@ class Agent3Client(baseUrl: String, private val token: String) {
                     "Ugyldigt Agent 3.0 Preview-svar: serverens Read review matcher ikke den reviewede intent",
                 )
             }
+            if (root.has("capability_receipt") && !root.isNull("capability_receipt")) {
+                requireRawCapabilityReceipt(
+                    root.opt("capability_receipt"),
+                    context = "reviewed Preview capability-evidence",
+                )
+            }
         }
         return PlanPreview(
             planId = root.nullableString("plan_id"),
@@ -236,8 +242,21 @@ class Agent3Client(baseUrl: String, private val token: String) {
      * the reviewed caller retain only a safely bound run id as recovery reference
      * when the raw mode conflicts, without weakening ordinary Start semantics.
      */
-    internal fun startReviewedPlanTransport(planId: String): ReviewedStartTransportEnvelope {
+    internal fun startReviewedPlanTransport(
+        planId: String,
+        expectedCapabilityReceiptPresent: Boolean,
+    ): ReviewedStartTransportEnvelope {
         val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
+        if (expectedCapabilityReceiptPresent) {
+            requireRawCapabilityReceipt(
+                root.opt("capability_receipt"),
+                context = "reviewed Start capability-evidence",
+            )
+        } else if (root.has("capability_receipt") && !root.isNull("capability_receipt")) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 reviewed Start capability-evidence: receipt var ikke forventet",
+            )
+        }
         val envelope = parseRunEnvelope(root)
         if (envelope.planId.isNullOrBlank() || envelope.planId != planId) {
             throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")

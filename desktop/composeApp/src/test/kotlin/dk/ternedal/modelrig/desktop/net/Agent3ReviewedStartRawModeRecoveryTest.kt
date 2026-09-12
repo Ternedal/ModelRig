@@ -65,7 +65,7 @@ class Agent3ReviewedStartRawModeRecoveryTest {
                     .startReviewedPlanEnvelope("plan-1", true, null)
             }
             assertEquals(
-                "Invalid Agent 3.0 Start envelope: capability receipt does not match reviewed Preview",
+                "Invalid Agent 3.0 reviewed Start capability evidence: receipt was not expected",
                 error.message,
             )
             assertEquals(1, server.requests.size)

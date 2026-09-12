@@ -20,7 +20,10 @@ internal fun Agent3Client.startReviewedPlanEnvelope(
     expectedReviewReads: Boolean,
     expectedCapabilityReceipt: Agent3Client.CapabilityReceipt?,
 ): Agent3Client.RunEnvelope {
-    val transport = startReviewedPlanTransport(planId)
+    val transport = startReviewedPlanTransport(
+        planId = planId,
+        expectedCapabilityReceiptPresent = expectedCapabilityReceipt != null,
+    )
     val envelope = transport.envelope
     if (envelope.capabilityReceipt != expectedCapabilityReceipt) {
         throw ModelRigException(

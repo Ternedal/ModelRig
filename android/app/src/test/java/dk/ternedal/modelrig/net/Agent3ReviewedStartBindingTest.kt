@@ -35,9 +35,14 @@ class Agent3ReviewedStartBindingTest {
 
     @Test
     fun changedCapabilityReceiptFailsClosed() {
+        val expected = receipt()
         val server = server(startEnvelope(capabilityReceiptJson = receiptJson(route = "other-route")))
         try {
-            assertReceiptFailure(server, receipt())
+            assertReceiptFailure(
+                server = server,
+                expected = expected,
+                expectedMessage = "Ugyldigt Agent 3.0 Start-svar: capability receipt matcher ikke previewet",
+            )
         } finally {
             server.shutdown()
         }
@@ -47,7 +52,11 @@ class Agent3ReviewedStartBindingTest {
     fun missingCapabilityReceiptFailsClosed() {
         val server = server(startEnvelope())
         try {
-            assertReceiptFailure(server, receipt())
+            assertReceiptFailure(
+                server = server,
+                expected = receipt(),
+                expectedMessage = "Ugyldigt Agent 3.0 reviewed Start capability-evidence: receipt mangler",
+            )
         } finally {
             server.shutdown()
         }
@@ -57,7 +66,11 @@ class Agent3ReviewedStartBindingTest {
     fun unexpectedCapabilityReceiptFailsClosed() {
         val server = server(startEnvelope(capabilityReceiptJson = receiptJson()))
         try {
-            assertReceiptFailure(server, null)
+            assertReceiptFailure(
+                server = server,
+                expected = null,
+                expectedMessage = "Ugyldigt Agent 3.0 reviewed Start capability-evidence: receipt var ikke forventet",
+            )
         } finally {
             server.shutdown()
         }
@@ -130,16 +143,14 @@ class Agent3ReviewedStartBindingTest {
     private fun assertReceiptFailure(
         server: MockWebServer,
         expected: Agent3Client.CapabilityReceipt?,
+        expectedMessage: String,
     ) {
         val error = runCatching {
             Agent3Client(server.url("/").toString(), "token")
                 .startReviewedPlanEnvelope("plan-1", true, expected)
         }.exceptionOrNull()
         assertTrue(error is ModelRigException)
-        assertEquals(
-            "Ugyldigt Agent 3.0 Start-svar: capability receipt matcher ikke previewet",
-            error?.message,
-        )
+        assertEquals(expectedMessage, error?.message)
     }
 
     private fun assertReadReviewFailure(server: MockWebServer, expected: Boolean) {
