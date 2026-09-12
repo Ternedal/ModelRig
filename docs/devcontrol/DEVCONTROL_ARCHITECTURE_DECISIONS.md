@@ -111,11 +111,12 @@ Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDA
 
 **Dato 12/09-2026. Status: foreslået til beslutning.**
 
-Gør request-reservation til én authenticated host-local transaction: public
-consume-pathen tager først en irreversible create-once lock, genlæser derefter
-`refs/heads/main` gennem staged Trusted Git og re-verificerer den signerede
-request mod internt current time før final receipt commit. Caller kan ikke
-indsprøjte observation, timestamp, ledger-root eller prebuilt receipt.
+Gør request-reservation til én authenticated host-local transaction. Public
+consume-pathen kan ikke få observation, clock eller authority-paths indsprøjtet;
+den udleder canonical repository/host-state selv. Den staged Git-runtime skal
+matche manifest + executable fra `CandidateSnapshotReceipt`, hvis SHA allerede
+er bundet af den human-signerede qualification chain. Først derefter tages den
+irreversible lock, `main` genlæses, og requesten re-verificeres mod current time.
 
 Receipt beviser kun host-local replay guard (`host_replay_guard_committed=true`)
 og siger eksplicit `global_replay_safe=false`; en lokal ledger kan ikke bevise
