@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -30,12 +31,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.data.Agent3TaskRunReferenceStore
+import dk.ternedal.modelrig.data.Agent3TaskStartRecoveryStore
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
 import dk.ternedal.modelrig.net.Agent3ReadonlyTaskClient
+import dk.ternedal.modelrig.net.Agent3TaskHttpException
 import dk.ternedal.modelrig.net.Agent3TaskReadinessClient
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
@@ -61,12 +66,24 @@ fun Agent3TaskScreen(
     onUseAgent2: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current.applicationContext
+    val runReferenceStore = remember { Agent3TaskRunReferenceStore(context) }
+    val startRecoveryStore = remember { Agent3TaskStartRecoveryStore(context) }
     var readiness by remember { mutableStateOf<Agent3TaskReadinessClient.Readiness?>(null) }
     var message by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<Agent3ReadonlyTaskClient.Preview?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf<Agent3ReadonlyTaskClient.Started?>(null) }
+    var retainedRunId by remember { mutableStateOf(runReferenceStore.read()) }
+    var retainedStartPlanId by remember { mutableStateOf(startRecoveryStore.read()) }
+    var startRecoveryPending by remember {
+        mutableStateOf(retainedRunId == null && retainedStartPlanId != null)
+    }
+    var initialRecoveryPending by remember { mutableStateOf(retainedRunId != null) }
     var busy by remember { mutableStateOf(TaskBusy.READINESS) }
     var error by remember { mutableStateOf<String?>(null) }
+    var publicationEpoch by remember { mutableStateOf(0L) }
 
     fun connection(): Pair<String, String> {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
@@ -74,6 +91,56 @@ fun Agent3TaskScreen(
         val token = store.token?.takeIf { it.isNotBlank() }
             ?: kotlin.error("Ingen device-token er gemt")
         return base to token
+    }
+
+    fun writeRetainedStartPlanId(planId: String?): Boolean {
+        val normalized = planId?.trim()?.takeIf { it.isNotEmpty() }
+        val saved = startRecoveryStore.write(normalized)
+        if (saved) {
+            retainedStartPlanId = normalized
+            startRecoveryPending = normalized != null && retainedRunId == null && snapshot == null
+        }
+        return saved
+    }
+
+    fun publishSnapshot(value: Agent3ReadonlyTaskClient.Started) {
+        snapshot = value
+        val activeTool = value.termination.activeTool
+        val retained = Agent3TaskUiPolicy.retainedRunIdAfterSnapshot(
+            runId = value.run.id,
+            terminal = value.terminal,
+            activeToolState = activeTool?.state,
+            activeToolRequestState = activeTool?.requestState,
+        )
+        retainedRunId = retained
+        if (!runReferenceStore.write(retained)) {
+            startRecoveryPending = retainedStartPlanId != null
+            error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.LOCAL_REFERENCE, null)
+            return
+        }
+        if (retainedStartPlanId != null) writeRetainedStartPlanId(null)
+        startRecoveryPending = false
+    }
+
+    fun recoverRun() {
+        val runId = retainedRunId ?: return
+        if (!Agent3TaskUiPolicy.canRecoverRun(runId, busy != TaskBusy.NONE)) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
+        busy = TaskBusy.STATUS
+        error = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3ReadonlyTaskClient(base, token).status(runId)
+                }
+            }
+            busy = TaskBusy.NONE
+            result.onSuccess(::publishSnapshot)
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STATUS, it.message)
+                }
+        }
     }
 
     fun refreshReadiness() {
@@ -90,12 +157,16 @@ fun Agent3TaskScreen(
             busy = TaskBusy.NONE
             result.onSuccess { value ->
                 readiness = value
-                if (!value.agent3ReadonlySelected && snapshot == null) preview = null
+                if (!value.agent3ReadonlySelected && snapshot == null && !startRecoveryPending) preview = null
             }.onFailure {
                 // Unknown/unreadable readiness is Agent 2, not an optimistic guess.
                 readiness = null
-                if (snapshot == null) preview = null
-                error = it.message ?: "Task-readiness kunne ikke hentes"
+                if (snapshot == null && !startRecoveryPending) preview = null
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
+            }
+            if (initialRecoveryPending) {
+                initialRecoveryPending = false
+                recoverRun()
             }
         }
     }
@@ -105,13 +176,42 @@ fun Agent3TaskScreen(
                 serverSurface = readiness?.selectedSurface,
                 message = message,
                 busy = busy != TaskBusy.NONE,
-                hasRun = snapshot != null,
+                hasRun = Agent3TaskUiPolicy.hasTaskAuthority(
+                    snapshotPresent = snapshot != null,
+                    retainedRunId = retainedRunId,
+                    retainedStartPlanId = retainedStartPlanId,
+                ),
             )
         ) return
         busy = TaskBusy.PREVIEW
         error = null
         preview = null
+        previewDeadlineMillis = null
+        previewExpired = false
+        startRecoveryPending = false
         scope.launch {
+            val readinessResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3TaskReadinessClient(base, token).readiness()
+                }
+            }
+            val freshReadiness = readinessResult.getOrElse {
+                busy = TaskBusy.NONE
+                readiness = null
+                preview = null
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
+                return@launch
+            }
+            readiness = freshReadiness
+            if (!freshReadiness.agent3ReadonlySelected) {
+                busy = TaskBusy.NONE
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                return@launch
+            }
+            val requestStartedAtMillis = SystemClock.elapsedRealtime()
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val (base, token) = connection()
@@ -119,23 +219,55 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { preview = it }
-                .onFailure { error = it.message ?: "Plan-preview fejlede" }
+            result.onSuccess { value ->
+                preview = value
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    value.expiresInSeconds,
+                )
+                previewDeadlineMillis = deadline
+                previewExpired = Agent3TaskUiPolicy.isPreviewExpired(
+                    deadline,
+                    SystemClock.elapsedRealtime(),
+                )
+            }.onFailure {
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.PREVIEW, it.message)
+            }
         }
     }
 
-    fun startTask() {
-        val plan = preview ?: return
-        val planId = plan.planId ?: return
-        if (!Agent3TaskUiPolicy.canStart(
-                serverSurface = readiness?.selectedSurface,
-                previewCanStart = plan.canStart,
+    fun publishStartFailure(failure: Throwable) {
+        if (
+            failure is Agent3TaskHttpException &&
+            !Agent3TaskUiPolicy.shouldRetainStartRecovery(failure.reasonCode)
+        ) {
+            writeRetainedStartPlanId(null)
+            if (failure.reasonCode == "task_start_refused") {
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START_REFUSED, failure.message)
+            } else {
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START_NOT_ACCEPTED, failure.message)
+            }
+            return
+        }
+        startRecoveryPending = true
+        error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.START, failure.message)
+    }
+
+    fun recoverPendingStart() {
+        val planId = retainedStartPlanId ?: return
+        val hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId)
+        if (!Agent3TaskUiPolicy.canRecoverStart(
+                retainedStartPlanId = planId,
                 busy = busy != TaskBusy.NONE,
-                hasRun = snapshot != null,
+                hasRun = hasRun,
             )
         ) return
         busy = TaskBusy.START
         error = null
+        startRecoveryPending = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
@@ -144,14 +276,106 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { snapshot = it }
-                .onFailure { error = it.message ?: "Opgaven kunne ikke startes" }
+            result.onSuccess(::publishSnapshot)
+                .onFailure(::publishStartFailure)
+        }
+    }
+
+    fun startTask() {
+        if (startRecoveryPending) {
+            recoverPendingStart()
+            return
+        }
+        val plan = preview ?: return
+        val planId = plan.planId ?: return
+        val nowMillis = SystemClock.elapsedRealtime()
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
+        if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, nowMillis)) {
+            previewExpired = true
+        }
+        if (!Agent3TaskUiPolicy.canStart(
+                serverSurface = readiness?.selectedSurface,
+                previewCanStart = plan.canStart,
+                previewFresh = previewFresh,
+                busy = busy != TaskBusy.NONE,
+                hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId),
+            )
+        ) return
+        busy = TaskBusy.START
+        error = null
+        scope.launch {
+            val readinessResult = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3TaskReadinessClient(base, token).readiness()
+                }
+            }
+            val freshReadiness = readinessResult.getOrElse {
+                busy = TaskBusy.NONE
+                readiness = null
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.READINESS, it.message)
+                return@launch
+            }
+            readiness = freshReadiness
+            if (!freshReadiness.agent3ReadonlySelected) {
+                busy = TaskBusy.NONE
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                return@launch
+            }
+            if (!Agent3TaskUiPolicy.readinessBindingMatches(
+                    currentPilotReportSha256 = freshReadiness.pilot.reportSha256,
+                    currentPilotCandidateGitSha = freshReadiness.pilot.candidateGitSha,
+                    currentRigValidationReportSha256 = freshReadiness.rigValidation.reportSha256,
+                    previewPilotReportSha256 = plan.evidence.pilotReportSha256,
+                    previewPilotCandidateGitSha = plan.evidence.pilotCandidateGitSha,
+                    previewRigValidationReportSha256 = plan.evidence.rigValidationReportSha256,
+                )
+            ) {
+                busy = TaskBusy.NONE
+                preview = null
+                previewDeadlineMillis = null
+                previewExpired = false
+                error = "Plan-previewet matcher ikke længere task-readiness. Lav et nyt preview."
+                return@launch
+            }
+            val startNowMillis = SystemClock.elapsedRealtime()
+            if (!Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, startNowMillis)) {
+                busy = TaskBusy.NONE
+                if (Agent3TaskUiPolicy.isPreviewExpired(previewDeadlineMillis, startNowMillis)) {
+                    previewExpired = true
+                }
+                return@launch
+            }
+            if (!writeRetainedStartPlanId(planId)) {
+                busy = TaskBusy.NONE
+                error = presentAgent3TaskScreenError(
+                    Agent3TaskFailureOperation.START_RECOVERY_REFERENCE,
+                    null,
+                )
+                return@launch
+            }
+            startRecoveryPending = true
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val (base, token) = connection()
+                    Agent3ReadonlyTaskClient(base, token).start(planId)
+                }
+            }
+            busy = TaskBusy.NONE
+            result.onSuccess(::publishSnapshot)
+                .onFailure(::publishStartFailure)
         }
     }
 
     fun refreshRun() {
         val runId = snapshot?.run?.id ?: return
         if (busy != TaskBusy.NONE) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
         busy = TaskBusy.STATUS
         error = null
         scope.launch {
@@ -162,8 +386,10 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { snapshot = it }
-                .onFailure { error = it.message ?: "Task-status kunne ikke hentes" }
+            result.onSuccess(::publishSnapshot)
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STATUS, it.message)
+                }
         }
     }
 
@@ -175,6 +401,7 @@ fun Agent3TaskScreen(
                 busy = busy != TaskBusy.NONE,
             )
         ) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
         busy = TaskBusy.STOP_PLAN
         error = null
         scope.launch {
@@ -185,9 +412,31 @@ fun Agent3TaskScreen(
                 }
             }
             busy = TaskBusy.NONE
-            result.onSuccess { snapshot = it }
-                .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
+            result.onSuccess(::publishSnapshot)
+                .onFailure {
+                    error = presentAgent3TaskScreenError(Agent3TaskFailureOperation.STOP_PLAN, it.message)
+                }
         }
+    }
+
+    fun resetTerminalHistory() {
+        val current = snapshot ?: return
+        val activeTool = current.termination.activeTool
+        if (!Agent3TaskUiPolicy.canResetTerminalHistory(
+                runTerminal = current.terminal,
+                activeToolState = activeTool?.state,
+                activeToolRequestState = activeTool?.requestState,
+                busy = busy != TaskBusy.NONE,
+            )
+        ) return
+        publicationEpoch = Agent3TaskUiPolicy.nextPublicationEpoch(publicationEpoch)
+        snapshot = null
+        preview = null
+        previewDeadlineMillis = null
+        previewExpired = false
+        startRecoveryPending = retainedStartPlanId != null && retainedRunId == null
+        message = ""
+        error = null
     }
 
     LaunchedEffect(Unit) { refreshReadiness() }
@@ -212,23 +461,46 @@ fun Agent3TaskScreen(
         ) {
             delay(1_000)
             if (busy != TaskBusy.NONE) continue
+            val requestEpoch = publicationEpoch
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val (base, token) = connection()
                     Agent3ReadonlyTaskClient(base, token).status(runId)
                 }
             }
+            if (!Agent3TaskUiPolicy.canPublish(requestEpoch, publicationEpoch)) continue
             if (result.isSuccess) {
-                snapshot = result.getOrThrow()
+                publishSnapshot(result.getOrThrow())
             } else {
-                error = result.exceptionOrNull()?.message ?: "Automatisk task-status fejlede"
+                error = presentAgent3TaskScreenError(
+                    Agent3TaskFailureOperation.AUTOMATIC_STATUS,
+                    result.exceptionOrNull()?.message,
+                )
                 return@LaunchedEffect
             }
         }
     }
 
+    LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+        val deadline = previewDeadlineMillis ?: return@LaunchedEffect
+        val remaining = deadline - SystemClock.elapsedRealtime()
+        if (remaining > 0L) delay(remaining)
+        if (preview?.planId != null && Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                SystemClock.elapsedRealtime(),
+            )
+        ) {
+            previewExpired = true
+        }
+    }
+
     val surface = Agent3TaskUiPolicy.normalizedSurface(readiness?.selectedSurface)
-    val hasRun = snapshot != null
+    val hasRun = Agent3TaskUiPolicy.hasRunAuthority(snapshot != null, retainedRunId)
+    val hasTaskAuthority = Agent3TaskUiPolicy.hasTaskAuthority(
+        snapshotPresent = snapshot != null,
+        retainedRunId = retainedRunId,
+        retainedStartPlanId = retainedStartPlanId,
+    )
     val isBusy = busy != TaskBusy.NONE
 
     Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
@@ -261,12 +533,8 @@ fun Agent3TaskScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (surface == Agent3TaskUiPolicy.AGENT3_READONLY) {
-                                "Agent 3 read-only valgt af serveren"
-                            } else {
-                                "Agent 2 fallback"
-                            },
-                            color = if (surface == Agent3TaskUiPolicy.AGENT3_READONLY) {
+                            presentAgent3TaskReadinessHeadline(readiness?.selectedSurface),
+                            color = if (readiness?.agent3ReadonlySelected == true) {
                                 KalivTheme.colors.success
                             } else {
                                 KalivTheme.colors.amber
@@ -275,25 +543,32 @@ fun Agent3TaskScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            readiness?.reason ?: "readiness_unavailable",
+                            presentAgent3TaskReadinessStatus(readiness?.selectedSurface, readiness?.reason),
                             color = KalivTheme.colors.textMuted,
                             fontSize = 11.sp,
                         )
+                        presentAgent3TaskReadinessServerReason(readiness?.reason)?.let { evidence ->
+                            Text(evidence, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                        }
                     }
                     if (busy == TaskBusy.READINESS) CircularProgressIndicator()
                 }
                 Spacer(Modifier.height(8.dp))
-                MetaRow("Aktiv surface", surface)
-                MetaRow("Fallback", readiness?.fallbackSurface ?: Agent3TaskUiPolicy.AGENT2)
-                MetaRow("Routing", readiness?.uiContract?.routeSource ?: "fail_closed")
+                MetaRow("Aktiv surface", presentAgent3TaskReadinessSurface(readiness?.selectedSurface))
+                MetaRow("Fallback", presentAgent3TaskReadinessSurface(readiness?.fallbackSurface))
+                MetaRow("Routing", presentAgent3TaskReadinessRouteSource(readiness?.uiContract?.routeSource))
                 MetaRow(
                     "Pilot",
                     readiness?.pilot?.successes?.let { "$it/${readiness?.pilot?.tasks ?: "?"}" } ?: "ukendt",
                 )
                 MetaRow("Replans", readiness?.pilot?.replans?.toString() ?: "ukendt")
                 MetaRow("Retry-events", readiness?.pilot?.retryEvents?.toString() ?: "ukendt")
-                readiness?.reasons?.distinct()?.forEach {
-                    Text("• $it", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
+                val readinessReasons = readiness?.reasons?.distinct().orEmpty()
+                if (readinessReasons.isNotEmpty()) {
+                    Text("Tekniske readiness-koder", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                    readinessReasons.forEach {
+                        Text("• $it", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(enabled = !isBusy, onClick = { refreshReadiness() }) {
@@ -310,7 +585,59 @@ fun Agent3TaskScreen(
                 }
             }
 
-            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasRun) {
+            if (snapshot == null && retainedRunId != null) {
+                Spacer(Modifier.height(12.dp))
+                SurfaceCard {
+                    Text(
+                        "Tidligere task skal genforbindes",
+                        color = KalivTheme.colors.textHigh,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "Denne enhed har en gemt reference til en read-only task. En ny task er låst, indtil riggen har bekræftet den eksisterende status.",
+                        color = KalivTheme.colors.textMuted,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        enabled = Agent3TaskUiPolicy.canRecoverRun(retainedRunId, isBusy),
+                        onClick = { recoverRun() },
+                    ) {
+                        Text(if (busy == TaskBusy.STATUS) "Henter status…" else "Prøv igen")
+                    }
+                }
+            }
+
+            if (snapshot == null && retainedRunId == null && retainedStartPlanId != null && preview == null) {
+                Spacer(Modifier.height(12.dp))
+                SurfaceCard {
+                    Text(
+                        "Startstatus skal afklares",
+                        color = KalivTheme.colors.textHigh,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        "Denne enhed har gemt den samme plan-reference fra en Start, der ikke fik et entydigt svar. Ingen ny opgave kan startes, før riggen har afklaret den Start.",
+                        color = KalivTheme.colors.textMuted,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        enabled = Agent3TaskUiPolicy.canRecoverStart(
+                            retainedStartPlanId = retainedStartPlanId,
+                            busy = isBusy,
+                            hasRun = hasRun,
+                        ),
+                        onClick = { recoverPendingStart() },
+                    ) {
+                        Text(if (busy == TaskBusy.START) "Henter startstatus…" else "Hent startstatus")
+                    }
+                }
+            }
+
+            if (surface == Agent3TaskUiPolicy.AGENT2 && !hasTaskAuthority) {
                 Spacer(Modifier.height(12.dp))
                 SurfaceCard {
                     Text(
@@ -327,7 +654,7 @@ fun Agent3TaskScreen(
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = onUseAgent2) { Text("Åbn normal chat") }
                 }
-            } else if (!hasRun) {
+            } else if (!hasRun && (retainedStartPlanId == null || preview != null)) {
                 Spacer(Modifier.height(12.dp))
                 SurfaceCard {
                     Text("Ny read-only opgave", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold)
@@ -337,8 +664,10 @@ fun Agent3TaskScreen(
                         onValueChange = {
                             message = it
                             preview = null
+                            previewDeadlineMillis = null
+                            previewExpired = false
                         },
-                        enabled = !isBusy,
+                        enabled = !isBusy && !hasTaskAuthority,
                         label = { Text("Hvad skal Kaliv undersøge?") },
                         supportingText = {
                             Text("Kun lokale, idempotente read-tools kan godkendes af serveren.")
@@ -353,7 +682,7 @@ fun Agent3TaskScreen(
                             serverSurface = readiness?.selectedSurface,
                             message = message,
                             busy = isBusy,
-                            hasRun = false,
+                            hasRun = hasTaskAuthority,
                         ),
                         onClick = { requestPreview() },
                     ) {
@@ -363,14 +692,34 @@ fun Agent3TaskScreen(
 
                 preview?.let { plan ->
                     Spacer(Modifier.height(12.dp))
+                    val nowMillis = SystemClock.elapsedRealtime()
+                    val expired = previewExpired || Agent3TaskUiPolicy.isPreviewExpired(
+                        previewDeadlineMillis,
+                        nowMillis,
+                    )
+                    val previewFresh = !expired && Agent3TaskUiPolicy.isPreviewFresh(
+                        previewDeadlineMillis,
+                        nowMillis,
+                    )
                     PlanReviewCard(
                         preview = plan,
-                        canStart = Agent3TaskUiPolicy.canStart(
-                            serverSurface = readiness?.selectedSurface,
-                            previewCanStart = plan.canStart,
-                            busy = isBusy,
-                            hasRun = false,
-                        ),
+                        canStart = if (retainedStartPlanId != null) {
+                            Agent3TaskUiPolicy.canRecoverStart(
+                                retainedStartPlanId = retainedStartPlanId,
+                                busy = isBusy,
+                                hasRun = hasRun,
+                            )
+                        } else {
+                            Agent3TaskUiPolicy.canStart(
+                                serverSurface = readiness?.selectedSurface,
+                                previewCanStart = plan.canStart,
+                                previewFresh = previewFresh,
+                                busy = isBusy,
+                                hasRun = false,
+                            )
+                        },
+                        expired = expired,
+                        recoveryPending = retainedStartPlanId != null,
                         starting = busy == TaskBusy.START,
                         onStart = { startTask() },
                     )
@@ -385,6 +734,19 @@ fun Agent3TaskScreen(
                     onRefresh = { refreshRun() },
                     onStopPlan = { stopPlan() },
                 )
+                val activeTool = run.termination.activeTool
+                if (Agent3TaskUiPolicy.canResetTerminalHistory(
+                        runTerminal = run.terminal,
+                        activeToolState = activeTool?.state,
+                        activeToolRequestState = activeTool?.requestState,
+                        busy = isBusy,
+                    )
+                ) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = { resetTerminalHistory() }) {
+                        Text("Ny opgave")
+                    }
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -402,6 +764,8 @@ fun Agent3TaskScreen(
 private fun PlanReviewCard(
     preview: Agent3ReadonlyTaskClient.Preview,
     canStart: Boolean,
+    expired: Boolean,
+    recoveryPending: Boolean,
     starting: Boolean,
     onStart: () -> Unit,
 ) {
@@ -412,6 +776,21 @@ private fun PlanReviewCard(
             color = KalivTheme.colors.success,
             fontSize = 11.sp,
         )
+        if (recoveryPending) {
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "Start blev sendt, men udfaldet er ikke bekræftet. Samme Start bruges kun til at hente det allerede accepterede run eller et serverafslag.",
+                color = KalivTheme.colors.amber,
+                fontSize = 11.sp,
+            )
+        } else if (expired) {
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "Plan-previewet er udløbet. Lav et nyt preview før start.",
+                color = KalivTheme.colors.danger,
+                fontSize = 11.sp,
+            )
+        }
         if (preview.rationale.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
             Text(preview.rationale, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
@@ -427,7 +806,11 @@ private fun PlanReviewCard(
         EvidenceCard(preview.evidence)
         Spacer(Modifier.height(12.dp))
         Button(enabled = canStart, onClick = onStart) {
-            Text(if (starting) "Starter…" else "Start read-only opgave")
+            Text(
+                if (starting) "Henter startstatus…"
+                else if (recoveryPending) "Hent startstatus"
+                else "Start read-only opgave"
+            )
         }
     }
 }
@@ -453,7 +836,7 @@ private fun TaskRunCard(
                 Text(run.id, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             }
             Text(
-                run.state,
+                presentAgent3TaskRunState(run.state),
                 color = runStateColor(run.state),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
@@ -461,7 +844,7 @@ private fun TaskRunCard(
         }
         Spacer(Modifier.height(8.dp))
         if (shouldPoll) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        MetaRow("Route", run.routeKind)
+        MetaRow("Rute", presentAgent3TaskRunRoute(run.routeKind))
         MetaRow("Step", "${run.currentStep}/${run.steps.size}")
         MetaRow("Plan terminal", if (snapshot.terminal) "ja" else "nej")
         MetaRow("Statuspolling", if (shouldPoll) "aktiv" else "afsluttet")
@@ -491,10 +874,10 @@ private fun TaskRunCard(
             Text("Outcome", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
             Text(it, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
         }
-        run.error?.takeIf { it.isNotBlank() }?.let {
+        presentAgent3TaskRunError(run.state, run.error)?.let { message ->
             Spacer(Modifier.height(10.dp))
-            Text("Fejl/outcome", color = KalivTheme.colors.danger, fontWeight = FontWeight.SemiBold)
-            Text(it, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
+            Text("Kørselsproblem", color = KalivTheme.colors.danger, fontWeight = FontWeight.SemiBold)
+            Text(message, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(12.dp))
@@ -517,9 +900,19 @@ private fun TaskRunCard(
         } else {
             snapshot.events.takeLast(20).forEach { event ->
                 Spacer(Modifier.height(5.dp))
-                Text(event.kind, color = KalivTheme.colors.signal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                if (event.payload.isNotBlank()) {
-                    Text(event.payload.take(320), color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                Text(
+                    presentAgent3TaskEventKind(event.kind),
+                    color = KalivTheme.colors.signal,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    presentAgent3TaskEventAuditCode(event.kind),
+                    color = KalivTheme.colors.textMuted,
+                    fontSize = 9.sp,
+                )
+                presentAgent3TaskEventStructuredDetail(event.payload)?.let { detail ->
+                    Text(detail, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
                 }
             }
         }
@@ -537,9 +930,10 @@ private fun TerminationCard(receipt: Agent3ReadonlyTaskClient.TerminationReceipt
     Surface(color = KalivTheme.colors.surfaceHigh, shape = RoundedCornerShape(10.dp)) {
         Column(Modifier.fillMaxWidth().padding(10.dp)) {
             Text("Plan", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            MetaRow("Status", plan.state)
+            MetaRow("Status", presentAgent3TerminationPlanState(plan.state))
+            MetaRow("Stopomfang", presentAgent3TerminationPlanScope(plan.requestScope))
             MetaRow("Kan stoppes", if (plan.canRequest) "ja" else "nej")
-            MetaRow("Effekt", plan.effect)
+            MetaRow("Effekt", presentAgent3TerminationPlanEffect(plan.effect))
             if (plan.effect == "prevent_future_steps_active_tool_continues") {
                 Text(
                     "Plan-stop forhindrer nye steps, men det aktive tool fortsætter.",
@@ -547,26 +941,76 @@ private fun TerminationCard(receipt: Agent3ReadonlyTaskClient.TerminationReceipt
                     fontSize = 10.sp,
                 )
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Teknisk kvittering · plan",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            agent3TerminationPlanEvidence(
+                state = plan.state,
+                canRequest = plan.canRequest,
+                requestScope = plan.requestScope,
+                effect = plan.effect,
+                reason = plan.reason,
+            ).forEach { field ->
+                Text("${field.label}: ${field.value}", color = KalivTheme.colors.textMuted, fontSize = 9.sp)
+            }
 
             Spacer(Modifier.height(8.dp))
             Text("Modelstream", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            MetaRow("Status", stream.state)
+            MetaRow("Status", presentAgent3TerminationModelState(stream.state))
             MetaRow("Aktiv", if (stream.active) "ja" else "nej")
             MetaRow("Runtime-handle", if (stream.handlePresent) "ja" else "nej")
             MetaRow("Kan stoppes", if (stream.canRequest) "ja" else "nej")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Teknisk kvittering · modelstream",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            agent3TerminationModelEvidence(
+                state = stream.state,
+                active = stream.active,
+                canRequest = stream.canRequest,
+                handlePresent = stream.handlePresent,
+                reason = stream.reason,
+            ).forEach { field ->
+                Text("${field.label}: ${field.value}", color = KalivTheme.colors.textMuted, fontSize = 9.sp)
+            }
 
             Spacer(Modifier.height(8.dp))
             Text("Aktivt tool", color = KalivTheme.colors.textHigh, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             if (tool == null) {
                 Text("Intet aktivt tool", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             } else {
-                MetaRow("Tool", tool.tool)
-                MetaRow("Step-state", tool.state)
-                MetaRow("Semantik", terminationSemanticsLabel(tool.semantics))
-                MetaRow("Request-state", tool.requestState)
+                MetaRow("Step-status", presentAgent3TaskStepState(tool.state) ?: "Status ukendt")
+                MetaRow("Afbrydelse", presentAgent3TerminationSemantics(tool.semantics))
+                MetaRow("Stopstatus", presentAgent3TerminationRequestState(tool.requestState))
                 MetaRow("Runtime-handle", if (tool.handlePresent) "ja" else "nej")
+                MetaRow("Kan stoppes", if (tool.canRequest) "ja" else "nej")
                 MetaRow("Direkte kontrol", if (tool.canRequest && tool.handlePresent) "tilgængelig" else "ingen")
-                Text(tool.reason, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Teknisk kvittering · aktivt tool",
+                    color = KalivTheme.colors.textMuted,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                agent3TerminationActiveToolEvidence(
+                    stepId = tool.stepId,
+                    tool = tool.tool,
+                    state = tool.state,
+                    semantics = tool.semantics,
+                    handlePresent = tool.handlePresent,
+                    canRequest = tool.canRequest,
+                    requestState = tool.requestState,
+                    reason = tool.reason,
+                ).forEach { field ->
+                    Text("${field.label}: ${field.value}", color = KalivTheme.colors.textMuted, fontSize = 9.sp)
+                }
             }
         }
     }
@@ -578,27 +1022,29 @@ private fun StepCard(index: Int, step: Agent3ReadonlyTaskClient.Step) {
         Column(Modifier.fillMaxWidth().padding(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "$index. ${step.summary.ifBlank { step.tool }}",
+                    "$index. ${presentAgent3TaskStepHeadline(step.summary)}",
                     color = KalivTheme.colors.textHigh,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                step.state?.let {
-                    Text(it, color = runStateColor(it), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                step.state?.let { rawState ->
+                    presentAgent3TaskStepState(rawState)?.let { label ->
+                        Text(label, color = runStateColor(rawState), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
-            Text("tool: ${step.tool}", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+            Text(presentAgent3TaskStepToolAudit(step.tool), color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             Text(
-                "risk=${step.risk} · egress=${step.egress} · idempotent=${step.idempotent}",
+                presentAgent3TaskStepReadOnlyMetadata(step.risk, step.egress, step.idempotent),
                 color = KalivTheme.colors.textMuted,
                 fontSize = 10.sp,
             )
-            if (step.args != "{}") {
-                Text("args: ${step.args.take(300)}", color = KalivTheme.colors.textMuted, fontSize = 10.sp)
+            presentAgent3TaskStepStructuredDetail(step.args != "{}")?.let { detail ->
+                Text(detail, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
             }
-            step.error?.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = KalivTheme.colors.danger, fontSize = 10.sp)
+            presentAgent3TaskStepError(step.state, step.error)?.let { message ->
+                Text(message, color = KalivTheme.colors.danger, fontSize = 10.sp)
             }
         }
     }
@@ -606,21 +1052,47 @@ private fun StepCard(index: Int, step: Agent3ReadonlyTaskClient.Step) {
 
 @Composable
 private fun ReceiptCard(receipt: Agent3ReadonlyTaskClient.CapabilityReceipt?) {
-    Text("Capability receipt", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
+    Text("Kapabilitetstjek", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.SemiBold)
     if (receipt == null) {
-        Text("Ingen receipt returneret", color = KalivTheme.colors.amber, fontSize = 11.sp)
+        Text("Kapabilitetskvittering er ikke tilgængelig.", color = KalivTheme.colors.amber, fontSize = 11.sp)
         return
     }
-    MetaRow("Tilladt", if (receipt.allowed) "ja" else "nej")
-    MetaRow("Route", receipt.route)
-    MetaRow("Graph", receipt.graphSha256.shortHash())
-    MetaRow("Plan", receipt.planSha256.shortHash())
-    receipt.blockers.forEach {
+    Text(
+        presentAgent3CapabilityStatusMessage(receipt.allowed),
+        color = if (receipt.allowed) KalivTheme.colors.success else KalivTheme.colors.danger,
+        fontSize = 11.sp,
+    )
+    MetaRow("Rute", presentAgent3CapabilityRoute(receipt.route))
+    MetaRow("Blokeringer", presentAgent3CapabilityBlockerCount(receipt.blockers.size))
+    MetaRow("Graf-hash", receipt.graphSha256.shortHash())
+    MetaRow("Plan-hash", receipt.planSha256.shortHash())
+    if (receipt.blockers.isNotEmpty()) {
+        Spacer(Modifier.height(4.dp))
         Text(
-            "• ${it.capabilityId}: ${it.state} — ${it.reason}",
-            color = KalivTheme.colors.danger,
-            fontSize = 10.sp,
+            "Teknisk kvittering · blokeringer",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
         )
+        receipt.blockers.forEachIndexed { index, blocker ->
+            Text(
+                "Blokering ${index + 1}",
+                color = KalivTheme.colors.textMuted,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            agent3CapabilityBlockerEvidence(
+                blocker.capabilityId,
+                blocker.state,
+                blocker.reason,
+            ).forEach { field ->
+                Text(
+                    "${field.label}: ${field.value}",
+                    color = KalivTheme.colors.textMuted,
+                    fontSize = 9.sp,
+                )
+            }
+        }
     }
 }
 
@@ -653,13 +1125,6 @@ private fun runStateColor(state: String): Color = when (state) {
     "failed", "blocked" -> KalivTheme.colors.danger
     "cancelled", "completed_after_cancel" -> KalivTheme.colors.amber
     else -> KalivTheme.colors.signal
-}
-
-private fun terminationSemanticsLabel(value: String?): String = when (value) {
-    "none" -> "ikke-afbrydelig"
-    "cooperative" -> "kooperativ"
-    "runtime" -> "runtime-håndteret"
-    else -> "ukendt / fail-closed"
 }
 
 private fun String.shortHash(): String = if (length <= 14) this else take(12) + "…"

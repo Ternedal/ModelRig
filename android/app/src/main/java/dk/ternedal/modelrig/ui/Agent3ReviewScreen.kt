@@ -18,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,9 +30,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dk.ternedal.modelrig.data.TokenStore
+import dk.ternedal.modelrig.logic.Agent3ReadReviewResumeAuthority
+import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
+import dk.ternedal.modelrig.logic.Agent3ReviewPreviewIntent
+import dk.ternedal.modelrig.logic.Agent3ReviewPreviewPolicy
+import dk.ternedal.modelrig.logic.Agent3TaskUiPolicy
+import dk.ternedal.modelrig.logic.isAgent3ReadReviewResumeConsumed
 import dk.ternedal.modelrig.net.Agent3Client
+import dk.ternedal.modelrig.net.startReviewedPlanEnvelope
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dk.ternedal.modelrig.ui.components.kalivScreenInsets
@@ -43,58 +52,181 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     var message by remember { mutableStateOf("") }
     var reviewReads by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<Agent3Client.PlanPreview?>(null) }
+    var previewConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
+    var previewIntent by remember { mutableStateOf<Agent3ReviewPreviewIntent?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Client.Run?>(null) }
+    var runConnection by remember { mutableStateOf<Agent3ReviewConnectionBinding?>(null) }
+    var runReviewReads by remember { mutableStateOf<Boolean?>(null) }
     var review by remember { mutableStateOf<Agent3Client.ReadReview?>(null) }
+    var consumedResumeAuthority by remember { mutableStateOf<Agent3ReadReviewResumeAuthority?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var resultBody by remember { mutableStateOf<String?>(null) }
     var replanPreview by remember { mutableStateOf<dk.ternedal.modelrig.net.Agent3ReplanClient.Preview?>(null) }
 
-    fun client(): Agent3Client {
+    fun currentConnection(): Agent3ReviewConnectionBinding {
         val base = store.baseUrl?.takeIf { it.isNotBlank() }
             ?: error("Ingen rig-URL er gemt")
         val token = store.token?.takeIf { it.isNotBlank() }
             ?: error("Ingen device-token er gemt")
-        return Agent3Client(base, token)
+        return requireNotNull(Agent3ReviewConnectionBinding.capture(base, token)) {
+            "Forbindelsen er ugyldig"
+        }
+    }
+
+    fun client(connection: Agent3ReviewConnectionBinding): Agent3Client =
+        Agent3Client(connection.baseUrl, connection.token)
+
+    fun clearPreviewAuthority() {
+        preview = null
+        previewConnection = null
+        previewIntent = null
+        previewDeadlineMillis = null
+        previewExpired = false
     }
 
     fun createPreview() {
-        val text = message.trim()
-        if (text.isEmpty() || busy) return
+        val requestIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads) ?: return
+        val currentRun = run
+        val termination = currentRun?.termination
+        val runTerminal = currentRun?.state?.lowercase() in setOf("blocked", "completed", "failed", "cancelled")
+        if (!Agent3TaskUiPolicy.canCreateReviewPreview(
+                message = requestIntent.message,
+                busy = busy,
+                hasRun = currentRun != null,
+                runTerminal = if (currentRun == null) null else runTerminal,
+                terminationPresent = termination != null,
+                activeToolState = termination?.activeTool?.state,
+                activeToolRequestState = termination?.activeTool?.requestState,
+            )
+        ) return
+        val connection = runCatching { currentConnection() }
+            .getOrElse {
+                error = it.message ?: "Forbindelsen er ugyldig"
+                return
+            }
+        val requestStartedAtMillis = System.nanoTime() / 1_000_000L
         busy = true
         error = null
-        run = null
-        review = null
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    client().previewPlan(
-                        message = text,
+                    client(connection).previewPlan(
+                        message = requestIntent.message,
                         mode = "rig",
-                        reviewReads = reviewReads,
+                        reviewReads = requestIntent.reviewReads,
                     )
                 }
             }
             busy = false
-            result.onSuccess { preview = it }
-                .onFailure { error = it.message ?: "Plan-preview fejlede" }
+            result.onSuccess { planned ->
+                val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
+                if (!Agent3ReviewPreviewPolicy.canPublish(requestIntent, currentIntent, planned.reviewReads)) {
+                    error = if (requestIntent.reviewReads != planned.reviewReads) {
+                        "Preview blev afvist, fordi serverens Read review ikke matcher den reviewede opgave"
+                    } else {
+                        "Preview blev forældet, fordi opgaven eller Read review ændrede sig"
+                    }
+                    return@onSuccess
+                }
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    planned.expiresInSeconds,
+                )
+                preview = planned
+                previewConnection = connection
+                previewIntent = requestIntent
+                previewDeadlineMillis = deadline
+                previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
+                run = null
+                runConnection = null
+                runReviewReads = null
+                review = null
+                consumedResumeAuthority = null
+                resultBody = null
+                replanPreview = null
+            }.onFailure { error = it.message ?: "Plan-preview fejlede" }
         }
     }
 
     fun startPreview() {
-        val planId = preview?.planId ?: return
-        if (busy) return
+        val currentPreview = preview ?: return
+        val boundConnection = previewConnection
+        val currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token)
+        val currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads)
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+            previewDeadlineMillis,
+            System.nanoTime() / 1_000_000L,
+        )
+        if (!previewFresh) previewExpired = true
+        if (!Agent3ReviewPreviewPolicy.canStart(
+                planId = currentPreview.planId,
+                hasSteps = currentPreview.steps.isNotEmpty(),
+                previewFresh = previewFresh,
+                capabilityAllowed = currentPreview.capabilityReceipt?.allowed,
+                busy = busy,
+                hasRun = run != null,
+                currentConnection = currentConnection,
+                previewConnection = boundConnection,
+                currentIntent = currentIntent,
+                previewIntent = previewIntent,
+                previewReviewReads = currentPreview.reviewReads,
+            )
+        ) return
+        val planId = currentPreview.planId ?: return
+        val connection = boundConnection ?: return
+        val expectedReviewReads = currentPreview.reviewReads
+        val expectedCapabilityReceipt = currentPreview.capabilityReceipt
         busy = true
         error = null
+        clearPreviewAuthority()
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { client().startPlanEnvelope(planId) }
+                runCatching {
+                    client(connection).startReviewedPlanEnvelope(
+                        planId = planId,
+                        expectedReviewReads = expectedReviewReads,
+                        expectedCapabilityReceipt = expectedCapabilityReceipt,
+                    )
+                }
             }
             busy = false
             result.onSuccess {
                 run = it.run
+                runConnection = connection
+                runReviewReads = expectedReviewReads
                 review = it.readReview
-            }.onFailure { error = it.message ?: "Planen kunne ikke startes" }
+                consumedResumeAuthority = null
+            }.onFailure {
+                val detail = it.message ?: "Planen kunne ikke startes"
+                error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
+            }
+        }
+    }
+
+    LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+        val planId = preview?.planId ?: return@LaunchedEffect
+        val deadline = previewDeadlineMillis
+        if (deadline == null) {
+            previewExpired = true
+            return@LaunchedEffect
+        }
+        val remaining = deadline - (System.nanoTime() / 1_000_000L)
+        if (remaining > 0L) delay(remaining)
+        if (
+            preview?.planId == planId &&
+            previewDeadlineMillis == deadline &&
+            Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+        ) {
+            previewExpired = true
         }
     }
 
@@ -129,7 +261,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = message,
-                    onValueChange = { message = it; preview = null },
+                    onValueChange = { message = it; clearPreviewAuthority() },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 8,
@@ -141,11 +273,11 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (reviewReads) {
-                        Button(onClick = { reviewReads = false; preview = null }) {
+                        Button(onClick = { reviewReads = false; clearPreviewAuthority() }) {
                             Text("Read review: til")
                         }
                     } else {
-                        OutlinedButton(onClick = { reviewReads = true; preview = null }) {
+                        OutlinedButton(onClick = { reviewReads = true; clearPreviewAuthority() }) {
                             Text("Read review: fra")
                         }
                     }
@@ -157,7 +289,19 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(10.dp))
-                Button(enabled = !busy && message.isNotBlank(), onClick = { createPreview() }) {
+                val currentRun = run
+                val termination = currentRun?.termination
+                val runTerminal = currentRun?.state?.lowercase() in setOf("blocked", "completed", "failed", "cancelled")
+                val canCreatePreview = Agent3TaskUiPolicy.canCreateReviewPreview(
+                    message = message.trim(),
+                    busy = busy,
+                    hasRun = currentRun != null,
+                    runTerminal = if (currentRun == null) null else runTerminal,
+                    terminationPresent = termination != null,
+                    activeToolState = termination?.activeTool?.state,
+                    activeToolRequestState = termination?.activeTool?.requestState,
+                )
+                Button(enabled = canCreatePreview, onClick = { createPreview() }) {
                     Text(if (busy) "Arbejder…" else "Lav preview")
                 }
             }
@@ -168,6 +312,11 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             }
 
             preview?.let { plan ->
+                val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                    previewDeadlineMillis,
+                    System.nanoTime() / 1_000_000L,
+                )
+                val expiredForDisplay = previewExpired || !previewFresh
                 Spacer(Modifier.height(12.dp))
                 ReviewSurface {
                     Text("Server-preview", color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold)
@@ -183,16 +332,55 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                             fontSize = 13.sp,
                         )
                     }
+                    plan.capabilityReceipt?.let { receipt ->
+                        Spacer(Modifier.height(10.dp))
+                        Agent3CapabilityReceiptCard(receipt)
+                    }
                     Spacer(Modifier.height(10.dp))
                     Button(
-                        enabled = !busy && plan.planId != null && plan.steps.isNotEmpty(),
+                        enabled = Agent3ReviewPreviewPolicy.canStart(
+                            planId = plan.planId,
+                            hasSteps = plan.steps.isNotEmpty(),
+                            previewFresh = previewFresh,
+                            capabilityAllowed = plan.capabilityReceipt?.allowed,
+                            busy = busy,
+                            hasRun = run != null,
+                            currentConnection = Agent3ReviewConnectionBinding.capture(store.baseUrl, store.token),
+                            previewConnection = previewConnection,
+                            currentIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads),
+                            previewIntent = previewIntent,
+                            previewReviewReads = plan.reviewReads,
+                        ),
                         onClick = { startPreview() },
                     ) { Text("Start den viste single-use plan") }
+                    if (expiredForDisplay) {
+                        Text(
+                            "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                            color = KalivTheme.colors.danger,
+                            fontSize = 11.sp,
+                        )
+                    } else {
+                        plan.expiresInSeconds?.let {
+                            Text(
+                                "Plan-id udløber om ca. $it sek.",
+                                color = KalivTheme.colors.textMuted,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
                 }
             }
 
             run?.let { current ->
                 val checkpoint = review
+                val resumeAuthority = Agent3ReadReviewResumeAuthority.capture(
+                    current.id,
+                    checkpoint?.completedStepId,
+                )
+                val resumeConsumed = isAgent3ReadReviewResumeConsumed(
+                    resumeAuthority,
+                    consumedResumeAuthority,
+                )
                 Spacer(Modifier.height(16.dp))
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
@@ -272,45 +460,115 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
                     )
                 }
                 if (checkpoint?.waiting == true) {
+                    if (resumeConsumed) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Fortsæt er allerede sendt for dette checkpoint. Samme checkpoint genbruges ikke; Replan eller Stop er stadig tilgængelig.",
+                            color = KalivTheme.colors.caps,
+                            fontSize = 12.sp,
+                        )
+                    }
                     Spacer(Modifier.height(14.dp))
                     dk.ternedal.modelrig.ui.chat.Agent3CheckpointActions(
                         busy = busy,
+                        continueEnabled = !resumeConsumed,
                         onContinue = {
-                            busy = true
-                            scope.launch {
-                                val res = withContext(Dispatchers.IO) { runCatching { client().resume(current.id) } }
-                                res.onSuccess {
-                                    run = it
-                                    resultBody = null
-                                    replanPreview = null
-                                    error = null
-                                }.onFailure { error = it.message }
-                                val fresh = withContext(Dispatchers.IO) { runCatching { client().getRun(current.id) } }
-                                fresh.onSuccess { run = it }
-                                busy = false
+                            val connection = runConnection
+                            val expectedReviewReads = runReviewReads
+                            val authority = resumeAuthority
+                            if (connection == null) {
+                                error = "Run-forbindelsen mangler"
+                            } else if (expectedReviewReads == null) {
+                                error = "Run review-mode mangler"
+                            } else if (authority == null) {
+                                error = "Read-checkpoint-authority mangler; opdatér run-status"
+                            } else if (resumeConsumed) {
+                                error = "Fortsæt er allerede sendt for dette checkpoint; opdatér run-status"
+                            } else if (!busy) {
+                                consumedResumeAuthority = authority
+                                busy = true
+                                error = null
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            client(connection).resumeRunEnvelope(
+                                                runId = current.id,
+                                                expectedReviewReads = expectedReviewReads,
+                                                expectedCompletedStepId = authority.completedStepId,
+                                            )
+                                        }
+                                    }
+                                    res.onSuccess {
+                                        run = it.run
+                                        review = it.readReview
+                                        resultBody = null
+                                        replanPreview = null
+                                        error = null
+                                    }.onFailure {
+                                        val detail = it.message ?: "Kunne ikke fortsætte runnet"
+                                        error = "$detail. Resume-resultatet kan allerede være ændret på serveren; dette checkpoint er forbrugt lokalt og kan ikke genbruges. Opdatér run-status."
+                                    }
+                                    val fresh = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            client(connection).getRunEnvelope(
+                                                current.id,
+                                                expectedReviewReads,
+                                            )
+                                        }
+                                    }
+                                    fresh.onSuccess {
+                                        run = it.run
+                                        review = it.readReview
+                                    }
+                                    busy = false
+                                }
                             }
                         },
                         onReplan = {
-                            busy = true
-                            scope.launch {
-                                val res = withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        dk.ternedal.modelrig.net.Agent3ReplanClient(
-                                            store.baseUrl.orEmpty(), store.token.orEmpty(),
-                                        ).preview(current.id)
+                            val connection = runConnection
+                            if (connection == null) {
+                                error = "Run-forbindelsen mangler"
+                            } else if (!busy) {
+                                busy = true
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            dk.ternedal.modelrig.net.Agent3ReplanClient(
+                                                connection.baseUrl, connection.token,
+                                            ).previewReviewed(current.id)
+                                        }
                                     }
+                                    res.onSuccess { replanPreview = it; error = null }
+                                        .onFailure { error = it.message }
+                                    busy = false
                                 }
-                                res.onSuccess { replanPreview = it; error = null }
-                                    .onFailure { error = it.message }
-                                busy = false
                             }
                         },
                         onStop = {
-                            busy = true
-                            scope.launch {
-                                val res = withContext(Dispatchers.IO) { runCatching { client().cancel(current.id) } }
-                                res.onSuccess { run = it; error = null }.onFailure { error = it.message }
-                                busy = false
+                            val connection = runConnection
+                            val expectedReviewReads = runReviewReads
+                            if (connection == null) {
+                                error = "Run-forbindelsen mangler"
+                            } else if (expectedReviewReads == null) {
+                                error = "Run review-mode mangler"
+                            } else if (!busy) {
+                                busy = true
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            client(connection).cancelRunEnvelope(
+                                                current.id,
+                                                expectedReviewReads,
+                                            )
+                                        }
+                                    }
+                                    res.onSuccess {
+                                        run = it.run
+                                        review = it.readReview
+                                        error = null
+                                    }.onFailure { error = it.message }
+                                    busy = false
+                                }
                             }
                         },
                     )

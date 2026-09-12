@@ -809,12 +809,31 @@ class Agent3Orchestrator:
         return self.advance(run.id)
 
     def cancel(self, run_id: str) -> AgentRun:
-        run = self._require(run_id)
-        if run.state not in {RunState.COMPLETED, RunState.FAILED, RunState.CANCELLED}:
+        # Stop must linearize against the exact run snapshot it observed. A
+        # worker can advance a step between load() and persistence; an
+        # unconditional save would roll that newer truth back inside a stale
+        # CANCELLED payload. Retry from the newer snapshot when the CAS loses.
+        while True:
+            run = self._require(run_id)
+            if run.state in {
+                RunState.BLOCKED,
+                RunState.COMPLETED,
+                RunState.FAILED,
+                RunState.CANCELLED,
+            }:
+                return run
+            expected_state = run.state
+            expected_payload = run.to_json()
             run.state = RunState.CANCELLED
             run.error = "Cancelled by user"
-            self.store.save_with_event(run, "run_cancelled", {})
-        return run
+            if self.store.save_with_event_if_unchanged(
+                run,
+                expected_state=expected_state,
+                expected_payload=expected_payload,
+                kind="run_cancelled",
+                payload={},
+            ):
+                return run
 
     def _execute(self, run: AgentRun, step: AgentStep) -> None:
         expected_payload = run.to_json()

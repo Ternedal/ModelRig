@@ -2,7 +2,9 @@ package dk.ternedal.modelrig.ui.agent
 
 import dk.ternedal.modelrig.net.Agent3Client
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentRunPresentationTest {
@@ -14,14 +16,38 @@ class AgentRunPresentationTest {
             confirmationDigest = null, confirmationExpiresAt = null, error = null,
         )
 
+    private fun termination(
+        canRequest: Boolean,
+        reason: String = "server reason",
+    ) = Agent3Client.TerminationReceipt(
+        schema = "agent3.termination.v1",
+        plan = Agent3Client.TerminationPlan(
+            state = "running",
+            canRequest = canRequest,
+            requestScope = "plan",
+            effect = "stop_remaining_steps",
+            reason = reason,
+        ),
+        modelStream = Agent3Client.TerminationModelStream(
+            state = "idle",
+            active = false,
+            canRequest = false,
+            handlePresent = false,
+            reason = "idle",
+        ),
+        activeTool = null,
+        productionActivation = false,
+    )
+
     private fun run(
         id: String = "r1",
         state: String = "running",
         currentStep: Int = 0,
         steps: List<Agent3Client.Step> = emptyList(),
+        termination: Agent3Client.TerminationReceipt? = null,
     ) = Agent3Client.Run(
         id = id, state = state, routeKind = "plan", currentStep = currentStep,
-        steps = steps, answer = null, error = null, termination = null,
+        steps = steps, answer = null, error = null, termination = termination,
     )
 
     @Test
@@ -41,6 +67,47 @@ class AgentRunPresentationTest {
             run(id = "nyest", state = "awaiting_review"),
         )
         assertEquals("nyest", AgentRunPresentation.activeRun(runs)?.id)
+    }
+
+    @Test
+    fun `stop authority kraever eksplicit server-tilladelse og fail-closer`() {
+        assertFalse(AgentRunPresentation.canRequestStop(run()))
+        assertFalse(AgentRunPresentation.canRequestStop(run(termination = termination(false))))
+        assertTrue(AgentRunPresentation.canRequestStop(run(termination = termination(true))))
+        assertFalse(
+            AgentRunPresentation.canRequestStop(
+                run(state = "cancelled", termination = termination(true)),
+            ),
+        )
+    }
+
+    @Test
+    fun `stop blocked reason bruger server reason og opfinder ikke tilladelse`() {
+        assertEquals(
+            "server says no handle",
+            AgentRunPresentation.stopBlockedReason(
+                run(termination = termination(false, "server says no handle")),
+            ),
+        )
+        assertEquals(
+            "Riggen gav ingen Stop-tilladelse.",
+            AgentRunPresentation.stopBlockedReason(run()),
+        )
+        assertNull(
+            AgentRunPresentation.stopBlockedReason(
+                run(termination = termination(true)),
+            ),
+        )
+    }
+
+    @Test
+    fun `stop invaliderer poll startet mod aeldre run truth`() {
+        val pollEpoch = 41L
+        val stopEpoch = AgentRunPresentation.nextRunPanelPublicationEpoch(pollEpoch)
+        assertEquals(42L, stopEpoch)
+        assertFalse(AgentRunPresentation.canPublishRunPanelPoll(pollEpoch, stopEpoch))
+        assertTrue(AgentRunPresentation.canPublishRunPanelPoll(stopEpoch, stopEpoch))
+        assertEquals(1L, AgentRunPresentation.nextRunPanelPublicationEpoch(Long.MAX_VALUE))
     }
 
     @Test
