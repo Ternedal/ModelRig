@@ -39,11 +39,24 @@ jobs:
           python3 tests/worker_agent3_reviewed_start_reconcile.py
           python3 tests/worker_agent3_planner_review.py
 
-      - name: Android unit tests
-        working-directory: android
-        run: ./gradlew :app:testDebugUnitTest --no-daemon --console=plain
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: "21"
 
-      - name: Desktop unit tests
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+
+      - name: Install canonical Android platform + build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Android canonical CI gate
+        working-directory: android
+        shell: bash
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest -Proborazzi.test.verify=true --no-daemon --console=plain
+
+      - name: Desktop canonical CI gate
         working-directory: desktop
         run: ./gradlew :composeApp:test --no-daemon --console=plain
 
