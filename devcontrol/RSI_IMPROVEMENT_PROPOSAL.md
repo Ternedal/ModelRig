@@ -7,7 +7,7 @@ Agent 3 eval
     ↓
 SHA/digest-bundet improvement brief
     ↓
-modelprompt
+modelprompt / eksplicit one-shot lokal model
     ↓
 kaliv-rsi-improvement-proposal/v1
     ↓
@@ -24,6 +24,8 @@ Et modeloutput valideres som `ImprovementProposal`. Kontrakten kræver en falsif
 
 `improvement_binding.py` binder derefter proposal tilbage til præcis samme repository, base SHA, eval schema, evidence SHA-256 og finding IDs som modellen fik vist. Modellen kan derfor ikke skifte evidens undervejs.
 
+`improvement_model.py` er et provider-neutralt one-shot led: caller injicerer en chat-funktion, modellen får præcis ét forsøg, og output bliver straks evidence-bundet. DevControl importerer fortsat hverken worker-runtime, HTTP-klient eller modelprovider.
+
 ## Hvad den bevidst ikke kan
 
 Denne slice kan ikke:
@@ -33,7 +35,8 @@ Denne slice kan ikke:
 - skrive patches eller commits;
 - pushe en branch eller oprette/merge en PR;
 - release/deploye/aktivere noget;
-- køre som baggrundsagent eller unattended RSI-loop.
+- køre som baggrundsagent eller unattended RSI-loop;
+- auto-retrye en model, til den producerer et godkendt forslag.
 
 Det er proposal-laget, ikke execution-laget.
 
@@ -61,6 +64,22 @@ python scripts/rsi_improvement_planner.py `
 ```
 
 Kun det kanoniske output efter binding er et gyldigt forslag. Det er stadig **ikke** en udviklingsopgave.
+
+## One-shot lokal model
+
+På selve riggen kan proposal-leddet nu også køre den lokale Ollama-model direkte. Runneren accepterer kun `localhost`/loopback Ollama og foretager præcis ét modelkald:
+
+```powershell
+python scripts/rsi_model_propose.py `
+  --eval-report validation/agent3-model-eval-latest.json `
+  --base-sha <EXACT_40_HEX_SHA> `
+  --model qwen3:14b `
+  --brief-out validation/rsi-improvement-brief.json `
+  --raw-out validation/rsi-improvement-proposal.raw.json `
+  --proposal-out validation/rsi-improvement-proposal.json
+```
+
+Hvis modellen svarer med markdown, ugyldig JSON, et andet evidence-digest, et andet base-SHA, opdigtede finding IDs eller authority-felter, fejler kørslen. Der forsøges ikke automatisk igen. En ren eval kalder slet ikke modellen.
 
 ## Næste RSI-slices
 
