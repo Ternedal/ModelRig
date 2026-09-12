@@ -128,9 +128,13 @@ assert body["read_review"]["removable_step_ids"] == [
     body["run"]["steps"][1]["id"]
 ]
 
-assert client.post(
+replayed = client.post(
     f"/experimental/agent3/plans/{preview_body['plan_id']}/start"
-).status_code == 409
+)
+assert replayed.status_code == 200, replayed.text
+assert replayed.json()["run"]["id"] == body["run"]["id"]
+assert replayed.json()["read_review"]["waiting"] is True
+assert executed == ["rig_status"]
 
 # Without explicit opt-in, the reviewed runtime retains the old contiguous-read
 # behavior and returns a disabled review receipt.
