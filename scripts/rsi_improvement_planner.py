@@ -22,9 +22,11 @@ sys.path.insert(0, str(ROOT / "devcontrol" / "src"))
 from kaliv_dev_control.improvement_binding import (  # noqa: E402
     canonical_bound_proposal_json,
 )
+from kaliv_dev_control.improvement_evidence import (  # noqa: E402
+    build_verified_agent3_improvement_brief,
+)
 from kaliv_dev_control.improvement_proposal import (  # noqa: E402
     ImprovementProposalError,
-    build_agent3_improvement_brief,
     render_improvement_prompt,
 )
 
@@ -60,7 +62,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--eval-report", type=Path, required=True)
     parser.add_argument("--repository", default="Ternedal/ModelRig")
-    parser.add_argument("--base-sha", required=True)
+    parser.add_argument(
+        "--base-sha",
+        required=True,
+        help=(
+            "exact repository Git SHA supplied by repository authority; "
+            "the Agent 3 eval itself carries code_sha256, not a Git SHA"
+        ),
+    )
     parser.add_argument("--brief-out", type=Path)
     parser.add_argument("--prompt-out", type=Path)
     parser.add_argument(
@@ -77,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         report = _read_json(args.eval_report, name="eval report")
-        brief = build_agent3_improvement_brief(
+        brief = build_verified_agent3_improvement_brief(
             report,
             repository=args.repository,
             base_sha=args.base_sha,
