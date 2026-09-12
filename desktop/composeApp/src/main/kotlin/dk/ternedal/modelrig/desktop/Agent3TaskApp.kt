@@ -606,8 +606,8 @@ private fun DesktopStepCard(index: Int, step: Agent3ReadonlyTaskStep) {
         presentTaskStepStructuredDetail(step.args.isNotEmpty())?.let { detail ->
             Text(detail, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         }
-        step.error?.takeIf { it.isNotBlank() }?.let {
-            Text(it, color = KalivTheme.colors.Danger, fontSize = 10.sp)
+        presentTaskStepError(step.state, step.error)?.let { message ->
+            Text(message, color = KalivTheme.colors.Danger, fontSize = 10.sp)
         }
     }
 }
