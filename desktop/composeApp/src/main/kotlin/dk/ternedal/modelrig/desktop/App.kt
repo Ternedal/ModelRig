@@ -336,13 +336,13 @@ fun App() {
             val assistantIdx = messages.size
             messages.add(UiMessage("assistant", "", null, streaming = true, status = if (useRag) KalivStatus.RAG else KalivStatus.THINKING))
             scope.launch {
-                // Best-effort DB metadata still uses the PREFERRED source.
-                // Chat execution identity itself is route-authoritative in ChatRouter;
-                // persisting the actual fallback source/model is a separate concern.
+                // Normal Chat starts unresolved; its source/model is finalized
+                // only after ChatRouter identifies the source that actually answered.
+                // RAG keeps its existing explicit metadata in this narrow slice.
                 val cid = withContext(Dispatchers.IO) {
                     val id = convId ?: db.newConversation(
-                        source = if (useRag) "rag" else if (preferLocal) "rig" else "cloud",
-                        model = if (preferLocal) localModel else cloudModel,
+                        source = if (useRag) "rag" else PendingChatConversationProvenance.source,
+                        model = if (useRag) (if (preferLocal) localModel else cloudModel) else PendingChatConversationProvenance.model,
                         title = text,
                     )
                     db.addMessage(id, "user", text)
@@ -350,6 +350,7 @@ fun App() {
                 }
                 if (convId == null) convId = cid
 
+                var answeredSource: ChatResult.Source? = null
                 val err = withContext(Dispatchers.IO) {
                     runCatching {
                         if (useRag) {
@@ -386,7 +387,7 @@ fun App() {
                             val cloud = if (cloudKey.isNotBlank())
                                 OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey, think = false)
                             else null
-                            ChatRouter(
+                            answeredSource = ChatRouter(
                                 local = local,
                                 localModel = localModel,
                                 cloud = cloud,
@@ -396,6 +397,7 @@ fun App() {
                                 localSystem = localSystem,
                                 cloudSystem = cloudSystem,
                             ).chatStream(history) { src, delta ->
+                                answeredSource = src
                                 scope.launch {
                                     lastSource = src
                                     val cur = messages[assistantIdx]
@@ -413,7 +415,17 @@ fun App() {
                 messages[assistantIdx] = cur.copy(text = msg, streaming = false)
                 if (err == null || cancelled) {
                     val finalText = messages[assistantIdx].text
-                    withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+                    withContext(Dispatchers.IO) {
+                        db.addMessage(cid, "assistant", finalText)
+                        answeredSource?.let { source ->
+                            val provenance = completedChatConversationProvenance(source, localModel, cloudModel)
+                            // Provenance failure must not relabel an already-produced answer as interrupted.
+                            // Leaving pending/previous provenance is safer than persisting a guessed route.
+                            runCatching {
+                                db.updateConversationRoute(cid, provenance.source, provenance.model)
+                            }
+                        }
+                    }
                 }
                 busy = false
             }
