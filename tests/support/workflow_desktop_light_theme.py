@@ -11,7 +11,11 @@ test inventory authority.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DESKTOP = ROOT / "desktop" / "composeApp" / "src" / "main" / "kotlin" / "dk" / "ternedal" / "modelrig" / "desktop"
@@ -105,8 +109,13 @@ for binding in (
 accent = color["light"]["accent"]
 canvas = color["light"]["canvas"]
 surface = color["light"]["surface"]
+elevated = color["light"]["elevated"]
+light_text = color["light"]["text"]
+light_warn = color["light"]["warn"]
 ivory = "#F7F4EF"
+primary_ink = "#FFF6E9"
 bronze = color["brand"]["bronze"]
+old_gradient_top = "#A87B3B"
 
 accent_canvas = contrast(accent, canvas)
 accent_surface = contrast(accent, surface)
@@ -124,8 +133,6 @@ check(
     f"onPrimary ivory paa light accent er AA ({ivory_accent:.2f}:1)",
 )
 
-# Historical/sabotage proof for L1: the exact mapping removed by #1270 must
-# fail the boundary this gate protects.
 historical = contrast(bronze, canvas)
 check(
     historical < AA_TEXT,
@@ -151,9 +158,6 @@ check("else c.Border" in shell, "light shell borders bruger Kaliv Border")
 check("c.Signal.copy(alpha = 0.12f)" in shell, "light aktiv navigation bruger themed Signal-wash")
 check("LiveViewport" not in shell, "L2a roerer ikke den simulerede browser/page-flade")
 
-# App must keep the arities this migration is designed around. If someone adds
-# the legacy optional argument, the support gate fails instead of silently
-# switching the product back to the dark-only implementation.
 title_start = app.index("KalivTitleBar(")
 title_end = app.index("\n        Row(Modifier.fillMaxWidth().weight(1f))", title_start)
 title_call = app[title_start:title_end]
@@ -169,8 +173,6 @@ context_end = app.index("\n                )", context_start) + len("\n         
 context_call = app[context_start:context_end]
 check("modifier =" not in context_call, "App context-panel call bliver paa L2a exact arity")
 
-# Sabotage: prove the L2a boundary can turn red if the title bar regresses to
-# unconditional dark chrome.
 sabotaged = shell.replace(
     "if (c.isDark) Color(0x990B0A09) else c.Surface",
     "Color(0x990B0A09)",
@@ -179,9 +181,9 @@ sabotaged = shell.replace(
 check(not shell_light_boundary(sabotaged), "unconditional dark titlebar sabotage fanges")
 
 
-# L2b: Agent/Computer application chrome is theme-aware. The simulated
-# browser/page in LiveViewport is intentionally outside this authority.
-screens = SCREENS.read_text(encoding="utf-8")
+# L2b: source assertions operate on comments-stripped Kotlin so a commented-out
+# binding cannot satisfy the gate. This also pays the repo's raw-source-check ratchet.
+screens = code_of(SCREENS)
 
 
 def _block(start: str, end: str | None = None) -> str:
@@ -196,12 +198,12 @@ agent = _block("fun KalivAgentCockpit(", "@Composable\nprivate fun AgentIdleProm
 agent_idle = _block("private fun AgentIdlePrompt()", "@Composable\nprivate fun AgentBubble")
 agent_bubble = _block("private fun AgentBubble(", "@Composable\ninternal fun AgentComposer")
 plan_row = _block("private fun PlanRow(", "@Composable\ninternal fun StatusCircle")
-status = _block("internal fun StatusCircle(", "/**\n * The inline approval card")
+status = _block("internal fun StatusCircle(", "@Composable\ninternal fun ApprovalCard")
 approval = _block("internal fun ApprovalCard(", "@Composable\nprivate fun LogEntry")
 computer = _block("fun KalivComputerUse(", "@Composable\nprivate fun UseStepRow")
 use_row = _block("private fun UseStepRow(", "@Composable\nprivate fun StatusCircleSmall")
-status_small = _block("private fun StatusCircleSmall(", "/**\n * The live viewport")
-live = _block("private fun LiveViewport(", "/** Approval bar for computer-use")
+status_small = _block("private fun StatusCircleSmall(", "@Composable\nprivate fun LiveViewport")
+live = _block("private fun LiveViewport(", "@Composable\nprivate fun ComputerApprovalBar(")
 computer_approval = _block("private fun ComputerApprovalBar(", "@Composable\nprivate fun ResultBar")
 result_bar = _block("private fun ResultBar(")
 
@@ -260,8 +262,28 @@ check(
     "L2b Computer resultatbar bruger Success/Danger roller",
 )
 
-# Direct dark chrome calls may not survive in the bounded L2b application
-# blocks. Dark literals are allowed only behind explicit c.isDark bindings.
+# Measure the two small-text decisions that motivated the source bindings.
+text_on_elevated = contrast(light_text, elevated)
+warn_on_elevated = contrast(light_warn, elevated)
+check(
+    text_on_elevated >= AA_TEXT,
+    f"light TextHigh paa elevated er AA for sma status/badge labels ({text_on_elevated:.2f}:1)",
+)
+check(
+    warn_on_elevated < AA_TEXT,
+    f"light Warning paa elevated demonstrerer small-text sabotage ({warn_on_elevated:.2f}:1)",
+)
+primary_on_accent = contrast(primary_ink, accent)
+primary_on_old_top = contrast(primary_ink, old_gradient_top)
+check(
+    primary_on_accent >= AA_TEXT,
+    f"light approve Signal + primary ink er AA ({primary_on_accent:.2f}:1)",
+)
+check(
+    primary_on_old_top < AA_TEXT,
+    f"gammel gradient-top demonstrerer approve-sabotage ({primary_on_old_top:.2f}:1)",
+)
+
 l2b_application = "\n".join(
     [icon, icon_item, agent, agent_idle, agent_bubble, plan_row, status, approval,
      computer, use_row, status_small, computer_approval, result_bar]
@@ -274,8 +296,6 @@ for forbidden in (
 ):
     check(forbidden not in l2b_application, f"L2b app chrome har ingen unconditional {forbidden}")
 
-# LiveViewport is a self-contained simulated web/browser surface and must keep
-# its own page/chrome palette rather than inherit application light-theme roles.
 for literal in (
     "Color(0xFFFBF9F5)",
     "Color(0xFFEDE8E0)",
@@ -284,7 +304,6 @@ for literal in (
 ):
     check(literal in live, f"LiveViewport exemption bevarer {literal}")
 
-# Sabotage proof: removing the icon rail's light branch must turn this boundary red.
 sabotaged_icon = icon.replace(
     "if (c.isDark) Color(0x8C14110E) else c.Surface",
     "Color(0x8C14110E)",
