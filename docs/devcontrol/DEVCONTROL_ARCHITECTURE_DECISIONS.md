@@ -24,3 +24,18 @@ Vedtaget FØR implementeringen landes, så efterprøvningen af PR #338 måler
 branchen mod ADR'en frem for omvendt.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-001_DEVCONTROL_AUTHORITY_BOUNDARY.md`
+
+## ADR-DC-002 — RSI-forbedringsforslag som ikke-autoriserende lag
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Afgrænser RSI-leddet fra eval-evidens til et modeludarbejdet, men
+ikke-autoriserende forbedringsforslag. Forslaget er SHA/digest-bundet,
+falsificerbart og må kun foreslå scope/tests; det kan ikke tildele DevControl
+execution authority eller konverteres automatisk til `DevelopmentTask`.
+
+Første adapter er `kaliv-agent3-model-eval/v1`; ren evidens producerer intet
+opfundet forbedringsarbejde. Promotion til en rigtig udviklingsopgave forbliver
+et separat authority-step under ADR-DC-001.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-002_RSI_IMPROVEMENT_PROPOSAL_BOUNDARY.md`
