@@ -1,13 +1,14 @@
 """Authenticated host-local reservation boundary before DC-L15 execution.
 
-The authority-bearing path in this module is intentionally narrow. It derives
-its own wall-clock time, reads ``refs/heads/main`` through ``TrustedGitRuntime``
-after the irreversible create-once lock is acquired, re-verifies the signed
-human request at that time, and only then commits a canonical reservation.
+The authority-bearing path derives its own repository, operation root and wall
+clock, then binds the staged Git runtime to the candidate-snapshot receipt that
+is already named by the human-signed qualification chain. After an irreversible
+create-once host lock, it re-reads ``refs/heads/main`` through that exact runtime,
+re-verifies the signed request at current time, and only then commits a receipt.
 
-A reservation proves one canonical *host-local* replay guard. It deliberately
-does not claim distributed/global replay safety, a persistent frozen main,
-physical campaign completion, pilot GO, publication, or activation authority.
+The receipt proves one canonical *host-local* replay guard. It deliberately does
+not claim distributed/global replay safety, a persistent frozen main, physical
+campaign completion, pilot GO, publication, or activation authority.
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from .asymmetric_authority import (
     Ed25519AuthorityVerifier,
 )
 from .durable_publication import DurablePublicationError, create_once_file, unlink_durable
+from .improvement_candidate_snapshot import CandidateSnapshotReceipt
 from .improvement_physical_request import (
     PhysicalQualificationRequest,
     PhysicalQualificationRequestError,
@@ -147,6 +149,10 @@ def _ensure_link_free_directory(path: Path, *, name: str) -> Path:
             directory.mkdir()
         except FileExistsError:
             pass
+        except OSError as exc:
+            raise PhysicalQualificationReservationError(
+                f"{name} could not be created"
+            ) from exc
         if not directory.is_dir() or directory.is_symlink():
             raise PhysicalQualificationReservationError(f"{name} creation raced")
     return _safe_root(target, name=name)
@@ -156,24 +162,41 @@ def _path_sha256(path: Path) -> str:
     return _sha256_bytes(os.fsencode(os.fspath(path)))
 
 
-def _canonical_host_ledger_root() -> Path:
-    """Return the single production ledger location for this host.
-
-    There is intentionally no public root/ID parameter. Tests use the private
-    transaction helper with a temporary root instead of weakening production
-    authority. Host-local state still cannot prove distributed/global replay
-    exclusion, which is why every receipt keeps ``global_replay_safe=false``.
-    """
-
+def _canonical_host_state_root() -> Path:
     if os.name == "nt":
-        root = Path(r"C:\ProgramData\ModelRig\DevControl\rsi-physical-request-ledger-v1")
+        root = Path(r"C:\ProgramData\ModelRig\DevControl")
     elif os.name == "posix":
-        root = Path("/var/lib/modelrig/devcontrol/rsi-physical-request-ledger-v1")
+        root = Path("/var/lib/modelrig/devcontrol")
     else:
         raise PhysicalQualificationReservationError(
-            "canonical physical request ledger is unsupported on this platform"
+            "canonical physical request state is unsupported on this platform"
         )
-    return _ensure_link_free_directory(root, name="canonical physical request ledger")
+    return _ensure_link_free_directory(root, name="canonical DevControl host state")
+
+
+def _canonical_host_ledger_root() -> Path:
+    return _ensure_link_free_directory(
+        _canonical_host_state_root() / "rsi-physical-request-ledger-v1",
+        name="canonical physical request ledger",
+    )
+
+
+def _canonical_operation_root() -> Path:
+    return _ensure_link_free_directory(
+        _canonical_host_state_root() / "rsi-physical-git-operation-v1",
+        name="canonical physical request Git operation root",
+    )
+
+
+def _canonical_repository_root() -> Path:
+    """Bind production observation to the checkout containing this authority code."""
+
+    root = Path(__file__).resolve().parents[3]
+    if not (root / "devcontrol").is_dir():
+        raise PhysicalQualificationReservationError(
+            "canonical ModelRig repository root could not be derived"
+        )
+    return _safe_root(root, name="canonical ModelRig repository root")
 
 
 _OBSERVATION_FIELDS = {
@@ -338,6 +361,10 @@ _RESERVATION_FIELDS = {
     "schema",
     "ledger_scope",
     "ledger_root_path_sha256",
+    "repository_root_path_sha256",
+    "snapshot_receipt_sha256",
+    "git_runtime_manifest_sha256",
+    "git_executable_sha256",
     "request_id",
     "request_sha256",
     "qualification_packet_sha256",
@@ -369,6 +396,10 @@ class PhysicalQualificationReservation:
     """Parseable final receipt; authority requires canonical-ledger load."""
 
     ledger_root_path_sha256: str
+    repository_root_path_sha256: str
+    snapshot_receipt_sha256: str
+    git_runtime_manifest_sha256: str
+    git_executable_sha256: str
     request_id: str
     request_sha256: str
     qualification_packet_sha256: str
@@ -403,6 +434,10 @@ class PhysicalQualificationReservation:
         _identifier(self.request_id, name="request_id")
         for name, value, pattern in (
             ("ledger_root_path_sha256", self.ledger_root_path_sha256, _HEX64),
+            ("repository_root_path_sha256", self.repository_root_path_sha256, _HEX64),
+            ("snapshot_receipt_sha256", self.snapshot_receipt_sha256, _HEX64),
+            ("git_runtime_manifest_sha256", self.git_runtime_manifest_sha256, _HEX64),
+            ("git_executable_sha256", self.git_executable_sha256, _HEX64),
             ("request_sha256", self.request_sha256, _HEX64),
             ("qualification_packet_sha256", self.qualification_packet_sha256, _HEX64),
             ("signature_sha256", self.signature_sha256, _HEX64),
@@ -461,6 +496,10 @@ class PhysicalQualificationReservation:
             "schema": self.schema,
             "ledger_scope": self.ledger_scope,
             "ledger_root_path_sha256": self.ledger_root_path_sha256,
+            "repository_root_path_sha256": self.repository_root_path_sha256,
+            "snapshot_receipt_sha256": self.snapshot_receipt_sha256,
+            "git_runtime_manifest_sha256": self.git_runtime_manifest_sha256,
+            "git_executable_sha256": self.git_executable_sha256,
             "request_id": self.request_id,
             "request_sha256": self.request_sha256,
             "qualification_packet_sha256": self.qualification_packet_sha256,
@@ -638,11 +677,43 @@ def _require_requested_main(
         )
 
 
+def _require_signed_runtime_pin(
+    *,
+    snapshot_receipt: CandidateSnapshotReceipt,
+    qualification: QualificationPacket,
+    observation: LocalMainHeadObservation,
+) -> None:
+    if not isinstance(snapshot_receipt, CandidateSnapshotReceipt):
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires CandidateSnapshotReceipt"
+        )
+    if (
+        snapshot_receipt.sha256 != qualification.snapshot_receipt_sha256
+        or snapshot_receipt.materialization_receipt_sha256
+        != qualification.materialization_receipt_sha256
+        or snapshot_receipt.task_sha256 != qualification.task_sha256
+        or snapshot_receipt.candidate_commit_sha != qualification.candidate_commit_sha
+        or snapshot_receipt.candidate_tree_sha != qualification.candidate_tree_sha
+    ):
+        raise PhysicalQualificationReservationError(
+            "snapshot receipt is not the one bound by the signed qualification chain"
+        )
+    if (
+        observation.git_runtime_manifest_sha256
+        != snapshot_receipt.git_runtime_manifest_sha256
+        or observation.git_executable_sha256 != snapshot_receipt.git_executable_sha256
+    ):
+        raise PhysicalQualificationReservationError(
+            "trusted Git runtime does not match the signed snapshot runtime identity"
+        )
+
+
 def _reservation_mapping(
     *,
     ledger: _PhysicalQualificationRequestLedger,
     request: PhysicalQualificationRequest,
     qualification: QualificationPacket,
+    snapshot_receipt: CandidateSnapshotReceipt,
     signature: DetachedEd25519AuthoritySignature,
     requester_actor_id: str,
     observation: LocalMainHeadObservation,
@@ -654,6 +725,10 @@ def _reservation_mapping(
         "schema": RESERVATION_SCHEMA,
         "ledger_scope": LEDGER_SCOPE,
         "ledger_root_path_sha256": ledger.root_sha256,
+        "repository_root_path_sha256": observation.repository_root_path_sha256,
+        "snapshot_receipt_sha256": snapshot_receipt.sha256,
+        "git_runtime_manifest_sha256": observation.git_runtime_manifest_sha256,
+        "git_executable_sha256": observation.git_executable_sha256,
         "request_id": request.request_id,
         "request_sha256": request.sha256,
         "qualification_packet_sha256": qualification.sha256,
@@ -688,6 +763,7 @@ def _consume_physical_qualification_request_once(
     operation_root: Path,
     request: PhysicalQualificationRequest,
     qualification: QualificationPacket,
+    snapshot_receipt: CandidateSnapshotReceipt,
     signature: DetachedEd25519AuthoritySignature,
     verifier: Ed25519AuthorityVerifier,
     now_provider: Callable[[], str],
@@ -698,13 +774,16 @@ def _consume_physical_qualification_request_once(
         raise PhysicalQualificationReservationError(
             "physical request consumption requires TrustedGitRuntime"
         )
+    if not isinstance(snapshot_receipt, CandidateSnapshotReceipt):
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires CandidateSnapshotReceipt"
+        )
     ledger = _PhysicalQualificationRequestLedger(
         _safe_root(ledger_root, name="physical request ledger root")
     )
 
-    # Preflight before taking the irreversible lock avoids burning an obviously
-    # stale/mismatched request. Neither preflight evidence nor time is accepted
-    # from the caller of the public authority API.
+    # Preflight before the irreversible lock avoids burning an obviously stale
+    # request. Authority still comes from the post-lock observation/reverify.
     preflight_at = now_provider()
     _utc(preflight_at, name="trusted preflight time")
     _verify_request_at(
@@ -721,6 +800,11 @@ def _consume_physical_qualification_request_once(
         observed_at_utc=preflight_at,
         repository=request.repository,
     )
+    _require_signed_runtime_pin(
+        snapshot_receipt=snapshot_receipt,
+        qualification=qualification,
+        observation=preflight_observation,
+    )
     _require_requested_main(preflight_observation, request)
 
     # From here onward every failure is fail-closed: the request has been
@@ -735,6 +819,11 @@ def _consume_physical_qualification_request_once(
             operation_root=operation_root,
             observed_at_utc=observed_at,
             repository=request.repository,
+        )
+        _require_signed_runtime_pin(
+            snapshot_receipt=snapshot_receipt,
+            qualification=qualification,
+            observation=observation,
         )
         _require_requested_main(observation, request)
 
@@ -756,6 +845,7 @@ def _consume_physical_qualification_request_once(
             ledger=ledger,
             request=request,
             qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
             signature=signature,
             requester_actor_id=request_receipt.requester_actor_id,
             observation=observation,
@@ -776,28 +866,28 @@ def _consume_physical_qualification_request_once(
 def consume_physical_qualification_request_once(
     *,
     trusted_git: TrustedGitRuntime,
-    repository_root: Path,
-    operation_root: Path,
     request: PhysicalQualificationRequest,
     qualification: QualificationPacket,
+    snapshot_receipt: CandidateSnapshotReceipt,
     signature: DetachedEd25519AuthoritySignature,
     verifier: Ed25519AuthorityVerifier,
 ) -> PhysicalQualificationReservation:
     """Authenticate, observe, and host-reserve one request exactly once.
 
-    Callers cannot supply observation evidence, time, ledger ID, ledger root, or
-    a prebuilt receipt. The returned receipt is loaded from the one canonical
-    host-local ledger only after the create-once transaction commits.
+    Callers cannot supply repository root, operation root, observation evidence,
+    time, ledger ID/root, or a prebuilt receipt. The caller-supplied staged Git
+    runtime must match the exact snapshot-runtime identity already named by the
+    human-signed qualification chain.
     """
 
-    root = _canonical_host_ledger_root()
     return _consume_physical_qualification_request_once(
-        ledger_root=root,
+        ledger_root=_canonical_host_ledger_root(),
         trusted_git=trusted_git,
-        repository_root=repository_root,
-        operation_root=operation_root,
+        repository_root=_canonical_repository_root(),
+        operation_root=_canonical_operation_root(),
         request=request,
         qualification=qualification,
+        snapshot_receipt=snapshot_receipt,
         signature=signature,
         verifier=verifier,
         now_provider=_now_utc_seconds,
