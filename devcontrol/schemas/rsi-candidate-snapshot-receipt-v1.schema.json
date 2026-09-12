@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-candidate-snapshot-receipt-v1.schema.json",
+  "title": "ModelRig RSI candidate snapshot receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "materialization_receipt_sha256",
+    "task_sha256",
+    "candidate_commit_sha",
+    "candidate_tree_sha",
+    "file_count",
+    "total_bytes",
+    "manifest_sha256",
+    "git_runtime_manifest_sha256",
+    "git_executable_sha256",
+    "network_performed",
+    "repository_mutated",
+    "authority",
+    "merge_authority"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-candidate-snapshot-receipt/v1"},
+    "materialization_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "file_count": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "total_bytes": {"type": "integer", "minimum": 1, "maximum": 2147483648},
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_runtime_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_executable_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "network_performed": {"const": false},
+    "repository_mutated": {"const": false},
+    "authority": {"const": "evidence-only"},
+    "merge_authority": {"const": "human"}
+  }
+}
