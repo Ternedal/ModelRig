@@ -246,7 +246,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
         planId: String,
         expectedCapabilityReceiptPresent: Boolean? = null,
     ): ReviewedStartTransportEnvelope {
-        val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
+        val root = postReviewedStart("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
         if (expectedCapabilityReceiptPresent != null) {
             val present = root.has("capability_receipt") && !root.isNull("capability_receipt")
             if (expectedCapabilityReceiptPresent) {
@@ -432,6 +432,43 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .header("Authorization", "Bearer $token")
             .build(),
     )
+
+    private fun postReviewedStart(path: String, payload: JSONObject): JSONObject {
+        val request = Request.Builder()
+            .url(base + path)
+            .post(payload.toString().toRequestBody(jsonType))
+            .header("Authorization", "Bearer $token")
+            .build()
+        try {
+            http.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    val detail = runCatching {
+                        val root = JSONObject(text)
+                        root.optString("error").ifBlank { root.optString("detail") }
+                    }.getOrNull()?.ifBlank { null } ?: text.take(500)
+                    throw Agent3ReviewedStartHttpException(
+                        statusCode = response.code,
+                        reasonCode = response.header("X-ModelRig-Agent3-Reason")
+                            ?.trim()
+                            ?.takeIf { it.isNotEmpty() },
+                        message = "Agent 3.0 failed (${response.code}): $detail",
+                    )
+                }
+                return runCatching { JSONObject(text) }
+                    .getOrElse { throw ModelRigException("Agent 3.0 returned invalid JSON") }
+            }
+        } catch (failure: Agent3ReviewedStartHttpException) {
+            throw failure
+        } catch (failure: java.io.IOException) {
+            throw Agent3ReviewedStartHttpException(
+                statusCode = null,
+                reasonCode = null,
+                message = "Agent 3.0 reviewed Start transport failed: ${failure.message ?: failure::class.simpleName}",
+                cause = failure,
+            )
+        }
+    }
 
     private fun execute(request: Request): JSONObject {
         http.newCall(request).execute().use { response ->
