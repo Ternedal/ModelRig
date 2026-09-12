@@ -165,11 +165,20 @@ enum class RiskLevel { READ, WRITE, DESTRUCTIVE }
 
 @Composable
 internal fun RiskBadge(risk: RiskLevel, modifier: Modifier = Modifier) {
-    // Handoff exact rgba values for the badge bg/fg per level.
-    val (bg, fg, label) = when (risk) {
-        RiskLevel.READ -> Triple(Color(0x33785A37), Color(0xFFB8AC9C), "READ")
-        RiskLevel.WRITE -> Triple(Color(0x38B9823F), Color(0xFFD09A55), "WRITE")
-        RiskLevel.DESTRUCTIVE -> Triple(Color(0x339C564C), Color(0xFFC47B70), "DESTRUCTIVE")
+    val c = KalivTheme.colors
+    // Preserve the handoff palette in dark mode; light mode uses semantic roles.
+    val (bg, fg, label) = if (c.isDark) {
+        when (risk) {
+            RiskLevel.READ -> Triple(Color(0x33785A37), Color(0xFFB8AC9C), "READ")
+            RiskLevel.WRITE -> Triple(Color(0x38B9823F), Color(0xFFD09A55), "WRITE")
+            RiskLevel.DESTRUCTIVE -> Triple(Color(0x339C564C), Color(0xFFC47B70), "DESTRUCTIVE")
+        }
+    } else {
+        when (risk) {
+            RiskLevel.READ -> Triple(c.Success.copy(alpha = 0.12f), c.TextHigh, "READ")
+            RiskLevel.WRITE -> Triple(c.Warning.copy(alpha = 0.12f), c.TextHigh, "WRITE")
+            RiskLevel.DESTRUCTIVE -> Triple(c.Danger.copy(alpha = 0.12f), c.TextHigh, "DESTRUCTIVE")
+        }
     }
     Box(
         modifier
@@ -289,12 +298,14 @@ fun KalivTitleBar(
  */
 @Composable
 fun KalivIconRail(active: KalivScreen, onSelect: (KalivScreen) -> Unit) {
+    val c = KalivTheme.colors
+    val railBackground = if (c.isDark) Color(0x8C14110E) else c.Surface
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(70.dp)
             .fillMaxHeight()
-            .background(Color(0x8C14110E))
+            .background(railBackground)
             .padding(vertical = 16.dp),
     ) {
         val top = listOf(
@@ -314,7 +325,12 @@ fun KalivIconRail(active: KalivScreen, onSelect: (KalivScreen) -> Unit) {
 
 @Composable
 private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(12.dp)
+    val activeStart = if (c.isDark) Color(0x479A7136) else c.Signal.copy(alpha = 0.14f)
+    val activeEnd = if (c.isDark) Color(0x149A7136) else c.Signal.copy(alpha = 0.05f)
+    val activeBorder = if (c.isDark) Color(0x669A7136) else c.Signal.copy(alpha = 0.32f)
+    val inactiveInk = if (c.isDark) Color(0xFFC3B8A8) else c.TextMuted
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -324,10 +340,10 @@ private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
                 if (on) Modifier
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color(0x479A7136), Color(0x149A7136)),
+                            listOf(activeStart, activeEnd),
                         ),
                     )
-                    .border(1.dp, Color(0x669A7136), shape)
+                    .border(1.dp, activeBorder, shape)
                 else Modifier,
             )
             .clickable { onClick() },
@@ -335,7 +351,7 @@ private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
         Text(
             glyph,
             fontSize = 18.sp,
-            color = if (on) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+            color = if (on) c.TextHigh else inactiveInk,
         )
     }
 }
@@ -593,11 +609,13 @@ internal fun PillToggle(on: Boolean, label: String, onToggle: () -> Unit) {
 /** An outlined chip button (used for "+ Tilføj dokument" etc.). */
 @Composable
 internal fun OutlineChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(9.dp)
+    val border = if (c.isDark) Color(0x4D785A37) else c.Border
     Box(
         modifier.clip(shape)
             .background(KalivTheme.colors.SurfaceHigh)
-            .border(1.dp, Color(0x4D785A37), shape)
+            .border(1.dp, border, shape)
             .clickable(onClick = onClick)
             .padding(vertical = 9.dp),
         contentAlignment = Alignment.Center,
@@ -688,6 +706,11 @@ fun KalivAgentCockpit(
     system: String?,
     modifier: Modifier = Modifier,
 ) {
+    val c = KalivTheme.colors
+    val divider = if (c.isDark) Color(0x33785A37) else c.Border
+    val actionLogBackground = if (c.isDark) Color(0x8014110E) else c.Surface
+    val gateBackground = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
+    val gateBorder = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
     val scope = rememberCoroutineScope()
     // Conversation for the agent task (its own, separate from chat).
     val turns = remember { mutableStateListOf<Pair<String, String>>() } // role to text
@@ -786,7 +809,7 @@ fun KalivAgentCockpit(
         Column(
             Modifier.width(360.dp).fillMaxHeight()
                 .background(KalivTheme.colors.Graphite)
-                .border(1.dp, Color(0x33785A37), RoundedCornerShape(0.dp))
+                .border(1.dp, divider, RoundedCornerShape(0.dp))
                 .padding(18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -873,7 +896,7 @@ fun KalivAgentCockpit(
         // --- Action log (264dp) ---
         Column(
             Modifier.width(264.dp).fillMaxHeight()
-                .background(Color(0x8014110E))
+                .background(actionLogBackground)
                 .padding(16.dp),
         ) {
             SectionLabel("Handlingslog")
@@ -888,8 +911,8 @@ fun KalivAgentCockpit(
             Spacer(Modifier.height(10.dp))
             Box(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp))
-                    .background(Color(0x1A9A7136))
-                    .border(1.dp, Color(0x339A7136), RoundedCornerShape(9.dp))
+                    .background(gateBackground)
+                    .border(1.dp, gateBorder, RoundedCornerShape(9.dp))
                     .padding(11.dp),
             ) {
                 Text(
@@ -903,6 +926,8 @@ fun KalivAgentCockpit(
 
 @Composable
 private fun AgentIdlePrompt() {
+    val c = KalivTheme.colors
+    val suggestionInk = if (c.isDark) Color(0xFFC3B8A8) else c.TextMuted
     Column {
         Text(
             "Beskriv en opgave, s\u00e5 l\u00e6gger Kaliv en plan.",
@@ -917,7 +942,7 @@ private fun AgentIdlePrompt() {
             "Find dubletter i mine dokumenter",
         ).forEach {
             Box(Modifier.padding(vertical = 3.dp)) {
-                Text("\u2022 $it", color = Color(0xFFC3B8A8), fontSize = 12.5.sp)
+                Text("\u2022 $it", color = suggestionInk, fontSize = 12.5.sp)
             }
         }
     }
@@ -925,7 +950,9 @@ private fun AgentIdlePrompt() {
 
 @Composable
 private fun AgentBubble(role: String, text: String) {
+    val c = KalivTheme.colors
     val isUser = role == "user"
+    val assistantBorder = if (c.isDark) Color(0x4D785A37) else c.Border
     Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         if (!isUser) {
             Text("Kaliv", color = KalivTheme.colors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
@@ -934,7 +961,7 @@ private fun AgentBubble(role: String, text: String) {
         Box(
             Modifier.clip(RoundedCornerShape(13.dp))
                 .background(if (isUser) KalivTheme.colors.Signal else KalivTheme.colors.Surface)
-                .border(1.dp, if (isUser) KalivTheme.colors.Signal else Color(0x4D785A37), RoundedCornerShape(13.dp))
+                .border(1.dp, if (isUser) c.Signal else assistantBorder, RoundedCornerShape(13.dp))
                 .padding(horizontal = 13.dp, vertical = 10.dp),
         ) {
             Text(text, color = if (isUser) kalivPrimaryInk else KalivTheme.colors.TextHigh, fontSize = 13.sp, lineHeight = 20.sp)
@@ -1002,12 +1029,14 @@ private fun PlanRow(
     onApprove: () -> Unit,
     onDeny: () -> Unit,
 ) {
+    val c = KalivTheme.colors
+    val connector = if (c.isDark) Color(0x4D785A37) else c.Border
     Row(Modifier.fillMaxWidth()) {
         // Gutter: status circle + connector.
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(26.dp)) {
             StatusCircle(index, step.status)
             if (!isLast) {
-                Box(Modifier.width(2.dp).height(40.dp).background(Color(0x4D785A37)))
+                Box(Modifier.width(2.dp).height(40.dp).background(connector))
             }
         }
         Spacer(Modifier.width(12.dp))
@@ -1042,34 +1071,40 @@ private fun PlanRow(
 
 @Composable
 internal fun StatusCircle(index: Int, status: StepStatus) {
+    val c = KalivTheme.colors
     val size = 26
+    val doneBackground = if (c.isDark) Color(0x336F8A63) else c.Success.copy(alpha = 0.12f)
+    val activeBackground = if (c.isDark) Color(0xFF8A6530) else c.Signal
+    val activeBorder = if (c.isDark) Color(0x2E9A7136) else c.Signal.copy(alpha = 0.18f)
+    val pendingBorder = if (c.isDark) Color(0x4D785A37) else c.Border
+    val cancelledBackground = if (c.isDark) Color(0x22000000) else c.Danger.copy(alpha = 0.08f)
+    val cancelledBorder = if (c.isDark) Color(0x4D9C564C) else c.Danger.copy(alpha = 0.35f)
+    val cancelledInk = if (c.isDark) Color(0xFFC47B70) else c.Danger
     when (status) {
         StepStatus.DONE -> Box(
             Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
-                .background(Color(0x336F8A63))
-                .border(1.dp, KalivTheme.colors.Success, RoundedCornerShape(999.dp)),
+                .background(doneBackground)
+                .border(1.dp, c.Success, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
-        ) { Text("\u2713", color = KalivTheme.colors.Success, fontSize = 13.sp) }
+        ) { Text("\u2713", color = c.Success, fontSize = 13.sp) }
         StepStatus.ACTIVE -> Box(
             Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
-                .background(Color(0xFF8A6530))
-                .border(4.dp, Color(0x2E9A7136), RoundedCornerShape(999.dp)),
+                .background(activeBackground)
+                .border(4.dp, activeBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("$index", color = kalivPrimaryInk, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
         StepStatus.PENDING -> Box(
             Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
-                .background(KalivTheme.colors.SurfaceHigh)
-                .border(1.dp, Color(0x4D785A37), RoundedCornerShape(999.dp)),
+                .background(c.SurfaceHigh)
+                .border(1.dp, pendingBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
-        ) { Text("$index", color = KalivTheme.colors.TextMuted, fontSize = 12.sp) }
-        // A run halted by a rejection: the step will not happen, so it must
-        // not keep looking like it is merely waiting its turn.
+        ) { Text("$index", color = c.TextMuted, fontSize = 12.sp) }
         StepStatus.CANCELLED -> Box(
             Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
-                .background(Color(0x22000000))
-                .border(1.dp, Color(0x4D9C564C), RoundedCornerShape(999.dp)),
+                .background(cancelledBackground)
+                .border(1.dp, cancelledBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
-        ) { Text("\u2715", color = Color(0xFFC47B70), fontSize = 12.sp) }
+        ) { Text("\u2715", color = cancelledInk, fontSize = 12.sp) }
     }
 }
 
@@ -1080,57 +1115,64 @@ internal fun StatusCircle(index: Int, status: StepStatus) {
  */
 @Composable
 internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> Unit) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(14.dp)
+    val surface = if (c.isDark) {
+        Brush.verticalGradient(listOf(Color(0xFF241A10), Color(0xFF1B140D)))
+    } else {
+        Brush.verticalGradient(listOf(c.SurfaceHigh, c.Surface))
+    }
+    val border = if (c.isDark) Color(0x73C69A4B) else c.Signal.copy(alpha = 0.32f)
+    val codeSurface = if (c.isDark) Color(0xFF100C09) else c.Graphite
+    val rejectBorder = if (c.isDark) Color(0x4D785A37) else c.Border
+    val approveSurface = if (c.isDark) kalivPrimaryGradient else Brush.verticalGradient(listOf(c.Signal, c.Signal))
     Column(
         Modifier.fillMaxWidth().clip(shape)
-            .background(Brush.verticalGradient(listOf(Color(0xFF241A10), Color(0xFF1B140D))))
-            .border(1.dp, Color(0x73C69A4B), shape)
+            .background(surface)
+            .border(1.dp, border, shape)
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             KalivAnkh(16)
             Spacer(Modifier.width(8.dp))
-            Text("Kaliv vil bruge et v\u00e6rkt\u00f8j", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("Kaliv vil bruge et v\u00e6rkt\u00f8j", color = c.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
             RiskBadge(riskOf(card.risk, card.tool, card.impact))
         }
         Spacer(Modifier.height(8.dp))
         Text(
             card.summary.ifBlank { "${card.tool} \u2014 afventer din godkendelse" },
-            color = KalivTheme.colors.TextMuted, fontSize = 12.sp, lineHeight = 17.sp,
+            color = c.TextMuted, fontSize = 12.sp, lineHeight = 17.sp,
         )
         Spacer(Modifier.height(10.dp))
-        // Arg-preview box (monospace on CodeSurface).
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF100C09))
+                .background(codeSurface)
                 .padding(horizontal = 11.dp, vertical = 9.dp),
         ) {
             Text(
                 "tool: ${card.tool}",
-                color = KalivTheme.colors.Highlight, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace, lineHeight = 17.sp,
+                color = c.Highlight, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace, lineHeight = 17.sp,
             )
         }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
-            // Godkend (primary gradient)
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
-                    .background(kalivPrimaryGradient)
+                    .background(approveSurface)
                     .clickable(onClick = onApprove)
                     .padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
             ) { Text("Godkend", color = kalivPrimaryInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
             Spacer(Modifier.width(10.dp))
-            // Afvis (outline)
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
-                    .background(KalivTheme.colors.SurfaceHigh)
-                    .border(1.dp, Color(0x4D785A37), RoundedCornerShape(10.dp))
+                    .background(c.SurfaceHigh)
+                    .border(1.dp, rejectBorder, RoundedCornerShape(10.dp))
                     .clickable(onClick = onDeny)
                     .padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Afvis", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+            ) { Text("Afvis", color = c.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
         }
     }
 }
@@ -1196,6 +1238,12 @@ fun KalivComputerUse(
     // rather than keeping runState entirely private.
     onRunningChange: (Boolean) -> Unit = {},
 ) {
+    val c = KalivTheme.colors
+    val leftPanelBackground = if (c.isDark) Color(0x8014110E) else c.Surface
+    val stopBackground = if (c.isDark) Color(0x269C564C) else c.Danger.copy(alpha = 0.10f)
+    val stopBorder = if (c.isDark) Color(0x809C564C) else c.Danger.copy(alpha = 0.40f)
+    val stopInk = if (c.isDark) Color(0xFFE0B3AB) else c.Danger
+    val runningInk = if (c.isDark) c.Warning else c.TextHigh
     var input by remember { mutableStateOf("") }
     var runState by remember { mutableStateOf(RunState.IDLE) }
     LaunchedEffect(runState) { onRunningChange(runState == RunState.RUNNING) }
@@ -1238,7 +1286,7 @@ fun KalivComputerUse(
         // --- Left column (340dp) ---
         Column(
             Modifier.width(340.dp).fillMaxHeight()
-                .background(Color(0x8014110E))
+                .background(leftPanelBackground)
                 .padding(18.dp),
         ) {
             // "Kaliv styrer skærmen" status only while running.
@@ -1246,7 +1294,7 @@ fun KalivComputerUse(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
                     Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Warning))
                     Spacer(Modifier.width(7.dp))
-                    Text("Kaliv styrer sk\u00e6rmen", color = KalivTheme.colors.Warning, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                    Text("Kaliv styrer sk\u00e6rmen", color = runningInk, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
                 }
             }
             Text("Opgave", color = KalivTheme.colors.TextHigh, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -1285,12 +1333,12 @@ fun KalivComputerUse(
                             Spacer(Modifier.width(10.dp))
                             Box(
                                 Modifier.weight(1f).clip(RoundedCornerShape(9.dp))
-                                    .background(Color(0x269C564C))
-                                    .border(1.dp, Color(0x809C564C), RoundedCornerShape(9.dp))
+                                    .background(stopBackground)
+                                    .border(1.dp, stopBorder, RoundedCornerShape(9.dp))
                                     .clickable { stopTask() }
                                     .padding(vertical = 9.dp),
                                 contentAlignment = Alignment.Center,
-                            ) { Text("\u25A0 Stop", color = Color(0xFFE0B3AB), fontSize = 12.5.sp, fontWeight = FontWeight.Medium) }
+                            ) { Text("\u25A0 Stop", color = stopInk, fontSize = 12.5.sp, fontWeight = FontWeight.Medium) }
                         }
                     }
                 }
@@ -1342,10 +1390,12 @@ fun KalivComputerUse(
 
 @Composable
 private fun UseStepRow(index: Int, step: UseStep, isLast: Boolean) {
+    val c = KalivTheme.colors
+    val connector = if (c.isDark) Color(0x4D785A37) else c.Border
     Row(Modifier.fillMaxWidth()) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(22.dp)) {
             StatusCircleSmall(index, step.status)
-            if (!isLast) Box(Modifier.width(2.dp).height(34.dp).background(Color(0x4D785A37)))
+            if (!isLast) Box(Modifier.width(2.dp).height(34.dp).background(connector))
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f).padding(bottom = 12.dp)) {
@@ -1363,27 +1413,35 @@ private fun UseStepRow(index: Int, step: UseStep, isLast: Boolean) {
 
 @Composable
 private fun StatusCircleSmall(index: Int, status: StepStatus) {
+    val c = KalivTheme.colors
+    val doneBackground = if (c.isDark) Color(0x336F8A63) else c.Success.copy(alpha = 0.12f)
+    val activeBackground = if (c.isDark) Color(0xFF8A6530) else c.Signal
+    val activeBorder = if (c.isDark) Color(0x2E9A7136) else c.Signal.copy(alpha = 0.18f)
+    val pendingBorder = if (c.isDark) Color(0x4D785A37) else c.Border
+    val cancelledBackground = if (c.isDark) Color(0x22000000) else c.Danger.copy(alpha = 0.08f)
+    val cancelledBorder = if (c.isDark) Color(0x4D9C564C) else c.Danger.copy(alpha = 0.35f)
+    val cancelledInk = if (c.isDark) Color(0xFFC47B70) else c.Danger
     when (status) {
         StepStatus.DONE -> Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(Color(0x336F8A63))
-                .border(1.dp, KalivTheme.colors.Success, RoundedCornerShape(999.dp)),
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(doneBackground)
+                .border(1.dp, c.Success, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
-        ) { Text("\u2713", color = KalivTheme.colors.Success, fontSize = 11.sp) }
+        ) { Text("\u2713", color = c.Success, fontSize = 11.sp) }
         StepStatus.ACTIVE -> Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(Color(0xFF8A6530))
-                .border(3.dp, Color(0x2E9A7136), RoundedCornerShape(999.dp)),
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(activeBackground)
+                .border(3.dp, activeBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Box(Modifier.size(6.dp).clip(RoundedCornerShape(999.dp)).background(kalivPrimaryInk)) }
         StepStatus.PENDING -> Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.SurfaceHigh)
-                .border(1.dp, Color(0x4D785A37), RoundedCornerShape(999.dp)),
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(c.SurfaceHigh)
+                .border(1.dp, pendingBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
-        ) { Text("$index", color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
+        ) { Text("$index", color = c.TextMuted, fontSize = 11.sp) }
         StepStatus.CANCELLED -> Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(Color(0x22000000))
-                .border(1.dp, Color(0x4D9C564C), RoundedCornerShape(999.dp)),
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(cancelledBackground)
+                .border(1.dp, cancelledBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
-        ) { Text("\u2715", color = Color(0xFFC47B70), fontSize = 11.sp) }
+        ) { Text("\u2715", color = cancelledInk, fontSize = 11.sp) }
     }
 }
 
@@ -1466,47 +1524,60 @@ private fun HoursRow(day: String, hours: String, highlighted: Boolean) {
 /** Approval bar for computer-use (same gradient/border as the 1b card). */
 @Composable
 private fun ComputerApprovalBar(detail: String, onApprove: () -> Unit, onDeny: () -> Unit) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(14.dp)
+    val surface = if (c.isDark) {
+        Brush.verticalGradient(listOf(Color(0xFF241A10), Color(0xFF1B140D)))
+    } else {
+        Brush.verticalGradient(listOf(c.SurfaceHigh, c.Surface))
+    }
+    val border = if (c.isDark) Color(0x73C69A4B) else c.Signal.copy(alpha = 0.32f)
+    val rejectBorder = if (c.isDark) Color(0x4D785A37) else c.Border
+    val approveSurface = if (c.isDark) kalivPrimaryGradient else Brush.verticalGradient(listOf(c.Signal, c.Signal))
     Column(
         Modifier.fillMaxWidth().clip(shape)
-            .background(Brush.verticalGradient(listOf(Color(0xFF241A10), Color(0xFF1B140D))))
-            .border(1.dp, Color(0x73C69A4B), shape)
+            .background(surface)
+            .border(1.dp, border, shape)
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             KalivAnkh(16)
             Spacer(Modifier.width(8.dp))
-            Text("Kaliv vil oprette en kalenderbegivenhed", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("Kaliv vil oprette en kalenderbegivenhed", color = c.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
             RiskBadge(RiskLevel.WRITE)
         }
         Spacer(Modifier.height(8.dp))
-        Text(detail, color = KalivTheme.colors.TextMuted, fontSize = 12.sp, lineHeight = 17.sp)
+        Text(detail, color = c.TextMuted, fontSize = 12.sp, lineHeight = 17.sp)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(kalivPrimaryGradient)
+                Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(approveSurface)
                     .clickable(onClick = onApprove).padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
             ) { Text("Godkend", color = kalivPrimaryInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
             Spacer(Modifier.width(10.dp))
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(KalivTheme.colors.SurfaceHigh)
-                    .border(1.dp, Color(0x4D785A37), RoundedCornerShape(10.dp))
+                Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(c.SurfaceHigh)
+                    .border(1.dp, rejectBorder, RoundedCornerShape(10.dp))
                     .clickable(onClick = onDeny).padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Afvis", color = KalivTheme.colors.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+            ) { Text("Afvis", color = c.TextHigh, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
         }
     }
 }
 
 @Composable
 private fun ResultBar(success: Boolean, label: String, onReset: () -> Unit) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
-    val (bg, border, fg) = if (success)
-        Triple(Color(0x266F8A63), Color(0x806F8A63), KalivTheme.colors.Success)
-    else
-        Triple(Color(0x269C564C), Color(0x809C564C), Color(0xFFE0B3AB))
+    val (bg, border, fg) = if (c.isDark) {
+        if (success) Triple(Color(0x266F8A63), Color(0x806F8A63), c.Success)
+        else Triple(Color(0x269C564C), Color(0x809C564C), Color(0xFFE0B3AB))
+    } else {
+        if (success) Triple(c.Success.copy(alpha = 0.10f), c.Success.copy(alpha = 0.40f), c.Success)
+        else Triple(c.Danger.copy(alpha = 0.10f), c.Danger.copy(alpha = 0.40f), c.Danger)
+    }
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Row(
             Modifier.fillMaxWidth().clip(shape).background(bg).border(1.dp, border, shape).padding(12.dp),
