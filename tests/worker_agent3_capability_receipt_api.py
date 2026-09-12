@@ -8,10 +8,14 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.agent3 import capability_probe as _probe
+from app.agent3.api import build_router
+from app.agent3.cancellation_status import install_termination_contract
 from app.agent3.capability_graph_api import build_runtime_capability_graph
 from app.agent3.capability_receipt import agent_run_plan_sha256
 from app.agent3.capability_receipt_api import build_capability_receipt_router
 from app.agent3.core import (
+    Agent3Orchestrator,
     AgentRun,
     AgentRunStore,
     AgentStep,
@@ -23,14 +27,14 @@ from app.agent3.core import (
     TurnRequest,
 )
 from app.agent3.integration import V2ToolAdapter
+from app.agent3.replan_runtime import PersistentReadReplanner, ReplanJournal
+from app.agent3.replanner import ReadSuffixReplanner
 
 # The capability receipt now describes the rig it MEASURES (F-302): before
 # 1.58.67 rig_reachable/rag_ready were hardcoded True, so this test passed by
 # inheriting an assumption. There is no Ollama in CI, so a real probe correctly
 # reports the rig as unreachable and the receipt correctly refuses. State the
 # assumption instead of depending on the environment.
-from app.agent3 import capability_probe as _probe  # noqa: E402
-
 _probe.measure = lambda **kw: {  # type: ignore[assignment]
     "worker_ready": True,
     "rig_reachable": True,
@@ -215,4 +219,105 @@ assert set(parsed) == {
     "executed",
 }
 
-print("31 passed, 0 failed")
+# #1255: exact generic GET capability evidence is calculated from the exact
+# serialized run in that response. It is not a later independent store read.
+snapshot_root = tempfile.mkdtemp(prefix="agent3-run-snapshot-capability-")
+snapshot_store = AgentRunStore(os.path.join(snapshot_root, "runs.db"))
+snapshot_orchestrator = Agent3Orchestrator(
+    store=snapshot_store,
+    executor=adapter.execute,
+)
+snapshot_replanner = PersistentReadReplanner(
+    snapshot_store,
+    ReplanJournal(os.path.join(snapshot_root, "replans.db")),
+    ReadSuffixReplanner(max_steps=12, max_replans=3),
+)
+snapshot_app = FastAPI(version="test-version")
+snapshot_app.include_router(
+    build_router(
+        snapshot_orchestrator,
+        adapter,
+        worker_version="test-version",
+        replan_service=snapshot_replanner,
+    )
+)
+snapshot_app.state.agent3_orchestrator = snapshot_orchestrator
+snapshot_app.state.agent3_replanner = snapshot_replanner
+snapshot_app.state.agent3_mounted = True
+install_termination_contract(snapshot_app)
+snapshot_client = TestClient(snapshot_app)
+
+snapshot_run = AgentRun(
+    request=TurnRequest(
+        "snapshot receipt",
+        mode="rig",
+        tools=True,
+        conversation_id="conv-snapshot",
+    ),
+    route=RoutePlan(
+        RouteKind.RIG_TOOLS_LOCAL,
+        "snapshot route",
+        uses_cloud=False,
+        uses_rig=True,
+        uses_tools=True,
+        uses_rag=False,
+    ),
+    steps=[
+        AgentStep(
+            tool="rig_status",
+            args={"revision": 1},
+            risk=RiskClass.READ,
+            sensitivity=Sensitivity.OPERATIONAL,
+            egress=EgressClass.LOCAL,
+            origin="local",
+            conversation_id="conv-snapshot",
+        )
+    ],
+)
+snapshot_store.save(snapshot_run)
+
+first_get = snapshot_client.get(f"/experimental/agent3/runs/{snapshot_run.id}")
+assert first_get.status_code == 200, first_get.text
+first_payload = first_get.json()
+assert "capability_receipt" in first_payload
+first_returned_run = AgentRun.from_json(
+    json.dumps(first_payload["run"], ensure_ascii=False, sort_keys=True)
+)
+first_snapshot_digest = first_payload["capability_receipt"]["plan_sha256"]
+assert first_snapshot_digest == agent_run_plan_sha256(first_returned_run)
+assert first_payload["capability_receipt"]["production_activation"] is False
+
+replacement = AgentStep(
+    tool="rig_status",
+    args={"revision": 2},
+    risk=RiskClass.READ,
+    sensitivity=Sensitivity.OPERATIONAL,
+    egress=EgressClass.LOCAL,
+    origin="local",
+    conversation_id="conv-snapshot",
+)
+revised, replan_receipt = snapshot_replanner.apply(
+    snapshot_run.id,
+    [replacement],
+    reason="change pending read args",
+)
+assert replan_receipt.to_revision == 1
+assert revised.steps[0].args == {"revision": 2}
+
+second_get = snapshot_client.get(f"/experimental/agent3/runs/{snapshot_run.id}")
+assert second_get.status_code == 200, second_get.text
+second_payload = second_get.json()
+second_returned_run = AgentRun.from_json(
+    json.dumps(second_payload["run"], ensure_ascii=False, sort_keys=True)
+)
+second_snapshot_digest = second_payload["capability_receipt"]["plan_sha256"]
+assert second_snapshot_digest == agent_run_plan_sha256(second_returned_run)
+assert second_snapshot_digest != first_snapshot_digest
+assert second_payload["run"]["current_step"] == first_payload["run"]["current_step"] == 0
+assert second_payload["run"]["state"] == first_payload["run"]["state"] == "running"
+
+# Scope is exact generic GET only. The run list has no synthetic per-run receipt.
+list_payload = snapshot_client.get("/experimental/agent3/runs").json()
+assert "capability_receipt" not in list_payload
+
+print("42 passed, 0 failed")

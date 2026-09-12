@@ -8,8 +8,9 @@ package dk.ternedal.modelrig.desktop.net
  * only the already-bound nonblank run id as recovery reference; the rejected
  * Start payload never becomes UI authority. Fresh server truth must independently
  * prove the exact run id, expected review mode and checkpoint before publication.
- * The already-proven Start capability receipt remains immutable review evidence
- * across recovery because generic run GET does not own or return Plan-Start evidence.
+ * When the reviewed Preview carried capability evidence, the fresh generic GET
+ * must also carry current capability evidence computed from that exact same run
+ * snapshot. Only its plan identity is recovery authority; graph state may drift.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -69,22 +70,20 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
         )
-        if (
-            fresh.capabilityReceipt != null &&
-            fresh.capabilityReceipt != expectedCapabilityReceipt
-        ) {
-            throw Agent3Exception(
-                "Invalid Agent 3.0 fresh run envelope: capability receipt does not match reviewed Preview"
-            )
-        }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
         if (expectedCapabilityReceipt != null) {
-            val evidence = getRunCapabilityEvidence(recoveryRunId)
+            val current = fresh.capabilityReceipt
+                ?: throw Agent3Exception(
+                    "Invalid Agent 3.0 fresh run envelope: same-snapshot capability evidence is missing"
+                )
             validateRecoveredCapabilityPlan(
-                current = evidence.receipt,
+                current = current,
                 reviewed = expectedCapabilityReceipt,
             )
         }
+        // Current graph state describes now, not the evidence the operator
+        // reviewed. Publish only the exact historical reviewed receipt after
+        // same-snapshot plan identity has been proven.
         fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "the reviewed Start envelope was rejected"

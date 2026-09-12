@@ -8,9 +8,12 @@ package dk.ternedal.modelrig.net
  * structure before exposing the raw top-level review mode separately. A raw mode
  * conflict therefore grants only a safely bound run id as recovery reference;
  * the rejected Start payload never becomes UI authority. Fresh server truth must
- * then independently prove the exact run id, reviewed mode and checkpoint. The
- * already-proven Start capability receipt remains immutable review evidence across
- * that recovery only after current stored run evidence re-proves the same plan identity.
+ * then independently prove the exact run id, reviewed mode and checkpoint. When
+ * the reviewed Preview carried capability evidence, the fresh generic GET must
+ * also carry current capability evidence computed from that exact same run
+ * snapshot. Only its plan identity is authoritative for recovery; current graph
+ * state may drift. The exact historical reviewed receipt is restored only after
+ * that same-snapshot plan proof succeeds.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -70,35 +73,43 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
         )
-        if (
-            fresh.capabilityReceipt != null &&
-            fresh.capabilityReceipt != expectedCapabilityReceipt
-        ) {
-            throw ModelRigException(
-                "Ugyldigt Agent 3.0 frisk run-status: capability receipt matcher ikke previewet",
-            )
-        }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
 
         if (expectedCapabilityReceipt != null) {
-            val current = getRunCapabilityEvidence(recoveryRunId).receipt
-            if (
-                current.planSha256 != expectedCapabilityReceipt.planSha256 ||
-                current.route != expectedCapabilityReceipt.route ||
-                current.requiredCapabilityIds != expectedCapabilityReceipt.requiredCapabilityIds
-            ) {
-                throw ModelRigException(
-                    "Ugyldigt Agent 3.0 capability-evidence: frisk run-plan matcher ikke previewet",
+            val current = fresh.capabilityReceipt
+                ?: throw ModelRigException(
+                    "Ugyldigt Agent 3.0 frisk run-status: same-snapshot capability evidence mangler",
                 )
-            }
+            validateRecoveredCapabilityPlan(
+                current = current,
+                reviewed = expectedCapabilityReceipt,
+            )
         }
 
+        // Current graph state is evidence about now, not what the operator
+        // reviewed. Publish only the exact historical reviewed receipt after the
+        // same-snapshot plan identity has been proven.
         fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "det reviewede Start-svar blev afvist"
         val recovery = recoveryFailure.message ?: "frisk run-status kunne ikke valideres"
         throw ModelRigException(
             "$original. Frisk run-recovery fejlede: $recovery",
+        )
+    }
+}
+
+private fun validateRecoveredCapabilityPlan(
+    current: Agent3Client.CapabilityReceipt,
+    reviewed: Agent3Client.CapabilityReceipt,
+) {
+    if (
+        current.planSha256 != reviewed.planSha256 ||
+        current.route != reviewed.route ||
+        current.requiredCapabilityIds != reviewed.requiredCapabilityIds
+    ) {
+        throw ModelRigException(
+            "Ugyldigt Agent 3.0 capability-evidence: frisk run-plan matcher ikke previewet",
         )
     }
 }
