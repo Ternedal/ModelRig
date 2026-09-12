@@ -53,6 +53,7 @@ _CLEAR_STATE_NAMES = _RESOURCE_STATE_NAMES + (
     "agent3_protected_memory_grant_db",
     "agent3_planner_memory_context_provider",
     "agent3_replan_preview_service",
+    "agent3_exact_run_capability_graph_provider",
 )
 
 
@@ -217,6 +218,11 @@ def mount_agent3(
                 adapter,
                 worker_version=worker_version,
             )
+
+        # The core exact-run route resolves this provider at request time. Core-only
+        # mounts never set it, so only the complete production surface decorates
+        # exact GET with same-snapshot capability evidence.
+        app.state.agent3_exact_run_capability_graph_provider = graph_provider
 
         def task_graph_provider():
             return build_runtime_capability_graph(

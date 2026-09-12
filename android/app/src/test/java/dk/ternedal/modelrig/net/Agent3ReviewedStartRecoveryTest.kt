@@ -3,6 +3,7 @@ package dk.ternedal.modelrig.net
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,7 +47,7 @@ class Agent3ReviewedStartRecoveryTest {
     }
 
     @Test
-    fun recoveryPreservesReviewedReceiptWhenCurrentGraphChangesButPlanMatches() {
+    fun recoveryPreservesReviewedReceiptWhenSameSnapshotGraphChangesButPlanMatches() {
         val expected = receipt()
         val server = server(
             startEnvelope(
@@ -58,11 +59,11 @@ class Agent3ReviewedStartRecoveryTest {
             runEnvelope(
                 answer = "fresh-run-truth",
                 readReviewJson = "{\"enabled\":true,\"waiting\":false}",
-            ),
-            capabilityEvidenceJson(
-                graphSha = "c".repeat(64),
-                allowed = false,
-                blockersJson = """[{"capability_id":"tools","state":"degraded","reason":"fresh graph changed"}]""",
+                capabilityReceiptJson = receiptJson(
+                    graphSha = "c".repeat(64),
+                    allowed = false,
+                    blockersJson = """[{"capability_id":"tools","state":"degraded","reason":"fresh graph changed"}]""",
+                ),
             ),
         )
         try {
@@ -75,15 +76,13 @@ class Agent3ReviewedStartRecoveryTest {
 
             assertEquals(expected, envelope.capabilityReceipt)
             assertEquals("fresh-run-truth", envelope.run.answer)
-            assertEquals(3, server.requestCount)
+            assertEquals(2, server.requestCount)
             assertEquals(
                 listOf(
                     "/api/v1/experimental/agent3/plans/plan-1/start",
                     "/api/v1/experimental/agent3/runs/server-run",
-                    "/api/v1/experimental/agent3/runs/server-run/capability-receipt",
                 ),
                 listOf(
-                    server.takeRequest().path,
                     server.takeRequest().path,
                     server.takeRequest().path,
                 ),
@@ -94,7 +93,7 @@ class Agent3ReviewedStartRecoveryTest {
     }
 
     @Test
-    fun rawModeConflictRecoveryRebindsReviewedPlanBeforePreservingReceipt() {
+    fun rawModeConflictRecoveryUsesSameSnapshotPlanEvidenceBeforePreservingReceipt() {
         val expected = receipt()
         val server = server(
             startEnvelope(
@@ -106,8 +105,8 @@ class Agent3ReviewedStartRecoveryTest {
             runEnvelope(
                 answer = "fresh-reviewed-truth",
                 readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(),
             ),
-            capabilityEvidenceJson(),
         )
         try {
             val envelope = Agent3Client(server.url("/").toString(), "token")
@@ -119,14 +118,14 @@ class Agent3ReviewedStartRecoveryTest {
 
             assertEquals(expected, envelope.capabilityReceipt)
             assertEquals("fresh-reviewed-truth", envelope.run.answer)
-            assertEquals(3, server.requestCount)
+            assertEquals(2, server.requestCount)
         } finally {
             server.shutdown()
         }
     }
 
     @Test
-    fun changedCurrentPlanDigestFailsClosed() {
+    fun changedSameSnapshotPlanDigestFailsClosed() {
         val expected = receipt()
         val server = server(
             startEnvelope(
@@ -138,8 +137,8 @@ class Agent3ReviewedStartRecoveryTest {
             runEnvelope(
                 answer = "fresh-run-truth",
                 readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(planSha = "d".repeat(64)),
             ),
-            capabilityEvidenceJson(planSha = "d".repeat(64)),
         )
         try {
             val error = runCatching {
@@ -153,15 +152,15 @@ class Agent3ReviewedStartRecoveryTest {
 
             assertTrue(error is ModelRigException)
             assertTrue(error?.message?.contains("Frisk run-recovery fejlede") == true)
-            assertTrue(error?.message?.contains("frisk run-plan matcher ikke previewet") == true)
-            assertEquals(3, server.requestCount)
+            assertTrue(error?.message?.contains("same-snapshot run-plan matcher ikke previewet") == true)
+            assertEquals(2, server.requestCount)
         } finally {
             server.shutdown()
         }
     }
 
     @Test
-    fun changedCurrentRequiredCapabilitiesFailClosed() {
+    fun changedSameSnapshotRequiredCapabilitiesFailClosed() {
         val expected = receipt()
         val server = server(
             startEnvelope(
@@ -173,8 +172,8 @@ class Agent3ReviewedStartRecoveryTest {
             runEnvelope(
                 answer = "fresh-run-truth",
                 readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(requiredIdsJson = "[\"tools\",\"rag\"]"),
             ),
-            capabilityEvidenceJson(requiredIdsJson = "[\"tools\",\"rag\"]"),
         )
         try {
             val error = runCatching {
@@ -187,38 +186,15 @@ class Agent3ReviewedStartRecoveryTest {
             }.exceptionOrNull()
 
             assertTrue(error is ModelRigException)
-            assertTrue(error?.message?.contains("frisk run-plan matcher ikke previewet") == true)
-            assertEquals(3, server.requestCount)
+            assertTrue(error?.message?.contains("same-snapshot run-plan matcher ikke previewet") == true)
+            assertEquals(2, server.requestCount)
         } finally {
             server.shutdown()
         }
     }
 
     @Test
-    fun capabilityEvidenceBindsExactRunIdAndEvaluationFlags() {
-        val cases = listOf(
-            capabilityEvidenceJson(runId = "other-run") to "andet run-id",
-            capabilityEvidenceJson(evaluated = false) to "evaluated/executed-binding",
-            capabilityEvidenceJson(executed = true) to "evaluated/executed-binding",
-        )
-        cases.forEach { (body, expectedMessage) ->
-            val server = server(body)
-            try {
-                val error = runCatching {
-                    Agent3Client(server.url("/").toString(), "token")
-                        .getRunCapabilityEvidence("server-run")
-                }.exceptionOrNull()
-                assertTrue(error is ModelRigException)
-                assertTrue(error?.message?.contains(expectedMessage) == true)
-                assertEquals(1, server.requestCount)
-            } finally {
-                server.shutdown()
-            }
-        }
-    }
-
-    @Test
-    fun contradictoryFreshCapabilityFailsClosedBeforePlanEvidenceRequest() {
+    fun changedSameSnapshotRouteFailsClosed() {
         val expected = receipt()
         val server = server(
             startEnvelope(
@@ -245,10 +221,96 @@ class Agent3ReviewedStartRecoveryTest {
 
             assertTrue(error is ModelRigException)
             assertTrue(error?.message?.contains("Frisk run-recovery fejlede") == true)
-            assertTrue(error?.message?.contains("capability receipt matcher ikke previewet") == true)
+            assertTrue(error?.message?.contains("same-snapshot run-plan matcher ikke previewet") == true)
             assertEquals(2, server.requestCount)
         } finally {
             server.shutdown()
+        }
+    }
+
+    @Test
+    fun missingSameSnapshotCapabilityEvidenceFailsClosedForReviewedReceipt() {
+        val expected = receipt()
+        val server = server(
+            startEnvelope(
+                answer = "rejected-start-payload",
+                reviewReads = true,
+                readReviewJson = "{\"enabled\":false,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(),
+            ),
+            runEnvelope(
+                answer = "fresh-without-plan-evidence",
+                readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+            ),
+        )
+        try {
+            val error = runCatching {
+                Agent3Client(server.url("/").toString(), "token")
+                    .startReviewedPlanEnvelope(
+                        planId = "plan-1",
+                        expectedReviewReads = true,
+                        expectedCapabilityReceipt = expected,
+                    )
+            }.exceptionOrNull()
+
+            assertTrue(error is ModelRigException)
+            assertTrue(error?.message?.contains("same-snapshot capability receipt mangler") == true)
+            assertEquals(2, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun nullReviewedReceiptDoesNotInventFreshCapabilityAuthority() {
+        val server = server(
+            startEnvelope(
+                answer = "rejected-start-payload",
+                reviewReads = true,
+                readReviewJson = "{\"enabled\":false,\"waiting\":false}",
+            ),
+            runEnvelope(
+                answer = "fresh-run-truth",
+                readReviewJson = "{\"enabled\":true,\"waiting\":false}",
+                capabilityReceiptJson = receiptJson(),
+            ),
+        )
+        try {
+            val envelope = Agent3Client(server.url("/").toString(), "token")
+                .startReviewedPlanEnvelope(
+                    planId = "plan-1",
+                    expectedReviewReads = true,
+                    expectedCapabilityReceipt = null,
+                )
+
+            assertNull(envelope.capabilityReceipt)
+            assertEquals("fresh-run-truth", envelope.run.answer)
+            assertEquals(2, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun capabilityEvidenceBindsExactRunIdAndEvaluationFlags() {
+        val cases = listOf(
+            capabilityEvidenceJson(runId = "other-run") to "andet run-id",
+            capabilityEvidenceJson(evaluated = false) to "evaluated/executed-binding",
+            capabilityEvidenceJson(executed = true) to "evaluated/executed-binding",
+        )
+        cases.forEach { (body, expectedMessage) ->
+            val server = server(body)
+            try {
+                val error = runCatching {
+                    Agent3Client(server.url("/").toString(), "token")
+                        .getRunCapabilityEvidence("server-run")
+                }.exceptionOrNull()
+                assertTrue(error is ModelRigException)
+                assertTrue(error?.message?.contains(expectedMessage) == true)
+                assertEquals(1, server.requestCount)
+            } finally {
+                server.shutdown()
+            }
         }
     }
 
@@ -415,15 +477,22 @@ class Agent3ReviewedStartRecoveryTest {
             productionActivation = false,
         )
 
-    private fun receiptJson(route: String = "rig-tools"): String = """
+    private fun receiptJson(
+        graphSha: String = "a".repeat(64),
+        planSha: String = "b".repeat(64),
+        route: String = "rig-tools",
+        requiredIdsJson: String = "[\"tools\"]",
+        allowed: Boolean = true,
+        blockersJson: String = "[]",
+    ): String = """
         {
           "schema": "kaliv-agent3-capability-receipt/v1",
-          "graph_sha256": "${"a".repeat(64)}",
-          "plan_sha256": "${"b".repeat(64)}",
+          "graph_sha256": "$graphSha",
+          "plan_sha256": "$planSha",
           "route": "$route",
-          "allowed": true,
-          "required_capability_ids": ["tools"],
-          "blockers": [],
+          "allowed": $allowed,
+          "required_capability_ids": $requiredIdsJson,
+          "blockers": $blockersJson,
           "production_activation": false
         }
     """.trimIndent()

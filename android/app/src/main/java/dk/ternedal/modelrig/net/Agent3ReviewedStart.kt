@@ -10,7 +10,7 @@ package dk.ternedal.modelrig.net
  * the rejected Start payload never becomes UI authority. Fresh server truth must
  * then independently prove the exact run id, reviewed mode and checkpoint. The
  * already-proven Start capability receipt remains immutable review evidence across
- * that recovery only after current stored run evidence re-proves the same plan identity.
+ * that recovery only after the same fresh run response re-proves plan identity.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -70,29 +70,27 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
         )
-        if (
-            fresh.capabilityReceipt != null &&
-            fresh.capabilityReceipt != expectedCapabilityReceipt
-        ) {
-            throw ModelRigException(
-                "Ugyldigt Agent 3.0 frisk run-status: capability receipt matcher ikke previewet",
-            )
-        }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
 
         if (expectedCapabilityReceipt != null) {
-            val current = getRunCapabilityEvidence(recoveryRunId).receipt
+            val current = fresh.capabilityReceipt
+                ?: throw ModelRigException(
+                    "Ugyldigt Agent 3.0 frisk run-status: same-snapshot capability receipt mangler",
+                )
             if (
                 current.planSha256 != expectedCapabilityReceipt.planSha256 ||
                 current.route != expectedCapabilityReceipt.route ||
                 current.requiredCapabilityIds != expectedCapabilityReceipt.requiredCapabilityIds
             ) {
                 throw ModelRigException(
-                    "Ugyldigt Agent 3.0 capability-evidence: frisk run-plan matcher ikke previewet",
+                    "Ugyldigt Agent 3.0 frisk run-status: same-snapshot run-plan matcher ikke previewet",
                 )
             }
         }
 
+        // The current receipt proves only that this exact fresh run snapshot is
+        // still the reviewed plan. Historical review authority remains exactly
+        // the receipt the operator saw (including null).
         fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "det reviewede Start-svar blev afvist"

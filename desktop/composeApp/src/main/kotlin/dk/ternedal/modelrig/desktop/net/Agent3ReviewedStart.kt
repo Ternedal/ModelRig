@@ -9,7 +9,7 @@ package dk.ternedal.modelrig.desktop.net
  * Start payload never becomes UI authority. Fresh server truth must independently
  * prove the exact run id, expected review mode and checkpoint before publication.
  * The already-proven Start capability receipt remains immutable review evidence
- * across recovery because generic run GET does not own or return Plan-Start evidence.
+ * across recovery only after the same fresh run response re-proves plan identity.
  */
 internal fun Agent3Client.startReviewedPlanEnvelope(
     planId: String,
@@ -69,22 +69,22 @@ private fun Agent3Client.recoverReviewedStartEnvelope(
             runId = recoveryRunId,
             expectedReviewReads = expectedReviewReads,
         )
-        if (
-            fresh.capabilityReceipt != null &&
-            fresh.capabilityReceipt != expectedCapabilityReceipt
-        ) {
-            throw Agent3Exception(
-                "Invalid Agent 3.0 fresh run envelope: capability receipt does not match reviewed Preview"
-            )
-        }
         validateReviewedStartCheckpoint(fresh, expectedReviewReads)
+
         if (expectedCapabilityReceipt != null) {
-            val evidence = getRunCapabilityEvidence(recoveryRunId)
+            val current = fresh.capabilityReceipt
+                ?: throw Agent3Exception(
+                    "Invalid Agent 3.0 fresh run envelope: same-snapshot capability receipt is missing"
+                )
             validateRecoveredCapabilityPlan(
-                current = evidence.receipt,
+                current = current,
                 reviewed = expectedCapabilityReceipt,
             )
         }
+
+        // The current receipt proves only that this exact fresh run snapshot is
+        // still the reviewed plan. Historical review authority remains exactly
+        // the receipt the operator saw (including null).
         fresh.copy(capabilityReceipt = expectedCapabilityReceipt)
     } catch (recoveryFailure: Exception) {
         val original = originalFailure.message ?: "the reviewed Start envelope was rejected"
@@ -105,7 +105,7 @@ private fun validateRecoveredCapabilityPlan(
         current.requiredCapabilityIds != reviewed.requiredCapabilityIds
     ) {
         throw Agent3Exception(
-            "Invalid Agent 3.0 capability evidence: current run plan does not match reviewed Preview"
+            "Invalid Agent 3.0 fresh run envelope: same-snapshot plan does not match reviewed Preview"
         )
     }
 }

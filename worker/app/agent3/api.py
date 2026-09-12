@@ -14,6 +14,7 @@ from .approval import (
     consume_agent3_approval,
     verify_agent3_approval,
 )
+from .capability_receipt import evaluate_run_capabilities
 
 
 def _build_code_identity() -> str:
@@ -166,6 +167,7 @@ def build_router(
     approval_db_path: str | None = None,
     *,
     allow_client_plans: bool = False,
+    exact_run_capability_graph_provider: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/experimental/agent3", tags=["experimental-agent3"])
     orchestrator.router = StrictTurnRouter()
@@ -184,6 +186,20 @@ def build_router(
         payload = {"run": _run_payload(run), "read_review": read_review(run.id)}
         payload.update(extra)
         return payload
+
+    def exact_run_capability_receipt(run: AgentRun) -> dict[str, Any] | None:
+        if exact_run_capability_graph_provider is None:
+            return None
+        try:
+            graph = exact_run_capability_graph_provider()
+            if graph is None:
+                return None
+            return evaluate_run_capabilities(graph, run).to_dict()
+        except Exception:
+            # Generic GET is recovery/status truth in its own right. Capability
+            # decoration is additive: reviewed recovery that requires it fails
+            # closed client-side instead of making ordinary GET unavailable.
+            return None
 
     def start_steps(
         request: TurnRequest,
@@ -346,7 +362,11 @@ def build_router(
         run = orchestrator.store.load(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="run not found")
-        return response(run, replan_recovery=recovery)
+        extra: dict[str, Any] = {"replan_recovery": recovery}
+        capability_receipt = exact_run_capability_receipt(run)
+        if capability_receipt is not None:
+            extra["capability_receipt"] = capability_receipt
+        return response(run, **extra)
 
     @router.get("/runs/{run_id}/events")
     def get_events(run_id: str, limit: int = 200) -> dict[str, Any]:
@@ -556,12 +576,20 @@ def _mount_agent3_core(app: FastAPI) -> bool:
         return True
     orchestrator, adapter = build_default_runtime()
     replan_service = build_default_replanner(orchestrator)
+
+    def exact_run_capability_graph_provider():
+        provider = getattr(app.state, "agent3_exact_run_capability_graph_provider", None)
+        if not callable(provider):
+            return None
+        return provider()
+
     app.include_router(
         build_router(
             orchestrator,
             adapter,
             worker_version=getattr(app, "version", None),
             replan_service=replan_service,
+            exact_run_capability_graph_provider=exact_run_capability_graph_provider,
         )
     )
     app.state.agent3_core_mounted = True
