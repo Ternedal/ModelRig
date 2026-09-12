@@ -3,10 +3,10 @@
 
 This support gate measures product boundaries that the generic token contrast
 gate cannot see: which token roles desktop Brand.kt binds to its light palette,
-and whether the default CHAT shell actually selects theme-aware application
-chrome. It is invoked by the existing top-level workflow_design_token_contrast.py
-gate so focused desktop slices do not silently change CURRENT_STATE's top-level
-test inventory authority.
+and whether desktop CHAT/Agent/Computer application chrome actually selects
+theme-aware light roles. It is invoked by the existing top-level
+workflow_design_token_contrast.py gate so focused desktop slices do not silently
+change CURRENT_STATE's top-level test inventory authority.
 """
 from __future__ import annotations
 
@@ -105,8 +105,13 @@ for binding in (
 accent = color["light"]["accent"]
 canvas = color["light"]["canvas"]
 surface = color["light"]["surface"]
+elevated = color["light"]["elevated"]
+light_text = color["light"]["text"]
+light_warn = color["light"]["warn"]
 ivory = "#F7F4EF"
+primary_ink = "#FFF6E9"
 bronze = color["brand"]["bronze"]
+old_gradient_top = "#A87B3B"
 
 accent_canvas = contrast(accent, canvas)
 accent_surface = contrast(accent, surface)
@@ -151,9 +156,6 @@ check("else c.Border" in shell, "light shell borders bruger Kaliv Border")
 check("c.Signal.copy(alpha = 0.12f)" in shell, "light aktiv navigation bruger themed Signal-wash")
 check("LiveViewport" not in shell, "L2a roerer ikke den simulerede browser/page-flade")
 
-# App must keep the arities this migration is designed around. If someone adds
-# the legacy optional argument, the support gate fails instead of silently
-# switching the product back to the dark-only implementation.
 title_start = app.index("KalivTitleBar(")
 title_end = app.index("\n        Row(Modifier.fillMaxWidth().weight(1f))", title_start)
 title_call = app[title_start:title_end]
@@ -169,8 +171,6 @@ context_end = app.index("\n                )", context_start) + len("\n         
 context_call = app[context_start:context_end]
 check("modifier =" not in context_call, "App context-panel call bliver paa L2a exact arity")
 
-# Sabotage: prove the L2a boundary can turn red if the title bar regresses to
-# unconditional dark chrome.
 sabotaged = shell.replace(
     "if (c.isDark) Color(0x990B0A09) else c.Surface",
     "Color(0x990B0A09)",
@@ -190,20 +190,36 @@ def _block(start: str, end: str | None = None) -> str:
     return screens[a:b]
 
 
+risk_badge = _block("internal fun RiskBadge(", "/**\n * A slim horizontal meter")
 icon = _block("fun KalivIconRail(", "@Composable\nprivate fun IconRailItem")
 icon_item = _block("private fun IconRailItem(", "/**\n * The 246dp left navigation rail")
 agent = _block("fun KalivAgentCockpit(", "@Composable\nprivate fun AgentIdlePrompt")
 agent_idle = _block("private fun AgentIdlePrompt()", "@Composable\nprivate fun AgentBubble")
 agent_bubble = _block("private fun AgentBubble(", "@Composable\ninternal fun AgentComposer")
 plan_row = _block("private fun PlanRow(", "@Composable\ninternal fun StatusCircle")
-status = _block("internal fun StatusCircle(", "/**\n * The inline approval card")
+status = _block("internal fun StatusCircle(", "@Composable\ninternal fun ApprovalCard")
 approval = _block("internal fun ApprovalCard(", "@Composable\nprivate fun LogEntry")
 computer = _block("fun KalivComputerUse(", "@Composable\nprivate fun UseStepRow")
 use_row = _block("private fun UseStepRow(", "@Composable\nprivate fun StatusCircleSmall")
 status_small = _block("private fun StatusCircleSmall(", "/**\n * The live viewport")
-live = _block("private fun LiveViewport(", "/** Approval bar for computer-use")
+live = _block("private fun LiveViewport(", "@Composable\nprivate fun ComputerApprovalBar(")
 computer_approval = _block("private fun ComputerApprovalBar(", "@Composable\nprivate fun ResultBar")
 result_bar = _block("private fun ResultBar(")
+
+check(
+    "Triple(c.Warning.copy(alpha = 0.14f), c.TextHigh, \"WRITE\")" in risk_badge,
+    "L2b tiny WRITE badge bruger semantic tint men AA TextHigh ink i light",
+)
+text_on_elevated = contrast(light_text, elevated)
+warn_on_elevated = contrast(light_warn, elevated)
+check(
+    text_on_elevated >= AA_TEXT,
+    f"light TextHigh paa elevated er AA for risk-badge label ({text_on_elevated:.2f}:1)",
+)
+check(
+    warn_on_elevated < AA_TEXT,
+    f"light Warning paa elevated demonstrerer badge-sabotage ({warn_on_elevated:.2f}:1)",
+)
 
 check(
     "if (c.isDark) Color(0x8C14110E) else c.Surface" in icon,
@@ -218,7 +234,7 @@ check(
     "L2b Agent handlingslog bruger Surface i light",
 )
 check(
-    "else c.Border" in agent_bubble and "else c.TextMuted" in agent_idle,
+    "else c.Border" in agent_bubble and "c.TextMuted" in agent_idle,
     "L2b Agent bubble/forslag bruger theme border/ink",
 )
 check(
@@ -228,9 +244,20 @@ check(
 check(
     "Brush.verticalGradient(listOf(c.SurfaceHigh, c.Surface))" in approval
     and "Brush.verticalGradient(listOf(c.Signal, c.Signal))" in approval
-    and "else c.Graphite" in approval,
+    and "else c.CodeSurface" in approval,
     "L2b Agent approval surface/code/approve er theme-aware",
 )
+primary_on_accent = contrast(primary_ink, accent)
+primary_on_old_top = contrast(primary_ink, old_gradient_top)
+check(
+    primary_on_accent >= AA_TEXT,
+    f"light approve Signal + primary ink er AA ({primary_on_accent:.2f}:1)",
+)
+check(
+    primary_on_old_top < AA_TEXT,
+    f"gammel gradient-top demonstrerer approve-sabotage ({primary_on_old_top:.2f}:1)",
+)
+
 check(
     "if (c.isDark) Color(0x8014110E) else c.Surface" in computer
     and "c.Danger.copy(alpha = 0.10f)" in computer,
@@ -242,8 +269,9 @@ check(
 )
 check(
     "Brush.verticalGradient(listOf(c.SurfaceHigh, c.Surface))" in computer_approval
-    and "else c.Border" in computer_approval,
-    "L2b Computer approval surface/border er theme-aware",
+    and "else c.Border" in computer_approval
+    and "Brush.verticalGradient(listOf(c.Signal, c.Signal))" in computer_approval,
+    "L2b Computer approval surface/border/approve er theme-aware",
 )
 check(
     "c.Success.copy(alpha = 0.10f)" in result_bar
@@ -254,8 +282,9 @@ check(
 # Direct dark chrome calls may not survive in the bounded L2b application
 # blocks. Dark literals are allowed only behind explicit c.isDark bindings.
 l2b_application = "\n".join(
-    [icon, icon_item, agent, agent_idle, agent_bubble, plan_row, status, approval,
-     computer, use_row, status_small, computer_approval, result_bar]
+    [risk_badge, icon, icon_item, agent, agent_idle, agent_bubble, plan_row,
+     status, approval, computer, use_row, status_small, computer_approval,
+     result_bar]
 )
 for forbidden in (
     ".background(Color(0x8C14110E))",
@@ -275,7 +304,6 @@ for literal in (
 ):
     check(literal in live, f"LiveViewport exemption bevarer {literal}")
 
-# Sabotage proof: removing the icon rail's light branch must turn this boundary red.
 sabotaged_icon = icon.replace(
     "if (c.isDark) Color(0x8C14110E) else c.Surface",
     "Color(0x8C14110E)",
