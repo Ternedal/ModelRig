@@ -3,6 +3,7 @@ package dk.ternedal.modelrig.desktop
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -44,5 +45,18 @@ class KalivPerformancePolicyTest {
 
         assertTrue(presentation.measured)
         assertNull(presentation.sparkline)
+    }
+
+    @Test
+    fun invalidMeasuredTelemetryFailsClosed() {
+        assertFailsWith<IllegalArgumentException> {
+            KalivPerformanceTelemetry.Measured(tokensPerSecond = -1, responseSeconds = 0.2)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            KalivPerformanceTelemetry.Measured(tokensPerSecond = 1, responseSeconds = Double.NaN)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            KalivPerformanceTelemetry.Measured(tokensPerSecond = 1, responseSeconds = 0.2, sparkline = listOf(Float.NaN))
+        }
     }
 }

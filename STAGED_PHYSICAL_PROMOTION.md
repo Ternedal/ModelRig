@@ -391,7 +391,7 @@ Kapaciteters golden-screenshots kan genskabes).
 | Krav | Hvor |
 |---|---|
 | `selected_surface_visible` | Topkortets overskrift: "Agent 3 read-only valgt af serveren" (grøn) eller "Agent 2 fallback" (gul), plus `Aktiv surface`-rækken |
-| `server_reason_visible` | Linjen under overskriften: serverens `reason` ordret, fx `agent3_readonly_selected`; `readiness_unavailable` hvis readiness ikke kunne hentes |
+| `server_reason_visible` | Den sekundære `Serverkode: …`-linje viser serverens `reason` ordret, fx `agent3_readonly_selected`; hvis readiness ikke kan hentes, vises menneskelig fejltekst uden en opdigtet serverkode |
 | `fallback_visible` | `Fallback`-rækken i topkortet, og overskriftens gule tilstand når fladen ER faldet tilbage |
 | `replans_visible` | `Replans`-rækken (og `Retry-events` ved siden af) |
 | `plan_review_visible` | `Lav plan-preview` → plan-kortet med de foreslåede trin |
