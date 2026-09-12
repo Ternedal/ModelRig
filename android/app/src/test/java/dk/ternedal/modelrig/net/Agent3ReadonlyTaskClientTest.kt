@@ -20,6 +20,7 @@ class Agent3ReadonlyTaskClientTest {
             val preview = client.preview("vis rigstatus", "conversation-1")
 
             assertEquals("plan-123", preview.planId)
+            assertEquals(120, preview.expiresInSeconds)
             assertTrue(preview.canStart)
             assertEquals("rig_status", preview.steps.single().tool)
             assertFalse(preview.capabilityReceipt?.productionActivation ?: true)
@@ -180,8 +181,19 @@ class Agent3ReadonlyTaskClientTest {
             it.getJSONObject("route").put("uses_cloud", true)
         }
         val activation = JSONObject(previewJson()).put("production_activation", true)
+        val missingExpiry = JSONObject(previewJson()).also { it.remove("expires_in_seconds") }
+        val zeroExpiry = JSONObject(previewJson()).put("expires_in_seconds", 0)
+        val negativeExpiry = JSONObject(previewJson()).put("expires_in_seconds", -1)
 
-        listOf(write, nonIdempotent, cloud, activation).forEach { value ->
+        listOf(
+            write,
+            nonIdempotent,
+            cloud,
+            activation,
+            missingExpiry,
+            zeroExpiry,
+            negativeExpiry,
+        ).forEach { value ->
             assertTrue(runCatching { client.parsePreview(value) }.exceptionOrNull() is ModelRigException)
         }
     }
@@ -222,6 +234,41 @@ class Agent3ReadonlyTaskClientTest {
             mismatchedStep,
         ).forEach { value ->
             assertTrue(runCatching { client.parseStarted(value) }.exceptionOrNull() is ModelRigException)
+        }
+    }
+
+    @Test
+    fun taskStepStatesFailClosedButPreviewMayOmitOrDeclarePending() {
+        val client = Agent3ReadonlyTaskClient("http://127.0.0.1", "token")
+
+        val omittedPreviewState = JSONObject(previewJson()).also {
+            it.getJSONArray("plan").getJSONObject(0).remove("state")
+        }
+        val pendingPreview = JSONObject(previewJson())
+        val executingPreview = JSONObject(previewJson()).also {
+            it.getJSONArray("plan").getJSONObject(0).put("state", "executing")
+        }
+        val futurePreview = JSONObject(previewJson()).also {
+            it.getJSONArray("plan").getJSONObject(0).put("state", "future_step_state")
+        }
+
+        assertTrue(client.parsePreview(omittedPreviewState).canStart)
+        assertTrue(client.parsePreview(pendingPreview).canStart)
+        listOf(executingPreview, futurePreview).forEach { value ->
+            assertTrue(runCatching { client.parsePreview(value) }.exceptionOrNull() is ModelRigException)
+        }
+
+        listOf("future_step_state", "approved", "waiting_confirmation", "denied").forEach { stepState ->
+            val value = JSONObject(
+                snapshotJson(
+                    state = "running",
+                    terminal = false,
+                    stepState = stepState,
+                ),
+            )
+            assertTrue(
+                runCatching { client.parseStarted(value) }.exceptionOrNull() is ModelRigException,
+            )
         }
     }
 

@@ -119,6 +119,10 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val reviewReads: Boolean,
     )
 
+    data class RunRequest(
+        val retryOfRunId: String? = null,
+    )
+
     data class Run(
         val id: String,
         val state: String,
@@ -128,13 +132,25 @@ class Agent3Client(baseUrl: String, private val token: String) {
         val answer: String?,
         val error: String?,
         val termination: TerminationReceipt?,
+        val request: RunRequest = RunRequest(),
     )
 
     data class RunEnvelope(
         val run: Run,
+        val planId: String? = null,
         val reviewReads: Boolean,
         val readReview: ReadReview,
         val capabilityReceipt: CapabilityReceipt?,
+    )
+
+    internal data class ReviewedStartTransportEnvelope(
+        val envelope: RunEnvelope,
+        val responseReviewReads: Boolean,
+    )
+
+    internal data class RunCapabilityEvidence(
+        val runId: String,
+        val receipt: CapabilityReceipt,
     )
 
     data class Event(
@@ -157,8 +173,9 @@ class Agent3Client(baseUrl: String, private val token: String) {
         memorySubjects: List<String> = emptyList(),
         memoryMaxChars: Int = 4_000,
         memoryMaxRecords: Int = 25,
-        reviewReads: Boolean = false,
+        reviewReads: Boolean? = null,
     ): PlanPreview {
+        val requestedReviewReads = reviewReads ?: false
         val payload = JSONObject()
             .put("message", message)
             .put("mode", mode)
@@ -171,10 +188,24 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .put("memory_subjects", JSONArray(memorySubjects))
             .put("memory_max_chars", memoryMaxChars)
             .put("memory_max_records", memoryMaxRecords)
-            .put("review_reads", reviewReads)
+            .put("review_reads", requestedReviewReads)
         conversationId?.let { payload.put("conversation_id", it) }
         plannerModel?.let { payload.put("planner_model", it) }
         val root = post("/api/v1/experimental/agent3/plan", payload)
+        if (reviewReads != null) {
+            val responseReviewReads = root.opt("review_reads")
+            if (responseReviewReads !is Boolean || responseReviewReads != requestedReviewReads) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 Preview-svar: serverens Read review matcher ikke den reviewede intent",
+                )
+            }
+            if (root.has("capability_receipt") && !root.isNull("capability_receipt")) {
+                requireRawCapabilityReceipt(
+                    root.opt("capability_receipt"),
+                    context = "reviewed Preview capability-evidence",
+                )
+            }
+        }
         return PlanPreview(
             planId = root.nullableString("plan_id"),
             expiresInSeconds = root.nullableInt("expires_in_seconds"),
@@ -188,16 +219,115 @@ class Agent3Client(baseUrl: String, private val token: String) {
         )
     }
 
-    fun startPlanEnvelope(planId: String): RunEnvelope {
+    fun startPlanEnvelope(planId: String, expectedReviewReads: Boolean? = null): RunEnvelope {
         val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
-        return parseRunEnvelope(root)
+        if (expectedReviewReads != null) {
+            val responseReviewReads = root.opt("review_reads")
+            if (responseReviewReads !is Boolean || responseReviewReads != expectedReviewReads) {
+                throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serverens Read review matcher ikke previewet")
+            }
+        }
+        val envelope = parseRunEnvelope(root)
+        if (envelope.planId.isNullOrBlank() || envelope.planId != planId) {
+            throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")
+        }
+        return envelope
+    }
+
+    /**
+     * Reviewed-only Start transport boundary.
+     *
+     * Unlike [startPlanEnvelope], this validates the baseline server envelope
+     * before exposing the raw boolean review mode as a separate proof. That lets
+     * the reviewed caller retain only a safely bound run id as recovery reference
+     * when the raw mode conflicts, without weakening ordinary Start semantics.
+     */
+    internal fun startReviewedPlanTransport(
+        planId: String,
+        expectedCapabilityReceiptPresent: Boolean? = null,
+    ): ReviewedStartTransportEnvelope {
+        val root = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", JSONObject())
+        if (expectedCapabilityReceiptPresent != null) {
+            val present = root.has("capability_receipt") && !root.isNull("capability_receipt")
+            if (expectedCapabilityReceiptPresent) {
+                requireRawCapabilityReceipt(
+                    root.opt("capability_receipt"),
+                    context = "reviewed Start capability-evidence",
+                )
+            } else if (present) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 Start-svar: serveren returnerede uventet capability evidence",
+                )
+            }
+        }
+        val envelope = parseRunEnvelope(root)
+        if (envelope.planId.isNullOrBlank() || envelope.planId != planId) {
+            throw ModelRigException("Ugyldigt Agent 3.0 Start-svar: serveren returnerede et andet plan-id")
+        }
+        val responseReviewReads = root.opt("review_reads")
+        if (responseReviewReads !is Boolean) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 Start-svar: serverens Read review mangler en boolsk binding",
+            )
+        }
+        return ReviewedStartTransportEnvelope(
+            envelope = envelope,
+            responseReviewReads = responseReviewReads,
+        )
     }
 
     fun startPlan(planId: String): Run = startPlanEnvelope(planId).run
 
-    fun getRun(runId: String): Run {
+    fun getRun(runId: String): Run = getRunEnvelope(runId).run
+
+    internal fun getRunEnvelope(
+        runId: String,
+        expectedReviewReads: Boolean? = null,
+        requireStrictCapabilityReceipt: Boolean = false,
+    ): RunEnvelope {
         val root = get("/api/v1/experimental/agent3/runs/${seg(runId)}")
-        return parseRunEnvelope(root).run
+        if (
+            requireStrictCapabilityReceipt &&
+            root.has("capability_receipt") &&
+            !root.isNull("capability_receipt")
+        ) {
+            requireRawCapabilityReceipt(
+                root.opt("capability_receipt"),
+                context = "same-snapshot capability-evidence",
+            )
+        }
+        return bindRunEnvelopeReview(
+            parseRunEnvelope(root, expectedRunId = runId),
+            expectedReviewReads,
+        )
+    }
+
+    internal fun getRunCapabilityEvidence(runId: String): RunCapabilityEvidence {
+        val root = get("/api/v1/experimental/agent3/runs/${seg(runId)}/capability-receipt")
+        val returnedRunId = root.opt("run_id")
+        if (returnedRunId !is String || returnedRunId.isBlank() || returnedRunId != runId) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 capability-evidence: serveren returnerede et andet run-id",
+            )
+        }
+        val evaluated = root.opt("evaluated")
+        val executed = root.opt("executed")
+        if (evaluated !is Boolean || !evaluated || executed !is Boolean || executed) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 capability-evidence: evaluated/executed-binding er ugyldig",
+            )
+        }
+
+        val rawReceipt = requireRawCapabilityReceipt(
+            root.opt("receipt"),
+            context = "capability-evidence",
+        )
+        val receipt = parseCapabilityReceipt(rawReceipt)
+            ?: throw ModelRigException("Ugyldigt Agent 3.0 capability-evidence: receipt mangler")
+        return RunCapabilityEvidence(
+            runId = returnedRunId,
+            receipt = receipt,
+        )
     }
 
     fun listRuns(): List<Run> {
@@ -238,7 +368,7 @@ class Agent3Client(baseUrl: String, private val token: String) {
     fun retry(runId: String, cloudReady: Boolean = false): Run {
         val payload = JSONObject().put("cloud_ready", cloudReady)
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/retry", payload)
-        return parseRunEnvelope(root).run
+        return parseRunEnvelope(root, expectedRetryOfRunId = runId).run
     }
 
     fun confirm(runId: String, stepId: String, digest: String, approve: Boolean): Run {
@@ -247,17 +377,48 @@ class Agent3Client(baseUrl: String, private val token: String) {
             .put("digest", digest)
             .put("decision", if (approve) "approve" else "deny")
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/confirm", payload)
-        return parseRunEnvelope(root).run
+        return parseRunEnvelope(root, expectedRunId = runId).run
     }
 
-    fun resume(runId: String): Run {
-        val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", JSONObject())
-        return parseRunEnvelope(root).run
+    fun resume(runId: String): Run = resumeRunEnvelope(runId).run
+
+    internal fun resumeRunEnvelope(
+        runId: String,
+        expectedReviewReads: Boolean? = null,
+        expectedCompletedStepId: String? = null,
+    ): RunEnvelope {
+        val payload = JSONObject()
+        expectedCompletedStepId?.let { payload.put("completed_step_id", it) }
+        val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/resume", payload)
+        return bindRunEnvelopeReview(
+            parseRunEnvelope(root, expectedRunId = runId),
+            expectedReviewReads,
+        )
     }
 
-    fun cancel(runId: String): Run {
+    fun cancel(runId: String): Run = cancelRunEnvelope(runId).run
+
+    internal fun cancelRunEnvelope(
+        runId: String,
+        expectedReviewReads: Boolean? = null,
+    ): RunEnvelope {
         val root = post("/api/v1/experimental/agent3/runs/${seg(runId)}/cancel", JSONObject())
-        return parseRunEnvelope(root).run
+        return bindRunEnvelopeReview(
+            parseRunEnvelope(root, expectedRunId = runId),
+            expectedReviewReads,
+        )
+    }
+
+    private fun bindRunEnvelopeReview(
+        envelope: RunEnvelope,
+        expectedReviewReads: Boolean?,
+    ): RunEnvelope {
+        if (expectedReviewReads != null && envelope.readReview.enabled != expectedReviewReads) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 run-svar: Read review-state matcher ikke runnet",
+            )
+        }
+        return envelope
     }
 
     private fun get(path: String): JSONObject = execute(
@@ -287,14 +448,29 @@ class Agent3Client(baseUrl: String, private val token: String) {
         }
     }
 
-    private fun parseRunEnvelope(root: JSONObject): RunEnvelope {
-        val termination = parseTerminationReceipt(root.optJSONObject("termination"))
-        return RunEnvelope(
-            run = parseRun(root.requireObject("run")).copy(termination = termination),
+    private fun parseRunEnvelope(
+        root: JSONObject,
+        expectedRunId: String? = null,
+        expectedRetryOfRunId: String? = null,
+    ): RunEnvelope {
+        val parsedRun = parseRun(root.requireObject("run"))
+        val termination = parseTerminationReceipt(root.optJSONObject("termination"), parsedRun)
+        val envelope = RunEnvelope(
+            run = parsedRun.copy(termination = termination),
+            planId = root.nullableString("plan_id"),
             reviewReads = root.optBoolean("review_reads", false),
             readReview = parseReadReview(root.optJSONObject("read_review")),
             capabilityReceipt = parseCapabilityReceipt(root.optJSONObject("capability_receipt")),
         )
+        if (expectedRunId != null && envelope.run.id != expectedRunId) {
+            throw ModelRigException("Ugyldigt Agent 3.0 run-svar: serveren returnerede et andet run-id")
+        }
+        if (expectedRetryOfRunId != null &&
+            (envelope.run.request.retryOfRunId.isNullOrBlank() || envelope.run.request.retryOfRunId != expectedRetryOfRunId)
+        ) {
+            throw ModelRigException("Ugyldigt Agent 3.0 Retry-svar: serveren returnerede et andet oprindeligt run-id")
+        }
+        return envelope
     }
 
     private fun parseRun(o: JSONObject): Run = Run(
@@ -306,10 +482,14 @@ class Agent3Client(baseUrl: String, private val token: String) {
         answer = o.nullableString("answer"),
         error = o.nullableString("error"),
         termination = null,
+        request = RunRequest(
+            retryOfRunId = o.optJSONObject("request")?.nullableString("retry_of_run_id"),
+        ),
     )
 
-    private fun parseTerminationReceipt(o: JSONObject?): TerminationReceipt? {
-        val receipt = o ?: return null
+    private fun parseTerminationReceipt(o: JSONObject?, run: Run): TerminationReceipt {
+        val receipt = o
+            ?: throw ModelRigException("Ugyldigt termination receipt: mangler for run-svar")
         val plan = receipt.optJSONObject("plan")
             ?: throw ModelRigException("Ugyldigt termination receipt: plan mangler")
         val modelStream = receipt.optJSONObject("model_stream")
@@ -345,38 +525,111 @@ class Agent3Client(baseUrl: String, private val token: String) {
             activeTool = activeTool,
             productionActivation = receipt.optBoolean("production_activation", true),
         )
-        validateTerminationReceipt(parsed)
-        return parsed
+        return validateTerminationReceipt(parsed, run)
     }
 
-    private fun validateTerminationReceipt(receipt: TerminationReceipt) {
-        if (receipt.schema != "kaliv-agent3-termination/v1") {
-            throw ModelRigException("Ukendt termination receipt-schema: ${receipt.schema}")
+    internal fun validateTerminationReceipt(receipt: TerminationReceipt?, run: Run): TerminationReceipt {
+        val value = receipt
+            ?: throw ModelRigException("Ugyldigt termination receipt: mangler for run-svar")
+        if (value.schema != "kaliv-agent3-termination/v1") {
+            throw ModelRigException("Ukendt termination receipt-schema: ${value.schema}")
         }
-        if (receipt.productionActivation) {
+        if (value.productionActivation) {
             throw ModelRigException("Ugyldigt termination receipt: produktion må aldrig aktiveres")
         }
-        if (receipt.plan.state !in setOf("available", "terminal") ||
-            receipt.plan.requestScope != "plan" ||
-            receipt.plan.effect.isBlank() || receipt.plan.reason.isBlank() ||
-            receipt.plan.canRequest != (receipt.plan.state == "available")
+
+        val runStates = setOf(
+            "running",
+            "waiting_confirmation",
+            "blocked",
+            "completed",
+            "failed",
+            "cancelled",
+        )
+        val terminalStates = setOf("blocked", "completed", "failed", "cancelled")
+        val stepStates = setOf(
+            "pending",
+            "completed_after_cancel",
+            "waiting_confirmation",
+            "approved",
+            "executing",
+            "succeeded",
+            "denied",
+            "blocked",
+            "failed",
+        )
+        val requestStates = setOf("available", "pending", "terminal", "unavailable", "not_active")
+        val semantics = setOf<String?>(null, "none", "cooperative", "runtime")
+
+        if (run.id.isBlank() || run.state !in runStates || run.currentStep < 0 || run.currentStep > run.steps.size) {
+            throw ModelRigException("Ugyldigt termination receipt: run-id/state/current-step er inkonsistent")
+        }
+        if (run.steps.any { it.state == null || it.state !in stepStates }) {
+            throw ModelRigException("Ugyldigt termination receipt: run-step state er uden for Agent 3")
+        }
+
+        val terminal = run.state in terminalStates
+        val expectedPlanState = if (terminal) "terminal" else "available"
+        val current = run.steps.getOrNull(run.currentStep)
+        val executing = current?.state == "executing"
+        val expectedEffect = if (executing) {
+            "prevent_future_steps_active_tool_continues"
+        } else {
+            "prevent_future_steps"
+        }
+        val plan = value.plan
+        if (
+            plan.state != expectedPlanState ||
+            plan.canRequest != !terminal ||
+            plan.requestScope != "plan" ||
+            plan.effect != expectedEffect ||
+            plan.reason.isBlank()
         ) {
-            throw ModelRigException("Ugyldigt termination receipt: plan-scope er inkonsistent")
+            throw ModelRigException("Ugyldigt termination receipt: plan-scope er uenig med run")
         }
-        if (receipt.modelStream.state.isBlank() || receipt.modelStream.reason.isBlank() ||
-            (receipt.modelStream.canRequest && !receipt.modelStream.handlePresent)
+
+        val stream = value.modelStream
+        if (
+            stream.state != "not_active" ||
+            stream.active ||
+            stream.canRequest ||
+            stream.handlePresent ||
+            stream.reason.isBlank()
         ) {
-            throw ModelRigException("Ugyldigt termination receipt: model-stream er inkonsistent")
+            throw ModelRigException("Ugyldigt termination receipt: model-stream er uenig med Agent 3-run")
         }
-        receipt.activeTool?.let { active ->
-            if (active.stepId.isBlank() || active.tool.isBlank() || active.state.isBlank() ||
-                active.requestState.isBlank() || active.reason.isBlank() ||
-                active.semantics !in setOf(null, "none", "cooperative", "runtime") ||
-                (active.canRequest && !active.handlePresent)
-            ) {
-                throw ModelRigException("Ugyldigt termination receipt: active_tool er inkonsistent")
-            }
+
+        val active = value.activeTool
+        if ((active == null) != (current == null)) {
+            throw ModelRigException("Ugyldigt termination receipt: active_tool er uenig med current-step")
         }
+        if (active == null) return value
+
+        if (
+            active.stepId.isBlank() ||
+            active.tool.isBlank() ||
+            active.state !in stepStates ||
+            active.requestState !in requestStates ||
+            active.reason.isBlank() ||
+            active.semantics !in semantics ||
+            active.stepId != current?.id ||
+            active.tool != current?.tool ||
+            active.state != current?.state ||
+            (active.canRequest && !active.handlePresent) ||
+            (active.canRequest && active.semantics !in setOf("cooperative", "runtime"))
+        ) {
+            throw ModelRigException("Ugyldigt termination receipt: active_tool er uenig med current-step")
+        }
+        if (active.state == "executing" && active.requestState == "terminal") {
+            throw ModelRigException("Ugyldigt termination receipt: executing tool kan ikke være terminal")
+        }
+        if (active.state == "completed_after_cancel" && active.requestState != "terminal") {
+            throw ModelRigException("Ugyldigt termination receipt: sen completion er ikke terminal")
+        }
+        if (active.requestState == "available" && !active.canRequest) {
+            throw ModelRigException("Ugyldigt termination receipt: available tool-control kan ikke requestes")
+        }
+        return value
     }
 
     private fun parseMemoryReceipt(o: JSONObject?): MemoryReceipt {
@@ -390,6 +643,55 @@ class Agent3Client(baseUrl: String, private val token: String) {
             characterCount = receipt.optInt("character_count", 0),
             sha256 = receipt.nullableString("sha256"),
         )
+    }
+
+    private fun requireRawCapabilityReceipt(value: Any?, context: String): JSONObject {
+        val rawReceipt = value as? JSONObject
+            ?: throw ModelRigException("Ugyldigt Agent 3.0 $context: receipt mangler")
+        for (field in listOf("schema", "graph_sha256", "plan_sha256", "route")) {
+            if (rawReceipt.opt(field) !is String) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 $context: receipt.$field har forkert type",
+                )
+            }
+        }
+        if (
+            rawReceipt.opt("allowed") !is Boolean ||
+            rawReceipt.opt("production_activation") !is Boolean
+        ) {
+            throw ModelRigException(
+                "Ugyldigt Agent 3.0 $context: receipt boolean-binding er ugyldig",
+            )
+        }
+        val requiredIds = rawReceipt.opt("required_capability_ids") as? JSONArray
+            ?: throw ModelRigException(
+                "Ugyldigt Agent 3.0 $context: required_capability_ids mangler",
+            )
+        for (index in 0 until requiredIds.length()) {
+            if (requiredIds.opt(index) !is String) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 $context: required_capability_ids har forkert type",
+                )
+            }
+        }
+        val blockers = rawReceipt.opt("blockers") as? JSONArray
+            ?: throw ModelRigException("Ugyldigt Agent 3.0 $context: blockers mangler")
+        for (index in 0 until blockers.length()) {
+            val blocker = blockers.opt(index) as? JSONObject
+                ?: throw ModelRigException(
+                    "Ugyldigt Agent 3.0 $context: blocker har forkert type",
+                )
+            if (
+                blocker.opt("capability_id") !is String ||
+                blocker.opt("state") !is String ||
+                blocker.opt("reason") !is String
+            ) {
+                throw ModelRigException(
+                    "Ugyldigt Agent 3.0 $context: blocker er ufuldstændig",
+                )
+            }
+        }
+        return rawReceipt
     }
 
     private fun parseCapabilityReceipt(o: JSONObject?): CapabilityReceipt? {

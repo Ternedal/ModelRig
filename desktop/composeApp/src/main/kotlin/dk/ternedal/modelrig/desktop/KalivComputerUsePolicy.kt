@@ -1,9 +1,13 @@
 package dk.ternedal.modelrig.desktop
 
 /**
- * Product-authoritative presentation for desktop Computer-use while no live
- * execution/viewport contract is wired into this client. Worker browser-use
- * capability alone does not authorize the desktop UI to simulate execution.
+ * Product-authoritative presentation for desktop computer-use while no live
+ * execution/viewport contract is wired into this client.
+ *
+ * The worker may support browser-use independently; that does not authorize the
+ * desktop UI to simulate a run or claim remote control. Until the desktop owns
+ * real run state, viewport evidence and confirmation outcomes, every execution
+ * affordance stays fail-closed.
  */
 internal data class KalivComputerUsePresentation(
     val title: String,

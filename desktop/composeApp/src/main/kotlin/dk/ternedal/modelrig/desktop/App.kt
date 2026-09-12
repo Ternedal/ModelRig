@@ -480,6 +480,16 @@ fun App() {
             }
         }
 
+        // One presentation authority feeds both the wide rail and Chat title.
+        // The shell must never claim local-only while configured routing says cloud.
+        val chatRouteStatus = presentSidebarStatus(
+            preferLocal = preferLocal,
+            autoCloudFallback = autoCloudFallback,
+            cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
+            localModel = localModel,
+            cloudModel = cloudModel,
+        )
+
         // Shell from the mockup: a 40dp custom title bar spans the FULL width,
         // and the three columns live below it. Each direction carries its own
         // chrome -- 1a a 246dp labelled rail, 1b/1c the 70dp icon rail -- and
@@ -511,7 +521,7 @@ fun App() {
         Row(Modifier.fillMaxWidth().weight(1f)) {
             if (activeScreen == KalivScreen.CHAT) {
             KalivNavRail(
-                active = activeScreen,
+                active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                 onSelect = { screen ->
                     activeScreen = screen
                     // MODELS/DOCS/SETTINGS reuse the existing panels rather than
@@ -535,7 +545,7 @@ fun App() {
             )
             } else {
                 KalivIconRail(
-                    active = activeScreen,
+                    active = desktopNavigationSelection(activeScreen, showSettings, showModels),
                     onSelect = { screen ->
                         activeScreen = screen
                         when (screen) {
@@ -972,38 +982,10 @@ fun App() {
                 res.onSuccess { auditRows = it; auditError = null }
                     .onFailure { auditError = apiErrorHint(it.message) }
             }
-            AlertDialog(
-                onDismissRequest = { showAudit = false },
-                title = { Text("Handlingslog", fontWeight = FontWeight.SemiBold) },
-                text = {
-                    Column(Modifier.verticalScroll(rememberScrollState()).height(360.dp)) {
-                        auditError?.let { Text(it, color = KalivTheme.colors.Danger, fontSize = 12.sp) }
-                        if (auditRows.isEmpty() && auditError == null)
-                            Text("(ingen handlinger endnu)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
-                        auditRows.forEach { e ->
-                            // Header and payload are separate texts: the summary is a
-                            // multi-line value dump, and inlining it after "\n    " only
-                            // indented its FIRST line (#779 item 6). Block padding
-                            // indents every line; monospace keeps key=value columns.
-                            Column(Modifier.padding(vertical = 4.dp)) {
-                                Text(
-                                    "${e.ts.take(19).replace('T', ' ')}  ·  ${e.tool}  ·  ${e.outcome}" +
-                                        (if (e.origin != "local") "  ·  ${e.origin}" else ""),
-                                    color = KalivTheme.colors.TextHigh, fontSize = 12.sp,
-                                )
-                                if (e.result_summary.isNotBlank()) {
-                                    Text(
-                                        e.result_summary.trimEnd(),
-                                        color = KalivTheme.colors.TextMuted, fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.padding(start = 12.dp, top = 2.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = { TextButton(onClick = { showAudit = false }) { Text("Luk") } },
+            DesktopAuditDialog(
+                rows = auditRows,
+                error = auditError,
+                onDismiss = { showAudit = false },
             )
         }
     }

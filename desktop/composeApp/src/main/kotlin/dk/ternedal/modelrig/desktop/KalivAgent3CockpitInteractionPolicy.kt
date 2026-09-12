@@ -22,12 +22,14 @@ internal data class KalivAgent3CockpitInteraction(
     val previewStartEnabled: Boolean,
     val previewDiscardEnabled: Boolean,
     val stopPlanEnabled: Boolean,
+    val refreshTerminalToolEnabled: Boolean,
     val clearTerminalRunEnabled: Boolean,
 )
 
 internal enum class Agent3CockpitConfirmationState {
     HIDDEN,
     LIVE,
+    CONSUMED,
     EXPIRED,
     INVALID,
 }
@@ -41,11 +43,24 @@ internal fun presentAgent3CockpitInteraction(
     busy: Boolean,
     runState: String?,
     planCanRequestStop: Boolean? = null,
+    activeToolState: String? = null,
+    activeToolRequestState: String? = null,
     hasPreview: Boolean = false,
 ): KalivAgent3CockpitInteraction {
     val hasRun = runState != null
     val terminal = hasRun && isTerminal(runState)
     val previewActionsEnabled = !busy && !hasRun && hasPreview
+    val fullTerminal = hasRun && Agent3TaskUiPolicy.canResetTerminalHistory(
+        runTerminal = terminal,
+        activeToolState = activeToolState,
+        activeToolRequestState = activeToolRequestState,
+        busy = busy,
+    )
+    val terminalToolStillActive = terminal && Agent3TaskUiPolicy.shouldPoll(
+        runTerminal = true,
+        activeToolState = activeToolState,
+        activeToolRequestState = activeToolRequestState,
+    )
     return KalivAgent3CockpitInteraction(
         composerEnabled = !busy && !hasRun,
         previewStartEnabled = previewActionsEnabled,
@@ -54,20 +69,41 @@ internal fun presentAgent3CockpitInteraction(
             planCanRequest = planCanRequestStop,
             busy = busy,
         ),
-        clearTerminalRunEnabled = !busy && terminal,
+        refreshTerminalToolEnabled = !busy && terminalToolStillActive,
+        clearTerminalRunEnabled = fullTerminal,
     )
 }
+
+internal fun shouldBlockAgent3CockpitForCurrentConnection(
+    currentConnectionUnavailable: Boolean,
+    hasRun: Boolean,
+): Boolean = currentConnectionUnavailable && !hasRun
+
+internal fun isAgent3CockpitWaitingForConfirmation(runState: String?): Boolean =
+    runState?.lowercase() in setOf("waiting_confirmation", "awaiting_confirmation")
 
 internal fun presentAgent3CockpitConfirmation(
     confirmationDigest: String?,
     confirmationExpiresAt: Double?,
+    runState: String?,
     stepState: String?,
     busy: Boolean,
     nowEpochSeconds: Double,
+    confirmationConsumed: Boolean = false,
 ): KalivAgent3CockpitConfirmation {
-    if (confirmationDigest == null || isTerminal(stepState)) {
+    if (
+        !isAgent3CockpitWaitingForConfirmation(runState) ||
+        confirmationDigest == null ||
+        isTerminal(stepState)
+    ) {
         return KalivAgent3CockpitConfirmation(
             state = Agent3CockpitConfirmationState.HIDDEN,
+            actionEnabled = false,
+        )
+    }
+    if (confirmationConsumed) {
+        return KalivAgent3CockpitConfirmation(
+            state = Agent3CockpitConfirmationState.CONSUMED,
             actionEnabled = false,
         )
     }
@@ -93,15 +129,19 @@ internal fun presentAgent3CockpitConfirmation(
 internal fun canAgent3CockpitDecide(
     confirmationDigest: String?,
     confirmationExpiresAt: Double?,
+    runState: String?,
     stepState: String?,
     busy: Boolean,
     nowEpochSeconds: Double,
+    confirmationConsumed: Boolean = false,
 ): Boolean = presentAgent3CockpitConfirmation(
     confirmationDigest = confirmationDigest,
     confirmationExpiresAt = confirmationExpiresAt,
+    runState = runState,
     stepState = stepState,
     busy = busy,
     nowEpochSeconds = nowEpochSeconds,
+    confirmationConsumed = confirmationConsumed,
 ).actionEnabled
 
 internal fun canAgent3CockpitPreview(

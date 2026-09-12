@@ -10,7 +10,31 @@ executor = state["executor"]
 replacement_id = state["new_read_id"]
 write_id = state["write_id"]
 
-resumed = client.post(f"/experimental/agent3/runs/{run_id}/resume")
+checkpoint_response = client.get(f"/experimental/agent3/runs/{run_id}")
+assert checkpoint_response.status_code == 200, checkpoint_response.text
+checkpoint = checkpoint_response.json()["read_review"]
+checkpoint_step_id = checkpoint["completed_step_id"]
+assert checkpoint["waiting"] is True
+assert checkpoint_step_id
+
+missing = client.post(
+    f"/experimental/agent3/runs/{run_id}/resume",
+    json={},
+)
+assert missing.status_code == 409, missing.text
+assert executor.calls == ["rig_status"]
+
+stale = client.post(
+    f"/experimental/agent3/runs/{run_id}/resume",
+    json={"completed_step_id": "stale-checkpoint"},
+)
+assert stale.status_code == 409, stale.text
+assert executor.calls == ["rig_status"]
+
+resumed = client.post(
+    f"/experimental/agent3/runs/{run_id}/resume",
+    json={"completed_step_id": checkpoint_step_id},
+)
 assert resumed.status_code == 200, resumed.text
 payload = resumed.json()
 run = payload["run"]
@@ -30,6 +54,13 @@ assert review["waiting"] is False
 assert review["removable_step_ids"] == []
 assert "note_append" not in executor.calls
 
+duplicate = client.post(
+    f"/experimental/agent3/runs/{run_id}/resume",
+    json={"completed_step_id": checkpoint_step_id},
+)
+assert duplicate.status_code == 409, duplicate.text
+assert executor.calls == ["rig_status", "rig_status"]
+
 kinds = [
     event["kind"]
     for event in client.get(f"/experimental/agent3/runs/{run_id}/events").json()["events"]
@@ -37,4 +68,4 @@ kinds = [
 assert kinds.count("replan_review_resumed") == 1
 assert kinds[-1] == "confirmation_required"
 
-print("15 passed, 0 failed")
+print("27 passed, 0 failed")

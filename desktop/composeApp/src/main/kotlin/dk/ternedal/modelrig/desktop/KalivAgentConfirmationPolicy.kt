@@ -1,10 +1,11 @@
 package dk.ternedal.modelrig.desktop
 
 /**
- * Presentation authority while an Agent write confirmation is unresolved.
+ * Presentation authority for the Agent cockpit while a worker write
+ * confirmation is pending or being decided.
  *
- * The card remains authoritative until the worker acknowledges a decision.
- * While it exists, a second Agent turn must not be started.
+ * A pending confirmation remains authoritative until the worker acknowledges a
+ * decision. While it exists, starting another Agent turn is not allowed.
  */
 internal data class KalivAgentConfirmationPresentation(
     val showCard: Boolean,
