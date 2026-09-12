@@ -145,12 +145,14 @@ internal fun KalivCard(
     padding: Int = 14,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(12.dp)
+    val border = if (c.isDark) Color(0x4D785A37) else c.Border
     Column(
         modifier
             .clip(shape)
-            .background(KalivTheme.colors.Surface)
-            .border(1.dp, Color(0x4D785A37), shape) // rgba(120,90,55,.3)
+            .background(c.Surface)
+            .border(1.dp, border, shape)
             .padding(padding.dp),
         content = content,
     )
@@ -166,18 +168,24 @@ enum class RiskLevel { READ, WRITE, DESTRUCTIVE }
 @Composable
 internal fun RiskBadge(risk: RiskLevel, modifier: Modifier = Modifier) {
     val c = KalivTheme.colors
-    // Preserve the handoff palette in dark mode; light mode uses semantic roles.
-    val (bg, fg, label) = if (c.isDark) {
-        when (risk) {
-            RiskLevel.READ -> Triple(Color(0x33785A37), Color(0xFFB8AC9C), "READ")
-            RiskLevel.WRITE -> Triple(Color(0x38B9823F), Color(0xFFD09A55), "WRITE")
-            RiskLevel.DESTRUCTIVE -> Triple(Color(0x339C564C), Color(0xFFC47B70), "DESTRUCTIVE")
+    // Preserve the handoff exactly in dark mode. Light mode keeps the semantic
+    // tint but uses TextHigh for the tiny 9.5sp label: Light.warn itself is
+    // below AA as normal text on the elevated light surface.
+    val (bg, fg, label) = when (risk) {
+        RiskLevel.READ -> if (c.isDark) {
+            Triple(Color(0x33785A37), Color(0xFFB8AC9C), "READ")
+        } else {
+            Triple(c.Success.copy(alpha = 0.12f), c.TextHigh, "READ")
         }
-    } else {
-        when (risk) {
-            RiskLevel.READ -> Triple(c.Success.copy(alpha = 0.12f), c.Success, "READ")
-            RiskLevel.WRITE -> Triple(c.Warning.copy(alpha = 0.12f), c.Warning, "WRITE")
-            RiskLevel.DESTRUCTIVE -> Triple(c.Danger.copy(alpha = 0.12f), c.Danger, "DESTRUCTIVE")
+        RiskLevel.WRITE -> if (c.isDark) {
+            Triple(Color(0x38B9823F), Color(0xFFD09A55), "WRITE")
+        } else {
+            Triple(c.Warning.copy(alpha = 0.14f), c.TextHigh, "WRITE")
+        }
+        RiskLevel.DESTRUCTIVE -> if (c.isDark) {
+            Triple(Color(0x339C564C), Color(0xFFC47B70), "DESTRUCTIVE")
+        } else {
+            Triple(c.Danger.copy(alpha = 0.12f), c.TextHigh, "DESTRUCTIVE")
         }
     }
     Box(
@@ -203,7 +211,8 @@ internal fun RiskBadge(risk: RiskLevel, modifier: Modifier = Modifier) {
  */
 @Composable
 internal fun MetaBar(fraction: Float, modifier: Modifier = Modifier, height: Int = 6) {
-    val trough = Color(0xFF100C09)
+    val c = KalivTheme.colors
+    val trough = if (c.isDark) Color(0xFF100C09) else c.Border.copy(alpha = 0.55f)
     Box(
         modifier
             .fillMaxWidth()
@@ -216,7 +225,7 @@ internal fun MetaBar(fraction: Float, modifier: Modifier = Modifier, height: Int
                 .fillMaxHeight()
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .clip(RoundedCornerShape(999.dp))
-                .background(Brush.horizontalGradient(listOf(KalivTheme.colors.Signal, KalivTheme.colors.Highlight))),
+                .background(Brush.horizontalGradient(listOf(c.Signal, c.Highlight))),
         )
     }
 }
@@ -251,12 +260,16 @@ fun KalivTitleBar(
     live: String? = null,
     onClose: (() -> Unit)? = null,
 ) {
+    val c = KalivTheme.colors
+    val background = if (c.isDark) Color(0x990B0A09) else c.Surface
+    val wordmark = if (c.isDark) Color(0xFFE9DFCE) else c.TextHigh
+    val subtitleInk = if (c.isDark) Color(0xFF6F665C) else c.TextMuted
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .height(40.dp)
-            .background(Color(0x990B0A09))
+            .background(background)
             .padding(start = 14.dp),
     ) {
         KalivAnkh(24)
@@ -267,19 +280,19 @@ fun KalivTitleBar(
             fontSize = 14.sp,
             letterSpacing = 3.sp,
             fontWeight = FontWeight.Medium,
-            color = Color(0xFFE9DFCE),
+            color = wordmark,
         )
         Spacer(Modifier.width(10.dp))
-        Text(subtitle, fontSize = 11.5.sp, color = Color(0xFF6F665C))
+        Text(subtitle, fontSize = 11.5.sp, color = subtitleInk)
         if (live != null) {
             Spacer(Modifier.width(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(7.dp).clip(CircleShape)
-                        .background(KalivTheme.colors.Warning),
+                        .background(c.Warning),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text(live, fontSize = 11.sp, color = Color(0xFFD09A55))
+                Text(live, fontSize = 11.sp, color = c.Warning)
             }
         }
         Spacer(Modifier.weight(1f))
@@ -288,7 +301,6 @@ fun KalivTitleBar(
         // chrome (#779 item 2).
     }
 }
-
 
 /**
  * The 70dp icon-only rail the mockup uses for 1b (and, as a small documented
@@ -330,7 +342,6 @@ private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
     val activeStart = if (c.isDark) Color(0x479A7136) else c.Signal.copy(alpha = 0.14f)
     val activeEnd = if (c.isDark) Color(0x149A7136) else c.Signal.copy(alpha = 0.05f)
     val activeBorder = if (c.isDark) Color(0x669A7136) else c.Signal.copy(alpha = 0.32f)
-    val inactiveInk = if (c.isDark) Color(0xFFC3B8A8) else c.TextMuted
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -338,11 +349,7 @@ private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
             .clip(shape)
             .then(
                 if (on) Modifier
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(activeStart, activeEnd),
-                        ),
-                    )
+                    .background(Brush.verticalGradient(listOf(activeStart, activeEnd)))
                     .border(1.dp, activeBorder, shape)
                 else Modifier,
             )
@@ -351,7 +358,7 @@ private fun IconRailItem(glyph: String, on: Boolean, onClick: () -> Unit) {
         Text(
             glyph,
             fontSize = 18.sp,
-            color = if (on) c.TextHigh else inactiveInk,
+            color = if (on) c.TextHigh else c.TextMuted,
         )
     }
 }
@@ -372,24 +379,20 @@ fun KalivNavRail(
     modelBackend: String,
     modifier: Modifier = Modifier,
 ) {
+    val c = KalivTheme.colors
+    val railBackground = if (c.isDark) Color(0x8C14110E) else c.Surface
     Column(
         modifier
             .width(246.dp)
             .fillMaxHeight()
-            .background(Color(0x8C14110E)) // rgba(20,17,14,.55)
+            .background(railBackground)
             .padding(horizontal = 14.dp, vertical = 16.dp),
     ) {
-        // No brand row here: the 40dp KalivTitleBar above owns the ankh and
-        // the KALIV wordmark. The mockup's rail starts straight at the nav
-        // items -- having both is what put the wordmark on screen twice.
         navItems.forEach { item ->
             NavRow(item = item, active = item.screen == active, onClick = { onSelect(item.screen) })
             Spacer(Modifier.height(4.dp))
         }
-
         Spacer(Modifier.weight(1f))
-
-        // Active-model card
         ActiveModelCard(modelName, vramUsedGb, vramTotalGb, modelBackend)
         Spacer(Modifier.height(12.dp))
         PrivacySeal()
@@ -398,17 +401,17 @@ fun KalivNavRail(
 
 @Composable
 private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(9.dp)
     val base = Modifier
         .fillMaxWidth()
         .clip(shape)
-        // NavItem baerer allerede et label ("Chat", "Modeller", ...); kun
-        // glyffen blev renderet, saa en skaermlaeser fik "\u25AC" eller intet.
         .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
     val bg = if (active) {
-        base.background(
-            Brush.horizontalGradient(listOf(Color(0x389A7136), Color(0x0F9A7136))), // .22 → .06
-        ).border(1.dp, Color(0x599A7136), shape) // .35
+        val start = if (c.isDark) Color(0x389A7136) else c.Signal.copy(alpha = 0.12f)
+        val end = if (c.isDark) Color(0x0F9A7136) else c.Signal.copy(alpha = 0.04f)
+        val border = if (c.isDark) Color(0x599A7136) else c.Signal.copy(alpha = 0.30f)
+        base.background(Brush.horizontalGradient(listOf(start, end))).border(1.dp, border, shape)
     } else {
         base
     }
@@ -418,14 +421,14 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             item.glyph,
-            color = if (active) KalivTheme.colors.Highlight else KalivTheme.colors.TextMuted,
+            color = if (active) c.Highlight else c.TextMuted,
             fontSize = 15.sp,
             modifier = Modifier.width(24.dp),
         )
         Spacer(Modifier.width(6.dp))
         Text(
             item.label,
-            color = if (active) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+            color = if (active) c.TextHigh else c.TextMuted,
             fontSize = 13.5.sp,
             fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
         )
@@ -434,29 +437,31 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun ActiveModelCard(modelName: String, usedGb: Double, totalGb: Double, backend: String) {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
+    val border = if (c.isDark) Color(0x33785A37) else c.Border
     Column(
         Modifier.fillMaxWidth().clip(shape)
-            .background(KalivTheme.colors.SurfaceHigh)
-            .border(1.dp, Color(0x33785A37), shape)
+            .background(c.SurfaceHigh)
+            .border(1.dp, border, shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
     ) {
         SectionLabel("Aktiv model")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Success))
+            Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(c.Success))
             Spacer(Modifier.width(7.dp))
-            Text(modelName, color = KalivTheme.colors.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(modelName, color = c.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+        Text("Lokal \u00b7 $backend", color = c.TextMuted, fontSize = 11.5.sp)
         Spacer(Modifier.height(9.dp))
         val frac = if (totalGb > 0) (usedGb / totalGb).toFloat() else 0f
         MetaBar(frac)
         Spacer(Modifier.height(5.dp))
         Text(
             "VRAM ${fmtGb(usedGb)} / ${fmtGb(totalGb)} GB",
-            color = KalivTheme.colors.TextMuted,
+            color = c.TextMuted,
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
         )
@@ -465,25 +470,28 @@ private fun ActiveModelCard(modelName: String, usedGb: Double, totalGb: Double, 
 
 @Composable
 private fun PrivacySeal() {
+    val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
+    val background = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
+    val border = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
+    val headline = if (c.isDark) Color(0xFFE9DFCE) else c.TextHigh
     Row(
         Modifier.fillMaxWidth().clip(shape)
-            .background(Color(0x1A9A7136)) // rgba(154,113,54,.1)
-            .border(1.dp, Color(0x339A7136), shape)
+            .background(background)
+            .border(1.dp, border, shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("\uD83D\uDD12", color = KalivTheme.colors.Highlight, fontSize = 15.sp) // 🔒
+        Text("\uD83D\uDD12", color = c.Highlight, fontSize = 15.sp)
         Spacer(Modifier.width(9.dp))
         Column {
-            Text("100 % lokal", color = Color(0xFFE9DFCE), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-            Text("Intet forlader maskinen", color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp)
+            Text("100 % lokal", color = headline, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text("Intet forlader maskinen", color = c.TextMuted, fontSize = 10.5.sp)
         }
     }
 }
 
 private fun fmtGb(v: Double): String {
-    // Danish decimal comma, one decimal (handoff copy: "6,2 / 12 GB").
     val s = String.format(java.util.Locale.US, "%.1f", v)
     return (if (s.endsWith(".0")) s.dropLast(2) else s).replace('.', ',')
 }
@@ -494,11 +502,6 @@ private fun fmtGb(v: Double): String {
 
 data class RagDocRow(val kind: String, val name: String, val size: String)
 
-/**
- * The 300dp right panel of 1a. Reflects the LIVE state passed in (RAG on/off,
- * ingested sources, tokens/sec) rather than mock copy -- the toggle and the
- * source list are driven by App()'s ragMode / ragSources.
- */
 @Composable
 fun KalivContextPanel(
     ragOn: Boolean,
@@ -510,18 +513,19 @@ fun KalivContextPanel(
     sparkline: List<Float>,
     modifier: Modifier = Modifier,
 ) {
+    val c = KalivTheme.colors
+    val panelBackground = if (c.isDark) Color(0x8014110E) else c.Surface
     Column(
         modifier
             .width(300.dp)
             .fillMaxHeight()
-            .background(Color(0x8014110E)) // rgba(20,17,14,.5)
+            .background(panelBackground)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // Context & RAG card with a real toggle
         KalivCard {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("Kontekst & RAG", color = KalivTheme.colors.TextHigh, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                Text("Kontekst & RAG", color = c.TextHigh, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
                 PillToggle(on = ragOn, label = "Kontekst & RAG", onToggle = onToggleRag)
             }
@@ -529,32 +533,32 @@ fun KalivContextPanel(
             Text(
                 if (ragOn) "Dokumenter indgår i svar. Kun lokalt \u2014 intet sendes til sky uden dit samtykke."
                 else "RAG er slået fra. Slå til for at lade Kaliv svare ud fra dine dokumenter.",
-                color = KalivTheme.colors.TextMuted,
+                color = c.TextMuted,
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
             )
         }
 
-        // Active documents card
         KalivCard {
             SectionLabel("Aktive dokumenter")
             Spacer(Modifier.height(10.dp))
             if (docs.isEmpty()) {
-                Text("(ingen dokumenter ingesteret endnu)", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                Text("(ingen dokumenter ingesteret endnu)", color = c.TextMuted, fontSize = 12.sp)
             } else {
                 docs.take(6).forEach { d ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                        val tile = if (c.isDark) Color(0xFF2A211A) else c.Graphite
                         Box(
                             Modifier.size(26.dp).clip(RoundedCornerShape(7.dp))
-                                .background(Color(0xFF2A211A)),
+                                .background(tile),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(d.kind, color = KalivTheme.colors.Highlight, fontSize = 8.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            Text(d.kind, color = c.Highlight, fontSize = 8.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(d.name, color = KalivTheme.colors.TextHigh, fontSize = 12.5.sp, maxLines = 1)
-                            if (d.size.isNotBlank()) Text(d.size, color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp)
+                            Text(d.name, color = c.TextHigh, fontSize = 12.5.sp, maxLines = 1)
+                            if (d.size.isNotBlank()) Text(d.size, color = c.TextMuted, fontSize = 10.5.sp)
                         }
                     }
                 }
@@ -563,41 +567,41 @@ fun KalivContextPanel(
             OutlineChip("+ Tilf\u00f8j dokument", onClick = onAddDocument, modifier = Modifier.fillMaxWidth())
         }
 
-        // Performance card with sparkline
         KalivCard {
             SectionLabel("Ydelse")
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
-                    Text("Tokens / sek.", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
-                    Text("$tokensPerSec", color = KalivTheme.colors.Highlight, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Tokens / sek.", color = c.TextMuted, fontSize = 11.sp)
+                    Text("$tokensPerSec", color = c.Highlight, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Sparkline(sparkline, Modifier.width(120.dp).height(34.dp))
             }
             Spacer(Modifier.height(10.dp))
             Row {
-                Text("Svartid", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+                Text("Svartid", color = c.TextMuted, fontSize = 11.sp)
                 Spacer(Modifier.weight(1f))
                 Text(
                     (if (String.format(java.util.Locale.US, "%.2f", responseSeconds).endsWith("0"))
                         String.format(java.util.Locale.US, "%.2f", responseSeconds) else
                         String.format(java.util.Locale.US, "%.2f", responseSeconds)).replace('.', ',') + " s",
-                    color = KalivTheme.colors.TextHigh, fontSize = 12.5.sp, fontFamily = FontFamily.Monospace,
+                    color = c.TextHigh, fontSize = 12.5.sp, fontFamily = FontFamily.Monospace,
                 )
             }
         }
     }
 }
 
-/** A 38×21 pill switch (handoff: on = #8A6530 track, white knob). */
 @Composable
 internal fun PillToggle(on: Boolean, label: String, onToggle: () -> Unit) {
-    val track = if (on) Color(0xFF8A6530) else KalivTheme.colors.SurfaceHigh
+    val c = KalivTheme.colors
+    val onTrack = if (c.isDark) Color(0xFF8A6530) else c.Signal
+    val track = if (on) onTrack else c.SurfaceHigh
     Box(
         Modifier.size(width = 38.dp, height = 21.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(track)
-            .border(1.dp, if (on) Color(0xFF8A6530) else KalivTheme.colors.Border, RoundedCornerShape(999.dp))
+            .border(1.dp, if (on) onTrack else c.Border, RoundedCornerShape(999.dp))
             .clickable(onClickLabel = label, role = Role.Switch, onClick = onToggle)
             .padding(horizontal = 3.dp),
         contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart,
@@ -606,7 +610,6 @@ internal fun PillToggle(on: Boolean, label: String, onToggle: () -> Unit) {
     }
 }
 
-/** An outlined chip button (used for "+ Tilføj dokument" etc.). */
 @Composable
 internal fun OutlineChip(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = KalivTheme.colors
@@ -614,17 +617,16 @@ internal fun OutlineChip(label: String, onClick: () -> Unit, modifier: Modifier 
     val border = if (c.isDark) Color(0x4D785A37) else c.Border
     Box(
         modifier.clip(shape)
-            .background(KalivTheme.colors.SurfaceHigh)
+            .background(c.SurfaceHigh)
             .border(1.dp, border, shape)
             .clickable(onClick = onClick)
             .padding(vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = KalivTheme.colors.Signal, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = c.Signal, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
     }
 }
 
-/** Sparkline via Canvas (handoff: same pattern as SendGlyphDesktop/DesktopThinking). */
 @Composable
 internal fun Sparkline(points: List<Float>, modifier: Modifier = Modifier) {
     val stroke = KalivTheme.colors.Signal
@@ -649,7 +651,6 @@ internal fun Sparkline(points: List<Float>, modifier: Modifier = Modifier) {
 // 1b -- Agent-cockpit: plan timeline + inline approval + action log
 // ===========================================================================
 
-/** One step in the agent plan (handoff: {tool, risk, status, resultSummary}). */
 data class PlanStep(
     val tool: String,
     val risk: RiskLevel,
@@ -659,19 +660,6 @@ data class PlanStep(
 
 enum class StepStatus { DONE, ACTIVE, PENDING, CANCELLED }
 
-/** Map a worker risk string / tool name to the badge level. */
-/**
- * Classify a tool call for the badge.
- *
- * The worker now states `impact` on the confirmation card and in the audit log
- * (write / destructive / admin), which is the finer question the badge is
- * actually asking -- `risk` alone makes note_append, delete_model and
- * pull_model identical. Prefer what the server said.
- *
- * The tool-name fallback below is only for entries that predate the field, and
- * it is deliberately last: a name table is a second copy of a risk
- * classification, and a stale copy fails toward "probably harmless".
- */
 internal fun riskOf(risk: String, tool: String, impact: String = ""): RiskLevel {
     val i = impact.lowercase()
     when {
@@ -689,15 +677,6 @@ internal fun riskOf(risk: String, tool: String, impact: String = ""): RiskLevel 
     }
 }
 
-/**
- * The 1b agent-cockpit. Four columns: slim icon-rail (provided by the shared
- * KalivNavRail on the left of App), chat column (360dp), plan panel (flex),
- * action log (264dp).
- *
- * This composable renders the plan/chat/log columns; the nav-rail is drawn by
- * App() as with 1a. Task lifecycle (idle -> running -> done) is driven by
- * ToolsClient.toolsChat + toolsConfirm, exactly like the chat tools loop.
- */
 @Composable
 fun KalivAgentCockpit(
     baseUrl: String,
@@ -707,13 +686,8 @@ fun KalivAgentCockpit(
     modifier: Modifier = Modifier,
 ) {
     val c = KalivTheme.colors
-    val divider = if (c.isDark) Color(0x33785A37) else c.Border
-    val actionLogBackground = if (c.isDark) Color(0x8014110E) else c.Surface
-    val gateBackground = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
-    val gateBorder = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
     val scope = rememberCoroutineScope()
-    // Conversation for the agent task (its own, separate from chat).
-    val turns = remember { mutableStateListOf<Pair<String, String>>() } // role to text
+    val turns = remember { mutableStateListOf<Pair<String, String>>() }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var taskStarted by remember { mutableStateOf(false) }
@@ -732,16 +706,13 @@ fun KalivAgentCockpit(
     fun applyTurn(turn: ToolTurn) {
         when (turn.status) {
             "confirmation_required" -> {
-                // The active write step waits for approval; mark it ACTIVE.
                 val lvl = riskOf(turn.risk, turn.tool, turn.impact)
-                // Replace any existing ACTIVE with this, else append.
                 val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
                 val step = PlanStep(turn.tool, lvl, StepStatus.ACTIVE, turn.summary)
                 if (idx >= 0) plan[idx] = step else plan.add(step)
                 pending = turn
             }
             else -> {
-                // Terminal: the last active step becomes DONE, answer added to chat.
                 val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
                 if (idx >= 0) plan[idx] = plan[idx].copy(status = StepStatus.DONE, resultSummary = turn.answer.take(80))
                 val ans = turn.answer.ifBlank { "Opgave afsluttet." }
@@ -773,14 +744,9 @@ fun KalivAgentCockpit(
         val card = pending ?: return
         pending = null
         busy = true
-        // Mark the active step's outcome.
         val idx = plan.indexOfFirst { it.status == StepStatus.ACTIVE }
         if (idx >= 0 && !approve) {
             plan[idx] = plan[idx].copy(status = StepStatus.DONE, resultSummary = "Afvist \u2014 intet \u00e6ndret")
-            // The prototype halts the whole run on a rejection (agentPhase
-            // "stopped"), and that matches the project's posture: a declined
-            // write should not leave the plan looking like the remaining steps
-            // are still coming. Mark them cancelled rather than pending.
             for (i in plan.indices) {
                 if (plan[i].status == StepStatus.PENDING) {
                     plan[i] = plan[i].copy(status = StepStatus.CANCELLED, resultSummary = "Ikke udf\u00f8rt \u2014 kørslen blev stoppet")
@@ -804,16 +770,20 @@ fun KalivAgentCockpit(
         busy = false
     }
 
+    val chatDivider = if (c.isDark) Color(0x33785A37) else c.Border
+    val logBackground = if (c.isDark) Color(0x8014110E) else c.Surface
+    val gateBackground = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
+    val gateBorder = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
+
     Row(modifier.fillMaxSize()) {
-        // --- Chat column (360dp) ---
         Column(
             Modifier.width(360.dp).fillMaxHeight()
-                .background(KalivTheme.colors.Graphite)
-                .border(1.dp, divider, RoundedCornerShape(0.dp))
+                .background(c.Graphite)
+                .border(1.dp, chatDivider, RoundedCornerShape(0.dp))
                 .padding(18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("Opgave", color = KalivTheme.colors.TextHigh, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Opgave", color = c.TextHigh, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
                 if (taskStarted) {
                     OutlineChip("\u2715 Afbryd", onClick = { abortTask() })
@@ -821,11 +791,7 @@ fun KalivAgentCockpit(
             }
             Spacer(Modifier.height(14.dp))
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                if (!taskStarted) {
-                    AgentIdlePrompt()
-                } else {
-                    turns.forEach { (role, text) -> AgentBubble(role, text) }
-                }
+                if (!taskStarted) AgentIdlePrompt() else turns.forEach { (role, text) -> AgentBubble(role, text) }
             }
             Spacer(Modifier.height(10.dp))
             AgentComposer(
@@ -837,44 +803,41 @@ fun KalivAgentCockpit(
             )
         }
 
-        // --- Plan panel (flex) ---
         Column(
             Modifier.weight(1f).fillMaxHeight()
-                .background(KalivTheme.colors.Graphite)
+                .background(c.Graphite)
                 .padding(horizontal = 22.dp, vertical = 18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     "Agent-plan",
-                    color = KalivTheme.colors.TextHigh,
+                    color = c.TextHigh,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    // Never let a squeezed panel break this one letter per
-                    // line, which is what happened at the old 1000dp window.
                     softWrap = false,
                     maxLines = 1,
                 )
                 Spacer(Modifier.width(10.dp))
                 val done = plan.count { it.status == StepStatus.DONE }
                 if (plan.isNotEmpty()) {
-                    Text("$done af ${plan.size} trin", color = KalivTheme.colors.TextMuted, fontSize = 12.sp)
+                    Text("$done af ${plan.size} trin", color = c.TextMuted, fontSize = 12.sp)
                 }
                 Spacer(Modifier.weight(1f))
                 Text(
                     "\uD83D\uDD12 Menneske godkender hver skrivning",
-                    color = KalivTheme.colors.TextMuted,
+                    color = c.TextMuted,
                     fontSize = 11.5.sp,
                     softWrap = false,
                     maxLines = 1,
                 )
             }
             Spacer(Modifier.height(16.dp))
-            errorText?.let { Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 12.sp) }
+            errorText?.let { Text("Fejl: $it", color = c.Danger, fontSize = 12.sp) }
             if (plan.isEmpty() && !taskStarted) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         "Start en opgave til venstre.\nKaliv l\u00e6gger en plan, k\u00f8rer l\u00e6setrin selv,\nog stopper ved hver skrivning for din godkendelse.",
-                        color = KalivTheme.colors.TextMuted, fontSize = 13.sp, lineHeight = 21.sp,
+                        color = c.TextMuted, fontSize = 13.sp, lineHeight = 21.sp,
                     )
                 }
             } else {
@@ -893,17 +856,16 @@ fun KalivAgentCockpit(
             }
         }
 
-        // --- Action log (264dp) ---
         Column(
             Modifier.width(264.dp).fillMaxHeight()
-                .background(actionLogBackground)
+                .background(logBackground)
                 .padding(16.dp),
         ) {
             SectionLabel("Handlingslog")
             Spacer(Modifier.height(12.dp))
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 if (log.isEmpty()) {
-                    Text("(ingen handlinger endnu)", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+                    Text("(ingen handlinger endnu)", color = c.TextMuted, fontSize = 11.5.sp)
                 } else {
                     log.forEach { e -> LogEntry(e) }
                 }
@@ -917,7 +879,7 @@ fun KalivAgentCockpit(
             ) {
                 Text(
                     "Porten ligger i workeren. En \u00e6ndret klient kan ikke springe den over.",
-                    color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp, lineHeight = 15.sp,
+                    color = c.TextMuted, fontSize = 10.5.sp, lineHeight = 15.sp,
                 )
             }
         }
@@ -927,11 +889,10 @@ fun KalivAgentCockpit(
 @Composable
 private fun AgentIdlePrompt() {
     val c = KalivTheme.colors
-    val suggestionInk = if (c.isDark) Color(0xFFC3B8A8) else c.TextMuted
     Column {
         Text(
             "Beskriv en opgave, s\u00e5 l\u00e6gger Kaliv en plan.",
-            color = KalivTheme.colors.TextMuted, fontSize = 13.sp, lineHeight = 20.sp,
+            color = c.TextMuted, fontSize = 13.sp, lineHeight = 20.sp,
         )
         Spacer(Modifier.height(12.dp))
         SectionLabel("Forslag")
@@ -942,7 +903,7 @@ private fun AgentIdlePrompt() {
             "Find dubletter i mine dokumenter",
         ).forEach {
             Box(Modifier.padding(vertical = 3.dp)) {
-                Text("\u2022 $it", color = suggestionInk, fontSize = 12.5.sp)
+                Text("\u2022 $it", color = c.TextMuted, fontSize = 12.5.sp)
             }
         }
     }
@@ -955,32 +916,28 @@ private fun AgentBubble(role: String, text: String) {
     val assistantBorder = if (c.isDark) Color(0x4D785A37) else c.Border
     Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         if (!isUser) {
-            Text("Kaliv", color = KalivTheme.colors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text("Kaliv", color = c.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(3.dp))
         }
         Box(
             Modifier.clip(RoundedCornerShape(13.dp))
-                .background(if (isUser) KalivTheme.colors.Signal else KalivTheme.colors.Surface)
+                .background(if (isUser) c.Signal else c.Surface)
                 .border(1.dp, if (isUser) c.Signal else assistantBorder, RoundedCornerShape(13.dp))
                 .padding(horizontal = 13.dp, vertical = 10.dp),
         ) {
-            Text(text, color = if (isUser) kalivPrimaryInk else KalivTheme.colors.TextHigh, fontSize = 13.sp, lineHeight = 20.sp)
+            Text(text, color = if (isUser) kalivPrimaryInk else c.TextHigh, fontSize = 13.sp, lineHeight = 20.sp)
         }
     }
 }
 
 @Composable
 internal fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Boolean, placeholder: String, onSend: () -> Unit) {
+    val c = KalivTheme.colors
     Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
             value = value,
             onValueChange = onValue,
             modifier = Modifier.weight(1f).heightIn(min = 52.dp)
-                // Prototype: Enter runs the task, Shift+Enter inserts a
-                // newline (onCTaskKey / onTaskKey). Without this the composer
-                // could only be sent by hitting the 44dp button, which is a
-                // poor fit for a text-first surface -- and it is exactly how
-                // I failed to start a task while capturing screenshots.
                 .onPreviewKeyEvent { ev ->
                     if (ev.type == KeyEventType.KeyDown &&
                         ev.key == Key.Enter &&
@@ -993,7 +950,7 @@ internal fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Bo
                         false
                     }
                 },
-            placeholder = { Text(placeholder, color = KalivTheme.colors.TextMuted, fontSize = 13.sp) },
+            placeholder = { Text(placeholder, color = c.TextMuted, fontSize = 13.sp) },
             enabled = enabled,
             maxLines = 4,
             shape = RoundedCornerShape(14.dp),
@@ -1002,24 +959,19 @@ internal fun AgentComposer(value: String, onValue: (String) -> Unit, enabled: Bo
         val canSend = enabled && value.isNotBlank()
         Box(
             Modifier.size(44.dp).clip(RoundedCornerShape(14.dp))
-                .background(if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.SurfaceHigh)
-                .border(1.dp, if (canSend) KalivTheme.colors.Signal else KalivTheme.colors.Border, RoundedCornerShape(14.dp))
+                .background(if (canSend) c.Signal else c.SurfaceHigh)
+                .border(1.dp, if (canSend) c.Signal else c.Border, RoundedCornerShape(14.dp))
                 .clickable(
                     enabled = canSend, onClickLabel = "Send", role = Role.Button,
                     onClick = onSend,
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            Text("\u2794", color = if (canSend) kalivPrimaryInk else KalivTheme.colors.TextMuted, fontSize = 16.sp)
+            Text("\u2794", color = if (canSend) kalivPrimaryInk else c.TextMuted, fontSize = 16.sp)
         }
     }
 }
 
-/**
- * One row of the plan timeline: status circle + connector line in the gutter,
- * then tool name + risk badge + result, and (if this is the active write step)
- * the inline approval card.
- */
 @Composable
 private fun PlanRow(
     index: Int,
@@ -1032,7 +984,6 @@ private fun PlanRow(
     val c = KalivTheme.colors
     val connector = if (c.isDark) Color(0x4D785A37) else c.Border
     Row(Modifier.fillMaxWidth()) {
-        // Gutter: status circle + connector.
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(26.dp)) {
             StatusCircle(index, step.status)
             if (!isLast) {
@@ -1044,11 +995,7 @@ private fun PlanRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     step.tool,
-                    color = if (step.status == StepStatus.PENDING || step.status == StepStatus.CANCELLED) {
-                        KalivTheme.colors.TextMuted
-                    } else {
-                        KalivTheme.colors.TextHigh
-                    },
+                    color = if (step.status == StepStatus.PENDING || step.status == StepStatus.CANCELLED) c.TextMuted else c.TextHigh,
                     fontSize = 13.5.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Medium,
@@ -1058,9 +1005,8 @@ private fun PlanRow(
             }
             if (step.resultSummary.isNotBlank()) {
                 Spacer(Modifier.height(3.dp))
-                Text(step.resultSummary, color = KalivTheme.colors.TextMuted, fontSize = 12.sp, lineHeight = 17.sp)
+                Text(step.resultSummary, color = c.TextMuted, fontSize = 12.sp, lineHeight = 17.sp)
             }
-            // Inline approval card for the active write step.
             if (card != null) {
                 Spacer(Modifier.height(10.dp))
                 ApprovalCard(card = card, onApprove = onApprove, onDeny = onDeny)
@@ -1073,23 +1019,23 @@ private fun PlanRow(
 internal fun StatusCircle(index: Int, status: StepStatus) {
     val c = KalivTheme.colors
     val size = 26
-    val doneBackground = if (c.isDark) Color(0x336F8A63) else c.Success.copy(alpha = 0.12f)
-    val activeBackground = if (c.isDark) Color(0xFF8A6530) else c.Signal
-    val activeBorder = if (c.isDark) Color(0x2E9A7136) else c.Signal.copy(alpha = 0.18f)
+    val doneBg = if (c.isDark) Color(0x336F8A63) else c.Success.copy(alpha = 0.12f)
+    val activeBg = if (c.isDark) Color(0xFF8A6530) else c.Signal
+    val activeBorder = if (c.isDark) Color(0x2E9A7136) else c.Signal.copy(alpha = 0.24f)
     val pendingBorder = if (c.isDark) Color(0x4D785A37) else c.Border
-    val cancelledBackground = if (c.isDark) Color(0x22000000) else c.Danger.copy(alpha = 0.08f)
+    val cancelledBg = if (c.isDark) Color(0x22000000) else c.Danger.copy(alpha = 0.08f)
     val cancelledBorder = if (c.isDark) Color(0x4D9C564C) else c.Danger.copy(alpha = 0.35f)
     val cancelledInk = if (c.isDark) Color(0xFFC47B70) else c.Danger
     when (status) {
         StepStatus.DONE -> Box(
             Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
-                .background(doneBackground)
+                .background(doneBg)
                 .border(1.dp, c.Success, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("\u2713", color = c.Success, fontSize = 13.sp) }
         StepStatus.ACTIVE -> Box(
             Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
-                .background(activeBackground)
+                .background(activeBg)
                 .border(4.dp, activeBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("$index", color = kalivPrimaryInk, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
@@ -1101,35 +1047,30 @@ internal fun StatusCircle(index: Int, status: StepStatus) {
         ) { Text("$index", color = c.TextMuted, fontSize = 12.sp) }
         StepStatus.CANCELLED -> Box(
             Modifier.size(size.dp).clip(RoundedCornerShape(999.dp))
-                .background(cancelledBackground)
+                .background(cancelledBg)
                 .border(1.dp, cancelledBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("\u2715", color = cancelledInk, fontSize = 12.sp) }
     }
 }
 
-/**
- * The inline approval card (handoff: radius 14, gradient #241A10→#1B140D, 1dp
- * rgba(198,154,75,.45)). Ankh + title + WRITE badge, arg-preview box, and the
- * 50/50 Godkend/Afvis buttons. The gate is in the worker; this only renders.
- */
 @Composable
 internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> Unit) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(14.dp)
-    val surface = if (c.isDark) {
+    val cardBrush = if (c.isDark) {
         Brush.verticalGradient(listOf(Color(0xFF241A10), Color(0xFF1B140D)))
     } else {
         Brush.verticalGradient(listOf(c.SurfaceHigh, c.Surface))
     }
-    val border = if (c.isDark) Color(0x73C69A4B) else c.Signal.copy(alpha = 0.32f)
-    val codeSurface = if (c.isDark) Color(0xFF100C09) else c.Graphite
+    val cardBorder = if (c.isDark) Color(0x73C69A4B) else c.Warning.copy(alpha = 0.45f)
+    val argBackground = if (c.isDark) Color(0xFF100C09) else c.CodeSurface
     val rejectBorder = if (c.isDark) Color(0x4D785A37) else c.Border
-    val approveSurface = if (c.isDark) kalivPrimaryGradient else Brush.verticalGradient(listOf(c.Signal, c.Signal))
+    val approveBrush = if (c.isDark) kalivPrimaryGradient else Brush.verticalGradient(listOf(c.Signal, c.Signal))
     Column(
         Modifier.fillMaxWidth().clip(shape)
-            .background(surface)
-            .border(1.dp, border, shape)
+            .background(cardBrush)
+            .border(1.dp, cardBorder, shape)
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -1147,7 +1088,7 @@ internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> U
         Spacer(Modifier.height(10.dp))
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                .background(codeSurface)
+                .background(argBackground)
                 .padding(horizontal = 11.dp, vertical = 9.dp),
         ) {
             Text(
@@ -1159,7 +1100,7 @@ internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> U
         Row(Modifier.fillMaxWidth()) {
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
-                    .background(approveSurface)
+                    .background(approveBrush)
                     .clickable(onClick = onApprove)
                     .padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
@@ -1179,30 +1120,30 @@ internal fun ApprovalCard(card: ToolTurn, onApprove: () -> Unit, onDeny: () -> U
 
 @Composable
 private fun LogEntry(e: AuditEntry) {
-    val time = e.ts.take(19).replace('T', ' ').takeLast(8).dropLast(3) // HH:mm
+    val c = KalivTheme.colors
+    val time = e.ts.take(19).replace('T', ' ').takeLast(8).dropLast(3)
     val dot = when {
-        "read" in e.risk.lowercase() || "read" in e.outcome.lowercase() -> KalivTheme.colors.Success
-        "pend" in e.outcome.lowercase() || "await" in e.outcome.lowercase() -> KalivTheme.colors.Warning
-        else -> KalivTheme.colors.Signal
+        "read" in e.risk.lowercase() || "read" in e.outcome.lowercase() -> c.Success
+        "pend" in e.outcome.lowercase() || "await" in e.outcome.lowercase() -> c.Warning
+        else -> c.Signal
     }
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Column(Modifier.weight(1f)) {
             Text(
                 "${if (time.isNotBlank()) "$time \u00b7 " else ""}${e.tool}",
-                color = KalivTheme.colors.TextHigh, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace,
+                color = c.TextHigh, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(6.dp).clip(RoundedCornerShape(999.dp)).background(dot))
                 Spacer(Modifier.width(6.dp))
                 Text(
                     e.outcome + (if (e.origin != "local") " \u00b7 ${e.origin}" else ""),
-                    color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp,
+                    color = c.TextMuted, fontSize = 10.5.sp,
                 )
             }
         }
     }
 }
-
 
 // ===========================================================================
 // 1c -- Computer-use split: task/step list + live viewport + pause/stop
@@ -1210,22 +1151,8 @@ private fun LogEntry(e: AuditEntry) {
 
 enum class RunState { IDLE, RUNNING, PAUSED, STOPPED, DONE }
 
-/** A computer-use step (mirrors the plan step but with a plain label). */
 data class UseStep(val label: String, val detail: String, val status: StepStatus)
 
-/**
- * The 1c computer-use screen. Two columns: left (340dp) task + step timeline +
- * pause/stop control bar; right live viewport (mock browser + light page +
- * work overlay) with an approval bar before each write.
- *
- * Per the handoff: the viewport is HIDDEN until a task runs (no fake page
- * behind a scrim). The "Kaliv styrer skærmen" status only shows while running.
- *
- * NOTE (honest scope): live browser frames come from the worker's browser_use
- * adapter in production. This client renders the viewport chrome, the step
- * timeline, and the approval gate; the sample page is illustrative of the
- * annotation layer (focus ring + cursor + overlay) until wired to real frames.
- */
 @Composable
 fun KalivComputerUse(
     baseUrl: String,
@@ -1233,16 +1160,9 @@ fun KalivComputerUse(
     model: String,
     system: String?,
     modifier: Modifier = Modifier,
-    // The mockup puts "● Kaliv styrer skærmen" in the title bar while a task
-    // runs, so the shell needs to know the run state -- hence this callback
-    // rather than keeping runState entirely private.
     onRunningChange: (Boolean) -> Unit = {},
 ) {
     val c = KalivTheme.colors
-    val leftPanelBackground = if (c.isDark) Color(0x8014110E) else c.Surface
-    val stopBackground = if (c.isDark) Color(0x269C564C) else c.Danger.copy(alpha = 0.10f)
-    val stopBorder = if (c.isDark) Color(0x809C564C) else c.Danger.copy(alpha = 0.40f)
-    val stopInk = if (c.isDark) Color(0xFFE0B3AB) else c.Danger
     var input by remember { mutableStateOf("") }
     var runState by remember { mutableStateOf(RunState.IDLE) }
     LaunchedEffect(runState) { onRunningChange(runState == RunState.RUNNING) }
@@ -1256,7 +1176,6 @@ fun KalivComputerUse(
         taskText = t
         input = ""
         runState = RunState.RUNNING
-        // Seed an illustrative plan; in production these arrive from the worker.
         steps.clear()
         steps.addAll(
             listOf(
@@ -1281,27 +1200,30 @@ fun KalivComputerUse(
         pendingAction = null
     }
 
+    val leftBackground = if (c.isDark) Color(0x8014110E) else c.Surface
+    val stopBackground = if (c.isDark) Color(0x269C564C) else c.Danger.copy(alpha = 0.10f)
+    val stopBorder = if (c.isDark) Color(0x809C564C) else c.Danger.copy(alpha = 0.45f)
+    val stopInk = if (c.isDark) Color(0xFFE0B3AB) else c.Danger
+
     Row(modifier.fillMaxSize()) {
-        // --- Left column (340dp) ---
         Column(
             Modifier.width(340.dp).fillMaxHeight()
-                .background(leftPanelBackground)
+                .background(leftBackground)
                 .padding(18.dp),
         ) {
-            // "Kaliv styrer skærmen" status only while running.
             if (runState == RunState.RUNNING) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
-                    Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Warning))
+                    Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(c.Warning))
                     Spacer(Modifier.width(7.dp))
-                    Text("Kaliv styrer sk\u00e6rmen", color = KalivTheme.colors.Warning, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                    Text("Kaliv styrer sk\u00e6rmen", color = c.Warning, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
                 }
             }
-            Text("Opgave", color = KalivTheme.colors.TextHigh, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("Opgave", color = c.TextHigh, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             if (runState == RunState.IDLE) {
                 Text(
                     "Beskriv en computer-opgave. Kaliv styrer en browser og stopper ved hver skrivning for din godkendelse.",
-                    color = KalivTheme.colors.TextMuted, fontSize = 12.5.sp, lineHeight = 19.sp,
+                    color = c.TextMuted, fontSize = 12.5.sp, lineHeight = 19.sp,
                 )
                 Spacer(Modifier.height(14.dp))
                 AgentComposer(
@@ -1309,7 +1231,7 @@ fun KalivComputerUse(
                     placeholder = "Ny computer-opgave \u2026", onSend = { startTask() },
                 )
             } else {
-                Text(taskText, color = KalivTheme.colors.TextMuted, fontSize = 12.5.sp, lineHeight = 19.sp)
+                Text(taskText, color = c.TextMuted, fontSize = 12.5.sp, lineHeight = 19.sp)
                 Spacer(Modifier.height(16.dp))
                 SectionLabel("Trin")
                 Spacer(Modifier.height(10.dp))
@@ -1318,7 +1240,6 @@ fun KalivComputerUse(
                         UseStepRow(index = i + 1, step = s, isLast = i == steps.lastIndex)
                     }
                 }
-                // Control bar (Pause / Stop) or a finished/stopped result.
                 when (runState) {
                     RunState.STOPPED -> ResultBar(false, "Stoppet \u2014 intet \u00e6ndret", onReset = { resetTask() })
                     RunState.DONE -> ResultBar(true, "Fuldf\u00f8rt", onReset = { resetTask() })
@@ -1344,20 +1265,18 @@ fun KalivComputerUse(
             }
         }
 
-        // --- Right column: live viewport (flex) ---
         Column(
             Modifier.weight(1f).fillMaxHeight()
-                .background(KalivTheme.colors.Graphite)
+                .background(c.Graphite)
                 .padding(horizontal = 18.dp, vertical = 16.dp),
         ) {
             if (runState == RunState.IDLE) {
-                // Clean waiting state -- viewport hidden until a task runs.
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         KalivAnkh(40)
                         Spacer(Modifier.height(14.dp))
-                        Text("Ingen aktiv computer-opgave", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
-                        Text("Start en opgave for at se Kaliv arbejde live.", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+                        Text("Ingen aktiv computer-opgave", color = c.TextMuted, fontSize = 13.sp)
+                        Text("Start en opgave for at se Kaliv arbejde live.", color = c.TextMuted, fontSize = 11.5.sp)
                     }
                 }
             } else {
@@ -1367,7 +1286,6 @@ fun KalivComputerUse(
                     ComputerApprovalBar(
                         detail = detail,
                         onApprove = {
-                            // Approve -> mark active step done, advance to finish.
                             val idx = steps.indexOfFirst { it.status == StepStatus.ACTIVE }
                             if (idx >= 0) steps[idx] = steps[idx].copy(status = StepStatus.DONE, detail = "oprettet")
                             if (idx + 1 <= steps.lastIndex) steps[idx + 1] = steps[idx + 1].copy(status = StepStatus.DONE, detail = "lukket")
@@ -1400,11 +1318,11 @@ private fun UseStepRow(index: Int, step: UseStep, isLast: Boolean) {
         Column(Modifier.weight(1f).padding(bottom = 12.dp)) {
             Text(
                 step.label,
-                color = if (step.status == StepStatus.PENDING) KalivTheme.colors.TextMuted else KalivTheme.colors.TextHigh,
+                color = if (step.status == StepStatus.PENDING) c.TextMuted else c.TextHigh,
                 fontSize = 13.sp, fontWeight = FontWeight.Medium,
             )
             if (step.detail.isNotBlank()) {
-                Text(step.detail, color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+                Text(step.detail, color = c.TextMuted, fontSize = 11.5.sp)
             }
         }
     }
@@ -1413,21 +1331,21 @@ private fun UseStepRow(index: Int, step: UseStep, isLast: Boolean) {
 @Composable
 private fun StatusCircleSmall(index: Int, status: StepStatus) {
     val c = KalivTheme.colors
-    val doneBackground = if (c.isDark) Color(0x336F8A63) else c.Success.copy(alpha = 0.12f)
-    val activeBackground = if (c.isDark) Color(0xFF8A6530) else c.Signal
-    val activeBorder = if (c.isDark) Color(0x2E9A7136) else c.Signal.copy(alpha = 0.18f)
+    val doneBg = if (c.isDark) Color(0x336F8A63) else c.Success.copy(alpha = 0.12f)
+    val activeBg = if (c.isDark) Color(0xFF8A6530) else c.Signal
+    val activeBorder = if (c.isDark) Color(0x2E9A7136) else c.Signal.copy(alpha = 0.24f)
     val pendingBorder = if (c.isDark) Color(0x4D785A37) else c.Border
-    val cancelledBackground = if (c.isDark) Color(0x22000000) else c.Danger.copy(alpha = 0.08f)
+    val cancelledBg = if (c.isDark) Color(0x22000000) else c.Danger.copy(alpha = 0.08f)
     val cancelledBorder = if (c.isDark) Color(0x4D9C564C) else c.Danger.copy(alpha = 0.35f)
     val cancelledInk = if (c.isDark) Color(0xFFC47B70) else c.Danger
     when (status) {
         StepStatus.DONE -> Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(doneBackground)
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(doneBg)
                 .border(1.dp, c.Success, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("\u2713", color = c.Success, fontSize = 11.sp) }
         StepStatus.ACTIVE -> Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(activeBackground)
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(activeBg)
                 .border(3.dp, activeBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Box(Modifier.size(6.dp).clip(RoundedCornerShape(999.dp)).background(kalivPrimaryInk)) }
@@ -1437,7 +1355,7 @@ private fun StatusCircleSmall(index: Int, status: StepStatus) {
             contentAlignment = Alignment.Center,
         ) { Text("$index", color = c.TextMuted, fontSize = 11.sp) }
         StepStatus.CANCELLED -> Box(
-            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(cancelledBackground)
+            Modifier.size(22.dp).clip(RoundedCornerShape(999.dp)).background(cancelledBg)
                 .border(1.dp, cancelledBorder, RoundedCornerShape(999.dp)),
             contentAlignment = Alignment.Center,
         ) { Text("\u2715", color = cancelledInk, fontSize = 11.sp) }
@@ -1445,9 +1363,9 @@ private fun StatusCircleSmall(index: Int, status: StepStatus) {
 }
 
 /**
- * The live viewport: a mock browser (light chrome + traffic lights + URL pill)
- * over a light page, with the Saturday row highlighted (bronze focus ring),
- * a Kaliv cursor, and a bottom work-overlay. Illustrates the annotation layer.
+ * The live viewport deliberately models an external light browser/page. Its
+ * local literals are content/chrome of that simulated page, not app-theme
+ * authority, and are intentionally excluded from #1277's light-mode gate.
  */
 @Composable
 private fun LiveViewport(modifier: Modifier = Modifier) {
@@ -1458,7 +1376,6 @@ private fun LiveViewport(modifier: Modifier = Modifier) {
             .border(1.dp, Color(0x66C69A4B), shape),
     ) {
         Column(Modifier.fillMaxSize()) {
-            // Browser chrome (light)
             Row(
                 Modifier.fillMaxWidth().height(44.dp).background(Color(0xFFEDE8E0)).padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1477,7 +1394,6 @@ private fun LiveViewport(modifier: Modifier = Modifier) {
                     Text("\uD83D\uDD12 kommune.dk/genbrugsplads/aabningstider", color = Color(0xFF6B6257), fontSize = 11.sp, maxLines = 1)
                 }
             }
-            // Light page content
             Column(Modifier.fillMaxSize().padding(22.dp)) {
                 Text("\u00c5bningstider \u2014 Genbrugsplads Nord", color = Color(0xFF231E19), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(16.dp))
@@ -1486,7 +1402,6 @@ private fun LiveViewport(modifier: Modifier = Modifier) {
                 HoursRow("S\u00f8ndag", "Lukket", highlighted = false)
             }
         }
-        // Work overlay (bottom gradient fade)
         Box(
             Modifier.fillMaxWidth().height(52.dp).align(Alignment.BottomCenter)
                 .background(Brush.verticalGradient(listOf(Color(0x00000000), Color(0xCC0B0A09))))
@@ -1520,23 +1435,22 @@ private fun HoursRow(day: String, hours: String, highlighted: Boolean) {
     }
 }
 
-/** Approval bar for computer-use (same gradient/border as the 1b card). */
 @Composable
 private fun ComputerApprovalBar(detail: String, onApprove: () -> Unit, onDeny: () -> Unit) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(14.dp)
-    val surface = if (c.isDark) {
+    val cardBrush = if (c.isDark) {
         Brush.verticalGradient(listOf(Color(0xFF241A10), Color(0xFF1B140D)))
     } else {
         Brush.verticalGradient(listOf(c.SurfaceHigh, c.Surface))
     }
-    val border = if (c.isDark) Color(0x73C69A4B) else c.Signal.copy(alpha = 0.32f)
+    val cardBorder = if (c.isDark) Color(0x73C69A4B) else c.Warning.copy(alpha = 0.45f)
     val rejectBorder = if (c.isDark) Color(0x4D785A37) else c.Border
-    val approveSurface = if (c.isDark) kalivPrimaryGradient else Brush.verticalGradient(listOf(c.Signal, c.Signal))
+    val approveBrush = if (c.isDark) kalivPrimaryGradient else Brush.verticalGradient(listOf(c.Signal, c.Signal))
     Column(
         Modifier.fillMaxWidth().clip(shape)
-            .background(surface)
-            .border(1.dp, border, shape)
+            .background(cardBrush)
+            .border(1.dp, cardBorder, shape)
             .padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -1551,7 +1465,7 @@ private fun ComputerApprovalBar(detail: String, onApprove: () -> Unit, onDeny: (
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(approveSurface)
+                Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(approveBrush)
                     .clickable(onClick = onApprove).padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center,
             ) { Text("Godkend", color = kalivPrimaryInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
@@ -1570,12 +1484,18 @@ private fun ComputerApprovalBar(detail: String, onApprove: () -> Unit, onDeny: (
 private fun ResultBar(success: Boolean, label: String, onReset: () -> Unit) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
-    val (bg, border, fg) = if (c.isDark) {
-        if (success) Triple(Color(0x266F8A63), Color(0x806F8A63), c.Success)
-        else Triple(Color(0x269C564C), Color(0x809C564C), Color(0xFFE0B3AB))
+    val (bg, border, fg) = if (success) {
+        if (c.isDark) {
+            Triple(Color(0x266F8A63), Color(0x806F8A63), c.Success)
+        } else {
+            Triple(c.Success.copy(alpha = 0.10f), c.Success.copy(alpha = 0.45f), c.Success)
+        }
     } else {
-        if (success) Triple(c.Success.copy(alpha = 0.10f), c.Success.copy(alpha = 0.40f), c.Success)
-        else Triple(c.Danger.copy(alpha = 0.10f), c.Danger.copy(alpha = 0.40f), c.Danger)
+        if (c.isDark) {
+            Triple(Color(0x269C564C), Color(0x809C564C), Color(0xFFE0B3AB))
+        } else {
+            Triple(c.Danger.copy(alpha = 0.10f), c.Danger.copy(alpha = 0.45f), c.Danger)
+        }
     }
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Row(
