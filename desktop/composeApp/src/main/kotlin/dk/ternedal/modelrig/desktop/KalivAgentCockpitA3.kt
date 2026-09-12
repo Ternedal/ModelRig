@@ -39,6 +39,7 @@ import dk.ternedal.modelrig.desktop.net.Agent3Client
 import dk.ternedal.modelrig.desktop.net.Agent3Run
 import dk.ternedal.modelrig.desktop.net.Agent3Step
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -191,7 +192,15 @@ fun KalivAgentCockpitA3(
     }
 
     fun decide(step: Agent3Step, approve: Boolean) {
-        if (busy) return
+        val nowEpochSeconds = System.currentTimeMillis() / 1000.0
+        if (!canAgent3CockpitDecide(
+                confirmationDigest = step.confirmationDigest,
+                confirmationExpiresAt = step.confirmationExpiresAt,
+                stepState = step.state,
+                busy = busy,
+                nowEpochSeconds = nowEpochSeconds,
+            )
+        ) return
         val r = run ?: return
         val sid = step.id ?: return
         val digest = step.confirmationDigest ?: return
@@ -423,6 +432,46 @@ private fun A3StepRow(
     onReject: () -> Unit,
     busy: Boolean,
 ) {
+    var confirmationNow by remember(
+        step.id,
+        step.confirmationDigest,
+        step.confirmationExpiresAt,
+        step.state,
+    ) { mutableStateOf(System.currentTimeMillis() / 1000.0) }
+
+    LaunchedEffect(
+        step.id,
+        step.confirmationDigest,
+        step.confirmationExpiresAt,
+        step.state,
+    ) {
+        val expiry = step.confirmationExpiresAt
+        if (
+            step.confirmationDigest != null &&
+            expiry != null &&
+            expiry.isFinite() &&
+            !isTerminal(step.state)
+        ) {
+            while (true) {
+                val now = System.currentTimeMillis() / 1000.0
+                confirmationNow = now
+                if (now >= expiry) break
+                val remainingMillis = ((expiry - now) * 1000.0)
+                    .toLong()
+                    .coerceIn(1L, 1_000L)
+                delay(remainingMillis)
+            }
+        }
+    }
+
+    val confirmation = presentAgent3CockpitConfirmation(
+        confirmationDigest = step.confirmationDigest,
+        confirmationExpiresAt = step.confirmationExpiresAt,
+        stepState = step.state,
+        busy = busy,
+        nowEpochSeconds = confirmationNow,
+    )
+
     Row(Modifier.fillMaxWidth()) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(44.dp)) {
             StatusCircle(index, statusOf(step, isCurrent))
@@ -456,17 +505,37 @@ private fun A3StepRow(
                 Spacer(Modifier.height(4.dp))
                 Text(it, color = KalivTheme.colors.Danger, fontSize = 12.sp)
             }
-            // A card exists only when the server issued a digest for this step.
-            // The client never decides that a confirmation is needed.
-            if (step.confirmationDigest != null && !isTerminal(step.state)) {
-                Spacer(Modifier.height(10.dp))
-                A3ApprovalCard(
-                    tool = step.tool,
-                    argsPreview = step.args.toString(),
-                    onApprove = onApprove,
-                    onReject = onReject,
-                    enabled = !busy,
-                )
+            // The server owns both the immutable digest and its expiry.
+            // Local time may only remove actionability; it never extends TTL or
+            // invents a new confirmation/run state.
+            when (confirmation.state) {
+                Agent3CockpitConfirmationState.LIVE -> {
+                    Spacer(Modifier.height(10.dp))
+                    A3ApprovalCard(
+                        tool = step.tool,
+                        argsPreview = step.args.toString(),
+                        onApprove = onApprove,
+                        onReject = onReject,
+                        enabled = confirmation.actionEnabled,
+                    )
+                }
+                Agent3CockpitConfirmationState.EXPIRED -> {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Bekræftelsen er udløbet. Ingen beslutning sendes på den gamle godkendelse.",
+                        color = KalivTheme.colors.Warning,
+                        fontSize = 11.5.sp,
+                    )
+                }
+                Agent3CockpitConfirmationState.INVALID -> {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Bekræftelsen mangler en gyldig udløbstid. Handlingen er låst fail-closed.",
+                        color = KalivTheme.colors.Warning,
+                        fontSize = 11.5.sp,
+                    )
+                }
+                Agent3CockpitConfirmationState.HIDDEN -> Unit
             }
         }
     }
