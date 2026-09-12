@@ -8,6 +8,7 @@ class KalivComputerUsePolicyTest {
     @Test
     fun unavailableDesktopComputerUseClaimsNoExecutionAuthority() {
         val presentation = presentComputerUse()
+
         assertFalse(presentation.executionEnabled)
         assertFalse(presentation.showLiveViewport)
         assertFalse(presentation.showApproval)
@@ -18,6 +19,7 @@ class KalivComputerUsePolicyTest {
     fun unavailableCopyIsExplicitAndDoesNotPretendToBeLive() {
         val presentation = presentComputerUse()
         val copy = (presentation.title + " " + presentation.detail).lowercase()
+
         assertTrue("ikke tilgængelig" in copy)
         assertTrue("ikke koblet" in copy)
         assertFalse("kaliv styrer skærmen" in copy)

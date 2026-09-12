@@ -292,5 +292,83 @@ check(fresh_d.steps[0].state == StepState.FAILED and "boom" in (fresh_d.steps[0]
 check("step_failed_after_cancel" in kinds_d and "step_failed" not in kinds_d,
       "journal preserves failure ordering without stale failure commit")
 
+
+# Race E: Stop itself must not be the stale writer. Force a step_started CAS to
+# linearize after cancel() has loaded the old PENDING snapshot but before its
+# first cancellation persistence attempt. Stop must reload, preserve EXECUTING
+# truth, and only then append run_cancelled.
+store_e = new_store("kaliv-cancel-stale-write-")
+step_e = AgentStep("rig_status", {}, RiskClass.READ)
+run_e = make_run("r-cancel-stale-write", step_e)
+store_e.save(run_e)
+orch_e = Agent3Orchestrator(store=store_e, executor=lambda _step: None)
+real_event_cas_e = store_e.save_with_event_if_unchanged
+race_e = {"fired": False}
+
+
+def advance_before_cancel_commit(run_arg, **kwargs):
+    if kwargs.get("kind") == "run_cancelled" and not race_e["fired"]:
+        race_e["fired"] = True
+        fresh = store_e.load(run_arg.id)
+        assert fresh is not None
+        expected = fresh.to_json()
+        fresh.steps[0].state = StepState.EXECUTING
+        assert real_event_cas_e(
+            fresh,
+            expected_state=RunState.RUNNING,
+            expected_payload=expected,
+            kind="step_started",
+            payload={"step_id": fresh.steps[0].id, "tool": fresh.steps[0].tool},
+        )
+    return real_event_cas_e(run_arg, **kwargs)
+
+
+store_e.save_with_event_if_unchanged = advance_before_cancel_commit  # type: ignore[method-assign]
+try:
+    result_e = orch_e.cancel(run_e.id)
+finally:
+    store_e.save_with_event_if_unchanged = real_event_cas_e  # type: ignore[method-assign]
+fresh_e = store_e.load(run_e.id)
+kinds_e = [e["kind"] for e in store_e.events(run_e.id)]
+check(race_e["fired"], "a concurrent step transition is forced inside Stop's load/save window")
+check(
+    result_e.state == RunState.CANCELLED and fresh_e.state == RunState.CANCELLED,
+    "Stop still becomes authoritative after retrying the lost CAS",
+)
+check(
+    fresh_e.steps[0].state == StepState.EXECUTING,
+    "Stop preserves the newer step_started truth instead of rolling it back to PENDING",
+)
+check(
+    kinds_e[-2:] == ["step_started", "run_cancelled"],
+    "journal ordering records the concurrent transition before the eventual Stop",
+)
+
+# Race F: BLOCKED is already terminal task truth. Stop must be idempotent over
+# that outcome rather than rewriting it to CANCELLED and inventing a user stop.
+store_f = new_store("kaliv-cancel-blocked-terminal-")
+step_f = AgentStep("rig_status", {}, RiskClass.READ)
+step_f.state = StepState.BLOCKED
+step_f.error = "policy blocked"
+run_f = make_run("r-blocked-terminal", step_f)
+run_f.state = RunState.BLOCKED
+run_f.error = "policy blocked"
+store_f.save_with_event(run_f, "run_blocked", {"reason": "policy blocked"})
+orch_f = Agent3Orchestrator(store=store_f, executor=lambda _step: None)
+result_f = orch_f.cancel(run_f.id)
+fresh_f = store_f.load(run_f.id)
+kinds_f = [e["kind"] for e in store_f.events(run_f.id)]
+check(
+    result_f.state == RunState.BLOCKED
+    and fresh_f.state == RunState.BLOCKED
+    and fresh_f.error == "policy blocked"
+    and fresh_f.steps[0].state == StepState.BLOCKED,
+    "Stop leaves an already BLOCKED terminal outcome unchanged",
+)
+check(
+    kinds_f == ["run_blocked"] and "run_cancelled" not in kinds_f,
+    "Stop does not append a false cancellation event for terminal BLOCKED truth",
+)
+
 print(f"\n===== AGENT3 LATE CANCEL: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

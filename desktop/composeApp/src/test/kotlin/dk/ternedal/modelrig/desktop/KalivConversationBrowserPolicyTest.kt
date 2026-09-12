@@ -83,5 +83,4 @@ class KalivConversationBrowserPolicyTest {
         assertFalse(epoch.mayPublish(beforeWrap))
         assertTrue(epoch.mayPublish(afterWrap))
     }
-
 }

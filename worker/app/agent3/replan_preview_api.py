@@ -23,6 +23,7 @@ class ReplanPreviewReq(BaseModel):
 
 def _step_payload(step) -> dict[str, Any]:
     return {
+        "id": step.id,
         "tool": step.tool,
         "args": step.args,
         "risk": step.risk.value,
