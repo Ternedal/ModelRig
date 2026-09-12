@@ -1,28 +1,4 @@
-from pathlib import Path
-
-
-def replace_once(path: str, old: str, new: str) -> None:
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{path}: expected one match, found {count}")
-    p.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-
-replace_once(
-    "worker/app/agent3/planner.py",
-    '''        if existing.state is not RunState.RUNNING:\n            return existing\n        try:\n            return orchestrator.advance(run_id)\n''',
-    '''        if existing.state is not RunState.RUNNING:\n            return existing\n        # A waiting read-review checkpoint is explicit human authority. A retry\n        # that is only recovering a previously ambiguous Start must never consume\n        # that checkpoint by calling advance() without an expected review step.\n        if reviewing and orchestrator.review_store.get(run_id)["waiting"]:\n            return existing\n        try:\n            return orchestrator.advance(run_id)\n''',
-)
-
-replace_once(
-    "worker/app/agent3/planner.py",
-    '''            if state == "accepted":\n                if existing is None:\n                    raise _reviewed_start_error(\n                        "reviewed_start_refused",\n                        "accepted reviewed Start is missing its bound run",\n                    )\n                stored = json.loads(\n''',
-    '''            if state == "accepted":\n                if existing is None:\n                    # Acceptance proves this exact reserved run was materialized at\n                    # least once and may already have produced side effects. Missing\n                    # run storage is therefore ambiguous/corrupt recovery, never a\n                    # definitive refusal that would let clients clear authority.\n                    raise _reviewed_start_error(\n                        "reviewed_start_pending",\n                        "accepted reviewed Start is missing its bound run; recovery remains ambiguous",\n                        status_code=503,\n                    )\n                stored = json.loads(\n''',
-)
-
-Path("tests/worker_agent3_reviewed_start_p1d.py").write_text(r'''from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -178,6 +154,3 @@ assert missing_plans.reviewed_start_recovery(missing_plan_id)[:2] == (
 missing_plans.close()
 
 print("16 passed, 0 failed")
-''', encoding="utf-8")
-
-print("reviewed Start P1d patch staged")

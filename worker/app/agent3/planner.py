@@ -442,6 +442,11 @@ def build_planner_router(
         # and advancing it would try to complete a non-RUNNING run forever.
         if existing.state is not RunState.RUNNING:
             return existing
+        # A waiting read-review checkpoint is explicit human authority. A retry
+        # that is only recovering a previously ambiguous Start must never consume
+        # that checkpoint by calling advance() without an expected review step.
+        if reviewing and orchestrator.review_store.get(run_id)["waiting"]:
+            return existing
         try:
             return orchestrator.advance(run_id)
         except Exception as exc:
@@ -479,9 +484,14 @@ def build_planner_router(
             existing = orchestrator.store.load(reserved_run_id)
             if state == "accepted":
                 if existing is None:
+                    # Acceptance proves this exact reserved run was materialized at
+                    # least once and may already have produced side effects. Missing
+                    # run storage is therefore ambiguous/corrupt recovery, never a
+                    # definitive refusal that would let clients clear authority.
                     raise _reviewed_start_error(
-                        "reviewed_start_refused",
-                        "accepted reviewed Start is missing its bound run",
+                        "reviewed_start_pending",
+                        "accepted reviewed Start is missing its bound run; recovery remains ambiguous",
+                        status_code=503,
                     )
                 stored = json.loads(
                     plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
