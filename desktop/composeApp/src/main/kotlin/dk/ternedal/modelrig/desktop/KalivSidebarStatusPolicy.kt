@@ -8,6 +8,7 @@ data class KalivSidebarStatus(
     val modelAuthority: String,
     val privacyTitle: String,
     val privacyDetail: String,
+    val titleSubtitle: String,
     val localOnly: Boolean,
 )
 
@@ -26,6 +27,7 @@ internal fun presentSidebarStatus(
             modelAuthority = "Primær · cloud",
             privacyTitle = "Cloud foretrukket",
             privacyDetail = "Chat sendes til cloud først · lokal er fallback",
+            titleSubtitle = "— cloud foretrukket",
             localOnly = false,
         )
         !preferLocal -> KalivSidebarStatus(
@@ -33,6 +35,7 @@ internal fun presentSidebarStatus(
             modelAuthority = "Cloud valgt · ikke konfigureret",
             privacyTitle = "Cloud valgt · ikke klar",
             privacyDetail = "Lokal fallback bruges, hvis den er tilgængelig",
+            titleSubtitle = "— cloud valgt · ikke klar",
             localOnly = false,
         )
         autoCloudFallback && cloudConfigured -> KalivSidebarStatus(
@@ -40,6 +43,7 @@ internal fun presentSidebarStatus(
             modelAuthority = "Primær · lokal",
             privacyTitle = "Lokal først · cloud muligt",
             privacyDetail = "Fejl før første output kan bruge cloud-fallback",
+            titleSubtitle = "— lokal først · cloud muligt",
             localOnly = false,
         )
         autoCloudFallback -> KalivSidebarStatus(
@@ -47,6 +51,7 @@ internal fun presentSidebarStatus(
             modelAuthority = "Primær · lokal",
             privacyTitle = "Chat: lokal nu",
             privacyDetail = "Cloud-fallback er slået til, men cloud er ikke konfigureret",
+            titleSubtitle = "— lokal AI på din maskine",
             localOnly = true,
         )
         else -> KalivSidebarStatus(
@@ -54,10 +59,14 @@ internal fun presentSidebarStatus(
             modelAuthority = "Primær · lokal",
             privacyTitle = "Chat: kun lokal",
             privacyDetail = "Ingen automatisk cloud-fallback",
+            titleSubtitle = "— lokal AI på din maskine",
             localOnly = true,
         )
     }
 }
+
+internal fun presentLocalModelSelectorLabel(localModel: String): String =
+    "Lokal model: ${localModel.ifBlank { "(ikke valgt)" }} ▾"
 
 sealed interface KalivVramTelemetry {
     data object Unavailable : KalivVramTelemetry

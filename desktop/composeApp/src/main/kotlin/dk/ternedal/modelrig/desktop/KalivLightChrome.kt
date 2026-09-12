@@ -119,6 +119,7 @@ fun KalivNavRail(
             modelAuthority = "Lokal · $modelBackend",
             privacyTitle = "Chat: kun lokal",
             privacyDetail = "Legacy-kald uden cloud-routing authority",
+            titleSubtitle = "— lokal AI på din maskine",
             localOnly = true,
         ),
         vram = KalivVramTelemetry.Measured(vramUsedGb, vramTotalGb),
