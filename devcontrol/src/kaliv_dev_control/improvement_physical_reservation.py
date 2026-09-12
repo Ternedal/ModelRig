@@ -16,7 +16,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
@@ -393,7 +393,7 @@ _RESERVATION_FIELDS = {
 
 @dataclass(frozen=True, slots=True)
 class PhysicalQualificationReservation:
-    """Parseable final receipt; authority requires canonical-ledger load."""
+    """Parsed receipt data; only canonical-ledger load marks it authoritative."""
 
     ledger_root_path_sha256: str
     repository_root_path_sha256: str
@@ -425,6 +425,12 @@ class PhysicalQualificationReservation:
     remote_publication_authorized: bool = False
     authority: str = RESERVATION_AUTHORITY
     schema: str = RESERVATION_SCHEMA
+    _canonical_ledger_verified: bool = field(
+        default=False,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if self.schema != RESERVATION_SCHEMA or self.ledger_scope != LEDGER_SCOPE:
@@ -487,9 +493,17 @@ class PhysicalQualificationReservation:
 
     @classmethod
     def from_mapping(cls, value: Any) -> "PhysicalQualificationReservation":
+        """Parse schema-valid data without granting canonical-ledger provenance."""
+
         return cls(
             **_strict(value, fields=_RESERVATION_FIELDS, name="physical reservation")
         )
+
+    @property
+    def canonical_ledger_verified(self) -> bool:
+        """True only after this instance was read back from its bound ledger."""
+
+        return self._canonical_ledger_verified
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -573,6 +587,7 @@ class _PhysicalQualificationRequestLedger:
             raise PhysicalQualificationReservationError(
                 "physical reservation belongs to another host ledger root"
             )
+        object.__setattr__(receipt, "_canonical_ledger_verified", True)
         return receipt
 
     def load(self, request_sha256: str) -> PhysicalQualificationReservation:
@@ -719,8 +734,6 @@ def _reservation_mapping(
     observation: LocalMainHeadObservation,
     consumed_at_utc: str,
 ) -> dict[str, Any]:
-    # This mapping is created only after the irreversible lock exists. The final
-    # receipt object itself is minted only by read-back from the committed file.
     return {
         "schema": RESERVATION_SCHEMA,
         "ledger_scope": LEDGER_SCOPE,
@@ -782,8 +795,6 @@ def _consume_physical_qualification_request_once(
         _safe_root(ledger_root, name="physical request ledger root")
     )
 
-    # Preflight before the irreversible lock avoids burning an obviously stale
-    # request. Authority still comes from the post-lock observation/reverify.
     preflight_at = now_provider()
     _utc(preflight_at, name="trusted preflight time")
     _verify_request_at(
@@ -807,8 +818,6 @@ def _consume_physical_qualification_request_once(
     )
     _require_requested_main(preflight_observation, request)
 
-    # From here onward every failure is fail-closed: the request has been
-    # irreversibly taken out of this host's replay pool.
     ledger.acquire_lock(request.sha256)
     try:
         observed_at = now_provider()
