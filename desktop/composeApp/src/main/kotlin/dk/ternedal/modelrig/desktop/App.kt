@@ -324,28 +324,21 @@ fun App() {
                 }
                 return
             }
-            // System prompt reflects the PREFERRED source (preferLocal), not
-            // necessarily whichever one ends up answering after a fallback —
-            // a known simplification since the router picks the actual source
-            // only at call time. Fine for the common case; a mid-call switch
-            // is the rare edge case (rig went down mid-session). Irrelevant in
-            // RAG mode -- the worker sets its own system prompt.
-            val sys = (if (preferLocal) localSystem else cloudSystem).trim()
-            val history = buildList {
-                if (sys.isNotEmpty()) add(ChatMessage("system", sys))
-                addAll(
-                    messages.filter { it.role == "user" || it.role == "assistant" }
-                        .map { ChatMessage(it.role, it.text) },
-                )
-            }
+            // Conversation history is route-neutral. ChatRouter injects the
+            // product system identity for the source that ACTUALLY executes,
+            // so a fallback can never inherit the preferred source's identity.
+            // RAG stays on the worker path and owns its own system prompt.
+            val history = messages
+                .filter { it.role == "user" || it.role == "assistant" }
+                .map { ChatMessage(it.role, it.text) }
             val useRag = ragMode
             val srcFilter = ragSourceFilter
             val assistantIdx = messages.size
             messages.add(UiMessage("assistant", "", null, streaming = true, status = if (useRag) KalivStatus.RAG else KalivStatus.THINKING))
             scope.launch {
-                // Best-effort source label for the DB row: since ChatRouter can
-                // fall back dynamically, we label by the PREFERRED source
-                // (preferLocal), same known simplification as the system prompt.
+                // Best-effort DB metadata still uses the PREFERRED source.
+                // Chat execution identity itself is route-authoritative in ChatRouter;
+                // persisting the actual fallback source/model is a separate concern.
                 val cid = withContext(Dispatchers.IO) {
                     val id = convId ?: db.newConversation(
                         source = if (useRag) "rag" else if (preferLocal) "rig" else "cloud",
@@ -393,7 +386,16 @@ fun App() {
                             val cloud = if (cloudKey.isNotBlank())
                                 OllamaClient(baseUrl = "https://ollama.com", chatPath = "/api/chat", bearer = cloudKey, think = false)
                             else null
-                            ChatRouter(local, localModel, cloud, cloudModel, preferLocal, autoCloudFallback).chatStream(history) { src, delta ->
+                            ChatRouter(
+                                local = local,
+                                localModel = localModel,
+                                cloud = cloud,
+                                cloudModel = cloudModel,
+                                preferLocal = preferLocal,
+                                autoFallback = autoCloudFallback,
+                                localSystem = localSystem,
+                                cloudSystem = cloudSystem,
+                            ).chatStream(history) { src, delta ->
                                 scope.launch {
                                     lastSource = src
                                     val cur = messages[assistantIdx]
