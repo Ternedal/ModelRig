@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-candidate-runtime-provenance-v1.schema.json",
+  "title": "ModelRig RSI candidate runtime provenance v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "materialization_receipt_sha256",
+    "task_sha256",
+    "candidate_commit_sha",
+    "candidate_tree_sha",
+    "snapshot_tree_sha",
+    "worker_code_sha256",
+    "candidate_eval_sha256",
+    "regression_proof_sha256",
+    "accepted_regression",
+    "authority",
+    "merge_authority"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-candidate-runtime-provenance/v1"},
+    "materialization_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "snapshot_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "worker_code_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_eval_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "regression_proof_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "accepted_regression": {"const": true},
+    "authority": {"const": "evidence-only"},
+    "merge_authority": {"const": "human"}
+  }
+}
