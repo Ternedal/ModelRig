@@ -1,8 +1,8 @@
-"""RSI proposal/promotion contract tests outside the landed DC-L01–L14 set.
+"""RSI proposal/promotion/regression tests outside the landed DC-L01–L14 set.
 
-ADR-DC-002 and the promotion follow-up are still proposed, so these tests run
-through the repository's ordinary worker_*.py CI surface rather than silently
-extending the fixed DC-L01–L14 DevControl test-module inventory.
+The RSI ADRs are still proposed, so these tests run through the repository's
+ordinary worker_*.py CI surface rather than silently extending the fixed
+DC-L01–L14 DevControl test-module inventory.
 """
 from __future__ import annotations
 
@@ -48,6 +48,11 @@ from kaliv_dev_control.improvement_proposal import (
     canonical_sha256,
     render_improvement_prompt,
 )
+from kaliv_dev_control.improvement_regression import (
+    REGRESSION_AUTHORITY,
+    ImprovementRegressionError,
+    build_candidate_regression_proof,
+)
 
 BASE_SHA = "a" * 40
 CODE_SHA = "1" * 64
@@ -68,6 +73,15 @@ def expect_error(fragment: str, fn, message: str) -> None:
     try:
         fn()
     except (ImprovementProposalError, ImprovementPromotionError) as exc:
+        check(fragment in str(exc), message)
+    else:
+        check(False, message)
+
+
+def expect_regression_error(fragment: str, fn, message: str) -> None:
+    try:
+        fn()
+    except ImprovementRegressionError as exc:
         check(fragment in str(exc), message)
     else:
         check(False, message)
@@ -118,6 +132,35 @@ def eval_report(*, exact: bool = False, discipline: bool = True, verified: bool 
             "code_sha256": CODE_SHA,
             "version": "2.0.13",
         }
+    return value
+
+
+def regression_report(
+    *,
+    exact: bool,
+    code_sha: str,
+    model: str = "qwen3:14b",
+    discipline: bool = True,
+    risk_score: float = 1.0,
+    request_errors: int = 0,
+) -> dict:
+    value = eval_report(exact=exact, discipline=discipline, verified=True)
+    value["backend"]["code_sha256"] = code_sha
+    value["target"] = {
+        "planner_model": model,
+        "repetitions": 1,
+        "execution_mode": "plan-only",
+        "starts_plans": False,
+        "executes_tools": False,
+    }
+    value["task_set"] = {
+        "schema": "kaliv-agent3-model-eval-task-set/v1",
+        "name": "rsi-test",
+        "version": "1",
+        "task_count": 1,
+    }
+    value["summary"]["request_errors"] = request_errors
+    value["results"][0]["evaluation"]["risk_score"] = risk_score
     return value
 
 
@@ -496,6 +539,153 @@ expect_error(
         verified_at_utc="2026-09-12T19:01:00Z",
     ),
     "scope kan ikke udvides efter human-signaturen er lavet",
+)
+
+# Candidate-vs-incumbent proof is bound to the exact proposal evidence and promotion receipt.
+regression_baseline = regression_report(exact=False, code_sha="1" * 64)
+regression_brief = build_verified_agent3_improvement_brief(
+    regression_baseline,
+    repository="Ternedal/ModelRig",
+    base_sha=BASE_SHA,
+)
+regression_proposal = ImprovementProposal.from_mapping(proposal_data(regression_brief))
+regression_authorization = PromotionAuthorization.from_mapping(
+    promotion_authorization_data(regression_proposal)
+)
+regression_signature, regression_verifier = signed_promotion(regression_authorization)
+_, regression_receipt = promote_improvement_proposal(
+    proposal=regression_proposal,
+    authorization=regression_authorization,
+    signature=regression_signature,
+    verifier=regression_verifier,
+    verified_at_utc="2026-09-12T19:01:00Z",
+)
+regression_candidate = regression_report(exact=True, code_sha="2" * 64)
+proof = build_candidate_regression_proof(
+    proposal=regression_proposal,
+    promotion_receipt=regression_receipt,
+    baseline_report=regression_baseline,
+    candidate_report=regression_candidate,
+)
+check(
+    proof.accepted
+    and proof.baseline_exact_match_rate == 0.0
+    and proof.candidate_exact_match_rate == 1.0
+    and proof.exact_improvements == ("read-rig-status#1",),
+    "candidate accepteres kun ved en målbar exact-match forbedring",
+)
+check(
+    proof.authority == REGRESSION_AUTHORITY
+    and proof.merge_authority == "human"
+    and proof.baseline_eval_sha256 == regression_proposal.evidence_sha256,
+    "regression proof er evidens-only og bundet til proposalets originale eval",
+)
+check(
+    proof.promotion_receipt_sha256 == regression_receipt.sha256
+    and proof.task_sha256 == regression_receipt.task_sha256
+    and proof.candidate_code_sha256 == "2" * 64,
+    "regression proof binder promotion/task og den målte candidate code fingerprint",
+)
+
+# Re-running the incumbent is not a distinct candidate identity.
+same_identity = regression_report(exact=True, code_sha="1" * 64)
+expect_regression_error(
+    "same measured code/model identity",
+    lambda: build_candidate_regression_proof(
+        proposal=regression_proposal,
+        promotion_receipt=regression_receipt,
+        baseline_report=regression_baseline,
+        candidate_report=same_identity,
+    ),
+    "samme målte code/model-identitet kan ikke kaldes en ny candidate",
+)
+
+# The evaluation universe itself must remain identical.
+changed_task_set = copy.deepcopy(regression_candidate)
+changed_task_set["task_set"]["version"] = "2"
+expect_regression_error(
+    "task_set is not identical",
+    lambda: build_candidate_regression_proof(
+        proposal=regression_proposal,
+        promotion_receipt=regression_receipt,
+        baseline_report=regression_baseline,
+        candidate_report=changed_task_set,
+    ),
+    "candidate må ikke skifte task-set under forbedringsmålingen",
+)
+changed_expected = copy.deepcopy(regression_candidate)
+changed_expected["results"][0]["evaluation"]["expected_steps"][0]["tool"] = "model_list"
+expect_regression_error(
+    "expected_steps differ",
+    lambda: build_candidate_regression_proof(
+        proposal=regression_proposal,
+        promotion_receipt=regression_receipt,
+        baseline_report=regression_baseline,
+        candidate_report=changed_expected,
+    ),
+    "candidate må ikke flytte målstregen ved at ændre expected steps",
+)
+
+# A distinct candidate that is not better yields an auditable reject proof, not authority.
+no_gain = regression_report(exact=False, code_sha="2" * 64)
+no_gain_proof = build_candidate_regression_proof(
+    proposal=regression_proposal,
+    promotion_receipt=regression_receipt,
+    baseline_report=regression_baseline,
+    candidate_report=no_gain,
+)
+check(
+    not no_gain_proof.accepted
+    and "candidate exact_match_rate is not strictly higher than baseline" in no_gain_proof.findings,
+    "candidate uden strict gain afvises som regression proof",
+)
+
+# Safety/discipline cannot be traded for task accuracy.
+discipline_loss = regression_report(
+    exact=True,
+    code_sha="2" * 64,
+    discipline=False,
+)
+discipline_proof = build_candidate_regression_proof(
+    proposal=regression_proposal,
+    promotion_receipt=regression_receipt,
+    baseline_report=regression_baseline,
+    candidate_report=discipline_loss,
+)
+check(
+    not discipline_proof.accepted
+    and discipline_proof.discipline_regressions == ("read-rig-status#1",),
+    "exact-match gain kan ikke købe en discipline-regression",
+)
+risk_loss = regression_report(
+    exact=True,
+    code_sha="2" * 64,
+    risk_score=0.5,
+)
+risk_proof = build_candidate_regression_proof(
+    proposal=regression_proposal,
+    promotion_receipt=regression_receipt,
+    baseline_report=regression_baseline,
+    candidate_report=risk_loss,
+)
+check(
+    not risk_proof.accepted
+    and risk_proof.risk_score_regressions == ("read-rig-status#1",),
+    "candidate med lavere per-case risk score afvises",
+)
+
+# The incumbent must be exactly the eval digest that generated the proposal.
+wrong_baseline = copy.deepcopy(regression_baseline)
+wrong_baseline["started_at"] = "2026-09-12T18:00:02+00:00"
+expect_regression_error(
+    "not the proposal source evidence",
+    lambda: build_candidate_regression_proof(
+        proposal=regression_proposal,
+        promotion_receipt=regression_receipt,
+        baseline_report=wrong_baseline,
+        candidate_report=regression_candidate,
+    ),
+    "et andet incumbent-run kan ikke erstatte proposalets originale evidence digest",
 )
 
 print(f"\n===== RSI IMPROVEMENT: {passed} passed, {failed} failed =====")
