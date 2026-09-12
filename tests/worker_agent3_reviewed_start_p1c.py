@@ -1,40 +1,4 @@
-from pathlib import Path
-
-
-def replace_once(path: str, old: str, new: str) -> None:
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{path}: expected one match, found {count}")
-    p.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-
-replace_once(
-    "worker/app/agent3/planner.py",
-    '''    CapabilitySnapshot,\n    RouteKind,\n    TurnRequest,\n''',
-    '''    CapabilitySnapshot,\n    RouteKind,\n    RunState,\n    TurnRequest,\n''',
-)
-
-replace_once(
-    "worker/app/agent3/planner.py",
-    '''    def _reconcile_reviewed_start_run(run_id: str) -> AgentRun:\n        try:\n            return orchestrator.advance(run_id)\n        except Exception as exc:\n            raise _reviewed_start_error(\n                "reviewed_start_pending",\n                "persisted reviewed Start requires recovery retry",\n                status_code=503,\n            ) from exc\n''',
-    '''    def _reconcile_reviewed_start_run(run_id: str) -> AgentRun:\n        existing = orchestrator.store.load(run_id)\n        if existing is None:\n            raise _reviewed_start_error(\n                "reviewed_start_pending",\n                "persisted reviewed Start run is not yet materialized",\n                status_code=503,\n            )\n        # Only RUNNING snapshots need crash reconciliation. BLOCKED is terminal\n        # authority too (for example route/capability drift before execution),\n        # and advancing it would try to complete a non-RUNNING run forever.\n        if existing.state is not RunState.RUNNING:\n            return existing\n        try:\n            return orchestrator.advance(run_id)\n        except Exception as exc:\n            raise _reviewed_start_error(\n                "reviewed_start_pending",\n                "persisted reviewed Start requires recovery retry",\n                status_code=503,\n            ) from exc\n''',
-)
-
-replace_once(
-    "worker/app/agent3/plan_store.py",
-    '''        state, run_id, owner_raw, expires_at = row\n        if time.time() > float(expires_at):\n            return "refused", None, None\n        if state == "refused":\n            return "refused", None, None\n        if state not in {"pending", "accepted"}:\n            raise PlanStoreError("reviewed Start has invalid state")\n        if not isinstance(run_id, str) or not run_id:\n            raise PlanStoreError("reviewed Start is missing its reserved run id")\n        return str(state), run_id, self._owner_value(owner_raw)\n''',
-    '''        state, run_id, owner_raw, _expires_at = row\n        # Once Start has been claimed, wall-clock expiry must never turn ambiguous\n        # execution authority into a definitive refusal. The exact plan/run binding\n        # remains recoverable until code explicitly records a refusal.\n        if state == "refused":\n            return "refused", None, None\n        if state not in {"pending", "accepted"}:\n            raise PlanStoreError("reviewed Start has invalid state")\n        if not isinstance(run_id, str) or not run_id:\n            raise PlanStoreError("reviewed Start is missing its reserved run id")\n        return str(state), run_id, self._owner_value(owner_raw)\n''',
-)
-
-replace_once(
-    "worker/app/agent3/plan_store.py",
-    '''                connection.execute(\n                    "DELETE FROM agent_reviewed_starts WHERE expires_at < ?",\n                    (now,),\n                )\n                cursor = connection.execute(\n                    "DELETE FROM agent_plans WHERE expires_at < ? AND ("\n                    "start_result IS NULL OR start_result='refused' OR "\n                    "(start_result IN ('pending','accepted') "\n                    "AND start_terminal_at IS NOT NULL))",\n                    (now,),\n                )\n''',
-    '''                connection.execute(\n                    "DELETE FROM agent_reviewed_starts "\n                    "WHERE expires_at < ? AND state='refused'",\n                    (now,),\n                )\n                cursor = connection.execute(\n                    "DELETE FROM agent_plans WHERE expires_at < ? AND ("\n                    "start_result IS NULL OR start_result='refused' OR "\n                    "(start_result IN ('pending','accepted') "\n                    "AND start_terminal_at IS NOT NULL)) "\n                    "AND id NOT IN (SELECT plan_id FROM agent_reviewed_starts "\n                    "WHERE state IN ('pending','accepted'))",\n                    (now,),\n                )\n''',
-)
-
-Path("tests/worker_agent3_reviewed_start_p1c.py").write_text(r'''from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -192,6 +156,3 @@ assert refused_rows == []
 reopened.close()
 
 print("14 passed, 0 failed")
-''', encoding="utf-8")
-
-print("reviewed Start P1c patch staged")

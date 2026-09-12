@@ -215,9 +215,10 @@ class PlanStore:
                 ).fetchone()
         if row is None:
             return None
-        state, run_id, owner_raw, expires_at = row
-        if time.time() > float(expires_at):
-            return "refused", None, None
+        state, run_id, owner_raw, _expires_at = row
+        # Once Start has been claimed, wall-clock expiry must never turn ambiguous
+        # execution authority into a definitive refusal. The exact plan/run binding
+        # remains recoverable until code explicitly records a refusal.
         if state == "refused":
             return "refused", None, None
         if state not in {"pending", "accepted"}:
@@ -784,14 +785,17 @@ class PlanStore:
         with self._lock:
             with self._connection() as connection:
                 connection.execute(
-                    "DELETE FROM agent_reviewed_starts WHERE expires_at < ?",
+                    "DELETE FROM agent_reviewed_starts "
+                    "WHERE expires_at < ? AND state='refused'",
                     (now,),
                 )
                 cursor = connection.execute(
                     "DELETE FROM agent_plans WHERE expires_at < ? AND ("
                     "start_result IS NULL OR start_result='refused' OR "
                     "(start_result IN ('pending','accepted') "
-                    "AND start_terminal_at IS NOT NULL))",
+                    "AND start_terminal_at IS NOT NULL)) "
+                    "AND id NOT IN (SELECT plan_id FROM agent_reviewed_starts "
+                    "WHERE state IN ('pending','accepted'))",
                     (now,),
                 )
                 connection.commit()

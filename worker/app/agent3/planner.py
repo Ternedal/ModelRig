@@ -20,6 +20,7 @@ from .core import (
     AgentStep,
     CapabilitySnapshot,
     RouteKind,
+    RunState,
     TurnRequest,
 )
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
@@ -429,6 +430,18 @@ def build_planner_router(
         )
 
     def _reconcile_reviewed_start_run(run_id: str) -> AgentRun:
+        existing = orchestrator.store.load(run_id)
+        if existing is None:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start run is not yet materialized",
+                status_code=503,
+            )
+        # Only RUNNING snapshots need crash reconciliation. BLOCKED is terminal
+        # authority too (for example route/capability drift before execution),
+        # and advancing it would try to complete a non-RUNNING run forever.
+        if existing.state is not RunState.RUNNING:
+            return existing
         try:
             return orchestrator.advance(run_id)
         except Exception as exc:
