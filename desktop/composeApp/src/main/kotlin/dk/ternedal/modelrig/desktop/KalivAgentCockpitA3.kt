@@ -89,8 +89,14 @@ fun KalivAgentCockpitA3(
     var revision by remember { mutableStateOf(1) }
     var lastTotal by remember { mutableStateOf(0) }
     val log = remember { mutableStateListOf<String>() }
+    var publicationEpoch by remember { mutableStateOf(0L) }
 
     fun client() = Agent3Client(baseUrl, bearer.orEmpty())
+
+    fun advancePublicationEpoch(): Long {
+        publicationEpoch = nextAgent3CockpitPublicationEpoch(publicationEpoch)
+        return publicationEpoch
+    }
 
     // Availability is discovered, not assumed: Agent 3 is dormant unless the
     // rig opted in, and a cockpit that pretends otherwise would fail at the
@@ -102,16 +108,19 @@ fun KalivAgentCockpitA3(
                 "KALIV_AGENT3_ENABLED=1 og ligger under /experimental/."
     }
 
-    fun refresh(runId: String) {
+    fun refresh(runId: String, requestEpoch: Long = publicationEpoch) {
         scope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { client().getRun(runId) } }
+            if (!canPublishAgent3CockpitResponse(requestEpoch, publicationEpoch)) return@launch
             r.onSuccess { fresh ->
                 val total = fresh.steps.size
                 if (lastTotal != 0 && total != lastTotal) revision += 1
                 lastTotal = total
                 run = fresh
             }.onFailure { error = it.message }
+
             val ev = withContext(Dispatchers.IO) { runCatching { client().events(runId) } }
+            if (!canPublishAgent3CockpitResponse(requestEpoch, publicationEpoch)) return@launch
             ev.onSuccess { list ->
                 log.clear()
                 list.takeLast(40).forEach { log.add(it.kind) }
@@ -148,15 +157,18 @@ fun KalivAgentCockpitA3(
             hasPreview = true,
         )
         if (!presentation.previewStartEnabled) return
+        val mutationEpoch = advancePublicationEpoch()
         busy = true; error = null
         scope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { client().startPlan(id) } }
-            r.onSuccess {
-                run = it
-                lastTotal = it.steps.size
-                planId = null // single-use: the id cannot be started twice
-                refresh(it.id)
-            }.onFailure { error = it.message }
+            if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
+                r.onSuccess {
+                    run = it
+                    lastTotal = it.steps.size
+                    planId = null // single-use: the id cannot be started twice
+                    refresh(it.id, mutationEpoch)
+                }.onFailure { error = it.message }
+            }
             busy = false
         }
     }
@@ -179,15 +191,23 @@ fun KalivAgentCockpitA3(
     }
 
     fun decide(step: Agent3Step, approve: Boolean) {
+        if (busy) return
         val r = run ?: return
         val sid = step.id ?: return
         val digest = step.confirmationDigest ?: return
+        val mutationEpoch = advancePublicationEpoch()
         busy = true
+        error = null
         scope.launch {
             val res = withContext(Dispatchers.IO) {
                 runCatching { client().confirm(r.id, sid, digest, approve) }
             }
-            res.onSuccess { run = it; refresh(it.id) }.onFailure { error = it.message }
+            if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
+                res.onSuccess {
+                    run = it
+                    refresh(it.id, mutationEpoch)
+                }.onFailure { error = it.message }
+            }
             busy = false
         }
     }
@@ -200,15 +220,18 @@ fun KalivAgentCockpitA3(
             planCanRequestStop = r.termination?.plan?.canRequest,
         )
         if (!presentation.stopPlanEnabled) return
+        val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
         scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { client().cancel(r.id) } }
-            result.onSuccess { fresh ->
-                run = fresh
-                refresh(fresh.id)
-            }.onFailure {
-                error = it.message ?: "Planen kunne ikke stoppes"
+            if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
+                result.onSuccess { fresh ->
+                    run = fresh
+                    refresh(fresh.id, mutationEpoch)
+                }.onFailure {
+                    error = it.message ?: "Planen kunne ikke stoppes"
+                }
             }
             busy = false
         }
@@ -218,6 +241,9 @@ fun KalivAgentCockpitA3(
         val current = run ?: return
         val presentation = presentAgent3CockpitInteraction(busy = busy, runState = current.state)
         if (!presentation.clearTerminalRunEnabled) return
+        // Invalidate any detached refresh so it cannot resurrect the locally
+        // cleared terminal history after this explicit reset.
+        advancePublicationEpoch()
         // Local history reset only. The server run is already terminal; this
         // action never claims to cancel or mutate remote execution.
         run = null
