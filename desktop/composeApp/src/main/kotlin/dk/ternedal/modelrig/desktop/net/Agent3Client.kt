@@ -297,19 +297,24 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
             ),
         )
         if (reviewReads != null) {
-            val responseReviewReads = runCatching {
-                val root = json.parseToJsonElement(body) as? JsonObject
-                val raw = root?.get("review_reads") as? JsonPrimitive
-                when {
-                    raw == null || raw.isString -> null
-                    raw.content == "true" -> true
-                    raw.content == "false" -> false
-                    else -> null
-                }
-            }.getOrNull()
+            val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            val rawReviewReads = root?.get("review_reads") as? JsonPrimitive
+            val responseReviewReads = when {
+                rawReviewReads == null || rawReviewReads.isString -> null
+                rawReviewReads.content == "true" -> true
+                rawReviewReads.content == "false" -> false
+                else -> null
+            }
             if (responseReviewReads != reviewReads) {
                 throw Agent3Exception(
                     "Invalid Agent 3.0 Preview envelope: server review_reads does not match reviewed intent"
+                )
+            }
+            val rawReceipt = root?.get("capability_receipt")
+            if (rawReceipt != null && rawReceipt !== JsonNull) {
+                requireRawCapabilityReceipt(
+                    rawReceipt,
+                    context = "reviewed Preview capability evidence",
                 )
             }
         }
@@ -349,19 +354,34 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
      * exposed separately. A raw mode conflict can therefore yield only a safe
      * run-id recovery reference, never normal reviewed Start authority.
      */
-    internal fun startReviewedPlanTransport(planId: String): Agent3ReviewedStartTransportEnvelope {
+    internal fun startReviewedPlanTransport(
+        planId: String,
+        expectedCapabilityReceiptPresent: Boolean,
+    ): Agent3ReviewedStartTransportEnvelope {
         val body = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            ?: throw Agent3Exception(
+                "Invalid Agent 3.0 reviewed Start envelope: response is not an object"
+            )
+        val rawReceipt = root["capability_receipt"]
+        if (expectedCapabilityReceiptPresent) {
+            requireRawCapabilityReceipt(
+                rawReceipt,
+                context = "reviewed Start capability evidence",
+            )
+        } else if (rawReceipt != null && rawReceipt !== JsonNull) {
+            throw Agent3Exception(
+                "Invalid Agent 3.0 reviewed Start capability evidence: receipt was not expected"
+            )
+        }
         val envelope = decodeRunEnvelope(body, expectedPlanId = planId)
-        val responseReviewReads = runCatching {
-            val root = json.parseToJsonElement(body) as? JsonObject
-            val raw = root?.get("review_reads") as? JsonPrimitive
-            when {
-                raw == null || raw.isString -> null
-                raw.content == "true" -> true
-                raw.content == "false" -> false
-                else -> null
-            }
-        }.getOrNull() ?: throw Agent3Exception(
+        val rawReviewReads = root["review_reads"] as? JsonPrimitive
+        val responseReviewReads = when {
+            rawReviewReads == null || rawReviewReads.isString -> null
+            rawReviewReads.content == "true" -> true
+            rawReviewReads.content == "false" -> false
+            else -> null
+        } ?: throw Agent3Exception(
             "Invalid Agent 3.0 Start envelope: server review_reads is not a boolean binding"
         )
         return Agent3ReviewedStartTransportEnvelope(
