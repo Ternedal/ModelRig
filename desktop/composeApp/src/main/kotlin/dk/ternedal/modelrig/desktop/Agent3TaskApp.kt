@@ -511,8 +511,8 @@ private fun DesktopRunCard(
             value.events.takeLast(20).forEach { event ->
                 Spacer(Modifier.height(5.dp))
                 Text(event.kind, color = KalivTheme.colors.Signal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                event.payload?.toString()?.takeIf { it.isNotBlank() }?.let {
-                    Text(it.take(420), color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+                presentTaskEventStructuredDetail(event.payload != null)?.let { detail ->
+                    Text(detail, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
                 }
             }
         }
@@ -596,8 +596,8 @@ private fun DesktopStepCard(index: Int, step: Agent3ReadonlyTaskStep) {
             color = KalivTheme.colors.TextMuted,
             fontSize = 10.sp,
         )
-        if (step.args.isNotEmpty()) {
-            Text("args: ${step.args.toString().take(420)}", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+        presentTaskStepStructuredDetail(step.args.isNotEmpty())?.let { detail ->
+            Text(detail, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         }
         step.error?.takeIf { it.isNotBlank() }?.let {
             Text(it, color = KalivTheme.colors.Danger, fontSize = 10.sp)
