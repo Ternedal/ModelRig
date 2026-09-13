@@ -137,6 +137,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_outcome_answer_api.py`
 - `tests/worker_agent3_outcome_context.py`
 - `tests/worker_agent3_outcome_context_adversarial.py`
+- `tests/worker_agent3_pair_adoption.py`
 - `tests/worker_agent3_plan_authority_api.py`
 - `tests/worker_agent3_plan_single_use.py`
 - `tests/worker_agent3_plan_store.py`
@@ -179,6 +180,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_rig_validation_cli.py`
 - `tests/worker_agent3_risk_parity.py`
 - `tests/worker_agent3_routing_preview.py`
+- `tests/worker_agent3_run_schema_guard.py`
 - `tests/worker_agent3_smoke_cli.py`
 - `tests/worker_agent3_task_readiness.py`
 - `tests/worker_agent3_task_readiness_entrypoint.py`
