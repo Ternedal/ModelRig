@@ -113,18 +113,28 @@ Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDA
 
 Gør request-reservation til én authenticated host-local transaction. Public
 consume-pathen kan ikke få observation, clock eller authority-paths indsprøjtet;
-den udleder canonical repository/host-state selv. Den staged Git-runtime skal
-matche manifest + executable fra `CandidateSnapshotReceipt`, hvis SHA allerede
-er bundet af den human-signerede qualification chain. Først derefter tages den
-irreversible lock, `main` genlæses, og requesten re-verificeres mod current time.
+den udleder canonical repository/host-state selv. Caller-ejede request,
+qualification, snapshot receipt, signature og verifier/keyring kopieres først
+til exact-type canonical value snapshots, og subclasses af authority-typer
+afvises.
+
+Den caller-leverede `TrustedGitRuntime` skal ligeledes være exact type og
+rekonstrueres lokalt fra sin verificerede transaction-root. Den rekonstruerede
+runtime skal matche manifest + executable fra `CandidateSnapshotReceipt`, hvis
+SHA allerede er bundet af den human-signerede qualification chain. Først
+derefter tages den irreversible lock, `main` genlæses, og requesten
+re-verificeres mod current time med de lokale snapshots.
 
 Den durable ledger er kun host-local replay/recovery-state og kan ikke reloades
-som authenticated authority. Kun den succesfulde live consume-transaktion kan
-returnere en ikke-serialiseret `transaction_authenticated=true` instans efter
-create-once commit, canonical read-back og cleanup. Provenance bindes samtidig
-til exact objekt-identitet, originating PID og canonical receipt-SHA; mutation
-invaliderer den straks, og POSIX fork-child arver ingen authority. Persisted eller
-manuelt fremstillede canonical bytes forbliver `transaction_authenticated=false`.
+som authenticated authority. Final read-back skal være byte-identisk med den
+canonical payload, transactionen netop create-once skrev, så en schema-valid
+race-replacement ikke kan opgraderes til live authority. Kun den succesfulde
+live consume-transaktion kan derefter returnere en ikke-serialiseret
+`transaction_authenticated=true` instans efter cleanup. Provenance bindes til
+exact objekt-identitet, originating PID og canonical receipt-SHA; mutation
+invaliderer den straks, og POSIX fork-child arver ingen authority. Persisted,
+manuelt fremstillede eller race-udskiftede canonical bytes forbliver
+`transaction_authenticated=false`.
 
 Replay-scope er fortsat eksplicit host-local (`host_replay_guard_committed=true`,
 `global_replay_safe=false`). Vedvarende frozen `main`, campaign-start, pilot,
