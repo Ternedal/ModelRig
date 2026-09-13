@@ -135,6 +135,17 @@ class PhysicalReplayStateHostControlTests(unittest.TestCase):
             self._stat(uid=0, mode=0o755)
         )
 
+    @unittest.skipUnless(os.name == "posix", "POSIX operator regression")
+    def test_posix_replay_writer_requires_effective_root(self):
+        with patch.object(state_control.os, "geteuid", return_value=1000):
+            with self.assertRaisesRegex(
+                state_control.PhysicalHostStateError,
+                "elevated host operator",
+            ):
+                state_control._require_posix_elevated_operator()
+        with patch.object(state_control.os, "geteuid", return_value=0):
+            state_control._require_posix_elevated_operator()
+
     @unittest.skipUnless(os.name == "posix", "POSIX host-state regression")
     def test_ordinary_temp_tree_cannot_be_production_replay_state(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -157,6 +168,27 @@ class PhysicalReplayStateHostControlTests(unittest.TestCase):
         missing = OSError(errno.ENODATA, "no acl")
         with patch.object(state_control.os, "getxattr", side_effect=missing):
             state_control._require_no_posix_acl(Path("/synthetic"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX operator regression")
+    def test_canonical_ledger_checks_operator_before_host_state(self):
+        events: list[str] = []
+        with (
+            patch.object(
+                state_control,
+                "_require_elevated_operator",
+                side_effect=lambda: events.append("operator"),
+            ),
+            patch.object(
+                state_control,
+                "_require_posix_host_control",
+                side_effect=lambda path: events.append("ledger") or path,
+            ),
+        ):
+            self.assertEqual(
+                state_control._canonical_host_controlled_ledger_root(),
+                state_control._POSIX_LEDGER,
+            )
+        self.assertEqual(events, ["operator", "ledger"])
 
     def test_public_facade_uses_privilege_separated_replay_resolver(self):
         self.assertIs(
