@@ -2,8 +2,8 @@
 
 The migration contract is stronger than "the code runs": create realistic state
 for every current persistent store, back it up, wipe it, restore it and compare
-the bytes. The failure cases also prove corrupt archives and silent clobber are
-refused.
+portable semantics. Failure cases prove corrupt/mixed authority and half-publish
+paths fail closed.
 
 Run: PYTHONPATH=worker python3 tests/worker_backup.py
 """
@@ -20,8 +20,6 @@ import tarfile
 import tempfile
 
 _root = tempfile.mkdtemp(prefix="kaliv-backup-test-")
-# One stable root exercises the same defaults used by a real Windows rig. The
-# backend pairing file and notes have their own authoritative locations.
 os.environ["KALIV_DATA_DIR"] = os.path.join(_root, "data-root")
 os.environ["MODELRIG_DATA"] = os.path.join(_root, "backend", "modelrig-data.json")
 os.environ["KALIV_TOOLS_DIR"] = os.path.join(_root, "notes")
@@ -99,7 +97,7 @@ def seed():
 
 
 def snapshot() -> dict:
-    """sha256 of every persistent file, for a byte-for-byte before/after."""
+    """sha256 of every persistent file."""
     out = {}
     for it in backup.items():
         if it.kind == "file" and os.path.exists(it.path):
@@ -128,7 +126,7 @@ def archive_with_schema(
     drop_keys=(),
     replace_files=None,
 ) -> None:
-    """Copy an archive while changing manifest.schema and optionally dropping keys."""
+    """Copy an archive while changing schema and optionally replacing members."""
     drop_keys = set(drop_keys)
     replace_files = dict(replace_files or {})
     with tarfile.open(source, "r:gz") as src, tarfile.open(destination, "w:gz") as dst:
@@ -154,6 +152,14 @@ def archive_with_schema(
             dst.addfile(replacement, io.BytesIO(data))
 
 
+def archive_member_bytes(archive: str, key: str) -> bytes:
+    with tarfile.open(archive, "r:gz") as tar:
+        member = tar.extractfile(f"data/{key}")
+        if member is None:
+            raise AssertionError(f"missing archive member {key}")
+        return member.read()
+
+
 def execution_progress_bytes_with_erasing_trigger() -> bytes:
     fd, path = tempfile.mkstemp(prefix="kaliv-trigger-progress-", suffix=".db")
     os.close(fd)
@@ -166,9 +172,6 @@ def execution_progress_bytes_with_erasing_trigger() -> bytes:
             "WHERE run_id=NEW.run_id AND step_index=NEW.step_index "
             "AND step_sha256=NEW.step_sha256; END"
         )
-        # A catalog name is attacker-controlled after writable_schema edits. Hide
-        # the still-active trigger behind sqlite_* so validation must inspect the
-        # complete catalog instead of treating the reserved prefix as trusted.
         con.execute("PRAGMA writable_schema=ON")
         con.execute(
             "UPDATE sqlite_master SET name='sqlite_erasing_trigger', "
@@ -178,8 +181,6 @@ def execution_progress_bytes_with_erasing_trigger() -> bytes:
         con.commit()
         con.close()
 
-        # Reopen exactly as restore would: the reserved-name trigger must still
-        # be live and capable of erasing an inserted watermark.
         probe = sqlite3.connect(path)
         probe.execute(
             "INSERT OR IGNORE INTO agent_execution_starts("
@@ -273,23 +274,37 @@ check(os.path.exists(archive), "create: archive written")
 check(archive.endswith(".tar.gz"), "create: archive is a gzip tarball")
 check(not os.path.exists(archive + ".tmp"), "create: no leftover temp file")
 manifest = backup._read_manifest(archive)
-check(manifest["schema"] == 3, "schema: execution-authority inventory writes schema 3")
-check(1 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: current code retains schema-1 read compatibility")
-check(2 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: current code retains schema-2 read compatibility")
+check(manifest["schema"] == 4, "schema: paired Agent3 authority writes schema 4")
+check(1 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: schema-1 read compatibility remains for safe legacy state")
+check(2 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: schema-2 read compatibility remains for safe legacy state")
+check(3 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: schema-3 reader remains for safe legacy state")
+check(
+    isinstance(manifest.get(backup.AGENT3_SNAPSHOT_MANIFEST_KEY), str),
+    "create: paired Agent3 authority carries a manifest snapshot generation",
+)
 check(
     "agent3-execution-progress.db" in manifest["files"],
     "create: execution-progress authority is present beside Agent3 runs",
 )
 
 verified = backup.verify(archive)
-check(verified["ok"], "verify: a fresh backup passes its own hashes and authority relation")
+check(verified["ok"], "verify: a fresh backup passes hashes + bound authority validation")
 check(verified["checked"] == len(before), "verify: every seeded file is in the archive")
 
-# Legacy schema numbers remain readable only when the archive actually carries
-# the execution authority required by any Agent3 run state it contains.
+# Materialized legacy Agent3 authority is no longer provable as one snapshot.
+# Even if both old files are present, schema 1-3 cannot attest that they belong
+# together and therefore must not restore non-idempotent execution authority.
 legacy = os.path.join(_root, "legacy-schema-1.tar.gz")
 archive_with_schema(archive, legacy, 1)
-check(backup.verify(legacy)["ok"], "schema: legacy schema 1 with complete execution authority still verifies")
+legacy_verify = backup.verify(legacy)
+check(
+    not legacy_verify["ok"],
+    "schema: materialized legacy Agent3 authority is refused without snapshot binding",
+)
+check(
+    any("schema-4" in problem for problem in legacy_verify["problems"]),
+    "schema: legacy refusal names the missing schema-4 snapshot binding",
+)
 
 unsafe_legacy = os.path.join(_root, "unsafe-schema-2-without-progress.tar.gz")
 archive_with_schema(
@@ -312,9 +327,7 @@ except ValueError:
     check(True, "restore: unsafe legacy Agent3 archive is refused")
 check(snapshot() == pre_unsafe_restore, "restore: unsafe legacy refusal writes NOTHING")
 
-# The relation is two-way at restore time. A progress-only archive must never be
-# allowed to overwrite the live watermark sidecar while retaining a different
-# destination run DB; that would erase rollback fencing for the retained runs.
+# The relation is two-way: progress authority may never travel without runs.
 progress_only = os.path.join(_root, "progress-only-without-runs.tar.gz")
 archive_with_schema(
     archive,
@@ -342,9 +355,42 @@ check(
     "restore: progress-only refusal preserves live run + watermark authority byte-for-byte",
 )
 
-# A sidecar whose bytes hash correctly but which is not the execution-authority
-# SQLite schema must still fail verification. Hashes prove transport integrity,
-# not authority semantics.
+# A different, independently valid run snapshot cannot be paired with this
+# archive's watermark snapshot merely by updating the transport hash.
+second_archive = backup.create(os.path.join(_root, "second-generation"))
+second_manifest = backup._read_manifest(second_archive)
+check(
+    second_manifest[backup.AGENT3_SNAPSHOT_MANIFEST_KEY]
+    != manifest[backup.AGENT3_SNAPSHOT_MANIFEST_KEY],
+    "create: independent backups receive different Agent3 snapshot generations",
+)
+mixed_pair = os.path.join(_root, "mixed-agent3-authority.tar.gz")
+archive_with_schema(
+    archive,
+    mixed_pair,
+    4,
+    replace_files={
+        backup.AGENT3_RUNS_KEY: archive_member_bytes(second_archive, backup.AGENT3_RUNS_KEY)
+    },
+)
+mixed_verify = backup.verify(mixed_pair)
+check(
+    not mixed_verify["ok"],
+    "verify: independently valid run/progress snapshots cannot be mixed",
+)
+check(
+    any("snapshot binding" in problem for problem in mixed_verify["problems"]),
+    "verify: mixed pair names the snapshot-generation mismatch",
+)
+pre_mixed_restore = snapshot()
+try:
+    backup.restore(mixed_pair, force=True)
+    check(False, "restore: mixed Agent3 authority pair is refused")
+except ValueError:
+    check(True, "restore: mixed Agent3 authority pair is refused")
+check(snapshot() == pre_mixed_restore, "restore: mixed-pair refusal writes NOTHING")
+
+# Hashes prove transport integrity, not authority semantics.
 invalid_progress = os.path.join(_root, "invalid-execution-progress.tar.gz")
 archive_with_schema(
     archive,
@@ -369,11 +415,6 @@ except ValueError:
     check(True, "restore: invalid execution-progress authority is refused")
 check(snapshot() == pre_invalid_restore, "restore: invalid authority refusal writes NOTHING")
 
-# A syntactically valid sidecar can still be unsafe if extra schema objects can
-# mutate watermark semantics. The fixture is stronger than an ordinary trigger:
-# writable_schema renames the still-active erasing trigger into sqlite_* while
-# integrity_check remains OK. Reserved catalog prefixes are therefore never
-# trusted; the complete catalog must match the canonical authority schema.
 trigger_progress_bytes = execution_progress_bytes_with_erasing_trigger()
 trigger_progress = os.path.join(_root, "trigger-execution-progress.tar.gz")
 archive_with_schema(
@@ -402,10 +443,6 @@ check(
     "restore: reserved-name trigger authority refusal writes NOTHING",
 )
 
-# Inline constraints are part of execution authority even though they do not
-# appear as separate sqlite_master objects and table_xinfo exposes the same
-# visible columns/PK. CHECK(0) combined with INSERT OR IGNORE can silently drop
-# every execution watermark, so only the canonical CREATE TABLE SQL is accepted.
 check_progress_bytes = execution_progress_bytes_with_rejecting_check()
 check_progress = os.path.join(_root, "check-constrained-execution-progress.tar.gz")
 archive_with_schema(
@@ -449,10 +486,29 @@ restored = backup.restore(archive)
 check(len(restored["restored"]) == len(before), "restore: every file came back")
 
 after = snapshot()
-check(after == before, "restore: byte-for-byte identical to before")
+pair_keys = {backup.AGENT3_RUNS_KEY, backup.AGENT3_EXECUTION_PROGRESS_KEY}
+check(
+    {key: value for key, value in after.items() if key not in pair_keys}
+    == {key: value for key, value in before.items() if key not in pair_keys},
+    "restore: non-Agent3-pair files are byte-for-byte identical",
+)
+run_count, run_problem = backup._agent3_runs_row_count_path(runs_item.path)
+progress_count, progress_problem = backup._execution_progress_row_count_path(progress_item.path)
+check(run_problem is None and run_count == 1, "restore: Agent3 run snapshot retains its row")
+check(
+    progress_problem is None and progress_count == 1,
+    "restore: Agent3 execution-progress snapshot retains its watermark",
+)
+for item in (runs_item, progress_item):
+    con = sqlite3.connect(item.path)
+    binding_count = con.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+        ("kaliv_backup_snapshot",),
+    ).fetchone()[0]
+    con.close()
+    check(binding_count == 0, f"restore: backup-only snapshot binding is stripped from {item.key}")
 
-# Every restored sqlite store must still be structurally readable, including
-# the execution-progress sidecar whose filename itself does not end in .db.
+# Every restored sqlite store must still be structurally readable.
 for it in backup.items():
     if it.kind != "file" or not it.key.endswith(".db"):
         continue
@@ -467,7 +523,6 @@ con.close()
 check(count == 200, "restore: RAG database still contains all 200 rows")
 
 # --- failure modes ----------------------------------------------------------
-# A corrupt archive must be refused, not half-applied.
 bad = os.path.join(_root, "corrupt.tar.gz")
 with tarfile.open(archive, "r:gz") as src, tarfile.open(bad, "w:gz") as dst:
     for member in src.getmembers():
@@ -491,7 +546,6 @@ except ValueError:
     check(True, "restore: a corrupt archive is refused")
 check(snapshot() == {}, "restore: a refused restore wrote NOTHING")
 
-# Without --force, a restore must not clobber an existing rig.
 backup.restore(archive)
 try:
     backup.restore(archive)
@@ -502,9 +556,63 @@ except FileExistsError:
 forced = backup.restore(archive, force=True)
 check(len(forced["restored"]) == len(before), "restore --force: overwrites cleanly")
 
-# A valid progress sidecar without its paired run store is itself unsafe source
-# state: publishing it could later overwrite another rig's watermark authority
-# while retaining that rig's run payload under --force restore.
+# Paired restore is failure-atomic from Agent3's point of view. Inject a failure
+# at the progress publication after the run path has become the durable fence.
+progress_before_failure = snapshot()[backup.AGENT3_EXECUTION_PROGRESS_KEY]
+real_replace = backup.os.replace
+
+
+def fail_progress_publish(source, destination):
+    if (
+        os.path.abspath(destination) == os.path.abspath(progress_item.path)
+        and ".restore-" in os.path.basename(source)
+    ):
+        raise OSError("injected progress publication failure")
+    return real_replace(source, destination)
+
+
+backup.os.replace = fail_progress_publish
+try:
+    try:
+        backup.restore(archive, force=True)
+        check(False, "restore fence: injected second publication failure propagates")
+    except OSError:
+        check(True, "restore fence: injected second publication failure propagates")
+finally:
+    backup.os.replace = real_replace
+
+with open(runs_item.path, "rb") as f:
+    fenced_bytes = f.read(128)
+check(
+    fenced_bytes.startswith(backup._RESTORE_FENCE_PREFIX),
+    "restore fence: interrupted pair leaves durable non-SQLite run-path fence",
+)
+check(
+    snapshot()[backup.AGENT3_EXECUTION_PROGRESS_KEY] == progress_before_failure,
+    "restore fence: failed second publish did not replace live progress authority",
+)
+try:
+    fenced = sqlite3.connect(runs_item.path)
+    try:
+        fenced.execute("SELECT name FROM sqlite_master").fetchone()
+        check(False, "restore fence: Agent3 SQLite cannot open half-published authority")
+    finally:
+        fenced.close()
+except sqlite3.DatabaseError:
+    check(True, "restore fence: Agent3 SQLite cannot open half-published authority")
+
+repaired = backup.restore(archive, force=True)
+check(
+    runs_item.path in repaired["restored"] and progress_item.path in repaired["restored"],
+    "restore fence: retry publishes the complete bound authority pair",
+)
+check(
+    backup._agent3_runs_row_count_path(runs_item.path)[1] is None
+    and backup._execution_progress_problem_path(progress_item.path) is None,
+    "restore fence: retry removes the fence and restores canonical live authority",
+)
+
+# A valid progress sidecar without its paired run store is unsafe source state.
 wipe()
 _seed_sqlite(progress_item.path, progress_item.key)
 try:
@@ -515,7 +623,6 @@ except ValueError:
 wipe()
 
 # A malformed execution sidecar must be refused before a backup is created.
-wipe()
 _seed_sqlite(runs_item.path, runs_item.key)
 os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
 with open(progress_item.path, "wb") as f:
@@ -527,8 +634,6 @@ except ValueError:
     check(True, "create: invalid execution-progress authority is refused")
 wipe()
 
-# A structurally correct live sidecar with a reserved-name erasing trigger must
-# also be rejected before create can publish a backup.
 _seed_sqlite(runs_item.path, runs_item.key)
 os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
 with open(progress_item.path, "wb") as f:
@@ -540,8 +645,6 @@ except ValueError:
     check(True, "create: reserved-name trigger execution-progress authority is refused")
 wipe()
 
-# A structurally correct live sidecar with an inline constraint that suppresses
-# watermark insertion must be rejected before create can publish a backup.
 _seed_sqlite(runs_item.path, runs_item.key)
 os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
 with open(progress_item.path, "wb") as f:
@@ -553,7 +656,6 @@ except ValueError:
     check(True, "create: CHECK-constrained execution-progress authority is refused")
 wipe()
 
-# A non-empty run database without its execution authority must never produce a new backup.
 _seed_sqlite(runs_item.path, runs_item.key)
 try:
     backup.create(os.path.join(_root, "missing-progress"))
@@ -562,9 +664,8 @@ except ValueError:
     check(True, "create: Agent3 runs without execution-progress sidecar are refused")
 wipe()
 
-# Legacy schema 1/2 archives may legitimately contain an initialized but empty
-# Agent3 run store: no execution has crossed the boundary, so no progress
-# sidecar authority exists yet and no replay risk is introduced.
+# Legacy schema 1/2 remains supported for an initialized but genuinely empty
+# run store, because no execution authority exists to bind.
 os.makedirs(os.path.dirname(runs_item.path), exist_ok=True)
 con = sqlite3.connect(runs_item.path)
 con.execute(
@@ -586,16 +687,11 @@ check(
 )
 wipe()
 
-# An empty rig is still a valid backup.
 empty = backup.create(os.path.join(_root, "empty"))
 check(backup.verify(empty)["ok"], "create: an empty rig produces a valid empty backup")
-check(backup._read_manifest(empty)["schema"] == 3, "create: empty rig still emits current schema 3")
+check(backup._read_manifest(empty)["schema"] == 4, "create: empty rig emits current schema 4")
 
 # --- complete-rig orchestration contract -----------------------------------
-# Keep this in the existing backup test instead of adding a new tests/*.py file:
-# generated CURRENT_STATE inventory is itself a drift gate. The repository-wide
-# PowerShell syntax gate parses the operator; these checks lock the sequencing
-# choices that make the two independently tested child migrations coherent.
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 complete_operator = os.path.join(repo_root, "scripts", "migrate-complete-rig.ps1")
 check(os.path.isfile(complete_operator), "complete migration: top-level operator exists")
