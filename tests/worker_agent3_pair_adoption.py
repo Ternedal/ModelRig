@@ -4,12 +4,15 @@ Run: PYTHONPATH=worker python3 tests/worker_agent3_pair_adoption.py
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import shutil
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 import uuid
 
@@ -19,6 +22,7 @@ os.environ["KALIV_AGENT3_DB"] = os.path.join(_root, "live", "agent3.db")
 os.environ["KALIV_TOOLS_DIR"] = os.path.join(_root, "notes")
 
 from app import backup  # noqa: E402
+from app import backup_schema5  # noqa: E402
 from app.agent3 import authority_pair  # noqa: E402
 from app.agent3.adopt_pair import adopt_current_pair  # noqa: E402
 from app.agent3.core import (  # noqa: E402
@@ -407,6 +411,95 @@ check(
 if direct_restore.returncode != 0:
     print(direct_restore.stdout)
     print(direct_restore.stderr)
+
+# Directory manifests are archive-controlled input. Hash correctness must not
+# authorize a path outside the configured directory root.
+for safe_rel in ("nested/note.txt", r"nested\note.txt"):
+    safe_parts, safe_problem = backup_schema5._directory_rel_parts(safe_rel)
+    check(
+        safe_problem is None and safe_parts == ("nested", "note.txt"),
+        f"directory path: supported nested path stays portable ({safe_rel!r})",
+    )
+
+for unsafe_rel in (
+    "",
+    ".",
+    "..",
+    "../escape.txt",
+    r"..\escape.txt",
+    "/absolute.txt",
+    r"\rooted.txt",
+    r"C:\escape.txt",
+    r"C:escape.txt",
+    "bad\x00name.txt",
+):
+    _parts, unsafe_problem = backup_schema5._directory_rel_parts(unsafe_rel)
+    check(
+        unsafe_problem is not None,
+        f"directory path: unsafe archive path is rejected ({unsafe_rel!r})",
+    )
+
+traversal_archive = os.path.join(_root, "directory-path-traversal.tar.gz")
+traversal_rel = "../escape.txt"
+traversal_payload = b"must-not-escape-notes-root"
+traversal_manifest = {
+    "schema": backup_schema5.BACKUP_SCHEMA,
+    "created": "adversarial",
+    "files": {
+        "notes": {
+            "kind": "dir",
+            "files": {
+                traversal_rel: hashlib.sha256(traversal_payload).hexdigest(),
+            },
+        },
+    },
+}
+with tarfile.open(traversal_archive, "w:gz") as tar:
+    member = tarfile.TarInfo(f"data/notes/{traversal_rel}")
+    member.size = len(traversal_payload)
+    tar.addfile(member, io.BytesIO(traversal_payload))
+    manifest_bytes = json.dumps(traversal_manifest, sort_keys=True).encode("utf-8")
+    manifest_member = tarfile.TarInfo("manifest.json")
+    manifest_member.size = len(manifest_bytes)
+    tar.addfile(manifest_member, io.BytesIO(manifest_bytes))
+
+traversal_verify = backup_schema5.verify(traversal_archive)
+check(
+    not traversal_verify["ok"]
+    and any("invalid directory path" in problem for problem in traversal_verify["problems"]),
+    "directory path: hash-consistent traversal archive fails verification",
+)
+escape_path = os.path.abspath(
+    os.path.join(os.environ["KALIV_TOOLS_DIR"], traversal_rel)
+)
+try:
+    backup_schema5.restore(traversal_archive, force=True)
+    check(False, "directory path: traversal archive is refused before restore")
+except ValueError:
+    check(True, "directory path: traversal archive is refused before restore")
+check(
+    not os.path.exists(escape_path),
+    "directory path: refused traversal writes nothing outside notes root",
+)
+
+symlink_root = os.environ["KALIV_TOOLS_DIR"]
+os.makedirs(symlink_root, exist_ok=True)
+outside_root = os.path.join(_root, "outside-notes")
+os.makedirs(outside_root, exist_ok=True)
+link_path = os.path.join(symlink_root, "outside-link")
+try:
+    os.symlink(outside_root, link_path, target_is_directory=True)
+except (OSError, NotImplementedError):
+    check(True, "directory path: symlink containment probe unavailable on this host")
+else:
+    _destination, symlink_problem = backup_schema5._contained_directory_destination(
+        symlink_root, "outside-link/escape.txt"
+    )
+    check(
+        symlink_problem is not None,
+        "directory path: existing parent symlink cannot escape restore root",
+     )
+    os.unlink(link_path)
 
 # The Windows migration operator must establish the stopped boundary before the
 # trust transition, and adoption must occur before schema-5 backup creation.

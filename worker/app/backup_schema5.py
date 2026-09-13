@@ -44,7 +44,9 @@ import argparse
 import hashlib
 import io
 import json
+import ntpath
 import os
+import posixpath
 import sqlite3
 import sys
 import tarfile
@@ -185,6 +187,47 @@ def _sha256_file(path: str) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _directory_rel_parts(
+    value: object,
+) -> tuple[Optional[tuple[str, ...]], Optional[str]]:
+    # Validate one archive-controlled directory member as a portable relative path.
+    if not isinstance(value, str) or not value:
+        return None, "directory manifest path is missing or empty"
+    if "\x00" in value:
+        return None, "directory manifest path contains NUL"
+    drive, _tail = ntpath.splitdrive(value)
+    if drive or ntpath.isabs(value) or posixpath.isabs(value):
+        return None, "directory manifest path is rooted or drive-qualified"
+
+    # Archives can be produced on both Windows and POSIX. Treat both slash
+    # conventions as separators before checking components so a Windows-style
+    # traversal cannot become an ordinary filename on POSIX (or vice versa).
+    parts = tuple(value.replace("\\", "/").split("/"))
+    if any(part in {"", ".", ".."} for part in parts):
+        return None, "directory manifest path contains an unsafe component"
+    return parts, None
+
+
+def _contained_directory_destination(
+    root: str,
+    rel: object,
+) -> tuple[Optional[str], Optional[str]]:
+    # Resolve a validated member while proving current filesystem containment.
+    parts, problem = _directory_rel_parts(rel)
+    if problem or parts is None:
+        return None, problem or "invalid directory manifest path"
+
+    root_real = os.path.realpath(os.path.abspath(root))
+    destination = os.path.abspath(os.path.join(root_real, *parts))
+    resolved_destination = os.path.realpath(destination)
+    try:
+        if os.path.commonpath([root_real, resolved_destination]) != root_real:
+            return None, "directory manifest path escapes its configured restore root"
+    except ValueError:
+        return None, "directory manifest path is outside its configured restore root"
+    return destination, None
 
 
 def _walk(path: str) -> list[str]:
@@ -1074,6 +1117,12 @@ def verify(archive: str) -> dict:
                     problems.append(f"invalid directory manifest entry: {key}")
                     continue
                 for rel, want in recorded.items():
+                    _parts, path_problem = _directory_rel_parts(rel)
+                    if path_problem:
+                        problems.append(
+                            f"invalid directory path {key}/{rel!r}: {path_problem}"
+                        )
+                        continue
                     got = _member_sha(tar, f"data/{key}/{rel}")
                     if got is None:
                         problems.append(f"missing from archive: {key}/{rel}")
@@ -1305,7 +1354,14 @@ def restore(archive: str, force: bool = False) -> dict:
             else:
                 os.makedirs(item.path, exist_ok=True)
                 for rel in meta["files"]:
-                    destination = os.path.join(item.path, rel)
+                    destination, path_problem = _contained_directory_destination(
+                        item.path, rel
+                    )
+                    if path_problem or destination is None:
+                        raise ValueError(
+                            f"invalid directory restore path {key}/{rel!r}: "
+                            + str(path_problem or "unknown containment failure")
+                        )
                     _extract_to(tar, f"data/{key}/{rel}", destination)
                     restored.append(destination)
     return {"restored": restored}
