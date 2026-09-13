@@ -221,9 +221,9 @@ print(f"Stage B final-gate contracts: {passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)
 
-# ADR-DC-010, ADR-DC-011 and ADR-DC-012 remain proposed, so their heavy
-# adversarial contracts live under tests/support and are explicitly attached to
-# this already-discovered physical gate rather than extending test-glob inventory.
+# ADR-DC-010 through ADR-DC-013 remain proposed, so their heavy adversarial
+# contracts live under tests/support and are explicitly attached to this already-
+# discovered physical gate rather than extending test-glob inventory.
 def _run_support_contract(filename: str, module_name: str) -> None:
     path = ROOT / "tests" / "support" / filename
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -263,3 +263,9 @@ _run_support_contract(
     "rsi_physical_campaign_execution_binding_production_boundary",
 )
 print("RSI physical campaign exact-runner execution-binding contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_main_freeze_production_boundary.py",
+    "rsi_physical_campaign_main_freeze_production_boundary",
+)
+print("RSI physical campaign continuous-main-freeze contract: PASS")
