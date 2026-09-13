@@ -24,7 +24,7 @@ screens_src = code_of(SCREENS)
 def kotlin_function(src: str, marker: str) -> str:
     """Return one Kotlin function body, ignoring braces inside quoted strings."""
     start = src.index(marker)
-    body_start = src.index("{", start)
+    body_start = src.index(") {", start) + 2
     depth = 0
     quote = ""
     escaped = False
