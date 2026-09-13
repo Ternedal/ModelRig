@@ -6,124 +6,128 @@
 
 ## Kontekst
 
-ADR-DC-008 indfører et kortlivet, human-signeret request-artifact før DC-L15. En gyldig signatur beviser kun, at en identificeret human authority bad om én bounded fysisk qualification mod en bestemt ønsket `main`-SHA. Den beviser ikke, at `main` matcher SHA'en på reservationstidspunktet, og den forbruger ikke requesten.
+ADR-DC-008 indfører et kortlivet, human-signeret request-artifact før DC-L15. Signaturen må kun betyde, at en identificeret menneskelig authority har anmodet om én bounded fysisk qualification mod en bestemt ønsket `main`-SHA. Den beviser ikke, at `main` stadig matcher, den starter ingen probes, og den giver ingen pilot-, publication- eller activation-authority.
 
-Reservation-laget skal derfor lukke observation-, time- og replay-huller uden at overdrive, hvad et lokalt filesystem kan bevise. En lokal create-once ledger kan etablere fail-closed replay/recovery-state på den konkrete host, men kan hverken bevise global replay-eksklusion eller i sig selv autentificere, hvem der skrev en fil i ledger-mappen.
+Reservation-laget skal derfor lukke fire forskellige huller uden at blande dem sammen:
 
-Desuden er en `TrustedGitRuntime`-instans ikke i sig selv en trust-beslutning. H2-kontrakten gør runtime-manifestet content-addressed og re-verificerbart, men kræver separat review/pinning. Reservationen må derfor kun bruge en Git-runtime, hvis dens manifest- og executable-digests matcher den `CandidateSnapshotReceipt`, hvis SHA allerede er bundet ind i den human-signerede qualification chain. Den caller-ejede runtime-tree må heller ikke forblive execution-path efter verification: en anden principal kan ellers udskifte executable/helpers mellem hash-check og process-start. Authority-transaktionen skal derfor kopiere den verificerede runtime til en transaction-private staging-root under sin canonical operation-root og udføre alle trusted Git-reads gennem den private kopi.
+1. **trust root** — caller må ikke selv vælge den Ed25519-keyring, der afgør om callerens egen signatur er trusted;
+2. **runtime/observation** — caller må ikke levere en fabrikeret `main`-observation eller en mutable Git-runtime, der kan udskiftes mellem verification og execution;
+3. **time/replay** — caller må ikke backdate consumption eller genbruge samme request på den canonical host-ledger;
+4. **provenance** — schema-valid persisted bytes må ikke kunne opgraderes til live authenticated authority alene ved at ligge på den rigtige path.
 
-Caller-ejede Python-objekter er heller ikke immutable authority bare fordi deres dataclasses er `frozen=True`: subclasses kan override adfærd, og `object.__setattr__` kan mutere felter mellem verification og receipt-building. Authority-transaktionen skal derfor selv skabe lokale exact-type value snapshots af alle signerede/verificerede inputs, før nogen authority-beslutning bruges videre.
+En lokal filesystem-ledger kan kun etablere fail-closed replay/recovery-state på den konkrete host. Den kan ikke bevise distribueret/global one-time use. Denne ADR holder derfor `global_replay_safe=false` og reserverer enhver senere fysisk campaign-admission til en separat boundary.
 
 ## Beslutning
 
-Der foreslås et separat evidence-only reservation-led:
+Den authority-bærende sekvens er:
 
-`caller input snapshot → verified human request → signed runtime pin → transaction-private runtime staging → trusted preflight → irreversible permanent host replay-marker → trusted main re-read → signed-chain reverify → create-once final replay state → exact-byte read-back → transaction-authenticated in-memory receipt`
+`host-pinned request trust root → caller value snapshots → signed request verification → signed runtime pin → transaction-private runtime staging → trusted preflight → irreversible permanent host replay-marker → trusted main re-read → post-marker signed-chain reverify → create-once final replay state → exact-byte read-back → transaction-authenticated in-memory receipt`
 
-### 1. Caller leverer ikke authority-evidence eller authority-paths
+### 1. Public consume må ikke acceptere caller-valgt trust root
 
-Den authority-bærende public consume-path må ikke acceptere:
+Den eneste public authority-bearing path er:
 
-- et caller-konstrueret `LocalMainHeadObservation`;
-- et caller-valgt `consumed_at_utc`;
-- caller-valgt ledger-root eller ledger-ID;
+`consume_physical_qualification_request_once(...)`
+
+Dens caller-input er begrænset til:
+
+- exact `TrustedGitRuntime`;
+- `PhysicalQualificationRequest`;
+- `QualificationPacket`;
+- `CandidateSnapshotReceipt`;
+- `DetachedEd25519AuthoritySignature`.
+
+Public API må **ikke** acceptere:
+
+- `Ed25519AuthorityVerifier` eller anden keyring/trust-root;
+- caller-konstrueret `LocalMainHeadObservation`;
+- caller-valgt clock/`consumed_at_utc`;
+- caller-valgt ledger-root/ledger-ID;
 - caller-valgt repository-root eller Git operation-root;
-- et prebuilt reservation-receipt til persistence.
+- prebuilt reservation receipt.
 
-Observationer er fortsat serialiserbar `evidence-only` data, men typen eller schema-validitet er ikke provenance. Produktionens repository-root udledes af checkoutet, der indeholder authority-koden, og host-state/operation-root er canonical lokale paths.
+Produktion resolver selv Ed25519-verifieren fra en fast host-kontrolleret public-keyring:
 
-Før første authority-verifikation skal transaktionen desuden snapshotte caller-ejede inputs til nye, exact-type value objects:
+- Windows: `C:\Program Files\ModelRig\DevControl\authority\rsi-physical-request-authority-keyring-v1.json`;
+- POSIX: `/etc/modelrig/devcontrol/authority/rsi-physical-request-authority-keyring-v1.json`.
 
-- `PhysicalQualificationRequest` via canonical JSON parse;
-- `QualificationPacket` via canonical JSON parse;
-- `CandidateSnapshotReceipt` via canonical mapping reconstruction;
-- `DetachedEd25519AuthoritySignature` via canonical mapping reconstruction;
-- `Ed25519AuthorityVerifier` via en ny verifier bygget af exact-type, canonical-rekonstruerede trusted keys og samme minimum keyring epoch.
+Keyringen bruger schema `kaliv-rsi-physical-request-authority-keyring/v1` og authority-domain `rsi-dc-l15-physical-request`. Den skal være canonical JSON, non-empty, size-bounded, link-free og indeholde exact `TrustedEd25519AuthorityKey`-evidence for issuer-system `kaliv-rsi-dc-l15-request-authority-v1` med et gyldigt minimum keyring epoch. Manglende, malformed, wrong-domain eller unsafe keyring fejler lukket; der findes ingen fallback til caller-input, genereret nøgle eller repository-embedded private key.
 
-Subclasses af disse authority-typer afvises. Efter snapshot må transactionen kun bruge de lokale snapshots, så efterfølgende caller-mutation ikke kan ændre den request, qualification, signature, snapshot receipt eller keyring, som receiptet bindes til.
+På POSIX kræves desuden root-owned keyring og root-owned directory chain uden group/world-write. På Windows ligger trust-rooten på den faste host-admin path under `Program Files`; denne ADR gør ingen stærkere ACL-attestation-claim end den platform-trust, som den path repræsenterer.
 
-### 2. Git-runtime skal være pinned og flyttes ud af callerens mutable tree
+Der tilføjes ingen private-key loader, signer, credential transport eller network lookup. Modulet er verification-only.
 
-Public consume modtager den `CandidateSnapshotReceipt`, som qualification-pakken refererer til. Callerens `TrustedGitRuntime` skal være exact type; subclasses afvises. Transaktionen verificerer caller-runtimeens manifest, receipt-layout og filer og opretter derefter en ny transaction-private staging-root under den canonical operation-root. Den komplette runtime kopieres create-once til denne private root via den eksisterende trusted-runtime staging-kontrakt og re-verificeres dér. Kun en ny `TrustedGitRuntime` over den private transaction-root må bruges til preflight, post-lock observation og runtime-evidence.
+En underscored/private transaction-seam må fortsat modtage en injected verifier til deterministic tests. Den seam er ikke package-root API, er ikke en dokumenteret production authority-path og ændrer ikke same-process arbitrary-code threat boundary.
 
-Før observation accepteres skal reservation-laget bevise:
+### 2. Caller-ejede authority-objekter snapshots før brug
 
-- `snapshot_receipt.sha256 == qualification.snapshot_receipt_sha256`;
-- samme task- og materialization-receipt-identitet;
-- samme candidate commit/tree;
-- den private runtimes `git_runtime_manifest_sha256` matcher snapshot-receiptet;
-- den private runtimes `git_executable_sha256` matcher snapshot-receiptet.
+Før første authority-beslutning rekonstruerer transactionen caller-ejede signed/value inputs til exact-type lokale snapshots:
 
-Dermed kan en caller hverken bruge en overridable `TrustedGitRuntime` subclass, stage en anden integritetsgyldig Git-pakke eller mutere den oprindelige caller-ejede runtime efter snapshot og få en anden executable/helper til at producere authority-observationen. Runtime-kopien slettes først, når consume-forsøget har produceret eller fail-closed efter sin ledger-state; den caller-ejede tree bruges aldrig som execution-path efter staging.
+- `PhysicalQualificationRequest` fra canonical JSON;
+- `QualificationPacket` fra canonical JSON;
+- `CandidateSnapshotReceipt` fra canonical mapping;
+- `DetachedEd25519AuthoritySignature` fra canonical mapping.
 
-### 3. Trusted main læses efter den irreversible replay-marker
+Den host-resolved production-verifier snapshots ligeledes til en lokal exact `Ed25519AuthorityVerifier` med canonical-rekonstruerede exact `TrustedEd25519AuthorityKey`-værdier og samme minimum keyring epoch.
 
-Et preflight-read må bruges til at undgå at brænde en åbenlyst mismatchende request. Den authority-bærende observation foretages imidlertid først **efter** create-once reservation-markeren er durably oprettet.
+Subclasses af authority-typer afvises. Fra dette punkt bruger transactionen kun de lokale snapshots. Efterfølgende caller-mutation via fx `object.__setattr__` kan derfor ikke ændre request, qualification, signature, snapshot receipt eller keyring, som receiptet bygges fra.
 
-Den post-lock observation skal:
+### 3. Trusted Git execution flyttes væk fra callerens mutable tree
 
-- læse præcis `refs/heads/main^{commit}` gennem transactionens private, signed/pinned staged `TrustedGitRuntime`;
-- være lokal og read-only;
-- udføre ingen network-operation;
-- mutere intet repository;
-- binde repository `Ternedal/ModelRig`;
-- binde canonical repository-root path, signed snapshot receipt, Trusted Git runtime-manifest og executable digest;
-- bruge timestamp afledt internt ved write-boundary'en.
+Callerens `TrustedGitRuntime` skal være exact type. Den verificeres og bindes mod runtime-identiteten i den `CandidateSnapshotReceipt`, hvis SHA allerede indgår i qualification-kæden.
 
-Hvis `main` flytter mellem preflight og post-lock read, fejler operationen **efter requesten er host-lokalt consumed/recovery-required**. Den bliver ikke automatisk genbrugelig.
+Derefter kopieres hele runtime-treeet create-once til en transaction-private staging-root under canonical operation-root. Kopien re-verificeres, og kun en ny `TrustedGitRuntime` over denne private transaction-root må bruges til preflight og post-marker `refs/heads/main^{commit}` reads.
 
-### 4. Signatur og expiry re-verificeres efter replay-marker
+Reservationen kræver fortsat:
 
-Human request-signaturen og qualification-bindingen re-verificeres igen ved et internt current-time timestamp efter replay-marker og post-lock observation. Re-verifikationen bruger fortsat kun transactionens lokale snapshots af request, qualification, signature og verifier/keyring.
+- snapshot receipt SHA matcher qualification;
+- task/materialization identity matcher;
+- candidate commit/tree matcher;
+- Git runtime manifest digest matcher signed snapshot;
+- Git executable digest matcher signed snapshot.
 
-Caller kan derfor ikke backdate consumption for at genbruge en udløbet request eller mutere signerede inputs efter en tidligere verification og få de nye værdier ind i reservation-receiptet. Hvis requesten udløber efter replay-marker men før final commit, forbliver marker-state fail-closed/recovery-required.
+Mutation eller replacement af callerens oprindelige executable/helpers efter snapshot kan derfor ikke ændre den runtime, der producerer authority-observationen.
 
-### 5. Durable ledger-state er ikke reloadable authority
+### 4. Replay-marker kommer før authority-bearing main-observation
 
-Et centralt trust-princip er, at eksistensen af en canonical JSON-fil i den lokale ledger **ikke** beviser, at den authenticated consume-transaktion skabte filen. En principal med direkte filesystem-write kan ellers fremstille de samme bytes.
+Et preflight-read må bruges til at undgå at brænde en åbenlyst forkert request. Den authority-bærende observation sker først efter create-once host reservation.
 
-Derfor gælder følgende:
+Create-once request-markeren er permanent replay-state, ikke midlertidig lock-cleanup. Efter markerens oprettelse læses præcis `refs/heads/main^{commit}` igen gennem transactionens private pinned runtime.
 
-- persisted final/pending/permanent replay-marker er replay- og recovery-state, ikke selvstændig authority;
-- `PhysicalQualificationReservation.from_mapping(...)` giver altid `transaction_authenticated=false`;
-- privat durability-load giver altid `transaction_authenticated=false`, også for en legitim tidligere transaction;
-- der findes ingen public `load_physical_qualification_reservation(...)` authority-loader;
-- `transaction_authenticated` serialiseres aldrig og kan derfor ikke mintes via JSON;
-- live provenance bindes til **objekt-identitet + originating PID + SHA-256 af de autentificerede canonical receipt-contents + exact final-path/payload + exact permanent replay-marker-path/payload**;
-- et efterfølgende `object.__setattr__`-angreb eller anden feltmutation ændrer canonical digest og gør straks `transaction_authenticated=false`;
-- en POSIX child-process må ikke arve authority: PID skal matche, og registry ryddes desuden via `os.register_at_fork(after_in_child=...)`;
-- final read-back skal være **byte-identisk med præcis den canonical payload, som transactionen netop gav til create-once write**;
-- den permanente replay-marker skal stadig eksistere med præcis de bytes transactionen oprettede, både før provenance registreres og ved enhver senere `transaction_authenticated`-læsning;
-- hvis final eller replay-marker fjernes, erstattes eller muteres, bliver live provenance straks falsk;
-- kun den igangværende authenticated consume-transaktion må registrere live provenance, og først efter exact-payload read-back, pending-cleanup og en sidste exact-byte verification af både final og replay-marker.
+Observationen skal være lokal/read-only, uden network eller repository mutation, og binde canonical repository-root samt runtime manifest/executable identity.
 
-Den canonical rækkefølge er:
+Hvis `main` flytter efter preflight, eller trusted Git fejler efter replay-marker, er requesten stadig host-lokalt consumed/recovery-required. Markeren rulles ikke tilbage til en genbrugelig request.
 
-1. snapshot exact-type caller authority-inputs;
-2. verificér callerens exact-type Trusted Git-runtime og stage en transaction-private, content-identisk runtime-copy under canonical operation-root;
-3. re-verificér request + qualification ved internt current time med de lokale snapshots;
-4. trusted preflight af `main` gennem den private signed/pinned Git-runtime;
-5. create-once **permanent** host-local replay-marker keyed af snapshot-requestens canonical SHA-256;
-6. trusted post-marker `main` observation gennem samme private pinned runtime;
-7. trusted-current-time re-verifikation af den lokale signed request + qualification;
-8. create-once pending payload;
-9. create-once final canonical payload;
-10. læs final tilbage og kræv byte-identitet med payloaden fra trin 9, derefter parse + canonical validation uden at grant'e authority;
-11. cleanup kun pending-state; den create-once replay-marker bevares permanent;
-12. re-læs final og replay-marker og kræv exact byte-identitet med transactionens egne payloads;
-13. registrér kun den returnerede in-memory instans med `(origin_pid, authenticated_receipt_sha256, object identity, final path/payload, replay-marker path/payload)`.
+### 5. Trusted time og signatur re-verificeres efter marker
 
-`transaction_authenticated=true` kræver derefter ved hver læsning, at samme objekt stadig lever, at processen har samme PID, at receiptets aktuelle canonical SHA-256 er identisk med den registrerede digest, og at både final og replay-marker fortsat findes som regular link-free files med exact registrerede bytes.
+Production clock afledes internt ved transaction-boundaryen. Caller kan ikke levere eller backdate consumption time.
 
-Hvis noget fejler efter trin 5, må requesten ikke genbruges på samme canonical host ledger uden en separat eksplicit recovery-procedure. Hvis processen crasher efter final write men før trin 13, bevares replay-state, men authority må ikke rekonstrueres automatisk fra filen.
+Efter replay-marker og post-marker `main` read re-verificeres den lokale signed request + qualification chain mod et nyt current-time timestamp og den host-resolved/snapshottede verifier.
 
-Direkte filesystem-injektion, removal eller race-replacement af en perfekt canonical final-fil eller replay-marker kan derfor højst brænde/blokere den lokale request, skabe recovery/DoS-state eller invalidere et eksisterende live receipt. Det kan ikke gennem denne boundary skabe eller bevare et `transaction_authenticated=true` receipt med en brudt replay guard.
+Hvis requesten udløber mellem preflight og commit, eller signaturen/keyring-bindingen ikke længere verificerer, fejler transactionen lukket og efterlader requesten consumed/recovery-required på den canonical host-ledger.
 
-### 6. Replay-scope er host-local, ikke global
+### 6. Persisted ledger-bytes er replay/recovery-state, ikke reloadable authority
 
-Produktionens public API bruger én canonical host-local ledger-location og eksponerer ingen root/ID-selector. Receipt binder SHA-256 af den konkrete ledger-root samt canonical repository-root og pinned Git-runtime-identitet.
+Canonical final/pending/replay-marker bytes må ikke i sig selv bevise, at den authenticated transaction skabte dem.
 
-Et schema-validt receipt beskriver altid:
+Derfor:
+
+- `PhysicalQualificationReservation.from_mapping(...)` giver aldrig transaction provenance;
+- private ledger reload giver `transaction_authenticated=false`;
+- der findes ingen public authority-loader for persisted reservation bytes;
+- `transaction_authenticated` serialiseres ikke;
+- final read-back skal være byte-identisk med præcis den in-memory payload, transactionen create-once skrev;
+- live provenance registreres først efter pending-cleanup og ny exact-byte verification af både final og permanent replay-marker;
+- provenance bindes til exact object identity, originating PID, authenticated receipt SHA-256, final path/payload og replay-marker path/payload;
+- receipt-mutation ændrer digest og invaliderer provenance;
+- POSIX fork-child arver ingen provenance: PID skal matche, og registry ryddes med `os.register_at_fork(after_in_child=...)`;
+- hver senere `transaction_authenticated`-læsning re-checker, at final og replay-marker stadig er regular link-free files med exact registrerede bytes.
+
+Removal, replacement eller tamper af final/replay-marker kan derfor højst skabe DoS/recovery-state eller invalidere et eksisterende live receipt. Det kan ikke mint'e eller bevare `transaction_authenticated=true`.
+
+### 7. Replay-scope er eksplicit host-local
+
+Et schema-validt reservation receipt siger altid:
 
 - `ledger_scope=canonical-host-local-v1`;
 - `main_head_match_confirmed=true`;
@@ -131,78 +135,78 @@ Et schema-validt receipt beskriver altid:
 - `host_replay_guard_committed=true`;
 - `global_replay_safe=false`.
 
-Men de serialiserede felter er data, ikke transaction provenance. Kun den live returnerede, uændrede instans i den oprindelige proces med `transaction_authenticated=true` beviser, at netop denne proces gennemførte den authenticated consume-sekvens **og at dens final + permanente replay-marker stadig er intakte**. En senere boundary må aldrig opgradere et reloadet ledger-artifact alene til execution authority.
+Public production-pathen bruger én canonical host-state/ledger-location og eksponerer ingen selector. Private test-ledgers må bruges til deterministic regressions, men de kan aldrig ændre `global_replay_safe=false`.
 
-`global_replay_safe=false` er en vigtig sandhed. En lokal filesystem-ledger kan ikke bevise, at den samme signed request ikke er præsenteret på en anden host. En senere campaign-admission boundary skal derfor binde den autoriserede fysiske host/runner-identitet, før requesten kan bruges til faktisk execution.
+En senere campaign-admission boundary skal derfor binde den faktiske physical host/runner og må ikke bruge reloadede ledger-bytes eller et process-arvet receipt alene som execution authority.
 
-### 7. Exact-main er stadig ikke persistent freeze
+### 8. Reservationen stopper før fysisk execution
 
-Post-marker observationen beviser kun, at `refs/heads/main` matchede `requested_frozen_main_sha` på det konkrete observationstidspunkt i den live authenticated transaction.
-
-Receipt skal derfor fortsat have:
+Reservation receipt skal altid bevare:
 
 - `frozen_main_confirmed=false`;
 - `physical_campaign_completed=false`;
 - `campaign_start_authorized=false`;
 - `pilot_go_authorized=false`;
 - `activation_authorized=false`;
-- `remote_publication_authorized=false`.
+- `remote_publication_authorized=false`;
+- `authority=consumed-request-evidence-only`.
 
-En senere campaign-admission boundary skal re-verificere relevant frozen-main/host evidence omkring selve fysiske runner-starten.
+Denne boundary må ikke starte de 11 DC-L15 probes, oprette cadence, erklære persistent `main` freeze, generere fysisk isolation-evidens, autorisere pilot, merge/push/release/deploy, remote publication eller DC-L16 activation.
 
-### 8. Ingen fysisk execution authority
+## Canonical transaction-rækkefølge
 
-Reservation-leddet må ikke:
+1. resolve host-kontrolleret RSI request-authority keyring/verifier;
+2. snapshot exact-type request/qualification/snapshot/signature og den host-resolved verifier;
+3. verificér callerens exact `TrustedGitRuntime` og stage transaction-private runtime-copy;
+4. re-verificér signed request ved trusted current time;
+5. trusted preflight af `main` gennem private pinned runtime;
+6. create-once permanent host-local replay-marker keyed af request SHA-256;
+7. trusted post-marker `main` read gennem samme private pinned runtime;
+8. trusted-current-time re-verifikation af signed request + qualification;
+9. create-once pending payload;
+10. create-once final canonical payload;
+11. exact-byte read-back + canonical parse uden authority grant;
+12. cleanup kun pending; replay-marker bevares;
+13. exact-byte re-check af final + replay-marker;
+14. registrér kun den returnerede live instans med process/content/durable-state provenance;
+15. cleanup transaction-private Git-runtime fail-closed.
 
-- starte de 11 DC-L15 probes;
-- oprette background cadence;
-- erklære vedvarende `main` freeze;
-- generere fysisk isolation-evidens;
-- erklære DC-L15 completed;
-- autorisere pilot-GO;
-- autorisere merge, push, release, deploy eller remote publication;
-- aktivere DC-L16.
-
-## Artefakter
-
-- `kaliv-rsi-local-main-head-observation/v1` — parsebar evidence-only observation;
-- `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local replay/evidence data;
-- `consume_physical_qualification_request_once(...)` — eneste public authority-bearing path og eneste vej til en live `transaction_authenticated=true` instans;
-- canonical host ledger — final + permanent replay-marker som replay/recovery-state, eksplicit ikke public reloadable authority;
-- transaction-private Trusted Git staging under canonical operation-root — authority-owned execution-copy, ikke callerens mutable runtime-tree.
-
-Reservationens serialiserede authority-label er fast `consumed-request-evidence-only`; den ikke-serialiserede `transaction_authenticated` provenance er separat, content-bound, process-bound og durable-state-bound og kan ikke overleve reload, fork eller removal/tamper af final/replay-marker som authority.
+Hvis noget fejler efter trin 6, kan requesten ikke genbruges på samme canonical host-ledger uden en separat eksplicit recovery-procedure.
 
 ## Fail-closed krav
 
 Implementationen skal mindst afvise eller fail-close ved:
 
-1. forged/caller-supplied observation i authority-pathen;
-2. caller-supplied/backdated consumption time;
-3. caller-valgt repository/operation/ledger path i public authority-pathen;
-4. subclasses/overridable varianter af authority-inputs eller `TrustedGitRuntime`;
-5. staged Git-runtime der ikke matcher snapshot-receiptet i den signerede qualification chain;
-6. mutation/replacement af callerens runtime executable/helpers efter snapshot må ikke påvirke den transaction-private execution-copy;
-7. mutation af caller-owned request/qualification/snapshot/signature/verifier efter snapshot/verification må ikke ændre det receipt, transactionen bygger;
-8. forkert eller malformed `main` SHA;
-9. `main` der flytter mellem preflight og post-marker read;
-10. expired eller ugyldig human request ved post-marker re-verifikation;
-11. duplicate consumption i canonical host ledger;
-12. enhver eksisterende final/pending/replay-marker-state som genbrugelig request;
-13. direct persistence af prebuilt/fabricated final receipt som authority;
-14. perfekt canonical direct-written final file må stadig have `transaction_authenticated=false` ved load;
-15. final-file replacement mellem create-once write og read-back skal fejle, også hvis replacement er schema-valid og canonical;
-16. final removal/replacement efter read-back men før provenance-registration må ikke kunne returnere authenticated authority;
-17. permanent replay-marker removal/replacement før eller efter provenance-registration skal fail-close eller gøre live provenance false;
-18. mutation af et legitimt live receipt med `object.__setattr__` eller tilsvarende må straks miste transaction provenance;
-19. POSIX fork-child må ikke arve parentens transaction provenance;
-20. tampering med canonical final reservation;
-21. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+1. caller-supplied verifier/keyring/trust root i public consume;
+2. manglende, malformed, wrong-domain, non-canonical eller unsafe host keyring;
+3. authority key for forkert issuer-system eller stale minimum keyring epoch;
+4. forged/caller-supplied observation, clock eller authority-path;
+5. subclasses/overridable authority-inputs eller `TrustedGitRuntime`;
+6. caller-owned signed input mutation efter snapshot/verification;
+7. caller runtime mutation efter private staging;
+8. runtime identity mismatch mod signed `CandidateSnapshotReceipt`;
+9. malformed/wrong `main` SHA eller `main` drift mellem preflight og post-marker read;
+10. expired/invalid signed request efter marker;
+11. duplicate canonical-host consume eller crash-left marker/pending/final state;
+12. direct/prebuilt/fabricated final receipt persistence;
+13. schema-valid final replacement mellem create-once write og read-back;
+14. final/replay-marker removal eller replacement før provenance-registration;
+15. final/replay-marker tamper efter registration;
+16. live receipt mutation;
+17. POSIX fork inheritance;
+18. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
-## Konsekvenser
+## Artefakter
 
-Efter denne boundary kan DevControl i **den samme succesfulde authenticated transaction, i den oprindelige proces, mens receiptets canonical contents er uændrede og mens exact final + permanente replay-marker bytes fortsat eksisterer** sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret fra lokale immutable value snapshots, at observationen blev udført gennem en transaction-private Git-runtime-copy med samme signed/pinned manifest og executable som softwarekæden bandt, at den canonical lokale `main` matchede ved post-marker observationen, og at præcis de bytes transactionen byggede blev create-once committed og læst tilbage før live provenance blev registreret.
+- `kaliv-rsi-physical-request-authority-keyring/v1` — host-kontrolleret verification-only public-key trust root;
+- `kaliv-rsi-local-main-head-observation/v1` — parsebar evidence-only observation;
+- `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local replay/evidence data;
+- `consume_physical_qualification_request_once(...)` — eneste public authority-bearing consume path;
+- canonical host ledger — final + permanent replay-marker som replay/recovery-state;
+- transaction-private Trusted Git staging under canonical operation-root.
 
-Efter process exit eller fork kan ledger-state stadig fail-close replay og drive en særskilt recovery-procedure, men den kan ikke alene rekonstruere authenticated authority. Det næste host/freeze/campaign-admission-led skal derfor enten fortsætte direkte fra en live `transaction_authenticated=true` reservation i den oprindelige proces eller definere sin egen særskilt autentificerede recovery/attestation; det må ikke stole på et reloadet eller process-arvet ledger-artifact alene.
+## Konsekvens
 
-Det er fortsat **ikke** global replay-bevis, vedvarende frozen-main-bevis eller tilladelse til at starte fysisk execution.
+Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en **host-pinned, caller-uafhængig public-key trust root**, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem pinned trusted Git efter permanent host reservation og producerede et live process-bound receipt, mens durable replay-markers fortsat er intakte.
+
+Det beviser fortsat ikke global replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og skal behandles i separate senere ADR'er/boundaries.
