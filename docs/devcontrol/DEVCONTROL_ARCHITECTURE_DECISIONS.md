@@ -133,20 +133,20 @@ Replay-marker og final receipt beholder deres originale create-once
 descriptors/fil-identiteter gennem provenance-registration. Live provenance
 binder exact receipt identity, PID, receipt-SHA, exact bytes og metadata history;
 durable mismatch revokerer monotont, mens ren in-memory content mutation kun er
-midlertidigt invalid. På POSIX bindes ledger-rooten **og hele dens eksisterende
-ancestor-kæde** til kernel-event history før første permanente publication.
-Linux bruger én inotify-instance med parent-directory watches og exact child-name
-filtrering pr. ancestry-led; flyt/slet af den beskyttede ledger-path eller en
-ancestor, parent self-move/delete/unmount, ignored watch eller queue overflow
-fejler lukket. BSD-style POSIX bruger kqueue vnode rename/delete/revoke på hvert
-retained directory-object, hvor tilgængeligt. Capture→monitor-arm-vinduet lukkes
-med setup-only directory metadata-stamps, som revalideres umiddelbart efter
-arming men ikke bruges som live-history bagefter; rename→restore under arming
-fejler derfor lukket uden at gøre unrelated sibling-churn autoritetsbærende.
-Både ledger-root- og ancestor-rename→replay→restore kan derfor ikke genoplive et
-gammelt receipt. Unsupported POSIX exact directory-chain history monitoring
-fejler lukket. Outer transaction-failure revokerer allerede registreret
-provenance før en traceback bliver caller-visible.
+midlertidigt invalid. På Linux bindes ledger-rooten **og hele dens eksisterende
+ancestor-kæde** til watch-before-trust inotify-history før directory-identiteter
+accepteres som provenance. Parent-directory watches filtreres på exact beskyttet
+child-navn; relevant rename/create/delete, parent self-move/delete/unmount,
+ignored watch eller queue overflow fejler lukket, mens unrelated sibling-churn
+ignoreres. Setup-only metadata-stamps bevares som defense-in-depth, men den
+adversarial regression neutraliserer stamp-signalet og kræver stadig, at
+rename→restore efter watch-arming opdages via queued inotify-history. Public
+production-facaden fejler aktuelt lukket på non-Linux POSIX; den private
+lower-level kqueue-kode er ikke production authority i denne revision. Både
+ledger-root- og ancestor-rename→replay→restore kan derfor ikke genoplive et
+gammelt receipt på den understøttede Linux production-path. Outer
+transaction-failure revokerer allerede registreret provenance før en traceback
+bliver caller-visible.
 
 Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
 som authenticated authority. Replay-scope er eksplicit host-local
