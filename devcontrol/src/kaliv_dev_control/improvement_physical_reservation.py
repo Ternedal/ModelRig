@@ -8,9 +8,10 @@ re-verifies the signed request at current time, and only then commits a receipt.
 
 The durable ledger proves one canonical *host-local* replay guard. Persisted
 ledger bytes are replay/recovery state only: they are deliberately not reloadable
-authority. A non-serialized transaction-authenticated bit is minted only on the
-in-memory receipt returned by the successful authenticated consume transaction
-after create-once write, canonical read-back and cleanup all succeed.
+authority. Transaction provenance is process-local object identity, not a field:
+only the exact in-memory receipt registered by the successful authenticated
+consume transaction after create-once write, canonical read-back and cleanup can
+report ``transaction_authenticated=True``.
 
 Neither the durable state nor the returned receipt claims distributed/global
 replay safety, a persistent frozen main, physical campaign completion, pilot GO,
@@ -22,7 +23,8 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass, field
+import weakref
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
@@ -397,9 +399,35 @@ _RESERVATION_FIELDS = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+def _transaction_identity_registry():
+    """Create a process-local identity registry that cannot be serialized."""
+
+    references: dict[int, Any] = {}
+
+    def mark(value: Any) -> None:
+        identity = id(value)
+
+        def discard(reference: Any, *, identity: int = identity) -> None:
+            if references.get(identity) is reference:
+                references.pop(identity, None)
+
+        references[identity] = weakref.ref(value, discard)
+
+    def contains(value: Any) -> bool:
+        reference = references.get(id(value))
+        return reference is not None and reference() is value
+
+    return mark, contains
+
+
+_mark_transaction_authenticated, _is_transaction_authenticated = (
+    _transaction_identity_registry()
+)
+
+
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class PhysicalQualificationReservation:
-    """Parsed receipt data with non-serializable transaction provenance."""
+    """Parsed receipt data; live transaction provenance is identity-only."""
 
     ledger_root_path_sha256: str
     repository_root_path_sha256: str
@@ -431,12 +459,6 @@ class PhysicalQualificationReservation:
     remote_publication_authorized: bool = False
     authority: str = RESERVATION_AUTHORITY
     schema: str = RESERVATION_SCHEMA
-    _transaction_authenticated: bool = field(
-        default=False,
-        init=False,
-        repr=False,
-        compare=False,
-    )
 
     def __post_init__(self) -> None:
         if self.schema != RESERVATION_SCHEMA or self.ledger_scope != LEDGER_SCOPE:
@@ -507,9 +529,9 @@ class PhysicalQualificationReservation:
 
     @property
     def transaction_authenticated(self) -> bool:
-        """True only on the object returned by a completed authenticated consume."""
+        """True only for the exact live object registered by authenticated consume."""
 
-        return self._transaction_authenticated
+        return _is_transaction_authenticated(self)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -662,7 +684,7 @@ class _PhysicalQualificationRequestLedger:
             raise PhysicalQualificationReservationError(
                 "physical request is durably host-consumed but reservation requires recovery"
             ) from exc
-        object.__setattr__(verified, "_transaction_authenticated", True)
+        _mark_transaction_authenticated(verified)
         return verified
 
 
@@ -896,8 +918,9 @@ def consume_physical_qualification_request_once(
     Callers cannot supply repository root, operation root, observation evidence,
     time, ledger ID/root, or a prebuilt receipt. The caller-supplied staged Git
     runtime must match the exact snapshot-runtime identity already named by the
-    human-signed qualification chain. The returned object carries non-serialized
-    transaction provenance; persisted ledger data is replay/recovery state only.
+    human-signed qualification chain. Only the exact returned live object has
+    process-local transaction provenance; persisted ledger data is replay/recovery
+    state only.
     """
 
     return _consume_physical_qualification_request_once(
