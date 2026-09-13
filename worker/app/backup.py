@@ -42,12 +42,15 @@ def _run_store_schema_problem_path(
     Progress authority has always been checked against complete sqlite_master.
     Run authority must have the same property: an unexpected trigger, view or
     index can otherwise survive a hash-valid backup and alter future run state
-    after restore. A canonical minimal legacy ``agent_runs`` database is also
-    structurally admissible while it is still unbound: explicit offline pair
-    adoption must be able to inspect non-empty legacy authority before it can
-    atomically add provenance. Schema-5 backup/create still rejects materialized
-    unbound authority; this structural exception grants no execution authority.
+    after restore. Canonical legacy ``agent_runs`` stores are structurally
+    admissible before the runtime has created its event journal, including the
+    exact pair/snapshot binding tables requested by the caller. This lets
+    explicit offline adoption inspect and then bind non-empty legacy authority
+    without blessing extra SQLite objects. Schema-5 backup/create still rejects
+    materialized unbound authority; structural admission grants no execution
+    authority by itself.
     """
+    del run_count  # row cardinality is an authority rule, not a schema-shape rule
     try:
         con = _impl._readonly_sqlite(path)
     except _impl.sqlite3.Error as exc:
@@ -70,37 +73,39 @@ def _run_store_schema_problem_path(
         for row in rows
     ]
 
-    full = [
+    def add_expected_bindings(expected: list[tuple[str, str, str, Optional[str]]]) -> None:
+        if pair_id is not None:
+            expected.append(
+                ("table", _PAIR_TABLE, _PAIR_TABLE, _impl._normalize_sql(_PAIR_TABLE_SQL))
+            )
+        if snapshot_id is not None:
+            expected.append(
+                (
+                    "table",
+                    _impl._SNAPSHOT_TABLE,
+                    _impl._SNAPSHOT_TABLE,
+                    _impl._SNAPSHOT_TABLE_SQL,
+                )
+            )
+        expected.sort(key=lambda row: (row[0], row[1], row[2]))
+
+    full: list[tuple[str, str, str, Optional[str]]] = [
         ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
         ("table", "agent_events", "agent_events", _impl._normalize_sql(_EVENTS_TABLE_SQL)),
         ("table", "agent_runs", "agent_runs", _impl._normalize_sql(_RUNS_TABLE_SQL)),
         ("table", "sqlite_sequence", "sqlite_sequence", "CREATE TABLE sqlite_sequence(name,seq)"),
     ]
-    if pair_id is not None:
-        full.append(
-            ("table", _PAIR_TABLE, _PAIR_TABLE, _impl._normalize_sql(_PAIR_TABLE_SQL))
-        )
-    if snapshot_id is not None:
-        full.append(
-            (
-                "table",
-                _impl._SNAPSHOT_TABLE,
-                _impl._SNAPSHOT_TABLE,
-                _impl._SNAPSHOT_TABLE_SQL,
-            )
-        )
-    full = sorted(full, key=lambda row: (row[0], row[1], row[2]))
-
+    add_expected_bindings(full)
     if actual == full:
         return None
 
-    if pair_id is None and snapshot_id is None:
-        minimal = [
-            ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
-            ("table", "agent_runs", "agent_runs", _impl._normalize_sql(_RUNS_TABLE_SQL)),
-        ]
-        if actual == minimal:
-            return None
+    minimal: list[tuple[str, str, str, Optional[str]]] = [
+        ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
+        ("table", "agent_runs", "agent_runs", _impl._normalize_sql(_RUNS_TABLE_SQL)),
+    ]
+    add_expected_bindings(minimal)
+    if actual == minimal:
+        return None
 
     rendered = [f"{kind}:{name}->{table} sql={sql!r}" for kind, name, table, sql in actual]
     return (
