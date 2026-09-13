@@ -84,11 +84,13 @@ def _close_owned_resource(resource: Any, seen: set[int]) -> None:
         return
 
     # AgentRunStore, ReadReviewStore and ReplanJournal predate a public close
-    # method but are owned by this composition root. Close their sole persistent
-    # SQLite handle here until those stores gain an operation-scoped contract.
-    connection = getattr(resource, "_conn", None)
-    if connection is not None:
-        connection.close()
+    # method but are owned by this composition root. AgentRunStore now owns a
+    # second durable execution-progress SQLite handle; close every owned fallback
+    # handle explicitly until these stores gain a public lifecycle contract.
+    for connection_name in ("_progress_conn", "_conn"):
+        connection = getattr(resource, connection_name, None)
+        if connection is not None:
+            connection.close()
 
 
 def close_agent3(app: FastAPI) -> None:

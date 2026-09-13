@@ -52,6 +52,29 @@ func TestForward_StreamsNDJSONToEnd(t *testing.T) {
 	}
 }
 
+func TestForward_ReviewedStartReasonHeaderIsNarrowlyForwarded(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-ModelRig-Agent3-Reason", "reviewed_start_refused")
+		w.Header().Set("X-ModelRig-Internal", "must-not-leak")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = fmt.Fprint(w, `{"detail":"refused"}`)
+	}))
+	defer up.Close()
+
+	c := New(up.URL, 5*time.Second)
+	req := httptest.NewRequest("POST", "/api/v1/experimental/agent3/plans/p/start", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	c.Forward(rec, req, "/experimental/agent3/plans/p/start")
+
+	if got := rec.Header().Get("X-ModelRig-Agent3-Reason"); got != "reviewed_start_refused" {
+		t.Fatalf("reviewed Start reason = %q", got)
+	}
+	if got := rec.Header().Get("X-ModelRig-Internal"); got != "" {
+		t.Fatalf("untrusted upstream header leaked: %q", got)
+	}
+}
+
 func TestForward_PassthroughWhenUpstreamCutsEarly(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fl := w.(http.Flusher)

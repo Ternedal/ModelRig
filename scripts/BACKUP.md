@@ -120,6 +120,14 @@ scripts\kaliv-backup.bat restore FILE    REM restore (refuses to overwrite)
 scripts\kaliv-backup.bat restore FILE /f REM restore, overwriting live data
 ```
 
+Restore is intentionally offline for Agent 3. A running `AgentRunStore` holds a
+shared runtime lease, so restore refuses before touching live state until the
+worker is stopped. Restore then commits a durable `restore_in_progress` guard
+before publication and clears it only after the complete archive succeeds. If a
+restore is interrupted or fails after publication begins, Agent 3 startup remains
+blocked until a complete verified retry finishes; this prevents a valid-looking
+run database from booting beside only partially restored companion stores.
+
 Schedule a daily 03:00 backup (run once, elevated):
 
 ```powershell

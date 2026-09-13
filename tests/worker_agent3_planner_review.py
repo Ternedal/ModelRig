@@ -128,9 +128,13 @@ assert body["read_review"]["removable_step_ids"] == [
     body["run"]["steps"][1]["id"]
 ]
 
-assert client.post(
+replayed = client.post(
     f"/experimental/agent3/plans/{preview_body['plan_id']}/start"
-).status_code == 409
+)
+assert replayed.status_code == 200, replayed.text
+assert replayed.json()["run"]["id"] == body["run"]["id"]
+assert replayed.json()["read_review"]["waiting"] is True
+assert executed == ["rig_status"]
 
 # Without explicit opt-in, the reviewed runtime retains the old contiguous-read
 # behavior and returns a disabled review receipt.
@@ -153,4 +157,35 @@ assert plain_body["run"]["state"] == "completed"
 assert plain_body["run"]["current_step"] == 2
 assert executed[-2:] == ["rig_status", "list_models"]
 
-print("19 passed, 0 failed")
+# Route/capability drift between Preview and Start may materialize a BLOCKED
+# run. Even that run is externally observable and must carry the exact reviewed
+# policy before it is persisted; otherwise a missing row defaults to
+# enabled=False and same-plan recovery wedges on a raw review_reads mismatch.
+drift_preview = client.post(
+    "/experimental/agent3/plan",
+    json={"message": "check rig before route drift", "mode": "rig", "review_reads": True},
+)
+assert drift_preview.status_code == 200, drift_preview.text
+drift_body = drift_preview.json()
+Gate.enabled = False
+try:
+    drift_started = client.post(
+        f"/experimental/agent3/plans/{drift_body['plan_id']}/start"
+    )
+finally:
+    Gate.enabled = True
+assert drift_started.status_code == 200, drift_started.text
+drift_run = drift_started.json()
+assert drift_run["run"]["state"] == "blocked"
+assert drift_run["review_reads"] is True
+assert drift_run["read_review"]["enabled"] is True
+assert drift_run["read_review"]["waiting"] is False
+
+drift_replay = client.post(
+    f"/experimental/agent3/plans/{drift_body['plan_id']}/start"
+)
+assert drift_replay.status_code == 200, drift_replay.text
+assert drift_replay.json()["run"]["id"] == drift_run["run"]["id"]
+assert drift_replay.json()["read_review"]["enabled"] is True
+
+print("27 passed, 0 failed")
