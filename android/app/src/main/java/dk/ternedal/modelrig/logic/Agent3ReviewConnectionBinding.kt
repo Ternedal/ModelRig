@@ -1,5 +1,9 @@
 package dk.ternedal.modelrig.logic
 
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+
 /**
  * Immutable in-memory authority for one Android Agent 3 review connection context.
  * The credential is deliberately never persisted, rendered or included in toString().
@@ -17,12 +21,43 @@ internal class Agent3ReviewConnectionBinding private constructor(
         "Agent3ReviewConnectionBinding(baseUrl=$baseUrl, token=<redacted>)"
 
     companion object {
+        private const val CREDENTIAL_FINGERPRINT_DOMAIN = "kaliv-agent3-reviewed-start-credential/v1"
+        private val recentCredentialFingerprints = ConcurrentHashMap<String, String>()
+
         fun capture(baseUrl: String?, token: String?): Agent3ReviewConnectionBinding? {
-            val normalizedBase = baseUrl?.trim()?.trimEnd('/').orEmpty()
-            val normalizedToken = token?.trim().orEmpty()
-            if (normalizedBase.isBlank() || normalizedToken.isBlank()) return null
+            val normalizedBase = normalizeBaseUrl(baseUrl) ?: return null
+            val normalizedToken = token?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            val fingerprint = credentialFingerprint(normalizedBase, normalizedToken) ?: return null
+            recentCredentialFingerprints[normalizedBase] = fingerprint
             return Agent3ReviewConnectionBinding(normalizedBase, normalizedToken)
         }
+
+        /**
+         * Non-secret, rig-scoped verifier for durable reviewed-Start recovery.
+         * The token itself is never retained here. Including the normalized rig
+         * URL prevents the same token from producing a linkable fingerprint
+         * across unrelated rigs.
+         */
+        internal fun credentialFingerprint(baseUrl: String?, token: String?): String? {
+            val normalizedBase = normalizeBaseUrl(baseUrl) ?: return null
+            val normalizedToken = token?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            val digest = MessageDigest.getInstance("SHA-256").digest(
+                buildString {
+                    append(CREDENTIAL_FINGERPRINT_DOMAIN)
+                    append('\u0000')
+                    append(normalizedBase)
+                    append('\u0000')
+                    append(normalizedToken)
+                }.toByteArray(StandardCharsets.UTF_8)
+            )
+            return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }
+
+        internal fun recentCredentialFingerprint(baseUrl: String?): String? =
+            normalizeBaseUrl(baseUrl)?.let(recentCredentialFingerprints::get)
+
+        private fun normalizeBaseUrl(baseUrl: String?): String? =
+            baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
     }
 }
 
