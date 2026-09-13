@@ -1,0 +1,67 @@
+name: tmp-qualify-reviewed-start-p1n
+
+on:
+  push:
+    branches:
+      - qualify/agent3-reviewed-start-p1n-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: qualify/agent3-reviewed-start-p1n-20260913
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+      - name: Compile Agent3 Python
+        run: python -m compileall -q worker/app/agent3 tests/worker_agent3_reviewed_start_p1l.py
+      - name: Run reviewed Start recovery and cancellation chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          for t in tests/worker_agent3_reviewed_start_p1*.py; do
+            echo "==> $t"
+            python "$t"
+          done
+          for t in \
+            tests/worker_agent3_planner_review.py \
+            tests/worker_agent3_review_reads.py \
+            tests/worker_agent3_recovery.py \
+            tests/worker_agent3_plan_store.py \
+            tests/worker_agent3_cancellation_contract.py \
+            tests/worker_agent3_late_cancel.py; do
+            if [[ -f "$t" ]]; then
+              echo "==> $t"
+              python "$t"
+            fi
+          done
+      - name: Check canonical current state
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp CURRENT_STATE.md /tmp/CURRENT_STATE.before
+          python scripts/current_state.py
+          python scripts/current_state.py --check
+          if ! cmp -s /tmp/CURRENT_STATE.before CURRENT_STATE.md; then
+            echo "CURRENT_STATE_CHANGED=1"
+            git diff -- CURRENT_STATE.md
+            exit 42
+          fi
+          echo "CURRENT_STATE_CHANGED=0"
+      - name: Diff hygiene
+        run: |
+          git diff --check
+          git status --short
+          grep -q '_publish_reviewed_start_acceptance' worker/app/agent3/planner.py
+          grep -q 'acceptance_publication_serializes_cancel' tests/worker_agent3_reviewed_start_p1l.py
+          grep -q 'accepted_cancelled_recovery_clears_stale_checkpoint' tests/worker_agent3_reviewed_start_p1l.py
