@@ -19,10 +19,15 @@ from .trusted_git_runtime_staging import TrustedGitRuntime
 from ._improvement_physical_reservation_provenance import (
     install_descriptor_bound_provenance,
 )
+from ._improvement_physical_reservation_directory_provenance import (
+    install_directory_history_provenance,
+)
 from . import _improvement_physical_reservation_impl as _implementation
 
-# Install descriptor/file-identity provenance before any production transaction.
+# Install original-file provenance first, then bind the containing ledger
+# directory's rename history before exposing any transaction seam.
 install_descriptor_bound_provenance(_implementation)
+install_directory_history_provenance(_implementation)
 # The old convenience wrapper accepted a caller-selected verifier. The loaded
 # implementation retains only the explicitly private injectable transaction.
 if hasattr(_implementation, "consume_physical_qualification_request_once"):
