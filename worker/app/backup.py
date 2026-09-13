@@ -378,7 +378,14 @@ def _member_bytes(tar: tarfile.TarFile, name: str) -> Optional[bytes]:
 
 
 def _agent3_authority_problem(files: dict, *, runs_have_rows: bool) -> Optional[str]:
-    if runs_have_rows and AGENT3_EXECUTION_PROGRESS_KEY not in files:
+    has_runs = AGENT3_RUNS_KEY in files
+    has_progress = AGENT3_EXECUTION_PROGRESS_KEY in files
+    if has_progress and not has_runs:
+        return (
+            "execution-progress authority is present without the Agent 3 run store; "
+            "restoring the sidecar alone could replace watermarks for retained live run state"
+        )
+    if runs_have_rows and not has_progress:
         return (
             "Agent 3 run state is present without execution-progress authority; "
             "restoring it could replay a previously-started non-idempotent step"
@@ -396,22 +403,29 @@ def create(out_dir: str = ".") -> str:
     by_key = {item.key: item for item in inventory}
     runs = by_key[AGENT3_RUNS_KEY]
     progress = by_key[AGENT3_EXECUTION_PROGRESS_KEY]
+    runs_exists = os.path.exists(runs.path)
+    progress_exists = os.path.exists(progress.path)
     runs_have_rows = False
-    if os.path.exists(runs.path):
+    if runs_exists:
         run_count, run_problem = _agent3_runs_row_count_path(runs.path)
         if run_problem:
             raise ValueError(
                 "refusing to back up an invalid Agent 3 run store: " + run_problem
             )
         runs_have_rows = bool(run_count)
-    if os.path.exists(progress.path):
+    if progress_exists and not runs_exists:
+        raise ValueError(
+            "refusing to back up execution-progress authority without the Agent 3 run store: "
+            + progress.path
+        )
+    if progress_exists:
         progress_problem = _execution_progress_problem_path(progress.path)
         if progress_problem:
             raise ValueError(
                 "refusing to back up invalid Agent 3 execution-progress authority: "
                 + progress_problem
             )
-    if runs_have_rows and not os.path.exists(progress.path):
+    if runs_have_rows and not progress_exists:
         raise ValueError(
             "refusing to back up Agent 3 runs without the execution-progress sidecar: "
             + progress.path
