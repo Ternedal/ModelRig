@@ -1,0 +1,73 @@
+name: tmp-fix-reviewed-start-p1f
+
+on:
+  push:
+    branches:
+      - fix/agent3-reviewed-start-recovery-p1f-20260913
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-qualify:
+    if: ${{ !contains(github.event.head_commit.message, '[reviewed-start-p1f]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-reviewed-start-recovery-p1f-20260913
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Apply reviewed Start P1f fixes
+        run: python3 .tmp_fix_reviewed_start_p1f.py
+
+      - name: Install canonical worker deps
+        run: pip install -r worker/requirements.txt --break-system-packages
+
+      - name: Focused reviewed Start and read-review regressions
+        env:
+          PYTHONPATH: worker
+        run: |
+          python3 tests/worker_agent3_reviewed_start_p1f.py
+          python3 tests/worker_agent3_reviewed_start_p1e.py
+          python3 tests/worker_agent3_reviewed_start_p1d.py
+          python3 tests/worker_agent3_reviewed_start_p1c.py
+          python3 tests/worker_agent3_reviewed_start_reconcile.py
+          python3 tests/worker_agent3_reviewed_start_recovery.py
+          python3 tests/worker_agent3_planner_review.py
+          python3 tests/worker_agent3_review_reads.py
+          python3 tests/worker_agent3_plan_store.py
+
+      - name: Regenerate and verify canonical current state
+        run: |
+          python3 scripts/current_state.py
+          python3 tests/workflow_current_state.py
+
+      - name: Diff hygiene
+        run: git diff --check
+
+      - name: Commit bounded product fix and remove temporary machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/_tmp_fix_reviewed_start_p1f.yml
+          git rm .tmp_fix_reviewed_start_p1f.py
+          git add -A
+          retained_paths="$(git diff --cached --diff-filter=ACMRTUXB --name-only)"
+          if printf '%s\n' "$retained_paths" | grep -q '^\.github/workflows/_tmp_'; then
+            echo "temporary workflow leaked into retained tree" >&2
+            exit 1
+          fi
+          if printf '%s\n' "$retained_paths" | grep -q '^\.tmp_'; then
+            echo "temporary helper leaked into retained tree" >&2
+            exit 1
+          fi
+          git commit -m "fix(agent3): fail closed on missing reviewed read policy [reviewed-start-p1f]"
+          git push origin HEAD:fix/agent3-reviewed-start-recovery-p1f-20260913
