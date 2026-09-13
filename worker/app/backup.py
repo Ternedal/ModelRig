@@ -197,6 +197,7 @@ def _sqlite_table_problem(
     *,
     table: str,
     required: dict[str, tuple[str, int | None, int | None]],
+    reject_triggers: bool = False,
 ) -> Optional[str]:
     try:
         con = _readonly_sqlite(path)
@@ -208,6 +209,15 @@ def _sqlite_table_problem(
             if integrity is None or integrity[0] != "ok":
                 return f"SQLite integrity_check failed: {integrity[0] if integrity else 'no result'}"
             rows = list(con.execute(f"PRAGMA table_info({table})"))
+            triggers = []
+            if reject_triggers:
+                triggers = list(
+                    con.execute(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type='trigger' AND tbl_name=? ORDER BY name",
+                        (table,),
+                    )
+                )
         except sqlite3.Error as exc:
             return f"cannot inspect SQLite authority: {exc}"
         if not rows:
@@ -224,6 +234,9 @@ def _sqlite_table_problem(
                 return f"column {table}.{name} has invalid NOT NULL authority"
             if want_pk is not None and int(row[5]) != want_pk:
                 return f"column {table}.{name} has invalid primary-key authority"
+        if triggers:
+            names = ", ".join(str(row[0]) for row in triggers)
+            return f"table {table} has unexpected trigger authority: {names}"
         return None
     finally:
         con.close()
@@ -239,6 +252,7 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
             "step_sha256": ("TEXT", 1, 3),
             "started_at": ("REAL", 1, 0),
         },
+        reject_triggers=True,
     )
 
 
