@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
+import uuid
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -19,6 +22,7 @@ from .core import (
     AgentStep,
     CapabilitySnapshot,
     RouteKind,
+    RunState,
     TurnRequest,
 )
 from .integration import Agent3PlanError, PlannedToolCall, V2ToolAdapter
@@ -30,6 +34,10 @@ from .routing import StrictTurnRouter
 
 
 class PlannerError(RuntimeError):
+    pass
+
+
+class _ReviewedStartCancelled(RuntimeError):
     pass
 
 
@@ -397,87 +405,424 @@ def build_planner_router(
             response["capability_receipt"] = capability_receipt_payload
         return response
 
-    @router.post("/plans/{plan_id}/start")
-    def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
-        if orchestrator is None:
-            raise HTTPException(status_code=501, detail="plan execution is not mounted")
-        try:
-            envelope = json.loads(plan_store.consume(plan_id))
-            template = AgentRun.from_json(envelope["run"])
-            stored_caps = CapabilitySnapshot(**envelope["capabilities"])
-            memory_receipt = envelope.get("memory_context", _empty_memory_receipt())
-            review_reads = bool(envelope.get("review_reads", False))
-            stored_capability_receipt = envelope.get("capability_receipt")
-        except PlanStoreError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
-            raise HTTPException(status_code=409, detail="stored plan is invalid") from exc
-
-        if review_reads and not reviewing:
-            raise HTTPException(status_code=409, detail="read review is not mounted")
-
-        current_capability_receipt: dict[str, Any] | None = None
-        if stored_capability_receipt is not None:
-            if not isinstance(stored_capability_receipt, dict):
-                raise HTTPException(status_code=409, detail="stored capability receipt is invalid")
-            if capability_graph_provider is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="capability receipt validation is not mounted",
-                )
-            if stored_capability_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
-                raise HTTPException(
-                    status_code=409,
-                    detail="stored capability receipt does not match the plan",
-                )
-            current_capability_receipt = capability_receipt(template)
-            if current_capability_receipt != stored_capability_receipt:
-                raise HTTPException(
-                    status_code=409,
-                    detail="capability receipt is stale; preview the plan again",
-                )
-            if not bool(current_capability_receipt.get("allowed", False)):
-                raise HTTPException(
-                    status_code=409,
-                    detail="plan is blocked by current capabilities",
-                )
-
-        # Recheck the gate at start time. A kill-switch decision made after the
-        # preview wins over the earlier plan.
-        caps = CapabilitySnapshot(
-            rig_reachable=stored_caps.rig_reachable,
-            worker_ready=stored_caps.worker_ready,
-            tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
-            cloud_ready=stored_caps.cloud_ready,
-            rag_ready=stored_caps.rag_ready,
-            voice_ready=stored_caps.voice_ready,
-        )
-        kwargs: dict[str, Any] = {
-            "proactive": template.proactive,
-            "allow_private_cloud": template.allow_private_cloud,
-        }
-        if reviewing:
-            kwargs["review_reads"] = review_reads
-        run = orchestrator.start_with_steps(
-            template.request,
-            caps,
-            _clone_steps(template),
-            **kwargs,
-        )
+    def _reviewed_start_response(
+        plan_id: str,
+        stored: dict[str, Any],
+        run: AgentRun,
+    ) -> dict[str, Any]:
+        review_reads = bool(stored.get("review_reads", False))
         read_review = (
             orchestrator.review_store.get(run.id)
             if reviewing
             else {"enabled": False, "waiting": False}
         )
-        response = {
+        response: dict[str, Any] = {
             "run": json.loads(run.to_json()),
             "plan_id": plan_id,
-            "memory_context": memory_receipt,
+            "memory_context": stored.get("memory_context", _empty_memory_receipt()),
             "review_reads": review_reads,
             "read_review": read_review,
         }
-        if current_capability_receipt is not None:
-            response["capability_receipt"] = current_capability_receipt
+        stored_receipt = stored.get("capability_receipt")
+        if stored_receipt is not None:
+            response["capability_receipt"] = stored_receipt
         return response
+
+    def _reviewed_start_error(reason: str, message: str, status_code: int = 409) -> HTTPException:
+        return HTTPException(
+            status_code=status_code,
+            detail=message,
+            headers={"X-ModelRig-Agent3-Reason": reason},
+        )
+
+    reviewed_start_retry_ready: set[tuple[str, str]] = set()
+    reviewed_start_retry_lock = threading.Lock()
+
+    def _mark_reviewed_start_retry_ready(plan_id: str, run_id: str) -> None:
+        # This is deliberately process-local. It proves only that THIS worker's
+        # previous post-materialization request has exited, so a same-worker
+        # retry cannot race that executor. A process restart still uses the
+        # durable owner-generation CAS in PlanStore.
+        with reviewed_start_retry_lock:
+            reviewed_start_retry_ready.add((plan_id, run_id))
+
+    def _take_reviewed_start_retry_ready(plan_id: str, run_id: str) -> bool:
+        key = (plan_id, run_id)
+        with reviewed_start_retry_lock:
+            if key not in reviewed_start_retry_ready:
+                return False
+            reviewed_start_retry_ready.remove(key)
+            return True
+
+    def _finalize_cancelled_reviewed_start(plan_id: str, run_id: str) -> None:
+        # Cancellation is definitive only after the same-run execution guard has
+        # let the Start/recovery path observe the terminal CANCELLED snapshot.
+        # At that point no executor from this path is still in flight. Remove any
+        # checkpoint left by a crash between the run cancellation commit and the
+        # read-review cleanup, then publish a definitive refusal so clients may
+        # clear their ambiguous Start authority without calling the cancellation
+        # a successful Start acceptance.
+        if reviewing:
+            orchestrator.review_store.clear_waiting_if_matches(run_id)
+        plan_store.mark_reviewed_start_refused(plan_id, run_id)
+
+    def _parse_reviewed_materialization(payload: str) -> tuple[dict[str, Any], AgentRun, bool]:
+        envelope = json.loads(payload)
+        if not isinstance(envelope, dict):
+            raise TypeError("reviewed Start materialization must be an object")
+        raw_review_reads = envelope.get("review_reads")
+        if type(raw_review_reads) is not bool:
+            raise TypeError("review_reads must be a literal boolean")
+        template = AgentRun.from_json(envelope["run"])
+        return envelope, template, raw_review_reads
+
+    def _assert_reviewed_run_identity(existing: AgentRun, reviewed_template: AgentRun) -> None:
+        # Never execute a recovered row merely because its run id matches. The
+        # canonical plan digest binds route + tool/args + risk/sensitivity/egress
+        # metadata to what the operator reviewed while the explicit flags below
+        # bind execution-policy inputs that are intentionally outside the durable
+        # capability-receipt digest. Mutable execution state and step ids remain
+        # excluded.
+        if (
+            agent_run_plan_sha256(existing) != agent_run_plan_sha256(reviewed_template)
+            or existing.proactive != reviewed_template.proactive
+            or existing.allow_private_cloud != reviewed_template.allow_private_cloud
+        ):
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start run does not match the reviewed plan",
+                status_code=503,
+            )
+
+    def _reconcile_reviewed_start_run(
+        run_id: str,
+        *,
+        review_reads: bool,
+        reviewed_template: AgentRun,
+    ) -> AgentRun:
+        # Recovery identity checks, checkpoint reconstruction and the possible
+        # advance must linearize with ordinary Resume for this exact run.
+        # ReviewingAgent3Orchestrator uses an RLock, so the nested advance()
+        # below is re-entrant; non-reviewing fixtures keep their old behavior.
+        execution_guard = (
+            orchestrator.run_execution_guard(run_id) if reviewing else nullcontext()
+        )
+        with execution_guard:
+            return _reconcile_reviewed_start_run_locked(
+                run_id, review_reads=review_reads, reviewed_template=reviewed_template
+            )
+
+    def _reconcile_reviewed_start_run_locked(
+        run_id: str,
+        *,
+        review_reads: bool,
+        reviewed_template: AgentRun,
+    ) -> AgentRun:
+        existing = orchestrator.store.load(run_id)
+        if existing is None:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start run is not yet materialized",
+                status_code=503,
+            )
+        # Only RUNNING snapshots can be advanced. BLOCKED is terminal authority
+        # and may legitimately carry a fail-closed route produced by capability
+        # drift rather than the reviewed executable route. Observe terminal state
+        # unchanged; bind identity immediately before any path that could advance.
+        if existing.state is not RunState.RUNNING:
+            return existing
+        _assert_reviewed_run_identity(existing, reviewed_template)
+        # The immutable plan bit and the separate review-policy row are two
+        # persisted views of the same execution authority. They must agree in
+        # BOTH directions before recovery can advance. Otherwise corruption from
+        # true->false could clear a waiting checkpoint just as dangerously as a
+        # missing/disabled row for a true plan.
+        if reviewing:
+            review_state = orchestrator.review_store.get(run_id)
+            if bool(review_state["enabled"]) != review_reads:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed read policy disagrees with the reviewed plan; recovery remains ambiguous",
+                    status_code=503,
+                )
+            if not review_reads and review_state["waiting"]:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "unexpected reviewed read checkpoint; recovery remains ambiguous",
+                    status_code=503,
+                )
+        elif review_reads:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "reviewed read policy is unavailable; recovery remains ambiguous",
+                status_code=503,
+            )
+
+        if review_reads:
+            checkpointed = orchestrator.recover_read_review_checkpoint_if_due(run_id)
+            if checkpointed is not None:
+                return checkpointed
+        try:
+            return orchestrator.advance(run_id)
+        except Exception as exc:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start requires recovery retry",
+                status_code=503,
+            ) from exc
+
+    def _recover_materialized_reviewed_start(
+        plan_id: str,
+        run_id: str,
+        stored: dict[str, Any],
+        *,
+        review_reads: bool,
+        reviewed_template: AgentRun,
+    ) -> dict[str, Any]:
+        try:
+            reconciled = _reconcile_reviewed_start_run(
+                run_id,
+                review_reads=review_reads,
+                reviewed_template=reviewed_template,
+            )
+        except Exception:
+            # No second SQLite write is required to make a same-worker retry
+            # possible. The local token is issued only as this request exits;
+            # the next request must atomically consume it before recovery.
+            _mark_reviewed_start_retry_ready(plan_id, run_id)
+            raise
+
+        if reconciled.state is RunState.CANCELLED:
+            try:
+                _finalize_cancelled_reviewed_start(plan_id, run_id)
+            except Exception:
+                _mark_reviewed_start_retry_ready(plan_id, run_id)
+                raise
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "reviewed Start was cancelled before publication",
+            )
+
+        try:
+            plan_store.mark_reviewed_start_accepted(plan_id, run_id)
+            return _reviewed_start_response(plan_id, stored, reconciled)
+        except Exception:
+            _mark_reviewed_start_retry_ready(plan_id, run_id)
+            raise
+
+    @router.post("/plans/{plan_id}/start")
+    def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
+        if orchestrator is None:
+            raise _reviewed_start_error(
+                "reviewed_start_executor_unavailable",
+                "plan execution is not mounted",
+                status_code=501,
+            )
+
+        recovery = plan_store.reviewed_start_recovery(plan_id)
+        payload: str
+        reserved_run_id: str
+        if recovery is not None:
+            state, recovered_run_id, owner = recovery
+            if state == "refused":
+                raise _reviewed_start_error(
+                    "reviewed_start_refused",
+                    "reviewed Start is no longer recoverable",
+                )
+            if recovered_run_id is None:
+                raise _reviewed_start_error(
+                    "reviewed_start_refused",
+                    "reviewed Start is missing its bound run",
+                )
+            reserved_run_id = recovered_run_id
+            existing = orchestrator.store.load(reserved_run_id)
+            if state == "accepted":
+                if existing is None:
+                    # Acceptance proves this exact reserved run was materialized at
+                    # least once and may already have produced side effects. Missing
+                    # run storage is therefore ambiguous/corrupt recovery, never a
+                    # definitive refusal that would let clients clear authority.
+                    raise _reviewed_start_error(
+                        "reviewed_start_pending",
+                        "accepted reviewed Start is missing its bound run; recovery remains ambiguous",
+                        status_code=503,
+                    )
+                try:
+                    accepted_payload = plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
+                    stored, reviewed_template, _accepted_review_reads = _parse_reviewed_materialization(accepted_payload)
+                except (PlanStoreError, KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+                    raise _reviewed_start_error(
+                        "reviewed_start_pending",
+                        "accepted reviewed Start materialization is unreadable; recovery remains ambiguous",
+                        status_code=503,
+                    ) from exc
+                if existing.state is RunState.RUNNING:
+                    _assert_reviewed_run_identity(existing, reviewed_template)
+                return _reviewed_start_response(plan_id, stored, existing)
+
+            # A durable pending binding proves the reserved run may already have
+            # existed and produced side effects. Missing run storage is therefore
+            # ambiguous; never fall through into start_with_steps() to recreate it.
+            if existing is None:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "pending reviewed Start is missing its bound run; recovery remains ambiguous",
+                    status_code=503,
+                )
+
+            if owner == plan_store.start_owner:
+                if not _take_reviewed_start_retry_ready(plan_id, reserved_run_id):
+                    raise _reviewed_start_error(
+                        "reviewed_start_pending",
+                        "reviewed Start is still materializing in this worker",
+                    )
+            elif not plan_store.claim_reviewed_start_recovery(
+                plan_id,
+                reserved_run_id,
+                owner,
+            ):
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed Start recovery changed concurrently",
+                )
+
+            try:
+                payload = plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
+                recovery_envelope, recovery_template, recovered_review_reads = _parse_reviewed_materialization(payload)
+            except (PlanStoreError, KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+                _mark_reviewed_start_retry_ready(plan_id, reserved_run_id)
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "persisted reviewed Start materialization is unreadable; recovery remains ambiguous",
+                    status_code=503,
+                ) from exc
+            return _recover_materialized_reviewed_start(
+                plan_id,
+                reserved_run_id,
+                recovery_envelope,
+                review_reads=recovered_review_reads,
+                reviewed_template=recovery_template,
+            )
+        else:
+            reserved_run_id = str(uuid.uuid4())
+            try:
+                payload = plan_store.claim_reviewed_start(plan_id, reserved_run_id)
+            except PlanStoreError as exc:
+                raise _reviewed_start_error("reviewed_start_refused", str(exc)) from exc
+
+        try:
+            envelope, template, review_reads = _parse_reviewed_materialization(payload)
+            stored_caps = CapabilitySnapshot(**envelope["capabilities"])
+            stored_capability_receipt = envelope.get("capability_receipt")
+        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "stored plan is invalid",
+            ) from exc
+
+        if review_reads and not reviewing:
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "read review is not mounted",
+            )
+
+        try:
+            if stored_capability_receipt is not None:
+                if not isinstance(stored_capability_receipt, dict):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "stored capability receipt is invalid",
+                    )
+                if capability_graph_provider is None:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "capability receipt validation is not mounted",
+                    )
+                if stored_capability_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "stored capability receipt does not match the plan",
+                    )
+                current_capability_receipt = capability_receipt(template)
+                if current_capability_receipt != stored_capability_receipt:
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "capability receipt is stale; preview the plan again",
+                    )
+                if not bool(current_capability_receipt.get("allowed", False)):
+                    raise _reviewed_start_error(
+                        "reviewed_start_refused",
+                        "plan is blocked by current capabilities",
+                    )
+
+            caps = CapabilitySnapshot(
+                rig_reachable=stored_caps.rig_reachable,
+                worker_ready=stored_caps.worker_ready,
+                tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
+                cloud_ready=stored_caps.cloud_ready,
+                rag_ready=stored_caps.rag_ready,
+                voice_ready=stored_caps.voice_ready,
+            )
+            kwargs: dict[str, Any] = {
+                "proactive": template.proactive,
+                "allow_private_cloud": template.allow_private_cloud,
+                "run_id": reserved_run_id,
+            }
+            if reviewing:
+                kwargs["review_reads"] = review_reads
+                # A reviewed run must never become externally observable without
+                # its read-review policy. ReviewingAgent3Orchestrator already
+                # configures normal routed runs before saving them, but its
+                # blocked-route path uses the base blocked-run helper. Persist the
+                # policy here before either path can materialize the reserved run.
+                orchestrator.review_store.configure(reserved_run_id, review_reads)
+            run = orchestrator.start_with_steps(
+                template.request,
+                caps,
+                _clone_steps(template),
+                **kwargs,
+            )
+            if run.id != reserved_run_id:
+                raise RuntimeError("reviewed Start materialized a different run id")
+            if run.state is RunState.CANCELLED:
+                raise _ReviewedStartCancelled()
+            plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
+            return _reviewed_start_response(plan_id, envelope, run)
+        except _ReviewedStartCancelled:
+            try:
+                _finalize_cancelled_reviewed_start(plan_id, reserved_run_id)
+            except Exception:
+                _mark_reviewed_start_retry_ready(plan_id, reserved_run_id)
+                raise
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "reviewed Start was cancelled before publication",
+            )
+        except HTTPException:
+            existing = orchestrator.store.load(reserved_run_id)
+            if existing is not None:
+                return _recover_materialized_reviewed_start(
+                    plan_id,
+                    reserved_run_id,
+                    envelope,
+                    review_reads=review_reads,
+                    reviewed_template=template,
+                )
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise
+        except Exception:
+            existing = orchestrator.store.load(reserved_run_id)
+            if existing is not None:
+                return _recover_materialized_reviewed_start(
+                    plan_id,
+                    reserved_run_id,
+                    envelope,
+                    review_reads=review_reads,
+                    reviewed_template=template,
+                )
+            plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
+            raise
 
     return router
