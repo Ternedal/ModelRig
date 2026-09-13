@@ -649,7 +649,10 @@ def build_planner_router(
         except HTTPException:
             existing = orchestrator.store.load(reserved_run_id)
             if existing is not None:
-                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
+                reconciled = _reconcile_reviewed_start_run(
+                    reserved_run_id,
+                    review_reads=review_reads,
+                )
                 plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
                 return _reviewed_start_response(plan_id, envelope, reconciled)
             plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
@@ -657,7 +660,10 @@ def build_planner_router(
         except Exception:
             existing = orchestrator.store.load(reserved_run_id)
             if existing is not None:
-                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
+                reconciled = _reconcile_reviewed_start_run(
+                    reserved_run_id,
+                    review_reads=review_reads,
+                )
                 plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
                 return _reviewed_start_response(plan_id, envelope, reconciled)
             plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)

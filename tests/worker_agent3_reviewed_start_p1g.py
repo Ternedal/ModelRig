@@ -1,15 +1,4 @@
-from pathlib import Path
-
-planner = Path("worker/app/agent3/planner.py")
-text = planner.read_text(encoding="utf-8")
-old = "                reconciled = _reconcile_reviewed_start_run(reserved_run_id)\n"
-new = "                reconciled = _reconcile_reviewed_start_run(\n                    reserved_run_id,\n                    review_reads=review_reads,\n                )\n"
-count = text.count(old)
-if count != 2:
-    raise SystemExit(f"planner.py: expected two mirrored exception reconciliation calls, found {count}")
-planner.write_text(text.replace(old, new), encoding="utf-8")
-
-Path("tests/worker_agent3_reviewed_start_p1g.py").write_text(r'''from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -146,6 +135,3 @@ run_case(root, exception_kind="runtime")
 run_case(root, exception_kind="http")
 
 print("26 passed, 0 failed")
-''', encoding="utf-8")
-
-print("reviewed Start P1g patch staged")
