@@ -214,16 +214,17 @@ check(
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 operator = os.path.join(repo_root, "scripts", "migrate-new-rig-state.ps1")
 text = open(operator, "r", encoding="utf-8-sig").read()
-stop_pos = text.index("Save-TaskStatesAndStop")
-adopt_pos = text.index('Write-Step "Adopting legacy Agent3 pair authority')
-create_pos = text.index('Invoke-BackupModule -Arguments @(\"create\"')
+main_region = text[text.index("$resolvedRuntime = $null") :]
+stop_pos = main_region.index("    Save-TaskStatesAndStop")
+adopt_pos = main_region.index('Write-Step "Adopting legacy Agent3 pair authority')
+create_pos = main_region.index('Invoke-BackupModule -Arguments @(\"create\"')
 check(
     stop_pos < adopt_pos < create_pos,
-    "migration: appliance stop precedes adoption, which precedes backup create",
+    "migration: actual appliance-stop call precedes adoption, which precedes backup create",
 )
 check(
-    '-Module "app.agent3.adopt_pair"' in text
-    and '@("--offline-confirmed")' in text,
+    '-Module "app.agent3.adopt_pair"' in main_region
+    and '@("--offline-confirmed")' in main_region,
     "migration: adoption is explicit and carries offline confirmation",
 )
 
