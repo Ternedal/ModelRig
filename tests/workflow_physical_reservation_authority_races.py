@@ -2,6 +2,7 @@
 """Adversarial regressions for the RSI host-local reservation authority boundary."""
 from __future__ import annotations
 
+import importlib.util
 import inspect
 import json
 import os
@@ -12,7 +13,7 @@ import workflow_physical_validation_final_gate as base
 
 import kaliv_dev_control.improvement_physical_authority_keyring as keyring_module
 import kaliv_dev_control.improvement_physical_reservation as reservation_module
-import kaliv_dev_control.improvement_physical_reservation_impl as reservation_impl
+import kaliv_dev_control._improvement_physical_reservation_impl as reservation_impl
 from kaliv_dev_control.improvement_physical_reservation import (
     PhysicalQualificationReservationError,
     _consume_physical_qualification_request_once,
@@ -91,10 +92,12 @@ def test_public_surface_cannot_select_or_traverse_verifier() -> None:
         "consumed_at_utc",
     ):
         assert forbidden not in public_parameters
-    assert not hasattr(
-        reservation_impl, "consume_physical_qualification_request_once"
+    assert (
+        importlib.util.find_spec(
+            "kaliv_dev_control.improvement_physical_reservation_impl"
+        )
+        is None
     )
-    assert not hasattr(reservation_impl, "_implementation")
     assert not hasattr(reservation_module, "_implementation")
 
 
@@ -388,6 +391,115 @@ def test_final_removed_during_cleanup_fails_before_provenance_registration() -> 
         )
 
 
+def test_byte_identical_final_replacement_before_registration_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = _fixture(root)
+        final_path = ledger_root / f"{request.sha256}.json"
+        original_unlink = reservation_impl.unlink_durable
+        replaced = False
+
+        def cleanup_then_replace_final(path):
+            nonlocal replaced
+            result = original_unlink(path)
+            if Path(path).name.endswith(".pending.json") and final_path.is_file():
+                payload = final_path.read_bytes()
+                final_path.unlink()
+                final_path.write_bytes(payload)
+                replaced = True
+            return result
+
+        reservation_impl.unlink_durable = cleanup_then_replace_final
+        try:
+            _expect(
+                "durably host-consumed but reservation requires recovery",
+                lambda: _consume_physical_qualification_request_once(
+                    ledger_root=ledger_root,
+                    trusted_git=trusted_git,
+                    repository_root=repository_root,
+                    operation_root=operation_root,
+                    request=request,
+                    qualification=qualification,
+                    snapshot_receipt=snapshot_receipt,
+                    signature=signature,
+                    verifier=verifier,
+                    now_provider=_clock(),
+                ),
+            )
+        finally:
+            reservation_impl.unlink_durable = original_unlink
+
+        assert replaced is True
+        loaded = reservation_module._PhysicalQualificationRequestLedger(ledger_root).load(
+            request.sha256
+        )
+        assert loaded.transaction_authenticated is False
+
+
+def test_byte_identical_replay_marker_replacement_before_registration_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = _fixture(root)
+        replay_marker = ledger_root / f".{request.sha256}.lock"
+        original_unlink = reservation_impl.unlink_durable
+        replaced = False
+
+        def cleanup_then_replace_marker(path):
+            nonlocal replaced
+            result = original_unlink(path)
+            if Path(path).name.endswith(".pending.json") and replay_marker.is_file():
+                payload = replay_marker.read_bytes()
+                replay_marker.unlink()
+                replay_marker.write_bytes(payload)
+                replaced = True
+            return result
+
+        reservation_impl.unlink_durable = cleanup_then_replace_marker
+        try:
+            _expect(
+                "durably host-consumed but reservation requires recovery",
+                lambda: _consume_physical_qualification_request_once(
+                    ledger_root=ledger_root,
+                    trusted_git=trusted_git,
+                    repository_root=repository_root,
+                    operation_root=operation_root,
+                    request=request,
+                    qualification=qualification,
+                    snapshot_receipt=snapshot_receipt,
+                    signature=signature,
+                    verifier=verifier,
+                    now_provider=_clock(),
+                ),
+            )
+        finally:
+            reservation_impl.unlink_durable = original_unlink
+
+        assert replaced is True
+        assert replay_marker.is_file()
+
+
 def _consume_fixture(root: Path):
     (
         _main_sha,
@@ -453,6 +565,8 @@ def main() -> None:
     test_verified_input_snapshot_survives_caller_mutation_after_verify()
     test_final_swap_cannot_be_upgraded_to_live_authority()
     test_final_removed_during_cleanup_fails_before_provenance_registration()
+    test_byte_identical_final_replacement_before_registration_fails_closed()
+    test_byte_identical_replay_marker_replacement_before_registration_fails_closed()
     test_recreated_final_bytes_cannot_restore_live_provenance()
     test_recreated_replay_marker_bytes_cannot_restore_live_provenance()
     print("RSI physical reservation authority-race regressions: PASS")
