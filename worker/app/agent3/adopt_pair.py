@@ -15,9 +15,10 @@ def adopt_current_pair(*, offline_confirmed: bool = False) -> Optional[str]:
     Normal startup never calls this. The migration operator stops the appliance
     first and then opts in explicitly. Before any persistent pair id is written,
     the existing run/progress stores must both be present, structurally valid
-    and semantically coherent at the execution-watermark boundary. The final
-    semantic check is repeated while ``adopt_live_pair`` holds write locks on
-    both attached databases, so a successful transition cannot race a writer.
+    and semantically coherent at the execution-watermark boundary. The complete
+    structural + semantic check is repeated while ``adopt_live_pair`` holds
+    write locks on both attached databases, so a successful transition cannot
+    race a writer or bless schema drift in the pre-lock validation gap.
 
     A genuinely empty run-only store needs no adoption because it carries no
     execution authority yet. An already-bound valid pair is accepted
@@ -70,27 +71,31 @@ def adopt_current_pair(*, offline_confirmed: bool = False) -> Optional[str]:
             raise RuntimeError("invalid Agent 3 live pair: " + pair_problem)
         assert pair_id is not None
 
-    run_count, run_problem = backup._agent3_runs_row_count_path(
-        runs.path, pair_id=pair_id
-    )
-    progress_problem = backup._execution_progress_problem_path(
-        progress.path, pair_id=pair_id
-    )
-    semantic_problem = None
-    if not run_problem and not progress_problem:
-        semantic_problem = backup._agent3_pair_semantic_problem_paths(
-            runs.path, progress.path
+    def authority_problem() -> tuple[Optional[int], Optional[str]]:
+        run_count, run_problem = backup._agent3_runs_row_count_path(
+            runs.path, pair_id=pair_id
         )
-    if run_problem or progress_problem or semantic_problem:
-        raise RuntimeError(
-            "refusing Agent 3 pair adoption: "
-            + str(run_problem or progress_problem or semantic_problem)
+        progress_problem = backup._execution_progress_problem_path(
+            progress.path, pair_id=pair_id
         )
+        semantic_problem = None
+        if not run_problem and not progress_problem:
+            semantic_problem = backup._agent3_pair_semantic_problem_paths(
+                runs.path, progress.path
+            )
+        return run_count, str(run_problem or progress_problem or semantic_problem) if (
+            run_problem or progress_problem or semantic_problem
+        ) else None
+
+    run_count, problem = authority_problem()
+    if problem:
+        raise RuntimeError("refusing Agent 3 pair adoption: " + problem)
     if run_count is None:
         raise RuntimeError("could not inspect Agent 3 run authority")
 
     def locked_validator(_connection) -> Optional[str]:
-        return backup._agent3_pair_semantic_problem_paths(runs.path, progress.path)
+        _run_count, locked_problem = authority_problem()
+        return locked_problem
 
     return adopt_live_pair(runs.path, locked_validator)
 
