@@ -21,7 +21,7 @@ En lokal filesystem-ledger kan kun etablere fail-closed replay/recovery-state p�
 
 Production authority-sekvensen er:
 
-`host-pinned request trust root → exact caller snapshots → host-admin-controlled signed runtime → trusted preflight → permanent create-once replay-marker → trusted post-marker main read → current-time signed-chain reverify → create-once final → exact read-back → original-publication file provenance + ledger-root event-history binding → transaction-authenticated in-memory receipt`
+`host-pinned request trust root → exact caller snapshots → host-admin-controlled signed runtime → trusted preflight → permanent create-once replay-marker → trusted post-marker main read → current-time signed-chain reverify → create-once final → exact read-back → original-publication file provenance + POSIX directory-chain event-history binding → transaction-authenticated in-memory receipt`
 
 ### 1. Public consume må ikke acceptere caller-valgt trust root
 
@@ -105,17 +105,19 @@ Konsekvenser:
 - fork-child arver ingen authority: PID skal matche, registries ryddes og inherited descriptors lukkes;
 - enhver exception fra outer consume revokerer allerede registreret provenance for transaction-tokenet **før** exceptionen bliver caller-visible. Et receipt hentet fra traceback locals efter cleanup-failure er derfor unauthenticated.
 
-#### POSIX ledger-root event-history
+#### POSIX directory-chain event-history
 
-Fil-identitet alene fanger ikke, at hele ledger-rooten rename's og senere sættes tilbage: child inode/bytes/ctime kan ellers forblive uændret. Fra **før den første permanente publication** beholdes derfor den oprindelige ledger-root directory descriptor + `(dev, ino)`, og et kernel-event history monitor armeres på selve ledger-rooten:
+Fil-identitet på final/marker og ledger-root alene fanger ikke, at en **ancestor** til ledger-rooten kan rename's og senere sættes tilbage: ledger-child inode/bytes/ctime kan da forblive uændret, selv om canonical ledger-path midlertidigt pegede et andet sted og tillod replay.
 
-- Linux: inotify overvåger `IN_MOVE_SELF`, `IN_DELETE_SELF` og `IN_UNMOUNT`; et efterfølgende `IN_IGNORED` behandles ligeledes som history failure;
-- BSD-style POSIX: kqueue vnode monitor anvender rename/delete og revoke, hvor platformen understøtter det;
-- en POSIX-platform uden en understøttet exact rename-history primitive fejler lukket ved reservation publication i stedet for at degradere provenance lydløst.
+Fra **før den første permanente publication** beholdes derfor directory descriptors + `(dev, ino)` for ledger-rooten og alle dens eksisterende ancestors tilbage til filesystem-rooten, og en kernel-event history monitor armeres for hele path-kæden:
 
-Setup-racen omkring monitor-arming lukkes ved at kræve samme ledger directory `(dev, ino)` via både den åbne descriptor og canonical path samt uændret `ctime_ns` før/efter arming. Efter monitoren er armed bruges `ctime_ns` **ikke** som generel directory-history, fordi legitime child-file writes må ændre ledger-directory metadata.
+- Linux: én inotify-instance overvåger parent directories for rename/create/delete af det præcise beskyttede child-navn på hvert ancestry-led og behandler parent `MOVE_SELF`/`DELETE_SELF`/`UNMOUNT`, `IN_IGNORED` samt queue overflow som history failure;
+- BSD-style POSIX: kqueue vnode monitor anvender rename/delete og revoke på hvert retained directory-object, hvor platformen understøtter det;
+- en POSIX-platform uden en understøttet exact directory-chain history primitive fejler lukket ved reservation publication i stedet for at degradere provenance lydløst.
 
-Whole-ledger `rename-away → replay i replacement ledger → delete replacement → rename-back` efterlader et monotont kernel-event i den oprindelige binding og kan derfor ikke skjule det intervening replay eller genoplive et gammelt receipt. Omvendt påvirker oprettelse/sletning af **andre sibling directories under samme host-state parent** ikke monitoren og må ikke revokere en ellers uændret reservation.
+Linux-monitoren filtrerer child-events på exact navn, så oprettelse/sletning af **andre sibling entries** i en overvåget parent ikke revokerer en ellers uændret reservation. Efter monitor-arming verificeres hvert retained directory-object fortsat via både åben descriptor og canonical path-identitet. Et relevant history-event er monotont: senere path-restoration kan ikke gøre bindingen valid igen.
+
+Både `ledger rename-away → replay → restore` og `ancestor rename-away → replay i replacement subtree → delete replacement → restore ancestor` efterlader derfor event-history, som ikke kan skjules ved at sætte de oprindelige pathnames tilbage.
 
 Denne event-history mekanisme er eksplicit POSIX-specifik. Der påstås ikke tilsvarende Windows inotify/kqueue semantics.
 
@@ -153,7 +155,7 @@ Denne boundary starter ikke DC-L15 probes, cadence, persistent `main` freeze, fy
 2. snapshot exact-type request/qualification/snapshot/signature + verifier;
 3. rekonstruér exact `TrustedGitRuntime`, verificér signed runtime identity og host-admin-control af tree + chain;
 4. trusted preflight af `main` gennem den restricted host-controlled Git-reader;
-5. opret transaction/publication token, bind original ledger-root directory object og arm POSIX exact rename-history monitor før første permanente publication;
+5. opret transaction/publication token, bind ledger-root + ancestor directory objects og arm POSIX exact directory-chain history monitor før første permanente publication;
 6. create-once permanent replay-marker og behold original descriptor/fil-identitet;
 7. trusted post-marker `main` read gennem samme host-controlled runtime;
 8. trusted-current-time re-verifikation af signed request + qualification;
@@ -162,7 +164,7 @@ Denne boundary starter ikke DC-L15 probes, cadence, persistent `main` freeze, fy
 11. exact-byte read-back + canonical parse uden authority grant;
 12. cleanup kun pending; replay-marker bevares;
 13. claim original final + marker publication descriptors fra samme transaction-token;
-14. registrér exact live receipt med process/content/file provenance og, på POSIX, ledger-root event-history binding;
+14. registrér exact live receipt med process/content/file provenance og, på POSIX, directory-chain event-history binding;
 15. ved enhver outer exception: revokér registered provenance, frigiv unclaimed descriptors/history monitors og propagér derefter fejlen.
 
 Hvis noget fejler efter replay-markerens publication, kan requesten ikke genbruges på samme canonical host-ledger uden en separat eksplicit recovery-procedure.
@@ -191,8 +193,8 @@ Implementationen skal mindst afvise eller fail-close ved:
 18. final/marker tamper efter registration;
 19. delete→byte-identical recreate af final/marker;
 20. POSIX leaf rename-away/replay/rename-back;
-21. POSIX whole-ledger rename-away/replay/restore eller tab af ledger-root history monitor;
-22. POSIX-platform uden understøttet exact ledger-root rename-history primitive;
+21. POSIX ledger-root eller ancestor rename-away/replay/restore eller tab af directory-chain history monitor;
+22. POSIX-platform uden understøttet exact directory-chain rename-history primitive;
 23. live receipt mutation uden exact content restoration;
 24. POSIX fork inheritance;
 25. cross-transaction descriptor/history-monitor claim eller leaked retained state;
@@ -209,11 +211,11 @@ Implementationen skal mindst afvise eller fail-close ved:
 - private transaction-staged runtime seam — deterministic tests only;
 - canonical host ledger — final + permanent replay-marker som recovery/replay-state;
 - original-publication descriptor registry for final/replay-marker;
-- POSIX ledger-root directory descriptor + kernel event-history monitor;
+- POSIX ledger-root + ancestor directory descriptors og kernel event-history monitor;
 - process-local live provenance registry med process/content/file/history binding og transaction-token-bound exception revocation.
 
 ## Konsekvens
 
-Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en caller-uafhængig host-pinned trust root, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem en host-admin-kontrolleret runtime efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de oprindelige durable publications og — på POSIX — ledger-rootens monotone kernel-event history.
+Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en caller-uafhængig host-pinned trust root, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem en host-admin-kontrolleret runtime efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de oprindelige durable publications og — på POSIX — den canonical ledger-paths monotone directory-chain event history.
 
 Det beviser fortsat **ikke** global replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og kræver separate senere boundaries.
