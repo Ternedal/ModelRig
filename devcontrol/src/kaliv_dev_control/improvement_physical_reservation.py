@@ -7,7 +7,7 @@ transaction implementation remains private for deterministic adversarial tests.
 """
 from __future__ import annotations
 
-from . import improvement_physical_reservation_impl as _impl
+from . import _improvement_physical_reservation_impl as _impl
 from .improvement_candidate_snapshot import CandidateSnapshotReceipt
 from .improvement_physical_authority_keyring import (
     PhysicalRequestAuthorityKeyringError,
@@ -74,12 +74,6 @@ def consume_physical_qualification_request_once(
         verifier=verifier,
         now_provider=_impl._now_utc_seconds,
     )
-
-
-def __getattr__(name: str):
-    """Preserve read-only compatibility for legacy private test imports."""
-
-    return getattr(_impl, name)
 
 
 __all__ = [
