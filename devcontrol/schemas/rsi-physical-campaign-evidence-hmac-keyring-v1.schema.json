@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-physical-campaign-evidence-hmac-keyring-v1.schema.json",
+  "title": "ModelRig RSI physical campaign evidence HMAC keyring v1",
+  "description": "Host-admin trust state for legacy DC-L04 HMAC report verification. HMAC verifier material is signing-equivalent and never grants completion or activation authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "authority_domain", "trusted_hmac_keys"],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-physical-campaign-evidence-hmac-keyring/v1"},
+    "authority_domain": {"const": "rsi-dc-l15-physical-campaign-evidence"},
+    "trusted_hmac_keys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key_id", "secret_hex"],
+        "properties": {
+          "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+          "secret_hex": {"type": "string", "pattern": "^[0-9a-f]{64,8192}$"}
+        }
+      }
+    }
+  }
+}
