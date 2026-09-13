@@ -13,6 +13,12 @@ import types
 
 from . import _improvement_physical_reservation_impl as _implementation
 
+# The legacy convenience wrapper accepted a caller-selected verifier. It has no
+# valid role even inside the loaded private implementation; retain only the
+# explicitly underscored injectable transaction seam.
+if hasattr(_implementation, "consume_physical_qualification_request_once"):
+    delattr(_implementation, "consume_physical_qualification_request_once")
+
 LocalMainHeadObservation = _implementation.LocalMainHeadObservation
 PhysicalQualificationReservation = _implementation.PhysicalQualificationReservation
 PhysicalQualificationReservationError = _implementation.PhysicalQualificationReservationError

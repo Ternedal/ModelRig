@@ -16,25 +16,39 @@ from .improvement_physical_authority_keyring import (
 from .improvement_physical_request import PhysicalQualificationRequest
 from .improvement_qualification_packet import QualificationPacket
 from .trusted_git_runtime_staging import TrustedGitRuntime
-from ._improvement_physical_reservation_impl import (
-    MAIN_OBSERVATION_SCHEMA,
-    RESERVATION_SCHEMA,
-    RESERVATION_AUTHORITY,
-    LEDGER_SCOPE,
-    MAIN_REF,
-    PhysicalQualificationReservationError,
-    LocalMainHeadObservation,
-    PhysicalQualificationReservation,
-    observe_local_main_head,
-    _PhysicalQualificationRequestLedger,
-    _consume_physical_qualification_request_once,
-    _observe_with_reader,
-    _canonical,
-    _canonical_host_ledger_root,
-    _canonical_repository_root,
-    _canonical_operation_root,
-    _now_utc_seconds,
+from ._improvement_physical_reservation_provenance import (
+    install_descriptor_bound_provenance,
 )
+from . import _improvement_physical_reservation_impl as _implementation
+
+# Install descriptor/file-identity provenance before any production transaction.
+install_descriptor_bound_provenance(_implementation)
+# The old convenience wrapper accepted a caller-selected verifier. The loaded
+# implementation retains only the explicitly private injectable transaction.
+if hasattr(_implementation, "consume_physical_qualification_request_once"):
+    delattr(_implementation, "consume_physical_qualification_request_once")
+
+MAIN_OBSERVATION_SCHEMA = _implementation.MAIN_OBSERVATION_SCHEMA
+RESERVATION_SCHEMA = _implementation.RESERVATION_SCHEMA
+RESERVATION_AUTHORITY = _implementation.RESERVATION_AUTHORITY
+LEDGER_SCOPE = _implementation.LEDGER_SCOPE
+MAIN_REF = _implementation.MAIN_REF
+PhysicalQualificationReservationError = _implementation.PhysicalQualificationReservationError
+LocalMainHeadObservation = _implementation.LocalMainHeadObservation
+PhysicalQualificationReservation = _implementation.PhysicalQualificationReservation
+observe_local_main_head = _implementation.observe_local_main_head
+_PhysicalQualificationRequestLedger = _implementation._PhysicalQualificationRequestLedger
+_consume_physical_qualification_request_once = (
+    _implementation._consume_physical_qualification_request_once
+)
+_observe_with_reader = _implementation._observe_with_reader
+_canonical = _implementation._canonical
+_canonical_host_ledger_root = _implementation._canonical_host_ledger_root
+_canonical_repository_root = _implementation._canonical_repository_root
+_canonical_operation_root = _implementation._canonical_operation_root
+_now_utc_seconds = _implementation._now_utc_seconds
+
+del _implementation
 
 
 def consume_physical_qualification_request_once(
