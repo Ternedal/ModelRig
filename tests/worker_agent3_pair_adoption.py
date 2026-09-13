@@ -20,6 +20,14 @@ os.environ["KALIV_TOOLS_DIR"] = os.path.join(_root, "notes")
 from app import backup  # noqa: E402
 from app.agent3 import authority_pair  # noqa: E402
 from app.agent3.adopt_pair import adopt_current_pair  # noqa: E402
+from app.agent3.core import (  # noqa: E402
+    AgentRunStore,
+    AgentStep,
+    EgressClass,
+    RiskClass,
+    Sensitivity,
+    StepState,
+)
 
 passed = failed = 0
 
@@ -55,6 +63,23 @@ def step_payload(state: str) -> dict:
     }
 
 
+def execution_step_sha256() -> str:
+    """Use the runtime's canonical watermark digest, not a test-local copy."""
+    return AgentRunStore._execution_step_sha256(
+        AgentStep(
+            tool="append_note",
+            args={"text": "migration"},
+            risk=RiskClass.WRITE,
+            sensitivity=Sensitivity.OPERATIONAL,
+            egress=EgressClass.LOCAL,
+            origin="local",
+            conversation_id=None,
+            idempotent=False,
+            state=StepState.EXECUTING,
+        )
+    )
+
+
 def seed_unbound(*, state: str = "executing", include_progress: bool = True) -> None:
     runs_path, progress_path = paths()
     os.makedirs(os.path.dirname(runs_path), exist_ok=True)
@@ -85,7 +110,7 @@ def seed_unbound(*, state: str = "executing", include_progress: bool = True) -> 
             (
                 "legacy-run",
                 0,
-                backup._execution_step_sha256(step_payload("executing")),
+                execution_step_sha256(),
                 1.0,
             ),
         )
