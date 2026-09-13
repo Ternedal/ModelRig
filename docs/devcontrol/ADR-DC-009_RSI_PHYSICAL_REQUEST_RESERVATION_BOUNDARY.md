@@ -64,9 +64,9 @@ Production må **ikke** eksekvere fra en per-transaction runtime-copy, der kun e
 
 En ordinary service-user-owned runtime — også med mode `0700` — er ikke production authority og fejler lukket.
 
-Production Git-reader understøtter kun `rev-parse --verify refs/heads/main^{commit}`, bruger ingen shell, kører med bounded subprocess og et hardened environment uden caller-writable home/config/hooks/temp state, og re-attesterer runtime-treeet før og efter execution. Den signerede snapshot-chain binder fortsat manifest- og executable-digest.
+Production Git-reader understøtter kun `rev-parse --verify refs/heads/main^{commit}`, bruger ingen shell og et hardened environment uden caller-writable home/config/hooks/temp state, og re-attesterer runtime-treeet før og efter execution. Authority-pathen bruger **ikke** den generelle Linux `bounded_subprocess.py` supervisor, fordi den ville genlæse en ModelRig package-fil fra disk efter runtime-attestation. I stedet launcher den allerede indlæste production-path præcis den host-attesterede Git executable direkte gennem stdlib-processprimitive, med separat process-group/session, 120-sekunders timeout, bounded combined stdout/stderr og fail-closed nonzero/timeout/output-overflow. Dermed bliver ingen ordinary ModelRig package-source genlæst som child-side execution authority mellem runtime-attestation og Git-read. Den signerede snapshot-chain binder fortsat manifest- og executable-digest.
 
-Den underscored/private deterministic test-seam må fortsat bruge transaction-private runtime staging for race-tests. Det er test-infrastruktur, ikke public production authority.
+Den underscored/private deterministic test-seam må fortsat bruge transaction-private runtime staging og den generelle subprocess-infrastruktur for race-tests. Det er test-/general-infrastruktur, ikke public production Git authority.
 
 ### 4. Production replay-state er en elevated host-operator boundary
 
@@ -136,12 +136,15 @@ Fra **før den første permanente publication** bindes derfor ledger-rooten og h
 1. den canonical path-kæde beregnes;
 2. én inotify-instance armerer parent-directory watches for hvert ancestry-led **før directory-identiteter accepteres som trusted provenance**;
 3. directory descriptors + `(dev, ino)` captures;
-4. queued history drænes og canonical path-identiteter re-verificeres;
-5. først derefter må første permanente publication ske.
+4. queued history drænes;
+5. canonical path-identiteter re-verificeres mod de retained descriptors;
+6. kernel-history drænes **igen efter identity-validation**, før bindingen må returnere true eller første permanente publication fortsætte.
+
+Det samme dobbeltcheck gælder ved hver senere live `transaction_authenticated`-validering: en relevant event, der bliver queued efter det første drain men mens ancestry-stat-checket kører, skal observeres af post-validation-drainet og revokere bindingen før `true` kan returneres.
 
 Linux-monitoren filtrerer hvert parent-watch på det præcise beskyttede child-navn. `MOVED_FROM`, `MOVED_TO`, `CREATE` eller `DELETE` for dette navn samt parent `MOVE_SELF`/`DELETE_SELF`/`UNMOUNT`, `IN_IGNORED` eller queue overflow er monotont history failure. Oprettelse/sletning af **andre sibling entries** revokerer derimod ikke en ellers uændret reservation.
 
-Det eksisterende setup-only metadata-stamp check (`ctime_ns`, hvor tilgængeligt) bevares som defense-in-depth i den lavere provenance-implementation, men production-sikkerheden på Linux afhænger ikke af, at en rename nødvendigvis giver en unik timestamp. Regressionen neutraliserer metadata-stampen og kræver stadig, at `rename→restore` efter watch-arming fejler på queued inotify-history alene.
+Det eksisterende setup-only metadata-stamp check (`ctime_ns`, hvor tilgængeligt) bevares som defense-in-depth i den lavere provenance-implementation, men production-sikkerheden på Linux afhænger ikke af, at en rename nødvendigvis giver en unik timestamp. Regressionerne neutraliserer metadata-stampen og kræver stadig, at `rename→restore` efter watch-arming fejler på queued inotify-history alene, og injicerer desuden `rename→restore` præcis mellem første history-drain og ancestry-stat-validation for at bevise, at post-validation-drainet afviser før et stale `true`.
 
 BSD-style kqueue kræver et target descriptor før vnode-filteret kan registreres og kan derfor ikke levere samme watch-before-trust egenskab. Den public production facade fejler derfor aktuelt lukket på **non-Linux POSIX** i stedet for at påstå exact race-free directory-history setup. Den lavere private provenance-implementation kan fortsat indeholde kqueue-kode til isolation/eksperimenter, men den udgør ikke production authority.
 
@@ -185,17 +188,17 @@ Denne boundary starter ikke DC-L15 probes, cadence, persistent `main` freeze, fy
 2. kræv elevated host-operator context og resolve/host-control-validér den fixed canonical replay-ledger; ordinary service-user state accepteres ikke;
 3. snapshot exact-type request/qualification/snapshot/signature + verifier;
 4. rekonstruér exact `TrustedGitRuntime`, verificér signed runtime identity og host-admin-control af tree + chain;
-5. trusted preflight af `main` gennem den restricted host-controlled Git-reader;
-6. opret transaction/publication token; på Linux arm exact ancestry parent-watches **før** directory-identiteter captures, bind derefter ledger-root + ancestors og verificér tom history før første permanente publication; non-Linux POSIX fejler lukket;
+5. trusted preflight af `main` gennem den restricted host-controlled Git-reader, som launcher den attesterede Git executable direkte og ikke relauncher ModelRig package-source som Linux supervisor;
+6. opret transaction/publication token; på Linux arm exact ancestry parent-watches **før** directory-identiteter captures, dræn history, validér ledger-root + ancestors, og dræn history igen før første permanente publication; non-Linux POSIX fejler lukket;
 7. create-once permanent replay-marker og behold original descriptor/fil-identitet;
-8. trusted post-marker `main` read gennem samme host-controlled runtime;
+8. trusted post-marker `main` read gennem samme host-controlled direct Git path;
 9. trusted-current-time re-verifikation af signed request + qualification;
 10. create-once pending payload;
 11. create-once final canonical payload; behold original descriptor/fil-identitet;
 12. exact-byte read-back + canonical parse uden authority grant;
 13. cleanup kun pending; replay-marker bevares;
 14. claim original final + marker publication descriptors fra samme transaction-token;
-15. registrér exact live receipt med process/content/file provenance og, på Linux, watch-before-trust directory-chain event-history binding;
+15. registrér exact live receipt med process/content/file provenance og, på Linux, watch-before-trust directory-chain event-history binding med pre- og post-identity history drain;
 16. ved enhver outer exception: revokér registered provenance, frigiv unclaimed descriptors/history monitors og propagér derefter fejlen.
 
 Hvis noget fejler efter replay-markerens publication, kan requesten ikke genbruges gennem den normale production consume på samme canonical host-ledger uden en separat eksplicit host-admin recovery/tamper-handling. En kompromitteret host-admin/root principal er eksplicit uden for denne receipts replay-garanti.
@@ -216,25 +219,27 @@ Implementationen skal mindst afvise eller fail-close ved:
 10. subclasses/overridable authority-inputs eller `TrustedGitRuntime`;
 11. caller mutation af signed inputs efter snapshot;
 12. production runtime, der er service-user-writable eller ikke host-admin-kontrolleret;
-13. runtime manifest/executable mismatch mod signed `CandidateSnapshotReceipt`;
-14. malformed/wrong `main` SHA eller drift mellem preflight og post-marker read;
-15. expired/invalid signed request efter replay-marker;
-16. duplicate consume eller crash-left marker/pending/final state;
-17. direct/prebuilt/fabricated final persistence;
-18. non-canonical/non-identical final read-back;
-19. byte-identisk eller ændret final/marker replacement før registration;
-20. missing/mismatched original publication descriptor ved claim;
-21. final/marker tamper efter registration;
-22. delete→byte-identical recreate af final/marker;
-23. POSIX leaf rename-away/replay/rename-back;
-24. Linux ledger-root eller ancestor rename-away/replay/restore, monitor loss eller relevant queued ancestry-event;
-25. production på non-Linux POSIX, hvor exact watch-before-trust directory-history setup ikke kan bevises;
-26. live receipt mutation uden exact content restoration;
-27. POSIX fork inheritance;
-28. cross-transaction descriptor/history-monitor claim eller leaked retained state;
-29. outer consume/cleanup failure, der ellers ville efterlade traceback-reachable authenticated receipt;
-30. concurrent registry mutation, der ellers kunne give stale-true eller iteration failure under revocation/cleanup;
-31. ethvert forsøg på at hæve host-admin-compromise resistance, global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority ud over receiptets eksplicitte scope.
+13. authority-bearing Linux Git launch, der genlæser ordinary ModelRig package-source som child-side supervisor efter runtime-attestation;
+14. runtime manifest/executable mismatch mod signed `CandidateSnapshotReceipt`;
+15. malformed/wrong `main` SHA eller drift mellem preflight og post-marker read;
+16. expired/invalid signed request efter replay-marker;
+17. duplicate consume eller crash-left marker/pending/final state;
+18. direct/prebuilt/fabricated final persistence;
+19. non-canonical/non-identical final read-back;
+20. byte-identisk eller ændret final/marker replacement før registration;
+21. missing/mismatched original publication descriptor ved claim;
+22. final/marker tamper efter registration;
+23. delete→byte-identical recreate af final/marker;
+24. POSIX leaf rename-away/replay/rename-back;
+25. Linux ledger-root eller ancestor rename-away/replay/restore, monitor loss eller relevant queued ancestry-event;
+26. relevant inotify-event queued under ancestry identity-validation efter det første history-drain;
+27. production på non-Linux POSIX, hvor exact watch-before-trust directory-history setup ikke kan bevises;
+28. live receipt mutation uden exact content restoration;
+29. POSIX fork inheritance;
+30. cross-transaction descriptor/history-monitor claim eller leaked retained state;
+31. outer consume/cleanup failure, der ellers ville efterlade traceback-reachable authenticated receipt;
+32. concurrent registry mutation, der ellers kunne give stale-true eller iteration failure under revocation/cleanup;
+33. ethvert forsøg på at hæve host-admin-compromise resistance, global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority ud over receiptets eksplicitte scope.
 
 ## Artefakter
 
@@ -243,14 +248,14 @@ Implementationen skal mindst afvise eller fail-close ved:
 - `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local replay/evidence data med eksplicit ikke-global/non-host-admin-compromise replay-scope;
 - `consume_physical_qualification_request_once(...)` — eneste public authority-bearing consume path og en elevated physical host-operator operation;
 - fixed pre-provisioned host-admin replay ledger under `/var/lib/modelrig/devcontrol/...` eller `Program Files\ModelRig\DevControl\state\...`;
-- admin-controlled production `TrustedGitRuntime` + restricted physical Git reader;
+- admin-controlled production `TrustedGitRuntime` + restricted direct physical Git reader, som launcher kun den attesterede Git executable og ikke en ModelRig package-file supervisor;
 - private transaction-staged runtime/ledger seams — deterministic tests only;
 - original-publication descriptor registry for final/replay-marker;
-- Linux ledger-root + ancestor parent-watches, retained directory descriptors og watch-before-trust kernel event-history;
+- Linux ledger-root + ancestor parent-watches, retained directory descriptors og watch-before-trust kernel event-history med history-drain både før og efter ancestry identity-validation;
 - process-local live provenance registry med process/content/file/history binding, shared fork-safe re-entrant registry lock og transaction-token-bound exception revocation.
 
 ## Konsekvens
 
-Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en caller-uafhængig host-pinned trust root, at reservationen blev udført af en elevated physical host-operator mod en pre-provisioned host-admin-kontrolleret replay-ledger, at requesten matchede den signerede software/runtime chain, at det ønskede `main` blev observeret gennem en host-admin-kontrolleret runtime efter permanent host reservation, og at transactionen producerede et live process-bound receipt, hvis provenance er bundet til de oprindelige durable publications og — på Linux — den canonical ledger-paths monotone watch-before-trust directory-chain event history.
+Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en caller-uafhængig host-pinned trust root, at reservationen blev udført af en elevated physical host-operator mod en pre-provisioned host-admin-kontrolleret replay-ledger, at requesten matchede den signerede software/runtime chain, at det ønskede `main` blev observeret gennem en host-admin-kontrolleret runtime efter permanent host reservation uden at authority-pathen genindlæste ordinary ModelRig package-source som process-supervisor, og at transactionen producerede et live process-bound receipt, hvis provenance er bundet til de oprindelige durable publications og — på Linux — den canonical ledger-paths monotone watch-before-trust directory-chain event history med et afsluttende history-drain efter ancestry identity-validation.
 
 Det beviser fortsat **ikke** replay-resistance mod kompromitteret host-admin/root, global/distribueret replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og kræver separate senere boundaries.
