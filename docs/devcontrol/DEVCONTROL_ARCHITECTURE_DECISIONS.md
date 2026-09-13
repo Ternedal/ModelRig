@@ -243,3 +243,21 @@ independent human verdict og pilot GO forbliver separate. Ingen merge,
 publication, release, deploy eller activation autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-013_RSI_CONTINUOUS_MAIN_FREEZE.md`
+
+## ADR-DC-014 — Independent human verdict closes DC-L15, not pilot GO
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Lukker kun `dc_l14_independent_human_verdict` ved verification af et separat
+Ed25519-signeret human verdict over exact ADR-DC-013 main-freeze proof og exact
+ADR-DC-012 execution proof. Reviewer skal være forskellig fra både physical
+operator og approver; production resolver kun en host-admin-kontrolleret
+verification-only public-key keyring og indeholder ingen signer/private key.
+
+Kun `approve` kan blive til et completion proof. `request_changes` og `reject`
+kan være gyldigt signerede review-artifacts, men kan ikke lukke DC-L15.
+Successful approval kan sætte `physical_campaign_completed=true` og
+`dc_l15_complete=true`, men `human_pilot_go_decision` forbliver den eneste åbne
+gate. Pilot, merge, publication, release, deploy og activation autoriseres ikke.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-014_RSI_INDEPENDENT_HUMAN_VERDICT.md`
