@@ -107,7 +107,9 @@ check(run["state"] == "waiting_confirmation", "write still waits for confirmatio
 check(run["steps"][0]["args"]["text"] == "original", "stored reviewed args remain authoritative")
 
 reused = client.post(f"/experimental/agent3/plans/{plan_id}/start")
-check(reused.status_code == 409, "plan_id is single-use")
+check(reused.status_code == 200, "same reviewed plan id replays the accepted Start")
+check(reused.json()["run"]["id"] == run["id"], "same-plan replay returns the exact bound run")
+check(len(run_store.recent(10)) == 1, "same-plan replay never creates a second run")
 
 expiry_path = os.path.join(root, "expiry.db")
 expiry_store = PlanStore(expiry_path, ttl_seconds=30)

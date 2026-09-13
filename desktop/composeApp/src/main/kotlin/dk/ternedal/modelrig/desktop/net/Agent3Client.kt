@@ -361,7 +361,7 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
         planId: String,
         expectedCapabilityReceiptPresent: Boolean? = null,
     ): Agent3ReviewedStartTransportEnvelope {
-        val body = post("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
+        val body = postReviewedStart("/api/v1/experimental/agent3/plans/${seg(planId)}/start", "{}")
         val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
             ?: throw Agent3Exception("Invalid Agent 3.0 Start envelope: response is not an object")
         if (expectedCapabilityReceiptPresent != null) {
@@ -730,6 +730,42 @@ class Agent3Client(baseUrl: String, private val bearer: String) {
     private fun post(path: String, body: String): String = send(
         builder(path).POST(HttpRequest.BodyPublishers.ofString(body)).build()
     )
+
+    private fun postReviewedStart(path: String, body: String): String {
+        val request = builder(path).POST(HttpRequest.BodyPublishers.ofString(body)).build()
+        try {
+            val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+            if (response.statusCode() !in 200..299) {
+                throw Agent3ReviewedStartHttpException(
+                    statusCode = response.statusCode(),
+                    reasonCode = response.headers()
+                        .firstValue("X-ModelRig-Agent3-Reason")
+                        .orElse(null)
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() },
+                    message = "Agent 3.0 failed (${response.statusCode()}): ${response.body().take(500)}",
+                )
+            }
+            return response.body()
+        } catch (failure: Agent3ReviewedStartHttpException) {
+            throw failure
+        } catch (failure: java.io.IOException) {
+            throw Agent3ReviewedStartHttpException(
+                statusCode = null,
+                reasonCode = null,
+                message = "Agent 3.0 reviewed Start transport failed: ${failure.message ?: failure::class.simpleName}",
+                cause = failure,
+            )
+        } catch (failure: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw Agent3ReviewedStartHttpException(
+                statusCode = null,
+                reasonCode = null,
+                message = "Agent 3.0 reviewed Start transport interrupted",
+                cause = failure,
+            )
+        }
+    }
 
     private fun send(request: HttpRequest): String {
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())

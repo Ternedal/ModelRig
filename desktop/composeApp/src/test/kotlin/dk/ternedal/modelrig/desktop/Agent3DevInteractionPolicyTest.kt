@@ -36,6 +36,28 @@ class Agent3DevInteractionPolicyTest {
         assertFalse(connection == binding("http://rig-a:8080", "token-b"))
     }
 
+    @Test fun reviewedStartCallbackRequiresTheExactCurrentConnection() {
+        assertTrue(
+            Agent3DevInteractionPolicy.canPublishForConnection(
+                connection,
+                binding(" http://rig-a:8080/ ", " token-a "),
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canPublishForConnection(
+                connection,
+                binding("http://rig-b:8080", "token-a"),
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canPublishForConnection(
+                connection,
+                binding("http://rig-a:8080", "token-b"),
+            )
+        )
+        assertFalse(Agent3DevInteractionPolicy.canPublishForConnection(connection, null))
+    }
+
     @Test fun previewIntentNormalizesExactPlannerInputs() {
         val value = intent("  vis status  ", true, " beta, alpha, beta,  ")
         assertEquals("vis status", value.message)
