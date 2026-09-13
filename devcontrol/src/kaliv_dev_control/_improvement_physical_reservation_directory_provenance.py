@@ -12,6 +12,11 @@ sibling churn does not revoke a valid receipt. BSD-style POSIX systems use
 kqueue vnode rename/delete/revoke filters on every retained directory object.
 Unsupported POSIX history monitoring fails closed at reservation publication
 rather than silently weakening provenance.
+
+The held/live registries share the same re-entrant lock as descriptor-bound file
+provenance. A transaction-authenticated read therefore cannot race file
+revocation, directory revocation, weakref cleanup, or another transaction's
+registry mutation and briefly return stale authority.
 """
 from __future__ import annotations
 
@@ -24,6 +29,11 @@ import struct
 import weakref
 from pathlib import Path
 from typing import Any, Callable
+
+from ._improvement_physical_reservation_registry_lock import (
+    registry_lock,
+    reset_registry_lock_after_fork,
+)
 
 _DIR_TOKEN: contextvars.ContextVar[object | None] = contextvars.ContextVar(
     "rsi_physical_reservation_directory_token",
@@ -477,20 +487,31 @@ def _install_posix_directory_history(implementation: Any) -> None:
     held: dict[tuple[object, Path], _Binding] = {}
     live: dict[int, _Binding] = {}
 
-    def release_held(transaction_token: object) -> None:
-        keys = [key for key in held if key[0] is transaction_token]
-        for key in keys:
-            binding = held.pop(key)
+    def close_bindings(bindings: tuple[_Binding, ...] | list[_Binding]) -> None:
+        for binding in bindings:
+            binding.revoked = True
             _close_binding(binding)
 
-    def revoke_live(binding: _Binding) -> None:
-        binding.revoked = True
-        _close_binding(binding)
+    def release_held(transaction_token: object) -> None:
+        with registry_lock():
+            bindings = [
+                held.pop(key)
+                for key in tuple(held)
+                if key[0] is transaction_token
+            ]
+        close_bindings(bindings)
 
     def revoke_transaction(transaction_token: object) -> None:
-        for binding in tuple(live.values()):
-            if binding.transaction_token is transaction_token:
-                revoke_live(binding)
+        with registry_lock():
+            bindings = [
+                live.pop(identity)
+                for identity, binding in tuple(live.items())
+                if binding.transaction_token is transaction_token
+            ]
+            for binding in bindings:
+                binding.revoked = True
+        for binding in bindings:
+            _close_binding(binding)
 
     def create_once_file(path: Path, payload: bytes, *, mode: int = 0o600) -> Any:
         token = _DIR_TOKEN.get()
@@ -499,29 +520,45 @@ def _install_posix_directory_history(implementation: Any) -> None:
             return original_create_once(candidate, payload, mode=mode)
         ledger_path = candidate.parent.resolve(strict=True)
         key = (token, ledger_path)
-        binding = held.get(key)
-        created_binding = False
-        if binding is None:
-            binding = _capture_binding(ledger_path, token)
-            held[key] = binding
-            created_binding = True
-        elif not _binding_matches(binding):
-            revoke_live(binding)
-            held.pop(key, None)
+        binding_to_close: _Binding | None = None
+        with registry_lock():
+            binding = held.get(key)
+            created_binding = False
+            if binding is None:
+                binding = _capture_binding(ledger_path, token)
+                held[key] = binding
+                created_binding = True
+            elif not _binding_matches(binding):
+                held.pop(key, None)
+                binding.revoked = True
+                binding_to_close = binding
+        if binding_to_close is not None:
+            _close_binding(binding_to_close)
             raise DirectoryBoundProvenanceError(
                 "reservation directory-chain history changed before publication"
             )
         try:
-            result = original_create_once(candidate, payload, mode=mode)
-            if not _binding_matches(binding):
-                raise DirectoryBoundProvenanceError(
-                    "reservation directory-chain history changed during publication"
-                )
+            # Use the shared RLock across the lower file-provenance publication
+            # and the directory-history recheck so no concurrent registry cleanup
+            # can close a retained descriptor between the two authority checks.
+            with registry_lock():
+                result = original_create_once(candidate, payload, mode=mode)
+                if not _binding_matches(binding):
+                    raise DirectoryBoundProvenanceError(
+                        "reservation directory-chain history changed during publication"
+                    )
             return result
         except BaseException:
             if created_binding:
-                held.pop(key, None)
-                _close_binding(binding)
+                with registry_lock():
+                    current = held.get(key)
+                    if current is binding:
+                        held.pop(key, None)
+                        binding.revoked = True
+                    else:
+                        binding = None
+                if binding is not None:
+                    _close_binding(binding)
             raise
 
     def mark(
@@ -543,51 +580,72 @@ def _install_posix_directory_history(implementation: Any) -> None:
                 "reservation final and replay marker use different ledger roots"
             )
         key = (token, ledger_path)
-        binding = held.get(key)
-        if binding is None or not _binding_matches(binding):
-            raise DirectoryBoundProvenanceError(
-                "reservation directory-chain history is unavailable"
+        previous: _Binding | None = None
+        with registry_lock():
+            binding = held.get(key)
+            if binding is None or not _binding_matches(binding):
+                raise DirectoryBoundProvenanceError(
+                    "reservation directory-chain history is unavailable"
+                )
+            # File and directory provenance register under one re-entrant lock,
+            # making the composed authority decision atomic with respect to
+            # concurrent revocation and weakref cleanup.
+            original_mark(
+                value,
+                final_path=final_path,
+                final_payload=final_payload,
+                lock_path=lock_path,
+                lock_payload=lock_payload,
             )
-        original_mark(
-            value,
-            final_path=final_path,
-            final_payload=final_payload,
-            lock_path=lock_path,
-            lock_payload=lock_payload,
-        )
-        if not _binding_matches(binding):
-            raise DirectoryBoundProvenanceError(
-                "reservation directory-chain history changed at registration"
-            )
-        held.pop(key, None)
-        identity = id(value)
-        previous = live.pop(identity, None)
+            if not _binding_matches(binding):
+                raise DirectoryBoundProvenanceError(
+                    "reservation directory-chain history changed at registration"
+                )
+            held.pop(key, None)
+            identity = id(value)
+            previous = live.pop(identity, None)
+
+            def discard(reference: Any, *, identity: int = identity) -> None:
+                with registry_lock():
+                    entry = live.get(identity)
+                    if entry is not None and entry.reference is reference:
+                        live.pop(identity, None)
+                        entry.revoked = True
+                    else:
+                        entry = None
+                if entry is not None:
+                    _close_binding(entry)
+
+            binding.reference = weakref.ref(value, discard)
+            live[identity] = binding
         if previous is not None:
-            revoke_live(previous)
-
-        def discard(reference: Any, *, identity: int = identity) -> None:
-            entry = live.get(identity)
-            if entry is not None and entry.reference is reference:
-                live.pop(identity, None)
-                _close_binding(entry)
-
-        binding.reference = weakref.ref(value, discard)
-        live[identity] = binding
+            previous.revoked = True
+            _close_binding(previous)
 
     def is_authenticated(value: Any) -> bool:
-        if not original_is_authenticated(value):
-            return False
-        binding = live.get(id(value))
-        if (
-            binding is None
-            or binding.reference is None
-            or binding.reference() is not value
-        ):
-            return False
-        if not _binding_matches(binding):
-            revoke_live(binding)
-            return False
-        return True
+        identity = id(value)
+        revoked: _Binding | None = None
+        with registry_lock():
+            # The file-provenance check re-enters the same RLock. File and
+            # directory evidence therefore represent one atomic live snapshot.
+            if not original_is_authenticated(value):
+                return False
+            binding = live.get(identity)
+            if (
+                binding is None
+                or binding.reference is None
+                or binding.reference() is not value
+            ):
+                return False
+            if _binding_matches(binding):
+                return True
+            if live.get(identity) is binding:
+                live.pop(identity, None)
+            binding.revoked = True
+            revoked = binding
+        if revoked is not None:
+            _close_binding(revoked)
+        return False
 
     def consume(*args: Any, **kwargs: Any) -> Any:
         transaction_token = object()
@@ -602,12 +660,18 @@ def _install_posix_directory_history(implementation: Any) -> None:
             _DIR_TOKEN.reset(context_token)
 
     def after_fork_child() -> None:
-        for binding in tuple(held.values()):
+        # This callback may run after the descriptor-provenance callback; reset
+        # again rather than ever waiting on a parent-owned RLock.
+        reset_registry_lock_after_fork()
+        with registry_lock():
+            held_bindings = tuple(held.values())
+            held.clear()
+            live_bindings = tuple(live.values())
+            live.clear()
+            for binding in held_bindings + live_bindings:
+                binding.revoked = True
+        for binding in held_bindings + live_bindings:
             _close_binding(binding)
-        held.clear()
-        for binding in tuple(live.values()):
-            _close_binding(binding)
-        live.clear()
         _DIR_TOKEN.set(None)
 
     if hasattr(os, "register_at_fork"):
