@@ -10,19 +10,24 @@ Backup schema history:
 * schema 2: expanded 2.x inventory;
 * schema 3: separate Agent 3 execution-progress authority;
 * schema 4: snapshot-bound Agent 3 run/progress authority with failure-atomic
-  paired restore semantics.
+  paired restore semantics;
+* schema 5: persistent live-pair identity plus semantic run/watermark validation
+  before snapshot binding.
 
 The Agent 3 run database and its execution-progress sidecar are one authority
-unit. New backups never copy those two files independently: SQLite snapshots are
-created by one backup operation, stamped with the same random snapshot id, and
-only that bound pair is accepted by schema 4 verification. On restore, the
-binding metadata is removed from staged copies before publication. Publication
-uses the authoritative run-db path itself as a durable restore fence: it is
-atomically replaced by a deliberately non-SQLite marker before the progress DB
-is published and is replaced by the staged run DB only after the progress DB is
-in place. If restore is interrupted at either replacement, AgentRunStore cannot
-open the fenced run path as SQLite, so Agent 3 fails closed until restore is
-retried.
+unit. A live pair carries one persistent pair id in both SQLite stores. New
+backups refuse non-empty unbound state, mismatched pair ids and progress rows
+that contradict the run payload before taking SQLite snapshots. The snapshots
+retain the live pair identity, receive one additional random snapshot id, and
+only that doubly-bound pair is accepted by schema-5 verification.
+
+On restore, only backup-only snapshot metadata is removed from staged copies;
+the persistent pair identity remains. Publication uses the authoritative run-db
+path itself as a durable restore fence: it is atomically replaced by a
+deliberately non-SQLite marker before the progress DB is published and is
+replaced by the staged run DB only after the progress DB is in place. If restore
+is interrupted at either replacement, Agent 3 startup cannot validate/open the
+fenced authority and fails closed until restore is retried.
 
 WHAT IS NOT INCLUDED: model weights (re-pullable via Ollama), Piper voices,
 repository files, modelrig.env, API keys, approval secrets or other credentials.
@@ -50,22 +55,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, TypeVar
 
-BACKUP_SCHEMA = 4
-SUPPORTED_BACKUP_SCHEMAS = frozenset({1, 2, 3, BACKUP_SCHEMA})
+BACKUP_SCHEMA = 5
+SUPPORTED_BACKUP_SCHEMAS = frozenset({1, 2, 3, 4, BACKUP_SCHEMA})
 AGENT3_RUNS_KEY = "agent3-runs.db"
 AGENT3_EXECUTION_PROGRESS_KEY = "agent3-execution-progress.db"
 AGENT3_SNAPSHOT_MANIFEST_KEY = "agent3_authority_snapshot_id"
-_AGENT3_RUNS_ROLE = "agent3-runs"
-_AGENT3_PROGRESS_ROLE = "agent3-execution-progress"
+AGENT3_PAIR_MANIFEST_KEY = "agent3_authority_pair_id"
 _SNAPSHOT_TABLE = "kaliv_backup_snapshot"
 _SNAPSHOT_TABLE_SQL = (
     "CREATE TABLE kaliv_backup_snapshot ("
     "snapshot_id TEXT NOT NULL, store_role TEXT NOT NULL)"
-)
-_PROGRESS_TABLE_SQL = (
-    "CREATE TABLE agent_execution_starts ("
-    "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
-    "started_at REAL NOT NULL, PRIMARY KEY(run_id,step_index,step_sha256))"
 )
 _RESTORE_FENCE_PREFIX = b"KALIV_AGENT3_PAIRED_RESTORE_IN_PROGRESS\n"
 
@@ -73,7 +72,16 @@ _RESTORE_FENCE_PREFIX = b"KALIV_AGENT3_PAIRED_RESTORE_IN_PROGRESS\n"
 # the stable Kaliv data root; explicit env overrides continue to win.
 from . import paths as _paths  # noqa: E402
 from . import tools as _tools  # noqa: E402
-from .agent3.runtime_restore_guard import agent3_restore_guard  # noqa: E402
+from .agent3.authority_pair import (  # noqa: E402
+    PAIR_TABLE as _PAIR_TABLE,
+    PAIR_TABLE_SQL as _PAIR_TABLE_SQL,
+    PROGRESS_ROLE as _AGENT3_PROGRESS_ROLE,
+    PROGRESS_TABLE_SQL as _PROGRESS_TABLE_SQL,
+    RUNS_ROLE as _AGENT3_RUNS_ROLE,
+    binding_problem_path as _pair_binding_problem_path,
+    read_binding_path as _read_pair_binding_path,
+    uuid_problem as _pair_id_problem,
+)
 
 
 @dataclass
@@ -300,6 +308,7 @@ def _execution_progress_problem_path(
     path: str,
     *,
     snapshot_id: Optional[str] = None,
+    pair_id: Optional[str] = None,
 ) -> Optional[str]:
     problem = _sqlite_table_problem(
         path,
@@ -343,6 +352,8 @@ def _execution_progress_problem_path(
                 _PROGRESS_TABLE_SQL,
             ),
         ]
+        if pair_id is not None:
+            expected_schema.append(("table", _PAIR_TABLE, _PAIR_TABLE, _PAIR_TABLE_SQL))
         if snapshot_id is not None:
             expected_schema.append(
                 ("table", _SNAPSHOT_TABLE, _SNAPSHOT_TABLE, _SNAPSHOT_TABLE_SQL)
@@ -376,6 +387,14 @@ def _execution_progress_problem_path(
     finally:
         con.close()
 
+    if pair_id is not None:
+        pair_problem = _pair_binding_problem_path(
+            path,
+            pair_id=pair_id,
+            role=_AGENT3_PROGRESS_ROLE,
+        )
+        if pair_problem:
+            return pair_problem
     if snapshot_id is not None:
         return _snapshot_binding_problem_path(
             path,
@@ -389,6 +408,7 @@ def _agent3_runs_row_count_path(
     path: str,
     *,
     snapshot_id: Optional[str] = None,
+    pair_id: Optional[str] = None,
 ) -> tuple[Optional[int], Optional[str]]:
     problem = _sqlite_table_problem(
         path,
@@ -402,6 +422,14 @@ def _agent3_runs_row_count_path(
     )
     if problem:
         return None, problem
+    if pair_id is not None:
+        pair_problem = _pair_binding_problem_path(
+            path,
+            pair_id=pair_id,
+            role=_AGENT3_RUNS_ROLE,
+        )
+        if pair_problem:
+            return None, pair_problem
     if snapshot_id is not None:
         binding_problem = _snapshot_binding_problem_path(
             path,
@@ -438,6 +466,121 @@ def _execution_progress_row_count_path(path: str) -> tuple[Optional[int], Option
             con.close()
 
 
+def _execution_step_sha256(step: dict) -> str:
+    payload = {
+        "tool": step.get("tool"),
+        "args": step.get("args", {}),
+        "risk": step.get("risk"),
+        "sensitivity": step.get("sensitivity", "operational"),
+        "egress": step.get("egress", "local"),
+        "origin": step.get("origin", "local"),
+        "conversation_id": step.get("conversation_id"),
+        "idempotent": bool(step.get("idempotent", False)),
+    }
+    raw = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _agent3_pair_semantic_problem_paths(
+    runs_path: str,
+    progress_path: str,
+) -> Optional[str]:
+    """Reject a progress ledger that is unsafe relative to the run snapshot."""
+    try:
+        runs_con = _readonly_sqlite(runs_path)
+        progress_con = _readonly_sqlite(progress_path)
+    except sqlite3.Error as exc:
+        return f"cannot open Agent 3 pair for semantic validation: {exc}"
+    try:
+        try:
+            run_rows = list(runs_con.execute("SELECT id,state,payload FROM agent_runs"))
+            progress_rows = list(
+                progress_con.execute(
+                    "SELECT run_id,step_index,step_sha256 FROM agent_execution_starts "
+                    "ORDER BY run_id,step_index,step_sha256"
+                )
+            )
+        except sqlite3.Error as exc:
+            return f"cannot inspect Agent 3 pair semantics: {exc}"
+
+        runs: dict[str, dict] = {}
+        for run_id, state, raw_payload in run_rows:
+            try:
+                payload = json.loads(raw_payload)
+            except (json.JSONDecodeError, TypeError) as exc:
+                return f"run {run_id!r} has invalid JSON payload: {exc}"
+            if not isinstance(payload, dict):
+                return f"run {run_id!r} payload is not an object"
+            if payload.get("id") not in {None, run_id}:
+                return f"run {run_id!r} payload id does not match its authority row"
+            if payload.get("state") not in {None, state}:
+                return f"run {run_id!r} payload state does not match its authority row"
+            if not isinstance(payload.get("steps"), list):
+                return f"run {run_id!r} payload has no valid steps list"
+            try:
+                int(payload.get("current_step", 0))
+            except (TypeError, ValueError):
+                return f"run {run_id!r} has invalid current_step authority"
+            runs[str(run_id)] = payload
+
+        for run_id, step_index, expected_sha in progress_rows:
+            payload = runs.get(str(run_id))
+            if payload is None:
+                return f"execution watermark references missing run {run_id!r}"
+            steps = payload["steps"]
+            try:
+                index = int(step_index)
+            except (TypeError, ValueError):
+                return f"execution watermark for run {run_id!r} has invalid step index"
+            if index < 0 or index >= len(steps):
+                return f"execution watermark for run {run_id!r} points outside the run plan"
+            step = steps[index]
+            if not isinstance(step, dict):
+                return f"run {run_id!r} step {index} is not an object"
+            if _execution_step_sha256(step) != str(expected_sha):
+                return f"execution watermark digest does not match run {run_id!r} step {index}"
+            current_step = int(payload.get("current_step", 0))
+            if current_step < index:
+                return f"execution watermark is ahead of run {run_id!r} current_step"
+            if current_step == index:
+                step_state = str(step.get("state", "pending"))
+                if step_state in {"approved", "waiting_confirmation"}:
+                    return (
+                        f"execution watermark contradicts pre-execution state for run {run_id!r} "
+                        f"step {index}"
+                    )
+                if step_state == "pending" and not bool(step.get("idempotent", False)):
+                    return (
+                        f"execution watermark would make non-idempotent pending run {run_id!r} "
+                        f"step {index} replayable"
+                    )
+        return None
+    finally:
+        runs_con.close()
+        progress_con.close()
+
+
+def _live_pair_id_problem(
+    runs_path: str,
+    progress_path: str,
+) -> tuple[Optional[str], Optional[str]]:
+    runs_binding, runs_problem = _read_pair_binding_path(runs_path)
+    progress_binding, progress_problem = _read_pair_binding_path(progress_path)
+    if runs_problem or progress_problem:
+        return None, str(runs_problem or progress_problem)
+    if runs_binding is None or progress_binding is None:
+        return None, "persistent Agent 3 live-pair binding is missing from one or both stores"
+    run_pair_id, run_role = runs_binding
+    progress_pair_id, progress_role = progress_binding
+    if run_role != _AGENT3_RUNS_ROLE or progress_role != _AGENT3_PROGRESS_ROLE:
+        return None, "persistent Agent 3 live-pair roles do not match their stores"
+    if run_pair_id != progress_pair_id:
+        return None, "Agent 3 run/progress stores belong to different persistent live pairs"
+    return run_pair_id, None
+
+
 _T = TypeVar("_T")
 
 
@@ -459,10 +602,13 @@ def _execution_progress_problem_bytes(
     data: bytes,
     *,
     snapshot_id: Optional[str] = None,
+    pair_id: Optional[str] = None,
 ) -> Optional[str]:
     return _with_temp_sqlite(
         data,
-        lambda path: _execution_progress_problem_path(path, snapshot_id=snapshot_id),
+        lambda path: _execution_progress_problem_path(
+            path, snapshot_id=snapshot_id, pair_id=pair_id
+        ),
     )
 
 
@@ -474,11 +620,35 @@ def _agent3_runs_row_count_bytes(
     data: bytes,
     *,
     snapshot_id: Optional[str] = None,
+    pair_id: Optional[str] = None,
 ) -> tuple[Optional[int], Optional[str]]:
     return _with_temp_sqlite(
         data,
-        lambda path: _agent3_runs_row_count_path(path, snapshot_id=snapshot_id),
+        lambda path: _agent3_runs_row_count_path(
+            path, snapshot_id=snapshot_id, pair_id=pair_id
+        ),
     )
+
+
+def _pair_semantic_problem_bytes(run_data: bytes, progress_data: bytes) -> Optional[str]:
+    fd_run, run_path = tempfile.mkstemp(prefix="kaliv-backup-runs-", suffix=".db")
+    fd_progress, progress_path = tempfile.mkstemp(
+        prefix="kaliv-backup-progress-", suffix=".db"
+    )
+    os.close(fd_run)
+    os.close(fd_progress)
+    try:
+        with open(run_path, "wb") as f:
+            f.write(run_data)
+        with open(progress_path, "wb") as f:
+            f.write(progress_data)
+        return _agent3_pair_semantic_problem_paths(run_path, progress_path)
+    finally:
+        for path in (run_path, progress_path):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
 
 
 def _member_bytes(tar: tarfile.TarFile, name: str) -> Optional[bytes]:
@@ -576,6 +746,7 @@ def create(out_dir: str = ".") -> str:
     runs_exists = os.path.exists(runs.path)
     progress_exists = os.path.exists(progress.path)
     runs_have_rows = False
+    pair_id: Optional[str] = None
 
     if runs_exists:
         run_count, run_problem = _agent3_runs_row_count_path(runs.path)
@@ -589,13 +760,55 @@ def create(out_dir: str = ".") -> str:
             "refusing to back up execution-progress authority without the Agent 3 run store: "
             + progress.path
         )
-    if progress_exists:
+    if runs_exists and progress_exists:
+        pair_id, pair_problem = _live_pair_id_problem(runs.path, progress.path)
+        if pair_problem:
+            raise ValueError(
+                "refusing to back up unproven Agent 3 live-pair authority: " + pair_problem
+            )
+        assert pair_id is not None
+        run_count, run_problem = _agent3_runs_row_count_path(
+            runs.path, pair_id=pair_id
+        )
+        progress_problem = _execution_progress_problem_path(
+            progress.path, pair_id=pair_id
+        )
+        semantic_problem = None
+        if not run_problem and not progress_problem:
+            semantic_problem = _agent3_pair_semantic_problem_paths(runs.path, progress.path)
+        if run_problem:
+            raise ValueError(
+                "refusing to back up invalid Agent 3 run authority: " + run_problem
+            )
+        if progress_problem:
+            raise ValueError(
+                "refusing to back up invalid Agent 3 execution-progress authority: "
+                + progress_problem
+            )
+        if semantic_problem:
+            raise ValueError(
+                "refusing to back up semantically inconsistent Agent 3 authority: "
+                + semantic_problem
+            )
+        runs_have_rows = bool(run_count)
+    elif progress_exists:
         progress_problem = _execution_progress_problem_path(progress.path)
         if progress_problem:
             raise ValueError(
                 "refusing to back up invalid Agent 3 execution-progress authority: "
                 + progress_problem
             )
+    elif runs_exists:
+        binding, binding_problem = _read_pair_binding_path(runs.path)
+        if binding_problem:
+            raise ValueError(
+                "refusing to back up invalid Agent 3 pair binding: " + binding_problem
+            )
+        if binding is not None:
+            raise ValueError(
+                "refusing to back up one member of a persistent Agent 3 live pair"
+            )
+
     if runs_have_rows and not progress_exists:
         raise ValueError(
             "refusing to back up Agent 3 runs without the execution-progress sidecar: "
@@ -608,15 +821,17 @@ def create(out_dir: str = ".") -> str:
         with tempfile.TemporaryDirectory(prefix="kaliv-agent3-backup-") as stage_dir:
             archive_sources: dict[str, str] = {}
 
-            # A paired snapshot is created progress-first and runs-second. This
-            # ordering cannot manufacture a newer watermark than the run payload
-            # from ordinary live execution; both copies are then bound to the
-            # same random generation so independently copied files cannot later
-            # masquerade as one authority snapshot.
             if runs_exists and progress_exists:
+                assert pair_id is not None
                 snapshot_id = str(uuid.uuid4())
                 progress_snapshot = os.path.join(stage_dir, "progress.db")
                 runs_snapshot = os.path.join(stage_dir, "runs.db")
+
+                # Progress-first / runs-second prevents ordinary live execution
+                # from manufacturing a watermark newer than the run snapshot.
+                # Persistent pair identity proves common provenance; semantic
+                # validation below catches stale/partial source copies that still
+                # share that provenance but disagree at the execution boundary.
                 _sqlite_snapshot(progress.path, progress_snapshot)
                 _sqlite_snapshot(runs.path, runs_snapshot)
                 _add_snapshot_binding(
@@ -630,26 +845,35 @@ def create(out_dir: str = ".") -> str:
                     role=_AGENT3_RUNS_ROLE,
                 )
                 progress_problem = _execution_progress_problem_path(
-                    progress_snapshot, snapshot_id=snapshot_id
+                    progress_snapshot,
+                    snapshot_id=snapshot_id,
+                    pair_id=pair_id,
                 )
                 run_count, run_problem = _agent3_runs_row_count_path(
-                    runs_snapshot, snapshot_id=snapshot_id
+                    runs_snapshot,
+                    snapshot_id=snapshot_id,
+                    pair_id=pair_id,
                 )
-                if progress_problem or run_problem:
+                semantic_problem = None
+                if not progress_problem and not run_problem:
+                    semantic_problem = _agent3_pair_semantic_problem_paths(
+                        runs_snapshot, progress_snapshot
+                    )
+                if progress_problem or run_problem or semantic_problem:
                     raise ValueError(
                         "refusing to publish an invalid bound Agent 3 backup snapshot: "
-                        + str(progress_problem or run_problem)
+                        + str(progress_problem or run_problem or semantic_problem)
                     )
                 if bool(run_count) != runs_have_rows:
                     raise ValueError("Agent 3 run snapshot changed unexpectedly during backup")
+                manifest[AGENT3_PAIR_MANIFEST_KEY] = pair_id
                 manifest[AGENT3_SNAPSHOT_MANIFEST_KEY] = snapshot_id
                 archive_sources[AGENT3_RUNS_KEY] = runs_snapshot
                 archive_sources[AGENT3_EXECUTION_PROGRESS_KEY] = progress_snapshot
             elif runs_exists:
-                # A structurally valid empty legacy-style run store has no
-                # execution authority yet. Snapshot it consistently without a
-                # pair binding so schema-4 remains compatible with never-used
-                # Agent 3 installations.
+                # A structurally valid empty, never-paired run store has no
+                # execution authority yet. Snapshot it without pair metadata so
+                # old never-used installations remain portable.
                 runs_snapshot = os.path.join(stage_dir, "runs-empty.db")
                 _sqlite_snapshot(runs.path, runs_snapshot)
                 archive_sources[AGENT3_RUNS_KEY] = runs_snapshot
@@ -737,22 +961,36 @@ def verify(archive: str) -> dict:
         progress_count: Optional[int] = None
 
         snapshot_id: Optional[str] = None
-        if schema == BACKUP_SCHEMA and has_progress:
+        if schema in {4, BACKUP_SCHEMA} and has_progress:
             raw_snapshot_id = manifest.get(AGENT3_SNAPSHOT_MANIFEST_KEY)
             snapshot_problem = _snapshot_id_problem(raw_snapshot_id)
             if snapshot_problem:
                 problems.append(snapshot_problem)
             else:
                 snapshot_id = str(raw_snapshot_id)
-        elif schema == BACKUP_SCHEMA and manifest.get(AGENT3_SNAPSHOT_MANIFEST_KEY) is not None:
+        elif schema in {4, BACKUP_SCHEMA} and manifest.get(AGENT3_SNAPSHOT_MANIFEST_KEY) is not None:
             problems.append(
                 "Agent 3 snapshot id is present without paired execution-progress authority"
+            )
+
+        pair_id: Optional[str] = None
+        if schema == BACKUP_SCHEMA and has_progress:
+            raw_pair_id = manifest.get(AGENT3_PAIR_MANIFEST_KEY)
+            pair_problem = _pair_id_problem(raw_pair_id)
+            if pair_problem:
+                problems.append(pair_problem)
+            else:
+                pair_id = str(raw_pair_id)
+        elif schema == BACKUP_SCHEMA and manifest.get(AGENT3_PAIR_MANIFEST_KEY) is not None:
+            problems.append(
+                "Agent 3 pair id is present without paired execution-progress authority"
             )
 
         if run_bytes is not None:
             run_count, run_problem = _agent3_runs_row_count_bytes(
                 run_bytes,
-                snapshot_id=snapshot_id if schema == BACKUP_SCHEMA and has_progress else None,
+                snapshot_id=snapshot_id if schema in {4, BACKUP_SCHEMA} and has_progress else None,
+                pair_id=pair_id if schema == BACKUP_SCHEMA and has_progress else None,
             )
             if run_problem:
                 problems.append(f"invalid Agent 3 run store: {run_problem}")
@@ -765,35 +1003,55 @@ def verify(archive: str) -> dict:
         if authority_problem:
             problems.append(authority_problem)
 
+        progress_ok = False
         if progress_bytes is not None:
             progress_problem = _execution_progress_problem_bytes(
                 progress_bytes,
-                snapshot_id=snapshot_id if schema == BACKUP_SCHEMA else None,
+                snapshot_id=snapshot_id if schema in {4, BACKUP_SCHEMA} else None,
+                pair_id=pair_id if schema == BACKUP_SCHEMA else None,
             )
             if progress_problem:
                 problems.append(
                     "invalid Agent 3 execution-progress authority: " + progress_problem
                 )
             else:
+                progress_ok = True
                 progress_count, count_problem = _execution_progress_row_count_bytes(
                     progress_bytes
                 )
                 if count_problem:
+                    progress_ok = False
                     problems.append(
                         "invalid Agent 3 execution-progress authority: " + count_problem
                     )
 
-        if schema < BACKUP_SCHEMA and (bool(run_count) or bool(progress_count)):
+        if (
+            schema == BACKUP_SCHEMA
+            and has_runs
+            and has_progress
+            and run_bytes is not None
+            and progress_bytes is not None
+            and pair_id is not None
+            and snapshot_id is not None
+            and run_count is not None
+            and progress_ok
+        ):
+            semantic_problem = _pair_semantic_problem_bytes(run_bytes, progress_bytes)
+            if semantic_problem:
+                problems.append(
+                    "invalid Agent 3 run/progress semantic relation: " + semantic_problem
+                )
+
+        if schema < BACKUP_SCHEMA and (has_progress or bool(run_count)):
             problems.append(
-                "legacy Agent 3 authority lacks schema-4 run/progress snapshot binding"
+                "legacy Agent 3 authority lacks schema-5 persistent live-pair binding"
             )
 
-        if schema == BACKUP_SCHEMA and has_progress and snapshot_id is None:
-            # The detailed id problem was already recorded; keep the relation
-            # fail-closed even if one of the DB inspections also failed.
+        if schema == BACKUP_SCHEMA and has_progress and (snapshot_id is None or pair_id is None):
+            # Detailed id errors were already recorded. Keep relation fail-closed.
             pass
         elif schema == BACKUP_SCHEMA and has_progress and not has_runs:
-            problems.append("schema-4 Agent 3 snapshot binding requires both authority files")
+            problems.append("schema-5 Agent 3 authority requires both paired stores")
 
         for key, meta in files.items():
             if not isinstance(meta, dict) or meta.get("kind") not in {"file", "dir"}:
@@ -875,13 +1133,7 @@ def _publish_agent3_pair(
     progress_path: str,
     snapshot_id: str,
 ) -> None:
-    """Publish a paired authority restore with the run path as durable fence.
-
-    The first atomic replace makes ``runs_path`` deliberately non-SQLite. Any
-    interruption before the final atomic replace therefore blocks AgentRunStore
-    at its first SQLite operation. The final run replace happens only after the
-    progress sidecar has been published.
-    """
+    """Publish a paired authority restore with the run path as durable fence."""
     run_parent = os.path.dirname(os.path.abspath(runs_path))
     progress_parent = os.path.dirname(os.path.abspath(progress_path))
     os.makedirs(run_parent, exist_ok=True)
@@ -913,41 +1165,9 @@ def _publish_agent3_pair(
 
 
 def restore(archive: str, force: bool = False) -> dict:
-    """Restore only while Agent3 runtime is quiescent.
-
-    Verification and the normal no-clobber preflight happen before restore
-    authority is acquired. Once the exclusive guard is entered, any failure
-    leaves a durable incomplete marker so no Agent3 runtime can boot against
-    partially restored cross-store state. A successful complete retry clears it.
-    """
-    check = verify(archive)
-    if not check["ok"]:
-        raise ValueError(
-            f"archive failed verification, refusing to restore: {check['problems']}"
-        )
-    manifest = _read_manifest(archive)
-    targets = {item.key: item for item in items()}
-    files = manifest["files"]
-    if not force:
-        clashes = []
-        for key in files:
-            item = targets.get(key)
-            if item and os.path.exists(item.path):
-                clashes.append(item.path)
-        if clashes:
-            raise FileExistsError(
-                "these already exist (use --force to overwrite): " + ", ".join(clashes)
-            )
-
-    run_path = targets[AGENT3_RUNS_KEY].path
-    with agent3_restore_guard(run_path):
-        return _restore_under_runtime_guard(archive, force=force)
-
-
-def _restore_under_runtime_guard(archive: str, force: bool = False) -> dict:
     """Restore an archive after complete verification.
 
-    Schema-4 Agent 3 run/progress authority is staged, unbound, validated and
+    Schema-5 Agent 3 authority is staged, snapshot-unbound, pair-validated and
     published as one fenced pair before any unrelated file is replaced.
     """
     check = verify(archive)
@@ -982,9 +1202,12 @@ def _restore_under_runtime_guard(archive: str, force: bool = False) -> dict:
         ):
             snapshot_id = manifest.get(AGENT3_SNAPSHOT_MANIFEST_KEY)
             snapshot_problem = _snapshot_id_problem(snapshot_id)
-            if snapshot_problem:
-                raise ValueError(snapshot_problem)
+            pair_id = manifest.get(AGENT3_PAIR_MANIFEST_KEY)
+            pair_problem = _pair_id_problem(pair_id)
+            if snapshot_problem or pair_problem:
+                raise ValueError(str(snapshot_problem or pair_problem))
             assert isinstance(snapshot_id, str)
+            assert isinstance(pair_id, str)
             runs_item = targets[AGENT3_RUNS_KEY]
             progress_item = targets[AGENT3_EXECUTION_PROGRESS_KEY]
             runs_stage = _stage_member_near(
@@ -995,15 +1218,24 @@ def _restore_under_runtime_guard(archive: str, force: bool = False) -> dict:
             )
             try:
                 run_count, run_problem = _agent3_runs_row_count_path(
-                    runs_stage, snapshot_id=snapshot_id
+                    runs_stage,
+                    snapshot_id=snapshot_id,
+                    pair_id=pair_id,
                 )
                 progress_problem = _execution_progress_problem_path(
-                    progress_stage, snapshot_id=snapshot_id
+                    progress_stage,
+                    snapshot_id=snapshot_id,
+                    pair_id=pair_id,
                 )
-                if run_problem or progress_problem:
+                semantic_problem = None
+                if not run_problem and not progress_problem:
+                    semantic_problem = _agent3_pair_semantic_problem_paths(
+                        runs_stage, progress_stage
+                    )
+                if run_problem or progress_problem or semantic_problem:
                     raise ValueError(
                         "invalid staged Agent 3 authority pair: "
-                        + str(run_problem or progress_problem)
+                        + str(run_problem or progress_problem or semantic_problem)
                     )
 
                 _strip_snapshot_binding(
@@ -1017,12 +1249,25 @@ def _restore_under_runtime_guard(archive: str, force: bool = False) -> dict:
                     role=_AGENT3_PROGRESS_ROLE,
                 )
 
-                live_run_count, live_run_problem = _agent3_runs_row_count_path(runs_stage)
-                live_progress_problem = _execution_progress_problem_path(progress_stage)
-                if live_run_problem or live_progress_problem:
+                live_run_count, live_run_problem = _agent3_runs_row_count_path(
+                    runs_stage, pair_id=pair_id
+                )
+                live_progress_problem = _execution_progress_problem_path(
+                    progress_stage, pair_id=pair_id
+                )
+                live_semantic_problem = None
+                if not live_run_problem and not live_progress_problem:
+                    live_semantic_problem = _agent3_pair_semantic_problem_paths(
+                        runs_stage, progress_stage
+                    )
+                if live_run_problem or live_progress_problem or live_semantic_problem:
                     raise ValueError(
-                        "invalid unbound staged Agent 3 authority pair: "
-                        + str(live_run_problem or live_progress_problem)
+                        "invalid snapshot-unbound staged Agent 3 authority pair: "
+                        + str(
+                            live_run_problem
+                            or live_progress_problem
+                            or live_semantic_problem
+                        )
                     )
                 if live_run_count != run_count:
                     raise ValueError("Agent 3 run count changed while removing snapshot binding")
