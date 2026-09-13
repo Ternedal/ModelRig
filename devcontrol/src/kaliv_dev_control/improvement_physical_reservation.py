@@ -2,8 +2,10 @@
 
 The public consume path deliberately does not accept an Ed25519 verifier or
 keyring from its caller. Production verification resolves the pinned public
-trust root from the fixed host-controlled authority keyring. The injectable
-transaction implementation remains private for deterministic adversarial tests.
+trust root from the fixed host-controlled authority keyring. The durable replay
+ledger is likewise resolved only from a fixed administrator-controlled path;
+the injectable transaction implementation remains private for deterministic
+adversarial tests.
 """
 from __future__ import annotations
 
@@ -28,6 +30,10 @@ from ._improvement_physical_reservation_directory_arming import (
 from ._improvement_physical_runtime_host_control import (
     PhysicalHostRuntimeError,
     install_host_controlled_physical_runtime_boundary,
+)
+from ._improvement_physical_state_host_control import (
+    PhysicalHostStateError,
+    _canonical_host_controlled_ledger_root,
 )
 from . import _improvement_physical_reservation_impl as _implementation
 
@@ -61,7 +67,9 @@ _consume_physical_qualification_request_once_host_controlled = (
 )
 _observe_with_reader = _implementation._observe_with_reader
 _canonical = _implementation._canonical
-_canonical_host_ledger_root = _implementation._canonical_host_ledger_root
+# Public production replay state must come from the privilege-separated resolver,
+# never the generic link-free directory creator retained by the private test seam.
+_canonical_host_ledger_root = _canonical_host_controlled_ledger_root
 _canonical_host_state_root = _implementation._canonical_host_state_root
 _canonical_repository_root = _implementation._canonical_repository_root
 _canonical_operation_root = _implementation._canonical_operation_root
@@ -83,12 +91,13 @@ def consume_physical_qualification_request_once(
 ) -> PhysicalQualificationReservation:
     """Authenticate, observe, and host-reserve one request exactly once.
 
-    Callers cannot select the verification trust root. The pinned Ed25519 public
-    keyring is resolved from fixed host-controlled authority state; a missing or
-    invalid host trust root fails closed. Production Git observations likewise
-    execute only from an administrator-controlled runtime tree. Callers also
-    cannot supply repository root, operation root, observation evidence, clock,
-    ledger ID/root, or a prebuilt receipt.
+    Callers cannot select the verification trust root or replay ledger. The
+    pinned Ed25519 public keyring and permanent replay state are resolved from
+    fixed host-admin-controlled locations; missing or unsafe host state fails
+    closed. Production Git observations likewise execute only from an
+    administrator-controlled runtime tree. Callers also cannot supply repository
+    root, operation root, observation evidence, clock, ledger ID/root, or a
+    prebuilt receipt.
     """
 
     try:
@@ -98,8 +107,14 @@ def consume_physical_qualification_request_once(
             "host-controlled physical request authority keyring is unavailable"
         ) from exc
     try:
+        ledger_root = _canonical_host_ledger_root()
+    except PhysicalHostStateError as exc:
+        raise PhysicalQualificationReservationError(
+            "host-controlled physical request replay ledger is unavailable"
+        ) from exc
+    try:
         return _consume_physical_qualification_request_once_host_controlled(
-            ledger_root=_canonical_host_ledger_root(),
+            ledger_root=ledger_root,
             trusted_git=trusted_git,
             repository_root=_canonical_repository_root(),
             operation_root=_canonical_operation_root(),
