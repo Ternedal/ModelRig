@@ -478,6 +478,28 @@ def build_planner_router(
                 status_code=503,
             ) from exc
 
+    def _recover_materialized_reviewed_start(
+        plan_id: str,
+        run_id: str,
+        stored: dict[str, Any],
+        *,
+        review_reads: bool,
+    ) -> dict[str, Any]:
+        # Once the exact reserved run exists, a failed reconciliation/finalization
+        # must not leave this worker generation holding the durable recovery claim
+        # forever. Release only after this execution path is exiting; a later
+        # request must claim the same run again before it can reconcile anything.
+        try:
+            reconciled = _reconcile_reviewed_start_run(
+                run_id,
+                review_reads=review_reads,
+            )
+            plan_store.mark_reviewed_start_accepted(plan_id, run_id)
+            return _reviewed_start_response(plan_id, stored, reconciled)
+        except Exception:
+            plan_store.release_reviewed_start_recovery(plan_id, run_id)
+            raise
+
     @router.post("/plans/{plan_id}/start")
     def start_reviewed_plan(plan_id: str) -> dict[str, Any]:
         if orchestrator is None:
@@ -547,18 +569,18 @@ def build_planner_router(
                         recovery_envelope.get("review_reads", False)
                     )
                 except (TypeError, json.JSONDecodeError, ValueError) as exc:
+                    plan_store.release_reviewed_start_recovery(plan_id, reserved_run_id)
                     raise _reviewed_start_error(
                         "reviewed_start_pending",
                         "persisted reviewed Start policy is unreadable; recovery remains ambiguous",
                         status_code=503,
                     ) from exc
-                reconciled = _reconcile_reviewed_start_run(
+                return _recover_materialized_reviewed_start(
+                    plan_id,
                     reserved_run_id,
+                    recovery_envelope,
                     review_reads=recovered_review_reads,
                 )
-                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
-                stored = recovery_envelope
-                return _reviewed_start_response(plan_id, stored, reconciled)
         else:
             reserved_run_id = str(uuid.uuid4())
             try:
@@ -649,23 +671,23 @@ def build_planner_router(
         except HTTPException:
             existing = orchestrator.store.load(reserved_run_id)
             if existing is not None:
-                reconciled = _reconcile_reviewed_start_run(
+                return _recover_materialized_reviewed_start(
+                    plan_id,
                     reserved_run_id,
+                    envelope,
                     review_reads=review_reads,
                 )
-                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
-                return _reviewed_start_response(plan_id, envelope, reconciled)
             plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
             raise
         except Exception:
             existing = orchestrator.store.load(reserved_run_id)
             if existing is not None:
-                reconciled = _reconcile_reviewed_start_run(
+                return _recover_materialized_reviewed_start(
+                    plan_id,
                     reserved_run_id,
+                    envelope,
                     review_reads=review_reads,
                 )
-                plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
-                return _reviewed_start_response(plan_id, envelope, reconciled)
             plan_store.mark_reviewed_start_refused(plan_id, reserved_run_id)
             raise
 
