@@ -50,6 +50,32 @@ def _seed_sqlite(path: str, key: str) -> None:
             "INSERT INTO docs (body) VALUES (?)",
             [("chunk %d" % i,) for i in range(200)],
         )
+    elif key == "agent3-runs.db":
+        con.execute(
+            "CREATE TABLE agent_runs ("
+            "id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
+        )
+        con.execute(
+            "CREATE TABLE agent_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, ts REAL NOT NULL, "
+            "kind TEXT NOT NULL, payload TEXT NOT NULL)"
+        )
+        con.execute(
+            "INSERT INTO agent_runs(id,state,payload,updated_at) VALUES(?,?,?,?)",
+            ("seed-run", "running", "{}", 1.0),
+        )
+    elif key == "agent3-execution-progress.db":
+        con.execute(
+            "CREATE TABLE agent_execution_starts ("
+            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+            "started_at REAL NOT NULL, "
+            "PRIMARY KEY(run_id,step_index,step_sha256))"
+        )
+        con.execute(
+            "INSERT INTO agent_execution_starts(run_id,step_index,step_sha256,started_at) "
+            "VALUES(?,?,?,?)",
+            ("seed-run", 0, "a" * 64, 1.0),
+        )
     else:
         con.execute("CREATE TABLE state (name TEXT PRIMARY KEY, value TEXT)")
         con.execute("INSERT INTO state(name, value) VALUES (?, ?)", (key, "seeded"))
@@ -101,24 +127,61 @@ def wipe():
             shutil.rmtree(it.path)
 
 
-def archive_with_schema(source: str, destination: str, schema: int, drop_keys=()) -> None:
-    """Copy an archive while changing manifest.schema and optionally dropping keys."""
+def archive_with_schema(
+    source: str,
+    destination: str,
+    schema: int,
+    drop_keys=(),
+    replace_files=None,
+) -> None:
+    """Copy an archive while changing schema, dropping or coherently replacing files."""
     drop_keys = set(drop_keys)
+    replace_files = dict(replace_files or {})
     with tarfile.open(source, "r:gz") as src, tarfile.open(destination, "w:gz") as dst:
         for member in src.getmembers():
-            if member.name.startswith("data/") and member.name.removeprefix("data/") in drop_keys:
+            key = member.name.removeprefix("data/") if member.name.startswith("data/") else None
+            if key in drop_keys:
                 continue
             extracted = src.extractfile(member)
             data = extracted.read() if extracted else b""
+            if key in replace_files:
+                data = replace_files[key]
             if member.name == "manifest.json":
                 manifest = json.loads(data)
                 manifest["schema"] = schema
-                for key in drop_keys:
-                    manifest["files"].pop(key, None)
+                for dropped in drop_keys:
+                    manifest["files"].pop(dropped, None)
+                for replaced, payload in replace_files.items():
+                    if replaced in manifest["files"]:
+                        manifest["files"][replaced]["sha256"] = hashlib.sha256(payload).hexdigest()
                 data = json.dumps(manifest, indent=2, sort_keys=True).encode()
             replacement = tarfile.TarInfo(member.name)
             replacement.size = len(data)
             dst.addfile(replacement, io.BytesIO(data))
+
+
+def empty_agent_runs_bytes() -> bytes:
+    fd, path = tempfile.mkstemp(prefix="empty-agent3-runs-", suffix=".db")
+    os.close(fd)
+    try:
+        con = sqlite3.connect(path)
+        con.execute(
+            "CREATE TABLE agent_runs ("
+            "id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
+        )
+        con.execute(
+            "CREATE TABLE agent_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, ts REAL NOT NULL, "
+            "kind TEXT NOT NULL, payload TEXT NOT NULL)"
+        )
+        con.commit()
+        con.close()
+        return open(path, "rb").read()
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
 
 
 # --- inventory --------------------------------------------------------------
@@ -206,6 +269,39 @@ except ValueError:
     check(True, "restore: unsafe legacy Agent3 archive is refused")
 check(snapshot() == pre_unsafe_restore, "restore: unsafe legacy refusal writes NOTHING")
 
+# Hash correctness is not enough for replay authority: a present sidecar must
+# itself be a structurally valid execution-progress database.
+invalid_sidecar = os.path.join(_root, "invalid-progress-with-valid-hash.tar.gz")
+archive_with_schema(
+    archive,
+    invalid_sidecar,
+    3,
+    replace_files={"agent3-execution-progress.db": b""},
+)
+invalid_progress_verify = backup.verify(invalid_sidecar)
+check(not invalid_progress_verify["ok"], "verify: empty execution sidecar is refused despite matching hash")
+check(
+    any("execution-progress authority database" in problem for problem in invalid_progress_verify["problems"]),
+    "verify: invalid execution sidecar names the authority schema problem",
+)
+
+# Schema 1/2 legitimately predate the sidecar. An archived run DB with the
+# canonical schema but zero run rows has no execution to replay and remains safe.
+safe_empty_legacy = os.path.join(_root, "safe-empty-schema-2-without-progress.tar.gz")
+archive_with_schema(
+    archive,
+    safe_empty_legacy,
+    2,
+    drop_keys={"agent3-execution-progress.db"},
+    replace_files={"agent3-runs.db": empty_agent_runs_bytes()},
+)
+check(backup.verify(safe_empty_legacy)["ok"], "schema: empty legacy Agent3 run store needs no nonexistent sidecar")
+wipe()
+safe_restore = backup.restore(safe_empty_legacy)
+check(bool(safe_restore["restored"]), "restore: safe empty legacy archive remains restorable")
+check(os.path.exists(runs_item.path), "restore: empty legacy Agent3 run DB is restored")
+check(not os.path.exists(progress_item.path), "restore: empty legacy restore does not invent execution authority")
+
 future = os.path.join(_root, "unsupported-schema.tar.gz")
 archive_with_schema(archive, future, 999)
 try:
@@ -282,6 +378,19 @@ try:
     check(False, "create: Agent3 runs without execution-progress sidecar are refused")
 except ValueError:
     check(True, "create: Agent3 runs without execution-progress sidecar are refused")
+wipe()
+
+# Presence alone is not authority. A truncated/empty sidecar must also block
+# backup creation before any archive is published.
+_seed_sqlite(runs_item.path, runs_item.key)
+os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
+with open(progress_item.path, "wb") as f:
+    f.write(b"")
+try:
+    backup.create(os.path.join(_root, "invalid-progress"))
+    check(False, "create: invalid execution-progress sidecar is refused")
+except ValueError:
+    check(True, "create: invalid execution-progress sidecar is refused")
 wipe()
 
 # An empty rig is still a valid backup.

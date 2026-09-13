@@ -47,8 +47,10 @@ import hashlib
 import io
 import json
 import os
+import sqlite3
 import sys
 import tarfile
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -184,13 +186,127 @@ def _walk(path: str) -> list[str]:
     return sorted(out)
 
 
-def _agent3_authority_problem(files: dict) -> Optional[str]:
-    if AGENT3_RUNS_KEY in files and AGENT3_EXECUTION_PROGRESS_KEY not in files:
-        return (
-            "Agent 3 run state is present without execution-progress authority; "
-            "restoring it could replay a previously-started non-idempotent step"
+_AGENT3_RUNS_SCHEMA = [
+    ("id", "TEXT", 0, 1),
+    ("state", "TEXT", 1, 0),
+    ("payload", "TEXT", 1, 0),
+    ("updated_at", "REAL", 1, 0),
+]
+_AGENT3_PROGRESS_SCHEMA = [
+    ("run_id", "TEXT", 1, 1),
+    ("step_index", "INTEGER", 1, 2),
+    ("step_sha256", "TEXT", 1, 3),
+    ("started_at", "REAL", 1, 0),
+]
+
+
+def _sqlite_table_status(
+    path: str,
+    table: str,
+    expected_schema: list[tuple[str, str, int, int]],
+    *,
+    count_rows: bool = False,
+) -> tuple[Optional[str], Optional[int]]:
+    """Read-only structural validation for authority SQLite files."""
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            return f"SQLite integrity_check failed for {table}", None
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        actual = [(row[1], str(row[2]).upper(), int(row[3]), int(row[5])) for row in rows]
+        if actual != expected_schema:
+            return f"required table schema is missing or invalid for {table}", None
+        count = int(conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]) if count_rows else None
+        return None, count
+    except (sqlite3.DatabaseError, OSError, ValueError) as exc:
+        return f"cannot read SQLite authority for {table}: {type(exc).__name__}", None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _sqlite_bytes_status(
+    data: bytes,
+    table: str,
+    expected_schema: list[tuple[str, str, int, int]],
+    *,
+    count_rows: bool = False,
+) -> tuple[Optional[str], Optional[int]]:
+    fd, path = tempfile.mkstemp(prefix="kaliv-backup-sqlite-", suffix=".db")
+    os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(data)
+        return _sqlite_table_status(
+            path, table, expected_schema, count_rows=count_rows
         )
-    return None
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def _execution_progress_problem(path: str) -> Optional[str]:
+    problem, _ = _sqlite_table_status(
+        path, "agent_execution_starts", _AGENT3_PROGRESS_SCHEMA
+    )
+    return problem
+
+
+def _member_bytes(tar: tarfile.TarFile, name: str) -> Optional[bytes]:
+    try:
+        f = tar.extractfile(name)
+    except KeyError:
+        return None
+    return None if f is None else f.read()
+
+
+def _agent3_archive_authority_problems(tar: tarfile.TarFile, manifest: dict) -> list[str]:
+    """Validate replay authority, while preserving safe legacy empty-run restores."""
+    problems: list[str] = []
+    files = manifest.get("files", {})
+    schema = manifest.get("schema")
+    has_runs = AGENT3_RUNS_KEY in files
+    has_progress = AGENT3_EXECUTION_PROGRESS_KEY in files
+
+    if has_progress:
+        data = _member_bytes(tar, f"data/{AGENT3_EXECUTION_PROGRESS_KEY}")
+        if data is not None:
+            problem, _ = _sqlite_bytes_status(
+                data, "agent_execution_starts", _AGENT3_PROGRESS_SCHEMA
+            )
+            if problem:
+                problems.append(
+                    "invalid Agent 3 execution-progress authority database: " + problem
+                )
+
+    if has_runs and not has_progress:
+        # Schema 3 promises an explicit authority pair. Legacy schemas predate
+        # the sidecar and remain safe only when the archived run table is empty.
+        if schema == BACKUP_SCHEMA:
+            problems.append(
+                "Agent 3 run state is present without execution-progress authority; "
+                "schema 3 requires the authority pair"
+            )
+        else:
+            data = _member_bytes(tar, f"data/{AGENT3_RUNS_KEY}")
+            if data is not None:
+                problem, count = _sqlite_bytes_status(
+                    data, "agent_runs", _AGENT3_RUNS_SCHEMA, count_rows=True
+                )
+                if problem:
+                    problems.append(
+                        "cannot prove legacy Agent 3 run store is empty: " + problem
+                    )
+                elif count:
+                    problems.append(
+                        "Agent 3 run state is present without execution-progress authority; "
+                        "restoring it could replay a previously-started non-idempotent step"
+                    )
+    return problems
 
 
 def create(out_dir: str = ".") -> str:
@@ -208,6 +324,13 @@ def create(out_dir: str = ".") -> str:
             "refusing to back up Agent 3 runs without the execution-progress sidecar: "
             + progress.path
         )
+    if os.path.exists(progress.path):
+        progress_problem = _execution_progress_problem(progress.path)
+        if progress_problem:
+            raise ValueError(
+                "refusing to back up invalid Agent 3 execution-progress authority: "
+                + progress_problem
+            )
 
     manifest: dict = {"schema": BACKUP_SCHEMA, "created": stamp, "files": {}}
 
@@ -260,10 +383,6 @@ def verify(archive: str) -> dict:
         raise ValueError(f"unsupported backup schema: {manifest.get('schema')}")
 
     problems: list[str] = []
-    authority_problem = _agent3_authority_problem(manifest.get("files", {}))
-    if authority_problem:
-        problems.append(authority_problem)
-
     checked = 0
     with tarfile.open(archive, "r:gz") as tar:
         for key, meta in manifest["files"].items():
@@ -286,6 +405,7 @@ def verify(archive: str) -> dict:
                         problems.append(f"hash mismatch: {key}/{rel}")
                     else:
                         checked += 1
+        problems.extend(_agent3_archive_authority_problems(tar, manifest))
     return {"ok": not problems, "checked": checked, "problems": problems}
 
 
