@@ -22,17 +22,21 @@ from ._improvement_physical_reservation_provenance import (
 from ._improvement_physical_reservation_directory_provenance import (
     install_directory_history_provenance,
 )
+from ._improvement_physical_reservation_directory_arming import (
+    install_directory_history_arming_guard,
+)
 from ._improvement_physical_runtime_host_control import (
     PhysicalHostRuntimeError,
     install_host_controlled_physical_runtime_boundary,
 )
 from . import _improvement_physical_reservation_impl as _implementation
 
-# Install original-file provenance first, then bind the containing ledger
-# directory's rename history. Production Git execution is finally narrowed to
-# an administrator-controlled runtime tree before exposing any authority path.
+# Install original-file provenance first, then directory-history provenance and
+# the Linux watch-before-trust arming guard. Production Git execution is finally
+# narrowed to an administrator-controlled runtime tree before exposing authority.
 install_descriptor_bound_provenance(_implementation)
 install_directory_history_provenance(_implementation)
+install_directory_history_arming_guard()
 install_host_controlled_physical_runtime_boundary(_implementation)
 # The old convenience wrapper accepted a caller-selected verifier. The loaded
 # implementation retains only the explicitly private injectable transaction.
