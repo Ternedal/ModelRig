@@ -261,3 +261,22 @@ Successful approval kan sætte `physical_campaign_completed=true` og
 gate. Pilot, merge, publication, release, deploy og activation autoriseres ikke.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-014_RSI_INDEPENDENT_HUMAN_VERDICT.md`
+
+## ADR-DC-015 — Human-signed pilot decision without starting DC-L16
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Lukker kun `human_pilot_go_decision` ved verification af en separat Ed25519-
+signeret `GO`, `NO-GO` eller `GO WITH CONDITIONS` beslutning over exact
+ADR-DC-014 completion proof og en eksplicit lokal pilot-scope. Scope binder
+operator surface, allowlisted task IDs, workspace-root digest, local-commit valg
+og default-deny invariants for remote write, push/PR/merge/release/deploy og
+production activation.
+
+Et verificeret positivt verdict kan kun sætte `pilot_go_authorized=true`; det
+starter ikke en product pilot og holder feature flag default-off. `NO-GO`
+forbliver et verificeret decision proof med `pilot_go_authorized=false`.
+Production resolver kun en host-admin-kontrolleret verification-only public-key
+keyring og indeholder ingen signer/private key eller produktentrypoint.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-015_RSI_HUMAN_PILOT_DECISION.md`
