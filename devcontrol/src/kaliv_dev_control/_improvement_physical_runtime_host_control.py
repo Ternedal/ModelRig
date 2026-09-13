@@ -6,8 +6,8 @@ process under the service account. This installer therefore adds a separate
 production consume path that accepts only an exact TrustedGitRuntime whose
 complete transaction tree is controlled by the host administrator:
 
-* POSIX: root-owned regular files/directories, with no group/world write in the
-  runtime tree or its ancestor chain.
+* POSIX: root-owned regular files/directories, with no group/world write or
+  extended POSIX ACLs in the runtime tree or its ancestor chain.
 * Windows: a tree under Program Files whose owner/DACL grants write/control only
   to SYSTEM, Administrators, or TrustedInstaller.
 
@@ -28,6 +28,7 @@ from typing import Any, Mapping
 from .bounded_subprocess import BoundedSubprocessError, run_bounded_subprocess
 from .improvement_physical_authority_keyring import (
     PhysicalRequestAuthorityKeyringError,
+    _require_no_posix_acl,
     _validate_windows_acl_snapshot,
     _windows_acl_snapshot,
 )
@@ -73,6 +74,12 @@ def _require_posix_object(path: Path, *, is_directory: bool) -> None:
         raise PhysicalHostRuntimeError(
             "physical request Git runtime is not root-controlled"
         )
+    try:
+        _require_no_posix_acl(path)
+    except PhysicalRequestAuthorityKeyringError as exc:
+        raise PhysicalHostRuntimeError(
+            "physical request Git runtime uses unsafe POSIX ACL state"
+        ) from exc
 
 
 def _require_posix_host_control(runtime: TrustedGitRuntime) -> None:
