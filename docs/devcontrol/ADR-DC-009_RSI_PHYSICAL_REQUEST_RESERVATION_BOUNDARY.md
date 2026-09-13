@@ -115,6 +115,8 @@ Fra **før den første permanente publication** beholdes derfor directory descri
 - BSD-style POSIX: kqueue vnode monitor anvender rename/delete og revoke på hvert retained directory-object, hvor platformen understøtter det;
 - en POSIX-platform uden en understøttet exact directory-chain history primitive fejler lukket ved reservation publication i stedet for at degradere provenance lydløst.
 
+Capture→monitor-arm-vinduet lukkes med en **setup-only metadata-stamp** på hvert retained directory-object: `(dev, ino)` og stampen skal matche både den åbne descriptor og den canonical path umiddelbart før/efter monitor-arming. En rename→restore i dette vindue skal derfor fail-close. Efter arming bruges stampen ikke som generel live-history; legitime child/sibling-operationer må fortsat ændre directory-metadata uden at revokere en ellers stabil reservation.
+
 Linux-monitoren filtrerer child-events på exact navn, så oprettelse/sletning af **andre sibling entries** i en overvåget parent ikke revokerer en ellers uændret reservation. Efter monitor-arming verificeres hvert retained directory-object fortsat via både åben descriptor og canonical path-identitet. Et relevant history-event er monotont: senere path-restoration kan ikke gøre bindingen valid igen.
 
 Både `ledger rename-away → replay → restore` og `ancestor rename-away → replay i replacement subtree → delete replacement → restore ancestor` efterlader derfor event-history, som ikke kan skjules ved at sætte de oprindelige pathnames tilbage.
@@ -155,7 +157,7 @@ Denne boundary starter ikke DC-L15 probes, cadence, persistent `main` freeze, fy
 2. snapshot exact-type request/qualification/snapshot/signature + verifier;
 3. rekonstruér exact `TrustedGitRuntime`, verificér signed runtime identity og host-admin-control af tree + chain;
 4. trusted preflight af `main` gennem den restricted host-controlled Git-reader;
-5. opret transaction/publication token, bind ledger-root + ancestor directory objects og arm POSIX exact directory-chain history monitor før første permanente publication;
+5. opret transaction/publication token, bind ledger-root + ancestor directory objects med setup-only stamps, arm POSIX exact directory-chain history monitor og revalidér identity/stamps før første permanente publication;
 6. create-once permanent replay-marker og behold original descriptor/fil-identitet;
 7. trusted post-marker `main` read gennem samme host-controlled runtime;
 8. trusted-current-time re-verifikation af signed request + qualification;
@@ -194,12 +196,13 @@ Implementationen skal mindst afvise eller fail-close ved:
 19. delete→byte-identical recreate af final/marker;
 20. POSIX leaf rename-away/replay/rename-back;
 21. POSIX ledger-root eller ancestor rename-away/replay/restore eller tab af directory-chain history monitor;
-22. POSIX-platform uden understøttet exact directory-chain rename-history primitive;
-23. live receipt mutation uden exact content restoration;
-24. POSIX fork inheritance;
-25. cross-transaction descriptor/history-monitor claim eller leaked retained state;
-26. outer consume/cleanup failure, der ellers ville efterlade traceback-reachable authenticated receipt;
-27. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+22. POSIX rename→restore under directory-history monitor arming;
+23. POSIX-platform uden understøttet exact directory-chain rename-history primitive;
+24. live receipt mutation uden exact content restoration;
+25. POSIX fork inheritance;
+26. cross-transaction descriptor/history-monitor claim eller leaked retained state;
+27. outer consume/cleanup failure, der ellers ville efterlade traceback-reachable authenticated receipt;
+28. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
 ## Artefakter
 
@@ -211,11 +214,9 @@ Implementationen skal mindst afvise eller fail-close ved:
 - private transaction-staged runtime seam — deterministic tests only;
 - canonical host ledger — final + permanent replay-marker som recovery/replay-state;
 - original-publication descriptor registry for final/replay-marker;
-- POSIX ledger-root + ancestor directory descriptors og kernel event-history monitor;
+- POSIX ledger-root + ancestor directory descriptors, setup-only arming stamps og kernel event-history monitor;
 - process-local live provenance registry med process/content/file/history binding og transaction-token-bound exception revocation.
 
 ## Konsekvens
 
 Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en caller-uafhængig host-pinned trust root, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem en host-admin-kontrolleret runtime efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de oprindelige durable publications og — på POSIX — den canonical ledger-paths monotone directory-chain event history.
-
-Det beviser fortsat **ikke** global replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og kræver separate senere boundaries.
