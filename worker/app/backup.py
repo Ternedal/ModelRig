@@ -44,11 +44,13 @@ def _run_store_schema_problem_path(
     index can otherwise survive a hash-valid backup and alter future run state
     after restore. Canonical legacy ``agent_runs`` stores are structurally
     admissible before the runtime has created its event journal, including the
-    exact pair/snapshot binding tables requested by the caller. This lets
-    explicit offline adoption inspect and then bind non-empty legacy authority
-    without blessing extra SQLite objects. Schema-5 backup/create still rejects
-    materialized unbound authority; structural admission grants no execution
-    authority by itself.
+    exact pair/snapshot binding tables requested by the caller. A canonical
+    pair table may also be present during a shape-only probe; its row/role/id
+    authority is still validated separately by the schema-5 state machine.
+    This lets explicit offline adoption inspect and then bind non-empty legacy
+    authority without blessing extra SQLite objects. Schema-5 backup/create
+    still rejects materialized unbound authority; structural admission grants
+    no execution authority by itself.
     """
     del run_count  # row cardinality is an authority rule, not a schema-shape rule
     try:
@@ -72,9 +74,12 @@ def _run_store_schema_problem_path(
         (str(row[0]), str(row[1]), str(row[2]), _impl._normalize_sql(row[3]))
         for row in rows
     ]
+    pair_table_present = any(
+        kind == "table" and name == _PAIR_TABLE for kind, name, _table, _sql in actual
+    )
 
     def add_expected_bindings(expected: list[tuple[str, str, str, Optional[str]]]) -> None:
-        if pair_id is not None:
+        if pair_id is not None or pair_table_present:
             expected.append(
                 ("table", _PAIR_TABLE, _PAIR_TABLE, _impl._normalize_sql(_PAIR_TABLE_SQL))
             )
