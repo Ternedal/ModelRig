@@ -1,10 +1,7 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import hashlib
-import hmac
-import json
-import sys
+import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,48 +9,30 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "worker"))
-
-from app.agent3 import capability_probe as _probe  # noqa: E402
-from app.agent3.core import Agent3Orchestrator, AgentRunStore  # noqa: E402
-from app.agent3.integration import V2ToolAdapter  # noqa: E402
-from app.agent3.memory import MemoryStore  # noqa: E402
-from app.agent3.memory_context import ContextTarget  # noqa: E402
-from app.agent3.memory_protected_planner import (  # noqa: E402
-    ProtectedPlannerMemoryContextProvider,
-)
-from app.agent3.memory_protected_reader import ProtectedMemoryReader  # noqa: E402
-from app.agent3.memory_protection import (  # noqa: E402
-    KEY_SCOPE_CURRENT_USER,
+from app.agent3.core import Agent3Orchestrator, AgentRunStore
+from app.agent3.integration import V2ToolAdapter
+from app.agent3.memory_context import ContextTarget
+from app.agent3.memory_protected import (
+    CountingAeadProvider,
     MemoryProtectionCodec,
-    MemoryProtectionError,
+    MemoryProtectionMigrator,
+    ProtectedMemoryReader,
 )
-from app.agent3.memory_protection_migration import MemoryProtectionMigrator  # noqa: E402
-from app.agent3.plan_store import PlanStore  # noqa: E402
-from app.agent3.planner import (  # noqa: E402
-    PlannerError,
-    TypedPlanner,
-    build_planner_router,
-)
-
-_probe.measure = lambda **_kwargs: {  # type: ignore[assignment]
-    "worker_ready": True,
-    "rig_reachable": True,
-    "rag_ready": True,
-    "measured_at": 0.0,
-}
+from app.agent3.memory_protected_context import ProtectedPlannerMemoryContextProvider
+from app.agent3.planner import TypedPlanner
+from app.agent3.planner_api import PlanStore, build_planner_router
+from app.agent3.memory import MemoryStore
 
 LEAK_MARKERS = {
-    "private": "T033-PLANNER-PRIVATE-local-only",
-    "provenance": "T033-PLANNER-PROVENANCE-must-not-enter-prompt",
-    "blocked": "T033-PLANNER-BLOCKED-must-never-decrypt",
+    "private": "PRIVATE-PLANNER-VALUE",
+    "blocked": "SECRET-PLANNER-VALUE",
+    "provenance": "PRIVATE-PLANNER-PROVENANCE",
 }
 checks: list[tuple[str, bool]] = []
 
 
-def check(label: str, condition: object) -> None:
-    checks.append((label, bool(condition)))
+def check(label: str, condition: bool) -> None:
+    checks.append((label, condition))
 
 
 def expect_refusal(label: str, fn) -> None:
@@ -65,78 +44,19 @@ def expect_refusal(label: str, fn) -> None:
         check(label, False)
 
 
-class CountingAeadProvider:
-    provider_id = "test-protected-planner-aead-v2"
-    key_scope = KEY_SCOPE_CURRENT_USER
-
-    def __init__(self, key: bytes = b"t033-planner-provider-key-not-production"):
-        self.key = key
-        self.protect_calls = 0
-        self.unprotect_calls = 0
-
-    def _stream(self, entropy: bytes, nonce: bytes, length: int) -> bytes:
-        result = bytearray()
-        block = 0
-        while len(result) < length:
-            result.extend(
-                hmac.new(
-                    self.key,
-                    b"stream\x00" + entropy + nonce + block.to_bytes(4, "big"),
-                    hashlib.sha256,
-                ).digest()
-            )
-            block += 1
-        return bytes(result[:length])
-
-    def protect(self, plaintext: bytes, *, entropy: bytes) -> bytes:
-        self.protect_calls += 1
-        nonce = hashlib.sha256(
-            self.key + entropy + self.protect_calls.to_bytes(8, "big")
-        ).digest()[:16]
-        stream = self._stream(entropy, nonce, len(plaintext))
-        encrypted = bytes(left ^ right for left, right in zip(plaintext, stream))
-        tag = hmac.new(
-            self.key,
-            b"tag\x00" + entropy + nonce + encrypted,
-            hashlib.sha256,
-        ).digest()
-        return nonce + tag + encrypted
-
-    def unprotect(self, ciphertext: bytes, *, entropy: bytes) -> bytes:
-        self.unprotect_calls += 1
-        if len(ciphertext) < 48:
-            raise MemoryProtectionError("planner fixture ciphertext is truncated")
-        nonce, tag, encrypted = ciphertext[:16], ciphertext[16:48], ciphertext[48:]
-        expected = hmac.new(
-            self.key,
-            b"tag\x00" + entropy + nonce + encrypted,
-            hashlib.sha256,
-        ).digest()
-        if not hmac.compare_digest(tag, expected):
-            raise MemoryProtectionError("planner fixture authentication failed")
-        stream = self._stream(entropy, nonce, len(encrypted))
-        return bytes(left ^ right for left, right in zip(encrypted, stream))
-
-
 class Tool:
-    name = "note_append"
     risk = "write"
-    impact = "write"
-    description = "Skriv en note"
-    params = {"type": "object", "properties": {"text": {"type": "string"}}}
-    isolate = False
-    env_allow = ()
-    schedulable = True
-    unschedulable_because = ""
-    sensitivity = "private"
-    cancellation = "none"
+    sensitivity = "operational"
+    egress = "local"
     idempotent = False
-    network = "none"
-    network_destinations = ()
 
     @staticmethod
-    def human_summary(args):
-        return f"Skriv: {args.get('text')}"
+    def validate_args(args):
+        return args
+
+    @staticmethod
+    def call(_args):
+        return {"ok": True}
 
 
 class Gate:
@@ -336,12 +256,7 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-planner-") as raw:
         client.close()
         plan_store.close()
         reader.close()
-        run_progress_connection = getattr(run_store, "_progress_conn", None)
-        if run_progress_connection is not None:
-            run_progress_connection.close()
-        run_connection = getattr(run_store, "_conn", None)
-        if run_connection is not None:
-            run_connection.close()
+        run_store.close()
 
 failed = [label for label, ok in checks if not ok]
 for label, ok in checks:
