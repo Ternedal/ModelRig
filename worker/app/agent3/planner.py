@@ -478,10 +478,50 @@ def build_planner_router(
                 status_code=503,
             )
 
+    def _assert_review_policy_binding(
+        run_id: str,
+        review_reads: bool,
+        *,
+        run_state: RunState,
+    ) -> None:
+        # Review policy is external execution authority, not presentation data.
+        # Any resumable snapshot must agree with the immutable reviewed plan bit
+        # before Start recovery may return an envelope that a later Resume or
+        # Confirm can use. This applies to WAITING_CONFIRMATION as well as RUNNING.
+        if reviewing:
+            review_state = orchestrator.review_store.get(run_id)
+            if bool(review_state["enabled"]) != review_reads:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed read policy disagrees with the reviewed plan; recovery remains ambiguous",
+                    status_code=503,
+                )
+            if not review_reads and review_state["waiting"]:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "unexpected reviewed read checkpoint; recovery remains ambiguous",
+                    status_code=503,
+                )
+            if run_state is RunState.WAITING_CONFIRMATION and review_state["waiting"]:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "read review checkpoint conflicts with confirmation authority",
+                    status_code=503,
+                )
+        elif review_reads:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "reviewed read policy is unavailable; recovery remains ambiguous",
+                status_code=503,
+            )
+
     def _publish_reviewed_start_acceptance(
         plan_id: str,
         run_id: str,
         stored: dict[str, Any],
+        *,
+        review_reads: bool,
+        reviewed_template: AgentRun,
     ) -> dict[str, Any]:
         # Acceptance and Cancel live in different SQLite databases, so there is
         # no cross-store transaction. The run-store RLock is nevertheless the
@@ -499,6 +539,13 @@ def build_planner_router(
                     status_code=503,
                 )
             _assert_reviewed_run_binding(current, run_id)
+            if current.state in {RunState.RUNNING, RunState.WAITING_CONFIRMATION}:
+                _assert_reviewed_run_identity(current, reviewed_template)
+                _assert_review_policy_binding(
+                    run_id,
+                    review_reads,
+                    run_state=current.state,
+                )
             if current.state is RunState.CANCELLED:
                 raise _ReviewedStartCancelled()
             plan_store.mark_reviewed_start_accepted(plan_id, run_id)
@@ -565,39 +612,19 @@ def build_planner_router(
             )
         _assert_reviewed_run_binding(existing, run_id)
         # WAITING_CONFIRMATION is observation-only here but still resumable by a
-        # later confirm call, so it must be bound to the reviewed immutable plan
-        # just like RUNNING before Start recovery can publish acceptance.
+        # later confirm call, so both immutable plan identity and external review
+        # policy must match before recovery can publish acceptance.
         if existing.state in {RunState.RUNNING, RunState.WAITING_CONFIRMATION}:
             _assert_reviewed_run_identity(existing, reviewed_template)
+            _assert_review_policy_binding(
+                run_id,
+                review_reads,
+                run_state=existing.state,
+            )
         # Only RUNNING snapshots can be advanced. BLOCKED/terminal snapshots may
         # legitimately carry a fail-closed route produced by capability drift.
         if existing.state is not RunState.RUNNING:
             return existing
-        # The immutable plan bit and the separate review-policy row are two
-        # persisted views of the same execution authority. They must agree in
-        # BOTH directions before recovery can advance. Otherwise corruption from
-        # true->false could clear a waiting checkpoint just as dangerously as a
-        # missing/disabled row for a true plan.
-        if reviewing:
-            review_state = orchestrator.review_store.get(run_id)
-            if bool(review_state["enabled"]) != review_reads:
-                raise _reviewed_start_error(
-                    "reviewed_start_pending",
-                    "reviewed read policy disagrees with the reviewed plan; recovery remains ambiguous",
-                    status_code=503,
-                )
-            if not review_reads and review_state["waiting"]:
-                raise _reviewed_start_error(
-                    "reviewed_start_pending",
-                    "unexpected reviewed read checkpoint; recovery remains ambiguous",
-                    status_code=503,
-                )
-        elif review_reads:
-            raise _reviewed_start_error(
-                "reviewed_start_pending",
-                "reviewed read policy is unavailable; recovery remains ambiguous",
-                status_code=503,
-            )
 
         if review_reads:
             checkpointed = orchestrator.recover_read_review_checkpoint_if_due(run_id)
@@ -634,7 +661,13 @@ def build_planner_router(
             raise
 
         try:
-            return _publish_reviewed_start_acceptance(plan_id, run_id, stored)
+            return _publish_reviewed_start_acceptance(
+                plan_id,
+                run_id,
+                stored,
+                review_reads=review_reads,
+                reviewed_template=reviewed_template,
+            )
         except _ReviewedStartCancelled:
             try:
                 _finalize_cancelled_reviewed_start(plan_id, run_id)
@@ -688,7 +721,7 @@ def build_planner_router(
                     )
                 try:
                     accepted_payload = plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
-                    stored, reviewed_template, _accepted_review_reads = _parse_reviewed_materialization(accepted_payload)
+                    stored, reviewed_template, accepted_review_reads = _parse_reviewed_materialization(accepted_payload)
                 except (PlanStoreError, KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
                     raise _reviewed_start_error(
                         "reviewed_start_pending",
@@ -711,6 +744,11 @@ def build_planner_router(
                     _assert_reviewed_run_binding(existing, reserved_run_id)
                     if existing.state in {RunState.RUNNING, RunState.WAITING_CONFIRMATION}:
                         _assert_reviewed_run_identity(existing, reviewed_template)
+                        _assert_review_policy_binding(
+                            reserved_run_id,
+                            accepted_review_reads,
+                            run_state=existing.state,
+                        )
                     if existing.state is RunState.CANCELLED and reviewing:
                         orchestrator.review_store.clear_waiting_if_matches(reserved_run_id)
                     return _reviewed_start_response(plan_id, stored, existing)
@@ -841,7 +879,13 @@ def build_planner_router(
             )
             if run.id != reserved_run_id:
                 raise RuntimeError("reviewed Start materialized a different run id")
-            return _publish_reviewed_start_acceptance(plan_id, reserved_run_id, envelope)
+            return _publish_reviewed_start_acceptance(
+                plan_id,
+                reserved_run_id,
+                envelope,
+                review_reads=review_reads,
+                reviewed_template=template,
+            )
         except _ReviewedStartCancelled:
             try:
                 _finalize_cancelled_reviewed_start(plan_id, reserved_run_id)
