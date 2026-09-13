@@ -374,15 +374,21 @@ class AgentRunStore:
         # Execution-start evidence deliberately lives in a separate SQLite file.
         # A stale/partially-restored agent_runs payload must never be able to roll
         # this watermark backwards and make a side effect look PENDING again.
-        progress_path = ":memory:" if path == ":memory:" else f"{path}.execution-progress"
-        self._progress_conn = sqlite3.connect(progress_path, check_same_thread=False)
-        self._progress_conn.execute(
-            "CREATE TABLE IF NOT EXISTS agent_execution_starts ("
-            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
-            "started_at REAL NOT NULL, "
-            "PRIMARY KEY(run_id,step_index,step_sha256))"
-        )
-        self._progress_conn.commit()
+        # File-backed stores use short-lived sidecar connections so Windows never
+        # retains a handle that prevents normal temp-dir/backup lifecycle cleanup.
+        self._progress_path = None if path == ":memory:" else f"{path}.execution-progress"
+        progress_conn = self._conn if self._progress_path is None else sqlite3.connect(self._progress_path)
+        try:
+            progress_conn.execute(
+                "CREATE TABLE IF NOT EXISTS agent_execution_starts ("
+                "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+                "started_at REAL NOT NULL, "
+                "PRIMARY KEY(run_id,step_index,step_sha256))"
+            )
+            progress_conn.commit()
+        finally:
+            if progress_conn is not self._conn:
+                progress_conn.close()
 
     @staticmethod
     def _execution_step_sha256(step: AgentStep) -> str:
@@ -407,16 +413,20 @@ class AgentRunStore:
         step = run.steps[run.current_step]
         digest = self._execution_step_sha256(step)
         with self._lock:
+            progress_conn = self._conn if self._progress_path is None else sqlite3.connect(self._progress_path)
             try:
-                self._progress_conn.execute(
+                progress_conn.execute(
                     "INSERT OR IGNORE INTO agent_execution_starts("
                     "run_id,step_index,step_sha256,started_at) VALUES(?,?,?,?)",
                     (run.id, run.current_step, digest, time.time()),
                 )
-                self._progress_conn.commit()
+                progress_conn.commit()
             except Exception:
-                self._progress_conn.rollback()
+                progress_conn.rollback()
                 raise
+            finally:
+                if progress_conn is not self._conn:
+                    progress_conn.close()
 
     def execution_progress_matches(self, run: AgentRun) -> bool:
         """Fail closed when durable execution evidence is ahead of a run payload.
@@ -428,11 +438,16 @@ class AgentRunStore:
         declared that step idempotent.
         """
         with self._lock:
-            rows = self._progress_conn.execute(
-                "SELECT step_index,step_sha256 FROM agent_execution_starts "
-                "WHERE run_id=? ORDER BY step_index ASC",
-                (run.id,),
-            ).fetchall()
+            progress_conn = self._conn if self._progress_path is None else sqlite3.connect(self._progress_path)
+            try:
+                rows = progress_conn.execute(
+                    "SELECT step_index,step_sha256 FROM agent_execution_starts "
+                    "WHERE run_id=? ORDER BY step_index ASC",
+                    (run.id,),
+                ).fetchall()
+            finally:
+                if progress_conn is not self._conn:
+                    progress_conn.close()
         for step_index, expected_sha in rows:
             if step_index < 0 or step_index >= len(run.steps):
                 return False
