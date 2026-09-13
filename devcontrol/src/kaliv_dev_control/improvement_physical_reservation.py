@@ -6,9 +6,15 @@ is already named by the human-signed qualification chain. After an irreversible
 create-once host lock, it re-reads ``refs/heads/main`` through that exact runtime,
 re-verifies the signed request at current time, and only then commits a receipt.
 
-The receipt proves one canonical *host-local* replay guard. It deliberately does
-not claim distributed/global replay safety, a persistent frozen main, physical
-campaign completion, pilot GO, publication, or activation authority.
+The durable ledger proves one canonical *host-local* replay guard. Persisted
+ledger bytes are replay/recovery state only: they are deliberately not reloadable
+authority. A non-serialized transaction-authenticated bit is minted only on the
+in-memory receipt returned by the successful authenticated consume transaction
+after create-once write, canonical read-back and cleanup all succeed.
+
+Neither the durable state nor the returned receipt claims distributed/global
+replay safety, a persistent frozen main, physical campaign completion, pilot GO,
+publication, or activation authority.
 """
 from __future__ import annotations
 
@@ -393,7 +399,7 @@ _RESERVATION_FIELDS = {
 
 @dataclass(frozen=True, slots=True)
 class PhysicalQualificationReservation:
-    """Parsed receipt data; only canonical-ledger load marks it authoritative."""
+    """Parsed receipt data with non-serializable transaction provenance."""
 
     ledger_root_path_sha256: str
     repository_root_path_sha256: str
@@ -425,7 +431,7 @@ class PhysicalQualificationReservation:
     remote_publication_authorized: bool = False
     authority: str = RESERVATION_AUTHORITY
     schema: str = RESERVATION_SCHEMA
-    _canonical_ledger_verified: bool = field(
+    _transaction_authenticated: bool = field(
         default=False,
         init=False,
         repr=False,
@@ -493,17 +499,17 @@ class PhysicalQualificationReservation:
 
     @classmethod
     def from_mapping(cls, value: Any) -> "PhysicalQualificationReservation":
-        """Parse schema-valid data without granting canonical-ledger provenance."""
+        """Parse schema-valid data without granting transaction provenance."""
 
         return cls(
             **_strict(value, fields=_RESERVATION_FIELDS, name="physical reservation")
         )
 
     @property
-    def canonical_ledger_verified(self) -> bool:
-        """True only after this instance was read back from its bound ledger."""
+    def transaction_authenticated(self) -> bool:
+        """True only on the object returned by a completed authenticated consume."""
 
-        return self._canonical_ledger_verified
+        return self._transaction_authenticated
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -548,7 +554,7 @@ class PhysicalQualificationReservation:
 
 
 class _PhysicalQualificationRequestLedger:
-    """Private create-once persistence primitive for one canonical host ledger."""
+    """Private create-once replay/recovery state for one canonical host ledger."""
 
     def __init__(self, root: Path) -> None:
         self.root = _safe_root(root, name="physical request ledger root")
@@ -563,6 +569,8 @@ class _PhysicalQualificationRequestLedger:
         )
 
     def _load_final(self, path: Path) -> PhysicalQualificationReservation:
+        """Parse persisted state without granting authenticated transaction provenance."""
+
         if not path.is_file() or _has_linkish_component(path):
             raise PhysicalQualificationReservationError(
                 "physical reservation final artifact is missing or unsafe"
@@ -587,10 +595,11 @@ class _PhysicalQualificationRequestLedger:
             raise PhysicalQualificationReservationError(
                 "physical reservation belongs to another host ledger root"
             )
-        object.__setattr__(receipt, "_canonical_ledger_verified", True)
         return receipt
 
     def load(self, request_sha256: str) -> PhysicalQualificationReservation:
+        """Load durable data only; this never recreates transaction authority."""
+
         final, pending, lock = self._paths(request_sha256)
         if final.exists() or final.is_symlink():
             return self._load_final(final)
@@ -653,6 +662,7 @@ class _PhysicalQualificationRequestLedger:
             raise PhysicalQualificationReservationError(
                 "physical request is durably host-consumed but reservation requires recovery"
             ) from exc
+        object.__setattr__(verified, "_transaction_authenticated", True)
         return verified
 
 
@@ -886,7 +896,8 @@ def consume_physical_qualification_request_once(
     Callers cannot supply repository root, operation root, observation evidence,
     time, ledger ID/root, or a prebuilt receipt. The caller-supplied staged Git
     runtime must match the exact snapshot-runtime identity already named by the
-    human-signed qualification chain.
+    human-signed qualification chain. The returned object carries non-serialized
+    transaction provenance; persisted ledger data is replay/recovery state only.
     """
 
     return _consume_physical_qualification_request_once(
@@ -901,12 +912,3 @@ def consume_physical_qualification_request_once(
         verifier=verifier,
         now_provider=_now_utc_seconds,
     )
-
-
-def load_physical_qualification_reservation(
-    request_sha256: str,
-) -> PhysicalQualificationReservation:
-    """Load authority-bearing evidence only from the canonical host ledger."""
-
-    root = _canonical_host_ledger_root()
-    return _PhysicalQualificationRequestLedger(root).load(request_sha256)
