@@ -473,6 +473,7 @@ def reservation_contract() -> None:
     assert "snapshot_receipt" in public_parameters
     assert not hasattr(reservation_module, "build_physical_qualification_reservation")
     assert not hasattr(reservation_module, "PhysicalQualificationRequestLedger")
+    assert not hasattr(reservation_module, "load_physical_qualification_reservation")
 
     # Synthetic TrustedGitRuntime is POSIX-only. Exact-head Linux CI exercises
     # the transaction; portable assertions above still run on Windows jobs.
@@ -508,6 +509,7 @@ def reservation_contract() -> None:
                 ]
             ),
         )
+        assert consumed.transaction_authenticated is True
         assert consumed.main_head_match_confirmed is True
         assert consumed.request_consumed is True
         assert consumed.host_replay_guard_committed is True
@@ -524,13 +526,14 @@ def reservation_contract() -> None:
         assert consumed.pilot_go_authorized is False
         assert consumed.activation_authorized is False
         assert consumed.remote_publication_authorized is False
-        assert PhysicalQualificationReservation.from_mapping(
-            consumed.to_dict()
-        ).canonical_json() == consumed.canonical_json()
+        parsed = PhysicalQualificationReservation.from_mapping(consumed.to_dict())
+        assert parsed.canonical_json() == consumed.canonical_json()
+        assert parsed.transaction_authenticated is False
 
         ledger = _PhysicalQualificationRequestLedger(ledger_root)
         loaded = ledger.load(request.sha256)
         assert loaded.canonical_json() == consumed.canonical_json()
+        assert loaded.transaction_authenticated is False
 
         _expect_reservation_error(
             "already been host-locally consumed",
@@ -566,6 +569,22 @@ def reservation_contract() -> None:
             "replay scope/consume evidence is invalid",
             lambda: PhysicalQualificationReservation.from_mapping(global_claim),
         )
+
+    # Even perfectly canonical bytes written directly into a ledger are durable
+    # replay/recovery state only; filesystem persistence cannot mint transaction
+    # provenance that is intentionally non-serialized.
+    with tempfile.TemporaryDirectory() as directory:
+        forged_root = Path(directory).resolve()
+        forged_ledger = _PhysicalQualificationRequestLedger(forged_root)
+        forged_mapping = consumed.to_dict()
+        forged_mapping["ledger_root_path_sha256"] = forged_ledger.root_sha256
+        forged_receipt = PhysicalQualificationReservation.from_mapping(forged_mapping)
+        assert forged_receipt.transaction_authenticated is False
+        forged_final = forged_root / f"{request.sha256}.json"
+        forged_final.write_bytes(forged_receipt.canonical_json().encode("utf-8"))
+        loaded_forgery = forged_ledger.load(request.sha256)
+        assert loaded_forgery.canonical_json() == forged_receipt.canonical_json()
+        assert loaded_forgery.transaction_authenticated is False
 
     # A different staged Git package is integrity-valid, but not authority-valid:
     # its runtime identity is not the one bound by the signed snapshot receipt.
@@ -703,6 +722,7 @@ def reservation_contract() -> None:
                     ),
                 )
             )
+    assert all(receipt.transaction_authenticated is True for receipt in receipts)
     assert all(receipt.global_replay_safe is False for receipt in receipts)
     assert receipts[0].ledger_root_path_sha256 != receipts[1].ledger_root_path_sha256
 
