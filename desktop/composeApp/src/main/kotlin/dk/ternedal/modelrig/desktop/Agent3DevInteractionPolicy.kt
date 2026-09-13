@@ -53,6 +53,11 @@ internal data class Agent3DevPreviewIntent(
 
 /** Shared local authority for the explicit --agent3 developer surface. */
 internal object Agent3DevInteractionPolicy {
+    fun canPublishForConnection(
+        requestConnection: Agent3DevConnectionBinding?,
+        currentConnection: Agent3DevConnectionBinding?,
+    ): Boolean = requestConnection != null && requestConnection == currentConnection
+
     fun canPreview(
         message: String,
         busy: Boolean,
