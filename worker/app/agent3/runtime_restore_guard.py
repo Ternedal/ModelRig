@@ -20,7 +20,7 @@ def _guard_path(run_db_path: str) -> str:
 def _open_guard(run_db_path: str) -> sqlite3.Connection:
     path = _guard_path(run_db_path)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path, timeout=5.0, isolation_level=None, check_same_thread=False)
+    con = sqlite3.connect(path, timeout=0.0, isolation_level=None, check_same_thread=False)
     try:
         try:
             row = con.execute(
@@ -96,7 +96,14 @@ class Agent3RestoreLease:
 
 def acquire_agent3_runtime_lease(run_db_path: str) -> Agent3RuntimeLease:
     """Acquire shared runtime authority, refusing incomplete/active restore."""
-    con = _open_guard(run_db_path)
+    try:
+        con = _open_guard(run_db_path)
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower():
+            raise RuntimeError(
+                "Agent3 restore is in progress; runtime startup is blocked"
+            ) from exc
+        raise
     try:
         con.execute("BEGIN")
         row = con.execute(
@@ -133,7 +140,14 @@ def acquire_agent3_runtime_lease(run_db_path: str) -> Agent3RuntimeLease:
 
 def acquire_agent3_restore_lease(run_db_path: str) -> Agent3RestoreLease:
     """Acquire exclusive restore authority or fail immediately if runtime is live."""
-    con = _open_guard(run_db_path)
+    try:
+        con = _open_guard(run_db_path)
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower():
+            raise RuntimeError(
+                "Agent3 restore is already in progress; concurrent restore is refused"
+            ) from exc
+        raise
     try:
         # First exclusive transaction is deliberately non-blocking. Any live
         # AgentRunStore owns a shared transaction and makes this fail before a
