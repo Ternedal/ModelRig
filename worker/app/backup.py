@@ -27,6 +27,7 @@ for _name in dir(_impl):
         globals()[_name] = getattr(_impl, _name)
 
 _original_restore = _impl.restore
+_original_verify = _impl.verify
 _original_runs_row_count_path = _impl._agent3_runs_row_count_path
 
 
@@ -160,6 +161,63 @@ def _agent3_runs_row_count_path(
 # use the closed run-store schema rather than only callers of this facade.
 _impl._agent3_runs_row_count_path = _agent3_runs_row_count_path
 globals()["_agent3_runs_row_count_path"] = _agent3_runs_row_count_path
+
+
+def _missing_execution_authority_problem(archive: str) -> Optional[str]:
+    """Keep replay-risk diagnostics visible even when run schema is also invalid.
+
+    Closed-schema validation can reject a legacy/downgraded run member before
+    the strict verifier records its row count. Missing execution-progress is an
+    independent safety defect: materialized runs without their watermark store
+    can make a previously-started non-idempotent step look replayable. Count
+    only the canonical ``agent_runs`` table shape here, without trusting any of
+    the extra SQLite objects that caused the strict schema rejection.
+    """
+    manifest = _impl._read_manifest(archive)
+    files = manifest.get("files", {})
+    if not isinstance(files, dict):
+        return None
+    if (
+        _impl.AGENT3_RUNS_KEY not in files
+        or _impl.AGENT3_EXECUTION_PROGRESS_KEY in files
+    ):
+        return None
+
+    with _impl.tarfile.open(archive, "r:gz") as tar:
+        run_data = _impl._member_bytes(tar, f"data/{_impl.AGENT3_RUNS_KEY}")
+    if run_data is None:
+        return None
+
+    run_count, count_problem = _impl._with_temp_sqlite(
+        run_data,
+        lambda path: _original_runs_row_count_path(path),
+    )
+    if count_problem or not run_count:
+        return None
+    return (
+        "Agent 3 run state is present without execution-progress authority; "
+        "restoring it could replay a previously-started non-idempotent step"
+    )
+
+
+def verify(archive: str) -> dict:
+    """Verify strictly while reporting independent replay-risk defects too."""
+    result = _original_verify(archive)
+    replay_problem = _missing_execution_authority_problem(archive)
+    if replay_problem is None:
+        return result
+
+    problems = list(result.get("problems", []))
+    if not any("execution-progress authority" in str(problem) for problem in problems):
+        problems.append(replay_problem)
+    return {**result, "ok": False, "problems": problems}
+
+
+# The schema-5 implementation's restore function resolves ``verify`` in its own
+# module at call time. Install the facade verifier there as well so direct
+# verification and guarded restore use the same comprehensive fail-closed gate.
+_impl.verify = verify
+globals()["verify"] = verify
 
 
 def _restore_preflight(archive: str, *, force: bool) -> dict[str, object]:
