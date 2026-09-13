@@ -1,14 +1,13 @@
 """Guarded public facade for Kaliv backup/restore.
 
 The schema-5 authority implementation lives in ``backup_schema5`` so its
-previously qualified pair/snapshot semantics remain intact. This facade layers
-newer cross-process restore exclusion, a closed run-store schema check and a
-fail-closed runs-first snapshot boundary on that implementation without
-duplicating the backup state machine.
+previously qualified pair/snapshot semantics, including replay-safe runs-first
+snapshot ordering, remain owned by the core implementation. This facade layers
+newer cross-process restore exclusion and a closed run-store schema check
+without duplicating the backup state machine.
 """
 from __future__ import annotations
 
-import threading
 from typing import Optional
 
 from . import backup_schema5 as _impl
@@ -31,54 +30,6 @@ for _name in dir(_impl):
 _original_restore = _impl.restore
 _original_verify = _impl.verify
 _original_runs_row_count_path = _impl._agent3_runs_row_count_path
-_original_sqlite_snapshot = _impl._sqlite_snapshot
-_snapshot_state = threading.local()
-
-
-def _runs_first_sqlite_snapshot(source: str, destination: str) -> None:
-    """Execute the schema-5 paired copy in replay-safe runs-first order.
-
-    ``backup_schema5.create`` historically requests the progress copy first and
-    the run copy second. Defer that first progress request until the paired run
-    request arrives. The physical SQLite order then becomes runs first, progress
-    second. If execution crosses this boundary, the staged progress ledger may
-    be newer than the staged run payload; the existing semantic validator sees
-    that watermark and fails closed. The inverse order can silently omit the
-    only watermark proving a non-idempotent step already started.
-
-    Deferred state is thread-local so concurrent backup callers cannot consume
-    each other's pair snapshot request.
-    """
-    pending = getattr(_snapshot_state, "pending_progress", None)
-    destination_name = _impl.os.path.basename(destination)
-
-    if pending is not None:
-        if destination_name == "runs.db":
-            try:
-                _original_sqlite_snapshot(source, destination)
-                _original_sqlite_snapshot(*pending)
-            finally:
-                _snapshot_state.pending_progress = None
-            return
-
-        # Future core drift changed the expected paired call sequence. Flush the
-        # pending copy normally instead of carrying it into unrelated work; the
-        # crossing-boundary regression then fails and makes the drift visible.
-        _snapshot_state.pending_progress = None
-        _original_sqlite_snapshot(*pending)
-
-    if destination_name == "progress.db" and source.endswith(".execution-progress"):
-        _snapshot_state.pending_progress = (source, destination)
-        return
-
-    _original_sqlite_snapshot(source, destination)
-
-
-# Functions defined in backup_schema5 resolve globals in that module. Interpose
-# the primitive there so facade and direct implementation callers share the same
-# replay-safe physical ordering.
-_impl._sqlite_snapshot = _runs_first_sqlite_snapshot
-globals()["_sqlite_snapshot"] = _runs_first_sqlite_snapshot
 
 
 def _run_store_schema_problem_path(
