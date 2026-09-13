@@ -71,7 +71,7 @@ def seed():
             continue
 
         os.makedirs(os.path.dirname(os.path.abspath(it.path)), exist_ok=True)
-        if it.path.lower().endswith(".db"):
+        if it.key.endswith(".db"):
             _seed_sqlite(it.path, it.key)
         else:
             with open(it.path, "w", encoding="utf-8") as f:
@@ -101,15 +101,20 @@ def wipe():
             shutil.rmtree(it.path)
 
 
-def archive_with_schema(source: str, destination: str, schema: int) -> None:
-    """Copy an archive while changing only manifest.schema."""
+def archive_with_schema(source: str, destination: str, schema: int, drop_keys=()) -> None:
+    """Copy an archive while changing manifest.schema and optionally dropping keys."""
+    drop_keys = set(drop_keys)
     with tarfile.open(source, "r:gz") as src, tarfile.open(destination, "w:gz") as dst:
         for member in src.getmembers():
+            if member.name.startswith("data/") and member.name.removeprefix("data/") in drop_keys:
+                continue
             extracted = src.extractfile(member)
             data = extracted.read() if extracted else b""
             if member.name == "manifest.json":
                 manifest = json.loads(data)
                 manifest["schema"] = schema
+                for key in drop_keys:
+                    manifest["files"].pop(key, None)
                 data = json.dumps(manifest, indent=2, sort_keys=True).encode()
             replacement = tarfile.TarInfo(member.name)
             replacement.size = len(data)
@@ -125,6 +130,7 @@ required_keys = {
     "jobs.db",
     "schedules.db",
     "agent3-runs.db",
+    "agent3-execution-progress.db",
     "agent3-read-reviews.db",
     "agent3-replans.db",
     "agent3-replan-previews.db",
@@ -144,6 +150,12 @@ check(
     next(it for it in backup.items() if it.key == "data.json").path == os.environ["MODELRIG_DATA"],
     "inventory: backend pairing state follows MODELRIG_DATA",
 )
+runs_item = next(it for it in backup.items() if it.key == "agent3-runs.db")
+progress_item = next(it for it in backup.items() if it.key == "agent3-execution-progress.db")
+check(
+    progress_item.path == runs_item.path + ".execution-progress",
+    "inventory: Agent3 execution authority follows the exact resolved run DB path",
+)
 
 # --- the round trip ---------------------------------------------------------
 seed()
@@ -155,18 +167,45 @@ check(os.path.exists(archive), "create: archive written")
 check(archive.endswith(".tar.gz"), "create: archive is a gzip tarball")
 check(not os.path.exists(archive + ".tmp"), "create: no leftover temp file")
 manifest = backup._read_manifest(archive)
-check(manifest["schema"] == 2, "schema: expanded 2.x inventory writes schema 2")
-check(1 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: current code retains schema-1 restore compatibility")
+check(manifest["schema"] == 3, "schema: execution-authority inventory writes schema 3")
+check(1 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: current code retains schema-1 read compatibility")
+check(2 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: current code retains schema-2 read compatibility")
+check(
+    "agent3-execution-progress.db" in manifest["files"],
+    "create: execution-progress authority is present beside Agent3 runs",
+)
 
 verified = backup.verify(archive)
-check(verified["ok"], "verify: a fresh backup passes its own hashes")
+check(verified["ok"], "verify: a fresh backup passes its own hashes and authority relation")
 check(verified["checked"] == len(before), "verify: every seeded file is in the archive")
 
-# A schema-1 archive remains readable by new code, while new archives no longer
-# masquerade as schema 1 to old code that cannot know the expanded inventory.
+# Legacy schema numbers remain readable only when the archive actually carries
+# the execution authority required by any Agent3 run state it contains.
 legacy = os.path.join(_root, "legacy-schema-1.tar.gz")
 archive_with_schema(archive, legacy, 1)
-check(backup.verify(legacy)["ok"], "schema: current code still verifies legacy schema 1")
+check(backup.verify(legacy)["ok"], "schema: legacy schema 1 with complete execution authority still verifies")
+
+unsafe_legacy = os.path.join(_root, "unsafe-schema-2-without-progress.tar.gz")
+archive_with_schema(
+    archive,
+    unsafe_legacy,
+    2,
+    drop_keys={"agent3-execution-progress.db"},
+)
+unsafe_verify = backup.verify(unsafe_legacy)
+check(not unsafe_verify["ok"], "schema: Agent3 runs without execution authority are refused")
+check(
+    any("execution-progress authority" in problem for problem in unsafe_verify["problems"]),
+    "schema: unsafe legacy archive names the missing execution authority",
+)
+pre_unsafe_restore = snapshot()
+try:
+    backup.restore(unsafe_legacy, force=True)
+    check(False, "restore: unsafe legacy Agent3 archive is refused")
+except ValueError:
+    check(True, "restore: unsafe legacy Agent3 archive is refused")
+check(snapshot() == pre_unsafe_restore, "restore: unsafe legacy refusal writes NOTHING")
+
 future = os.path.join(_root, "unsupported-schema.tar.gz")
 archive_with_schema(archive, future, 999)
 try:
@@ -184,9 +223,10 @@ check(len(restored["restored"]) == len(before), "restore: every file came back")
 after = snapshot()
 check(after == before, "restore: byte-for-byte identical to before")
 
-# Every restored sqlite store must still be structurally readable.
+# Every restored sqlite store must still be structurally readable, including
+# the execution-progress sidecar whose filename itself does not end in .db.
 for it in backup.items():
-    if it.kind != "file" or not it.path.lower().endswith(".db"):
+    if it.kind != "file" or not it.key.endswith(".db"):
         continue
     con = sqlite3.connect(it.path)
     integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
@@ -234,11 +274,20 @@ except FileExistsError:
 forced = backup.restore(archive, force=True)
 check(len(forced["restored"]) == len(before), "restore --force: overwrites cleanly")
 
-# An empty rig is still a valid backup.
+# A run database without its execution authority must never produce a new backup.
 wipe()
+_seed_sqlite(runs_item.path, runs_item.key)
+try:
+    backup.create(os.path.join(_root, "missing-progress"))
+    check(False, "create: Agent3 runs without execution-progress sidecar are refused")
+except ValueError:
+    check(True, "create: Agent3 runs without execution-progress sidecar are refused")
+wipe()
+
+# An empty rig is still a valid backup.
 empty = backup.create(os.path.join(_root, "empty"))
 check(backup.verify(empty)["ok"], "create: an empty rig produces a valid empty backup")
-check(backup._read_manifest(empty)["schema"] == 2, "create: empty rig still emits current schema 2")
+check(backup._read_manifest(empty)["schema"] == 3, "create: empty rig still emits current schema 3")
 
 # --- complete-rig orchestration contract -----------------------------------
 # Keep this in the existing backup test instead of adding a new tests/*.py file:

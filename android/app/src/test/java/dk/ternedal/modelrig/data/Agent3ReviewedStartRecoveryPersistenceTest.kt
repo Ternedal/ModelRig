@@ -52,14 +52,16 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun `newer generation read cannot let stale completion clear reused authority`() {
+    fun `stale callback from second store cannot clear reused generation`() {
         val rig = "https://aba-rig-${System.nanoTime()}.example"
         val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
-        val store = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
+        val clearingStore = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
+        val staleStore = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
         val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
         val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
 
-        assertTrue(store.reserve(rig, authority))
+        assertTrue(clearingStore.reserve(rig, authority))
+        assertEquals(authority, staleStore.read(rig))
         val originalEnvelope = requireNotNull(prefs.getString(key, null))
         val parts = originalEnvelope.split('\n', limit = 4)
         assertEquals(4, parts.size)
@@ -72,21 +74,24 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
         }
         val replacementEnvelope = listOf(parts[0], parts[1], replacementGeneration, parts[3]).joinToString("\n")
 
-        // Simulate another process clearing the old slot and re-reserving the exact
-        // same encoded authority. This process still holds the old origin envelope.
-        assertTrue(prefs.edit().remove(key).commit())
-        assertTrue(prefs.edit().putString(key, replacementEnvelope).commit())
+        // Store A completes G1 and retires only its own callback handle.
+        assertTrue(clearingStore.clearIfMatches(rig, authority))
+        assertNull(prefs.getString(key, null))
 
-        // Even if the newer durable slot is observed before the stale callback
-        // completes, first-origin-wins must preserve the old clear authority.
-        assertEquals(authority, store.read(rig))
-        assertFalse(store.clearIfMatches(rig, authority))
+        // Another process now reserves byte-identical authority as G2. Store B
+        // still has an in-flight G1 callback and then observes G2 before it fires.
+        assertTrue(prefs.edit().putString(key, replacementEnvelope).commit())
+        assertEquals(authority, staleStore.read(rig))
+
+        // Store B must keep its instance-local G1 clear authority, so the stale
+        // callback cannot borrow G2 from the read and delete the newer slot.
+        assertFalse(staleStore.clearIfMatches(rig, authority))
         assertEquals(replacementEnvelope, prefs.getString(key, null))
 
-        // The mismatch drops only the stale in-memory origin. A fresh explicit
-        // read can then bind the newer generation and clear that exact slot.
-        assertEquals(authority, store.read(rig))
-        assertTrue(store.clearIfMatches(rig, authority))
+        // The failed stale clear drops only B's old G1 handle. A fresh explicit
+        // read can then bind G2 and clear exactly that reservation.
+        assertEquals(authority, staleStore.read(rig))
+        assertTrue(staleStore.clearIfMatches(rig, authority))
         assertNull(prefs.getString(key, null))
     }
 
