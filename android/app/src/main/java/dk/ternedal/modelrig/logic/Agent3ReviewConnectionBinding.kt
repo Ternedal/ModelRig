@@ -2,7 +2,6 @@ package dk.ternedal.modelrig.logic
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Immutable in-memory authority for one Android Agent 3 review connection context.
@@ -22,13 +21,10 @@ internal class Agent3ReviewConnectionBinding private constructor(
 
     companion object {
         private const val CREDENTIAL_FINGERPRINT_DOMAIN = "kaliv-agent3-reviewed-start-credential/v1"
-        private val recentCredentialFingerprints = ConcurrentHashMap<String, String>()
 
         fun capture(baseUrl: String?, token: String?): Agent3ReviewConnectionBinding? {
             val normalizedBase = normalizeBaseUrl(baseUrl) ?: return null
             val normalizedToken = token?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-            val fingerprint = credentialFingerprint(normalizedBase, normalizedToken) ?: return null
-            recentCredentialFingerprints[normalizedBase] = fingerprint
             return Agent3ReviewConnectionBinding(normalizedBase, normalizedToken)
         }
 
@@ -51,9 +47,6 @@ internal class Agent3ReviewConnectionBinding private constructor(
             )
             return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
         }
-
-        internal fun recentCredentialFingerprint(baseUrl: String?): String? =
-            normalizeBaseUrl(baseUrl)?.let(recentCredentialFingerprints::get)
 
         private fun normalizeBaseUrl(baseUrl: String?): String? =
             baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
