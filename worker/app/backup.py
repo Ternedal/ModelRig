@@ -73,6 +73,7 @@ _RESTORE_FENCE_PREFIX = b"KALIV_AGENT3_PAIRED_RESTORE_IN_PROGRESS\n"
 # the stable Kaliv data root; explicit env overrides continue to win.
 from . import paths as _paths  # noqa: E402
 from . import tools as _tools  # noqa: E402
+from .agent3.runtime_restore_guard import agent3_restore_guard  # noqa: E402
 
 
 @dataclass
@@ -912,6 +913,38 @@ def _publish_agent3_pair(
 
 
 def restore(archive: str, force: bool = False) -> dict:
+    """Restore only while Agent3 runtime is quiescent.
+
+    Verification and the normal no-clobber preflight happen before restore
+    authority is acquired. Once the exclusive guard is entered, any failure
+    leaves a durable incomplete marker so no Agent3 runtime can boot against
+    partially restored cross-store state. A successful complete retry clears it.
+    """
+    check = verify(archive)
+    if not check["ok"]:
+        raise ValueError(
+            f"archive failed verification, refusing to restore: {check['problems']}"
+        )
+    manifest = _read_manifest(archive)
+    targets = {item.key: item for item in items()}
+    files = manifest["files"]
+    if not force:
+        clashes = []
+        for key in files:
+            item = targets.get(key)
+            if item and os.path.exists(item.path):
+                clashes.append(item.path)
+        if clashes:
+            raise FileExistsError(
+                "these already exist (use --force to overwrite): " + ", ".join(clashes)
+            )
+
+    run_path = targets[AGENT3_RUNS_KEY].path
+    with agent3_restore_guard(run_path):
+        return _restore_under_runtime_guard(archive, force=force)
+
+
+def _restore_under_runtime_guard(archive: str, force: bool = False) -> dict:
     """Restore an archive after complete verification.
 
     Schema-4 Agent 3 run/progress authority is staged, unbound, validated and

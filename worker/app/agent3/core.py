@@ -12,6 +12,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from .runtime_restore_guard import acquire_agent3_runtime_lease
+
 
 class StrEnum(str, Enum):
     def __str__(self) -> str:
@@ -359,30 +361,49 @@ class AgentRunStore:
     def __init__(self, path: str):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS agent_runs ("
-            "id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
-        )
-        self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS agent_events ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, ts REAL NOT NULL, "
-            "kind TEXT NOT NULL, payload TEXT NOT NULL)"
-        )
-        self._conn.commit()
+        self._runtime_restore_lease = None
+        if path != ":memory:":
+            # Acquire cross-process runtime authority before opening either live
+            # SQLite store. A restore-in-progress/incomplete marker therefore
+            # blocks startup even when runs_path currently contains the durable
+            # non-SQLite restore fence.
+            self._runtime_restore_lease = acquire_agent3_runtime_lease(path)
+        try:
+            self._conn = sqlite3.connect(path, check_same_thread=False)
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS agent_runs ("
+                "id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
+            )
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS agent_events ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, ts REAL NOT NULL, "
+                "kind TEXT NOT NULL, payload TEXT NOT NULL)"
+            )
+            self._conn.commit()
 
-        # Execution-start evidence deliberately lives in a separate SQLite file.
-        # A stale/partially-restored agent_runs payload must never be able to roll
-        # this watermark backwards and make a side effect look PENDING again.
-        progress_path = ":memory:" if path == ":memory:" else f"{path}.execution-progress"
-        self._progress_conn = sqlite3.connect(progress_path, check_same_thread=False)
-        self._progress_conn.execute(
-            "CREATE TABLE IF NOT EXISTS agent_execution_starts ("
-            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
-            "started_at REAL NOT NULL, "
-            "PRIMARY KEY(run_id,step_index,step_sha256))"
-        )
-        self._progress_conn.commit()
+            # Execution-start evidence deliberately lives in a separate SQLite file.
+            # A stale/partially-restored agent_runs payload must never be able to roll
+            # this watermark backwards and make a side effect look PENDING again.
+            progress_path = ":memory:" if path == ":memory:" else f"{path}.execution-progress"
+            self._progress_conn = sqlite3.connect(progress_path, check_same_thread=False)
+            self._progress_conn.execute(
+                "CREATE TABLE IF NOT EXISTS agent_execution_starts ("
+                "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+                "started_at REAL NOT NULL, "
+                "PRIMARY KEY(run_id,step_index,step_sha256))"
+            )
+            self._progress_conn.commit()
+        except Exception:
+            progress = getattr(self, "_progress_conn", None)
+            if progress is not None:
+                progress.close()
+            connection = getattr(self, "_conn", None)
+            if connection is not None:
+                connection.close()
+            if self._runtime_restore_lease is not None:
+                self._runtime_restore_lease.close()
+                self._runtime_restore_lease = None
+            raise
 
     @staticmethod
     def _execution_step_sha256(step: AgentStep) -> str:
@@ -447,6 +468,22 @@ class AgentRunStore:
                 if step.state == StepState.PENDING and not step.idempotent:
                     return False
         return True
+
+    def close(self) -> None:
+        """Release both authority stores and the process-wide restore lease."""
+        with self._lock:
+            progress = getattr(self, "_progress_conn", None)
+            if progress is not None:
+                progress.close()
+                self._progress_conn = None
+            connection = getattr(self, "_conn", None)
+            if connection is not None:
+                connection.close()
+                self._conn = None
+            lease = self._runtime_restore_lease
+            if lease is not None:
+                lease.close()
+                self._runtime_restore_lease = None
 
     def save(self, run: AgentRun) -> None:
         run.updated_at = time.time()

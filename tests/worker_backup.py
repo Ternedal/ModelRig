@@ -25,6 +25,7 @@ os.environ["MODELRIG_DATA"] = os.path.join(_root, "backend", "modelrig-data.json
 os.environ["KALIV_TOOLS_DIR"] = os.path.join(_root, "notes")
 
 from app import backup  # noqa: E402
+from app.agent3.core import AgentRunStore  # noqa: E402
 
 passed = failed = 0
 
@@ -556,6 +557,31 @@ except FileExistsError:
 forced = backup.restore(archive, force=True)
 check(len(forced["restored"]) == len(before), "restore --force: overwrites cleanly")
 
+# A live AgentRunStore owns a shared runtime lease. Restore must fail before any
+# destination is touched instead of relying on os.replace against open SQLite
+# handles (which is unsafe on Unix and may fail differently on Windows).
+live_store = AgentRunStore(runs_item.path)
+live_before = snapshot()
+try:
+    backup.restore(archive, force=True)
+    check(False, "restore guard: live Agent3 runtime is refused")
+except RuntimeError as exc:
+    check(
+        "runtime is active" in str(exc),
+        "restore guard: live Agent3 runtime is refused before publication",
+    )
+finally:
+    live_store.close()
+check(
+    snapshot() == live_before,
+    "restore guard: live-runtime refusal writes NOTHING to portable state",
+)
+forced_after_close = backup.restore(archive, force=True)
+check(
+    len(forced_after_close["restored"]) == len(before),
+    "restore guard: restore succeeds after AgentRunStore closes its lease",
+)
+
 # Paired restore is failure-atomic from Agent3's point of view. Inject a failure
 # at the progress publication after the run path has become the durable fence.
 progress_before_failure = snapshot()[backup.AGENT3_EXECUTION_PROGRESS_KEY]
@@ -592,6 +618,14 @@ check(
     "restore fence: failed second publish did not replace live progress authority",
 )
 try:
+    AgentRunStore(runs_item.path)
+    check(False, "restore guard: failed restore blocks fresh Agent3 startup")
+except RuntimeError as exc:
+    check(
+        "restore is incomplete" in str(exc),
+        "restore guard: failed restore leaves durable startup blocker",
+    )
+try:
     fenced = sqlite3.connect(runs_item.path)
     try:
         fenced.execute("SELECT name FROM sqlite_master").fetchone()
@@ -611,6 +645,49 @@ check(
     and backup._execution_progress_problem_path(progress_item.path) is None,
     "restore fence: retry removes the fence and restores canonical live authority",
 )
+probe_store = AgentRunStore(runs_item.path)
+probe_store.close()
+check(True, "restore guard: successful retry clears durable startup blocker")
+
+# A failure AFTER the Agent3 pair itself has published must still block startup:
+# otherwise a valid run/progress pair could boot beside only partially restored
+# plan/review/approval state. The persistent guard spans the complete archive.
+audit_item = next(it for it in backup.items() if it.key == "audit.db")
+real_replace = backup.os.replace
+
+def fail_unrelated_publish(source, destination):
+    if (
+        os.path.abspath(destination) == os.path.abspath(audit_item.path)
+        and str(source).endswith(".tmp")
+    ):
+        raise OSError("injected unrelated-store publication failure")
+    return real_replace(source, destination)
+
+backup.os.replace = fail_unrelated_publish
+try:
+    try:
+        backup.restore(archive, force=True)
+        check(False, "restore guard: post-pair unrelated publication failure propagates")
+    except OSError:
+        check(True, "restore guard: post-pair unrelated publication failure propagates")
+finally:
+    backup.os.replace = real_replace
+check(
+    backup._agent3_runs_row_count_path(runs_item.path)[1] is None,
+    "restore guard: post-pair failure may leave a valid run DB path",
+)
+try:
+    AgentRunStore(runs_item.path)
+    check(False, "restore guard: partial whole-archive restore cannot boot Agent3")
+except RuntimeError as exc:
+    check(
+        "restore is incomplete" in str(exc),
+        "restore guard: durable marker blocks valid-looking partial whole-archive state",
+    )
+backup.restore(archive, force=True)
+post_failure_store = AgentRunStore(runs_item.path)
+post_failure_store.close()
+check(True, "restore guard: complete retry re-authorizes Agent3 startup")
 
 # A valid progress sidecar without its paired run store is unsafe source state.
 wipe()
