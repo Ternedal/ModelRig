@@ -121,8 +121,10 @@ irreversible lock, `main` genlæses, og requesten re-verificeres mod current tim
 Den durable ledger er kun host-local replay/recovery-state og kan ikke reloades
 som authenticated authority. Kun den succesfulde live consume-transaktion kan
 returnere en ikke-serialiseret `transaction_authenticated=true` instans efter
-create-once commit, canonical read-back og cleanup. Persisted eller manuelt
-fremstillede canonical bytes forbliver `transaction_authenticated=false`.
+create-once commit, canonical read-back og cleanup. Provenance bindes samtidig
+til exact objekt-identitet, originating PID og canonical receipt-SHA; mutation
+invaliderer den straks, og POSIX fork-child arver ingen authority. Persisted eller
+manuelt fremstillede canonical bytes forbliver `transaction_authenticated=false`.
 
 Replay-scope er fortsat eksplicit host-local (`host_replay_guard_committed=true`,
 `global_replay_safe=false`). Vedvarende frozen `main`, campaign-start, pilot,
