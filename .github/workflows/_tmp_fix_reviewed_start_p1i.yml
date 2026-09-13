@@ -24,7 +24,9 @@ jobs:
           python-version: "3.12"
 
       - name: Apply reviewed Start P1i fixes
-        run: python3 .tmp_run_reviewed_start_p1i.py
+        run: |
+          python3 .tmp_run_reviewed_start_p1i.py
+          python3 .tmp_fix_reviewed_start_p1i_terminal.py
 
       - name: Install canonical worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
@@ -64,6 +66,7 @@ jobs:
           git rm .github/workflows/_tmp_fix_reviewed_start_p1i.yml
           git rm .tmp_fix_reviewed_start_p1i.py
           git rm .tmp_run_reviewed_start_p1i.py
+          git rm .tmp_fix_reviewed_start_p1i_terminal.py
           git add -A
           retained_paths="$(git diff --cached --diff-filter=ACMRTUXB --name-only)"
           if printf '%s\n' "$retained_paths" | grep -q '^\.github/workflows/_tmp_'; then
