@@ -15,7 +15,7 @@ production reader therefore requires the checkout root/ancestor chain and its
 entire ``.git`` metadata tree to be host-admin controlled before and after the
 read. Ordinary worktree files need not be immutable because ``rev-parse`` reads
 only repository metadata for this boundary; linked/common Git directories and
-external object alternates are deliberately unsupported and fail closed.
+external object/config authority are deliberately unsupported and fail closed.
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from typing import Any
 from . import _improvement_physical_runtime_host_control as _host
 
 _TIMEOUT_SECONDS = 120
+_MAX_GIT_CONFIG_BYTES = 1024 * 1024
 
 
 def _kill_process(process: subprocess.Popen[bytes]) -> None:
@@ -48,6 +49,35 @@ def _kill_process(process: subprocess.Popen[bytes]) -> None:
         return
 
 
+def _reject_config_includes(config: Path) -> None:
+    """Reject include/includeIf from any repository config Git may load."""
+
+    if not config.exists():
+        return
+    try:
+        payload = config.read_bytes()
+    except OSError as exc:
+        raise _host.PhysicalHostRuntimeError(
+            "physical request repository Git config is unavailable"
+        ) from exc
+    if len(payload) > _MAX_GIT_CONFIG_BYTES:
+        raise _host.PhysicalHostRuntimeError(
+            "physical request repository Git config is too large"
+        )
+    try:
+        text = payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise _host.PhysicalHostRuntimeError(
+            "physical request repository Git config is not canonical UTF-8"
+        ) from exc
+    for line in text.splitlines():
+        compact = "".join(line.strip().lower().split())
+        if compact.startswith("[include]") or compact.startswith("[includeif"):
+            raise _host.PhysicalHostRuntimeError(
+                "physical request repository Git config includes external state"
+            )
+
+
 def _reject_external_git_metadata(git_dir: Path) -> None:
     """Reject Git metadata layouts that can redirect object/config authority."""
 
@@ -59,30 +89,11 @@ def _reject_external_git_metadata(git_dir: Path) -> None:
         raise _host.PhysicalHostRuntimeError(
             "physical request repository uses external Git object alternates"
         )
-    config = git_dir / "config"
-    if config.exists():
-        try:
-            payload = config.read_bytes()
-        except OSError as exc:
-            raise _host.PhysicalHostRuntimeError(
-                "physical request repository Git config is unavailable"
-            ) from exc
-        if len(payload) > 1024 * 1024:
-            raise _host.PhysicalHostRuntimeError(
-                "physical request repository Git config is too large"
-            )
-        try:
-            text = payload.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise _host.PhysicalHostRuntimeError(
-                "physical request repository Git config is not canonical UTF-8"
-            ) from exc
-        for line in text.splitlines():
-            compact = "".join(line.strip().lower().split())
-            if compact.startswith("[include]") or compact.startswith("[includeif"):
-                raise _host.PhysicalHostRuntimeError(
-                    "physical request repository Git config includes external state"
-                )
+    # Git always reads .git/config. When extensions.worktreeConfig is enabled,
+    # it additionally reads .git/config.worktree. Scan both unconditionally so
+    # a worktree config can never smuggle an include to caller-writable state.
+    for name in ("config", "config.worktree"):
+        _reject_config_includes(git_dir / name)
 
 
 def _require_host_controlled_repository(repository_root: Path) -> Path:
