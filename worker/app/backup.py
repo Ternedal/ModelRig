@@ -47,10 +47,13 @@ import hashlib
 import io
 import json
 import os
+import sqlite3
 import sys
 import tarfile
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 BACKUP_SCHEMA = 3
@@ -184,8 +187,121 @@ def _walk(path: str) -> list[str]:
     return sorted(out)
 
 
-def _agent3_authority_problem(files: dict) -> Optional[str]:
-    if AGENT3_RUNS_KEY in files and AGENT3_EXECUTION_PROGRESS_KEY not in files:
+def _readonly_sqlite(path: str) -> sqlite3.Connection:
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
+    return sqlite3.connect(uri, uri=True)
+
+
+def _sqlite_table_problem(
+    path: str,
+    *,
+    table: str,
+    required: dict[str, tuple[str, int | None, int | None]],
+) -> Optional[str]:
+    try:
+        con = _readonly_sqlite(path)
+    except sqlite3.Error as exc:
+        return f"cannot open SQLite database: {exc}"
+    try:
+        try:
+            integrity = con.execute("PRAGMA integrity_check").fetchone()
+            if integrity is None or integrity[0] != "ok":
+                return f"SQLite integrity_check failed: {integrity[0] if integrity else 'no result'}"
+            rows = list(con.execute(f"PRAGMA table_info({table})"))
+        except sqlite3.Error as exc:
+            return f"cannot inspect SQLite authority: {exc}"
+        if not rows:
+            return f"required table {table} is missing"
+        columns = {str(row[1]): row for row in rows}
+        for name, (want_type, want_notnull, want_pk) in required.items():
+            row = columns.get(name)
+            if row is None:
+                return f"required column {table}.{name} is missing"
+            got_type = str(row[2]).upper()
+            if got_type != want_type:
+                return f"column {table}.{name} has type {got_type!r}, expected {want_type}"
+            if want_notnull is not None and int(row[3]) != want_notnull:
+                return f"column {table}.{name} has invalid NOT NULL authority"
+            if want_pk is not None and int(row[5]) != want_pk:
+                return f"column {table}.{name} has invalid primary-key authority"
+        return None
+    finally:
+        con.close()
+
+
+def _execution_progress_problem_path(path: str) -> Optional[str]:
+    return _sqlite_table_problem(
+        path,
+        table="agent_execution_starts",
+        required={
+            "run_id": ("TEXT", 1, 1),
+            "step_index": ("INTEGER", 1, 2),
+            "step_sha256": ("TEXT", 1, 3),
+            "started_at": ("REAL", 1, 0),
+        },
+    )
+
+
+def _agent3_runs_row_count_path(path: str) -> tuple[Optional[int], Optional[str]]:
+    problem = _sqlite_table_problem(
+        path,
+        table="agent_runs",
+        required={
+            "id": ("TEXT", None, 1),
+            "state": ("TEXT", 1, 0),
+            "payload": ("TEXT", 1, 0),
+            "updated_at": ("REAL", 1, 0),
+        },
+    )
+    if problem:
+        return None, problem
+    con = _readonly_sqlite(path)
+    try:
+        try:
+            row = con.execute("SELECT COUNT(*) FROM agent_runs").fetchone()
+        except sqlite3.Error as exc:
+            return None, f"cannot count Agent 3 runs: {exc}"
+        if row is None:
+            return None, "cannot count Agent 3 runs: no result"
+        return int(row[0]), None
+    finally:
+        con.close()
+
+
+def _with_temp_sqlite(data: bytes, inspector):
+    fd, path = tempfile.mkstemp(prefix="kaliv-backup-sqlite-", suffix=".db")
+    os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(data)
+        return inspector(path)
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def _execution_progress_problem_bytes(data: bytes) -> Optional[str]:
+    return _with_temp_sqlite(data, _execution_progress_problem_path)
+
+
+def _agent3_runs_row_count_bytes(data: bytes) -> tuple[Optional[int], Optional[str]]:
+    return _with_temp_sqlite(data, _agent3_runs_row_count_path)
+
+
+def _member_bytes(tar: tarfile.TarFile, name: str) -> Optional[bytes]:
+    try:
+        f = tar.extractfile(name)
+    except KeyError:
+        return None
+    if f is None:
+        return None
+    return f.read()
+
+
+def _agent3_authority_problem(files: dict, *, runs_have_rows: bool) -> Optional[str]:
+    if runs_have_rows and AGENT3_EXECUTION_PROGRESS_KEY not in files:
         return (
             "Agent 3 run state is present without execution-progress authority; "
             "restoring it could replay a previously-started non-idempotent step"
@@ -203,7 +319,22 @@ def create(out_dir: str = ".") -> str:
     by_key = {item.key: item for item in inventory}
     runs = by_key[AGENT3_RUNS_KEY]
     progress = by_key[AGENT3_EXECUTION_PROGRESS_KEY]
-    if os.path.exists(runs.path) and not os.path.exists(progress.path):
+    runs_have_rows = False
+    if os.path.exists(runs.path):
+        run_count, run_problem = _agent3_runs_row_count_path(runs.path)
+        if run_problem:
+            raise ValueError(
+                "refusing to back up an invalid Agent 3 run store: " + run_problem
+            )
+        runs_have_rows = bool(run_count)
+    if os.path.exists(progress.path):
+        progress_problem = _execution_progress_problem_path(progress.path)
+        if progress_problem:
+            raise ValueError(
+                "refusing to back up invalid Agent 3 execution-progress authority: "
+                + progress_problem
+            )
+    if runs_have_rows and not os.path.exists(progress.path):
         raise ValueError(
             "refusing to back up Agent 3 runs without the execution-progress sidecar: "
             + progress.path
@@ -259,14 +390,41 @@ def verify(archive: str) -> dict:
     if manifest.get("schema") not in SUPPORTED_BACKUP_SCHEMAS:
         raise ValueError(f"unsupported backup schema: {manifest.get('schema')}")
 
-    problems: list[str] = []
-    authority_problem = _agent3_authority_problem(manifest.get("files", {}))
-    if authority_problem:
-        problems.append(authority_problem)
+    files = manifest.get("files", {})
+    if not isinstance(files, dict):
+        raise ValueError("invalid backup manifest: files must be an object")
 
+    problems: list[str] = []
     checked = 0
     with tarfile.open(archive, "r:gz") as tar:
-        for key, meta in manifest["files"].items():
+        runs_have_rows = False
+        if AGENT3_RUNS_KEY in files:
+            run_bytes = _member_bytes(tar, f"data/{AGENT3_RUNS_KEY}")
+            if run_bytes is not None:
+                run_count, run_problem = _agent3_runs_row_count_bytes(run_bytes)
+                if run_problem:
+                    problems.append(f"invalid Agent 3 run store: {run_problem}")
+                else:
+                    runs_have_rows = bool(run_count)
+        authority_problem = _agent3_authority_problem(
+            files, runs_have_rows=runs_have_rows
+        )
+        if authority_problem:
+            problems.append(authority_problem)
+
+        if AGENT3_EXECUTION_PROGRESS_KEY in files:
+            progress_bytes = _member_bytes(
+                tar, f"data/{AGENT3_EXECUTION_PROGRESS_KEY}"
+            )
+            if progress_bytes is not None:
+                progress_problem = _execution_progress_problem_bytes(progress_bytes)
+                if progress_problem:
+                    problems.append(
+                        "invalid Agent 3 execution-progress authority: "
+                        + progress_problem
+                    )
+
+        for key, meta in files.items():
             if meta["kind"] == "file":
                 member = f"data/{key}"
                 got = _member_sha(tar, member)
