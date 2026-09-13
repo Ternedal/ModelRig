@@ -22,13 +22,15 @@ internal class Agent3DevConnectionBinding private constructor(
 
     companion object {
         private const val CREDENTIAL_FINGERPRINT_DOMAIN = "kaliv-agent3-reviewed-start-credential/v1"
-        private val recentCredentialFingerprints = ConcurrentHashMap<String, String>()
+        private const val RECENT_FINGERPRINT_MAX_AGE_NANOS = 2_000_000_000L
+        private data class RecentFingerprint(val value: String, val capturedAtNanos: Long)
+        private val recentCredentialFingerprints = ConcurrentHashMap<String, RecentFingerprint>()
 
         fun capture(baseUrl: String, token: String): Agent3DevConnectionBinding? {
             val normalizedBase = normalizeBaseUrl(baseUrl) ?: return null
             val normalizedToken = token.trim().takeIf { it.isNotEmpty() } ?: return null
             val fingerprint = credentialFingerprint(normalizedBase, normalizedToken) ?: return null
-            recentCredentialFingerprints[normalizedBase] = fingerprint
+            recentCredentialFingerprints[normalizedBase] = RecentFingerprint(fingerprint, System.nanoTime())
             return Agent3DevConnectionBinding(normalizedBase, normalizedToken)
         }
 
@@ -53,8 +55,21 @@ internal class Agent3DevConnectionBinding private constructor(
             return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
         }
 
-        internal fun recentCredentialFingerprint(baseUrl: String?): String? =
-            normalizeBaseUrl(baseUrl)?.let(recentCredentialFingerprints::get)
+        /**
+         * A desktop developer token may be edited in-memory without being saved.
+         * Only a very recent capture may override the persisted/DPAPI credential;
+         * older process-local fingerprints are ignored rather than becoming
+         * long-lived recovery authority.
+         */
+        internal fun recentCredentialFingerprint(baseUrl: String?): String? {
+            val normalizedBase = normalizeBaseUrl(baseUrl) ?: return null
+            val recent = recentCredentialFingerprints[normalizedBase] ?: return null
+            if (System.nanoTime() - recent.capturedAtNanos > RECENT_FINGERPRINT_MAX_AGE_NANOS) {
+                recentCredentialFingerprints.remove(normalizedBase, recent)
+                return null
+            }
+            return recent.value
+        }
 
         private fun normalizeBaseUrl(baseUrl: String?): String? =
             baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
