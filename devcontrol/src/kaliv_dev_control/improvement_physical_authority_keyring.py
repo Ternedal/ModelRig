@@ -9,6 +9,7 @@ host principal.
 from __future__ import annotations
 
 import ctypes
+import errno
 import json
 import os
 import stat
@@ -34,6 +35,15 @@ _KEYRING_FIELDS = {
     "minimum_keyring_epoch",
     "trusted_keys",
 }
+_POSIX_ACL_XATTRS = ("system.posix_acl_access", "system.posix_acl_default")
+_NO_POSIX_ACL_XATTR_ERRNOS = frozenset(
+    {
+        errno.ENODATA,
+        getattr(errno, "ENOATTR", errno.ENODATA),
+        errno.ENOTSUP,
+        getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+    }
+)
 
 # Windows security constants. The ACL policy intentionally permits write/control
 # authority only to SYSTEM, BUILTIN\Administrators, or TrustedInstaller.
@@ -139,6 +149,28 @@ def _canonical_physical_request_authority_keyring_path() -> Path:
     )
 
 
+def _require_no_posix_acl(path: Path) -> None:
+    """Reject extended POSIX ACL grants hidden behind otherwise-safe mode bits."""
+
+    if not hasattr(os, "getxattr"):
+        raise PhysicalRequestAuthorityKeyringError(
+            "physical request authority POSIX ACL state cannot be inspected"
+        )
+    for name in _POSIX_ACL_XATTRS:
+        try:
+            payload = os.getxattr(path, name, follow_symlinks=False)
+        except OSError as exc:
+            if exc.errno in _NO_POSIX_ACL_XATTR_ERRNOS:
+                continue
+            raise PhysicalRequestAuthorityKeyringError(
+                "physical request authority POSIX ACL state is unavailable"
+            ) from exc
+        if payload:
+            raise PhysicalRequestAuthorityKeyringError(
+                "physical request authority object uses an extended POSIX ACL"
+            )
+
+
 def _require_posix_host_control(path: Path, observed: os.stat_result) -> None:
     """Require a root-owned keyring under a root-owned non-writable directory chain."""
 
@@ -146,6 +178,7 @@ def _require_posix_host_control(path: Path, observed: os.stat_result) -> None:
         raise PhysicalRequestAuthorityKeyringError(
             "physical request authority keyring is not root-controlled"
         )
+    _require_no_posix_acl(path)
     cursor = path.parent
     while True:
         try:
@@ -162,6 +195,7 @@ def _require_posix_host_control(path: Path, observed: os.stat_result) -> None:
             raise PhysicalRequestAuthorityKeyringError(
                 "physical request authority keyring directory chain is not root-controlled"
             )
+        _require_no_posix_acl(cursor)
         if cursor.parent == cursor:
             return
         cursor = cursor.parent
@@ -221,21 +255,19 @@ def _windows_acl_snapshot(path: Path) -> tuple[str, tuple[tuple[int, str], ...]]
 
     if os.name != "nt":
         raise PhysicalRequestAuthorityKeyringError(
-            "Windows authority ACL inspection requires Windows"
+            "physical request authority Windows ACL inspection requires Windows"
         )
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    try:
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    except (AttributeError, OSError) as exc:
+        raise PhysicalRequestAuthorityKeyringError(
+            "physical request authority Windows ACL APIs are unavailable"
+        ) from exc
 
-    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-    kernel32.LocalFree.restype = ctypes.c_void_p
-    advapi32.ConvertSidToStringSidW.argtypes = [
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_wchar_p),
-    ]
-    advapi32.ConvertSidToStringSidW.restype = ctypes.c_int
     advapi32.GetNamedSecurityInfoW.argtypes = [
         ctypes.c_wchar_p,
-        ctypes.c_int,
+        ctypes.c_uint32,
         ctypes.c_uint32,
         ctypes.POINTER(ctypes.c_void_p),
         ctypes.POINTER(ctypes.c_void_p),
@@ -244,6 +276,8 @@ def _windows_acl_snapshot(path: Path) -> tuple[str, tuple[tuple[int, str], ...]]
         ctypes.POINTER(ctypes.c_void_p),
     ]
     advapi32.GetNamedSecurityInfoW.restype = ctypes.c_uint32
+    advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    advapi32.ConvertSidToStringSidW.restype = ctypes.c_int
     advapi32.GetAclInformation.argtypes = [
         ctypes.c_void_p,
         ctypes.c_void_p,
@@ -257,34 +291,30 @@ def _windows_acl_snapshot(path: Path) -> tuple[str, tuple[tuple[int, str], ...]]
         ctypes.POINTER(ctypes.c_void_p),
     ]
     advapi32.GetAce.restype = ctypes.c_int
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
 
     owner = ctypes.c_void_p()
     dacl = ctypes.c_void_p()
     descriptor = ctypes.c_void_p()
-    code = int(
-        advapi32.GetNamedSecurityInfoW(
-            os.fspath(path),
-            _SE_FILE_OBJECT,
-            _OWNER_SECURITY_INFORMATION | _DACL_SECURITY_INFORMATION,
-            ctypes.byref(owner),
-            None,
-            ctypes.byref(dacl),
-            None,
-            ctypes.byref(descriptor),
-        )
+    result = advapi32.GetNamedSecurityInfoW(
+        os.fspath(path),
+        _SE_FILE_OBJECT,
+        _OWNER_SECURITY_INFORMATION | _DACL_SECURITY_INFORMATION,
+        ctypes.byref(owner),
+        None,
+        ctypes.byref(dacl),
+        None,
+        ctypes.byref(descriptor),
     )
-    if code:
+    if result != 0 or not descriptor.value or not owner.value or not dacl.value:
+        if descriptor.value:
+            kernel32.LocalFree(ctypes.c_void_p(int(descriptor.value)))
         raise PhysicalRequestAuthorityKeyringError(
-            f"physical request authority ACL query failed with WinError {code}"
+            "physical request authority Windows security descriptor is unavailable"
         )
     try:
-        if not owner.value or not dacl.value:
-            raise PhysicalRequestAuthorityKeyringError(
-                "physical request authority ACL has no protected owner/DACL"
-            )
-        owner_sid = _windows_sid_string(
-            advapi32, kernel32, int(owner.value)
-        )
+        owner_sid = _windows_sid_string(advapi32, kernel32, int(owner.value))
         info = _ACL_SIZE_INFORMATION()
         if not advapi32.GetAclInformation(
             dacl,
@@ -293,7 +323,7 @@ def _windows_acl_snapshot(path: Path) -> tuple[str, tuple[tuple[int, str], ...]]
             _ACL_SIZE_INFORMATION_CLASS,
         ):
             raise PhysicalRequestAuthorityKeyringError(
-                "physical request authority DACL could not be enumerated"
+                "physical request authority DACL could not be inspected"
             )
         entries: list[tuple[int, str]] = []
         for index in range(int(info.AceCount)):
@@ -521,44 +551,53 @@ def _load_physical_request_authority_verifier_at(
             key = TrustedEd25519AuthorityKey.from_mapping(raw)
             if key.issuer_system_id != PHYSICAL_REQUEST_ISSUER_SYSTEM_ID:
                 raise PhysicalRequestAuthorityKeyringError(
-                    "physical request authority key belongs to another issuer system"
+                    "physical request authority key belongs to another issuer"
                 )
             if previous_key_id is not None and key.key_id <= previous_key_id:
                 raise PhysicalRequestAuthorityKeyringError(
-                    "physical request authority keys must be sorted and unique"
+                    "physical request authority trusted keys are not strictly sorted"
                 )
-            previous_key_id = key.key_id
+            if key.key_id in trusted:
+                raise PhysicalRequestAuthorityKeyringError(
+                    "physical request authority key id is duplicated"
+                )
             trusted[key.key_id] = key
             canonical_keys.append(key.to_dict())
-        verifier = Ed25519AuthorityVerifier(
-            trusted,
-            minimum_keyring_epoch=minimum_epoch,
-        )
-    except AsymmetricAuthorityError as exc:
+            previous_key_id = key.key_id
+    except (AsymmetricAuthorityError, TypeError, ValueError) as exc:
+        if isinstance(exc, PhysicalRequestAuthorityKeyringError):
+            raise
         raise PhysicalRequestAuthorityKeyringError(
-            "physical request authority keyring contains invalid public-key evidence"
+            "physical request authority keyring contains an invalid trusted key"
         ) from exc
 
-    canonical_mapping = {
-        "schema": PHYSICAL_REQUEST_AUTHORITY_KEYRING_SCHEMA,
-        "authority_domain": PHYSICAL_REQUEST_AUTHORITY_DOMAIN,
-        "minimum_keyring_epoch": minimum_epoch,
-        "trusted_keys": canonical_keys,
-    }
-    if payload != _canonical(canonical_mapping):
+    canonical = _canonical(
+        {
+            "schema": PHYSICAL_REQUEST_AUTHORITY_KEYRING_SCHEMA,
+            "authority_domain": PHYSICAL_REQUEST_AUTHORITY_DOMAIN,
+            "minimum_keyring_epoch": minimum_epoch,
+            "trusted_keys": canonical_keys,
+        }
+    )
+    if payload != canonical:
         raise PhysicalRequestAuthorityKeyringError(
             "physical request authority keyring is not canonical"
         )
-    return verifier
+    return Ed25519AuthorityVerifier(
+        trusted_keys=trusted,
+        minimum_keyring_epoch=minimum_epoch,
+    )
 
 
 def _canonical_physical_request_authority_verifier() -> Ed25519AuthorityVerifier:
-    """Resolve the production trust root from the fixed host-admin keyring path."""
-
     return _load_physical_request_authority_verifier_at(
         _canonical_physical_request_authority_keyring_path(),
         require_host_control=True,
     )
 
 
-__all__: list[str] = []
+__all__ = [
+    "PHYSICAL_REQUEST_AUTHORITY_KEYRING_SCHEMA",
+    "PHYSICAL_REQUEST_AUTHORITY_DOMAIN",
+    "PhysicalRequestAuthorityKeyringError",
+]
