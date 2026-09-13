@@ -220,3 +220,28 @@ for forbidden in (
 print(f"Stage B final-gate contracts: {passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)
+
+# ADR-DC-010 remains proposed, so its heavy adversarial contracts live under
+# tests/support and are explicitly attached to this already-discovered physical
+# gate test rather than silently extending the repository test-glob inventory.
+def _run_support_contract(filename: str, module_name: str) -> None:
+    path = ROOT / "tests" / "support" / filename
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    contract = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = contract
+    spec.loader.exec_module(contract)
+    contract.run_contract()
+
+
+_run_support_contract(
+    "rsi_physical_campaign_admission_contract.py",
+    "rsi_physical_campaign_admission_contract",
+)
+print("RSI physical campaign admission adversarial contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_admission_provenance_contract.py",
+    "rsi_physical_campaign_admission_provenance_contract",
+)
+print("RSI physical campaign admission provenance contract: PASS")

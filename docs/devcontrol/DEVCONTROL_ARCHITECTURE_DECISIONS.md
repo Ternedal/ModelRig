@@ -148,3 +148,27 @@ frozen `main`, campaign-start, pilot, publication og activation forbliver
 separate authority-gates.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
+
+## ADR-DC-010 — Authenticated one-shot admission før DC-L15 physical campaign
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Gør den live transaction-authenticated host-reservation plus en separat
+human-signeret exact runner-pin til en smal, host-local one-shot campaign-start
+admission. Caller-ejede authority-inputs snapshot'es til exact lokale value
+objects, og callerens exact-type `TrustedGitRuntime` kopieres til en
+transaction-private staged runtime før trusted Git reads. Current `main` +
+runner-bytes re-verificeres omkring create-once locken.
+
+Admission-locken forbliver permanent som host-local replay marker. Final
+read-back skal være byte-identisk med den committed payload, og live provenance
+bindes til exact objekt-identitet, originating PID, canonical SHA samt de exact
+current bytes i både final admission og replay marker. Mutation, fork eller
+marker-drift failer derfor lukket. Runner-budgettet er højst 16.000.000 bytes
+inden for den allerede hardened stable-read boundary.
+
+Admission kan kun give `campaign_start_authorized=true` for én manuel fysisk
+kampagne. Den kører ingen probes og giver ikke frozen-main, physical-complete,
+pilot, merge, publication, release, deploy eller activation authority.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-010_RSI_PHYSICAL_CAMPAIGN_ADMISSION_BOUNDARY.md`

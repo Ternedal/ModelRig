@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-physical-campaign-runner-authorization-v1.schema.json",
+  "title": "ModelRig RSI physical campaign runner authorization v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "authorization_id", "reservation_sha256", "host_scope_sha256",
+    "request_sha256", "qualification_packet_sha256", "snapshot_receipt_sha256",
+    "campaign_id", "proposal_id", "task_id", "task_sha256", "repository",
+    "base_sha", "requested_main_sha", "runner_relative_path", "runner_sha256",
+    "runner_bytes", "required_operator_actor_id", "required_approver_actor_id",
+    "required_report_schema", "required_boundary", "required_network_mode",
+    "required_probes", "authorized_at_utc", "expires_at_utc", "automatic_start",
+    "pilot_go_authorized", "activation_authorized", "remote_publication_authorized",
+    "authority", "scope"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-physical-campaign-runner-authorization/v1"},
+    "authorization_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "reservation_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "host_scope_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "qualification_packet_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "snapshot_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "campaign_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "proposal_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "task_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "task_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "requested_main_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "runner_relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+    "runner_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runner_bytes": {"type": "integer", "minimum": 1, "maximum": 16000000},
+    "required_operator_actor_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
+    "required_approver_actor_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
+    "required_report_schema": {"const": "kaliv-windows-isolation-physical-report/v1"},
+    "required_boundary": {"const": "os_isolated"},
+    "required_network_mode": {"const": "deny"},
+    "required_probes": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "restricted_token"}, {"const": "workspace_allowed"},
+        {"const": "workspace_escape_denied"}, {"const": "network_denied"},
+        {"const": "process_tree_timeout_cleanup"}, {"const": "process_tree_crash_cleanup"},
+        {"const": "cancel_cleanup"}, {"const": "reboot_cleanup"},
+        {"const": "memory_limit_enforced"}, {"const": "process_limit_enforced"},
+        {"const": "existing_tools_compatible"}
+      ],
+      "items": false, "minItems": 11, "maxItems": 11
+    },
+    "authorized_at_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "expires_at_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "automatic_start": {"const": false},
+    "pilot_go_authorized": {"const": false},
+    "activation_authorized": {"const": false},
+    "remote_publication_authorized": {"const": false},
+    "authority": {"const": "human-signed-runner-pin-only"},
+    "scope": {"const": "dc-l15-single-campaign-runner-pin"}
+  }
+}
