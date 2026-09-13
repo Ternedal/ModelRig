@@ -8,7 +8,7 @@
 
 ADR-DC-008 indfører et kortlivet, human-signeret request-artifact før DC-L15. En gyldig signatur beviser kun, at en identificeret human authority bad om én bounded fysisk qualification mod en bestemt ønsket `main`-SHA. Den beviser ikke, at `main` matcher SHA'en på reservationstidspunktet, og den forbruger ikke requesten.
 
-Reservation-laget skal derfor både lukke provenance-hullet og være præcist om sin egen rækkevidde. En lokal create-once ledger kan bevise one-time consumption på den konkrete fysiske host, men den kan ikke uden distribueret koordinering bevise global replay-eksklusion på tværs af flere hosts.
+Reservation-laget skal derfor lukke observation-, time- og replay-huller uden at overdrive, hvad et lokalt filesystem kan bevise. En lokal create-once ledger kan etablere fail-closed replay/recovery-state på den konkrete host, men kan hverken bevise global replay-eksklusion eller i sig selv autentificere, hvem der skrev en fil i ledger-mappen.
 
 Desuden er en `TrustedGitRuntime`-instans ikke i sig selv en trust-beslutning. H2-kontrakten gør runtime-manifestet content-addressed og re-verificerbart, men kræver separat review/pinning. Reservationen må derfor kun bruge den staged Git-runtime, hvis dens manifest- og executable-digests matcher den `CandidateSnapshotReceipt`, hvis SHA allerede er bundet ind i den human-signerede qualification chain.
 
@@ -16,7 +16,7 @@ Desuden er en `TrustedGitRuntime`-instans ikke i sig selv en trust-beslutning. H
 
 Der foreslås et separat evidence-only reservation-led:
 
-`verified human request → signed runtime pin → trusted preflight → irreversible host lock → trusted main re-read → signed-chain reverify → canonical host receipt`
+`verified human request → signed runtime pin → trusted preflight → irreversible host lock → trusted main re-read → signed-chain reverify → create-once replay state → transaction-authenticated in-memory receipt`
 
 ### 1. Caller leverer ikke authority-evidence eller authority-paths
 
@@ -56,7 +56,7 @@ Den post-lock observation skal:
 - binde canonical repository-root path, signed snapshot receipt, Trusted Git runtime-manifest og executable digest;
 - bruge timestamp afledt internt ved write-boundary'en.
 
-Hvis `main` flytter mellem preflight og post-lock read, fejler operationen **efter requesten er host-lokalt consumed**. Den bliver ikke automatisk genbrugelig.
+Hvis `main` flytter mellem preflight og post-lock read, fejler operationen **efter requesten er host-lokalt consumed/recovery-required**. Den bliver ikke automatisk genbrugelig.
 
 ### 4. Signatur og expiry re-verificeres efter lock
 
@@ -64,9 +64,18 @@ Human request-signaturen og qualification-bindingen re-verificeres igen ved et i
 
 Caller kan derfor ikke backdate consumption for at genbruge en udløbet request. Hvis requesten udløber efter lock men før final commit, forbliver lock-state fail-closed/recovery-required.
 
-### 5. Final receipt mintes kun gennem den authenticated transaction
+### 5. Durable ledger-state er ikke reloadable authority
 
-Der findes ingen public ledger-write API, som accepterer et allerede konstrueret `PhysicalQualificationReservation`.
+Et centralt trust-princip er, at eksistensen af en canonical JSON-fil i den lokale ledger **ikke** beviser, at den authenticated consume-transaktion skabte filen. En principal med direkte filesystem-write kan ellers fremstille de samme bytes.
+
+Derfor gælder følgende:
+
+- persisted final/pending/lock er replay- og recovery-state, ikke selvstændig authority;
+- `PhysicalQualificationReservation.from_mapping(...)` giver altid `transaction_authenticated=false`;
+- privat durability-load giver altid `transaction_authenticated=false`, også for en legitim tidligere transaction;
+- der findes ingen public `load_physical_qualification_reservation(...)` authority-loader;
+- `transaction_authenticated` serialiseres aldrig og kan derfor ikke mintes via JSON;
+- kun den igangværende authenticated consume-transaktion må sætte `transaction_authenticated=true`, og først efter create-once final write, canonical byte-identisk read-back og succesfuld cleanup.
 
 Den canonical rækkefølge er:
 
@@ -77,16 +86,19 @@ Den canonical rækkefølge er:
 5. trusted-current-time re-verifikation af signed request + qualification;
 6. create-once pending payload;
 7. create-once final canonical payload;
-8. canonical read-back, som først dér mintes som `PhysicalQualificationReservation`;
-9. durable cleanup af pending/lock.
+8. parse + canonical byte-identisk read-back uden at grant'e authority;
+9. durable cleanup af pending/lock;
+10. mint kun den returnerede in-memory instans med `transaction_authenticated=true`.
 
-Hvis noget fejler efter trin 3, må requesten ikke genbruges på samme canonical host ledger uden en separat eksplicit recovery-procedure.
+Hvis noget fejler efter trin 3, må requesten ikke genbruges på samme canonical host ledger uden en separat eksplicit recovery-procedure. Hvis processen crasher efter final write men før trin 10, bevares replay-state, men authority må ikke rekonstrueres automatisk fra filen.
+
+Direkte filesystem-injektion af en perfekt canonical final-fil kan derfor højst brænde/blokere den lokale request og skabe recovery/DoS-state. Den kan ikke gennem denne boundary skabe et transaction-authenticated receipt.
 
 ### 6. Replay-scope er host-local, ikke global
 
 Produktionens public API bruger én canonical host-local ledger-location og eksponerer ingen root/ID-selector. Receipt binder SHA-256 af den konkrete ledger-root samt canonical repository-root og pinned Git-runtime-identitet.
 
-Et gyldigt receipt har altid:
+Et schema-validt receipt beskriver altid:
 
 - `ledger_scope=canonical-host-local-v1`;
 - `main_head_match_confirmed=true`;
@@ -94,11 +106,13 @@ Et gyldigt receipt har altid:
 - `host_replay_guard_committed=true`;
 - `global_replay_safe=false`.
 
-`global_replay_safe=false` er en vigtig sandhed, ikke en mangel der må skjules. En lokal filesystem-ledger kan ikke bevise, at den samme signed request ikke er præsenteret på en anden host. En senere campaign-admission boundary skal derfor binde den autoriserede fysiske host/runner-identitet, før requesten kan bruges til faktisk execution.
+Men de serialiserede felter er data, ikke transaction provenance. Kun den live returnerede instans med `transaction_authenticated=true` beviser, at netop denne proces gennemførte den authenticated consume-sekvens. En senere boundary må aldrig opgradere et reloadet ledger-artifact alene til execution authority.
+
+`global_replay_safe=false` er en vigtig sandhed. En lokal filesystem-ledger kan ikke bevise, at den samme signed request ikke er præsenteret på en anden host. En senere campaign-admission boundary skal derfor binde den autoriserede fysiske host/runner-identitet, før requesten kan bruges til faktisk execution.
 
 ### 7. Exact-main er stadig ikke persistent freeze
 
-Post-lock observationen beviser kun, at `refs/heads/main` matchede `requested_frozen_main_sha` på det konkrete observationstidspunkt.
+Post-lock observationen beviser kun, at `refs/heads/main` matchede `requested_frozen_main_sha` på det konkrete observationstidspunkt i den live authenticated transaction.
 
 Receipt skal derfor fortsat have:
 
@@ -127,11 +141,11 @@ Reservation-leddet må ikke:
 ## Artefakter
 
 - `kaliv-rsi-local-main-head-observation/v1` — parsebar evidence-only observation;
-- `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local reservation receipt;
-- `consume_physical_qualification_request_once(...)` — eneste public authority-bearing write-path;
-- `load_physical_qualification_reservation(...)` — loader kun fra canonical host-local ledger.
+- `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local replay/evidence data;
+- `consume_physical_qualification_request_once(...)` — eneste public authority-bearing path og eneste vej til en live `transaction_authenticated=true` instans;
+- canonical host ledger — replay/recovery-state, eksplicit ikke public reloadable authority.
 
-Reservationens authority er fast `consumed-request-evidence-only`.
+Reservationens serialiserede authority-label er fast `consumed-request-evidence-only`; den ikke-serialiserede `transaction_authenticated` provenance er separat og kan ikke overleve reload.
 
 ## Fail-closed krav
 
@@ -146,12 +160,15 @@ Implementationen skal mindst afvise eller fail-close ved:
 7. expired eller ugyldig human request ved post-lock re-verifikation;
 8. duplicate consumption i canonical host ledger;
 9. enhver eksisterende final/pending/lock-state som genbrugelig request;
-10. direct persistence af prebuilt/fabricated final receipt;
-11. tampering med canonical final reservation;
-12. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+10. direct persistence af prebuilt/fabricated final receipt som authority;
+11. perfekt canonical direct-written final file må stadig have `transaction_authenticated=false` ved load;
+12. tampering med canonical final reservation;
+13. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
 ## Konsekvenser
 
-Efter denne boundary kan DevControl sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret, at observationen brugte den Git-runtime-identitet som den signerede softwarekæde allerede bandt, at den canonical lokale `main` matchede ved post-lock observationen, og at requesten blev taget ud af replay-puljen på den canonical fysiske host.
+Efter denne boundary kan DevControl i **den samme succesfulde authenticated transaction** sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret, at observationen brugte den Git-runtime-identitet som den signerede softwarekæde allerede bandt, at den canonical lokale `main` matchede ved post-lock observationen, og at create-once replay-state blev committed på den lokale host.
 
-Det er fortsat **ikke** global replay-bevis, vedvarende frozen-main-bevis eller tilladelse til at starte fysisk execution. Det næste authority-led skal være en separat host/freeze/campaign-admission boundary.
+Efter process exit kan ledger-state stadig fail-close replay og drive en særskilt recovery-procedure, men den kan ikke alene rekonstruere authenticated authority. Det næste host/freeze/campaign-admission-led skal derfor enten fortsætte direkte fra en live `transaction_authenticated=true` reservation eller definere sin egen særskilt autentificerede recovery/attestation; det må ikke stole på et reloadet ledger-artifact alene.
+
+Det er fortsat **ikke** global replay-bevis, vedvarende frozen-main-bevis eller tilladelse til at starte fysisk execution.
