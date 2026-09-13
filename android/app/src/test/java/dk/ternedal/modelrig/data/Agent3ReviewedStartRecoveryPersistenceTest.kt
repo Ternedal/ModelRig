@@ -1,7 +1,10 @@
 package dk.ternedal.modelrig.data
 
 import android.content.Context
+import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -21,17 +24,26 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun `authority survives a new store instance and remains rig scoped`() {
+    fun `authority survives a new store instance and remains rig and credential scoped`() {
         val rigA = "https://rig-a.example:8443/"
         val rigB = "https://rig-b.example:8443"
         val encoded = "{\"schema\":\"test-authority\"}"
 
+        assertNotNull(Agent3ReviewConnectionBinding.capture(rigA, "token-a"))
         val firstProcessStore = Agent3ReviewedStartRecoveryStore(context)
         assertTrue(firstProcessStore.write(rigA, encoded))
 
         val restartedProcessStore = Agent3ReviewedStartRecoveryStore(context)
         assertEquals(encoded, restartedProcessStore.read("https://rig-a.example:8443"))
         assertNull(restartedProcessStore.read(rigB))
+
+        assertNotNull(Agent3ReviewConnectionBinding.capture(rigA, "token-b"))
+        val mismatched = restartedProcessStore.read(rigA)
+        assertNotNull(mismatched)
+        assertNotEquals(encoded, mismatched)
+
+        assertNotNull(Agent3ReviewConnectionBinding.capture(rigA, "token-a"))
+        assertEquals(encoded, restartedProcessStore.read(rigA))
 
         assertTrue(restartedProcessStore.write(rigA, null))
         assertNull(Agent3ReviewedStartRecoveryStore(context).read(rigA))
