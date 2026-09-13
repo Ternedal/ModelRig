@@ -173,6 +173,16 @@ class PhysicalReplayStateHostControlTests(unittest.TestCase):
             state_control._require_no_posix_acl(Path("/synthetic"))
 
     @unittest.skipUnless(os.name == "posix", "POSIX ACL regression")
+    def test_unsupported_posix_acl_state_fails_closed(self):
+        unsupported = OSError(errno.ENOTSUP, "acl introspection unsupported")
+        with patch.object(state_control.os, "getxattr", side_effect=unsupported):
+            with self.assertRaisesRegex(
+                state_control.PhysicalHostStateError,
+                "ACL state is unavailable",
+            ):
+                state_control._require_no_posix_acl(Path("/synthetic"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX ACL regression")
     def test_authority_keyring_rejects_extended_posix_acl(self):
         with patch.object(
             authority_keyring.os,
@@ -182,6 +192,20 @@ class PhysicalReplayStateHostControlTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 authority_keyring.PhysicalRequestAuthorityKeyringError,
                 "extended POSIX ACL",
+            ):
+                authority_keyring._require_no_posix_acl(Path("/synthetic"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX ACL regression")
+    def test_authority_keyring_unsupported_acl_state_fails_closed(self):
+        unsupported = OSError(errno.ENOTSUP, "acl introspection unsupported")
+        with patch.object(
+            authority_keyring.os,
+            "getxattr",
+            side_effect=unsupported,
+        ):
+            with self.assertRaisesRegex(
+                authority_keyring.PhysicalRequestAuthorityKeyringError,
+                "ACL state is unavailable",
             ):
                 authority_keyring._require_no_posix_acl(Path("/synthetic"))
 
