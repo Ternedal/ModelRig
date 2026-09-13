@@ -429,7 +429,11 @@ def build_planner_router(
             headers={"X-ModelRig-Agent3-Reason": reason},
         )
 
-    def _reconcile_reviewed_start_run(run_id: str) -> AgentRun:
+    def _reconcile_reviewed_start_run(
+        run_id: str,
+        *,
+        review_reads: bool,
+    ) -> AgentRun:
         existing = orchestrator.store.load(run_id)
         if existing is None:
             raise _reviewed_start_error(
@@ -442,11 +446,26 @@ def build_planner_router(
         # and advancing it would try to complete a non-RUNNING run forever.
         if existing.state is not RunState.RUNNING:
             return existing
-        # Reviewed Start recovery must restore human review authority before
-        # advancing. This covers both an already-durable waiting checkpoint and
-        # the cross-store crash windows where a READ succeeded but set_waiting()
-        # had not yet reached the review DB.
-        if reviewing:
+        # The materialized reviewed plan is the authority for whether reads
+        # require human review. The separate review DB may be missing or only
+        # partially restored after a crash/restore. If the plan requires review
+        # but that policy row is absent/disabled, recovery must stop before any
+        # advance() can execute remaining reads. A client-side envelope mismatch
+        # check would happen too late because side effects could already exist.
+        if review_reads:
+            if not reviewing:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed read policy is unavailable; recovery remains ambiguous",
+                    status_code=503,
+                )
+            review_state = orchestrator.review_store.get(run_id)
+            if not review_state["enabled"]:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed read policy is missing; recovery remains ambiguous",
+                    status_code=503,
+                )
             checkpointed = orchestrator.recover_read_review_checkpoint_if_due(run_id)
             if checkpointed is not None:
                 return checkpointed
@@ -516,9 +535,29 @@ def build_planner_router(
                 )
             payload = plan_store.reviewed_start_materialization(plan_id, reserved_run_id)
             if existing is not None:
-                reconciled = _reconcile_reviewed_start_run(reserved_run_id)
+                # Parse only the bounded policy bit before reconciliation. If a
+                # materialization that already has a persisted run is unreadable,
+                # its authority is ambiguous: do not advance and do not convert it
+                # into a definitive refusal that clients could clear.
+                try:
+                    recovery_envelope = json.loads(payload)
+                    if not isinstance(recovery_envelope, dict):
+                        raise TypeError("reviewed Start materialization must be an object")
+                    recovered_review_reads = bool(
+                        recovery_envelope.get("review_reads", False)
+                    )
+                except (TypeError, json.JSONDecodeError, ValueError) as exc:
+                    raise _reviewed_start_error(
+                        "reviewed_start_pending",
+                        "persisted reviewed Start policy is unreadable; recovery remains ambiguous",
+                        status_code=503,
+                    ) from exc
+                reconciled = _reconcile_reviewed_start_run(
+                    reserved_run_id,
+                    review_reads=recovered_review_reads,
+                )
                 plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
-                stored = json.loads(payload)
+                stored = recovery_envelope
                 return _reviewed_start_response(plan_id, stored, reconciled)
         else:
             reserved_run_id = str(uuid.uuid4())
