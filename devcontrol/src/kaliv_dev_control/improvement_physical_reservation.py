@@ -1,18 +1,21 @@
 """Authenticated host-local reservation boundary before DC-L15 execution.
 
 The authority-bearing path derives its own repository, operation root and wall
-clock, then binds the staged Git runtime to the candidate-snapshot receipt that
-is already named by the human-signed qualification chain. After an irreversible
-create-once host lock, it re-reads ``refs/heads/main`` through that exact runtime,
-re-verifies the signed request at current time, and only then commits a receipt.
+clock, snapshots caller-owned authority inputs into exact local value objects,
+then binds a freshly reconstructed staged Git runtime to the candidate-snapshot
+receipt already named by the human-signed qualification chain. After an
+irreversible create-once host lock, it re-reads ``refs/heads/main`` through that
+exact runtime, re-verifies the signed request at current time, and only then
+commits a receipt.
 
 The durable ledger proves one canonical *host-local* replay guard. Persisted
 ledger bytes are replay/recovery state only: they are deliberately not reloadable
 authority. Transaction provenance is process-local object identity bound to the
 authenticated receipt digest and originating PID, not a serializable field. Only
 the exact, unmodified in-memory receipt registered by the successful authenticated
-consume transaction after create-once write, canonical read-back and cleanup can
-report ``transaction_authenticated=True``; forked children inherit no authority.
+consume transaction after create-once write, byte-identical canonical read-back
+and cleanup can report ``transaction_authenticated=True``; forked children
+inherit no authority.
 
 Neither the durable state nor the returned receipt claims distributed/global
 replay safety, a persistent frozen main, physical campaign completion, pilot GO,
@@ -33,6 +36,7 @@ from typing import Any, Callable, Mapping, Protocol
 from .asymmetric_authority import (
     DetachedEd25519AuthoritySignature,
     Ed25519AuthorityVerifier,
+    TrustedEd25519AuthorityKey,
 )
 from .durable_publication import DurablePublicationError, create_once_file, unlink_durable
 from .improvement_candidate_snapshot import CandidateSnapshotReceipt
@@ -347,9 +351,9 @@ def observe_local_main_head(
 ) -> LocalMainHeadObservation:
     """Collect read-only observation evidence; does not itself authorize consume."""
 
-    if not isinstance(trusted_git, TrustedGitRuntime):
+    if type(trusted_git) is not TrustedGitRuntime:
         raise PhysicalQualificationReservationError(
-            "main observation requires TrustedGitRuntime"
+            "main observation requires exact TrustedGitRuntime"
         )
     operation = _safe_root(operation_root, name="main observation operation root")
     runner = TrustedGitRunner(trusted_git, operation_root=operation)
@@ -609,7 +613,12 @@ class _PhysicalQualificationRequestLedger:
             self.root / f".{digest}.lock",
         )
 
-    def _load_final(self, path: Path) -> PhysicalQualificationReservation:
+    def _load_final(
+        self,
+        path: Path,
+        *,
+        expected_payload: bytes | None = None,
+    ) -> PhysicalQualificationReservation:
         """Parse persisted state without granting authenticated transaction provenance."""
 
         if not path.is_file() or _has_linkish_component(path):
@@ -620,6 +629,10 @@ class _PhysicalQualificationRequestLedger:
         if not payload or len(payload) > _MAX_ARTIFACT_BYTES:
             raise PhysicalQualificationReservationError(
                 "physical reservation final artifact size is invalid"
+            )
+        if expected_payload is not None and payload != expected_payload:
+            raise PhysicalQualificationReservationError(
+                "physical reservation final read-back does not match committed payload"
             )
         try:
             value = json.loads(payload.decode("utf-8", errors="strict"))
@@ -696,7 +709,7 @@ class _PhysicalQualificationRequestLedger:
         try:
             create_once_file(pending, payload)
             create_once_file(final, payload)
-            verified = self._load_final(final)
+            verified = self._load_final(final, expected_payload=payload)
             unlink_durable(pending)
             unlink_durable(lock)
         except Exception as exc:
@@ -705,6 +718,101 @@ class _PhysicalQualificationRequestLedger:
             ) from exc
         _mark_transaction_authenticated(verified)
         return verified
+
+
+def _snapshot_authority_inputs(
+    *,
+    request: PhysicalQualificationRequest,
+    qualification: QualificationPacket,
+    snapshot_receipt: CandidateSnapshotReceipt,
+    signature: DetachedEd25519AuthoritySignature,
+    verifier: Ed25519AuthorityVerifier,
+) -> tuple[
+    PhysicalQualificationRequest,
+    QualificationPacket,
+    CandidateSnapshotReceipt,
+    DetachedEd25519AuthoritySignature,
+    Ed25519AuthorityVerifier,
+]:
+    """Copy caller-owned authority inputs into exact local value objects."""
+
+    if type(request) is not PhysicalQualificationRequest:
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires exact PhysicalQualificationRequest"
+        )
+    if type(qualification) is not QualificationPacket:
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires exact QualificationPacket"
+        )
+    if type(snapshot_receipt) is not CandidateSnapshotReceipt:
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires exact CandidateSnapshotReceipt"
+        )
+    if type(signature) is not DetachedEd25519AuthoritySignature:
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires exact detached Ed25519 signature"
+        )
+    if type(verifier) is not Ed25519AuthorityVerifier:
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires exact Ed25519AuthorityVerifier"
+        )
+
+    try:
+        request_snapshot = PhysicalQualificationRequest.from_json(
+            request.canonical_json()
+        )
+        qualification_snapshot = QualificationPacket.from_json(
+            qualification.canonical_json()
+        )
+        snapshot_mapping = json.loads(snapshot_receipt.canonical_json())
+        snapshot_snapshot = CandidateSnapshotReceipt(**snapshot_mapping)
+        signature_snapshot = DetachedEd25519AuthoritySignature.from_mapping(
+            json.loads(signature.canonical_json())
+        )
+
+        trusted_keys: dict[str, TrustedEd25519AuthorityKey] = {}
+        source_keys = verifier._trusted_keys
+        minimum_epoch = verifier._minimum_keyring_epoch
+        if not isinstance(source_keys, dict):
+            raise TypeError("authority verifier keyring is not concrete")
+        for key_id, key in source_keys.items():
+            if type(key) is not TrustedEd25519AuthorityKey:
+                raise TypeError("authority verifier contains overridable key type")
+            trusted_keys[key_id] = TrustedEd25519AuthorityKey.from_mapping(
+                json.loads(key.canonical_json())
+            )
+        verifier_snapshot = Ed25519AuthorityVerifier(
+            trusted_keys,
+            minimum_keyring_epoch=minimum_epoch,
+        )
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise PhysicalQualificationReservationError(
+            "physical request authority inputs could not be snapshotted"
+        ) from exc
+
+    return (
+        request_snapshot,
+        qualification_snapshot,
+        snapshot_snapshot,
+        signature_snapshot,
+        verifier_snapshot,
+    )
+
+
+def _snapshot_trusted_git_runtime(trusted_git: TrustedGitRuntime) -> TrustedGitRuntime:
+    """Reconstruct one exact runtime from its verified transaction root."""
+
+    if type(trusted_git) is not TrustedGitRuntime:
+        raise PhysicalQualificationReservationError(
+            "physical request consumption requires exact TrustedGitRuntime"
+        )
+    try:
+        transaction_root = Path(os.fspath(trusted_git.transaction_root)).resolve()
+        return TrustedGitRuntime(transaction_root)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        raise PhysicalQualificationReservationError(
+            "physical request Trusted Git runtime could not be reconstructed"
+        ) from exc
 
 
 def _verify_request_at(
@@ -749,9 +857,9 @@ def _require_signed_runtime_pin(
     qualification: QualificationPacket,
     observation: LocalMainHeadObservation,
 ) -> None:
-    if not isinstance(snapshot_receipt, CandidateSnapshotReceipt):
+    if type(snapshot_receipt) is not CandidateSnapshotReceipt:
         raise PhysicalQualificationReservationError(
-            "physical request consumption requires CandidateSnapshotReceipt"
+            "physical request consumption requires exact CandidateSnapshotReceipt"
         )
     if (
         snapshot_receipt.sha256 != qualification.snapshot_receipt_sha256
@@ -834,14 +942,20 @@ def _consume_physical_qualification_request_once(
 ) -> PhysicalQualificationReservation:
     """Private injectable transaction used by production and deterministic tests."""
 
-    if not isinstance(trusted_git, TrustedGitRuntime):
-        raise PhysicalQualificationReservationError(
-            "physical request consumption requires TrustedGitRuntime"
-        )
-    if not isinstance(snapshot_receipt, CandidateSnapshotReceipt):
-        raise PhysicalQualificationReservationError(
-            "physical request consumption requires CandidateSnapshotReceipt"
-        )
+    trusted_runtime = _snapshot_trusted_git_runtime(trusted_git)
+    (
+        request_snapshot,
+        qualification_snapshot,
+        snapshot_snapshot,
+        signature_snapshot,
+        verifier_snapshot,
+    ) = _snapshot_authority_inputs(
+        request=request,
+        qualification=qualification,
+        snapshot_receipt=snapshot_receipt,
+        signature=signature,
+        verifier=verifier,
+    )
     ledger = _PhysicalQualificationRequestLedger(
         _safe_root(ledger_root, name="physical request ledger root")
     )
@@ -849,43 +963,43 @@ def _consume_physical_qualification_request_once(
     preflight_at = now_provider()
     _utc(preflight_at, name="trusted preflight time")
     _verify_request_at(
-        request=request,
-        qualification=qualification,
-        signature=signature,
-        verifier=verifier,
+        request=request_snapshot,
+        qualification=qualification_snapshot,
+        signature=signature_snapshot,
+        verifier=verifier_snapshot,
         at_utc=preflight_at,
     )
     preflight_observation = observe_local_main_head(
-        trusted_git=trusted_git,
+        trusted_git=trusted_runtime,
         repository_root=repository_root,
         operation_root=operation_root,
         observed_at_utc=preflight_at,
-        repository=request.repository,
+        repository=request_snapshot.repository,
     )
     _require_signed_runtime_pin(
-        snapshot_receipt=snapshot_receipt,
-        qualification=qualification,
+        snapshot_receipt=snapshot_snapshot,
+        qualification=qualification_snapshot,
         observation=preflight_observation,
     )
-    _require_requested_main(preflight_observation, request)
+    _require_requested_main(preflight_observation, request_snapshot)
 
-    ledger.acquire_lock(request.sha256)
+    ledger.acquire_lock(request_snapshot.sha256)
     try:
         observed_at = now_provider()
         _utc(observed_at, name="trusted post-lock observation time")
         observation = observe_local_main_head(
-            trusted_git=trusted_git,
+            trusted_git=trusted_runtime,
             repository_root=repository_root,
             operation_root=operation_root,
             observed_at_utc=observed_at,
-            repository=request.repository,
+            repository=request_snapshot.repository,
         )
         _require_signed_runtime_pin(
-            snapshot_receipt=snapshot_receipt,
-            qualification=qualification,
+            snapshot_receipt=snapshot_snapshot,
+            qualification=qualification_snapshot,
             observation=observation,
         )
-        _require_requested_main(observation, request)
+        _require_requested_main(observation, request_snapshot)
 
         consumed_at = now_provider()
         consumed = _utc(consumed_at, name="trusted consumption time")
@@ -895,24 +1009,24 @@ def _consume_physical_qualification_request_once(
                 "trusted main observation is future-dated or stale at consumption"
             )
         request_receipt = _verify_request_at(
-            request=request,
-            qualification=qualification,
-            signature=signature,
-            verifier=verifier,
+            request=request_snapshot,
+            qualification=qualification_snapshot,
+            signature=signature_snapshot,
+            verifier=verifier_snapshot,
             at_utc=consumed_at,
         )
         mapping = _reservation_mapping(
             ledger=ledger,
-            request=request,
-            qualification=qualification,
-            snapshot_receipt=snapshot_receipt,
-            signature=signature,
+            request=request_snapshot,
+            qualification=qualification_snapshot,
+            snapshot_receipt=snapshot_snapshot,
+            signature=signature_snapshot,
             requester_actor_id=request_receipt.requester_actor_id,
             observation=observation,
             consumed_at_utc=consumed_at,
         )
         return ledger.commit_locked_mapping(
-            request_sha256=request.sha256,
+            request_sha256=request_snapshot.sha256,
             mapping=mapping,
         )
     except PhysicalQualificationReservationError:
@@ -935,7 +1049,8 @@ def consume_physical_qualification_request_once(
     """Authenticate, observe, and host-reserve one request exactly once.
 
     Callers cannot supply repository root, operation root, observation evidence,
-    time, ledger ID/root, or a prebuilt receipt. The caller-supplied staged Git
+    time, ledger ID/root, or a prebuilt receipt. Caller-owned runtime and authority
+    inputs are reconstructed into exact local objects before verification. The
     runtime must match the exact snapshot-runtime identity already named by the
     human-signed qualification chain. Only the exact returned live object in the
     originating process, with unchanged canonical contents, retains transaction
