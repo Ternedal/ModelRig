@@ -50,43 +50,51 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun newerGenerationReadCannotLetStaleCompletionClearReusedAuthority() {
+    fun staleCallbackFromSecondStoreCannotClearReusedGeneration() {
         val dbPath = Files.createTempFile("modelrig-reviewed-start-aba-", ".db").toString()
         val rig = "https://aba-rig-${System.nanoTime()}.example"
         val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
 
-        DesktopChatDb(dbPath, TestProtector).use { db ->
-            val store = Agent3ReviewedStartRecoveryStore(db) { "token-a" }
-            val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
-            assertTrue(store.reserve(rig, authority))
-            val originalEnvelope = requireNotNull(db.getSetting(key))
-            val parts = originalEnvelope.split('\n', limit = 4)
-            assertEquals(4, parts.size)
-            assertEquals("kaliv-agent3-reviewed-start-storage/v3", parts[0])
+        DesktopChatDb(dbPath, TestProtector).use { dbA ->
+            DesktopChatDb(dbPath, TestProtector).use { dbB ->
+                val clearingStore = Agent3ReviewedStartRecoveryStore(dbA) { "token-a" }
+                val staleStore = Agent3ReviewedStartRecoveryStore(dbB) { "token-a" }
+                val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
 
-            val replacementGeneration = if (parts[2] == "11111111-1111-4111-8111-111111111111") {
-                "22222222-2222-4222-8222-222222222222"
-            } else {
-                "11111111-1111-4111-8111-111111111111"
+                assertTrue(clearingStore.reserve(rig, authority))
+                assertEquals(authority, staleStore.read(rig))
+                val originalEnvelope = requireNotNull(dbA.getSetting(key))
+                val parts = originalEnvelope.split('\n', limit = 4)
+                assertEquals(4, parts.size)
+                assertEquals("kaliv-agent3-reviewed-start-storage/v3", parts[0])
+
+                val replacementGeneration = if (parts[2] == "11111111-1111-4111-8111-111111111111") {
+                    "22222222-2222-4222-8222-222222222222"
+                } else {
+                    "11111111-1111-4111-8111-111111111111"
+                }
+                val replacementEnvelope = listOf(parts[0], parts[1], replacementGeneration, parts[3]).joinToString("\n")
+
+                // Store A completes G1 and retires only its own callback handle.
+                assertTrue(clearingStore.clearIfMatches(rig, authority))
+                assertNull(dbA.getSetting(key))
+
+                // Another process now reserves byte-identical authority as G2.
+                // Store B still owns a stale in-flight callback for G1.
+                assertTrue(dbA.putRawSettingIfAbsent(key, replacementEnvelope))
+                assertEquals(authority, staleStore.read(rig))
+
+                // Observing G2 must not replace store B's instance-local G1 clear
+                // authority. The stale callback therefore cannot delete G2.
+                assertFalse(staleStore.clearIfMatches(rig, authority))
+                assertEquals(replacementEnvelope, dbA.getSetting(key))
+
+                // After the stale handle is dropped, a fresh read binds G2 and
+                // can clear exactly that reservation generation.
+                assertEquals(authority, staleStore.read(rig))
+                assertTrue(staleStore.clearIfMatches(rig, authority))
+                assertNull(dbA.getSetting(key))
             }
-            val replacementEnvelope = listOf(parts[0], parts[1], replacementGeneration, parts[3]).joinToString("\n")
-
-            // Simulate another desktop process clearing the old slot and then
-            // re-reserving the exact same encoded authority with a new generation.
-            assertTrue(db.removeRawSettingIfValue(key, originalEnvelope))
-            assertTrue(db.putRawSettingIfAbsent(key, replacementEnvelope))
-
-            // Observing the newer durable slot must not overwrite this process's
-            // still-active old origin envelope before its stale callback arrives.
-            assertEquals(authority, store.read(rig))
-            assertFalse(store.clearIfMatches(rig, authority))
-            assertEquals(replacementEnvelope, db.getSetting(key))
-
-            // The failed stale clear drops only the stale in-memory origin. A
-            // fresh read can bind the newer generation and clear that exact slot.
-            assertEquals(authority, store.read(rig))
-            assertTrue(store.clearIfMatches(rig, authority))
-            assertNull(db.getSetting(key))
         }
     }
 
