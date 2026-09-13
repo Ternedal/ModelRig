@@ -112,46 +112,49 @@ Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDA
 **Dato 12/09-2026. Status: foreslået til beslutning.**
 
 Gør request-reservation til én authenticated host-local transaction med en
-caller-uafhængig Ed25519 trust-root. Public consume accepterer ikke
-verifier/keyring, observation, clock eller authority-paths; produktion resolver
-en fast host-admin-kontrolleret request-keyring og fejler lukket ved manglende,
-malformed, wrong-domain eller unsafe trust state. POSIX kræver root ownership og
-ikke-writable directory-chain; Windows kræver native owner/DACL-evidence uden
-write/control grants til ordinary/broad principals. Det tidligere
-non-underscored reservation-compatibility-modul er fjernet.
+caller-uafhængig Ed25519 trust-root og en separat host-admin replay-state
+boundary. Public consume accepterer ikke verifier/keyring, observation, clock
+eller authority-paths; produktion resolver en fast host-admin-kontrolleret
+request-keyring og fejler lukket ved manglende, malformed, wrong-domain eller
+unsafe trust state.
+
+Selve production consume er en **elevated physical host-operator operation**, ikke
+produkt-runtime. POSIX kræver effektiv UID 0 og en pre-provisioned replay-ledger
+under `/var/lib/modelrig/devcontrol/`, hvor hele chainen er root-owned uden
+group/world-write eller extended POSIX ACL. Windows kræver et elevated token og
+en replay-ledger under `Program Files`, hvor native owner/DACL kun giver
+write/control til trusted host-admin principals. Ordinary ModelRig service-
+identiteter er dermed ikke replay-state writers.
 
 Caller-ejede signed value-objekter og den host-resolved verifier snapshots til
-exact-type canonical values. Production Git execution bruger **ikke** længere en
+exact-type canonical values. Production Git execution bruger heller ikke en
 same-user `0700` transaction-copy som authority: public consume kræver en exact
-`TrustedGitRuntime`, hvis tree og ancestor chain er host-admin-kontrolleret
-(POSIX root-owned/no group-world write; Windows Program Files + owner/DACL), og
+`TrustedGitRuntime`, hvis tree og ancestor chain er host-admin-kontrolleret, og
 kører kun den bounded `main`-observation gennem en restricted Git-reader. Den
-private underscore-testseam kan fortsat bruge transaction-private staging til
-deterministiske regressions, men er ikke production authority.
+private underscore-testseam kan fortsat bruge transaction-private runtime og
+ledger state til deterministiske regressions, men er ikke production authority.
 
 Replay-marker og final receipt beholder deres originale create-once
 descriptors/fil-identiteter gennem provenance-registration. Live provenance
 binder exact receipt identity, PID, receipt-SHA, exact bytes og metadata history;
-durable mismatch revokerer monotont, mens ren in-memory content mutation kun er
-midlertidigt invalid. På Linux bindes ledger-rooten **og hele dens eksisterende
-ancestor-kæde** til watch-before-trust inotify-history før directory-identiteter
-accepteres som provenance. Parent-directory watches filtreres på exact beskyttet
-child-navn; relevant rename/create/delete, parent self-move/delete/unmount,
-ignored watch eller queue overflow fejler lukket, mens unrelated sibling-churn
-ignoreres. Setup-only metadata-stamps bevares som defense-in-depth, men den
-adversarial regression neutraliserer stamp-signalet og kræver stadig, at
-rename→restore efter watch-arming opdages via queued inotify-history. Public
-production-facaden fejler aktuelt lukket på non-Linux POSIX; den private
-lower-level kqueue-kode er ikke production authority i denne revision. Både
-ledger-root- og ancestor-rename→replay→restore kan derfor ikke genoplive et
-gammelt receipt på den understøttede Linux production-path. Outer
-transaction-failure revokerer allerede registreret provenance før en traceback
-bliver caller-visible.
+durable mismatch revokerer monotont. File- og directory-provenance deler én
+fork-safe re-entrant registry lock, så concurrent registration, authentication,
+weakref cleanup og transaction-revocation ikke kan skabe stale-true authority.
 
-Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
-som authenticated authority. Replay-scope er eksplicit host-local
-(`host_replay_guard_committed=true`, `global_replay_safe=false`). Persistent
-frozen `main`, campaign-start, pilot, publication og activation forbliver
-separate authority-gates.
+På Linux bindes ledger-rooten **og hele dens eksisterende ancestor-kæde** til
+watch-before-trust inotify-history før directory-identiteter accepteres som
+provenance. Parent-directory watches filtreres på exact beskyttet child-navn;
+relevant rename/create/delete, parent self-move/delete/unmount, ignored watch
+eller queue overflow fejler lukket, mens unrelated sibling-churn ignoreres.
+Public production-facaden fejler aktuelt lukket på non-Linux POSIX, fordi kqueue
+ikke kan etablere samme exact watch-before-trust setup.
+
+Durable ledger-bytes er kun replay/recovery-state og kan ikke reloades som
+authenticated authority. `host_replay_guard_committed=true` betyder, at en
+create-once marker blev durably committed i den canonical host-admin-ledger ved
+transactionen; schemaet lover eksplicit **ikke** rollback resistance mod en
+kompromitteret root/host-administrator principal. Replay-scope er host-local og
+`global_replay_safe=false`. Persistent frozen `main`, campaign-start, pilot,
+publication og activation forbliver separate authority-gates.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
