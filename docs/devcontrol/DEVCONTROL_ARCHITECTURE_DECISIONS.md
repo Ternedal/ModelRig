@@ -111,55 +111,43 @@ Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDA
 
 **Dato 12/09-2026. Status: foreslået til beslutning.**
 
-Gør request-reservation til én authenticated host-local transaction med en
-caller-uafhængig Ed25519 trust-root og en separat host-admin replay-state
-boundary. Public consume accepterer ikke verifier/keyring, observation, clock
-eller authority-paths; produktion resolver en fast host-admin-kontrolleret
-request-keyring og fejler lukket ved manglende, malformed, wrong-domain eller
-unsafe trust state.
+Gør request-reservation til én authenticated host-local transaction med
+caller-uafhængig Ed25519 trust-root, elevated host-operator replay-state,
+host-admin-kontrolleret Git runtime **og et separat host-admin-kontrolleret Git
+metadata-target**. Public consume accepterer ikke verifier/keyring, observation,
+clock, ledger/root paths eller prebuilt receipt.
 
-Selve production consume er en **elevated physical host-operator operation**, ikke
-produkt-runtime. POSIX kræver effektiv UID 0 og en pre-provisioned replay-ledger
-under `/var/lib/modelrig/devcontrol/`, hvor hele chainen er root-owned uden
-group/world-write eller extended POSIX ACL. Windows kræver et elevated token og
-en replay-ledger under `Program Files`, hvor native owner/DACL kun giver
-write/control til trusted host-admin principals. Ordinary ModelRig service-
-identiteter er dermed ikke replay-state writers.
+POSIX host-control er ACL-aware: keyring, runtime, repository-target og replay
+state skal være root-owned, uden group/world-write og uden extended POSIX
+access/default ACLs. Windows bruger Program Files + native owner/DACL evidence,
+hvor ordinary/broad principals ikke må have write/control authority.
 
-Caller-ejede signed value-objekter og den host-resolved verifier snapshots til
-exact-type canonical values. Production Git execution bruger heller ikke en
-same-user `0700` transaction-copy som authority: public consume kræver en exact
-`TrustedGitRuntime`, hvis tree og ancestor chain er host-admin-kontrolleret.
-Authority-pathen launcher kun den attesterede Git executable direkte for den
-restricted `rev-parse`-observation og relauncher ikke den generelle Linux
-`bounded_subprocess.py` package-supervisor efter runtime-attestation. Readet er
-fortsat no-shell, timeout/output-bounded og runtime re-attesteres efter execution.
-Den private underscore-testseam kan fortsat bruge transaction-private runtime og
-ledger state til deterministiske regressions, men er ikke production authority.
+Production Git-readet tillader kun `rev-parse --verify refs/heads/main^{commit}`.
+Authority-pathen launcher den attesterede Git executable direkte og relauncher
+ikke den generelle `bounded_subprocess.py` package-supervisor. Den beskytter også
+observationens target: checkout-root/ancestor-chain og hele `.git` metadata-treeet
+skal være host-admin-kontrolleret før og efter readet. Linked/common Git dirs,
+external object alternates og local config `include`/`includeIf` fejler lukket,
+så en beskyttet executable ikke kan omdirigeres til caller-writable Git state.
+Det beskytter **ikke** alle tracked worktree bytes og er derfor ikke et frozen-
+main proof.
 
-Replay-marker og final receipt beholder deres originale create-once
-descriptors/fil-identiteter gennem provenance-registration. Live provenance
-binder exact receipt identity, PID, receipt-SHA, exact bytes og metadata history;
-durable mismatch revokerer monotont. File- og directory-provenance deler én
-fork-safe re-entrant registry lock, så concurrent registration, authentication,
-weakref cleanup og transaction-revocation ikke kan skabe stale-true authority.
+Production replay-ledgeren er fast og pre-provisioned. POSIX kræver effektiv UID
+0; Windows kræver elevated token. Ordinary ModelRig service-identiteter er ikke
+replay-state writers. `host_replay_guard_committed=true` beskriver kun den
+canonical host-admin-ledger; kompromitteret root/host-admin og distributed/global
+one-time use er eksplicit uden for garantien, og `global_replay_safe=false`.
 
-På Linux bindes ledger-rooten **og hele dens eksisterende ancestor-kæde** til
-watch-before-trust inotify-history før directory-identiteter accepteres som
-provenance. Parent-directory watches filtreres på exact beskyttet child-navn;
-relevant rename/create/delete, parent self-move/delete/unmount, ignored watch
-eller queue overflow fejler lukket, mens unrelated sibling-churn ignoreres.
-History drænes både før og **efter** ancestry identity-validation, så en
-rename→restore-event queued under stat-runden ikke kan give ét stale-true receipt.
-Public production-facaden fejler aktuelt lukket på non-Linux POSIX, fordi kqueue
-ikke kan etablere samme exact watch-before-trust setup.
+Replay-marker/final beholder original-publication descriptors, og live provenance
+binder receipt identity, PID, digest, durable file identity og Linux directory
+history. Linux bruger watch-before-trust på hele ledger ancestry med history-drain
+både før og efter identity-validation; non-Linux POSIX production fejler aktuelt
+lukket frem for at overclaim'e tilsvarende race-free semantics.
 
-Durable ledger-bytes er kun replay/recovery-state og kan ikke reloades som
-authenticated authority. `host_replay_guard_committed=true` betyder, at en
-create-once marker blev durably committed i den canonical host-admin-ledger ved
-transactionen; schemaet lover eksplicit **ikke** rollback resistance mod en
-kompromitteret root/host-administrator principal. Replay-scope er host-local og
-`global_replay_safe=false`. Persistent frozen `main`, campaign-start, pilot,
-publication og activation forbliver separate authority-gates.
+Reservationen er fortsat evidence-only: `frozen_main_confirmed=false`,
+`physical_campaign_completed=false`, `campaign_start_authorized=false`,
+`pilot_go_authorized=false`, `remote_publication_authorized=false` og
+`activation_authorized=false`. Persistent freeze, fysisk campaign-admission,
+pilot, publication og activation forbliver separate authority-gates.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
