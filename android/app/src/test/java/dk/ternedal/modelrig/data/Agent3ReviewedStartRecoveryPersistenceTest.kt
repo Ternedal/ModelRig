@@ -52,7 +52,7 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun `stale completion cannot clear identical authority with a newer reservation generation`() {
+    fun `newer generation read cannot let stale completion clear reused authority`() {
         val rig = "https://aba-rig-${System.nanoTime()}.example"
         val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
         val store = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
@@ -77,11 +77,14 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
         assertTrue(prefs.edit().remove(key).commit())
         assertTrue(prefs.edit().putString(key, replacementEnvelope).commit())
 
+        // Even if the newer durable slot is observed before the stale callback
+        // completes, first-origin-wins must preserve the old clear authority.
+        assertEquals(authority, store.read(rig))
         assertFalse(store.clearIfMatches(rig, authority))
         assertEquals(replacementEnvelope, prefs.getString(key, null))
 
-        // Once this process explicitly reads the newer generation it owns that
-        // exact envelope and can clear it normally.
+        // The mismatch drops only the stale in-memory origin. A fresh explicit
+        // read can then bind the newer generation and clear that exact slot.
         assertEquals(authority, store.read(rig))
         assertTrue(store.clearIfMatches(rig, authority))
         assertNull(prefs.getString(key, null))
