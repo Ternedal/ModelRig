@@ -89,6 +89,36 @@ class ReadReviewStore:
         if changed != 1:
             raise ReadReviewError("read review is not enabled for this run")
 
+    def clear_waiting_if_matches(
+        self,
+        run_id: str,
+        *,
+        expected_completed_step_id: str | None = None,
+    ) -> bool:
+        """Clear only checkpoint authority that still belongs to this run/step."""
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                if expected_completed_step_id is None:
+                    changed = self._conn.execute(
+                        "UPDATE agent_read_reviews SET waiting=0,window_start=NULL,window_end=NULL,"
+                        "removable_step_ids='[]',completed_step_id=NULL,completed_tool=NULL,updated_at=? "
+                        "WHERE run_id=? AND waiting=1",
+                        (time.time(), run_id),
+                    ).rowcount
+                else:
+                    changed = self._conn.execute(
+                        "UPDATE agent_read_reviews SET waiting=0,window_start=NULL,window_end=NULL,"
+                        "removable_step_ids='[]',completed_step_id=NULL,completed_tool=NULL,updated_at=? "
+                        "WHERE run_id=? AND waiting=1 AND completed_step_id=?",
+                        (time.time(), run_id, expected_completed_step_id),
+                    ).rowcount
+                self._conn.commit()
+                return changed == 1
+            except Exception:
+                self._conn.rollback()
+                raise
+
     def resume(
         self,
         run_id: str,
@@ -312,6 +342,59 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             end += 1
         return (start, end) if end > start else None
 
+    def _publish_read_review_checkpoint(
+        self,
+        run: AgentRun,
+        *,
+        completed: AgentStep,
+        start: int,
+        end: int,
+        removable_ids: list[str],
+        recovered: bool,
+    ) -> AgentRun | None:
+        """Publish checkpoint only while the exact RUNNING snapshot remains authority.
+
+        The review row lives in a second SQLite database, so publication cannot
+        be one cross-store transaction. We make the review row durable first
+        (fail-closed on crash), then use the run payload as a CAS publication
+        fence. If Cancel wins that fence, only the checkpoint we just installed
+        is removed and the durable CANCELLED run is returned.
+        """
+        expected_payload = run.to_json()
+        self.review_store.set_waiting(
+            run.id,
+            completed_step_id=completed.id,
+            completed_tool=completed.tool,
+            window_start=start,
+            window_end=end,
+            removable_step_ids=removable_ids,
+        )
+        payload = {
+            "completed_step_id": completed.id,
+            "completed_tool": completed.tool,
+            "window_start": start,
+            "window_end": end,
+            "removable_step_ids": removable_ids,
+        }
+        if recovered:
+            payload["recovered"] = True
+        if self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.RUNNING,
+            expected_payload=expected_payload,
+            kind="replan_review_required",
+            payload=payload,
+        ):
+            return None
+
+        self.review_store.clear_waiting_if_matches(
+            run.id, expected_completed_step_id=completed.id
+        )
+        fresh = self._require(run.id)
+        if fresh.state == RunState.CANCELLED:
+            return fresh
+        raise RunConflict("run changed while read review checkpoint was being published")
+
     def recover_read_review_checkpoint_if_due(self, run_id: str) -> AgentRun | None:
         """Rebuild a reviewed-read checkpoint lost in a cross-store crash gap.
 
@@ -360,26 +443,23 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
 
         start, end = window
         removable_ids = [item.id for item in run.steps[start:end]]
-        self.review_store.set_waiting(
-            run.id,
-            completed_step_id=completed.id,
-            completed_tool=completed.tool,
-            window_start=start,
-            window_end=end,
-            removable_step_ids=removable_ids,
+        conflict = self._publish_read_review_checkpoint(
+            run,
+            completed=completed,
+            start=start,
+            end=end,
+            removable_ids=removable_ids,
+            recovered=True,
         )
-        self.store.event(
-            run.id,
-            "replan_review_required",
-            {
-                "completed_step_id": completed.id,
-                "completed_tool": completed.tool,
-                "window_start": start,
-                "window_end": end,
-                "removable_step_ids": removable_ids,
-                "recovered": True,
-            },
-        )
+        return conflict if conflict is not None else run
+
+    def cancel(self, run_id: str) -> AgentRun:
+        run = super().cancel(run_id)
+        if run.state == RunState.CANCELLED:
+            # A terminal stop owns authority over any older human-read checkpoint.
+            # This also closes the opposite ordering where checkpoint publication
+            # linearizes immediately before a concurrent Cancel.
+            self.review_store.clear_waiting_if_matches(run.id)
         return run
 
     def advance(
@@ -511,26 +591,15 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                 if window is not None:
                     start, end = window
                     removable_ids = [item.id for item in run.steps[start:end]]
-                    self.review_store.set_waiting(
-                        run.id,
-                        completed_step_id=step.id,
-                        completed_tool=step.tool,
-                        window_start=start,
-                        window_end=end,
-                        removable_step_ids=removable_ids,
+                    conflict = self._publish_read_review_checkpoint(
+                        run,
+                        completed=step,
+                        start=start,
+                        end=end,
+                        removable_ids=removable_ids,
+                        recovered=False,
                     )
-                    self.store.event(
-                        run.id,
-                        "replan_review_required",
-                        {
-                            "completed_step_id": step.id,
-                            "completed_tool": step.tool,
-                            "window_start": start,
-                            "window_end": end,
-                            "removable_step_ids": removable_ids,
-                        },
-                    )
-                    return run
+                    return conflict if conflict is not None else run
 
         expected_payload = run.to_json()
         answer = self.answerer(run)
