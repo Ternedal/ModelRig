@@ -1,8 +1,11 @@
 package dk.ternedal.modelrig.desktop.data
 
+import dk.ternedal.modelrig.desktop.Agent3DevConnectionBinding
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -14,12 +17,13 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun authoritySurvivesDatabaseReopenAndRemainsRigScoped() {
+    fun authoritySurvivesDatabaseReopenAndRemainsRigAndCredentialScoped() {
         val dbPath = Files.createTempFile("modelrig-reviewed-start-", ".db").toString()
         val rigA = "https://rig-a.example:8443/"
         val rigB = "https://rig-b.example:8443"
         val encoded = "{\"schema\":\"test-authority\"}"
 
+        assertNotNull(Agent3DevConnectionBinding.capture(rigA, "token-a"))
         DesktopChatDb(dbPath, TestProtector).use { db ->
             val store = Agent3ReviewedStartRecoveryStore(db)
             assertTrue(store.write(rigA, encoded))
@@ -29,6 +33,14 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
             val store = Agent3ReviewedStartRecoveryStore(reopened)
             assertEquals(encoded, store.read("https://rig-a.example:8443"))
             assertNull(store.read(rigB))
+
+            assertNotNull(Agent3DevConnectionBinding.capture(rigA, "token-b"))
+            val mismatched = store.read(rigA)
+            assertNotNull(mismatched)
+            assertNotEquals(encoded, mismatched)
+
+            assertNotNull(Agent3DevConnectionBinding.capture(rigA, "token-a"))
+            assertEquals(encoded, store.read(rigA))
             assertTrue(store.write(rigA, null))
         }
 
