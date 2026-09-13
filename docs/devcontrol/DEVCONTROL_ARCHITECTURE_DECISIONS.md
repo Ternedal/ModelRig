@@ -120,7 +120,9 @@ platform-specifikt: POSIX kræver root ownership og ikke-writable directory-chai
 og Windows kræver native owner/DACL-evidence uden write/control grants til
 almindelige eller brede principals. Det tidligere non-underscored reservation-
 compatibility-modul er fjernet, så production trust-root ikke kan omgås gennem
-forwarded functions eller compatibility-module traversal.
+forwarded functions eller compatibility-module traversal. Den eksplicit private
+underscore-testseam er ikke en public authority-kontrakt; beslutningen påstår
+ikke isolation mod vilkårligt kompromitteret same-process Python-kode.
 
 Caller-ejede signed value-objekter og den host-resolved verifier kopieres til
 exact-type canonical snapshots før authority-brug. Den caller-leverede
