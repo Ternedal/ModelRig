@@ -50,6 +50,26 @@ def _seed_sqlite(path: str, key: str) -> None:
             "INSERT INTO docs (body) VALUES (?)",
             [("chunk %d" % i,) for i in range(200)],
         )
+    elif key == backup.AGENT3_RUNS_KEY:
+        con.execute(
+            "CREATE TABLE agent_runs ("
+            "id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
+        )
+        con.execute(
+            "INSERT INTO agent_runs(id,state,payload,updated_at) VALUES(?,?,?,?)",
+            ("backup-run", "running", "{}", 1.0),
+        )
+    elif key == backup.AGENT3_EXECUTION_PROGRESS_KEY:
+        con.execute(
+            "CREATE TABLE agent_execution_starts ("
+            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+            "started_at REAL NOT NULL, PRIMARY KEY(run_id,step_index,step_sha256))"
+        )
+        con.execute(
+            "INSERT INTO agent_execution_starts(run_id,step_index,step_sha256,started_at) "
+            "VALUES(?,?,?,?)",
+            ("backup-run", 0, "a" * 64, 1.0),
+        )
     else:
         con.execute("CREATE TABLE state (name TEXT PRIMARY KEY, value TEXT)")
         con.execute("INSERT INTO state(name, value) VALUES (?, ?)", (key, "seeded"))
@@ -101,20 +121,33 @@ def wipe():
             shutil.rmtree(it.path)
 
 
-def archive_with_schema(source: str, destination: str, schema: int, drop_keys=()) -> None:
+def archive_with_schema(
+    source: str,
+    destination: str,
+    schema: int,
+    drop_keys=(),
+    replace_files=None,
+) -> None:
     """Copy an archive while changing manifest.schema and optionally dropping keys."""
     drop_keys = set(drop_keys)
+    replace_files = dict(replace_files or {})
     with tarfile.open(source, "r:gz") as src, tarfile.open(destination, "w:gz") as dst:
         for member in src.getmembers():
             if member.name.startswith("data/") and member.name.removeprefix("data/") in drop_keys:
                 continue
             extracted = src.extractfile(member)
             data = extracted.read() if extracted else b""
+            data_key = member.name.removeprefix("data/") if member.name.startswith("data/") else None
+            if data_key in replace_files:
+                data = replace_files[data_key]
             if member.name == "manifest.json":
                 manifest = json.loads(data)
                 manifest["schema"] = schema
                 for key in drop_keys:
                     manifest["files"].pop(key, None)
+                for key, replacement in replace_files.items():
+                    if key in manifest["files"]:
+                        manifest["files"][key]["sha256"] = hashlib.sha256(replacement).hexdigest()
                 data = json.dumps(manifest, indent=2, sort_keys=True).encode()
             replacement = tarfile.TarInfo(member.name)
             replacement.size = len(data)
@@ -206,6 +239,33 @@ except ValueError:
     check(True, "restore: unsafe legacy Agent3 archive is refused")
 check(snapshot() == pre_unsafe_restore, "restore: unsafe legacy refusal writes NOTHING")
 
+# A sidecar whose bytes hash correctly but which is not the execution-authority
+# SQLite schema must still fail verification. Hashes prove transport integrity,
+# not authority semantics.
+invalid_progress = os.path.join(_root, "invalid-execution-progress.tar.gz")
+archive_with_schema(
+    archive,
+    invalid_progress,
+    3,
+    replace_files={backup.AGENT3_EXECUTION_PROGRESS_KEY: b""},
+)
+invalid_progress_verify = backup.verify(invalid_progress)
+check(
+    not invalid_progress_verify["ok"],
+    "verify: empty execution-progress sidecar is refused even when its manifest hash matches",
+)
+check(
+    any("execution-progress authority" in problem for problem in invalid_progress_verify["problems"]),
+    "verify: invalid execution-progress sidecar names the authority failure",
+)
+pre_invalid_restore = snapshot()
+try:
+    backup.restore(invalid_progress, force=True)
+    check(False, "restore: invalid execution-progress authority is refused")
+except ValueError:
+    check(True, "restore: invalid execution-progress authority is refused")
+check(snapshot() == pre_invalid_restore, "restore: invalid authority refusal writes NOTHING")
+
 future = os.path.join(_root, "unsupported-schema.tar.gz")
 archive_with_schema(archive, future, 999)
 try:
@@ -274,14 +334,50 @@ except FileExistsError:
 forced = backup.restore(archive, force=True)
 check(len(forced["restored"]) == len(before), "restore --force: overwrites cleanly")
 
-# A run database without its execution authority must never produce a new backup.
+# A malformed execution sidecar must be refused before a backup is created.
 wipe()
+_seed_sqlite(runs_item.path, runs_item.key)
+os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
+with open(progress_item.path, "wb") as f:
+    f.write(b"")
+try:
+    backup.create(os.path.join(_root, "invalid-progress-create"))
+    check(False, "create: invalid execution-progress authority is refused")
+except ValueError:
+    check(True, "create: invalid execution-progress authority is refused")
+wipe()
+
+# A non-empty run database without its execution authority must never produce a new backup.
 _seed_sqlite(runs_item.path, runs_item.key)
 try:
     backup.create(os.path.join(_root, "missing-progress"))
     check(False, "create: Agent3 runs without execution-progress sidecar are refused")
 except ValueError:
     check(True, "create: Agent3 runs without execution-progress sidecar are refused")
+wipe()
+
+# Legacy schema 1/2 archives may legitimately contain an initialized but empty
+# Agent3 run store: no execution has crossed the boundary, so no progress
+# sidecar authority exists yet and no replay risk is introduced.
+os.makedirs(os.path.dirname(runs_item.path), exist_ok=True)
+con = sqlite3.connect(runs_item.path)
+con.execute(
+    "CREATE TABLE agent_runs ("
+    "id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
+)
+con.commit()
+con.close()
+empty_runs_archive = backup.create(os.path.join(_root, "empty-agent3-runs"))
+check(
+    backup.verify(empty_runs_archive)["ok"],
+    "create: initialized empty Agent3 run store does not require a progress sidecar",
+)
+legacy_empty_runs = os.path.join(_root, "legacy-schema-2-empty-agent3-runs.tar.gz")
+archive_with_schema(empty_runs_archive, legacy_empty_runs, 2)
+check(
+    backup.verify(legacy_empty_runs)["ok"],
+    "schema: legacy empty Agent3 run store remains compatible without a progress sidecar",
+)
 wipe()
 
 # An empty rig is still a valid backup.
