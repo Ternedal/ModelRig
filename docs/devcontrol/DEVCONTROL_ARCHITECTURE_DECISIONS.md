@@ -223,3 +223,23 @@ forbliver separate gates. Ingen Git/GitHub write, merge, publication, release,
 deploy eller activation autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-012_RSI_EXACT_RUNNER_EXECUTION_BINDING.md`
+
+## ADR-DC-013 — Live continuous `main` freeze over one physical campaign
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Lukker kun `continuous_main_freeze_confirmation` med en live, process-local
+watch-before-observe lease, der skal være armet før exact runner execution og
+forblive aktiv gennem evidence + execution-binding. Linux bruger `inotify` og
+Windows overlapped `ReadDirectoryChangesW`; ref mutation→revert, queue/watch loss
+og path replacement fejler lukket.
+
+Files-ref backend overvåges via exact `main`/`main.lock`,
+`packed-refs`/`packed-refs.lock`, config og Git-path ancestry. Reftable,
+linked/common Git dirs og symbolic main er ikke understøttet og fejler lukket.
+
+Successful proof er kun `verified-continuous-main-freeze-only`; DC-L15 completion,
+independent human verdict og pilot GO forbliver separate. Ingen merge,
+publication, release, deploy eller activation autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-013_RSI_CONTINUOUS_MAIN_FREEZE.md`
