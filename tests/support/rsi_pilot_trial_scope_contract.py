@@ -133,6 +133,13 @@ def run_contract() -> None:
     assert conditional.local_commits_allowed is True
     assert conditional.pilot_start_authorized is False
 
+    stripped = conditional.to_dict()
+    stripped["decision_notes"] = []
+    _expect(
+        "conditional GO must preserve explicit decision notes",
+        lambda: scope.PilotTrialScopeProof.from_mapping(stripped),
+    )
+
     narrowed = _project(
         _proof(local_commits_allowed=True),
         local_commits_requested=False,
