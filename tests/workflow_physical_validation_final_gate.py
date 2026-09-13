@@ -351,7 +351,8 @@ case "$1" in
         ;;
     rev-parse)
         if [ "$2" = "--verify" ]; then
-            cat .modelrig-main-sha
+            IFS= read -r main_sha < .modelrig-main-sha || exit 7
+            printf '%s\n' "$main_sha"
         else
             exit 8
         fi
