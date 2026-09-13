@@ -526,6 +526,27 @@ def reservation_contract() -> None:
         assert consumed.pilot_go_authorized is False
         assert consumed.activation_authorized is False
         assert consumed.remote_publication_authorized is False
+
+        # Provenance is bound to the exact authenticated canonical contents. A
+        # frozen dataclass can still be attacked with object.__setattr__; changing
+        # even one valid-looking field must immediately invalidate provenance.
+        authenticated_request_sha = consumed.request_sha256
+        object.__setattr__(consumed, "request_sha256", "0" * 64)
+        assert consumed.transaction_authenticated is False
+        object.__setattr__(consumed, "request_sha256", authenticated_request_sha)
+        assert consumed.transaction_authenticated is True
+
+        # POSIX fork inherits Python memory, so inherited registry/object identity
+        # must not inherit authority. Parent provenance remains intact afterwards.
+        child_pid = os.fork()
+        if child_pid == 0:
+            os._exit(0 if consumed.transaction_authenticated is False else 1)
+        waited_pid, child_status = os.waitpid(child_pid, 0)
+        assert waited_pid == child_pid
+        assert os.WIFEXITED(child_status)
+        assert os.WEXITSTATUS(child_status) == 0
+        assert consumed.transaction_authenticated is True
+
         parsed = PhysicalQualificationReservation.from_mapping(consumed.to_dict())
         assert parsed.canonical_json() == consumed.canonical_json()
         assert parsed.transaction_authenticated is False
