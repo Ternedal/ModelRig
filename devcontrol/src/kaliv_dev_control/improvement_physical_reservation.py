@@ -27,9 +27,15 @@ from ._improvement_physical_reservation_directory_provenance import (
 from ._improvement_physical_reservation_directory_arming import (
     install_directory_history_arming_guard,
 )
+from ._improvement_physical_reservation_directory_postcheck import (
+    install_directory_history_postcheck_guard,
+)
 from ._improvement_physical_runtime_host_control import (
     PhysicalHostRuntimeError,
     install_host_controlled_physical_runtime_boundary,
+)
+from ._improvement_physical_runtime_direct_git import (
+    install_direct_host_controlled_git_process,
 )
 from ._improvement_physical_state_host_control import (
     PhysicalHostStateError,
@@ -37,13 +43,17 @@ from ._improvement_physical_state_host_control import (
 )
 from . import _improvement_physical_reservation_impl as _implementation
 
-# Install original-file provenance first, then directory-history provenance and
-# the Linux watch-before-trust arming guard. Production Git execution is finally
-# narrowed to an administrator-controlled runtime tree before exposing authority.
+# Install original-file provenance first, then watch-before-trust directory
+# history plus the post-validation history drain that closes the drain→stat
+# race. Production Git execution is then narrowed to an administrator-controlled
+# runtime and its sole authority-bearing Git read is switched to the direct
+# in-memory process path so no ordinary ModelRig package file is relaunched.
 install_descriptor_bound_provenance(_implementation)
 install_directory_history_provenance(_implementation)
 install_directory_history_arming_guard()
+install_directory_history_postcheck_guard()
 install_host_controlled_physical_runtime_boundary(_implementation)
+install_direct_host_controlled_git_process()
 # The old convenience wrapper accepted a caller-selected verifier. The loaded
 # implementation retains only the explicitly private injectable transaction.
 if hasattr(_implementation, "consume_physical_qualification_request_once"):
