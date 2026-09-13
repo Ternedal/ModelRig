@@ -133,15 +133,17 @@ Replay-marker og final receipt beholder deres originale create-once
 descriptors/fil-identiteter gennem provenance-registration. Live provenance
 binder exact receipt identity, PID, receipt-SHA, exact bytes og metadata history;
 durable mismatch revokerer monotont, mens ren in-memory content mutation kun er
-midlertidigt invalid. På POSIX bindes desuden den oprindelige ledger-root
-directory object identity til et kernel-event history monitor, armet før første
-permanente publication. Linux bruger inotify self-move/delete/unmount history;
-BSD-style POSIX bruger kqueue vnode rename/delete/revoke, hvor tilgængeligt.
-Whole-ledger rename→replay→restore kan derfor ikke genoplive et gammelt receipt,
-mens unrelated sibling-directory churn under samme host-state parent ikke
-revokerer den. Unsupported POSIX exact history monitoring fejler lukket.
-Outer transaction-failure revokerer allerede registreret provenance før en
-traceback bliver caller-visible.
+midlertidigt invalid. På POSIX bindes ledger-rooten **og hele dens eksisterende
+ancestor-kæde** til kernel-event history før første permanente publication.
+Linux bruger én inotify-instance med parent-directory watches og exact child-name
+filtrering pr. ancestry-led; flyt/slet af den beskyttede ledger-path eller en
+ancestor, parent self-move/delete/unmount, ignored watch eller queue overflow
+fejler lukket. BSD-style POSIX bruger kqueue vnode rename/delete/revoke på hvert
+retained directory-object, hvor tilgængeligt. Både ledger-root- og
+ancestor-rename→replay→restore kan derfor ikke genoplive et gammelt receipt,
+mens unrelated sibling-entry churn fortsat ikke revokerer den. Unsupported POSIX
+exact directory-chain history monitoring fejler lukket. Outer transaction-failure
+revokerer allerede registreret provenance før en traceback bliver caller-visible.
 
 Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
 som authenticated authority. Replay-scope er eksplicit host-local
