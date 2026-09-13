@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.desktop.data.Agent3ReviewedStartRecoveryReservation
 import dk.ternedal.modelrig.desktop.data.Agent3ReviewedStartRecoveryStore
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
 import dk.ternedal.modelrig.desktop.net.Agent3Client
@@ -180,11 +181,12 @@ fun Agent3ReviewDevApp() {
             envelope: dk.ternedal.modelrig.desktop.net.Agent3RunEnvelope,
             connection: Agent3DevConnectionBinding,
             authority: Agent3ReviewedStartRecoveryAuthority,
+            reservation: Agent3ReviewedStartRecoveryReservation,
         ) {
             // Resolve only rig A's durable record first. A completion for rig A
             // must never overwrite the in-memory recovery authority currently
             // shown for rig B after the operator edits the connection fields.
-            val cleared = recoveryStore.clearIfMatches(connection.baseUrl, authority.encode())
+            val cleared = recoveryStore.clearIfMatches(connection.baseUrl, reservation)
             if (!Agent3DevInteractionPolicy.canPublishForConnection(connection, currentConnectionOrNull())) {
                 return
             }
@@ -204,10 +206,11 @@ fun Agent3ReviewDevApp() {
             failure: Throwable,
             connection: Agent3DevConnectionBinding,
             authority: Agent3ReviewedStartRecoveryAuthority,
+            reservation: Agent3ReviewedStartRecoveryReservation,
         ) {
             val detail = failure.message ?: "Planen kunne ikke startes"
             if (!shouldRetainReviewedStartRecovery(failure)) {
-                val cleared = recoveryStore.clearIfMatches(connection.baseUrl, authority.encode())
+                val cleared = recoveryStore.clearIfMatches(connection.baseUrl, reservation)
                 if (!Agent3DevInteractionPolicy.canPublishForConnection(connection, currentConnectionOrNull())) {
                     return
                 }
@@ -239,9 +242,10 @@ fun Agent3ReviewDevApp() {
                     error = it.message ?: "Forbindelsen er ugyldig"
                     return
                 }
-            val raw = recoveryStore.read(connection.baseUrl)
+            val reservation = recoveryStore.readReservation(connection.baseUrl)
+            val raw = reservation?.encodedAuthority ?: recoveryStore.read(connection.baseUrl)
             val authority = Agent3ReviewedStartRecoveryAuthority.decode(raw)
-            if (authority == null) {
+            if (authority == null || reservation == null) {
                 pendingStartRecovery = null
                 startRecoveryUnresolved = Agent3ReviewedStartRecoveryAuthority.hasUnresolvedRecord(raw)
                 error = if (startRecoveryUnresolved) {
@@ -266,8 +270,8 @@ fun Agent3ReviewDevApp() {
                     }
                 }
                 busy = false
-                result.onSuccess { publishReviewedStart(it, connection, authority) }
-                    .onFailure { publishReviewedStartFailure(it, connection, authority) }
+                result.onSuccess { publishReviewedStart(it, connection, authority, reservation) }
+                    .onFailure { publishReviewedStartFailure(it, connection, authority, reservation) }
             }
         }
 
@@ -310,7 +314,7 @@ fun Agent3ReviewDevApp() {
                 error = "Det reviewede preview kunne ikke bindes til en sikker Start-recovery."
                 return
             }
-            if (!recoveryStore.reserve(connection.baseUrl, authority.encode())) {
+            val reservation = recoveryStore.reserve(connection.baseUrl, authority.encode()) ?: run {
                 error = "Start blev ikke sendt, fordi recovery-authority ikke kunne gemmes sikkert lokalt."
                 return
             }
@@ -330,8 +334,8 @@ fun Agent3ReviewDevApp() {
                     }
                 }
                 busy = false
-                result.onSuccess { publishReviewedStart(it, connection, authority) }
-                    .onFailure { publishReviewedStartFailure(it, connection, authority) }
+                result.onSuccess { publishReviewedStart(it, connection, authority, reservation) }
+                    .onFailure { publishReviewedStartFailure(it, connection, authority, reservation) }
             }
         }
 

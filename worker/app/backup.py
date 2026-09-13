@@ -13,6 +13,7 @@ The backup inventory follows the current 2.x persistent stores:
   jobs.db                      async job state
   schedules.db                 schedules + scheduler approval-use state
   agent3-*.db                  Agent 3 runs/reviews/replans/memory/plans/approvals
+  agent3-execution-progress.db   monotonic Agent 3 execution-start authority
   home-rig-*.db/data-sharing   home-rig pilot authorization/audit state
   notes/                       what note_append wrote
 
@@ -20,10 +21,11 @@ WHAT IS NOT INCLUDED: model weights (re-pullable via Ollama), Piper voices,
 repository files, modelrig.env, API keys, approval secrets or other credentials.
 Those are installation/configuration inputs, not portable data archives.
 
-Schema 1 is the original V7 inventory. Schema 2 is the current 2.x inventory.
-New code accepts both so old backups remain restorable; new archives use schema
-2 so old code fails closed instead of accepting an archive whose newer keys it
-would silently skip.
+Schema 1 is the original V7 inventory. Schema 2 expanded the 2.x inventory.
+Schema 3 binds Agent 3 run state to its independent monotonic execution-progress
+sidecar. Older schemas remain parseable, but any archive containing only one half
+of that authority pair is invalid and restore fails closed. New archives use
+schema 3 so old code cannot silently skip the newer authority key.
 
 The manifest records a schema version and every stored file's sha256, so a
 restore can refuse a corrupt or truncated archive instead of writing half of one
@@ -49,13 +51,30 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-BACKUP_SCHEMA = 2
-SUPPORTED_BACKUP_SCHEMAS = frozenset({1, BACKUP_SCHEMA})
+BACKUP_SCHEMA = 3
+SUPPORTED_BACKUP_SCHEMAS = frozenset({1, 2, BACKUP_SCHEMA})
 
 # Resolve paths exactly like the worker. Relative defaults are anchored under
 # the stable Kaliv data root; explicit env overrides continue to win.
 from . import paths as _paths  # noqa: E402
 from . import tools as _tools  # noqa: E402
+from .agent3.core import agent3_execution_progress_path  # noqa: E402
+
+
+AGENT3_RUNS_KEY = "agent3-runs.db"
+AGENT3_EXECUTION_PROGRESS_KEY = "agent3-execution-progress.db"
+
+
+def _agent3_authority_pair_problem(keys: set[str]) -> str | None:
+    has_runs = AGENT3_RUNS_KEY in keys
+    has_progress = AGENT3_EXECUTION_PROGRESS_KEY in keys
+    if has_runs == has_progress:
+        return None
+    missing = AGENT3_EXECUTION_PROGRESS_KEY if has_runs else AGENT3_RUNS_KEY
+    return (
+        "Agent 3 run state and monotonic execution-progress authority must be "
+        f"backed up/restored together; missing {missing}"
+    )
 
 
 @dataclass
@@ -138,6 +157,16 @@ def items() -> list[Item]:
         ),
     ]
     out = [Item(key, _resolved(default, env), "file", required=False) for key, default, env in files]
+    run_index = next(i for i, item in enumerate(out) if item.key == AGENT3_RUNS_KEY)
+    out.insert(
+        run_index + 1,
+        Item(
+            AGENT3_EXECUTION_PROGRESS_KEY,
+            agent3_execution_progress_path(out[run_index].path),
+            "file",
+            required=False,
+        ),
+    )
     out.insert(1, Item("data.json", _backend_data(), "file", required=False))
     out.append(Item("notes", _tools.tools_dir(), "dir", required=False))
     return out
@@ -173,9 +202,17 @@ def create(out_dir: str = ".") -> str:
 
     # Build the archive in a temp path, then atomically rename: a reader must
     # never see a half-written backup and mistake it for a whole one.
+    inventory = items()
+    live_file_keys = {
+        it.key for it in inventory if it.kind == "file" and os.path.exists(it.path)
+    }
+    pair_problem = _agent3_authority_pair_problem(live_file_keys)
+    if pair_problem:
+        raise ValueError(f"refusing unsafe backup: {pair_problem}")
+
     tmp = archive + ".tmp"
     with tarfile.open(tmp, "w:gz") as tar:
-        for it in items():
+        for it in inventory:
             if it.kind == "file":
                 if not os.path.exists(it.path):
                     continue
@@ -220,6 +257,9 @@ def verify(archive: str) -> dict:
         raise ValueError(f"unsupported backup schema: {manifest.get('schema')}")
 
     problems: list[str] = []
+    pair_problem = _agent3_authority_pair_problem(set(manifest["files"]))
+    if pair_problem:
+        problems.append(pair_problem)
     checked = 0
     with tarfile.open(archive, "r:gz") as tar:
         for key, meta in manifest["files"].items():

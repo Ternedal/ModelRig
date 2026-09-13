@@ -33,33 +33,35 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
 
         val storeA = Agent3ReviewedStartRecoveryStore(context) { token }
         val storeB = Agent3ReviewedStartRecoveryStore(context) { token }
-        assertTrue(storeA.reserve(rigA, first))
-        assertFalse(storeB.reserve(rigA, second))
+        val firstReservation = requireNotNull(storeA.reserve(rigA, first))
+        assertNull(storeB.reserve(rigA, second))
         assertEquals(first, storeB.read("https://rig-a.example:8443"))
-        assertFalse(storeB.clearIfMatches(rigA, second))
-        assertEquals(first, storeA.read(rigA))
         assertNull(storeA.read(rigB))
+        val otherRigReservation = requireNotNull(storeB.reserve(rigB, second))
+        assertFalse(storeB.clearIfMatches(rigA, otherRigReservation))
+        assertEquals(first, storeA.read(rigA))
 
         token = "token-b"
         val mismatched = storeB.read(rigA)
         assertNotNull(mismatched)
         assertNotEquals(first, mismatched)
+        assertNull(storeB.readReservation(rigA))
 
         token = "token-a"
         assertEquals(first, storeA.read(rigA))
-        assertTrue(storeA.clearIfMatches(rigA, first))
+        assertTrue(storeA.clearIfMatches(rigA, firstReservation))
         assertNull(storeB.read(rigA))
     }
 
     @Test
-    fun `newer generation read cannot let stale completion clear reused authority`() {
+    fun `stale generation handle cannot clear newer reused authority after newer read`() {
         val rig = "https://aba-rig-${System.nanoTime()}.example"
         val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
         val store = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
         val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
         val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
 
-        assertTrue(store.reserve(rig, authority))
+        val staleReservation = requireNotNull(store.reserve(rig, authority))
         val originalEnvelope = requireNotNull(prefs.getString(key, null))
         val parts = originalEnvelope.split('\n', limit = 4)
         assertEquals(4, parts.size)
@@ -72,21 +74,14 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
         }
         val replacementEnvelope = listOf(parts[0], parts[1], replacementGeneration, parts[3]).joinToString("\n")
 
-        // Simulate another process clearing the old slot and re-reserving the exact
-        // same encoded authority. This process still holds the old origin envelope.
         assertTrue(prefs.edit().remove(key).commit())
         assertTrue(prefs.edit().putString(key, replacementEnvelope).commit())
 
-        // Even if the newer durable slot is observed before the stale callback
-        // completes, first-origin-wins must preserve the old clear authority.
-        assertEquals(authority, store.read(rig))
-        assertFalse(store.clearIfMatches(rig, authority))
+        val freshReservation = requireNotNull(store.readReservation(rig))
+        assertEquals(authority, freshReservation.encodedAuthority)
+        assertFalse(store.clearIfMatches(rig, staleReservation))
         assertEquals(replacementEnvelope, prefs.getString(key, null))
-
-        // The mismatch drops only the stale in-memory origin. A fresh explicit
-        // read can then bind the newer generation and clear that exact slot.
-        assertEquals(authority, store.read(rig))
-        assertTrue(store.clearIfMatches(rig, authority))
+        assertTrue(store.clearIfMatches(rig, freshReservation))
         assertNull(prefs.getString(key, null))
     }
 
@@ -103,7 +98,7 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
         val visible = store.read(rig)
         assertNotNull(visible)
         assertNotEquals(encoded, visible)
-        assertFalse(store.clearIfMatches(rig, encoded))
+        assertNull(store.readReservation(rig))
         assertEquals(raw, prefs.getString(key, null))
     }
 
@@ -119,11 +114,11 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
                 .commit()
         )
 
-        val visible = Agent3ReviewedStartRecoveryStore(context) { "token-a" }.read(rig)
+        val store = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
+        val visible = store.read(rig)
         assertNotNull(visible)
         assertNotEquals(encoded, visible)
-        assertFalse(Agent3ReviewedStartRecoveryStore(context) { "token-a" }.clearIfMatches(rig, encoded))
-
+        assertNull(store.readReservation(rig))
         val persisted = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE).getString(key, null)
         assertEquals(encoded, persisted)
     }

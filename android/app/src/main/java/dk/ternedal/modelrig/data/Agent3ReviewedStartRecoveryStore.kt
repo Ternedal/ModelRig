@@ -4,6 +4,13 @@ import android.content.Context
 import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
 import java.util.UUID
 
+/** Exact durable slot identity captured by one reviewed-Start operation. */
+data class Agent3ReviewedStartRecoveryReservation internal constructor(
+    val encodedAuthority: String,
+    internal val storageKey: String,
+    internal val expectedEnvelope: String,
+)
+
 /** URL-scoped storage for the opaque reviewed-Start recovery authority record. */
 class Agent3ReviewedStartRecoveryStore(
     context: Context,
@@ -19,48 +26,54 @@ class Agent3ReviewedStartRecoveryStore(
         val currentFingerprint = currentCredentialFingerprint(baseUrl)
             ?: return UNRESOLVED_CREDENTIAL_BINDING
         if (currentFingerprint != bound.credentialFingerprint) return UNRESOLVED_CREDENTIAL_BINDING
-        synchronized(slotLock) {
-            rememberFirstOriginEnvelope(authorityKey(key, bound.encodedAuthority), raw)
-        }
         return bound.encodedAuthority
     }
 
-    /** Reserve an empty slot atomically across concurrent screen/store instances. */
-    fun reserve(baseUrl: String?, encodedAuthority: String?): Boolean {
-        val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
-        val authority = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
-        val fingerprint = currentCredentialFingerprint(baseUrl) ?: return false
-        val reservationGeneration = UUID.randomUUID().toString()
-        val boundEnvelope = encodeBoundAuthority(fingerprint, reservationGeneration, authority)
-        val authorityKey = authorityKey(key, authority)
+    /** Read the current valid slot together with the exact generation that owns clearing authority. */
+    fun readReservation(baseUrl: String?): Agent3ReviewedStartRecoveryReservation? {
+        val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return null
         synchronized(slotLock) {
-            if (authorityKey in retiredAuthorities) return false
-            val current = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() }
-            if (current != null) return false
-            val saved = prefs.edit().putString(key, boundEnvelope).commit()
-            if (saved) rememberFirstOriginEnvelope(authorityKey, boundEnvelope)
-            return saved
+            val raw = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            val bound = decodeBoundAuthority(raw) ?: return null
+            val currentFingerprint = currentCredentialFingerprint(baseUrl) ?: return null
+            if (currentFingerprint != bound.credentialFingerprint) return null
+            return Agent3ReviewedStartRecoveryReservation(bound.encodedAuthority, key, raw)
         }
     }
 
-    /** Clear only the exact credential-bound reservation generation that originated this completion. */
-    fun clearIfMatches(baseUrl: String?, encodedAuthority: String?): Boolean {
-        val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
-        val authority = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
-        val authorityKey = authorityKey(key, authority)
+    /** Reserve an empty slot atomically across concurrent screen/store instances. */
+    fun reserve(
+        baseUrl: String?,
+        encodedAuthority: String?,
+    ): Agent3ReviewedStartRecoveryReservation? {
+        val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return null
+        val authority = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val fingerprint = currentCredentialFingerprint(baseUrl) ?: return null
+        val reservationGeneration = UUID.randomUUID().toString()
+        val boundEnvelope = encodeBoundAuthority(fingerprint, reservationGeneration, authority)
         synchronized(slotLock) {
-            val expectedEnvelope = originEnvelopes[authorityKey] ?: return false
             val current = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() }
-            if (current != expectedEnvelope) {
-                forgetOriginEnvelopeIfSame(authorityKey, expectedEnvelope)
-                return false
+            if (current != null) return null
+            val saved = prefs.edit().putString(key, boundEnvelope).commit()
+            return if (saved) {
+                Agent3ReviewedStartRecoveryReservation(authority, key, boundEnvelope)
+            } else {
+                null
             }
-            val cleared = prefs.edit().remove(key).commit()
-            if (cleared) {
-                forgetOriginEnvelopeIfSame(authorityKey, expectedEnvelope)
-                retiredAuthorities.add(authorityKey)
-            }
-            return cleared
+        }
+    }
+
+    /** Clear only the exact rig + credential + generation captured by this operation. */
+    fun clearIfMatches(
+        baseUrl: String?,
+        reservation: Agent3ReviewedStartRecoveryReservation,
+    ): Boolean {
+        val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
+        if (reservation.storageKey != key) return false
+        synchronized(slotLock) {
+            val current = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() }
+            if (current != reservation.expectedEnvelope) return false
+            return prefs.edit().remove(key).commit()
         }
     }
 
@@ -73,16 +86,6 @@ class Agent3ReviewedStartRecoveryStore(
 
     private companion object {
         val slotLock = Any()
-        val originEnvelopes = mutableMapOf<String, String>()
-        val retiredAuthorities = mutableSetOf<String>()
-
-        fun rememberFirstOriginEnvelope(authorityKey: String, envelope: String) {
-            if (authorityKey !in originEnvelopes) originEnvelopes[authorityKey] = envelope
-        }
-
-        fun forgetOriginEnvelopeIfSame(authorityKey: String, envelope: String) {
-            if (originEnvelopes[authorityKey] == envelope) originEnvelopes.remove(authorityKey)
-        }
     }
 }
 
@@ -98,9 +101,6 @@ private data class CredentialBoundAuthority(
     val reservationGeneration: String,
     val encodedAuthority: String,
 )
-
-private fun authorityKey(storageKey: String, authority: String): String =
-    "$storageKey\u0000$authority"
 
 private fun encodeBoundAuthority(
     fingerprint: String,

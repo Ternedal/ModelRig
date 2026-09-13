@@ -29,28 +29,30 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
             DesktopChatDb(dbPath, TestProtector).use { dbB ->
                 val storeA = Agent3ReviewedStartRecoveryStore(dbA) { token }
                 val storeB = Agent3ReviewedStartRecoveryStore(dbB) { token }
-                assertTrue(storeA.reserve(rigA, first))
-                assertFalse(storeB.reserve(rigA, second))
+                val firstReservation = requireNotNull(storeA.reserve(rigA, first))
+                assertNull(storeB.reserve(rigA, second))
                 assertEquals(first, storeB.read("https://rig-a.example:8443"))
-                assertFalse(storeB.clearIfMatches(rigA, second))
-                assertEquals(first, storeA.read(rigA))
                 assertNull(storeA.read(rigB))
+                val otherRigReservation = requireNotNull(storeB.reserve(rigB, second))
+                assertFalse(storeB.clearIfMatches(rigA, otherRigReservation))
+                assertEquals(first, storeA.read(rigA))
 
                 token = "token-b"
                 val mismatched = storeB.read(rigA)
                 assertNotNull(mismatched)
                 assertNotEquals(first, mismatched)
+                assertNull(storeB.readReservation(rigA))
 
                 token = "token-a"
                 assertEquals(first, storeA.read(rigA))
-                assertTrue(storeA.clearIfMatches(rigA, first))
+                assertTrue(storeA.clearIfMatches(rigA, firstReservation))
                 assertNull(storeB.read(rigA))
             }
         }
     }
 
     @Test
-    fun newerGenerationReadCannotLetStaleCompletionClearReusedAuthority() {
+    fun staleGenerationHandleCannotClearNewerReusedAuthorityAfterNewerRead() {
         val dbPath = Files.createTempFile("modelrig-reviewed-start-aba-", ".db").toString()
         val rig = "https://aba-rig-${System.nanoTime()}.example"
         val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
@@ -58,7 +60,7 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
         DesktopChatDb(dbPath, TestProtector).use { db ->
             val store = Agent3ReviewedStartRecoveryStore(db) { "token-a" }
             val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
-            assertTrue(store.reserve(rig, authority))
+            val staleReservation = requireNotNull(store.reserve(rig, authority))
             val originalEnvelope = requireNotNull(db.getSetting(key))
             val parts = originalEnvelope.split('\n', limit = 4)
             assertEquals(4, parts.size)
@@ -71,21 +73,14 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
             }
             val replacementEnvelope = listOf(parts[0], parts[1], replacementGeneration, parts[3]).joinToString("\n")
 
-            // Simulate another desktop process clearing the old slot and then
-            // re-reserving the exact same encoded authority with a new generation.
             assertTrue(db.removeRawSettingIfValue(key, originalEnvelope))
             assertTrue(db.putRawSettingIfAbsent(key, replacementEnvelope))
 
-            // Observing the newer durable slot must not overwrite this process's
-            // still-active old origin envelope before its stale callback arrives.
-            assertEquals(authority, store.read(rig))
-            assertFalse(store.clearIfMatches(rig, authority))
+            val freshReservation = requireNotNull(store.readReservation(rig))
+            assertEquals(authority, freshReservation.encodedAuthority)
+            assertFalse(store.clearIfMatches(rig, staleReservation))
             assertEquals(replacementEnvelope, db.getSetting(key))
-
-            // The failed stale clear drops only the stale in-memory origin. A
-            // fresh read can bind the newer generation and clear that exact slot.
-            assertEquals(authority, store.read(rig))
-            assertTrue(store.clearIfMatches(rig, authority))
+            assertTrue(store.clearIfMatches(rig, freshReservation))
             assertNull(db.getSetting(key))
         }
     }
@@ -104,7 +99,7 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
             val visible = store.read(rig)
             assertNotNull(visible)
             assertNotEquals(encoded, visible)
-            assertFalse(store.clearIfMatches(rig, encoded))
+            assertNull(store.readReservation(rig))
             assertEquals(raw, db.getSetting(key))
         }
     }
@@ -122,7 +117,7 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
             val visible = store.read(rig)
             assertNotNull(visible)
             assertNotEquals(encoded, visible)
-            assertFalse(store.clearIfMatches(rig, encoded))
+            assertNull(store.readReservation(rig))
             assertEquals(encoded, db.getSetting(key))
         }
     }

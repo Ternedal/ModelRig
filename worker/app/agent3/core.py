@@ -355,6 +355,11 @@ class PolicyEngine:
         return PolicyDecision("execute", "Read-only step allowed")
 
 
+def agent3_execution_progress_path(path: str) -> str:
+    """Return the independent monotonic execution-authority SQLite path."""
+    return ":memory:" if path == ":memory:" else f"{path}.execution-progress"
+
+
 class AgentRunStore:
     def __init__(self, path: str):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -374,7 +379,7 @@ class AgentRunStore:
         # Execution-start evidence deliberately lives in a separate SQLite file.
         # A stale/partially-restored agent_runs payload must never be able to roll
         # this watermark backwards and make a side effect look PENDING again.
-        progress_path = ":memory:" if path == ":memory:" else f"{path}.execution-progress"
+        progress_path = agent3_execution_progress_path(path)
         self._progress_conn = sqlite3.connect(progress_path, check_same_thread=False)
         self._progress_conn.execute(
             "CREATE TABLE IF NOT EXISTS agent_execution_starts ("
