@@ -118,9 +118,14 @@ matche manifest + executable fra `CandidateSnapshotReceipt`, hvis SHA allerede
 er bundet af den human-signerede qualification chain. Først derefter tages den
 irreversible lock, `main` genlæses, og requesten re-verificeres mod current time.
 
-Receipt beviser kun host-local replay guard (`host_replay_guard_committed=true`)
-og siger eksplicit `global_replay_safe=false`; en lokal ledger kan ikke bevise
-distribueret replay-eksklusion. Vedvarende frozen `main`, campaign-start, pilot,
+Den durable ledger er kun host-local replay/recovery-state og kan ikke reloades
+som authenticated authority. Kun den succesfulde live consume-transaktion kan
+returnere en ikke-serialiseret `transaction_authenticated=true` instans efter
+create-once commit, canonical read-back og cleanup. Persisted eller manuelt
+fremstillede canonical bytes forbliver `transaction_authenticated=false`.
+
+Replay-scope er fortsat eksplicit host-local (`host_replay_guard_committed=true`,
+`global_replay_safe=false`). Vedvarende frozen `main`, campaign-start, pilot,
 publication og activation forbliver separate authority-gates.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
