@@ -31,12 +31,12 @@ _WINDOWS_LEDGER = Path(
 )
 _WINDOWS_ANCHOR = Path(r"C:\Program Files")
 _POSIX_ACL_XATTRS = ("system.posix_acl_access", "system.posix_acl_default")
+# Only explicit xattr absence proves no POSIX ACL is present. If this filesystem
+# cannot expose ACL state, production replay authority is intentionally unavailable.
 _NO_ACL_XATTR_ERRNOS = frozenset(
     {
         errno.ENODATA,
         getattr(errno, "ENOATTR", errno.ENODATA),
-        errno.ENOTSUP,
-        getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
     }
 )
 _TOKEN_QUERY = 0x0008
