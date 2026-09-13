@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -308,6 +309,104 @@ check(
     not os.path.exists(progress_path),
     "adoption: empty run-only no-op does not manufacture progress authority",
 )
+
+# Direct schema-5 entry points must be safe in a fresh interpreter without the
+# public app.backup facade ever being imported. The first process proves a
+# hostile run trigger is rejected by direct create().
+direct_root = os.path.join(_root, "direct-schema5")
+direct_env = os.environ.copy()
+direct_env["KALIV_DATA_DIR"] = os.path.join(direct_root, "data")
+direct_env["KALIV_AGENT3_DB"] = os.path.join(direct_root, "live", "agent3.db")
+direct_env["KALIV_TOOLS_DIR"] = os.path.join(direct_root, "notes")
+direct_schema_script = r'''
+import os
+import sqlite3
+from app import backup_schema5 as backup
+
+runs = os.environ["KALIV_AGENT3_DB"]
+os.makedirs(os.path.dirname(runs), exist_ok=True)
+con = sqlite3.connect(runs)
+con.execute("CREATE TABLE agent_runs (id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)")
+con.execute("CREATE TRIGGER hostile_run_trigger AFTER UPDATE ON agent_runs BEGIN DELETE FROM agent_runs WHERE id=NEW.id; END")
+con.commit()
+con.close()
+try:
+    backup.create(os.path.join(os.path.dirname(runs), "out"))
+except ValueError as exc:
+    if "canonical closed authority schema" not in str(exc):
+        raise
+else:
+    raise SystemExit("direct schema5 create accepted hostile run trigger")
+'''
+direct_schema = subprocess.run(
+    [sys.executable, "-c", direct_schema_script],
+    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    env=direct_env,
+    capture_output=True,
+    text=True,
+)
+check(
+    direct_schema.returncode == 0,
+    "direct schema5: fresh create rejects hostile closed-run-schema drift",
+)
+if direct_schema.returncode != 0:
+    print(direct_schema.stdout)
+    print(direct_schema.stderr)
+
+# The second fresh process proves direct restore takes the runtime/restore lease
+# before publishing either authority member. A live shared runtime lease must
+# make forced restore fail without changing the run/progress bytes.
+direct_restore_root = os.path.join(_root, "direct-schema5-restore")
+direct_restore_env = os.environ.copy()
+direct_restore_env["KALIV_DATA_DIR"] = os.path.join(direct_restore_root, "data")
+direct_restore_env["KALIV_AGENT3_DB"] = os.path.join(
+    direct_restore_root, "live", "agent3.db"
+)
+direct_restore_env["KALIV_TOOLS_DIR"] = os.path.join(direct_restore_root, "notes")
+direct_restore_script = r'''
+import hashlib
+import os
+from app import backup_schema5 as backup
+from app.agent3.authority_pair import ensure_live_pair
+from app.agent3.runtime_restore_guard import acquire_agent3_runtime_lease
+
+runs = os.environ["KALIV_AGENT3_DB"]
+ensure_live_pair(runs)
+archive = backup.create(os.path.join(os.path.dirname(runs), "backups"))
+progress = runs + ".execution-progress"
+def digest(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+before = (digest(runs), digest(progress))
+lease = acquire_agent3_runtime_lease(runs)
+try:
+    try:
+        backup.restore(archive, force=True)
+    except RuntimeError as exc:
+        if "runtime" not in str(exc).lower():
+            raise
+    else:
+        raise SystemExit("direct schema5 restore bypassed active runtime lease")
+finally:
+    lease.close()
+after = (digest(runs), digest(progress))
+if after != before:
+    raise SystemExit("blocked direct schema5 restore changed authority files")
+'''
+direct_restore = subprocess.run(
+    [sys.executable, "-c", direct_restore_script],
+    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    env=direct_restore_env,
+    capture_output=True,
+    text=True,
+)
+check(
+    direct_restore.returncode == 0,
+    "direct schema5: fresh restore is excluded by an active runtime lease",
+)
+if direct_restore.returncode != 0:
+    print(direct_restore.stdout)
+    print(direct_restore.stderr)
 
 # The Windows migration operator must establish the stopped boundary before the
 # trust transition, and adoption must occur before schema-5 backup creation.
