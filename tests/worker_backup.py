@@ -177,6 +177,27 @@ def execution_progress_bytes_with_erasing_trigger() -> bytes:
             pass
 
 
+def execution_progress_bytes_with_rejecting_check() -> bytes:
+    fd, path = tempfile.mkstemp(prefix="kaliv-check-progress-", suffix=".db")
+    os.close(fd)
+    try:
+        con = sqlite3.connect(path)
+        con.execute(
+            "CREATE TABLE agent_execution_starts ("
+            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+            "started_at REAL NOT NULL, PRIMARY KEY(run_id,step_index,step_sha256), CHECK(0))"
+        )
+        con.commit()
+        con.close()
+        with open(path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
 # --- inventory --------------------------------------------------------------
 required_keys = {
     "rag.db",
@@ -322,6 +343,35 @@ check(
     "restore: trigger-bearing authority refusal writes NOTHING",
 )
 
+# Inline constraints are part of execution semantics even when table_xinfo and
+# sqlite_master object inventory still look canonical. CHECK(0) is especially
+# dangerous because AgentRunStore uses INSERT OR IGNORE: execution can continue
+# while every attempted watermark insert is silently discarded.
+check_progress_bytes = execution_progress_bytes_with_rejecting_check()
+check_progress = os.path.join(_root, "check-constrained-execution-progress.tar.gz")
+archive_with_schema(
+    archive,
+    check_progress,
+    3,
+    replace_files={backup.AGENT3_EXECUTION_PROGRESS_KEY: check_progress_bytes},
+)
+check_verify = backup.verify(check_progress)
+check(
+    not check_verify["ok"],
+    "verify: CHECK-constrained execution-progress sidecar is refused with matching manifest hash",
+)
+check(
+    any("canonical authority DDL" in problem for problem in check_verify["problems"]),
+    "verify: CHECK-constrained sidecar names the canonical-DDL authority failure",
+)
+pre_check_restore = snapshot()
+try:
+    backup.restore(check_progress, force=True)
+    check(False, "restore: CHECK-constrained execution-progress authority is refused")
+except ValueError:
+    check(True, "restore: CHECK-constrained execution-progress authority is refused")
+check(snapshot() == pre_check_restore, "restore: constrained authority refusal writes NOTHING")
+
 future = os.path.join(_root, "unsupported-schema.tar.gz")
 archive_with_schema(archive, future, 999)
 try:
@@ -414,6 +464,20 @@ try:
     check(False, "create: trigger-bearing execution-progress authority is refused")
 except ValueError:
     check(True, "create: trigger-bearing execution-progress authority is refused")
+wipe()
+
+# A live sidecar with a suppressing inline CHECK must be rejected before create
+# can publish an archive that appears structurally valid but cannot retain new
+# execution-start authority.
+_seed_sqlite(runs_item.path, runs_item.key)
+os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
+with open(progress_item.path, "wb") as f:
+    f.write(check_progress_bytes)
+try:
+    backup.create(os.path.join(_root, "check-progress-create"))
+    check(False, "create: CHECK-constrained execution-progress authority is refused")
+except ValueError:
+    check(True, "create: CHECK-constrained execution-progress authority is refused")
 wipe()
 
 # A non-empty run database without its execution authority must never produce a new backup.
