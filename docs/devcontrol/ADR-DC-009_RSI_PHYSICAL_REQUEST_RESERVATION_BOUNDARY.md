@@ -75,7 +75,10 @@ Derfor gælder følgende:
 - privat durability-load giver altid `transaction_authenticated=false`, også for en legitim tidligere transaction;
 - der findes ingen public `load_physical_qualification_reservation(...)` authority-loader;
 - `transaction_authenticated` serialiseres aldrig og kan derfor ikke mintes via JSON;
-- kun den igangværende authenticated consume-transaktion må sætte `transaction_authenticated=true`, og først efter create-once final write, canonical byte-identisk read-back og succesfuld cleanup.
+- live provenance bindes til **objekt-identitet + originating PID + SHA-256 af de autentificerede canonical receipt-contents**;
+- et efterfølgende `object.__setattr__`-angreb eller anden feltmutation ændrer canonical digest og gør straks `transaction_authenticated=false`;
+- en POSIX child-process må ikke arve authority: PID skal matche, og registry ryddes desuden via `os.register_at_fork(after_in_child=...)`;
+- kun den igangværende authenticated consume-transaktion må registrere live provenance, og først efter create-once final write, canonical byte-identisk read-back og succesfuld cleanup.
 
 Den canonical rækkefølge er:
 
@@ -88,7 +91,9 @@ Den canonical rækkefølge er:
 7. create-once final canonical payload;
 8. parse + canonical byte-identisk read-back uden at grant'e authority;
 9. durable cleanup af pending/lock;
-10. mint kun den returnerede in-memory instans med `transaction_authenticated=true`.
+10. registrér kun den returnerede in-memory instans med `(origin_pid, authenticated_receipt_sha256, object identity)`.
+
+`transaction_authenticated=true` kræver derefter ved hver læsning, at samme objekt stadig lever, at processen har samme PID, og at receiptets aktuelle canonical SHA-256 er identisk med den digest, der blev registreret ved trin 10.
 
 Hvis noget fejler efter trin 3, må requesten ikke genbruges på samme canonical host ledger uden en separat eksplicit recovery-procedure. Hvis processen crasher efter final write men før trin 10, bevares replay-state, men authority må ikke rekonstrueres automatisk fra filen.
 
@@ -106,7 +111,7 @@ Et schema-validt receipt beskriver altid:
 - `host_replay_guard_committed=true`;
 - `global_replay_safe=false`.
 
-Men de serialiserede felter er data, ikke transaction provenance. Kun den live returnerede instans med `transaction_authenticated=true` beviser, at netop denne proces gennemførte den authenticated consume-sekvens. En senere boundary må aldrig opgradere et reloadet ledger-artifact alene til execution authority.
+Men de serialiserede felter er data, ikke transaction provenance. Kun den live returnerede, uændrede instans i den oprindelige proces med `transaction_authenticated=true` beviser, at netop denne proces gennemførte den authenticated consume-sekvens. En senere boundary må aldrig opgradere et reloadet ledger-artifact alene til execution authority.
 
 `global_replay_safe=false` er en vigtig sandhed. En lokal filesystem-ledger kan ikke bevise, at den samme signed request ikke er præsenteret på en anden host. En senere campaign-admission boundary skal derfor binde den autoriserede fysiske host/runner-identitet, før requesten kan bruges til faktisk execution.
 
@@ -145,7 +150,7 @@ Reservation-leddet må ikke:
 - `consume_physical_qualification_request_once(...)` — eneste public authority-bearing path og eneste vej til en live `transaction_authenticated=true` instans;
 - canonical host ledger — replay/recovery-state, eksplicit ikke public reloadable authority.
 
-Reservationens serialiserede authority-label er fast `consumed-request-evidence-only`; den ikke-serialiserede `transaction_authenticated` provenance er separat og kan ikke overleve reload.
+Reservationens serialiserede authority-label er fast `consumed-request-evidence-only`; den ikke-serialiserede `transaction_authenticated` provenance er separat, content-bound, process-bound og kan ikke overleve reload eller fork som authority.
 
 ## Fail-closed krav
 
@@ -162,13 +167,15 @@ Implementationen skal mindst afvise eller fail-close ved:
 9. enhver eksisterende final/pending/lock-state som genbrugelig request;
 10. direct persistence af prebuilt/fabricated final receipt som authority;
 11. perfekt canonical direct-written final file må stadig have `transaction_authenticated=false` ved load;
-12. tampering med canonical final reservation;
-13. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+12. mutation af et legitimt live receipt med `object.__setattr__` eller tilsvarende må straks miste transaction provenance;
+13. POSIX fork-child må ikke arve parentens transaction provenance;
+14. tampering med canonical final reservation;
+15. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
 ## Konsekvenser
 
-Efter denne boundary kan DevControl i **den samme succesfulde authenticated transaction** sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret, at observationen brugte den Git-runtime-identitet som den signerede softwarekæde allerede bandt, at den canonical lokale `main` matchede ved post-lock observationen, og at create-once replay-state blev committed på den lokale host.
+Efter denne boundary kan DevControl i **den samme succesfulde authenticated transaction, i den oprindelige proces og så længe receiptets canonical contents er uændrede** sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret, at observationen brugte den Git-runtime-identitet som den signerede softwarekæde allerede bandt, at den canonical lokale `main` matchede ved post-lock observationen, og at create-once replay-state blev committed på den lokale host.
 
-Efter process exit kan ledger-state stadig fail-close replay og drive en særskilt recovery-procedure, men den kan ikke alene rekonstruere authenticated authority. Det næste host/freeze/campaign-admission-led skal derfor enten fortsætte direkte fra en live `transaction_authenticated=true` reservation eller definere sin egen særskilt autentificerede recovery/attestation; det må ikke stole på et reloadet ledger-artifact alene.
+Efter process exit eller fork kan ledger-state stadig fail-close replay og drive en særskilt recovery-procedure, men den kan ikke alene rekonstruere authenticated authority. Det næste host/freeze/campaign-admission-led skal derfor enten fortsætte direkte fra en live `transaction_authenticated=true` reservation i den oprindelige proces eller definere sin egen særskilt autentificerede recovery/attestation; det må ikke stole på et reloadet eller process-arvet ledger-artifact alene.
 
 Det er fortsat **ikke** global replay-bevis, vedvarende frozen-main-bevis eller tilladelse til at starte fysisk execution.
