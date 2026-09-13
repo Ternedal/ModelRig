@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
+from .runtime_restore_guard import acquire_agent3_runtime_lease
+
 PAIR_TABLE = "kaliv_agent3_authority_pair"
 PAIR_TABLE_SQL = (
     "CREATE TABLE kaliv_agent3_authority_pair ("
@@ -162,25 +164,8 @@ def _insert_pair_rows(con: sqlite3.Connection, pair_id: str) -> None:
     )
 
 
-def ensure_live_pair(runs_path: str) -> str:
-    """Create/validate persistent provenance for the live run + progress pair.
-
-    Pair bootstrap is deliberately narrow. New/empty authority can receive a
-    fresh identity. Existing non-empty authority without an identity is refused:
-    assigning a new id there would silently bless potentially unrelated source
-    stores. Existing installations must instead use the explicit offline
-    ``python -m app.agent3.adopt_pair --offline-confirmed`` transition, which
-    validates run/watermark semantics under one multi-database write boundary
-    before stamping the pair.
-
-    The two binding rows are created in one SQLite multi-database transaction.
-    DELETE journaling is required because SQLite only guarantees atomic commit
-    across ATTACHed databases when the main database is file-backed and WAL is
-    not in use.
-    """
-    if runs_path == ":memory:":
-        raise RuntimeError("persistent Agent 3 pair authority requires a file-backed run store")
-
+def _ensure_live_pair_under_runtime_lease(runs_path: str) -> str:
+    """Create/validate the pair while a runtime lease blocks restore authority."""
     runs_path = os.path.abspath(runs_path)
     progress_path = runs_path + ".execution-progress"
     os.makedirs(os.path.dirname(runs_path), exist_ok=True)
@@ -235,6 +220,32 @@ def ensure_live_pair(runs_path: str) -> str:
         raise RuntimeError(f"cannot establish persistent Agent 3 pair authority: {exc}") from exc
     finally:
         con.close()
+
+
+def ensure_live_pair(runs_path: str) -> str:
+    """Create/validate persistent provenance without racing a concurrent restore.
+
+    Pair bootstrap is deliberately narrow. New/empty authority can receive a
+    fresh identity. Existing non-empty authority without an identity is refused:
+    assigning a new id there would silently bless potentially unrelated source
+    stores. Existing installations must instead use the explicit offline
+    ``python -m app.agent3.adopt_pair --offline-confirmed`` transition.
+
+    A short shared runtime lease is acquired before either live SQLite authority
+    store is opened. The restore guard therefore cannot enter its exclusive
+    publication boundary while pair bootstrap is inspecting or modifying the
+    stores. After this function returns, AgentRunStore acquires its normal
+    long-lived lease; if a restore wins the tiny hand-off gap, store startup
+    simply fails closed on the guard rather than opening half-restored state.
+    """
+    if runs_path == ":memory:":
+        raise RuntimeError("persistent Agent 3 pair authority requires a file-backed run store")
+
+    lease = acquire_agent3_runtime_lease(runs_path)
+    try:
+        return _ensure_live_pair_under_runtime_lease(runs_path)
+    finally:
+        lease.close()
 
 
 def adopt_live_pair(runs_path: str, validator: PairValidator) -> str:
