@@ -37,13 +37,16 @@ def _run_store_schema_problem_path(
     snapshot_id: Optional[str],
     pair_id: Optional[str],
 ) -> Optional[str]:
-    """Require a closed SQLite schema for materialized Agent3 run authority.
+    """Require a closed SQLite schema for Agent3 run authority.
 
     Progress authority has always been checked against complete sqlite_master.
     Run authority must have the same property: an unexpected trigger, view or
     index can otherwise survive a hash-valid backup and alter future run state
-    after restore. A genuinely empty, never-paired legacy run table remains a
-    safe compatibility exception because it carries no execution authority.
+    after restore. A canonical minimal legacy ``agent_runs`` database is also
+    structurally admissible while it is still unbound: explicit offline pair
+    adoption must be able to inspect non-empty legacy authority before it can
+    atomically add provenance. Schema-5 backup/create still rejects materialized
+    unbound authority; this structural exception grants no execution authority.
     """
     try:
         con = _impl._readonly_sqlite(path)
@@ -91,7 +94,7 @@ def _run_store_schema_problem_path(
     if actual == full:
         return None
 
-    if run_count == 0 and pair_id is None and snapshot_id is None:
+    if pair_id is None and snapshot_id is None:
         minimal = [
             ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
             ("table", "agent_runs", "agent_runs", _impl._normalize_sql(_RUNS_TABLE_SQL)),
