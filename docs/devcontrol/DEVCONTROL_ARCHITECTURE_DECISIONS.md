@@ -115,21 +115,24 @@ Gør request-reservation til én authenticated host-local transaction med en
 caller-uafhængig Ed25519 trust-root. Public consume-pathen accepterer ikke
 verifier/keyring, observation, clock eller authority-paths; den resolver selv en
 fast host-admin-kontrolleret RSI request-keyring og fejler lukket, hvis trust-
-rooten mangler, er malformed, wrong-domain eller unsafe. Caller-ejede signed
-value-objekter og den host-resolved verifier kopieres derefter til exact-type
-canonical snapshots før authority-brug.
+rooten mangler, er malformed, wrong-domain eller unsafe. Host-control valideres
+platform-specifikt: POSIX kræver root ownership og ikke-writable directory-chain,
+og Windows kræver native owner/DACL-evidence uden write/control grants til
+almindelige eller brede principals.
 
-Den caller-leverede `TrustedGitRuntime` skal være exact type og verificeres mod
-den signed/pinned runtime-identitet fra `CandidateSnapshotReceipt`. Hele runtime-
-treeet kopieres create-once til en transaction-private staging-root under
-canonical operation-root, re-verificeres dér og bruges som eneste execution-
-path for preflight og post-marker `main`-observation.
+Caller-ejede signed value-objekter og den host-resolved verifier kopieres til
+exact-type canonical snapshots før authority-brug. Den caller-leverede
+`TrustedGitRuntime` skal være exact type og verificeres mod den signed/pinned
+runtime-identitet fra `CandidateSnapshotReceipt`; hele runtime-treeet kopieres
+derefter create-once til en transaction-private staging-root og bruges som den
+eneste execution-path for preflight og post-marker `main`-observation.
 
 Den irreversible create-once request-marker bevares som permanent host-local
-replay-marker efter succes. Final receipt skal læses byte-identisk tilbage, og
+replay-marker efter succes. Final receipt læses byte-identisk tilbage, hvorefter
 live provenance bindes til exact objekt-identitet, originating PID, canonical
-receipt-SHA samt de aktuelle exact bytes for både final og replay-marker.
-Removal/replacement/tamper invaliderer straks `transaction_authenticated`.
+receipt-SHA og **holdte descriptors/handles til de oprindelige final/replay-
+marker fil-identiteter + exact bytes**. Unlink/replacement/tamper invaliderer
+provenance; byte-identisk delete→recreate kan ikke genoplive et gammelt receipt.
 
 Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
 som authenticated authority. Replay-scope er eksplicit host-local
