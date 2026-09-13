@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.data
 
 import android.content.Context
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -21,19 +22,21 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun `authority survives a new store instance and remains rig scoped`() {
+    fun `authority reservation is compare-and-set across store instances`() {
         val rigA = "https://rig-a.example:8443/"
         val rigB = "https://rig-b.example:8443"
-        val encoded = "{\"schema\":\"test-authority\"}"
+        val first = "{\"schema\":\"authority-a\"}"
+        val second = "{\"schema\":\"authority-b\"}"
 
-        val firstProcessStore = Agent3ReviewedStartRecoveryStore(context)
-        assertTrue(firstProcessStore.write(rigA, encoded))
-
-        val restartedProcessStore = Agent3ReviewedStartRecoveryStore(context)
-        assertEquals(encoded, restartedProcessStore.read("https://rig-a.example:8443"))
-        assertNull(restartedProcessStore.read(rigB))
-
-        assertTrue(restartedProcessStore.write(rigA, null))
-        assertNull(Agent3ReviewedStartRecoveryStore(context).read(rigA))
+        val storeA = Agent3ReviewedStartRecoveryStore(context)
+        val storeB = Agent3ReviewedStartRecoveryStore(context)
+        assertTrue(storeA.reserve(rigA, first))
+        assertFalse(storeB.reserve(rigA, second))
+        assertEquals(first, storeB.read("https://rig-a.example:8443"))
+        assertFalse(storeB.clearIfMatches(rigA, second))
+        assertEquals(first, storeA.read(rigA))
+        assertNull(storeA.read(rigB))
+        assertTrue(storeA.clearIfMatches(rigA, first))
+        assertNull(storeB.read(rigA))
     }
 }

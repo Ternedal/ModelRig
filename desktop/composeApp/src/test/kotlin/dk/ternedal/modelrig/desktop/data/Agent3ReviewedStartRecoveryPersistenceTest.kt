@@ -3,6 +3,7 @@ package dk.ternedal.modelrig.desktop.data
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -14,26 +15,26 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun authoritySurvivesDatabaseReopenAndRemainsRigScoped() {
+    fun authorityReservationIsCrossConnectionCasAndRigScoped() {
         val dbPath = Files.createTempFile("modelrig-reviewed-start-", ".db").toString()
         val rigA = "https://rig-a.example:8443/"
         val rigB = "https://rig-b.example:8443"
-        val encoded = "{\"schema\":\"test-authority\"}"
+        val first = "{\"schema\":\"authority-a\"}"
+        val second = "{\"schema\":\"authority-b\"}"
 
-        DesktopChatDb(dbPath, TestProtector).use { db ->
-            val store = Agent3ReviewedStartRecoveryStore(db)
-            assertTrue(store.write(rigA, encoded))
-        }
-
-        DesktopChatDb(dbPath, TestProtector).use { reopened ->
-            val store = Agent3ReviewedStartRecoveryStore(reopened)
-            assertEquals(encoded, store.read("https://rig-a.example:8443"))
-            assertNull(store.read(rigB))
-            assertTrue(store.write(rigA, null))
-        }
-
-        DesktopChatDb(dbPath, TestProtector).use { reopenedAgain ->
-            assertNull(Agent3ReviewedStartRecoveryStore(reopenedAgain).read(rigA))
+        DesktopChatDb(dbPath, TestProtector).use { dbA ->
+            DesktopChatDb(dbPath, TestProtector).use { dbB ->
+                val storeA = Agent3ReviewedStartRecoveryStore(dbA)
+                val storeB = Agent3ReviewedStartRecoveryStore(dbB)
+                assertTrue(storeA.reserve(rigA, first))
+                assertFalse(storeB.reserve(rigA, second))
+                assertEquals(first, storeB.read("https://rig-a.example:8443"))
+                assertFalse(storeB.clearIfMatches(rigA, second))
+                assertEquals(first, storeA.read(rigA))
+                assertNull(storeA.read(rigB))
+                assertTrue(storeA.clearIfMatches(rigA, first))
+                assertNull(storeB.read(rigA))
+            }
         }
     }
 }

@@ -578,6 +578,12 @@ def build_planner_router(
                 "persisted reviewed Start run does not match the reviewed plan",
                 status_code=503,
             )
+        if not orchestrator.store.execution_progress_matches(existing):
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start execution progress moved backwards",
+                status_code=503,
+            )
 
     def _reconcile_reviewed_start_run(
         run_id: str,

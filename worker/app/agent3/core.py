@@ -371,6 +371,83 @@ class AgentRunStore:
         )
         self._conn.commit()
 
+        # Execution-start evidence deliberately lives in a separate SQLite file.
+        # A stale/partially-restored agent_runs payload must never be able to roll
+        # this watermark backwards and make a side effect look PENDING again.
+        progress_path = ":memory:" if path == ":memory:" else f"{path}.execution-progress"
+        self._progress_conn = sqlite3.connect(progress_path, check_same_thread=False)
+        self._progress_conn.execute(
+            "CREATE TABLE IF NOT EXISTS agent_execution_starts ("
+            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+            "started_at REAL NOT NULL, "
+            "PRIMARY KEY(run_id,step_index,step_sha256))"
+        )
+        self._progress_conn.commit()
+
+    @staticmethod
+    def _execution_step_sha256(step: AgentStep) -> str:
+        payload = {
+            "tool": step.tool,
+            "args": step.args,
+            "risk": step.risk.value,
+            "sensitivity": step.sensitivity.value,
+            "egress": step.egress.value,
+            "origin": step.origin,
+            "conversation_id": step.conversation_id,
+            "idempotent": step.idempotent,
+        }
+        raw = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
+
+    def _record_execution_start(self, run: AgentRun) -> None:
+        if run.current_step < 0 or run.current_step >= len(run.steps):
+            raise ValueError("cannot watermark an execution without a current step")
+        step = run.steps[run.current_step]
+        digest = self._execution_step_sha256(step)
+        with self._lock:
+            try:
+                self._progress_conn.execute(
+                    "INSERT OR IGNORE INTO agent_execution_starts("
+                    "run_id,step_index,step_sha256,started_at) VALUES(?,?,?,?)",
+                    (run.id, run.current_step, digest, time.time()),
+                )
+                self._progress_conn.commit()
+            except Exception:
+                self._progress_conn.rollback()
+                raise
+
+    def execution_progress_matches(self, run: AgentRun) -> bool:
+        """Fail closed when durable execution evidence is ahead of a run payload.
+
+        The marker is written after the EXECUTING run CAS but before the executor
+        is called. A crash before the marker therefore executes nothing; a marker
+        always means the step was allowed to cross the execution boundary.
+        Replaying a PENDING step is allowed only when the reviewed plan itself
+        declared that step idempotent.
+        """
+        with self._lock:
+            rows = self._progress_conn.execute(
+                "SELECT step_index,step_sha256 FROM agent_execution_starts "
+                "WHERE run_id=? ORDER BY step_index ASC",
+                (run.id,),
+            ).fetchall()
+        for step_index, expected_sha in rows:
+            if step_index < 0 or step_index >= len(run.steps):
+                return False
+            step = run.steps[step_index]
+            if self._execution_step_sha256(step) != expected_sha:
+                return False
+            if run.current_step < step_index:
+                return False
+            if run.current_step == step_index:
+                if step.state in {StepState.APPROVED, StepState.WAITING_CONFIRMATION}:
+                    return False
+                if step.state == StepState.PENDING and not step.idempotent:
+                    return False
+        return True
+
     def save(self, run: AgentRun) -> None:
         run.updated_at = time.time()
         with self._lock:
@@ -465,6 +542,11 @@ class AgentRunStore:
                     (run.id, time.time(), kind, encoded[:8000]),
                 )
                 self._conn.commit()
+                if kind == "step_started":
+                    # Do not let the executor run until the independent, monotonic
+                    # execution watermark is durable. If this write fails, the run
+                    # stays EXECUTING and recovery blocks/replays by existing rules.
+                    self._record_execution_start(run)
                 return True
             except Exception:
                 self._conn.rollback()

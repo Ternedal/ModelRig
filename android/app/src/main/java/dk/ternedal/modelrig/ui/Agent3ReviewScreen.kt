@@ -193,7 +193,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
         runReviewReads = authority.expectedReviewReads
         review = envelope.readReview
         consumedResumeAuthority = null
-        if (recoveryStore.write(connection.baseUrl, null)) {
+        if (recoveryStore.clearIfMatches(connection.baseUrl, authority.encode())) {
             pendingStartRecovery = null
             startRecoveryUnresolved = false
         } else {
@@ -210,7 +210,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
     ) {
         val detail = failure.message ?: "Planen kunne ikke startes"
         if (!shouldRetainReviewedStartRecovery(failure)) {
-            val cleared = recoveryStore.write(connection.baseUrl, null)
+            val cleared = recoveryStore.clearIfMatches(connection.baseUrl, authority.encode())
             if (cleared) {
                 pendingStartRecovery = null
                 startRecoveryUnresolved = false
@@ -303,7 +303,7 @@ fun Agent3ReviewScreen(store: TokenStore, onClose: () -> Unit) {
             error = "Det reviewede preview kunne ikke bindes til en sikker Start-recovery."
             return
         }
-        if (!recoveryStore.write(connection.baseUrl, authority.encode())) {
+        if (!recoveryStore.reserve(connection.baseUrl, authority.encode())) {
             error = "Start blev ikke sendt, fordi recovery-authority ikke kunne gemmes sikkert lokalt."
             return
         }

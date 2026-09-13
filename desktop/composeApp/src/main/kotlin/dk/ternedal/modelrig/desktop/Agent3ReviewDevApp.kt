@@ -184,7 +184,7 @@ fun Agent3ReviewDevApp() {
             // Resolve only rig A's durable record first. A completion for rig A
             // must never overwrite the in-memory recovery authority currently
             // shown for rig B after the operator edits the connection fields.
-            val cleared = recoveryStore.write(connection.baseUrl, null)
+            val cleared = recoveryStore.clearIfMatches(connection.baseUrl, authority.encode())
             if (!Agent3DevInteractionPolicy.canPublishForConnection(connection, currentConnectionOrNull())) {
                 return
             }
@@ -207,7 +207,7 @@ fun Agent3ReviewDevApp() {
         ) {
             val detail = failure.message ?: "Planen kunne ikke startes"
             if (!shouldRetainReviewedStartRecovery(failure)) {
-                val cleared = recoveryStore.write(connection.baseUrl, null)
+                val cleared = recoveryStore.clearIfMatches(connection.baseUrl, authority.encode())
                 if (!Agent3DevInteractionPolicy.canPublishForConnection(connection, currentConnectionOrNull())) {
                     return
                 }
@@ -310,7 +310,7 @@ fun Agent3ReviewDevApp() {
                 error = "Det reviewede preview kunne ikke bindes til en sikker Start-recovery."
                 return
             }
-            if (!recoveryStore.write(connection.baseUrl, authority.encode())) {
+            if (!recoveryStore.reserve(connection.baseUrl, authority.encode())) {
                 error = "Start blev ikke sendt, fordi recovery-authority ikke kunne gemmes sikkert lokalt."
                 return
             }

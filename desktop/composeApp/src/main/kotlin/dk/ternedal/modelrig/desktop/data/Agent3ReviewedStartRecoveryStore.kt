@@ -7,13 +7,18 @@ class Agent3ReviewedStartRecoveryStore(private val db: DesktopChatDb) {
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
 
-    fun write(baseUrl: String?, encodedAuthority: String?): Boolean {
+    /** Reserve an empty rig-scoped slot. Existing authority is never overwritten. */
+    fun reserve(baseUrl: String?, encodedAuthority: String?): Boolean {
         val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
-        val normalized = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() }
-        return runCatching {
-            db.putSetting(key, normalized.orEmpty())
-            true
-        }.getOrDefault(false)
+        val normalized = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        return runCatching { db.putRawSettingIfAbsent(key, normalized) }.getOrDefault(false)
+    }
+
+    /** Clear only the exact authority that originated this completion. */
+    fun clearIfMatches(baseUrl: String?, encodedAuthority: String?): Boolean {
+        val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
+        val expected = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        return runCatching { db.removeRawSettingIfValue(key, expected) }.getOrDefault(false)
     }
 }
 

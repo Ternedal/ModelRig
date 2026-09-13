@@ -11,12 +11,30 @@ class Agent3ReviewedStartRecoveryStore(context: Context) {
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
 
-    fun write(baseUrl: String?, encodedAuthority: String?): Boolean {
+    /** Reserve an empty slot atomically across concurrent screen/store instances. */
+    fun reserve(baseUrl: String?, encodedAuthority: String?): Boolean {
         val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
-        val normalized = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() }
-        val editor = prefs.edit()
-        if (normalized == null) editor.remove(key) else editor.putString(key, normalized)
-        return editor.commit()
+        val normalized = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        synchronized(slotLock) {
+            val current = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() }
+            if (current != null) return false
+            return prefs.edit().putString(key, normalized).commit()
+        }
+    }
+
+    /** Clear only the exact authority that originated this completion. */
+    fun clearIfMatches(baseUrl: String?, encodedAuthority: String?): Boolean {
+        val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
+        val expected = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        synchronized(slotLock) {
+            val current = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() }
+            if (current != expected) return false
+            return prefs.edit().remove(key).commit()
+        }
+    }
+
+    private companion object {
+        val slotLock = Any()
     }
 }
 
