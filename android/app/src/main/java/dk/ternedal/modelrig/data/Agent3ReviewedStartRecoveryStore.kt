@@ -4,7 +4,10 @@ import android.content.Context
 import dk.ternedal.modelrig.logic.Agent3ReviewConnectionBinding
 
 /** URL-scoped storage for the opaque reviewed-Start recovery authority record. */
-class Agent3ReviewedStartRecoveryStore(context: Context) {
+class Agent3ReviewedStartRecoveryStore(
+    context: Context,
+    private val credentialTokenProvider: (() -> String?)? = null,
+) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
 
@@ -35,7 +38,9 @@ class Agent3ReviewedStartRecoveryStore(context: Context) {
     }
 
     private fun currentCredentialFingerprint(baseUrl: String?): String? {
-        val persistedToken = runCatching { TokenStore(appContext).token }.getOrNull()
+        val persistedToken = runCatching {
+            credentialTokenProvider?.invoke() ?: TokenStore(appContext).token
+        }.getOrNull()
         return Agent3ReviewConnectionBinding.credentialFingerprint(baseUrl, persistedToken)
     }
 }
