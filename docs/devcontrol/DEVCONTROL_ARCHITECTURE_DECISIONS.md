@@ -118,25 +118,24 @@ qualification, snapshot receipt, signature og verifier/keyring kopieres først
 til exact-type canonical value snapshots, og subclasses af authority-typer
 afvises.
 
-Den caller-leverede `TrustedGitRuntime` skal ligeledes være exact type og
-rekonstrueres lokalt fra sin verificerede transaction-root. Den rekonstruerede
-runtime skal matche manifest + executable fra `CandidateSnapshotReceipt`, hvis
-SHA allerede er bundet af den human-signerede qualification chain. Først
-derefter tages den irreversible lock, `main` genlæses, og requesten
-re-verificeres mod current time med de lokale snapshots.
+Den caller-leverede `TrustedGitRuntime` skal være exact type og verificeres mod
+den signed/pinned runtime-identitet fra `CandidateSnapshotReceipt`. Derefter
+kopieres hele runtime-treeet create-once til en transaction-private staging-root
+under canonical operation-root, re-verificeres dér og bruges som den eneste
+execution-path for preflight og post-marker `main`-observation. Callerens mutable
+runtime-tree bruges ikke efter staging.
 
-Den durable ledger er kun host-local replay/recovery-state og kan ikke reloades
-som authenticated authority. Final read-back skal være byte-identisk med den
-canonical payload, transactionen netop create-once skrev, så en schema-valid
-race-replacement ikke kan opgraderes til live authority. Kun den succesfulde
-live consume-transaktion kan derefter returnere en ikke-serialiseret
-`transaction_authenticated=true` instans efter cleanup. Provenance bindes til
-exact objekt-identitet, originating PID og canonical receipt-SHA; mutation
-invaliderer den straks, og POSIX fork-child arver ingen authority. Persisted,
-manuelt fremstillede eller race-udskiftede canonical bytes forbliver
-`transaction_authenticated=false`.
+Den irreversible create-once request-marker bevares som **permanent host-local
+replay-marker** efter succes. Final receipt skal læses byte-identisk tilbage, og
+live provenance bindes ikke kun til exact objekt-identitet, originating PID og
+canonical receipt-SHA, men også til de aktuelle exact bytes for både final og
+replay-marker. Removal eller replacement af en af dem invaliderer straks
+`transaction_authenticated`.
 
-Replay-scope er fortsat eksplicit host-local (`host_replay_guard_committed=true`,
+Den durable ledger er fortsat kun host-local replay/recovery-state og kan ikke
+reloades som authenticated authority. Persisted, manuelt fremstillede eller
+race-udskiftede canonical bytes forbliver `transaction_authenticated=false`.
+Replay-scope er eksplicit host-local (`host_replay_guard_committed=true`,
 `global_replay_safe=false`). Vedvarende frozen `main`, campaign-start, pilot,
 publication og activation forbliver separate authority-gates.
 
