@@ -11,6 +11,11 @@ POSIX a rename changes ctime even when inode and bytes are preserved, so
 rename-away/replay/rename-back cannot restore an old receipt. Live registry
 entries are transaction-token-bound and are revoked on any exception from the
 outer consume scope, including a private-runtime cleanup failure after commit.
+
+All process-global publication/live-provenance registry access is serialized by
+the shared reservation registry RLock. This is part of the authority boundary:
+a concurrent weakref cleanup, another consume transaction, or fork cleanup must
+not interrupt transaction revocation and leave traceback-reachable authority.
 """
 from __future__ import annotations
 
@@ -21,6 +26,10 @@ import weakref
 from pathlib import Path
 from typing import Any, Callable
 
+from ._improvement_physical_reservation_registry_lock import (
+    registry_lock,
+    reset_registry_lock_after_fork,
+)
 from .durable_publication import (
     DurablePublicationError,
     create_once_file as _durable_create_once_file,
@@ -208,7 +217,11 @@ def _publish_bound_file(path: Path, payload: bytes, *, mode: int) -> None:
                 "create-once bound file path changed after publication"
             )
         key = (token, destination)
-        previous = _HELD_PUBLICATIONS.pop(key, None)
+        with registry_lock():
+            previous = _HELD_PUBLICATIONS.pop(key, None)
+            if previous is None:
+                _HELD_PUBLICATIONS[key] = (bytes(payload), descriptor, identity)
+                retained = True
         if previous is not None:
             try:
                 os.close(previous[1])
@@ -217,8 +230,6 @@ def _publish_bound_file(path: Path, payload: bytes, *, mode: int) -> None:
             raise DurablePublicationError(
                 "create-once bound file transaction published one path twice"
             )
-        _HELD_PUBLICATIONS[key] = (bytes(payload), descriptor, identity)
-        retained = True
     finally:
         if not retained:
             try:
@@ -305,7 +316,8 @@ def _claim_original_publication(
             "reservation provenance registration has no transaction token"
         )
     destination, _parent = _canonical_publication_path(path)
-    entry = _HELD_PUBLICATIONS.pop((token, destination), None)
+    with registry_lock():
+        entry = _HELD_PUBLICATIONS.pop((token, destination), None)
     if entry is None:
         raise DescriptorBoundProvenanceError(
             "reservation provenance has no original create-once publication"
@@ -328,9 +340,13 @@ def _claim_original_publication(
 
 
 def _release_unclaimed_publications(token: object) -> None:
-    keys = [key for key in _HELD_PUBLICATIONS if key[0] is token]
-    for key in keys:
-        _payload, descriptor, _identity = _HELD_PUBLICATIONS.pop(key)
+    with registry_lock():
+        entries = [
+            _HELD_PUBLICATIONS.pop(key)
+            for key in tuple(_HELD_PUBLICATIONS)
+            if key[0] is token
+        ]
+    for _payload, descriptor, _identity in entries:
         try:
             os.close(descriptor)
         except OSError:
@@ -350,18 +366,22 @@ def _descriptor_bound_transaction_registry():
                 pass
 
     def revoke_identity(identity: int) -> None:
-        entry = references.pop(identity, None)
+        with registry_lock():
+            entry = references.pop(identity, None)
         if entry is not None:
             close_entry(entry)
 
     def revoke_transaction(transaction_token: object) -> None:
-        identities = [
-            identity
-            for identity, entry in references.items()
-            if entry[11] is transaction_token
-        ]
-        for identity in identities:
-            revoke_identity(identity)
+        # Select and remove the complete transaction atomically. A weakref
+        # callback or another transaction must not mutate the dict mid-iteration.
+        with registry_lock():
+            entries = [
+                references.pop(identity)
+                for identity, entry in tuple(references.items())
+                if entry[11] is transaction_token
+            ]
+        for entry in entries:
+            close_entry(entry)
 
     def mark(
         value: Any,
@@ -393,17 +413,21 @@ def _descriptor_bound_transaction_registry():
             raise
 
         identity = id(value)
-        revoke_identity(identity)
         origin_pid = os.getpid()
         authenticated_sha256 = value.sha256
 
         def discard(reference: Any, *, identity: int = identity) -> None:
-            entry = references.get(identity)
-            if entry is not None and entry[9] is reference:
-                revoke_identity(identity)
+            with registry_lock():
+                entry = references.get(identity)
+                if entry is not None and entry[9] is reference:
+                    entry = references.pop(identity)
+                else:
+                    entry = None
+            if entry is not None:
+                close_entry(entry)
 
         reference = weakref.ref(value, discard)
-        references[identity] = (
+        entry = (
             origin_pid,
             authenticated_sha256,
             Path(final_path),
@@ -417,66 +441,78 @@ def _descriptor_bound_transaction_registry():
             lock_identity,
             transaction_token,
         )
+        with registry_lock():
+            previous = references.pop(identity, None)
+            references[identity] = entry
+        if previous is not None:
+            close_entry(previous)
 
     def contains(value: Any) -> bool:
         identity = id(value)
-        entry = references.get(identity)
-        if entry is None:
-            return False
-        (
-            origin_pid,
-            authenticated_sha256,
-            final_path,
-            final_payload,
-            final_descriptor,
-            final_identity,
-            lock_path,
-            lock_payload,
-            lock_descriptor,
-            reference,
-            lock_identity,
-            _transaction_token,
-        ) = entry
-        if origin_pid != os.getpid() or reference() is not value:
-            revoke_identity(identity)
-            return False
-        try:
-            if value.sha256 != authenticated_sha256:
-                # Receipt-object mutation invalidates the current observation but
-                # does not destroy the descriptor/file provenance. Restoring the
-                # exact authenticated value may therefore make this same object
-                # valid again, matching the established transaction contract.
+        revoked: tuple[Any, ...] | None = None
+        with registry_lock():
+            entry = references.get(identity)
+            if entry is None:
                 return False
-        except (AttributeError, TypeError, ValueError):
-            return False
-        markers_valid = _path_matches_held_marker(
-            final_path,
-            final_payload,
-            final_descriptor,
-            final_identity,
-        ) and _path_matches_held_marker(
-            lock_path,
-            lock_payload,
-            lock_descriptor,
-            lock_identity,
-        )
-        if not markers_valid:
-            # Durable marker provenance is monotonic: once file/path/identity
-            # mismatch is observed, byte-identical recreation must not revive it.
-            revoke_identity(identity)
-            return False
-        return True
+            (
+                origin_pid,
+                authenticated_sha256,
+                final_path,
+                final_payload,
+                final_descriptor,
+                final_identity,
+                lock_path,
+                lock_payload,
+                lock_descriptor,
+                reference,
+                lock_identity,
+                _transaction_token,
+            ) = entry
+            if origin_pid != os.getpid() or reference() is not value:
+                revoked = references.pop(identity, None)
+            else:
+                try:
+                    if value.sha256 != authenticated_sha256:
+                        # Receipt-object mutation invalidates the current
+                        # observation without destroying durable provenance.
+                        return False
+                except (AttributeError, TypeError, ValueError):
+                    return False
+                markers_valid = _path_matches_held_marker(
+                    final_path,
+                    final_payload,
+                    final_descriptor,
+                    final_identity,
+                ) and _path_matches_held_marker(
+                    lock_path,
+                    lock_payload,
+                    lock_descriptor,
+                    lock_identity,
+                )
+                if markers_valid:
+                    return True
+                # Durable marker provenance is monotonic: once file/path/identity
+                # mismatch is observed, byte-identical recreation cannot revive it.
+                revoked = references.pop(identity, None)
+        if revoked is not None:
+            close_entry(revoked)
+        return False
 
     def after_fork_child() -> None:
-        for entry in tuple(references.values()):
+        # Never wait on an RLock potentially owned by a vanished parent thread.
+        reset_registry_lock_after_fork()
+        with registry_lock():
+            reference_entries = tuple(references.values())
+            references.clear()
+            publication_entries = tuple(_HELD_PUBLICATIONS.values())
+            _HELD_PUBLICATIONS.clear()
+        for entry in reference_entries:
             close_entry(entry)
-        references.clear()
-        for _payload, descriptor, _identity in tuple(_HELD_PUBLICATIONS.values()):
+        for _payload, descriptor, _identity in publication_entries:
             try:
                 os.close(descriptor)
             except OSError:
                 pass
-        _HELD_PUBLICATIONS.clear()
         _PUBLICATION_TOKEN.set(None)
 
     if hasattr(os, "register_at_fork"):
