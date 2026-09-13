@@ -13,6 +13,7 @@ The backup inventory follows the current 2.x persistent stores:
   jobs.db                      async job state
   schedules.db                 schedules + scheduler approval-use state
   agent3-*.db                  Agent 3 runs/reviews/replans/memory/plans/approvals
+  agent3-execution-progress.db rollback-resistant Agent 3 execution-start authority
   home-rig-*.db/data-sharing   home-rig pilot authorization/audit state
   notes/                       what note_append wrote
 
@@ -20,10 +21,13 @@ WHAT IS NOT INCLUDED: model weights (re-pullable via Ollama), Piper voices,
 repository files, modelrig.env, API keys, approval secrets or other credentials.
 Those are installation/configuration inputs, not portable data archives.
 
-Schema 1 is the original V7 inventory. Schema 2 is the current 2.x inventory.
-New code accepts both so old backups remain restorable; new archives use schema
-2 so old code fails closed instead of accepting an archive whose newer keys it
-would silently skip.
+Schema 1 is the original V7 inventory. Schema 2 expanded the 2.x inventory.
+Schema 3 adds the separate Agent 3 execution-progress authority introduced to
+fence rollback/replay of non-idempotent steps. New code can read schemas 1/2/3,
+but a legacy archive that contains Agent 3 runs without the matching progress
+sidecar is refused as unsafe rather than silently restoring weaker authority.
+New archives use schema 3 so older code fails closed instead of accepting a
+backup whose execution-authority key it would silently skip.
 
 The manifest records a schema version and every stored file's sha256, so a
 restore can refuse a corrupt or truncated archive instead of writing half of one
@@ -49,8 +53,10 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-BACKUP_SCHEMA = 2
-SUPPORTED_BACKUP_SCHEMAS = frozenset({1, BACKUP_SCHEMA})
+BACKUP_SCHEMA = 3
+SUPPORTED_BACKUP_SCHEMAS = frozenset({1, 2, BACKUP_SCHEMA})
+AGENT3_RUNS_KEY = "agent3-runs.db"
+AGENT3_EXECUTION_PROGRESS_KEY = "agent3-execution-progress.db"
 
 # Resolve paths exactly like the worker. Relative defaults are anchored under
 # the stable Kaliv data root; explicit env overrides continue to win.
@@ -92,7 +98,7 @@ def items() -> list[Item]:
         ("tools-state.json", "./kaliv-tools-state.json", "KALIV_TOOLS_STATE"),
         ("jobs.db", "./modelrig-jobs.db", "MODELRIG_JOBS_DB"),
         ("schedules.db", "./kaliv-schedules.db", "KALIV_SCHEDULES_DB"),
-        ("agent3-runs.db", "./kaliv-agent3.db", "KALIV_AGENT3_DB"),
+        (AGENT3_RUNS_KEY, "./kaliv-agent3.db", "KALIV_AGENT3_DB"),
         (
             "agent3-read-reviews.db",
             "./kaliv-agent3-read-reviews.db",
@@ -139,6 +145,21 @@ def items() -> list[Item]:
     ]
     out = [Item(key, _resolved(default, env), "file", required=False) for key, default, env in files]
     out.insert(1, Item("data.json", _backend_data(), "file", required=False))
+
+    # AgentRunStore deliberately keeps execution-start watermarks in a separate
+    # SQLite file at exactly <KALIV_AGENT3_DB>.execution-progress. Derive the
+    # portable path from the already-resolved run DB so custom locations cannot
+    # make create/restore disagree about the sidecar.
+    runs_index = next(i for i, item in enumerate(out) if item.key == AGENT3_RUNS_KEY)
+    out.insert(
+        runs_index + 1,
+        Item(
+            AGENT3_EXECUTION_PROGRESS_KEY,
+            f"{out[runs_index].path}.execution-progress",
+            "file",
+            required=False,
+        ),
+    )
     out.append(Item("notes", _tools.tools_dir(), "dir", required=False))
     return out
 
@@ -163,11 +184,30 @@ def _walk(path: str) -> list[str]:
     return sorted(out)
 
 
+def _agent3_authority_problem(files: dict) -> Optional[str]:
+    if AGENT3_RUNS_KEY in files and AGENT3_EXECUTION_PROGRESS_KEY not in files:
+        return (
+            "Agent 3 run state is present without execution-progress authority; "
+            "restoring it could replay a previously-started non-idempotent step"
+        )
+    return None
+
+
 def create(out_dir: str = ".") -> str:
     """Write a timestamped archive. Returns its path."""
     os.makedirs(out_dir, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
     archive = os.path.join(out_dir, f"kaliv-backup-{stamp}.tar.gz")
+
+    inventory = items()
+    by_key = {item.key: item for item in inventory}
+    runs = by_key[AGENT3_RUNS_KEY]
+    progress = by_key[AGENT3_EXECUTION_PROGRESS_KEY]
+    if os.path.exists(runs.path) and not os.path.exists(progress.path):
+        raise ValueError(
+            "refusing to back up Agent 3 runs without the execution-progress sidecar: "
+            + progress.path
+        )
 
     manifest: dict = {"schema": BACKUP_SCHEMA, "created": stamp, "files": {}}
 
@@ -175,7 +215,7 @@ def create(out_dir: str = ".") -> str:
     # never see a half-written backup and mistake it for a whole one.
     tmp = archive + ".tmp"
     with tarfile.open(tmp, "w:gz") as tar:
-        for it in items():
+        for it in inventory:
             if it.kind == "file":
                 if not os.path.exists(it.path):
                     continue
@@ -220,6 +260,10 @@ def verify(archive: str) -> dict:
         raise ValueError(f"unsupported backup schema: {manifest.get('schema')}")
 
     problems: list[str] = []
+    authority_problem = _agent3_authority_problem(manifest.get("files", {}))
+    if authority_problem:
+        problems.append(authority_problem)
+
     checked = 0
     with tarfile.open(archive, "r:gz") as tar:
         for key, meta in manifest["files"].items():
@@ -286,7 +330,7 @@ def restore(archive: str, force: bool = False) -> dict:
         for key, meta in manifest["files"].items():
             it = targets.get(key)
             if it is None:
-                continue  # schema-1 archives may contain keys not known here
+                continue  # older archives may contain keys not known here
             if meta["kind"] == "file":
                 _extract_to(tar, f"data/{key}", it.path)
                 restored.append(it.path)
@@ -321,6 +365,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "create":
         path = create(args.out)
         res = verify(path)  # never hand back a backup without checking it
+        if not res["ok"]:
+            raise ValueError(f"created backup failed verification: {res['problems']}")
         print(f"created {path} ({res['checked']} files, verified)")
         return 0
     if args.cmd == "verify":
