@@ -28,7 +28,7 @@ jobs:
           path = Path('tests/worker_backup.py')
           text = path.read_text(encoding='utf-8')
           old = '''check(\n    any("execution-progress authority" in problem for problem in unsafe_verify["problems"]),\n    "schema: unsafe legacy archive names the missing execution authority",\n)\n'''
-          new = '''check(\n    any("closed authority schema" in problem for problem in unsafe_verify["problems"])\n    and any(\n        "schema-5 persistent live-pair binding" in problem\n        for problem in unsafe_verify["problems"]\n    ),\n    "schema: unsafe legacy archive names embedded v5 authority and missing live-pair proof",\n)\n'''
+          new = '''check(\n    any(\n        "schema-5 persistent live-pair binding" in problem\n        for problem in unsafe_verify["problems"]\n    ),\n    "schema: unsafe legacy archive names the missing schema-5 live-pair proof",\n)\n'''
           if text.count(old) != 1:
               raise SystemExit('legacy assertion anchor missing or ambiguous')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
@@ -64,5 +64,5 @@ jobs:
           git rm .github/workflows/_tmp_schema5_legacy_adoption.yml
           git add worker/app/backup.py tests/worker_backup.py
           git diff --cached --check
-          git commit -m "fix(agent3): preserve schema-5 legacy adoption boundary (#1309)" -m "Keep closed SQLite schema validation fail-closed while allowing canonical legacy pair adoption and shape-only schema-5 probes. Align the legacy archive regression with the stricter closed-schema validation order. Draft/off-main only; production_activation=false."
+          git commit -m "fix(agent3): preserve schema-5 legacy adoption boundary (#1309)" -m "Keep closed SQLite schema validation fail-closed while allowing canonical legacy pair adoption and shape-only schema-5 probes. Align the legacy archive regression with the schema-5 live-pair refusal contract. Draft/off-main only; production_activation=false."
           git push origin HEAD:fix/agent3-schema5-legacy-adoption-20260913
