@@ -12,16 +12,16 @@ Reservation-laget skal lukke fire adskilte huller:
 
 1. **trust root** — caller må ikke vælge Ed25519-keyringen, der afgør om callerens egen signatur er trusted;
 2. **runtime/observation** — authority-observation må ikke komme fra caller-supplied bytes eller en runtime, som samme service-bruger kan omskrive mellem verification og execution;
-3. **time/replay** — caller må ikke backdate consumption eller genbruge samme request på den canonical host-ledger;
+3. **time/replay** — caller må ikke backdate consumption eller genbruge samme request gennem production consume; replay-state må samtidig ikke kunne rulles tilbage af den ordinary service-principal, som reservationen skal beskytte imod;
 4. **provenance** — schema-valid persisted bytes, byte-identiske replacements eller rename/replay/restore må ikke kunne mint'e eller genoplive live authority.
 
-En lokal filesystem-ledger kan kun etablere fail-closed replay/recovery-state på den konkrete host. Den kan ikke bevise distribueret/global one-time use. `global_replay_safe` forbliver derfor `false`, og fysisk campaign-admission er en separat senere boundary.
+En lokal filesystem-ledger kan kun etablere fail-closed replay/recovery-state på den konkrete host, når ledgeren selv ligger bag en separat host-admin boundary. Den kan ikke bevise distribueret/global one-time use, og den giver ingen garanti mod en kompromitteret host-administrator/root principal. `global_replay_safe` forbliver derfor `false`, og fysisk campaign-admission er en separat senere boundary.
 
 ## Beslutning
 
 Production authority-sekvensen er:
 
-`host-pinned request trust root → exact caller snapshots → host-admin-controlled signed runtime → trusted preflight → permanent create-once replay-marker → trusted post-marker main read → current-time signed-chain reverify → create-once final → exact read-back → original-publication file provenance + Linux watch-before-trust directory-chain history → transaction-authenticated in-memory receipt`
+`host-pinned request trust root → elevated host operator + host-admin-controlled replay ledger → exact caller snapshots → host-admin-controlled signed runtime → trusted preflight → permanent create-once replay-marker → trusted post-marker main read → current-time signed-chain reverify → create-once final → exact read-back → original-publication file provenance + Linux watch-before-trust directory-chain history → transaction-authenticated in-memory receipt`
 
 ### 1. Public consume må ikke acceptere caller-valgt trust root
 
@@ -68,7 +68,27 @@ Production Git-reader understøtter kun `rev-parse --verify refs/heads/main^{com
 
 Den underscored/private deterministic test-seam må fortsat bruge transaction-private runtime staging for race-tests. Det er test-infrastruktur, ikke public production authority.
 
-### 4. Replay-marker kommer før authority-bearing main-observation
+### 4. Production replay-state er en elevated host-operator boundary
+
+Live provenance kan opdage tamper, mens et receipt eksisterer, men kan ikke gøre et ordinary service-user-writable directory rollback-sikkert mellem processer eller efter restart. Production replay-ledgeren må derfor ikke ejes af eller være writable gennem den almindelige ModelRig service-identitet.
+
+Public production resolver præcis én fast, pre-provisioned ledger:
+
+- POSIX: `/var/lib/modelrig/devcontrol/rsi-physical-request-ledger-v1`;
+- Windows: `C:\Program Files\ModelRig\DevControl\state\rsi-physical-request-ledger-v1`.
+
+Selve consume-operationen er en **fysisk host-operator handling**, ikke produkt-runtime:
+
+- POSIX kræver effektiv UID 0. Ledger-directory og hele ancestor chain skal være root-owned, uden group/world-write og uden extended POSIX access/default ACLs. Ordinary service-processer kan derfor ikke create, unlinke, replace eller nulstille replay-markers;
+- Windows kræver et elevated access token. Ledgeren skal ligge under `Program Files`, og directory-chainens native owner/DACL må kun give write/control til de allerede trusted host-admin principals (`SYSTEM`, `Administrators`, `TrustedInstaller`).
+
+Ledgeren oprettes **ikke** automatisk som service-user state. Manglende, ikke-pre-provisioned, linket, forkert ejet eller for bredt writable host-state fejler lukket før reservationstransaktionen starter.
+
+Denne boundary gør replay-state rollback-resistent over for ordinary/non-admin service-principals. Den påstår bevidst **ikke** modstand mod kompromitteret root/host-administrator: en principal, der allerede kontrollerer trust-root, protected runtime og den administrative ledger, ligger uden for `host_replay_guard_committed`-garantien. Reservation-schemaet beskriver samme afgrænsning machine-readable og holder `global_replay_safe=false`.
+
+Den private underscored test-seam kan fortsat bruge caller-valgte midlertidige ledgers til deterministiske regressions; det giver ingen production authority.
+
+### 5. Replay-marker kommer før authority-bearing main-observation
 
 Et trusted preflight-read må afvise en åbenlyst forkert request uden at brænde den. Den authority-bærende observation sker først efter create-once reservation.
 
@@ -76,15 +96,15 @@ Replay-markeren er permanent host-local replay-state. Den oprettes med `O_CREAT|
 
 Efter markerens oprettelse læses præcis `refs/heads/main^{commit}` igen gennem den host-admin-kontrollerede, snapshot-pinnede production Git-reader.
 
-Hvis `main` flytter, trusted Git fejler eller requesten senere viser sig udløbet, er requesten stadig host-lokalt consumed/recovery-required. Replay-markeren rulles ikke tilbage.
+Hvis `main` flytter, trusted Git fejler eller requesten senere viser sig udløbet, er requesten stadig host-lokalt consumed/recovery-required. Replay-markeren rulles ikke tilbage af transactionen.
 
-### 5. Trusted time og signatur re-verificeres efter marker
+### 6. Trusted time og signatur re-verificeres efter marker
 
 Production clock afledes internt. Caller kan ikke levere eller backdate consumption time.
 
 Efter replay-marker og post-marker `main` read re-verificeres signed request + qualification ved et nyt current-time timestamp mod den host-resolved/snapshottede verifier. Expiry eller signature/keyring mismatch fejler lukket og efterlader requesten consumed/recovery-required.
 
-### 6. Durable bytes er recovery-state; live provenance er process- og historie-bundet
+### 7. Durable bytes er recovery-state; live provenance er process- og historie-bundet
 
 Canonical final/pending/replay-marker bytes er ikke reloadable authority:
 
@@ -104,6 +124,8 @@ Konsekvenser:
 - receipt-object mutation giver midlertidigt `transaction_authenticated=false`; præcis restoration af original authenticated content kan blive valid igen, hvis durable provenance aldrig har mismatchet;
 - fork-child arver ingen authority: PID skal matche, registries ryddes og inherited descriptors lukkes;
 - enhver exception fra outer consume revokerer allerede registreret provenance for transaction-tokenet **før** exceptionen bliver caller-visible. Et receipt hentet fra traceback locals efter cleanup-failure er derfor unauthenticated.
+
+File-descriptor provenance og directory-history provenance deler én process-local re-entrant registry lock. Registration, live authentication, weakref cleanup, transaction revocation og retained-publication cleanup kan derfor ikke mutere de to authority-registries samtidigt eller skabe et stale-true vindue mellem file- og directory-evidence. Registry entries detach'es atomisk under låsen; descriptors/history handles lukkes efter detach. Fork-child erstatter det arvede lock før cleanup.
 
 #### Linux directory-chain event-history og watch-before-trust
 
@@ -125,9 +147,9 @@ BSD-style kqueue kræver et target descriptor før vnode-filteret kan registrere
 
 Både `ledger rename-away → replay → restore` og `ancestor rename-away → replay i replacement subtree → delete replacement → restore ancestor` efter monitor-arming efterlader history, som ikke kan skjules ved at sætte de oprindelige pathnames tilbage.
 
-Der påstås ikke tilsvarende Windows inotify/kqueue semantics; Windows authority er afgrænset af de separate native owner/DACL- og file-provenance guarantees i denne ADR.
+Der påstås ikke tilsvarende Windows inotify/kqueue semantics; Windows authority er afgrænset af de separate native owner/DACL-, elevated-operator- og file-provenance guarantees i denne ADR.
 
-### 7. Replay-scope er eksplicit host-local
+### 8. Replay-scope er eksplicit host-local
 
 Et schema-validt reservation receipt bevarer mindst:
 
@@ -137,11 +159,13 @@ Et schema-validt reservation receipt bevarer mindst:
 - `host_replay_guard_committed=true`;
 - `global_replay_safe=false`.
 
-Public production-pathen bruger canonical host-state og eksponerer ingen ledger-selector. Private test-ledgers ændrer aldrig `global_replay_safe=false`.
+`host_replay_guard_committed=true` betyder, at create-once-markeren blev durably committed i den canonical host-admin-kontrollerede ledger under en elevated production consume. Det betyder **ikke** host-admin/root-compromise resistance og heller ikke distribueret/global one-time use.
+
+Public production-pathen eksponerer ingen ledger-selector og kræver den elevated operator + protected ledger boundary ovenfor. Private test-ledgers ændrer aldrig `global_replay_safe=false`.
 
 En senere campaign-admission boundary skal binde den faktiske physical host/runner og må ikke bruge reloadede ledger-bytes eller process-arvede receipts som execution authority.
 
-### 8. Reservationen stopper før fysisk execution
+### 9. Reservationen stopper før fysisk execution
 
 Receiptet bevarer altid:
 
@@ -158,22 +182,23 @@ Denne boundary starter ikke DC-L15 probes, cadence, persistent `main` freeze, fy
 ## Canonical production-rækkefølge
 
 1. resolve og host-control-validér request-authority keyring/verifier;
-2. snapshot exact-type request/qualification/snapshot/signature + verifier;
-3. rekonstruér exact `TrustedGitRuntime`, verificér signed runtime identity og host-admin-control af tree + chain;
-4. trusted preflight af `main` gennem den restricted host-controlled Git-reader;
-5. opret transaction/publication token; på Linux arm exact ancestry parent-watches **før** directory-identiteter captures, bind derefter ledger-root + ancestors og verificér tom history før første permanente publication; non-Linux POSIX fejler lukket;
-6. create-once permanent replay-marker og behold original descriptor/fil-identitet;
-7. trusted post-marker `main` read gennem samme host-controlled runtime;
-8. trusted-current-time re-verifikation af signed request + qualification;
-9. create-once pending payload;
-10. create-once final canonical payload; behold original descriptor/fil-identitet;
-11. exact-byte read-back + canonical parse uden authority grant;
-12. cleanup kun pending; replay-marker bevares;
-13. claim original final + marker publication descriptors fra samme transaction-token;
-14. registrér exact live receipt med process/content/file provenance og, på Linux, watch-before-trust directory-chain event-history binding;
-15. ved enhver outer exception: revokér registered provenance, frigiv unclaimed descriptors/history monitors og propagér derefter fejlen.
+2. kræv elevated host-operator context og resolve/host-control-validér den fixed canonical replay-ledger; ordinary service-user state accepteres ikke;
+3. snapshot exact-type request/qualification/snapshot/signature + verifier;
+4. rekonstruér exact `TrustedGitRuntime`, verificér signed runtime identity og host-admin-control af tree + chain;
+5. trusted preflight af `main` gennem den restricted host-controlled Git-reader;
+6. opret transaction/publication token; på Linux arm exact ancestry parent-watches **før** directory-identiteter captures, bind derefter ledger-root + ancestors og verificér tom history før første permanente publication; non-Linux POSIX fejler lukket;
+7. create-once permanent replay-marker og behold original descriptor/fil-identitet;
+8. trusted post-marker `main` read gennem samme host-controlled runtime;
+9. trusted-current-time re-verifikation af signed request + qualification;
+10. create-once pending payload;
+11. create-once final canonical payload; behold original descriptor/fil-identitet;
+12. exact-byte read-back + canonical parse uden authority grant;
+13. cleanup kun pending; replay-marker bevares;
+14. claim original final + marker publication descriptors fra samme transaction-token;
+15. registrér exact live receipt med process/content/file provenance og, på Linux, watch-before-trust directory-chain event-history binding;
+16. ved enhver outer exception: revokér registered provenance, frigiv unclaimed descriptors/history monitors og propagér derefter fejlen.
 
-Hvis noget fejler efter replay-markerens publication, kan requesten ikke genbruges på samme canonical host-ledger uden en separat eksplicit recovery-procedure.
+Hvis noget fejler efter replay-markerens publication, kan requesten ikke genbruges gennem den normale production consume på samme canonical host-ledger uden en separat eksplicit host-admin recovery/tamper-handling. En kompromitteret host-admin/root principal er eksplicit uden for denne receipts replay-garanti.
 
 ## Fail-closed krav
 
@@ -182,46 +207,50 @@ Implementationen skal mindst afvise eller fail-close ved:
 1. caller-supplied verifier/keyring/trust root i public consume;
 2. manglende/malformed/wrong-domain/non-canonical/unsafe host keyring;
 3. POSIX keyring ownership/mode-brud eller Windows owner/DACL med ikke-admin write/control;
-4. forkert issuer-system eller stale minimum keyring epoch;
-5. packaged/non-underscored verifier-taking compatibility route eller traversal til private verifier-injection;
-6. forged observation, caller clock eller caller authority-path;
-7. subclasses/overridable authority-inputs eller `TrustedGitRuntime`;
-8. caller mutation af signed inputs efter snapshot;
-9. production runtime, der er service-user-writable eller ikke host-admin-kontrolleret;
-10. runtime manifest/executable mismatch mod signed `CandidateSnapshotReceipt`;
-11. malformed/wrong `main` SHA eller drift mellem preflight og post-marker read;
-12. expired/invalid signed request efter replay-marker;
-13. duplicate consume eller crash-left marker/pending/final state;
-14. direct/prebuilt/fabricated final persistence;
-15. non-canonical/non-identical final read-back;
-16. byte-identisk eller ændret final/marker replacement før registration;
-17. missing/mismatched original publication descriptor ved claim;
-18. final/marker tamper efter registration;
-19. delete→byte-identical recreate af final/marker;
-20. POSIX leaf rename-away/replay/rename-back;
-21. Linux ledger-root eller ancestor rename-away/replay/restore, monitor loss eller relevant queued ancestry-event;
-22. production på non-Linux POSIX, hvor exact watch-before-trust directory-history setup ikke kan bevises;
-23. live receipt mutation uden exact content restoration;
-24. POSIX fork inheritance;
-25. cross-transaction descriptor/history-monitor claim eller leaked retained state;
-26. outer consume/cleanup failure, der ellers ville efterlade traceback-reachable authenticated receipt;
-27. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+4. production replay consume uden elevated host-operator context;
+5. manglende, ikke-pre-provisioned, linked, forkert ejet, group/world-writable eller ACL-udvidet POSIX replay-ledger chain;
+6. Windows replay-ledger uden for Program Files eller med unsafe owner/DACL;
+7. forkert issuer-system eller stale minimum keyring epoch;
+8. packaged/non-underscored verifier-taking compatibility route eller traversal til private verifier-injection;
+9. forged observation, caller clock eller caller authority-path;
+10. subclasses/overridable authority-inputs eller `TrustedGitRuntime`;
+11. caller mutation af signed inputs efter snapshot;
+12. production runtime, der er service-user-writable eller ikke host-admin-kontrolleret;
+13. runtime manifest/executable mismatch mod signed `CandidateSnapshotReceipt`;
+14. malformed/wrong `main` SHA eller drift mellem preflight og post-marker read;
+15. expired/invalid signed request efter replay-marker;
+16. duplicate consume eller crash-left marker/pending/final state;
+17. direct/prebuilt/fabricated final persistence;
+18. non-canonical/non-identical final read-back;
+19. byte-identisk eller ændret final/marker replacement før registration;
+20. missing/mismatched original publication descriptor ved claim;
+21. final/marker tamper efter registration;
+22. delete→byte-identical recreate af final/marker;
+23. POSIX leaf rename-away/replay/rename-back;
+24. Linux ledger-root eller ancestor rename-away/replay/restore, monitor loss eller relevant queued ancestry-event;
+25. production på non-Linux POSIX, hvor exact watch-before-trust directory-history setup ikke kan bevises;
+26. live receipt mutation uden exact content restoration;
+27. POSIX fork inheritance;
+28. cross-transaction descriptor/history-monitor claim eller leaked retained state;
+29. outer consume/cleanup failure, der ellers ville efterlade traceback-reachable authenticated receipt;
+30. concurrent registry mutation, der ellers kunne give stale-true eller iteration failure under revocation/cleanup;
+31. ethvert forsøg på at hæve host-admin-compromise resistance, global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority ud over receiptets eksplicitte scope.
 
 ## Artefakter
 
 - `kaliv-rsi-physical-request-authority-keyring/v1` — host-kontrolleret verification-only trust root;
 - `kaliv-rsi-local-main-head-observation/v1` — parsebar evidence-only observation;
-- `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local replay/evidence data;
-- `consume_physical_qualification_request_once(...)` — eneste public authority-bearing consume path;
+- `kaliv-rsi-physical-qualification-reservation/v1` — canonical host-local replay/evidence data med eksplicit ikke-global/non-host-admin-compromise replay-scope;
+- `consume_physical_qualification_request_once(...)` — eneste public authority-bearing consume path og en elevated physical host-operator operation;
+- fixed pre-provisioned host-admin replay ledger under `/var/lib/modelrig/devcontrol/...` eller `Program Files\ModelRig\DevControl\state\...`;
 - admin-controlled production `TrustedGitRuntime` + restricted physical Git reader;
-- private transaction-staged runtime seam — deterministic tests only;
-- canonical host ledger — final + permanent replay-marker som recovery/replay-state;
+- private transaction-staged runtime/ledger seams — deterministic tests only;
 - original-publication descriptor registry for final/replay-marker;
 - Linux ledger-root + ancestor parent-watches, retained directory descriptors og watch-before-trust kernel event-history;
-- process-local live provenance registry med process/content/file/history binding og transaction-token-bound exception revocation.
+- process-local live provenance registry med process/content/file/history binding, shared fork-safe re-entrant registry lock og transaction-token-bound exception revocation.
 
 ## Konsekvens
 
-Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en caller-uafhængig host-pinned trust root, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem en host-admin-kontrolleret runtime efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de oprindelige durable publications og — på Linux — den canonical ledger-paths monotone watch-before-trust directory-chain event history.
+Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en caller-uafhængig host-pinned trust root, at reservationen blev udført af en elevated physical host-operator mod en pre-provisioned host-admin-kontrolleret replay-ledger, at requesten matchede den signerede software/runtime chain, at det ønskede `main` blev observeret gennem en host-admin-kontrolleret runtime efter permanent host reservation, og at transactionen producerede et live process-bound receipt, hvis provenance er bundet til de oprindelige durable publications og — på Linux — den canonical ledger-paths monotone watch-before-trust directory-chain event history.
 
-Det beviser fortsat **ikke** global replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og kræver separate senere boundaries.
+Det beviser fortsat **ikke** replay-resistance mod kompromitteret host-admin/root, global/distribueret replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og kræver separate senere boundaries.
