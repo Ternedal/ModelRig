@@ -1,5 +1,8 @@
 package dk.ternedal.modelrig.logic
 
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+
 /**
  * Immutable in-memory authority for one Android Agent 3 review connection context.
  * The credential is deliberately never persisted, rendered or included in toString().
@@ -17,12 +20,36 @@ internal class Agent3ReviewConnectionBinding private constructor(
         "Agent3ReviewConnectionBinding(baseUrl=$baseUrl, token=<redacted>)"
 
     companion object {
+        private const val CREDENTIAL_FINGERPRINT_DOMAIN = "kaliv-agent3-reviewed-start-credential/v1"
+
         fun capture(baseUrl: String?, token: String?): Agent3ReviewConnectionBinding? {
-            val normalizedBase = baseUrl?.trim()?.trimEnd('/').orEmpty()
-            val normalizedToken = token?.trim().orEmpty()
-            if (normalizedBase.isBlank() || normalizedToken.isBlank()) return null
+            val normalizedBase = normalizeBaseUrl(baseUrl) ?: return null
+            val normalizedToken = token?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             return Agent3ReviewConnectionBinding(normalizedBase, normalizedToken)
         }
+
+        /**
+         * Non-secret verifier used only to prove that durable Start recovery is
+         * being retried with the same rig credential that reviewed it. The raw
+         * token is never persisted or exposed by this helper.
+         */
+        internal fun credentialFingerprint(baseUrl: String?, token: String?): String? {
+            val normalizedBase = normalizeBaseUrl(baseUrl) ?: return null
+            val normalizedToken = token?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            val digest = MessageDigest.getInstance("SHA-256").digest(
+                buildString {
+                    append(CREDENTIAL_FINGERPRINT_DOMAIN)
+                    append('\u0000')
+                    append(normalizedBase)
+                    append('\u0000')
+                    append(normalizedToken)
+                }.toByteArray(StandardCharsets.UTF_8)
+            )
+            return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }
+
+        private fun normalizeBaseUrl(baseUrl: String?): String? =
+            baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
     }
 }
 
