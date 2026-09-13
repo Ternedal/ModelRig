@@ -37,6 +37,10 @@ class PlannerError(RuntimeError):
     pass
 
 
+class _ReviewedStartCancelled(RuntimeError):
+    pass
+
+
 class _DuplicateJsonKeyError(ValueError):
     pass
 
@@ -450,6 +454,18 @@ def build_planner_router(
             reviewed_start_retry_ready.remove(key)
             return True
 
+    def _finalize_cancelled_reviewed_start(plan_id: str, run_id: str) -> None:
+        # Cancellation is definitive only after the same-run execution guard has
+        # let the Start/recovery path observe the terminal CANCELLED snapshot.
+        # At that point no executor from this path is still in flight. Remove any
+        # checkpoint left by a crash between the run cancellation commit and the
+        # read-review cleanup, then publish a definitive refusal so clients may
+        # clear their ambiguous Start authority without calling the cancellation
+        # a successful Start acceptance.
+        if reviewing:
+            orchestrator.review_store.clear_waiting_if_matches(run_id)
+        plan_store.mark_reviewed_start_refused(plan_id, run_id)
+
     def _parse_reviewed_materialization(payload: str) -> tuple[dict[str, Any], AgentRun, bool]:
         envelope = json.loads(payload)
         if not isinstance(envelope, dict):
@@ -569,12 +585,28 @@ def build_planner_router(
                 review_reads=review_reads,
                 reviewed_template=reviewed_template,
             )
-            plan_store.mark_reviewed_start_accepted(plan_id, run_id)
-            return _reviewed_start_response(plan_id, stored, reconciled)
         except Exception:
             # No second SQLite write is required to make a same-worker retry
             # possible. The local token is issued only as this request exits;
             # the next request must atomically consume it before recovery.
+            _mark_reviewed_start_retry_ready(plan_id, run_id)
+            raise
+
+        if reconciled.state is RunState.CANCELLED:
+            try:
+                _finalize_cancelled_reviewed_start(plan_id, run_id)
+            except Exception:
+                _mark_reviewed_start_retry_ready(plan_id, run_id)
+                raise
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "reviewed Start was cancelled before publication",
+            )
+
+        try:
+            plan_store.mark_reviewed_start_accepted(plan_id, run_id)
+            return _reviewed_start_response(plan_id, stored, reconciled)
+        except Exception:
             _mark_reviewed_start_retry_ready(plan_id, run_id)
             raise
 
@@ -754,8 +786,20 @@ def build_planner_router(
             )
             if run.id != reserved_run_id:
                 raise RuntimeError("reviewed Start materialized a different run id")
+            if run.state is RunState.CANCELLED:
+                raise _ReviewedStartCancelled()
             plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
             return _reviewed_start_response(plan_id, envelope, run)
+        except _ReviewedStartCancelled:
+            try:
+                _finalize_cancelled_reviewed_start(plan_id, reserved_run_id)
+            except Exception:
+                _mark_reviewed_start_retry_ready(plan_id, reserved_run_id)
+                raise
+            raise _reviewed_start_error(
+                "reviewed_start_refused",
+                "reviewed Start was cancelled before publication",
+            )
         except HTTPException:
             existing = orchestrator.store.load(reserved_run_id)
             if existing is not None:
