@@ -106,3 +106,48 @@ forbruger ikke requesten og giver ikke campaign-start, pilot, publication eller
 activation authority.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDARY.md`
+
+## ADR-DC-009 — Authenticated host-local request-reservation før DC-L15
+
+**Dato 12/09-2026. Status: foreslået til beslutning.**
+
+Gør request-reservation til én authenticated host-local transaction med
+caller-uafhængig Ed25519 trust-root, elevated host-operator replay-state,
+host-admin-kontrolleret Git runtime **og et separat host-admin-kontrolleret Git
+metadata-target**. Public consume accepterer ikke verifier/keyring, observation,
+clock, ledger/root paths eller prebuilt receipt.
+
+POSIX host-control er ACL-aware: keyring, runtime, repository-target og replay
+state skal være root-owned, uden group/world-write og uden extended POSIX
+access/default ACLs. Windows bruger Program Files + native owner/DACL evidence,
+hvor ordinary/broad principals ikke må have write/control authority.
+
+Production Git-readet tillader kun `rev-parse --verify refs/heads/main^{commit}`.
+Authority-pathen launcher den attesterede Git executable direkte og relauncher
+ikke den generelle `bounded_subprocess.py` package-supervisor. Den beskytter også
+observationens target: checkout-root/ancestor-chain og hele `.git` metadata-treeet
+skal være host-admin-kontrolleret før og efter readet. Linked/common Git dirs,
+external object alternates og local config `include`/`includeIf` fejler lukket,
+så en beskyttet executable ikke kan omdirigeres til caller-writable Git state.
+Det beskytter **ikke** alle tracked worktree bytes og er derfor ikke et frozen-
+main proof.
+
+Production replay-ledgeren er fast og pre-provisioned. POSIX kræver effektiv UID
+0; Windows kræver elevated token. Ordinary ModelRig service-identiteter er ikke
+replay-state writers. `host_replay_guard_committed=true` beskriver kun den
+canonical host-admin-ledger; kompromitteret root/host-admin og distributed/global
+one-time use er eksplicit uden for garantien, og `global_replay_safe=false`.
+
+Replay-marker/final beholder original-publication descriptors, og live provenance
+binder receipt identity, PID, digest, durable file identity og Linux directory
+history. Linux bruger watch-before-trust på hele ledger ancestry med history-drain
+både før og efter identity-validation; non-Linux POSIX production fejler aktuelt
+lukket frem for at overclaim'e tilsvarende race-free semantics.
+
+Reservationen er fortsat evidence-only: `frozen_main_confirmed=false`,
+`physical_campaign_completed=false`, `campaign_start_authorized=false`,
+`pilot_go_authorized=false`, `remote_publication_authorized=false` og
+`activation_authorized=false`. Persistent freeze, fysisk campaign-admission,
+pilot, publication og activation forbliver separate authority-gates.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
