@@ -3,12 +3,16 @@
 Live descriptor/directory provenance can detect tamper while a receipt exists,
 but it cannot make a service-user-writable directory rollback-resistant between
 transactions or after restart. Production replay state therefore lives only in
-a fixed administrator-controlled directory. The private reservation
-implementation keeps its injectable/test ledger seam; this module is used only
-by the public production facade.
+a fixed administrator-controlled directory and may be mutated only by an
+explicit elevated host-operator invocation. The ordinary ModelRig service
+identity is not a replay-state writer.
+
+The private reservation implementation keeps its injectable/test ledger seam;
+this module is used only by the public production facade.
 """
 from __future__ import annotations
 
+import ctypes
 import errno
 import os
 import stat
@@ -35,14 +39,107 @@ _NO_ACL_XATTR_ERRNOS = frozenset(
         getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
     }
 )
+_TOKEN_QUERY = 0x0008
+_TOKEN_ELEVATION_CLASS = 20
 
 
 class PhysicalHostStateError(ValueError):
     """The canonical physical-request replay ledger is not host-admin controlled."""
 
 
+class _TOKEN_ELEVATION(ctypes.Structure):
+    _fields_ = [("TokenIsElevated", ctypes.c_uint32)]
+
+
 def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
     return (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino)
+
+
+def _require_posix_elevated_operator() -> None:
+    """Production replay mutation is a root/operator action, never service-user work."""
+
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None or geteuid() != 0:
+        raise PhysicalHostStateError(
+            "physical request replay reservation requires an elevated host operator"
+        )
+
+
+def _require_windows_elevated_operator() -> None:
+    """Require a full elevated Windows token before permitting replay-state writes."""
+
+    if os.name != "nt":
+        raise PhysicalHostStateError(
+            "Windows replay-state elevation inspection requires Windows"
+        )
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    except (AttributeError, OSError) as exc:
+        raise PhysicalHostStateError(
+            "physical request replay operator token cannot be inspected"
+        ) from exc
+
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    advapi32.OpenProcessToken.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    advapi32.OpenProcessToken.restype = ctypes.c_int
+    advapi32.GetTokenInformation.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    advapi32.GetTokenInformation.restype = ctypes.c_int
+
+    token = ctypes.c_void_p()
+    if not advapi32.OpenProcessToken(
+        kernel32.GetCurrentProcess(),
+        _TOKEN_QUERY,
+        ctypes.byref(token),
+    ):
+        raise PhysicalHostStateError(
+            "physical request replay operator token is unavailable"
+        )
+    try:
+        elevation = _TOKEN_ELEVATION()
+        returned = ctypes.c_uint32()
+        if not advapi32.GetTokenInformation(
+            token,
+            _TOKEN_ELEVATION_CLASS,
+            ctypes.byref(elevation),
+            ctypes.sizeof(elevation),
+            ctypes.byref(returned),
+        ):
+            raise PhysicalHostStateError(
+                "physical request replay operator elevation is unavailable"
+            )
+        if returned.value < ctypes.sizeof(elevation) or elevation.TokenIsElevated != 1:
+            raise PhysicalHostStateError(
+                "physical request replay reservation requires an elevated host operator"
+            )
+    finally:
+        if token.value:
+            kernel32.CloseHandle(token)
+
+
+def _require_elevated_operator() -> None:
+    if os.name == "posix":
+        _require_posix_elevated_operator()
+        return
+    if os.name == "nt":
+        _require_windows_elevated_operator()
+        return
+    raise PhysicalHostStateError(
+        "physical request replay operator platform is unsupported"
+    )
 
 
 def _validate_posix_directory_stat(observed: os.stat_result) -> None:
@@ -97,8 +194,8 @@ def _require_posix_host_control(path: Path) -> Path:
         cursor = cursor.parent
 
     # Establish trust root-down. Once a parent is root-controlled and not
-    # writable by ordinary principals, the next child cannot be swapped by the
-    # service account while that child is being attested.
+    # writable by ordinary principals, the next child cannot be swapped by an
+    # unprivileged service process while that child is being attested.
     for directory in reversed(chain):
         try:
             before = directory.lstat()
@@ -199,8 +296,9 @@ def _require_host_controlled_ledger_root(path: Path) -> Path:
 
 
 def _canonical_host_controlled_ledger_root() -> Path:
-    """Resolve the fixed production ledger; never create caller/service-owned state."""
+    """Resolve fixed production replay state for one elevated physical operator."""
 
+    _require_elevated_operator()
     if os.name == "posix":
         return _require_posix_host_control(_POSIX_LEDGER)
     if os.name == "nt":
