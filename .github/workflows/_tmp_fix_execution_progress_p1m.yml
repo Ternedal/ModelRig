@@ -1,0 +1,58 @@
+name: tmp-fix-execution-progress-p1m
+
+on:
+  push:
+    branches:
+      - fix/agent3-execution-progress-inline-constraint-p1m-20260913
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-execution-progress-inline-constraint-p1m-20260913
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Apply P1m fix
+        run: python .tmp_fix_execution_progress_p1m.py
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+      - name: Compile changed Python
+        run: python -m py_compile worker/app/backup.py tests/worker_backup.py
+      - name: Run backup authority regressions
+        env:
+          PYTHONPATH: ${{ github.workspace }}/worker
+        run: python tests/worker_backup.py
+      - name: Run reviewed-Start recovery chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          for t in tests/worker_agent3_reviewed_start_p1*.py; do
+            echo "==> $t"
+            python "$t"
+          done
+      - name: Canonical state and diff hygiene
+        run: |
+          python scripts/current_state.py --check
+          git diff --check
+          grep -q 'canonical CREATE TABLE authority' worker/app/backup.py
+          grep -q 'CHECK-constrained execution-progress sidecar' tests/worker_backup.py
+      - name: Commit retained P1m fix and remove temporary machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git rm .tmp_fix_execution_progress_p1m.py .github/workflows/_tmp_fix_execution_progress_p1m.yml
+          git add worker/app/backup.py tests/worker_backup.py
+          git diff --cached --check
+          git commit -m "fix(agent3): bind progress backup to canonical table SQL (#1309)" -m "Reject inline SQLite constraints that can suppress execution watermarks while preserving the visible schema. Draft/off-main only; production_activation=false."
+          git push origin HEAD:fix/agent3-execution-progress-inline-constraint-p1m-20260913
