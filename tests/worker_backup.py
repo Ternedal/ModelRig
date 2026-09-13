@@ -154,6 +154,30 @@ def archive_with_schema(
             dst.addfile(replacement, io.BytesIO(data))
 
 
+def _triggered_execution_progress_bytes() -> bytes:
+    fd, path = tempfile.mkstemp(prefix="triggered-execution-progress-", suffix=".db", dir=_root)
+    os.close(fd)
+    try:
+        _seed_sqlite(path, backup.AGENT3_EXECUTION_PROGRESS_KEY)
+        con = sqlite3.connect(path)
+        con.execute(
+            "CREATE TRIGGER erase_new_execution_watermark "
+            "AFTER INSERT ON agent_execution_starts BEGIN "
+            "DELETE FROM agent_execution_starts "
+            "WHERE run_id=NEW.run_id AND step_index=NEW.step_index "
+            "AND step_sha256=NEW.step_sha256; END"
+        )
+        con.commit()
+        con.close()
+        with open(path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
 # --- inventory --------------------------------------------------------------
 required_keys = {
     "rag.db",
@@ -266,6 +290,35 @@ except ValueError:
     check(True, "restore: invalid execution-progress authority is refused")
 check(snapshot() == pre_invalid_restore, "restore: invalid authority refusal writes NOTHING")
 
+# A semantically hostile sidecar can retain the expected table/PK and pass
+# integrity_check while using a trigger to erase every newly inserted watermark.
+# The manifest hash is deliberately rewritten to match these hostile bytes, so
+# refusal here proves authority-schema validation rather than transport hashing.
+triggered_progress = os.path.join(_root, "triggered-execution-progress.tar.gz")
+triggered_progress_bytes = _triggered_execution_progress_bytes()
+archive_with_schema(
+    archive,
+    triggered_progress,
+    3,
+    replace_files={backup.AGENT3_EXECUTION_PROGRESS_KEY: triggered_progress_bytes},
+)
+triggered_verify = backup.verify(triggered_progress)
+check(
+    not triggered_verify["ok"],
+    "verify: trigger-mutated execution-progress authority is refused with a matching manifest hash",
+)
+check(
+    any("unexpected trigger authority" in problem for problem in triggered_verify["problems"]),
+    "verify: trigger-mutated execution-progress failure names the trigger authority",
+)
+pre_trigger_restore = snapshot()
+try:
+    backup.restore(triggered_progress, force=True)
+    check(False, "restore: trigger-mutated execution-progress authority is refused")
+except ValueError:
+    check(True, "restore: trigger-mutated execution-progress authority is refused")
+check(snapshot() == pre_trigger_restore, "restore: trigger authority refusal writes NOTHING")
+
 future = os.path.join(_root, "unsupported-schema.tar.gz")
 archive_with_schema(archive, future, 999)
 try:
@@ -345,6 +398,27 @@ try:
     check(False, "create: invalid execution-progress authority is refused")
 except ValueError:
     check(True, "create: invalid execution-progress authority is refused")
+wipe()
+
+# A trigger-mutated progress store must be refused at create time too. Existing
+# rows do not make the schema safe because future inserts would lose authority.
+_seed_sqlite(runs_item.path, runs_item.key)
+_seed_sqlite(progress_item.path, progress_item.key)
+con = sqlite3.connect(progress_item.path)
+con.execute(
+    "CREATE TRIGGER erase_new_execution_watermark "
+    "AFTER INSERT ON agent_execution_starts BEGIN "
+    "DELETE FROM agent_execution_starts "
+    "WHERE run_id=NEW.run_id AND step_index=NEW.step_index "
+    "AND step_sha256=NEW.step_sha256; END"
+)
+con.commit()
+con.close()
+try:
+    backup.create(os.path.join(_root, "triggered-progress-create"))
+    check(False, "create: trigger-mutated execution-progress authority is refused")
+except ValueError:
+    check(True, "create: trigger-mutated execution-progress authority is refused")
 wipe()
 
 # A non-empty run database without its execution authority must never produce a new backup.
