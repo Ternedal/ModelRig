@@ -169,8 +169,9 @@ def ensure_live_pair(runs_path: str) -> str:
     fresh identity. Existing non-empty authority without an identity is refused:
     assigning a new id there would silently bless potentially unrelated source
     stores. Existing installations must instead use the explicit offline
-    ``app.backup adopt-agent3-pair`` transition, which validates run/watermark
-    semantics under one multi-database write boundary before stamping the pair.
+    ``python -m app.agent3.adopt_pair --offline-confirmed`` transition, which
+    validates run/watermark semantics under one multi-database write boundary
+    before stamping the pair.
 
     The two binding rows are created in one SQLite multi-database transaction.
     DELETE journaling is required because SQLite only guarantees atomic commit
@@ -214,7 +215,7 @@ def ensure_live_pair(runs_path: str) -> str:
                 if run_count or progress_count:
                     raise RuntimeError(
                         "refusing to assign a new Agent 3 pair id to non-empty unbound authority; "
-                        "stop the appliance and run `python -m app.backup adopt-agent3-pair`"
+                        "stop the appliance and run `python -m app.agent3.adopt_pair --offline-confirmed`"
                     )
                 pair_id = str(uuid.uuid4())
                 _insert_pair_rows(con, pair_id)
