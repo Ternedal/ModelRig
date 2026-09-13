@@ -65,7 +65,11 @@ def _reject_config_includes(config: Path) -> None:
             "physical request repository Git config is too large"
         )
     try:
-        text = payload.decode("utf-8", errors="strict")
+        # Git accepts an optional UTF-8 BOM at the beginning of a config file.
+        # Decode with utf-8-sig so the security scan sees the same first section
+        # header Git sees; otherwise a BOM-prefixed [include] would evade the
+        # startswith checks below while Git still follows the include.
+        text = payload.decode("utf-8-sig", errors="strict")
     except UnicodeDecodeError as exc:
         raise _host.PhysicalHostRuntimeError(
             "physical request repository Git config is not canonical UTF-8"
