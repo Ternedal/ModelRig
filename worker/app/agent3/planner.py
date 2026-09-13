@@ -466,6 +466,31 @@ def build_planner_router(
             orchestrator.review_store.clear_waiting_if_matches(run_id)
         plan_store.mark_reviewed_start_refused(plan_id, run_id)
 
+    def _publish_reviewed_start_acceptance(
+        plan_id: str,
+        run_id: str,
+        stored: dict[str, Any],
+    ) -> dict[str, Any]:
+        # Acceptance and Cancel live in different SQLite databases, so there is
+        # no cross-store transaction. The run-store RLock is nevertheless the
+        # exact serialization point used by Cancel's run CAS. Hold that mutex
+        # across the final run reload and the durable PlanStore acceptance write:
+        # if Cancel committed first we observe CANCELLED and refuse; if this
+        # write commits first, any later Cancel is unambiguously post-acceptance.
+        # The lock covers only publication, never external tool execution.
+        with orchestrator.store._lock:
+            current = orchestrator.store.load(run_id)
+            if current is None:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "reviewed Start run disappeared before publication",
+                    status_code=503,
+                )
+            if current.state is RunState.CANCELLED:
+                raise _ReviewedStartCancelled()
+            plan_store.mark_reviewed_start_accepted(plan_id, run_id)
+            return _reviewed_start_response(plan_id, stored, current)
+
     def _parse_reviewed_materialization(payload: str) -> tuple[dict[str, Any], AgentRun, bool]:
         envelope = json.loads(payload)
         if not isinstance(envelope, dict):
@@ -580,7 +605,7 @@ def build_planner_router(
         reviewed_template: AgentRun,
     ) -> dict[str, Any]:
         try:
-            reconciled = _reconcile_reviewed_start_run(
+            _reconcile_reviewed_start_run(
                 run_id,
                 review_reads=review_reads,
                 reviewed_template=reviewed_template,
@@ -592,7 +617,9 @@ def build_planner_router(
             _mark_reviewed_start_retry_ready(plan_id, run_id)
             raise
 
-        if reconciled.state is RunState.CANCELLED:
+        try:
+            return _publish_reviewed_start_acceptance(plan_id, run_id, stored)
+        except _ReviewedStartCancelled:
             try:
                 _finalize_cancelled_reviewed_start(plan_id, run_id)
             except Exception:
@@ -602,10 +629,6 @@ def build_planner_router(
                 "reviewed_start_refused",
                 "reviewed Start was cancelled before publication",
             )
-
-        try:
-            plan_store.mark_reviewed_start_accepted(plan_id, run_id)
-            return _reviewed_start_response(plan_id, stored, reconciled)
         except Exception:
             _mark_reviewed_start_retry_ready(plan_id, run_id)
             raise
@@ -656,9 +679,24 @@ def build_planner_router(
                         "accepted reviewed Start materialization is unreadable; recovery remains ambiguous",
                         status_code=503,
                     ) from exc
-                if existing.state is RunState.RUNNING:
-                    _assert_reviewed_run_identity(existing, reviewed_template)
-                return _reviewed_start_response(plan_id, stored, existing)
+                # The same run-store mutex serializes this snapshot/cleanup with
+                # any concurrent Cancel. If cancellation already committed, a
+                # stale cross-store checkpoint is removed before the accepted
+                # replay is returned. If Cancel comes later, cancel() performs
+                # its normal checkpoint cleanup after acceptance was durable.
+                with orchestrator.store._lock:
+                    existing = orchestrator.store.load(reserved_run_id)
+                    if existing is None:
+                        raise _reviewed_start_error(
+                            "reviewed_start_pending",
+                            "accepted reviewed Start lost its bound run during recovery",
+                            status_code=503,
+                        )
+                    if existing.state is RunState.RUNNING:
+                        _assert_reviewed_run_identity(existing, reviewed_template)
+                    if existing.state is RunState.CANCELLED and reviewing:
+                        orchestrator.review_store.clear_waiting_if_matches(reserved_run_id)
+                    return _reviewed_start_response(plan_id, stored, existing)
 
             # A durable pending binding proves the reserved run may already have
             # existed and produced side effects. Missing run storage is therefore
@@ -786,10 +824,7 @@ def build_planner_router(
             )
             if run.id != reserved_run_id:
                 raise RuntimeError("reviewed Start materialized a different run id")
-            if run.state is RunState.CANCELLED:
-                raise _ReviewedStartCancelled()
-            plan_store.mark_reviewed_start_accepted(plan_id, reserved_run_id)
-            return _reviewed_start_response(plan_id, envelope, run)
+            return _publish_reviewed_start_acceptance(plan_id, reserved_run_id, envelope)
         except _ReviewedStartCancelled:
             try:
                 _finalize_cancelled_reviewed_start(plan_id, reserved_run_id)
