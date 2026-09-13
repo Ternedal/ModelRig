@@ -35,7 +35,6 @@ class Agent3ReviewedStartRecoveryStore(context: Context) {
     }
 
     private fun currentCredentialFingerprint(baseUrl: String?): String? {
-        Agent3ReviewConnectionBinding.recentCredentialFingerprint(baseUrl)?.let { return it }
         val persistedToken = runCatching { TokenStore(appContext).token }.getOrNull()
         return Agent3ReviewConnectionBinding.credentialFingerprint(baseUrl, persistedToken)
     }
