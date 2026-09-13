@@ -17,7 +17,7 @@ os.environ["KALIV_DATA_DIR"] = os.path.join(_root, "data")
 os.environ["KALIV_AGENT3_DB"] = os.path.join(_root, "live", "agent3.db")
 os.environ["KALIV_TOOLS_DIR"] = os.path.join(_root, "notes")
 
-from app import backup  # noqa: E402
+from app import backup, backup_schema5  # noqa: E402
 from app.agent3 import authority_pair  # noqa: E402
 from app.agent3.adopt_pair import adopt_current_pair  # noqa: E402
 from app.agent3.core import (  # noqa: E402
@@ -173,7 +173,9 @@ check(backup.verify(archive)["ok"], "adoption: exported adopted pair verifies")
 # the durable watermark appears. Runs-first snapshotting leaves the staged run
 # at PENDING but captures the newer watermark, so the existing semantic check
 # must refuse the backup. Progress-first would instead lose the only watermark
-# and could publish an apparently coherent, replayable archive.
+# and could publish an apparently coherent, replayable archive. Exercise the
+# schema-5 implementation directly so this safety property cannot depend on
+# importing the public facade first.
 wipe()
 seed_unbound(state="pending", include_progress=False)
 progress = sqlite3.connect(progress_path)
@@ -184,7 +186,7 @@ race_pair_id = adopt_current_pair(offline_confirmed=True)
 check(isinstance(race_pair_id, str), "snapshot race: pending pair is explicitly adopted")
 
 physical_snapshots: list[tuple[str, str]] = []
-real_snapshot = backup._original_sqlite_snapshot
+real_snapshot = backup_schema5._sqlite_snapshot
 race_dir = os.path.join(_root, "snapshot-crossing-race")
 
 
@@ -215,22 +217,22 @@ def crossing_snapshot(source: str, destination: str) -> None:
     run.close()
 
 
-backup._original_sqlite_snapshot = crossing_snapshot
+backup_schema5._sqlite_snapshot = crossing_snapshot
 race_problem = ""
 try:
-    backup.create(race_dir)
-    check(False, "snapshot race: crossing execution cannot publish a backup")
+    backup_schema5.create(race_dir)
+    check(False, "snapshot race: direct schema5 create cannot publish crossing execution")
 except ValueError as exc:
     race_problem = str(exc)
-    check(True, "snapshot race: crossing execution cannot publish a backup")
+    check(True, "snapshot race: direct schema5 create cannot publish crossing execution")
 finally:
-    backup._original_sqlite_snapshot = real_snapshot
+    backup_schema5._sqlite_snapshot = real_snapshot
 
 check(
     len(physical_snapshots) == 2
     and os.path.abspath(physical_snapshots[0][0]) == os.path.abspath(runs_path)
     and os.path.abspath(physical_snapshots[1][0]) == os.path.abspath(progress_path),
-    "snapshot race: physical SQLite order is runs first, progress second",
+    "snapshot race: direct schema5 physical SQLite order is runs first, progress second",
 )
 check(
     "non-idempotent pending" in race_problem,
