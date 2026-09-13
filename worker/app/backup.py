@@ -256,7 +256,7 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
         try:
             schema_rows = list(
                 con.execute(
-                    "SELECT type,name,tbl_name FROM sqlite_master "
+                    "SELECT type,name,tbl_name,sql FROM sqlite_master "
                     "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
                 )
             )
@@ -265,12 +265,27 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
             return f"cannot inspect SQLite execution-authority schema: {exc}"
 
         expected_schema = [("table", "agent_execution_starts", "agent_execution_starts")]
-        if schema_rows != expected_schema:
+        schema_objects = [(str(row[0]), str(row[1]), str(row[2])) for row in schema_rows]
+        if schema_objects != expected_schema:
             rendered = [f"{row[0]}:{row[1]}->{row[2]}" for row in schema_rows]
             return (
                 "execution-progress database has unexpected user-defined schema objects: "
                 + (", ".join(rendered) if rendered else "none")
             )
+
+        # sqlite_master.sql is execution authority too. table_xinfo cannot expose
+        # inline CHECK/UNIQUE/FOREIGN KEY clauses, and INSERT OR IGNORE means a
+        # hostile CHECK can silently suppress every watermark while preserving
+        # the expected columns and PK. Accept only the exact table definition
+        # emitted by AgentRunStore for this dedicated sidecar.
+        expected_create_sql = (
+            "CREATE TABLE agent_execution_starts ("
+            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+            "started_at REAL NOT NULL, PRIMARY KEY(run_id,step_index,step_sha256))"
+        )
+        actual_create_sql = " ".join(str(schema_rows[0][3] or "").split())
+        if actual_create_sql != expected_create_sql:
+            return "execution-progress table does not match the canonical CREATE TABLE authority"
 
         expected_columns = [
             ("run_id", "TEXT", 1, 1, 0),
