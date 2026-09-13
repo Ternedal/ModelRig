@@ -30,11 +30,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dk.ternedal.modelrig.desktop.data.Agent3ReviewedStartRecoveryStore
 import dk.ternedal.modelrig.desktop.data.DesktopChatDb
 import dk.ternedal.modelrig.desktop.net.Agent3Client
 import dk.ternedal.modelrig.desktop.net.Agent3PlanPreview
 import dk.ternedal.modelrig.desktop.net.Agent3ReadReview
+import dk.ternedal.modelrig.desktop.net.Agent3ReviewedStartRecoveryAuthority
 import dk.ternedal.modelrig.desktop.net.Agent3Run
+import dk.ternedal.modelrig.desktop.net.shouldRetainReviewedStartRecovery
 import dk.ternedal.modelrig.desktop.net.startReviewedPlanEnvelope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -50,6 +53,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun Agent3ReviewDevApp() {
     val db = remember { DesktopChatDb() }
+    val recoveryStore = remember { Agent3ReviewedStartRecoveryStore(db) }
     fun setting(key: String, env: String?, default: String): String =
         System.getenv(env ?: "")?.takeIf { it.isNotBlank() }
             ?: db.getSetting(key) ?: default
@@ -75,6 +79,23 @@ fun Agent3ReviewDevApp() {
         var review by remember { mutableStateOf(Agent3ReadReview()) }
         var busy by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
+        val initialRecoveryRaw = remember(baseUrl) { recoveryStore.read(baseUrl) }
+        var pendingStartRecovery by remember(initialRecoveryRaw) {
+            mutableStateOf(Agent3ReviewedStartRecoveryAuthority.decode(initialRecoveryRaw))
+        }
+        var startRecoveryUnresolved by remember(initialRecoveryRaw) {
+            mutableStateOf(Agent3ReviewedStartRecoveryAuthority.hasUnresolvedRecord(initialRecoveryRaw))
+        }
+
+        LaunchedEffect(baseUrl, initialRecoveryRaw) {
+            val raw = recoveryStore.read(baseUrl)
+            val decoded = Agent3ReviewedStartRecoveryAuthority.decode(raw)
+            pendingStartRecovery = decoded
+            startRecoveryUnresolved = Agent3ReviewedStartRecoveryAuthority.hasUnresolvedRecord(raw)
+            if (startRecoveryUnresolved && decoded == null) {
+                error = "Den lokale Start-recovery kan ikke læses sikkert. Nye previews er blokeret; recovery-recorden er bevaret til operatørkontrol."
+            }
+        }
 
         fun currentConnection(): Agent3DevConnectionBinding {
             return requireNotNull(Agent3DevConnectionBinding.capture(baseUrl, token)) {
@@ -94,6 +115,14 @@ fun Agent3ReviewDevApp() {
         }
 
         fun createPreview() {
+            if (startRecoveryUnresolved) {
+                error = if (pendingStartRecovery != null) {
+                    "Et tidligere Start har uklart udfald. Gendan samme Start før et nyt preview."
+                } else {
+                    "En lokal Start-recovery kan ikke valideres. Nyt preview er blokeret, indtil recorden kan afklares sikkert."
+                }
+                return
+            }
             val requestIntent = Agent3ReviewPreviewIntent.capture(message, reviewReads) ?: return
             if (busy) return
             val connection = runCatching { currentConnection() }
@@ -144,6 +173,88 @@ fun Agent3ReviewDevApp() {
             }
         }
 
+        fun publishReviewedStart(
+            envelope: dk.ternedal.modelrig.desktop.net.Agent3RunEnvelope,
+            connection: Agent3DevConnectionBinding,
+            authority: Agent3ReviewedStartRecoveryAuthority,
+        ) {
+            run = envelope.run
+            review = envelope.readReview
+            if (recoveryStore.write(connection.baseUrl, null)) {
+                pendingStartRecovery = null
+                startRecoveryUnresolved = false
+            } else {
+                pendingStartRecovery = authority
+                startRecoveryUnresolved = true
+                error = "Run blev valideret, men den lokale Start-recovery kunne ikke ryddes. Samme plan kan sikkert gendannes igen."
+            }
+        }
+
+        fun publishReviewedStartFailure(
+            failure: Throwable,
+            connection: Agent3DevConnectionBinding,
+            authority: Agent3ReviewedStartRecoveryAuthority,
+        ) {
+            val detail = failure.message ?: "Planen kunne ikke startes"
+            if (!shouldRetainReviewedStartRecovery(failure)) {
+                val cleared = recoveryStore.write(connection.baseUrl, null)
+                if (cleared) {
+                    pendingStartRecovery = null
+                    startRecoveryUnresolved = false
+                } else {
+                    startRecoveryUnresolved = true
+                }
+                error = if (cleared) {
+                    "$detail. Serveren afviste Start definitivt; lav et nyt preview."
+                } else {
+                    "$detail. Serveren afviste Start definitivt, men lokal recovery kunne ikke ryddes."
+                }
+                return
+            }
+            pendingStartRecovery = authority
+            startRecoveryUnresolved = true
+            error = "$detail. Start-resultatet er uklart; brug Gendan samme Start i stedet for at lave et nyt preview."
+        }
+
+        fun recoverPendingStart() {
+            if (busy || run != null) return
+            val connection = runCatching { currentConnection() }
+                .getOrElse {
+                    error = it.message ?: "Forbindelsen er ugyldig"
+                    return
+                }
+            val raw = recoveryStore.read(connection.baseUrl)
+            val authority = Agent3ReviewedStartRecoveryAuthority.decode(raw)
+            if (authority == null) {
+                pendingStartRecovery = null
+                startRecoveryUnresolved = Agent3ReviewedStartRecoveryAuthority.hasUnresolvedRecord(raw)
+                error = if (startRecoveryUnresolved) {
+                    "Start-recovery-recorden kan ikke valideres og er bevaret. Nyt preview forbliver blokeret."
+                } else {
+                    "Der er ingen Start-recovery for denne rig."
+                }
+                return
+            }
+            pendingStartRecovery = authority
+            startRecoveryUnresolved = true
+            busy = true
+            error = null
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        client(connection).startReviewedPlanEnvelope(
+                            planId = authority.planId,
+                            expectedReviewReads = authority.expectedReviewReads,
+                            expectedCapabilityReceipt = authority.expectedCapabilityReceipt,
+                        )
+                    }
+                }
+                busy = false
+                result.onSuccess { publishReviewedStart(it, connection, authority) }
+                    .onFailure { publishReviewedStartFailure(it, connection, authority) }
+            }
+        }
+
         fun startPreview() {
             val reviewedPreview = preview ?: return
             val boundConnection = previewConnection
@@ -172,10 +283,23 @@ fun Agent3ReviewDevApp() {
                     previewIntent = previewIntent,
                 )
             ) return
+            if (startRecoveryUnresolved) return
             val planId = reviewedPreview.planId ?: return
             val connection = boundConnection ?: return
-            val expectedReviewReads = reviewedPreview.reviewReads
-            val expectedCapabilityReceipt = reviewedPreview.capabilityReceipt
+            val authority = Agent3ReviewedStartRecoveryAuthority.capture(
+                planId = planId,
+                expectedReviewReads = reviewedPreview.reviewReads,
+                expectedCapabilityReceipt = reviewedPreview.capabilityReceipt,
+            ) ?: run {
+                error = "Det reviewede preview kunne ikke bindes til en sikker Start-recovery."
+                return
+            }
+            if (!recoveryStore.write(connection.baseUrl, authority.encode())) {
+                error = "Start blev ikke sendt, fordi recovery-authority ikke kunne gemmes sikkert lokalt."
+                return
+            }
+            pendingStartRecovery = authority
+            startRecoveryUnresolved = true
             busy = true
             error = null
             clearPreviewAuthority()
@@ -183,20 +307,15 @@ fun Agent3ReviewDevApp() {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
                         client(connection).startReviewedPlanEnvelope(
-                            planId = planId,
-                            expectedReviewReads = expectedReviewReads,
-                            expectedCapabilityReceipt = expectedCapabilityReceipt,
+                            planId = authority.planId,
+                            expectedReviewReads = authority.expectedReviewReads,
+                            expectedCapabilityReceipt = authority.expectedCapabilityReceipt,
                         )
                     }
                 }
                 busy = false
-                result.onSuccess {
-                    run = it.run
-                    review = it.readReview
-                }.onFailure {
-                    val detail = it.message ?: "Planen kunne ikke startes"
-                    error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
-                }
+                result.onSuccess { publishReviewedStart(it, connection, authority) }
+                    .onFailure { publishReviewedStartFailure(it, connection, authority) }
             }
         }
 
@@ -314,7 +433,7 @@ fun Agent3ReviewDevApp() {
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                Button(enabled = !busy && message.isNotBlank(), onClick = ::createPreview) {
+                Button(enabled = !busy && message.isNotBlank() && !startRecoveryUnresolved, onClick = ::createPreview) {
                     Text(if (busy) "Arbejder…" else "Lav preview")
                 }
             }
@@ -322,6 +441,27 @@ fun Agent3ReviewDevApp() {
             error?.let {
                 Spacer(Modifier.height(12.dp))
                 ReviewCard { Text(it, color = KalivTheme.colors.Danger) }
+            }
+
+            pendingStartRecovery?.let { authority ->
+                Spacer(Modifier.height(12.dp))
+                ReviewCard {
+                    Text("Uafklaret Start", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.Bold)
+                    Text(
+                        "plan=${authority.planId} · review_reads=${authority.expectedReviewReads}",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 11.sp,
+                    )
+                    Text(
+                        "Kun samme plan-id gendannes. Serveren må ikke oprette et nyt run.",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(enabled = !busy && run == null, onClick = ::recoverPendingStart) {
+                        Text(if (busy) "Arbejder…" else "Gendan samme Start")
+                    }
+                }
             }
 
             preview?.let { plan ->
