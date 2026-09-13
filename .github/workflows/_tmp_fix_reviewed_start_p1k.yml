@@ -1,0 +1,70 @@
+name: tmp-fix-reviewed-start-p1k
+
+on:
+  push:
+    branches:
+      - fix/agent3-reviewed-start-recovery-p1k-20260913
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-reviewed-start-recovery-p1k-20260913
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Apply P1k fix
+        run: python .tmp_fix_reviewed_start_p1k.py
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+      - name: Compile Agent3 Python
+        run: python -m compileall -q worker/app/agent3
+      - name: Run P1 recovery chain and review/cancel regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          for t in tests/worker_agent3_reviewed_start_p1*.py; do
+            echo "==> $t"
+            python "$t"
+          done
+          for t in \
+            tests/worker_agent3_planner_review.py \
+            tests/worker_agent3_review_reads.py \
+            tests/worker_agent3_recovery.py \
+            tests/worker_agent3_plan_store.py \
+            tests/worker_agent3_cancellation_contract.py \
+            tests/worker_agent3_late_cancel.py; do
+            if [[ -f "$t" ]]; then
+              echo "==> $t"
+              python "$t"
+            fi
+          done
+      - name: Regenerate canonical current state
+        run: |
+          python scripts/current_state.py
+          python scripts/current_state.py --check
+      - name: Diff hygiene
+        run: |
+          git diff --check
+          git status --short
+          test -f tests/worker_agent3_reviewed_start_p1k.py
+          grep -q 'run_execution_guard' worker/app/agent3/review_orchestrator.py
+          grep -q '_reconcile_reviewed_start_run_locked' worker/app/agent3/planner.py
+      - name: Commit retained P1k fix and remove temporary machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git rm .tmp_fix_reviewed_start_p1k.py .github/workflows/_tmp_fix_reviewed_start_p1k.yml
+          git add worker/app/agent3/review_orchestrator.py worker/app/agent3/planner.py tests/worker_agent3_reviewed_start_p1k.py CURRENT_STATE.md
+          git diff --cached --check
+          git commit -m "fix(agent3): serialize reviewed Start recovery mutations (#1309)" -m "Serialize same-run recovery and Resume through one execution guard while preserving CAS-based cancellation authority, and add the P1k concurrency regression. Draft/off-main only; production_activation=false."
+          git push origin HEAD:fix/agent3-reviewed-start-recovery-p1k-20260913
