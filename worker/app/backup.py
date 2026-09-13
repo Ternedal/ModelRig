@@ -107,7 +107,7 @@ def _run_store_schema_problem_path(
     )
     full = sorted(full, key=lambda row: (row[0], row[1], row[2]))
 
-    if actual in {tuple(minimal), tuple(full)}:
+    if actual == minimal or actual == full:
         return None
 
     rendered = [f"{kind}:{name}->{table} sql={sql!r}" for kind, name, table, sql in actual]
