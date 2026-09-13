@@ -1,16 +1,24 @@
-"""POSIX ledger-directory history binding for RSI reservation provenance.
+"""POSIX ledger-directory path-history binding for RSI reservation provenance.
 
-File-level provenance keeps the original final/replay-marker descriptors. This
-layer additionally retains the ledger-root directory inode plus a history guard
-on its parent directory from the first permanent publication onward. Renaming
-the whole ledger root through its parent changes the parent's ctime even when
-the child files keep identical inode/bytes/ctime, so rename-away/replay/
-rename-back cannot resurrect an older live receipt.
+File-level provenance retains the original final/replay-marker descriptors. This
+layer additionally retains the ledger-root directory object and an event-history
+monitor armed before the first permanent publication. A whole-ledger rename is
+therefore monotonic evidence even if the exact directory is later moved back to
+its original pathname.
+
+The monitor is intentionally scoped to the ledger directory itself, not its
+parent. Unrelated sibling creation under the shared host-state root must not
+revoke an otherwise valid reservation. Linux uses inotify IN_MOVE_SELF /
+IN_DELETE_SELF / IN_UNMOUNT. BSD-style POSIX systems use a kqueue vnode rename /
+delete / revoke filter when available. Unsupported POSIX history monitoring fails
+closed at reservation publication rather than silently weakening provenance.
 """
 from __future__ import annotations
 
 import contextvars
+import ctypes
 import os
+import select
 import stat
 import weakref
 from pathlib import Path
@@ -21,12 +29,13 @@ _DIR_TOKEN: contextvars.ContextVar[object | None] = contextvars.ContextVar(
     default=None,
 )
 
-# File creation inside the ledger legitimately changes the ledger directory's
-# ctime, so the ledger itself is bound by (dev, ino). Its parent is the history
-# guard and is bound by (dev, ino, ctime_ns); adding/removing files *inside* the
-# ledger does not change that parent stamp, while renaming the ledger entry does.
 _DirObjectIdentity = tuple[int, int]
-_DirHistoryIdentity = tuple[int, int, int]
+
+_IN_DELETE_SELF = 0x00000400
+_IN_MOVE_SELF = 0x00000800
+_IN_UNMOUNT = 0x00002000
+_IN_IGNORED = 0x00008000
+_IN_HISTORY_MASK = _IN_DELETE_SELF | _IN_MOVE_SELF | _IN_UNMOUNT | _IN_IGNORED
 
 
 class DirectoryBoundProvenanceError(ValueError):
@@ -38,9 +47,8 @@ class _Binding:
         "ledger_path",
         "ledger_descriptor",
         "ledger_identity",
-        "guard_path",
-        "guard_descriptor",
-        "guard_identity",
+        "history_kind",
+        "history_handle",
         "transaction_token",
         "reference",
         "revoked",
@@ -52,17 +60,15 @@ class _Binding:
         ledger_path: Path,
         ledger_descriptor: int,
         ledger_identity: _DirObjectIdentity,
-        guard_path: Path,
-        guard_descriptor: int,
-        guard_identity: _DirHistoryIdentity,
+        history_kind: str,
+        history_handle: Any,
         transaction_token: object,
     ) -> None:
         self.ledger_path = ledger_path
         self.ledger_descriptor = ledger_descriptor
         self.ledger_identity = ledger_identity
-        self.guard_path = guard_path
-        self.guard_descriptor = guard_descriptor
-        self.guard_identity = guard_identity
+        self.history_kind = history_kind
+        self.history_handle = history_handle
         self.transaction_token = transaction_token
         self.reference = None
         self.revoked = False
@@ -76,11 +82,7 @@ def _ctime_ns(observed: os.stat_result) -> int:
 
 
 def _object_identity(observed: os.stat_result) -> _DirObjectIdentity:
-    return (int(observed.st_dev), int(observed.st_ino))
-
-
-def _history_identity(observed: os.stat_result) -> _DirHistoryIdentity:
-    return (int(observed.st_dev), int(observed.st_ino), _ctime_ns(observed))
+    return int(observed.st_dev), int(observed.st_ino)
 
 
 def _open_directory(path: Path) -> tuple[int, os.stat_result]:
@@ -108,40 +110,173 @@ def _open_directory(path: Path) -> tuple[int, os.stat_result]:
         raise
 
 
+def _is_linux() -> bool:
+    return (
+        os.name == "posix"
+        and hasattr(os, "uname")
+        and os.uname().sysname == "Linux"
+    )
+
+
+def _start_linux_history(path: Path) -> int:
+    libc = ctypes.CDLL(None, use_errno=True)
+    init1 = getattr(libc, "inotify_init1", None)
+    add_watch = getattr(libc, "inotify_add_watch", None)
+    if init1 is None or add_watch is None:
+        raise DirectoryBoundProvenanceError(
+            "reservation ledger rename-history monitor is unavailable"
+        )
+    init1.argtypes = [ctypes.c_int]
+    init1.restype = ctypes.c_int
+    add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    add_watch.restype = ctypes.c_int
+
+    flags = os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    descriptor = init1(flags)
+    if descriptor < 0:
+        raise DirectoryBoundProvenanceError(
+            "reservation ledger rename-history monitor could not be opened"
+        )
+    try:
+        watch = add_watch(descriptor, os.fsencode(os.fspath(path)), _IN_HISTORY_MASK)
+        if watch < 0:
+            raise DirectoryBoundProvenanceError(
+                "reservation ledger directory could not be history-watched"
+            )
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _start_kqueue_history(descriptor: int) -> Any:
+    kqueue_type = getattr(select, "kqueue", None)
+    kevent_type = getattr(select, "kevent", None)
+    if kqueue_type is None or kevent_type is None:
+        raise DirectoryBoundProvenanceError(
+            "reservation ledger rename-history monitor is unavailable"
+        )
+    required = (
+        "KQ_FILTER_VNODE",
+        "KQ_EV_ADD",
+        "KQ_EV_CLEAR",
+        "KQ_NOTE_RENAME",
+        "KQ_NOTE_DELETE",
+    )
+    if any(not hasattr(select, name) for name in required):
+        raise DirectoryBoundProvenanceError(
+            "reservation ledger vnode history flags are unavailable"
+        )
+    fflags = select.KQ_NOTE_RENAME | select.KQ_NOTE_DELETE
+    if hasattr(select, "KQ_NOTE_REVOKE"):
+        fflags |= select.KQ_NOTE_REVOKE
+    queue = kqueue_type()
+    try:
+        change = kevent_type(
+            descriptor,
+            filter=select.KQ_FILTER_VNODE,
+            flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+            fflags=fflags,
+        )
+        queue.control([change], 0, 0)
+        return queue
+    except BaseException:
+        queue.close()
+        raise
+
+
+def _start_history(path: Path, ledger_descriptor: int) -> tuple[str, Any]:
+    if _is_linux():
+        return "inotify", _start_linux_history(path)
+    if hasattr(select, "kqueue"):
+        return "kqueue", _start_kqueue_history(ledger_descriptor)
+    raise DirectoryBoundProvenanceError(
+        "exact reservation ledger rename-history monitoring is unsupported"
+    )
+
+
+def _history_clean(binding: _Binding) -> bool:
+    if binding.history_kind == "inotify":
+        try:
+            event = os.read(binding.history_handle, 4096)
+        except BlockingIOError:
+            return True
+        except OSError:
+            return False
+        return not event
+    if binding.history_kind == "kqueue":
+        try:
+            return not binding.history_handle.control(None, 1, 0)
+        except (OSError, ValueError):
+            return False
+    return False
+
+
 def _capture_binding(ledger_path: Path, transaction_token: object) -> _Binding:
     ledger = Path(ledger_path).resolve(strict=True)
-    guard = ledger.parent.resolve(strict=True)
-    ledger_descriptor, ledger_stat = _open_directory(ledger)
+    ledger_descriptor, before = _open_directory(ledger)
+    before_identity = _object_identity(before)
+    before_ctime = _ctime_ns(before)
+    history_kind = ""
+    history_handle: Any = None
     try:
-        guard_descriptor, guard_stat = _open_directory(guard)
-    except Exception:
+        path_before = os.stat(ledger, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(path_before.st_mode)
+            or _object_identity(path_before) != before_identity
+        ):
+            raise DirectoryBoundProvenanceError(
+                "reservation ledger directory changed before history monitoring"
+            )
+        history_kind, history_handle = _start_history(ledger, ledger_descriptor)
+        after = os.fstat(ledger_descriptor)
+        path_after = os.stat(ledger, follow_symlinks=False)
+        # ctime is used only to close the setup race before the event monitor is
+        # known to be armed. Once armed, child-file writes may change directory
+        # ctime and are intentionally irrelevant to path-history authority.
+        if (
+            _object_identity(after) != before_identity
+            or _object_identity(path_after) != before_identity
+            or _ctime_ns(after) != before_ctime
+            or _ctime_ns(path_after) != before_ctime
+        ):
+            raise DirectoryBoundProvenanceError(
+                "reservation ledger directory changed while arming history monitor"
+            )
+        binding = _Binding(
+            ledger_path=ledger,
+            ledger_descriptor=ledger_descriptor,
+            ledger_identity=before_identity,
+            history_kind=history_kind,
+            history_handle=history_handle,
+            transaction_token=transaction_token,
+        )
+        if not _binding_matches(binding):
+            raise DirectoryBoundProvenanceError(
+                "reservation ledger directory changed while binding history"
+            )
+        return binding
+    except BaseException:
+        if history_kind == "inotify" and isinstance(history_handle, int):
+            try:
+                os.close(history_handle)
+            except OSError:
+                pass
+        elif history_kind == "kqueue" and history_handle is not None:
+            try:
+                history_handle.close()
+            except (OSError, ValueError):
+                pass
         os.close(ledger_descriptor)
         raise
-    binding = _Binding(
-        ledger_path=ledger,
-        ledger_descriptor=ledger_descriptor,
-        ledger_identity=_object_identity(ledger_stat),
-        guard_path=guard,
-        guard_descriptor=guard_descriptor,
-        guard_identity=_history_identity(guard_stat),
-        transaction_token=transaction_token,
-    )
-    if not _binding_matches(binding):
-        _close_binding(binding)
-        raise DirectoryBoundProvenanceError(
-            "reservation ledger directory changed while binding history"
-        )
-    return binding
 
 
 def _binding_matches(binding: _Binding) -> bool:
-    if binding.revoked:
+    if binding.revoked or not _history_clean(binding):
         return False
     try:
         ledger_held = os.fstat(binding.ledger_descriptor)
-        guard_held = os.fstat(binding.guard_descriptor)
         ledger_path = os.stat(binding.ledger_path, follow_symlinks=False)
-        guard_path = os.stat(binding.guard_path, follow_symlinks=False)
     except OSError:
         return False
     return (
@@ -151,25 +286,27 @@ def _binding_matches(binding: _Binding) -> bool:
         and ledger_path.st_nlink >= 1
         and _object_identity(ledger_held) == binding.ledger_identity
         and _object_identity(ledger_path) == binding.ledger_identity
-        and stat.S_ISDIR(guard_held.st_mode)
-        and guard_held.st_nlink >= 1
-        and stat.S_ISDIR(guard_path.st_mode)
-        and guard_path.st_nlink >= 1
-        and _history_identity(guard_held) == binding.guard_identity
-        and _history_identity(guard_path) == binding.guard_identity
     )
 
 
 def _close_binding(binding: _Binding) -> None:
-    for descriptor_name in ("ledger_descriptor", "guard_descriptor"):
-        descriptor = getattr(binding, descriptor_name)
-        if descriptor < 0:
-            continue
+    if binding.ledger_descriptor >= 0:
         try:
-            os.close(descriptor)
+            os.close(binding.ledger_descriptor)
         except OSError:
             pass
-        setattr(binding, descriptor_name, -1)
+        binding.ledger_descriptor = -1
+    if binding.history_kind == "inotify" and isinstance(binding.history_handle, int):
+        try:
+            os.close(binding.history_handle)
+        except OSError:
+            pass
+    elif binding.history_kind == "kqueue" and binding.history_handle is not None:
+        try:
+            binding.history_handle.close()
+        except (OSError, ValueError):
+            pass
+    binding.history_handle = None
 
 
 def _requires_history_binding(path: Path) -> bool:
@@ -235,7 +372,14 @@ def _install_posix_directory_history(implementation: Any) -> None:
                 _close_binding(binding)
             raise
 
-    def mark(value: Any, *, final_path: Path, final_payload: bytes, lock_path: Path, lock_payload: bytes) -> None:
+    def mark(
+        value: Any,
+        *,
+        final_path: Path,
+        final_payload: bytes,
+        lock_path: Path,
+        lock_payload: bytes,
+    ) -> None:
         token = _DIR_TOKEN.get()
         if token is None:
             raise DirectoryBoundProvenanceError(
@@ -252,8 +396,6 @@ def _install_posix_directory_history(implementation: Any) -> None:
             raise DirectoryBoundProvenanceError(
                 "reservation ledger directory history is unavailable"
             )
-        # File-level provenance claims the original create-once file descriptors.
-        # If this call fails, the outer scopes release/revoke all retained state.
         original_mark(
             value,
             final_path=final_path,
@@ -281,13 +423,14 @@ def _install_posix_directory_history(implementation: Any) -> None:
         live[identity] = binding
 
     def is_authenticated(value: Any) -> bool:
-        # Preserve the underlying content/fork/file provenance semantics. In
-        # particular, reversible in-memory content mutation may make this false
-        # temporarily without revoking the directory-history binding.
         if not original_is_authenticated(value):
             return False
         binding = live.get(id(value))
-        if binding is None or binding.reference is None or binding.reference() is not value:
+        if (
+            binding is None
+            or binding.reference is None
+            or binding.reference() is not value
+        ):
             return False
         if not _binding_matches(binding):
             revoke_live(binding)
@@ -328,7 +471,9 @@ def install_directory_history_provenance(implementation: Any) -> None:
     """Install ledger-root rename-history binding after file provenance."""
 
     if implementation is None:
-        raise DirectoryBoundProvenanceError("reservation implementation is unavailable")
+        raise DirectoryBoundProvenanceError(
+            "reservation implementation is unavailable"
+        )
     if getattr(implementation, "_directory_history_provenance_installed", False):
         return
     if os.name == "posix":

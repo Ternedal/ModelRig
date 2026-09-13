@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regressions for directory history and production runtime host control."""
+"""Regressions for directory history, sibling churn, and production runtime host control."""
 from __future__ import annotations
 
 import os
@@ -71,6 +71,27 @@ def test_ledger_root_rename_replay_restore_cannot_restore_first_receipt() -> Non
 
         assert first.transaction_authenticated is False
         assert second.transaction_authenticated is False
+
+
+def test_unrelated_sibling_churn_does_not_revoke_live_receipt() -> None:
+    if os.name != "posix":
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        consumed, ledger_root, _request = race._consume_fixture(root)
+        assert consumed.transaction_authenticated is True
+
+        # Campaign admission creates sibling directories below the canonical
+        # host-state root before it rechecks the live reservation. Sibling
+        # entry churn must not revoke an otherwise unchanged ledger receipt.
+        sibling_ledger = ledger_root.parent / "rsi-physical-campaign-admission-ledger-v1"
+        sibling_operation = ledger_root.parent / "rsi-physical-campaign-git-operation-v1"
+        sibling_ledger.mkdir()
+        sibling_operation.mkdir()
+        assert consumed.transaction_authenticated is True
+        sibling_operation.rmdir()
+        sibling_ledger.rmdir()
+        assert consumed.transaction_authenticated is True
 
 
 def test_non_admin_posix_runtime_metadata_is_rejected() -> None:
@@ -154,6 +175,7 @@ def test_public_consume_routes_through_host_controlled_runtime_boundary() -> Non
 
 def main() -> None:
     test_ledger_root_rename_replay_restore_cannot_restore_first_receipt()
+    test_unrelated_sibling_churn_does_not_revoke_live_receipt()
     test_non_admin_posix_runtime_metadata_is_rejected()
     test_public_consume_routes_through_host_controlled_runtime_boundary()
     print("physical reservation directory/runtime host-control regressions: PASS")
