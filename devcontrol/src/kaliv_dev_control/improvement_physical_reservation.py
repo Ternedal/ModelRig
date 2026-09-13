@@ -22,12 +22,18 @@ from ._improvement_physical_reservation_provenance import (
 from ._improvement_physical_reservation_directory_provenance import (
     install_directory_history_provenance,
 )
+from ._improvement_physical_runtime_host_control import (
+    PhysicalHostRuntimeError,
+    install_host_controlled_physical_runtime_boundary,
+)
 from . import _improvement_physical_reservation_impl as _implementation
 
 # Install original-file provenance first, then bind the containing ledger
-# directory's rename history before exposing any transaction seam.
+# directory's rename history. Production Git execution is finally narrowed to
+# an administrator-controlled runtime tree before exposing any authority path.
 install_descriptor_bound_provenance(_implementation)
 install_directory_history_provenance(_implementation)
+install_host_controlled_physical_runtime_boundary(_implementation)
 # The old convenience wrapper accepted a caller-selected verifier. The loaded
 # implementation retains only the explicitly private injectable transaction.
 if hasattr(_implementation, "consume_physical_qualification_request_once"):
@@ -45,6 +51,9 @@ observe_local_main_head = _implementation.observe_local_main_head
 _PhysicalQualificationRequestLedger = _implementation._PhysicalQualificationRequestLedger
 _consume_physical_qualification_request_once = (
     _implementation._consume_physical_qualification_request_once
+)
+_consume_physical_qualification_request_once_host_controlled = (
+    _implementation._consume_physical_qualification_request_once_host_controlled
 )
 _observe_with_reader = _implementation._observe_with_reader
 _canonical = _implementation._canonical
@@ -72,9 +81,10 @@ def consume_physical_qualification_request_once(
 
     Callers cannot select the verification trust root. The pinned Ed25519 public
     keyring is resolved from fixed host-controlled authority state; a missing or
-    invalid host trust root fails closed. Callers also cannot supply repository
-    root, operation root, observation evidence, clock, ledger ID/root, or a
-    prebuilt receipt.
+    invalid host trust root fails closed. Production Git observations likewise
+    execute only from an administrator-controlled runtime tree. Callers also
+    cannot supply repository root, operation root, observation evidence, clock,
+    ledger ID/root, or a prebuilt receipt.
     """
 
     try:
@@ -83,18 +93,23 @@ def consume_physical_qualification_request_once(
         raise PhysicalQualificationReservationError(
             "host-controlled physical request authority keyring is unavailable"
         ) from exc
-    return _consume_physical_qualification_request_once(
-        ledger_root=_canonical_host_ledger_root(),
-        trusted_git=trusted_git,
-        repository_root=_canonical_repository_root(),
-        operation_root=_canonical_operation_root(),
-        request=request,
-        qualification=qualification,
-        snapshot_receipt=snapshot_receipt,
-        signature=signature,
-        verifier=verifier,
-        now_provider=_now_utc_seconds,
-    )
+    try:
+        return _consume_physical_qualification_request_once_host_controlled(
+            ledger_root=_canonical_host_ledger_root(),
+            trusted_git=trusted_git,
+            repository_root=_canonical_repository_root(),
+            operation_root=_canonical_operation_root(),
+            request=request,
+            qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
+            signature=signature,
+            verifier=verifier,
+            now_provider=_now_utc_seconds,
+        )
+    except PhysicalHostRuntimeError as exc:
+        raise PhysicalQualificationReservationError(
+            "host-controlled physical request Git runtime is unavailable"
+        ) from exc
 
 
 __all__ = [
