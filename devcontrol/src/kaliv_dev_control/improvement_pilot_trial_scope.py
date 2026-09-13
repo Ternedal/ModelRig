@@ -212,8 +212,10 @@ class PilotTrialScopeProof:
             raise PilotTrialScopeError("scope proof requires a positive human GO decision")
         if type(self.local_commits_allowed) is not bool:
             raise PilotTrialScopeError("local_commits_allowed must be boolean")
-        _notes(self.decision_notes)
+        notes = _notes(self.decision_notes)
         expected_conditional = self.decision == "go_with_conditions"
+        if expected_conditional and not notes:
+            raise PilotTrialScopeError("conditional GO must preserve explicit decision notes")
         if (
             self.human_pilot_go_verified is not True
             or self.conditional_go is not expected_conditional
