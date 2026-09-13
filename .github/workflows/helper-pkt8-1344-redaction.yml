@@ -1,0 +1,199 @@
+name: helper-pkt8-1344-redaction
+
+on:
+  push:
+    branches:
+      - helper/pkt8-1344-redaction
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact fix branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/pkt8-control-center-error-redaction
+          fetch-depth: 0
+
+      - name: Assert exact base authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "0eff363b7de788f4fbae165c248eb23e783269e9"
+
+      - name: Apply bounded privacy patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, got {count}: {old[:80]!r}")
+              write(path, text.replace(old, new, 1))
+
+          # Desktop: never echo an unknown client exception into normal Control Center copy.
+          replace_once(
+              "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterAuditSection.kt",
+              '        else -> message.take(300)\n',
+              '        else -> "Audit kunne ikke hentes."\n',
+          )
+          replace_once(
+              "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterSchedulesSection.kt",
+              '        else -> message.take(300)\n',
+              '        else -> "Scheduler-status kunne ikke hentes."\n',
+          )
+          replace_once(
+              "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterGitHubConnectorSection.kt",
+              '        else -> message.take(300)\n',
+              '        else -> "GitHub connector-status kunne ikke hentes."\n',
+          )
+
+          desktop_schedules = "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterSchedulesSection.kt"
+          replace_once(
+              desktop_schedules,
+              '@Composable\ninternal fun DesktopControlCenterSchedulesSection(',
+              '''internal fun desktopScheduleRuntimeErrorLabel(raw: String?): String? =\n    raw?.takeIf { it.isNotBlank() }?.let {\n        "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer."\n    }\n\n@Composable\ninternal fun DesktopControlCenterSchedulesSection(''',
+          )
+          replace_once(
+              desktop_schedules,
+              '''        runtime.lastError?.let {\n            Text("Seneste scheduler-fejl: $it", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)\n        }\n''',
+              '''        desktopScheduleRuntimeErrorLabel(runtime.lastError)?.let { label ->\n            Text(label, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)\n        }\n''',
+          )
+
+          # Android audit/GitHub sub-surfaces: same fail-closed presentation boundary.
+          replace_once(
+              "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterAuditSection.kt",
+              '        else -> message.take(300)\n',
+              '        else -> "Audit kunne ikke hentes."\n',
+          )
+          replace_once(
+              "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterGitHubConnectorSection.kt",
+              '        else -> message.take(300)\n',
+              '        else -> "GitHub connector-status kunne ikke hentes."\n',
+          )
+
+          # Android main Control Center previously rendered Throwable.message directly for
+          # status/capability/scheduler fetch failures. Keep the failure visible but bounded.
+          android_screen = "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
+          replace_once(
+              android_screen,
+              '@Composable\nfun ControlCenterScreen(',
+              '''internal fun controlCenterStatusError(raw: String?): String =\n    "Kontrolcenter-status kunne ikke hentes."\n\ninternal fun controlCenterCapabilitiesError(raw: String?): String =\n    "Capability-listen kunne ikke hentes."\n\ninternal fun controlCenterSchedulesError(raw: String?): String =\n    "Planstatus kunne ikke hentes."\n\ninternal fun controlCenterSchedulerRuntimeErrorLabel(raw: String?): String? =\n    raw?.takeIf { it.isNotBlank() }?.let {\n        "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer."\n    }\n\n@Composable\nfun ControlCenterScreen(''',
+          )
+          replace_once(
+              android_screen,
+              '            error = it.message ?: "Kontrolcenter-status kunne ikke hentes."\n',
+              '            error = controlCenterStatusError(it.message)\n',
+          )
+          replace_once(
+              android_screen,
+              '            capabilityError = it.message ?: "Capability-listen kunne ikke hentes."\n',
+              '            capabilityError = controlCenterCapabilitiesError(it.message)\n',
+          )
+          replace_once(
+              android_screen,
+              '            scheduleError = it.message ?: "Planstatus kunne ikke hentes."\n',
+              '            scheduleError = controlCenterSchedulesError(it.message)\n',
+          )
+          replace_once(
+              android_screen,
+              '''        runtime.lastError?.let {\n            Text("Runtime-fejl: $it", color = KalivTheme.colors.danger, fontSize = 11.sp)\n        }\n''',
+              '''        controlCenterSchedulerRuntimeErrorLabel(runtime.lastError)?.let { label ->\n            Text(label, color = KalivTheme.colors.danger, fontSize = 11.sp)\n        }\n''',
+          )
+
+          # Focused regression tests: arbitrary path/token/exception-like details never echo.
+          replace_once(
+              "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterAuditSectionTest.kt",
+              '\n}\n',
+              '''\n    @Test\n    fun unknownAuditFailuresDoNotEchoRawDetails() {\n        val raw = "RuntimeException: C:\\\\Users\\\\operator\\\\secret.txt Bearer device-token-123"\n        assertEquals("Audit kunne ikke hentes.", desktopControlCenterAuditError(raw))\n    }\n}\n''',
+          )
+          replace_once(
+              "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterSchedulesSectionTest.kt",
+              '    private fun runtime(\n',
+              '''    @Test\n    fun unknownSchedulerFailuresAndRuntimeDetailsAreRedacted() {\n        val raw = "RuntimeError: C:\\\\Users\\\\operator\\\\scheduler.db token=secret-123"\n        assertEquals("Scheduler-status kunne ikke hentes.", desktopControlCenterSchedulesError(raw))\n        assertEquals(\n            "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer.",\n            desktopScheduleRuntimeErrorLabel(raw),\n        )\n        assertEquals(null, desktopScheduleRuntimeErrorLabel(null))\n        assertEquals(null, desktopScheduleRuntimeErrorLabel(""))\n    }\n\n    private fun runtime(\n''',
+          )
+          replace_once(
+              "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterGitHubConnectorSectionTest.kt",
+              '\n}\n',
+              '''\n    @Test\n    fun unknownConnectorFailuresDoNotEchoRawDetails() {\n        val raw = "IllegalStateException: https://rig.local/?token=secret-123 C:\\\\Users\\\\operator"\n        assertEquals("GitHub connector-status kunne ikke hentes.", desktopGitHubConnectorError(raw))\n    }\n}\n''',
+          )
+          replace_once(
+              "android/app/src/test/java/dk/ternedal/modelrig/ui/ControlCenterAuditSectionTest.kt",
+              '\n}\n',
+              '''\n    @Test\n    fun unknownAuditErrorsDoNotEchoRawDetails() {\n        val raw = "RuntimeException: /data/user/0/private.db Bearer device-token-123"\n        assertEquals("Audit kunne ikke hentes.", controlCenterAuditError(raw))\n    }\n}\n''',
+          )
+          replace_once(
+              "android/app/src/test/java/dk/ternedal/modelrig/ui/ControlCenterGitHubConnectorSectionTest.kt",
+              '\n}\n',
+              '''\n    @Test\n    fun unknownConnectorErrorsDoNotEchoRawDetails() {\n        val raw = "IllegalStateException: https://rig.local/?token=secret-123 /data/user/0/private"\n        assertEquals("GitHub connector-status kunne ikke hentes.", controlCenterGitHubError(raw))\n    }\n}\n''',
+          )
+          replace_once(
+              "android/app/src/test/java/dk/ternedal/modelrig/ui/ControlCenterScreenTest.kt",
+              '    private fun runtime(\n',
+              '''    @Test\n    fun primaryControlCenterAndRuntimeErrorsDoNotEchoRawDetails() {\n        val raw = "RuntimeException: /data/user/0/private.db Bearer device-token-123"\n        assertEquals("Kontrolcenter-status kunne ikke hentes.", controlCenterStatusError(raw))\n        assertEquals("Capability-listen kunne ikke hentes.", controlCenterCapabilitiesError(raw))\n        assertEquals("Planstatus kunne ikke hentes.", controlCenterSchedulesError(raw))\n        assertEquals(\n            "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer.",\n            controlCenterSchedulerRuntimeErrorLabel(raw),\n        )\n        assertNull(controlCenterSchedulerRuntimeErrorLabel(null))\n        assertNull(controlCenterSchedulerRuntimeErrorLabel(""))\n    }\n\n    private fun runtime(\n''',
+          )
+          PY
+
+          git diff --check
+          git status --short
+
+      - name: Set up Java 21
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Run desktop unit tests
+        working-directory: desktop
+        run: ./gradlew :composeApp:test --no-daemon --console=plain
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install Android platform + build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Compile Android and run unit tests
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest -Proborazzi.test.verify=true --no-daemon --console=plain
+
+      - name: Commit only bounded source/test changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain | grep '^?? .github/workflows/' || true)"
+          git diff --check
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git add \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterAuditSection.kt \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterSchedulesSection.kt \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterGitHubConnectorSection.kt \
+            desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterAuditSectionTest.kt \
+            desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterSchedulesSectionTest.kt \
+            desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/ControlCenterGitHubConnectorSectionTest.kt \
+            android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterAuditSection.kt \
+            android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterGitHubConnectorSection.kt \
+            android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt \
+            android/app/src/test/java/dk/ternedal/modelrig/ui/ControlCenterAuditSectionTest.kt \
+            android/app/src/test/java/dk/ternedal/modelrig/ui/ControlCenterGitHubConnectorSectionTest.kt \
+            android/app/src/test/java/dk/ternedal/modelrig/ui/ControlCenterScreenTest.kt
+          test -n "$(git diff --cached --name-only)"
+          test -z "$(git status --porcelain | grep -vE '^(M | M|A | D|R |C )' || true)"
+          git commit -m "fix(control-center): redact unknown client errors (#1344)"
+          git push origin HEAD:fix/pkt8-control-center-error-redaction
