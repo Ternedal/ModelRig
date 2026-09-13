@@ -45,6 +45,13 @@ def _run_store_schema_problem_path(
     after restore. Two exact variants are valid: the minimal historical run
     store and the full runtime store with its event log. Neither permits any
     extra SQLite object.
+
+    ``backup_schema5.create`` performs one row-count discovery pass before it
+    resolves the expected live pair id. During that pass an already-canonical
+    pair table is structural metadata, not yet trusted identity. We therefore
+    allow its exact schema if it parses canonically, while the subsequent
+    ``_live_pair_id_problem`` + pair-aware validation still proves id/role
+    equality. This does not bless one-sided or foreign pairs.
     """
     del run_count  # row count is semantic authority, not a reason to allow drift.
     try:
@@ -69,11 +76,18 @@ def _run_store_schema_problem_path(
         for row in rows
     ]
 
+    allow_pair_table = pair_id is not None
+    if not allow_pair_table:
+        discovered_binding, binding_problem = _impl._read_pair_binding_path(path)
+        if binding_problem:
+            return binding_problem
+        allow_pair_table = discovered_binding is not None
+
     common = [
         ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
         ("table", "agent_runs", "agent_runs", _impl._normalize_sql(_RUNS_TABLE_SQL)),
     ]
-    if pair_id is not None:
+    if allow_pair_table:
         common.append(
             ("table", _PAIR_TABLE, _PAIR_TABLE, _impl._normalize_sql(_PAIR_TABLE_SQL))
         )
