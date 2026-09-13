@@ -229,6 +229,14 @@ def _sqlite_table_problem(
         con.close()
 
 
+def _normalized_execution_progress_ddl(sql: str) -> str:
+    normalized = "".join(str(sql).split()).lower()
+    with_if_not_exists = "createtableifnotexistsagent_execution_starts("
+    if normalized.startswith(with_if_not_exists):
+        normalized = "createtableagent_execution_starts(" + normalized[len(with_if_not_exists):]
+    return normalized
+
+
 def _execution_progress_problem_path(path: str) -> Optional[str]:
     problem = _sqlite_table_problem(
         path,
@@ -247,7 +255,7 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
     # extension point. Column/PK checks alone are insufficient: SQLite triggers
     # can silently erase a just-inserted watermark while integrity_check remains
     # "ok". Fail closed unless the complete user-defined schema is exactly the
-    # canonical watermark table and exactly its four visible columns.
+    # canonical watermark table and exactly its canonical CREATE TABLE DDL.
     try:
         con = _readonly_sqlite(path)
     except sqlite3.Error as exc:
@@ -256,7 +264,7 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
         try:
             schema_rows = list(
                 con.execute(
-                    "SELECT type,name,tbl_name FROM sqlite_master "
+                    "SELECT type,name,tbl_name,sql FROM sqlite_master "
                     "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
                 )
             )
@@ -265,7 +273,8 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
             return f"cannot inspect SQLite execution-authority schema: {exc}"
 
         expected_schema = [("table", "agent_execution_starts", "agent_execution_starts")]
-        if schema_rows != expected_schema:
+        actual_schema = [(str(row[0]), str(row[1]), str(row[2])) for row in schema_rows]
+        if actual_schema != expected_schema:
             rendered = [f"{row[0]}:{row[1]}->{row[2]}" for row in schema_rows]
             return (
                 "execution-progress database has unexpected user-defined schema objects: "
@@ -284,6 +293,15 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
         ]
         if actual_columns != expected_columns:
             return "execution-progress table does not match the exact authority column schema"
+
+        canonical_ddl = (
+            "CREATE TABLE agent_execution_starts ("
+            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
+            "started_at REAL NOT NULL, PRIMARY KEY(run_id,step_index,step_sha256))"
+        )
+        table_ddl = schema_rows[0][3]
+        if table_ddl is None or _normalized_execution_progress_ddl(str(table_ddl)) != _normalized_execution_progress_ddl(canonical_ddl):
+            return "execution-progress table does not match the canonical authority DDL"
         return None
     finally:
         con.close()
