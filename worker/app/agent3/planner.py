@@ -692,7 +692,10 @@ def build_planner_router(
                             "accepted reviewed Start lost its bound run during recovery",
                             status_code=503,
                         )
-                    if existing.state is RunState.RUNNING:
+                    # Accepted replay is observation-only, but any state that
+                    # can still resume execution must remain bound to the exact
+                    # immutable reviewed plan before later Resume/Confirm may run.
+                    if existing.state in {RunState.RUNNING, RunState.WAITING_CONFIRMATION}:
                         _assert_reviewed_run_identity(existing, reviewed_template)
                     if existing.state is RunState.CANCELLED and reviewing:
                         orchestrator.review_store.clear_waiting_if_matches(reserved_run_id)

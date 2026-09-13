@@ -1,18 +1,4 @@
-from pathlib import Path
-
-planner = Path("worker/app/agent3/planner.py")
-text = planner.read_text(encoding="utf-8")
-old = '''                    if existing.state is RunState.RUNNING:\n                        _assert_reviewed_run_identity(existing, reviewed_template)\n                    if existing.state is RunState.CANCELLED and reviewing:\n'''
-new = '''                    # Accepted replay is observation-only, but any state that\n                    # can still resume execution must remain bound to the exact\n                    # immutable reviewed plan before later Resume/Confirm may run.\n                    if existing.state in {RunState.RUNNING, RunState.WAITING_CONFIRMATION}:\n                        _assert_reviewed_run_identity(existing, reviewed_template)\n                    if existing.state is RunState.CANCELLED and reviewing:\n'''
-if old not in text:
-    raise SystemExit("missing accepted replay identity anchor")
-text = text.replace(old, new, 1)
-planner.write_text(text, encoding="utf-8")
-
-regression = Path("tests/worker_agent3_reviewed_start_p1m.py")
-if regression.exists():
-    raise SystemExit("P1m regression already exists")
-regression.write_text(r'''from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -195,6 +181,3 @@ root = tempfile.mkdtemp(prefix="agent3-reviewed-start-p1m-")
 accepted_waiting_confirmation_tamper_fails_closed(root)
 accepted_waiting_confirmation_exact_replays_observation_only(root)
 print("P1m: accepted WAITING_CONFIRMATION identity binding passed")
-''', encoding="utf-8")
-
-print("applied accepted WAITING_CONFIRMATION identity fix and regression")
