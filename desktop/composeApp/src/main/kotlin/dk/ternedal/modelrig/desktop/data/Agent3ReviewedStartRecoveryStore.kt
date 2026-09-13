@@ -3,7 +3,10 @@ package dk.ternedal.modelrig.desktop.data
 import dk.ternedal.modelrig.desktop.Agent3DevConnectionBinding
 
 /** Separate URL-scoped persistence for reviewed Start; task-surface authority is never reused. */
-class Agent3ReviewedStartRecoveryStore(private val db: DesktopChatDb) {
+class Agent3ReviewedStartRecoveryStore(
+    private val db: DesktopChatDb,
+    private val credentialTokenProvider: (() -> String?)? = null,
+) {
     fun read(baseUrl: String?): String? {
         val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return null
         val raw = db.getSetting(key)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -34,7 +37,8 @@ class Agent3ReviewedStartRecoveryStore(private val db: DesktopChatDb) {
     private fun currentCredentialFingerprint(baseUrl: String?): String? {
         Agent3DevConnectionBinding.recentCredentialFingerprint(baseUrl)?.let { return it }
         val persistedToken = runCatching {
-            System.getenv("MODELRIG_TOKEN")?.takeIf { it.isNotBlank() }
+            credentialTokenProvider?.invoke()
+                ?: System.getenv("MODELRIG_TOKEN")?.takeIf { it.isNotBlank() }
                 ?: db.getSetting("deviceToken")
         }.getOrNull()
         return Agent3DevConnectionBinding.credentialFingerprint(baseUrl, persistedToken)
