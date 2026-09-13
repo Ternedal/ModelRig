@@ -118,7 +118,9 @@ fast host-admin-kontrolleret RSI request-keyring og fejler lukket, hvis trust-
 rooten mangler, er malformed, wrong-domain eller unsafe. Host-control valideres
 platform-specifikt: POSIX kræver root ownership og ikke-writable directory-chain,
 og Windows kræver native owner/DACL-evidence uden write/control grants til
-almindelige eller brede principals.
+almindelige eller brede principals. Det tidligere non-underscored reservation-
+compatibility-modul er fjernet, så production trust-root ikke kan omgås gennem
+forwarded functions eller compatibility-module traversal.
 
 Caller-ejede signed value-objekter og den host-resolved verifier kopieres til
 exact-type canonical snapshots før authority-brug. Den caller-leverede
@@ -128,11 +130,14 @@ derefter create-once til en transaction-private staging-root og bruges som den
 eneste execution-path for preflight og post-marker `main`-observation.
 
 Den irreversible create-once request-marker bevares som permanent host-local
-replay-marker efter succes. Final receipt læses byte-identisk tilbage, hvorefter
-live provenance bindes til exact objekt-identitet, originating PID, canonical
-receipt-SHA og **holdte descriptors/handles til de oprindelige final/replay-
-marker fil-identiteter + exact bytes**. Unlink/replacement/tamper invaliderer
-provenance; byte-identisk delete→recreate kan ikke genoplive et gammelt receipt.
+replay-marker efter succes. Både replay-marker og final receipt beholder deres
+**oprindelige descriptors/handles og fil-identiteter fra selve O_CREAT|O_EXCL
+publicationen** gennem provenance-registration. Registration må claim'e netop
+disse originaler; et byte-identisk inode-swap før registration fejler derfor
+lukket i stedet for at blive den nye baseline. Live provenance binder desuden
+exact receipt-identitet, originating PID, canonical receipt-SHA og exact bytes.
+Unlink/replacement/tamper invaliderer provenance, og byte-identisk recreate kan
+ikke genoplive et gammelt receipt.
 
 Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
 som authenticated authority. Replay-scope er eksplicit host-local
