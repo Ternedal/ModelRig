@@ -2,20 +2,21 @@
 
 The authority-bearing path derives its own repository, operation root and wall
 clock, snapshots caller-owned authority inputs into exact local value objects,
-then binds a freshly reconstructed staged Git runtime to the candidate-snapshot
-receipt already named by the human-signed qualification chain. After an
-irreversible create-once host lock, it re-reads ``refs/heads/main`` through that
-exact runtime, re-verifies the signed request at current time, and only then
-commits a receipt.
+and copies the caller runtime into a transaction-private staged runtime before
+any trusted Git execution. That private runtime is bound to the candidate-
+snapshot receipt already named by the human-signed qualification chain. After
+an irreversible create-once host lock, the path re-reads ``refs/heads/main``
+through the private runtime, re-verifies the signed request at current time,
+and only then commits a receipt.
 
-The durable ledger proves one canonical *host-local* replay guard. Persisted
-ledger bytes are replay/recovery state only: they are deliberately not reloadable
-authority. Transaction provenance is process-local object identity bound to the
-authenticated receipt digest and originating PID, not a serializable field. Only
-the exact, unmodified in-memory receipt registered by the successful authenticated
-consume transaction after create-once write, byte-identical canonical read-back
-and cleanup can report ``transaction_authenticated=True``; forked children
-inherit no authority.
+The durable ledger is host-local replay/recovery state, not reloadable authority.
+The create-once reservation lock remains as the permanent replay marker after a
+successful commit. Transaction provenance is process-local object identity bound
+to the authenticated receipt digest, originating PID, and the exact current
+bytes of both final receipt and replay marker. Removing or replacing either
+marker invalidates live provenance immediately. Only the exact, unmodified
+in-memory receipt returned by the successful authenticated transaction can
+report ``transaction_authenticated=True``; forked children inherit no authority.
 
 Neither the durable state nor the returned receipt claims distributed/global
 replay safety, a persistent frozen main, physical campaign completion, pilot GO,
@@ -27,6 +28,8 @@ import hashlib
 import json
 import os
 import re
+import stat
+import tempfile
 import weakref
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -38,7 +41,12 @@ from .asymmetric_authority import (
     Ed25519AuthorityVerifier,
     TrustedEd25519AuthorityKey,
 )
-from .durable_publication import DurablePublicationError, create_once_file, unlink_durable
+from .durable_publication import (
+    DurablePublicationError,
+    create_once_file,
+    remove_tree_durable,
+    unlink_durable,
+)
 from .improvement_candidate_snapshot import CandidateSnapshotReceipt
 from .improvement_physical_request import (
     PhysicalQualificationRequest,
@@ -48,7 +56,7 @@ from .improvement_physical_request import (
 from .improvement_qualification_packet import QualificationPacket
 from .trusted_git_runtime_model import _has_linkish_component
 from .trusted_git_runtime_runner import TrustedGitRunner
-from .trusted_git_runtime_staging import TrustedGitRuntime
+from .trusted_git_runtime_staging import TrustedGitRuntime, stage_trusted_git_runtime
 
 MAIN_OBSERVATION_SCHEMA = "kaliv-rsi-local-main-head-observation/v1"
 RESERVATION_SCHEMA = "kaliv-rsi-physical-qualification-reservation/v1"
@@ -173,6 +181,49 @@ def _ensure_link_free_directory(path: Path, *, name: str) -> Path:
 
 def _path_sha256(path: Path) -> str:
     return _sha256_bytes(os.fsencode(os.fspath(path)))
+
+
+def _read_bound_file(path: Path, *, maximum: int) -> bytes | None:
+    """Read one regular marker through an opened descriptor, never path metadata alone."""
+
+    candidate = Path(path)
+    if (
+        not candidate.is_absolute()
+        or _has_linkish_component(candidate)
+        or not isinstance(maximum, int)
+        or isinstance(maximum, bool)
+        or maximum < 1
+    ):
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(candidate, flags)
+    except OSError:
+        return None
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_nlink != 1
+            or observed.st_size < 1
+            or observed.st_size > maximum
+        ):
+            return None
+        remaining = observed.st_size
+        chunks: list[bytes] = []
+        while remaining:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                return None
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            return None
+        return b"".join(chunks)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
 
 
 def _canonical_host_state_root() -> Path:
@@ -405,23 +456,41 @@ _RESERVATION_FIELDS = {
 
 
 def _transaction_identity_registry():
-    """Bind live provenance to object identity, exact contents, and one process."""
+    """Bind live provenance to identity, contents, process and exact replay markers."""
 
-    references: dict[int, tuple[int, str, Any]] = {}
+    references: dict[int, tuple[int, str, Path, bytes, Path, bytes, Any]] = {}
 
-    def mark(value: Any) -> None:
+    def mark(
+        value: Any,
+        *,
+        final_path: Path,
+        final_payload: bytes,
+        lock_path: Path,
+        lock_payload: bytes,
+    ) -> None:
+        if (
+            _read_bound_file(final_path, maximum=_MAX_ARTIFACT_BYTES) != final_payload
+            or _read_bound_file(lock_path, maximum=_MAX_ARTIFACT_BYTES) != lock_payload
+        ):
+            raise PhysicalQualificationReservationError(
+                "physical reservation replay markers changed before provenance registration"
+            )
         identity = id(value)
         origin_pid = os.getpid()
         authenticated_sha256 = value.sha256
 
         def discard(reference: Any, *, identity: int = identity) -> None:
             entry = references.get(identity)
-            if entry is not None and entry[2] is reference:
+            if entry is not None and entry[6] is reference:
                 references.pop(identity, None)
 
         references[identity] = (
             origin_pid,
             authenticated_sha256,
+            Path(final_path),
+            bytes(final_payload),
+            Path(lock_path),
+            bytes(lock_payload),
             weakref.ref(value, discard),
         )
 
@@ -429,13 +498,26 @@ def _transaction_identity_registry():
         entry = references.get(id(value))
         if entry is None:
             return False
-        origin_pid, authenticated_sha256, reference = entry
+        (
+            origin_pid,
+            authenticated_sha256,
+            final_path,
+            final_payload,
+            lock_path,
+            lock_payload,
+            reference,
+        ) = entry
         if origin_pid != os.getpid() or reference() is not value:
             return False
         try:
-            return value.sha256 == authenticated_sha256
+            if value.sha256 != authenticated_sha256:
+                return False
         except (AttributeError, TypeError, ValueError):
             return False
+        return (
+            _read_bound_file(final_path, maximum=_MAX_ARTIFACT_BYTES) == final_payload
+            and _read_bound_file(lock_path, maximum=_MAX_ARTIFACT_BYTES) == lock_payload
+        )
 
     if hasattr(os, "register_at_fork"):
         os.register_at_fork(after_in_child=references.clear)
@@ -450,7 +532,7 @@ _mark_transaction_authenticated, _is_transaction_authenticated = (
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
 class PhysicalQualificationReservation:
-    """Parsed receipt data; live provenance binds identity, digest, and process."""
+    """Parsed receipt data; live provenance binds identity, digest, process and markers."""
 
     ledger_root_path_sha256: str
     repository_root_path_sha256: str
@@ -552,7 +634,7 @@ class PhysicalQualificationReservation:
 
     @property
     def transaction_authenticated(self) -> bool:
-        """True only while identity, PID and canonical contents remain authenticated."""
+        """True only while identity, PID, contents and exact replay markers remain bound."""
 
         return _is_transaction_authenticated(self)
 
@@ -613,6 +695,17 @@ class _PhysicalQualificationRequestLedger:
             self.root / f".{digest}.lock",
         )
 
+    def _lock_payload(self, request_sha256: str) -> bytes:
+        digest = _hex(request_sha256, name="request_sha256", pattern=_HEX64)
+        return _canonical(
+            {
+                "schema": "kaliv-rsi-physical-qualification-reservation-lock/v1",
+                "ledger_scope": LEDGER_SCOPE,
+                "ledger_root_path_sha256": self.root_sha256,
+                "request_sha256": digest,
+            }
+        ).encode("utf-8")
+
     def _load_final(
         self,
         path: Path,
@@ -671,14 +764,7 @@ class _PhysicalQualificationRequestLedger:
             raise PhysicalQualificationReservationError(
                 "physical request has already been host-locally consumed or requires recovery"
             )
-        marker = _canonical(
-            {
-                "schema": "kaliv-rsi-physical-qualification-reservation-lock/v1",
-                "ledger_scope": LEDGER_SCOPE,
-                "ledger_root_path_sha256": self.root_sha256,
-                "request_sha256": request_sha256,
-            }
-        ).encode("utf-8")
+        marker = self._lock_payload(request_sha256)
         try:
             create_once_file(lock, marker)
         except (FileExistsError, DurablePublicationError) as exc:
@@ -693,9 +779,10 @@ class _PhysicalQualificationRequestLedger:
         mapping: Mapping[str, Any],
     ) -> PhysicalQualificationReservation:
         final, pending, lock = self._paths(request_sha256)
-        if not lock.is_file() or _has_linkish_component(lock):
+        lock_payload = self._lock_payload(request_sha256)
+        if _read_bound_file(lock, maximum=_MAX_ARTIFACT_BYTES) != lock_payload:
             raise PhysicalQualificationReservationError(
-                "physical request lock is missing after host-local consumption"
+                "physical request replay marker is missing after host-local consumption"
             )
         if final.exists() or final.is_symlink() or pending.exists() or pending.is_symlink():
             raise PhysicalQualificationReservationError(
@@ -709,15 +796,31 @@ class _PhysicalQualificationRequestLedger:
         try:
             create_once_file(pending, payload)
             create_once_file(final, payload)
-            verified = self._load_final(final, expected_payload=payload)
+            self._load_final(final, expected_payload=payload)
             unlink_durable(pending)
-            unlink_durable(lock)
+            # The create-once lock is deliberately permanent after commit. It is
+            # the replay marker, not temporary cleanup state.
+            verified = self._load_final(final, expected_payload=payload)
+            if _read_bound_file(lock, maximum=_MAX_ARTIFACT_BYTES) != lock_payload:
+                raise PhysicalQualificationReservationError(
+                    "physical request replay marker changed before provenance registration"
+                )
+            _mark_transaction_authenticated(
+                verified,
+                final_path=final,
+                final_payload=payload,
+                lock_path=lock,
+                lock_payload=lock_payload,
+            )
+            if verified.transaction_authenticated is not True:
+                raise PhysicalQualificationReservationError(
+                    "physical reservation lost replay provenance before return"
+                )
+            return verified
         except Exception as exc:
             raise PhysicalQualificationReservationError(
                 "physical request is durably host-consumed but reservation requires recovery"
             ) from exc
-        _mark_transaction_authenticated(verified)
-        return verified
 
 
 def _snapshot_authority_inputs(
@@ -799,19 +902,72 @@ def _snapshot_authority_inputs(
     )
 
 
-def _snapshot_trusted_git_runtime(trusted_git: TrustedGitRuntime) -> TrustedGitRuntime:
-    """Reconstruct one exact runtime from its verified transaction root."""
+def _snapshot_trusted_git_runtime(
+    trusted_git: TrustedGitRuntime,
+    *,
+    operation_root: Path,
+) -> tuple[TrustedGitRuntime, Path]:
+    """Copy a verified caller runtime into one transaction-private runtime tree."""
 
     if type(trusted_git) is not TrustedGitRuntime:
         raise PhysicalQualificationReservationError(
             "physical request consumption requires exact TrustedGitRuntime"
         )
+    snapshot_root: Path | None = None
     try:
-        transaction_root = Path(os.fspath(trusted_git.transaction_root)).resolve()
-        return TrustedGitRuntime(transaction_root)
-    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        operation = _safe_root(
+            operation_root,
+            name="physical request Git operation root",
+        )
+        source_root = Path(os.fspath(trusted_git.transaction_root)).resolve()
+        source_runtime = TrustedGitRuntime(source_root)
+        snapshot_root = Path(
+            tempfile.mkdtemp(prefix=".rsi-physical-runtime-", dir=operation)
+        ).resolve()
+        snapshot_root = _safe_root(
+            snapshot_root,
+            name="physical request private Git runtime snapshot root",
+        )
+        if os.name == "posix":
+            os.chmod(snapshot_root, 0o700)
+            observed = snapshot_root.stat()
+            if (
+                (hasattr(os, "geteuid") and observed.st_uid != os.geteuid())
+                or stat.S_IMODE(observed.st_mode) & 0o077
+            ):
+                raise PhysicalQualificationReservationError(
+                    "physical request private Git runtime snapshot is not process-private"
+                )
+        staged_root = stage_trusted_git_runtime(
+            source_runtime.receipt.manifest,
+            source_root=source_runtime.runtime_root,
+            staging_root=snapshot_root,
+        )
+        snapshot_runtime = TrustedGitRuntime(staged_root)
+        if (
+            snapshot_runtime.receipt.manifest.sha256
+            != source_runtime.receipt.manifest.sha256
+        ):
+            raise PhysicalQualificationReservationError(
+                "physical request private Git runtime snapshot identity changed"
+            )
+        snapshot_runtime.verify()
+        return snapshot_runtime, snapshot_root
+    except PhysicalQualificationReservationError:
+        if snapshot_root is not None and snapshot_root.exists():
+            try:
+                remove_tree_durable(snapshot_root)
+            except DurablePublicationError:
+                pass
+        raise
+    except (AttributeError, OSError, TypeError, ValueError, DurablePublicationError) as exc:
+        if snapshot_root is not None and snapshot_root.exists():
+            try:
+                remove_tree_durable(snapshot_root)
+            except DurablePublicationError:
+                pass
         raise PhysicalQualificationReservationError(
-            "physical request Trusted Git runtime could not be reconstructed"
+            "physical request Trusted Git runtime could not be privately snapshotted"
         ) from exc
 
 
@@ -942,7 +1098,6 @@ def _consume_physical_qualification_request_once(
 ) -> PhysicalQualificationReservation:
     """Private injectable transaction used by production and deterministic tests."""
 
-    trusted_runtime = _snapshot_trusted_git_runtime(trusted_git)
     (
         request_snapshot,
         qualification_snapshot,
@@ -956,85 +1111,100 @@ def _consume_physical_qualification_request_once(
         signature=signature,
         verifier=verifier,
     )
+    trusted_runtime, runtime_snapshot_root = _snapshot_trusted_git_runtime(
+        trusted_git,
+        operation_root=operation_root,
+    )
     ledger = _PhysicalQualificationRequestLedger(
         _safe_root(ledger_root, name="physical request ledger root")
     )
-
-    preflight_at = now_provider()
-    _utc(preflight_at, name="trusted preflight time")
-    _verify_request_at(
-        request=request_snapshot,
-        qualification=qualification_snapshot,
-        signature=signature_snapshot,
-        verifier=verifier_snapshot,
-        at_utc=preflight_at,
-    )
-    preflight_observation = observe_local_main_head(
-        trusted_git=trusted_runtime,
-        repository_root=repository_root,
-        operation_root=operation_root,
-        observed_at_utc=preflight_at,
-        repository=request_snapshot.repository,
-    )
-    _require_signed_runtime_pin(
-        snapshot_receipt=snapshot_snapshot,
-        qualification=qualification_snapshot,
-        observation=preflight_observation,
-    )
-    _require_requested_main(preflight_observation, request_snapshot)
-
-    ledger.acquire_lock(request_snapshot.sha256)
+    transaction_succeeded = False
     try:
-        observed_at = now_provider()
-        _utc(observed_at, name="trusted post-lock observation time")
-        observation = observe_local_main_head(
+        preflight_at = now_provider()
+        _utc(preflight_at, name="trusted preflight time")
+        _verify_request_at(
+            request=request_snapshot,
+            qualification=qualification_snapshot,
+            signature=signature_snapshot,
+            verifier=verifier_snapshot,
+            at_utc=preflight_at,
+        )
+        preflight_observation = observe_local_main_head(
             trusted_git=trusted_runtime,
             repository_root=repository_root,
             operation_root=operation_root,
-            observed_at_utc=observed_at,
+            observed_at_utc=preflight_at,
             repository=request_snapshot.repository,
         )
         _require_signed_runtime_pin(
             snapshot_receipt=snapshot_snapshot,
             qualification=qualification_snapshot,
-            observation=observation,
+            observation=preflight_observation,
         )
-        _require_requested_main(observation, request_snapshot)
+        _require_requested_main(preflight_observation, request_snapshot)
 
-        consumed_at = now_provider()
-        consumed = _utc(consumed_at, name="trusted consumption time")
-        observed = _utc(observation.observed_at_utc, name="observed_at_utc")
-        if observed > consumed or consumed - observed > _MAX_OBSERVATION_AGE:
-            raise PhysicalQualificationReservationError(
-                "trusted main observation is future-dated or stale at consumption"
+        ledger.acquire_lock(request_snapshot.sha256)
+        try:
+            observed_at = now_provider()
+            _utc(observed_at, name="trusted post-lock observation time")
+            observation = observe_local_main_head(
+                trusted_git=trusted_runtime,
+                repository_root=repository_root,
+                operation_root=operation_root,
+                observed_at_utc=observed_at,
+                repository=request_snapshot.repository,
             )
-        request_receipt = _verify_request_at(
-            request=request_snapshot,
-            qualification=qualification_snapshot,
-            signature=signature_snapshot,
-            verifier=verifier_snapshot,
-            at_utc=consumed_at,
-        )
-        mapping = _reservation_mapping(
-            ledger=ledger,
-            request=request_snapshot,
-            qualification=qualification_snapshot,
-            snapshot_receipt=snapshot_snapshot,
-            signature=signature_snapshot,
-            requester_actor_id=request_receipt.requester_actor_id,
-            observation=observation,
-            consumed_at_utc=consumed_at,
-        )
-        return ledger.commit_locked_mapping(
-            request_sha256=request_snapshot.sha256,
-            mapping=mapping,
-        )
-    except PhysicalQualificationReservationError:
-        raise
-    except Exception as exc:
-        raise PhysicalQualificationReservationError(
-            "physical request is durably host-consumed but reservation requires recovery"
-        ) from exc
+            _require_signed_runtime_pin(
+                snapshot_receipt=snapshot_snapshot,
+                qualification=qualification_snapshot,
+                observation=observation,
+            )
+            _require_requested_main(observation, request_snapshot)
+
+            consumed_at = now_provider()
+            consumed = _utc(consumed_at, name="trusted consumption time")
+            observed = _utc(observation.observed_at_utc, name="observed_at_utc")
+            if observed > consumed or consumed - observed > _MAX_OBSERVATION_AGE:
+                raise PhysicalQualificationReservationError(
+                    "trusted main observation is future-dated or stale at consumption"
+                )
+            request_receipt = _verify_request_at(
+                request=request_snapshot,
+                qualification=qualification_snapshot,
+                signature=signature_snapshot,
+                verifier=verifier_snapshot,
+                at_utc=consumed_at,
+            )
+            mapping = _reservation_mapping(
+                ledger=ledger,
+                request=request_snapshot,
+                qualification=qualification_snapshot,
+                snapshot_receipt=snapshot_snapshot,
+                signature=signature_snapshot,
+                requester_actor_id=request_receipt.requester_actor_id,
+                observation=observation,
+                consumed_at_utc=consumed_at,
+            )
+            result = ledger.commit_locked_mapping(
+                request_sha256=request_snapshot.sha256,
+                mapping=mapping,
+            )
+            transaction_succeeded = True
+            return result
+        except PhysicalQualificationReservationError:
+            raise
+        except Exception as exc:
+            raise PhysicalQualificationReservationError(
+                "physical request is durably host-consumed but reservation requires recovery"
+            ) from exc
+    finally:
+        try:
+            remove_tree_durable(runtime_snapshot_root)
+        except DurablePublicationError as exc:
+            if transaction_succeeded:
+                raise PhysicalQualificationReservationError(
+                    "physical request committed but private Git runtime cleanup failed closed"
+                ) from exc
 
 
 def consume_physical_qualification_request_once(
@@ -1049,12 +1219,13 @@ def consume_physical_qualification_request_once(
     """Authenticate, observe, and host-reserve one request exactly once.
 
     Callers cannot supply repository root, operation root, observation evidence,
-    time, ledger ID/root, or a prebuilt receipt. Caller-owned runtime and authority
-    inputs are reconstructed into exact local objects before verification. The
-    runtime must match the exact snapshot-runtime identity already named by the
-    human-signed qualification chain. Only the exact returned live object in the
-    originating process, with unchanged canonical contents, retains transaction
-    provenance; persisted ledger data is replay/recovery state only.
+    time, ledger ID/root, or a prebuilt receipt. Caller-owned authority inputs are
+    reconstructed into exact local objects before verification, and caller-owned
+    Git runtime bytes are copied into a transaction-private staged runtime before
+    execution. The runtime must match the exact snapshot-runtime identity already
+    named by the human-signed qualification chain. Live provenance remains true
+    only while the exact final receipt and permanent replay marker are still
+    present byte-for-byte. Persisted ledger data alone is replay/recovery state.
     """
 
     return _consume_physical_qualification_request_once(
