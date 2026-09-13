@@ -486,6 +486,128 @@ def already_cancelled_recovery_clears_stale_checkpoint(root: str) -> None:
     plans.close()
 
 
+def acceptance_publication_serializes_cancel(root: str) -> None:
+    plans = PlanStore(os.path.join(root, "publish-order-plans.db"), ttl_seconds=30)
+    reviewed = template_run(
+        steps=[
+            AgentStep(tool="read_one", args={}, risk=RiskClass.READ, idempotent=True),
+            AgentStep(tool="read_two", args={}, risk=RiskClass.READ, idempotent=True),
+        ]
+    )
+    plan_id, _ = plans.save(materialization(reviewed, review_reads=True))
+    runs = AgentRunStore(os.path.join(root, "publish-order-runs.db"))
+    reviews = ReadReviewStore(os.path.join(root, "publish-order-reviews.db"))
+    executed: list[str] = []
+
+    def executor(step: AgentStep):
+        executed.append(step.tool)
+        return {"ok": True}
+
+    orchestrator = ReviewingAgent3Orchestrator(runs, executor, reviews)
+    app = build_app(orchestrator, plans)
+    acceptance_entered = threading.Event()
+    acceptance_release = threading.Event()
+    original_accept = plans.mark_reviewed_start_accepted
+
+    def delayed_accept(plan: str, run: str) -> None:
+        acceptance_entered.set()
+        assert acceptance_release.wait(5), "acceptance release timed out"
+        original_accept(plan, run)
+
+    plans.mark_reviewed_start_accepted = delayed_accept  # type: ignore[method-assign]
+    start_result: dict[str, object] = {}
+
+    def start() -> None:
+        start_result["response"] = TestClient(app).post(
+            f"/experimental/agent3/plans/{plan_id}/start"
+        )
+
+    start_thread = threading.Thread(target=start, daemon=True)
+    start_thread.start()
+    assert acceptance_entered.wait(5), "Start never reached acceptance publication"
+    recovery = plans.reviewed_start_recovery(plan_id)
+    assert recovery is not None and recovery[0] == "pending" and recovery[1]
+    run_id = recovery[1]
+    assert reviews.get(run_id)["waiting"] is True
+
+    cancel_done = threading.Event()
+    cancel_result: dict[str, AgentRun] = {}
+
+    def cancel() -> None:
+        cancel_result["run"] = orchestrator.cancel(run_id)
+        cancel_done.set()
+
+    cancel_thread = threading.Thread(target=cancel, daemon=True)
+    cancel_thread.start()
+    assert not cancel_done.wait(0.1), "Cancel bypassed the acceptance publication guard"
+
+    acceptance_release.set()
+    start_thread.join(5)
+    cancel_thread.join(5)
+    assert not start_thread.is_alive() and not cancel_thread.is_alive()
+
+    response = start_result["response"]
+    assert response.status_code == 200, response.text
+    assert plans.reviewed_start_recovery(plan_id)[0] == "accepted"
+    assert cancel_result["run"].state is RunState.CANCELLED
+    final = runs.load(run_id)
+    assert final is not None and final.state is RunState.CANCELLED
+    assert reviews.get(run_id)["waiting"] is False
+    assert executed == ["read_one"], executed
+    plans.close()
+
+
+def accepted_cancelled_recovery_clears_stale_checkpoint(root: str) -> None:
+    plans = PlanStore(os.path.join(root, "accepted-cancelled-plans.db"), ttl_seconds=30)
+    reviewed = template_run(
+        steps=[
+            AgentStep(tool="read_one", args={}, risk=RiskClass.READ, idempotent=True),
+            AgentStep(tool="read_two", args={}, risk=RiskClass.READ, idempotent=True),
+        ]
+    )
+    plan_id, _ = plans.save(materialization(reviewed, review_reads=True))
+    run_id = "accepted-cancelled-run"
+    plans.claim_reviewed_start(plan_id, run_id)
+    plans.mark_reviewed_start_accepted(plan_id, run_id)
+
+    runs = AgentRunStore(os.path.join(root, "accepted-cancelled-runs.db"))
+    reviews = ReadReviewStore(os.path.join(root, "accepted-cancelled-reviews.db"))
+    persisted = AgentRun.from_json(reviewed.to_json())
+    persisted.id = run_id
+    persisted.steps[0].state = StepState.SUCCEEDED
+    persisted.steps[0].result = {"ok": True}
+    persisted.current_step = 1
+    persisted.state = RunState.CANCELLED
+    persisted.error = "Cancelled by user"
+    reviews.configure(run_id, True)
+    reviews.set_waiting(
+        run_id,
+        completed_step_id=persisted.steps[0].id,
+        completed_tool=persisted.steps[0].tool,
+        window_start=1,
+        window_end=2,
+        removable_step_ids=[persisted.steps[1].id],
+    )
+    runs.save_with_event(persisted, "run_cancelled", {})
+
+    def unexpected_executor(_step: AgentStep):
+        raise AssertionError("accepted cancelled replay executed")
+
+    orchestrator = ReviewingAgent3Orchestrator(runs, unexpected_executor, reviews)
+    response = TestClient(build_app(orchestrator, plans)).post(
+        f"/experimental/agent3/plans/{plan_id}/start"
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["run"]["state"] == "cancelled", body
+    assert body["read_review"]["waiting"] is False, body
+    assert reviews.get(run_id)["waiting"] is False
+    assert plans.reviewed_start_recovery(plan_id)[0] == "accepted"
+    final = runs.load(run_id)
+    assert final is not None and final.state is RunState.CANCELLED
+    plans.close()
+
+
 root = tempfile.mkdtemp(prefix="agent3-reviewed-start-p1l-")
 recovery_window_a_cancel_wins(root)
 ordinary_read_checkpoint_cancel_wins(root)
@@ -494,4 +616,6 @@ transition_cas_preserves_cancel(root)
 concurrent_initial_cancel_is_refused(root)
 concurrent_recovery_cancel_is_refused(root)
 already_cancelled_recovery_clears_stale_checkpoint(root)
+acceptance_publication_serializes_cancel(root)
+accepted_cancelled_recovery_clears_stale_checkpoint(root)
 print("P1l+: cancellation/reviewed-Start authority races passed")
