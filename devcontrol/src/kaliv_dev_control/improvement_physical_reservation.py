@@ -8,10 +8,11 @@ re-verifies the signed request at current time, and only then commits a receipt.
 
 The durable ledger proves one canonical *host-local* replay guard. Persisted
 ledger bytes are replay/recovery state only: they are deliberately not reloadable
-authority. Transaction provenance is process-local object identity, not a field:
-only the exact in-memory receipt registered by the successful authenticated
+authority. Transaction provenance is process-local object identity bound to the
+authenticated receipt digest and originating PID, not a serializable field. Only
+the exact, unmodified in-memory receipt registered by the successful authenticated
 consume transaction after create-once write, canonical read-back and cleanup can
-report ``transaction_authenticated=True``.
+report ``transaction_authenticated=True``; forked children inherit no authority.
 
 Neither the durable state nor the returned receipt claims distributed/global
 replay safety, a persistent frozen main, physical campaign completion, pilot GO,
@@ -400,22 +401,40 @@ _RESERVATION_FIELDS = {
 
 
 def _transaction_identity_registry():
-    """Create a process-local identity registry that cannot be serialized."""
+    """Bind live provenance to object identity, exact contents, and one process."""
 
-    references: dict[int, Any] = {}
+    references: dict[int, tuple[int, str, Any]] = {}
 
     def mark(value: Any) -> None:
         identity = id(value)
+        origin_pid = os.getpid()
+        authenticated_sha256 = value.sha256
 
         def discard(reference: Any, *, identity: int = identity) -> None:
-            if references.get(identity) is reference:
+            entry = references.get(identity)
+            if entry is not None and entry[2] is reference:
                 references.pop(identity, None)
 
-        references[identity] = weakref.ref(value, discard)
+        references[identity] = (
+            origin_pid,
+            authenticated_sha256,
+            weakref.ref(value, discard),
+        )
 
     def contains(value: Any) -> bool:
-        reference = references.get(id(value))
-        return reference is not None and reference() is value
+        entry = references.get(id(value))
+        if entry is None:
+            return False
+        origin_pid, authenticated_sha256, reference = entry
+        if origin_pid != os.getpid() or reference() is not value:
+            return False
+        try:
+            return value.sha256 == authenticated_sha256
+        except (AttributeError, TypeError, ValueError):
+            return False
+
+    if hasattr(os, "register_at_fork"):
+        os.register_at_fork(after_in_child=references.clear)
 
     return mark, contains
 
@@ -427,7 +446,7 @@ _mark_transaction_authenticated, _is_transaction_authenticated = (
 
 @dataclass(frozen=True, slots=True, weakref_slot=True)
 class PhysicalQualificationReservation:
-    """Parsed receipt data; live transaction provenance is identity-only."""
+    """Parsed receipt data; live provenance binds identity, digest, and process."""
 
     ledger_root_path_sha256: str
     repository_root_path_sha256: str
@@ -529,7 +548,7 @@ class PhysicalQualificationReservation:
 
     @property
     def transaction_authenticated(self) -> bool:
-        """True only for the exact live object registered by authenticated consume."""
+        """True only while identity, PID and canonical contents remain authenticated."""
 
         return _is_transaction_authenticated(self)
 
@@ -918,9 +937,9 @@ def consume_physical_qualification_request_once(
     Callers cannot supply repository root, operation root, observation evidence,
     time, ledger ID/root, or a prebuilt receipt. The caller-supplied staged Git
     runtime must match the exact snapshot-runtime identity already named by the
-    human-signed qualification chain. Only the exact returned live object has
-    process-local transaction provenance; persisted ledger data is replay/recovery
-    state only.
+    human-signed qualification chain. Only the exact returned live object in the
+    originating process, with unchanged canonical contents, retains transaction
+    provenance; persisted ledger data is replay/recovery state only.
     """
 
     return _consume_physical_qualification_request_once(
