@@ -157,11 +157,14 @@ func (c *Client) forward(
 		w.Header().Set("Content-Type", ct)
 	}
 	// Integrity attestations for renderer clients (body id, package and
-	// member digests) ride on X-BodyRig-* and are meaningless without a way
-	// to reach the client. A prefix, not a blanket copy: upstream internals
-	// still stop here.
+	// member digests) ride on X-BodyRig-*. Reviewed Agent 3 Start additionally
+	// exposes one bounded reason code so clients can distinguish a definitive
+	// refusal from an ambiguous/lost response without trusting arbitrary worker
+	// headers. Keep this an explicit allow-list, not a blanket copy.
 	for name, values := range resp.Header {
-		if !strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bodyrig-") {
+		canonical := http.CanonicalHeaderKey(name)
+		if canonical != "X-Modelrig-Agent3-Reason" &&
+			!strings.HasPrefix(canonical, "X-Bodyrig-") {
 			continue
 		}
 		for _, v := range values {
