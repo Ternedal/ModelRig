@@ -297,3 +297,22 @@ Ingen command registration, remote write/push/PR/merge/release/deploy eller
 production activation autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-016_RSI_SINGLE_TRIAL_SCOPE_PROJECTION.md`
+
+## ADR-DC-017 — Inert DC-L16 pilot preflight requirements manifest
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Afleder et deterministisk requirements-manifest fra exact ADR-DC-016
+single-trial scope. Manifestet fastlåser hvilke egenskaber en senere, separat
+runtime-preflight skal bevise: feature flag off-observation, runtime-boundary,
+native Windows isolation, trusted-Git closure, kill/revoke prearm, blokering af
+network write, fravær af credentials, forbud mod unattended cadence, off-state
+import-block samt exact source- og receipt-binding.
+
+Krav er ikke observationer: `preflight_observed=false`,
+`preflight_satisfied=false`, `pilot_start_authorized=false` og
+`product_pilot_started=false` er obligatoriske. Ingen host-observer, feature-flag
+reader, command registry, executor, network transport, publication eller
+production activation tilføjes.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-017_RSI_PILOT_PREFLIGHT_REQUIREMENTS.md`
