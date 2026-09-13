@@ -190,9 +190,109 @@ def inverse_review_policy_enabled_is_pending(root: str, *, waiting: bool) -> Non
     plans.close()
 
 
+def waiting_confirmation_policy_mismatch_is_pending(
+    root: str,
+    *,
+    accepted: bool,
+    reviewed_reads: bool,
+    stored_enabled: bool | None,
+    stale_waiting: bool = False,
+) -> None:
+    name = (
+        f"waiting-{'accepted' if accepted else 'pending'}-"
+        f"review-{int(reviewed_reads)}-store-{stored_enabled}-waiting-{int(stale_waiting)}"
+    )
+    reviewed = template_run(two_reads=stale_waiting)
+    plans_path = os.path.join(root, f"{name}-plans.db")
+    old = PlanStore(plans_path, ttl_seconds=30)
+    plan_id, _ = old.save(payload(reviewed, review_reads=reviewed_reads))
+    run_id = f"{name}-run"
+    old.claim_reviewed_start(plan_id, run_id)
+    if accepted:
+        old.mark_reviewed_start_accepted(plan_id, run_id)
+    old.close()
+
+    runs = AgentRunStore(os.path.join(root, f"{name}-runs.db"))
+    persisted = AgentRun.from_json(reviewed.to_json())
+    persisted.id = run_id
+    persisted.state = RunState.WAITING_CONFIRMATION
+    persisted.steps[0].state = StepState.WAITING_CONFIRMATION
+    persisted.current_step = 0
+    runs.save_with_event(persisted, "confirmation_required", {"step_id": persisted.steps[0].id})
+
+    reviews = ReadReviewStore(os.path.join(root, f"{name}-reviews.db"))
+    if stored_enabled is not None:
+        reviews.configure(run_id, stored_enabled)
+    if stale_waiting:
+        assert stored_enabled is True
+        reviews.set_waiting(
+            run_id,
+            completed_step_id=persisted.steps[0].id,
+            completed_tool=persisted.steps[0].tool,
+            window_start=1,
+            window_end=2,
+            removable_step_ids=[persisted.steps[1].id],
+        )
+
+    plans = PlanStore(plans_path, ttl_seconds=30)
+    executed: list[str] = []
+    response = TestClient(app_for(plans, runs, reviews, executed)).post(
+        f"/experimental/agent3/plans/{plan_id}/start"
+    )
+    assert response.status_code == 503, (name, response.text)
+    assert response.headers.get("X-ModelRig-Agent3-Reason") == "reviewed_start_pending"
+    assert executed == []
+    after = runs.load(run_id)
+    assert after is not None and after.state is RunState.WAITING_CONFIRMATION
+    assert after.steps[0].state is StepState.WAITING_CONFIRMATION
+    recovery = plans.reviewed_start_recovery(plan_id)
+    assert recovery is not None
+    assert recovery[0] == ("accepted" if accepted else "pending")
+    assert recovery[1] == run_id
+    state = reviews.get(run_id)
+    if stored_enabled is None:
+        assert state["enabled"] is False
+    else:
+        assert state["enabled"] is stored_enabled
+    assert state["waiting"] is stale_waiting
+    plans.close()
+
+
 root = tempfile.mkdtemp(prefix="agent3-reviewed-start-p1j-")
 execution_policy_flag_tamper_is_pending(root)
 inverse_review_policy_enabled_is_pending(root, waiting=False)
 inverse_review_policy_enabled_is_pending(root, waiting=True)
 
-print("28 passed, 0 failed")
+# A confirmation is resumable authority: policy corruption must fail closed for
+# both pending crash recovery and an already-accepted replay.
+for accepted in (False, True):
+    waiting_confirmation_policy_mismatch_is_pending(
+        root,
+        accepted=accepted,
+        reviewed_reads=True,
+        stored_enabled=None,
+    )
+    waiting_confirmation_policy_mismatch_is_pending(
+        root,
+        accepted=accepted,
+        reviewed_reads=True,
+        stored_enabled=False,
+    )
+    waiting_confirmation_policy_mismatch_is_pending(
+        root,
+        accepted=accepted,
+        reviewed_reads=False,
+        stored_enabled=True,
+    )
+
+# A read checkpoint cannot coexist with confirmation authority even when the
+# broad enabled bit matches review_reads=true.
+waiting_confirmation_policy_mismatch_is_pending(
+    root,
+    accepted=True,
+    reviewed_reads=True,
+    stored_enabled=True,
+    stale_waiting=True,
+)
+
+print("42 passed, 0 failed")
