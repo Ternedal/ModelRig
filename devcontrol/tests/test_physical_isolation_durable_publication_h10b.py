@@ -364,6 +364,28 @@ class PhysicalRepositoryHostControlTests(unittest.TestCase):
                     direct_git._require_host_controlled_repository(root)
 
     @unittest.skipUnless(os.name == "posix", "POSIX repository regression")
+    def test_repository_worktree_config_include_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "repository"
+            git_dir = root / ".git"
+            git_dir.mkdir(parents=True)
+            (git_dir / "config").write_text(
+                "[extensions]\n\tworktreeConfig = true\n",
+                encoding="utf-8",
+            )
+            (git_dir / "config.worktree").write_text(
+                "[includeIf \"gitdir:/synthetic\"]\n"
+                "\tpath = /tmp/caller-controlled-worktree-gitconfig\n",
+                encoding="utf-8",
+            )
+            with patch.object(host_runtime, "_require_posix_object", return_value=None):
+                with self.assertRaisesRegex(
+                    host_runtime.PhysicalHostRuntimeError,
+                    "includes external state",
+                ):
+                    direct_git._require_host_controlled_repository(root)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX repository regression")
     def test_repository_external_object_alternates_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve() / "repository"
