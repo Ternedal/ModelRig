@@ -196,12 +196,7 @@ agent_bubble = _block("private fun AgentBubble(", "@Composable\ninternal fun Age
 plan_row = _block("private fun PlanRow(", "@Composable\ninternal fun StatusCircle")
 status = _block("internal fun StatusCircle(", "@Composable\ninternal fun ApprovalCard")
 approval = _block("internal fun ApprovalCard(", "@Composable\nprivate fun LogEntry")
-computer = _block("fun KalivComputerUse(", "@Composable\nprivate fun UseStepRow")
-use_row = _block("private fun UseStepRow(", "@Composable\nprivate fun StatusCircleSmall")
-status_small = _block("private fun StatusCircleSmall(", "@Composable\nprivate fun LiveViewport")
-live = _block("private fun LiveViewport(", "@Composable\nprivate fun ComputerApprovalBar(")
-computer_approval = _block("private fun ComputerApprovalBar(", "@Composable\nprivate fun ResultBar")
-result_bar = _block("private fun ResultBar(")
+computer = _block("fun KalivComputerUse(")
 
 check(
     "if (c.isDark) Color(0x8C14110E) else c.Surface" in icon,
@@ -230,33 +225,25 @@ check(
     "L2b Agent approval surface/code/approve er theme-aware",
 )
 check(
-    "if (c.isDark) Color(0x8014110E) else c.Surface" in computer
-    and "c.Danger.copy(alpha = 0.10f)" in computer,
-    "L2b Computer sidepanel/Stop bruger theme Surface/Danger",
-)
-check(
-    "val runningInk = if (c.isDark) c.Warning else c.TextHigh" in computer,
-    "L2b Computer running-status bruger AA tekstink i light",
-)
-check(
     'RiskLevel.WRITE -> Triple(c.Warning.copy(alpha = 0.12f), c.TextHigh, "WRITE")' in screens
     and 'RiskLevel.DESTRUCTIVE -> Triple(c.Danger.copy(alpha = 0.12f), c.TextHigh, "DESTRUCTIVE")' in screens,
     "L2b sma risk-badges bruger TextHigh-ink over semantiske washes i light",
 )
 check(
-    "else c.Border" in use_row and "c.Danger.copy(alpha = 0.08f)" in status_small,
-    "L2b Computer timeline/status bruger theme roller",
+    "val presentation = presentComputerUse()" in computer
+    and "onRunningChange(false)" in computer,
+    "#925 Computer-use er fail-closed og kan ikke rejse live-control badge",
 )
-check(
-    "Brush.verticalGradient(listOf(c.SurfaceHigh, c.Surface))" in computer_approval
-    and "else c.Border" in computer_approval,
-    "L2b Computer approval surface/border er theme-aware",
-)
-check(
-    "c.Success.copy(alpha = 0.10f)" in result_bar
-    and "c.Danger.copy(alpha = 0.10f)" in result_bar,
-    "L2b Computer resultatbar bruger Success/Danger roller",
-)
+for removed in (
+    "fun LiveViewport(",
+    "private fun ComputerApprovalBar(",
+    "private fun UseStepRow(",
+    "private fun StatusCircleSmall(",
+    "private fun ResultBar(",
+    "enum class RunState",
+    "data class UseStep",
+):
+    check(removed not in screens, f"#925 fjernet illustrative Computer-use authority: {removed}")
 
 text_on_elevated = contrast(light_text, elevated)
 warn_on_elevated = contrast(light_warn, elevated)
@@ -280,8 +267,7 @@ check(
 )
 
 l2b_application = "\n".join(
-    [icon, icon_item, agent, agent_idle, agent_bubble, plan_row, status, approval,
-     computer, use_row, status_small, computer_approval, result_bar]
+    [icon, icon_item, agent, agent_idle, agent_bubble, plan_row, status, approval, computer]
 )
 for forbidden in (
     ".background(Color(0x8C14110E))",
@@ -291,13 +277,13 @@ for forbidden in (
 ):
     check(forbidden not in l2b_application, f"L2b app chrome har ingen unconditional {forbidden}")
 
-for literal in (
+for removed_literal in (
     "Color(0xFFFBF9F5)",
     "Color(0xFFEDE8E0)",
     "Color(0xFFE06C5A)",
     "Color(0xCC0B0A09)",
 ):
-    check(literal in live, f"LiveViewport exemption bevarer {literal}")
+    check(removed_literal not in computer, f"#925 Computer-use mock-literal er vaek: {removed_literal}")
 
 sabotaged_icon = icon.replace(
     "if (c.isDark) Color(0x8C14110E) else c.Surface",
