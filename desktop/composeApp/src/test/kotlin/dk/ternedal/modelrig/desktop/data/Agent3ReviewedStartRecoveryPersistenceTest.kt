@@ -50,7 +50,7 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
-    fun staleCompletionCannotClearIdenticalAuthorityWithNewerReservationGeneration() {
+    fun newerGenerationReadCannotLetStaleCompletionClearReusedAuthority() {
         val dbPath = Files.createTempFile("modelrig-reviewed-start-aba-", ".db").toString()
         val rig = "https://aba-rig-${System.nanoTime()}.example"
         val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
@@ -76,9 +76,14 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
             assertTrue(db.removeRawSettingIfValue(key, originalEnvelope))
             assertTrue(db.putRawSettingIfAbsent(key, replacementEnvelope))
 
+            // Observing the newer durable slot must not overwrite this process's
+            // still-active old origin envelope before its stale callback arrives.
+            assertEquals(authority, store.read(rig))
             assertFalse(store.clearIfMatches(rig, authority))
             assertEquals(replacementEnvelope, db.getSetting(key))
 
+            // The failed stale clear drops only the stale in-memory origin. A
+            // fresh read can bind the newer generation and clear that exact slot.
             assertEquals(authority, store.read(rig))
             assertTrue(store.clearIfMatches(rig, authority))
             assertNull(db.getSetting(key))
