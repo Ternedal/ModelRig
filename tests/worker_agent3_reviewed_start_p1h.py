@@ -115,7 +115,10 @@ def run_case(root: str, *, exception_kind: str) -> None:
     assert pending[0] == "pending"
     run_id = pending[1]
     assert run_id is not None
-    assert pending[2] is None
+    # The durable owner may remain this worker when the failing resource is
+    # the SQLite store itself. Same-worker retryability is proven by an in-memory
+    # exit token, not by requiring a second durable release write to succeed.
+    assert pending[2] == plans.start_owner
 
     persisted = run_store.load(run_id)
     assert persisted is not None

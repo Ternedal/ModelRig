@@ -167,6 +167,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent3_reviewed_start_p1f.py`
 - `tests/worker_agent3_reviewed_start_p1g.py`
 - `tests/worker_agent3_reviewed_start_p1h.py`
+- `tests/worker_agent3_reviewed_start_p1i.py`
 - `tests/worker_agent3_reviewed_start_reconcile.py`
 - `tests/worker_agent3_reviewed_start_recovery.py`
 - `tests/worker_agent3_rig_evidence.py`

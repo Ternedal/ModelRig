@@ -348,38 +348,6 @@ class PlanStore:
                     connection.rollback()
                     raise
 
-    def release_reviewed_start_recovery(self, plan_id: str, run_id: str) -> bool:
-        """Release this worker's pending recovery claim after materialized recovery exits."""
-        now = time.time()
-        with self._lock:
-            with self._connection() as connection:
-                try:
-                    connection.execute("BEGIN IMMEDIATE")
-                    row = connection.execute(
-                        "SELECT state,run_id,owner FROM agent_reviewed_starts WHERE plan_id=?",
-                        (plan_id,),
-                    ).fetchone()
-                    if row is None:
-                        raise PlanStoreError("reviewed Start recovery not found")
-                    state, existing_run_id, owner_raw = row
-                    if state != "pending" or existing_run_id != run_id:
-                        connection.commit()
-                        return False
-                    owner = self._owner_value(owner_raw)
-                    if owner != self._start_owner:
-                        connection.commit()
-                        return False
-                    changed = connection.execute(
-                        "UPDATE agent_reviewed_starts SET owner=NULL,updated_at=? "
-                        "WHERE plan_id=? AND state='pending' AND run_id=? AND owner=?",
-                        (now, plan_id, run_id, self._start_owner),
-                    ).rowcount
-                    connection.commit()
-                    return changed == 1
-                except Exception:
-                    connection.rollback()
-                    raise
-
     def mark_reviewed_start_accepted(self, plan_id: str, run_id: str) -> None:
         """Publish same-plan recovery only for the exact reserved run id."""
         now = time.time()
