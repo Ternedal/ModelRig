@@ -312,6 +312,36 @@ except ValueError:
     check(True, "restore: unsafe legacy Agent3 archive is refused")
 check(snapshot() == pre_unsafe_restore, "restore: unsafe legacy refusal writes NOTHING")
 
+# The relation is two-way at restore time. A progress-only archive must never be
+# allowed to overwrite the live watermark sidecar while retaining a different
+# destination run DB; that would erase rollback fencing for the retained runs.
+progress_only = os.path.join(_root, "progress-only-without-runs.tar.gz")
+archive_with_schema(
+    archive,
+    progress_only,
+    3,
+    drop_keys={backup.AGENT3_RUNS_KEY},
+)
+progress_only_verify = backup.verify(progress_only)
+check(
+    not progress_only_verify["ok"],
+    "schema: execution-progress authority without its run store is refused",
+)
+check(
+    any("without the Agent 3 run store" in problem for problem in progress_only_verify["problems"]),
+    "schema: progress-only archive names the missing paired run store",
+)
+pre_progress_only_restore = snapshot()
+try:
+    backup.restore(progress_only, force=True)
+    check(False, "restore: progress-only authority archive is refused under --force")
+except ValueError:
+    check(True, "restore: progress-only authority archive is refused under --force")
+check(
+    snapshot() == pre_progress_only_restore,
+    "restore: progress-only refusal preserves live run + watermark authority byte-for-byte",
+)
+
 # A sidecar whose bytes hash correctly but which is not the execution-authority
 # SQLite schema must still fail verification. Hashes prove transport integrity,
 # not authority semantics.
@@ -471,6 +501,18 @@ except FileExistsError:
 
 forced = backup.restore(archive, force=True)
 check(len(forced["restored"]) == len(before), "restore --force: overwrites cleanly")
+
+# A valid progress sidecar without its paired run store is itself unsafe source
+# state: publishing it could later overwrite another rig's watermark authority
+# while retaining that rig's run payload under --force restore.
+wipe()
+_seed_sqlite(progress_item.path, progress_item.key)
+try:
+    backup.create(os.path.join(_root, "orphan-progress-create"))
+    check(False, "create: execution-progress authority without run store is refused")
+except ValueError:
+    check(True, "create: execution-progress authority without run store is refused")
+wipe()
 
 # A malformed execution sidecar must be refused before a backup is created.
 wipe()
