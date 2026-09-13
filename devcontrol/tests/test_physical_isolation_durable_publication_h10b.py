@@ -14,6 +14,7 @@ from unittest.mock import patch
 import kaliv_dev_control._improvement_physical_runtime_direct_git as direct_git
 import kaliv_dev_control._improvement_physical_runtime_host_control as host_runtime
 import kaliv_dev_control._improvement_physical_state_host_control as state_control
+import kaliv_dev_control.improvement_physical_authority_keyring as authority_keyring
 import kaliv_dev_control.improvement_physical_reservation as reservation
 import kaliv_dev_control.physical_isolation as physical_module
 from kaliv_dev_control.durable_publication import DurablePublicationError
@@ -170,6 +171,45 @@ class PhysicalReplayStateHostControlTests(unittest.TestCase):
         missing = OSError(errno.ENODATA, "no acl")
         with patch.object(state_control.os, "getxattr", side_effect=missing):
             state_control._require_no_posix_acl(Path("/synthetic"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX ACL regression")
+    def test_authority_keyring_rejects_extended_posix_acl(self):
+        with patch.object(
+            authority_keyring.os,
+            "getxattr",
+            return_value=b"synthetic-acl",
+        ):
+            with self.assertRaisesRegex(
+                authority_keyring.PhysicalRequestAuthorityKeyringError,
+                "extended POSIX ACL",
+            ):
+                authority_keyring._require_no_posix_acl(Path("/synthetic"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX ACL regression")
+    def test_runtime_host_control_rejects_extended_posix_acl(self):
+        class FakeRegularFile:
+            def lstat(self):
+                return SimpleNamespace(
+                    st_mode=stat.S_IFREG | 0o700,
+                    st_nlink=1,
+                    st_uid=0,
+                )
+
+        with patch.object(
+            host_runtime,
+            "_require_no_posix_acl",
+            side_effect=authority_keyring.PhysicalRequestAuthorityKeyringError(
+                "synthetic extended POSIX ACL"
+            ),
+        ):
+            with self.assertRaisesRegex(
+                host_runtime.PhysicalHostRuntimeError,
+                "unsafe POSIX ACL",
+            ):
+                host_runtime._require_posix_object(
+                    FakeRegularFile(),
+                    is_directory=False,
+                )
 
     @unittest.skipUnless(os.name == "posix", "POSIX operator regression")
     def test_canonical_ledger_checks_operator_before_host_state(self):
