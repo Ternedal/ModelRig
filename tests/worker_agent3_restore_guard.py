@@ -74,14 +74,16 @@ with tempfile.TemporaryDirectory(prefix="agent3-restore-guard-") as root:
     check(True, "failed maintenance does not manufacture restore-incomplete state")
 
     # Once the runtime releases its lease, restore can enter. While EXCLUSIVE is
-    # held, fresh runtime startup must fail closed on both POSIX and Windows.
+    # held, fresh runtime startup cannot inspect enough guard state to distinguish
+    # restore from maintenance on every SQLite/platform combination; the public
+    # contract is therefore the deliberately generic exclusive-boundary blocker.
     with agent3_restore_guard(run_path):
         try:
             AgentRunStore(run_path)
             check(False, "active restore blocks fresh runtime startup")
         except RuntimeError as exc:
             check(
-                "restore is in progress" in str(exc),
+                "restore or maintenance is in progress" in str(exc),
                 "active restore blocks fresh runtime startup",
             )
 
