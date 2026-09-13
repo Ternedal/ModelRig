@@ -129,9 +129,12 @@ identiteter er dermed ikke replay-state writers.
 Caller-ejede signed value-objekter og den host-resolved verifier snapshots til
 exact-type canonical values. Production Git execution bruger heller ikke en
 same-user `0700` transaction-copy som authority: public consume kræver en exact
-`TrustedGitRuntime`, hvis tree og ancestor chain er host-admin-kontrolleret, og
-kører kun den bounded `main`-observation gennem en restricted Git-reader. Den
-private underscore-testseam kan fortsat bruge transaction-private runtime og
+`TrustedGitRuntime`, hvis tree og ancestor chain er host-admin-kontrolleret.
+Authority-pathen launcher kun den attesterede Git executable direkte for den
+restricted `rev-parse`-observation og relauncher ikke den generelle Linux
+`bounded_subprocess.py` package-supervisor efter runtime-attestation. Readet er
+fortsat no-shell, timeout/output-bounded og runtime re-attesteres efter execution.
+Den private underscore-testseam kan fortsat bruge transaction-private runtime og
 ledger state til deterministiske regressions, men er ikke production authority.
 
 Replay-marker og final receipt beholder deres originale create-once
@@ -146,6 +149,8 @@ watch-before-trust inotify-history før directory-identiteter accepteres som
 provenance. Parent-directory watches filtreres på exact beskyttet child-navn;
 relevant rename/create/delete, parent self-move/delete/unmount, ignored watch
 eller queue overflow fejler lukket, mens unrelated sibling-churn ignoreres.
+History drænes både før og **efter** ancestry identity-validation, så en
+rename→restore-event queued under stat-runden ikke kan give ét stale-true receipt.
 Public production-facaden fejler aktuelt lukket på non-Linux POSIX, fordi kqueue
 ikke kan etablere samme exact watch-before-trust setup.
 
