@@ -50,6 +50,61 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
+    fun staleCompletionCannotClearIdenticalAuthorityWithNewerReservationGeneration() {
+        val dbPath = Files.createTempFile("modelrig-reviewed-start-aba-", ".db").toString()
+        val rig = "https://aba-rig-${System.nanoTime()}.example"
+        val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
+
+        DesktopChatDb(dbPath, TestProtector).use { db ->
+            val store = Agent3ReviewedStartRecoveryStore(db) { "token-a" }
+            val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
+            assertTrue(store.reserve(rig, authority))
+            val originalEnvelope = requireNotNull(db.getSetting(key))
+            val parts = originalEnvelope.split('\n', limit = 4)
+            assertEquals(4, parts.size)
+            assertEquals("kaliv-agent3-reviewed-start-storage/v3", parts[0])
+
+            val replacementGeneration = if (parts[2] == "11111111-1111-4111-8111-111111111111") {
+                "22222222-2222-4222-8222-222222222222"
+            } else {
+                "11111111-1111-4111-8111-111111111111"
+            }
+            val replacementEnvelope = listOf(parts[0], parts[1], replacementGeneration, parts[3]).joinToString("\n")
+
+            // Simulate another desktop process clearing the old slot and then
+            // re-reserving the exact same encoded authority with a new generation.
+            assertTrue(db.removeRawSettingIfValue(key, originalEnvelope))
+            assertTrue(db.putRawSettingIfAbsent(key, replacementEnvelope))
+
+            assertFalse(store.clearIfMatches(rig, authority))
+            assertEquals(replacementEnvelope, db.getSetting(key))
+
+            assertEquals(authority, store.read(rig))
+            assertTrue(store.clearIfMatches(rig, authority))
+            assertNull(db.getSetting(key))
+        }
+    }
+
+    @Test
+    fun legacyV2CredentialBoundAuthorityStaysUnresolvedInsteadOfBeingAdopted() {
+        val dbPath = Files.createTempFile("modelrig-reviewed-start-v2-", ".db").toString()
+        val rig = "https://legacy-v2-${System.nanoTime()}.example"
+        val encoded = "{\"schema\":\"legacy-v2-authority\"}"
+
+        DesktopChatDb(dbPath, TestProtector).use { db ->
+            val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
+            val raw = "kaliv-agent3-reviewed-start-storage/v2\n${"a".repeat(64)}\n$encoded"
+            db.putSetting(key, raw)
+            val store = Agent3ReviewedStartRecoveryStore(db) { "token-a" }
+            val visible = store.read(rig)
+            assertNotNull(visible)
+            assertNotEquals(encoded, visible)
+            assertFalse(store.clearIfMatches(rig, encoded))
+            assertEquals(raw, db.getSetting(key))
+        }
+    }
+
+    @Test
     fun legacyUnboundAuthorityStaysUnresolvedAndIsNeverAdoptedByCurrentCredential() {
         val dbPath = Files.createTempFile("modelrig-reviewed-start-legacy-", ".db").toString()
         val rig = "https://legacy-rig-${System.nanoTime()}.example"
