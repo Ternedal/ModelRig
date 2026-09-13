@@ -462,9 +462,15 @@ def build_planner_router(
     def _assert_reviewed_run_identity(existing: AgentRun, reviewed_template: AgentRun) -> None:
         # Never execute a recovered row merely because its run id matches. The
         # canonical plan digest binds route + tool/args + risk/sensitivity/egress
-        # metadata to exactly what the operator reviewed, excluding mutable
-        # execution state and step ids.
-        if agent_run_plan_sha256(existing) != agent_run_plan_sha256(reviewed_template):
+        # metadata to what the operator reviewed while the explicit flags below
+        # bind execution-policy inputs that are intentionally outside the durable
+        # capability-receipt digest. Mutable execution state and step ids remain
+        # excluded.
+        if (
+            agent_run_plan_sha256(existing) != agent_run_plan_sha256(reviewed_template)
+            or existing.proactive != reviewed_template.proactive
+            or existing.allow_private_cloud != reviewed_template.allow_private_cloud
+        ):
             raise _reviewed_start_error(
                 "reviewed_start_pending",
                 "persisted reviewed Start run does not match the reviewed plan",
@@ -491,26 +497,33 @@ def build_planner_router(
         if existing.state is not RunState.RUNNING:
             return existing
         _assert_reviewed_run_identity(existing, reviewed_template)
-        # The materialized reviewed plan is the authority for whether reads
-        # require human review. The separate review DB may be missing or only
-        # partially restored after a crash/restore. If the plan requires review
-        # but that policy row is absent/disabled, recovery must stop before any
-        # advance() can execute remaining reads. A client-side envelope mismatch
-        # check would happen too late because side effects could already exist.
-        if review_reads:
-            if not reviewing:
-                raise _reviewed_start_error(
-                    "reviewed_start_pending",
-                    "reviewed read policy is unavailable; recovery remains ambiguous",
-                    status_code=503,
-                )
+        # The immutable plan bit and the separate review-policy row are two
+        # persisted views of the same execution authority. They must agree in
+        # BOTH directions before recovery can advance. Otherwise corruption from
+        # true->false could clear a waiting checkpoint just as dangerously as a
+        # missing/disabled row for a true plan.
+        if reviewing:
             review_state = orchestrator.review_store.get(run_id)
-            if not review_state["enabled"]:
+            if bool(review_state["enabled"]) != review_reads:
                 raise _reviewed_start_error(
                     "reviewed_start_pending",
-                    "reviewed read policy is missing; recovery remains ambiguous",
+                    "reviewed read policy disagrees with the reviewed plan; recovery remains ambiguous",
                     status_code=503,
                 )
+            if not review_reads and review_state["waiting"]:
+                raise _reviewed_start_error(
+                    "reviewed_start_pending",
+                    "unexpected reviewed read checkpoint; recovery remains ambiguous",
+                    status_code=503,
+                )
+        elif review_reads:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "reviewed read policy is unavailable; recovery remains ambiguous",
+                status_code=503,
+            )
+
+        if review_reads:
             checkpointed = orchestrator.recover_read_review_checkpoint_if_due(run_id)
             if checkpointed is not None:
                 return checkpointed

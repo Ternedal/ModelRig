@@ -1,28 +1,4 @@
-from pathlib import Path
-
-
-def replace_once(path: str, old: str, new: str) -> None:
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{path}: expected one match, found {count}")
-    p.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-
-replace_once(
-    "worker/app/agent3/planner.py",
-    '''    def _assert_reviewed_run_identity(existing: AgentRun, reviewed_template: AgentRun) -> None:\n        # Never execute a recovered row merely because its run id matches. The\n        # canonical plan digest binds route + tool/args + risk/sensitivity/egress\n        # metadata to exactly what the operator reviewed, excluding mutable\n        # execution state and step ids.\n        if agent_run_plan_sha256(existing) != agent_run_plan_sha256(reviewed_template):\n            raise _reviewed_start_error(\n                "reviewed_start_pending",\n                "persisted reviewed Start run does not match the reviewed plan",\n                status_code=503,\n            )\n''',
-    '''    def _assert_reviewed_run_identity(existing: AgentRun, reviewed_template: AgentRun) -> None:\n        # Never execute a recovered row merely because its run id matches. The\n        # canonical plan digest binds route + tool/args + risk/sensitivity/egress\n        # metadata to what the operator reviewed while the explicit flags below\n        # bind execution-policy inputs that are intentionally outside the durable\n        # capability-receipt digest. Mutable execution state and step ids remain\n        # excluded.\n        if (\n            agent_run_plan_sha256(existing) != agent_run_plan_sha256(reviewed_template)\n            or existing.proactive != reviewed_template.proactive\n            or existing.allow_private_cloud != reviewed_template.allow_private_cloud\n        ):\n            raise _reviewed_start_error(\n                "reviewed_start_pending",\n                "persisted reviewed Start run does not match the reviewed plan",\n                status_code=503,\n            )\n''',
-)
-
-replace_once(
-    "worker/app/agent3/planner.py",
-    '''        # The materialized reviewed plan is the authority for whether reads\n        # require human review. The separate review DB may be missing or only\n        # partially restored after a crash/restore. If the plan requires review\n        # but that policy row is absent/disabled, recovery must stop before any\n        # advance() can execute remaining reads. A client-side envelope mismatch\n        # check would happen too late because side effects could already exist.\n        if review_reads:\n            if not reviewing:\n                raise _reviewed_start_error(\n                    "reviewed_start_pending",\n                    "reviewed read policy is unavailable; recovery remains ambiguous",\n                    status_code=503,\n                )\n            review_state = orchestrator.review_store.get(run_id)\n            if not review_state["enabled"]:\n                raise _reviewed_start_error(\n                    "reviewed_start_pending",\n                    "reviewed read policy is missing; recovery remains ambiguous",\n                    status_code=503,\n                )\n            checkpointed = orchestrator.recover_read_review_checkpoint_if_due(run_id)\n            if checkpointed is not None:\n                return checkpointed\n''',
-    '''        # The immutable plan bit and the separate review-policy row are two\n        # persisted views of the same execution authority. They must agree in\n        # BOTH directions before recovery can advance. Otherwise corruption from\n        # true->false could clear a waiting checkpoint just as dangerously as a\n        # missing/disabled row for a true plan.\n        if reviewing:\n            review_state = orchestrator.review_store.get(run_id)\n            if bool(review_state["enabled"]) != review_reads:\n                raise _reviewed_start_error(\n                    "reviewed_start_pending",\n                    "reviewed read policy disagrees with the reviewed plan; recovery remains ambiguous",\n                    status_code=503,\n                )\n            if not review_reads and review_state["waiting"]:\n                raise _reviewed_start_error(\n                    "reviewed_start_pending",\n                    "unexpected reviewed read checkpoint; recovery remains ambiguous",\n                    status_code=503,\n                )\n        elif review_reads:\n            raise _reviewed_start_error(\n                "reviewed_start_pending",\n                "reviewed read policy is unavailable; recovery remains ambiguous",\n                status_code=503,\n            )\n\n        if review_reads:\n            checkpointed = orchestrator.recover_read_review_checkpoint_if_due(run_id)\n            if checkpointed is not None:\n                return checkpointed\n''',
-)
-
-Path("tests/worker_agent3_reviewed_start_p1j.py").write_text(r'''from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -220,6 +196,3 @@ inverse_review_policy_enabled_is_pending(root, waiting=False)
 inverse_review_policy_enabled_is_pending(root, waiting=True)
 
 print("28 passed, 0 failed")
-''', encoding="utf-8")
-
-print("reviewed Start P1j patch staged")
