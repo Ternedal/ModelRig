@@ -103,6 +103,9 @@ fun Agent3ReviewDevApp() {
             }
         }
 
+        fun currentConnectionOrNull(): Agent3DevConnectionBinding? =
+            Agent3DevConnectionBinding.capture(baseUrl, token)
+
         fun client(connection: Agent3DevConnectionBinding): Agent3Client =
             Agent3Client(connection.baseUrl, connection.token)
 
@@ -178,9 +181,16 @@ fun Agent3ReviewDevApp() {
             connection: Agent3DevConnectionBinding,
             authority: Agent3ReviewedStartRecoveryAuthority,
         ) {
+            // Resolve only rig A's durable record first. A completion for rig A
+            // must never overwrite the in-memory recovery authority currently
+            // shown for rig B after the operator edits the connection fields.
+            val cleared = recoveryStore.write(connection.baseUrl, null)
+            if (!Agent3DevInteractionPolicy.canPublishForConnection(connection, currentConnectionOrNull())) {
+                return
+            }
             run = envelope.run
             review = envelope.readReview
-            if (recoveryStore.write(connection.baseUrl, null)) {
+            if (cleared) {
                 pendingStartRecovery = null
                 startRecoveryUnresolved = false
             } else {
@@ -198,6 +208,9 @@ fun Agent3ReviewDevApp() {
             val detail = failure.message ?: "Planen kunne ikke startes"
             if (!shouldRetainReviewedStartRecovery(failure)) {
                 val cleared = recoveryStore.write(connection.baseUrl, null)
+                if (!Agent3DevInteractionPolicy.canPublishForConnection(connection, currentConnectionOrNull())) {
+                    return
+                }
                 if (cleared) {
                     pendingStartRecovery = null
                     startRecoveryUnresolved = false
@@ -209,6 +222,9 @@ fun Agent3ReviewDevApp() {
                 } else {
                     "$detail. Serveren afviste Start definitivt, men lokal recovery kunne ikke ryddes."
                 }
+                return
+            }
+            if (!Agent3DevInteractionPolicy.canPublishForConnection(connection, currentConnectionOrNull())) {
                 return
             }
             pendingStartRecovery = authority
