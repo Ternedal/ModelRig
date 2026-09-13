@@ -393,6 +393,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_pairing_link_parity.py`
 - `tests/workflow_person_create.py`
 - `tests/workflow_physical_reservation_authority_races.py`
+- `tests/workflow_physical_reservation_directory_history.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`
