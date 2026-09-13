@@ -81,6 +81,20 @@ def app_for(plans: PlanStore, run_store: AgentRunStore, review_store: ReadReview
     return app
 
 
+def rewrite_embedded_run_id(runs: AgentRunStore, row_id: str, embedded_id: str) -> None:
+    """Simulate partial restore/corruption where row key and payload id diverge."""
+    with runs._lock:
+        row = runs._conn.execute("SELECT payload FROM agent_runs WHERE id=?", (row_id,)).fetchone()
+        assert row is not None
+        body = json.loads(row[0])
+        body["id"] = embedded_id
+        runs._conn.execute(
+            "UPDATE agent_runs SET payload=? WHERE id=?",
+            (json.dumps(body, ensure_ascii=False, sort_keys=True), row_id),
+        )
+        runs._conn.commit()
+
+
 def missing_pending_run_stays_ambiguous(root: str) -> None:
     plans_path = os.path.join(root, "missing-plans.db")
     old = PlanStore(plans_path, ttl_seconds=30)
@@ -205,10 +219,78 @@ def mismatched_run_never_advances(root: str) -> None:
     plans.close()
 
 
+def embedded_run_id_mismatch_never_borrows_reserved_authority(root: str) -> None:
+    for accepted in (False, True):
+        suffix = "accepted" if accepted else "pending"
+        plans_path = os.path.join(root, f"embedded-id-{suffix}-plans.db")
+        old = PlanStore(plans_path, ttl_seconds=30)
+        plan_id, _ = old.save(payload(review_reads=False))
+        run_id = f"reserved-{suffix}-run"
+        old.claim_reviewed_start(plan_id, run_id)
+        if accepted:
+            old.mark_reviewed_start_accepted(plan_id, run_id)
+        old.close()
+
+        runs = AgentRunStore(os.path.join(root, f"embedded-id-{suffix}-runs.db"))
+        persisted = template_run()
+        persisted.id = run_id
+        persisted.state = RunState.RUNNING
+        runs.save_with_event(persisted, "run_created", {})
+        rewrite_embedded_run_id(runs, run_id, f"foreign-{suffix}-run")
+        reviews = ReadReviewStore(os.path.join(root, f"embedded-id-{suffix}-reviews.db"))
+        reviews.configure(run_id, False)
+
+        plans = PlanStore(plans_path, ttl_seconds=30)
+        executed: list[str] = []
+        response = TestClient(app_for(plans, runs, reviews, executed)).post(
+            f"/experimental/agent3/plans/{plan_id}/start"
+        )
+        assert response.status_code == 503, response.text
+        assert response.headers.get("X-ModelRig-Agent3-Reason") == "reviewed_start_pending"
+        assert executed == []
+        recovery = plans.reviewed_start_recovery(plan_id)
+        assert recovery is not None and recovery[0] == ("accepted" if accepted else "pending")
+        assert recovery[1] == run_id
+        plans.close()
+
+
+def accepted_waiting_confirmation_requires_reviewed_identity(root: str) -> None:
+    plans = PlanStore(os.path.join(root, "accepted-waiting-plans.db"), ttl_seconds=30)
+    plan_id, _ = plans.save(payload(review_reads=False))
+    run_id = "accepted-waiting-run"
+    plans.claim_reviewed_start(plan_id, run_id)
+    plans.mark_reviewed_start_accepted(plan_id, run_id)
+
+    runs = AgentRunStore(os.path.join(root, "accepted-waiting-runs.db"))
+    tampered = template_run(args={"path": "unreviewed-later-step"})
+    tampered.id = run_id
+    tampered.state = RunState.WAITING_CONFIRMATION
+    tampered.steps[0].state = StepState.WAITING_CONFIRMATION
+    runs.save_with_event(tampered, "confirmation_required", {"step_id": tampered.steps[0].id})
+    reviews = ReadReviewStore(os.path.join(root, "accepted-waiting-reviews.db"))
+    reviews.configure(run_id, False)
+
+    executed: list[str] = []
+    response = TestClient(app_for(plans, runs, reviews, executed)).post(
+        f"/experimental/agent3/plans/{plan_id}/start"
+    )
+    assert response.status_code == 503, response.text
+    assert response.headers.get("X-ModelRig-Agent3-Reason") == "reviewed_start_pending"
+    assert executed == []
+    persisted = runs.load(run_id)
+    assert persisted is not None
+    assert persisted.state == RunState.WAITING_CONFIRMATION
+    assert persisted.steps[0].args == {"path": "unreviewed-later-step"}
+    assert plans.reviewed_start_recovery(plan_id)[0] == "accepted"
+    plans.close()
+
+
 root = tempfile.mkdtemp(prefix="agent3-reviewed-start-p1i-")
 missing_pending_run_stays_ambiguous(root)
 invalid_review_reads_initial_is_refused(root)
 invalid_review_reads_recovery_stays_pending(root)
 mismatched_run_never_advances(root)
+embedded_run_id_mismatch_never_borrows_reserved_authority(root)
+accepted_waiting_confirmation_requires_reviewed_identity(root)
 
-print("32 passed, 0 failed")
+print("36 passed, 0 failed")
