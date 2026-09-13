@@ -2,11 +2,13 @@
 
 The schema-5 authority implementation lives in ``backup_schema5`` so its
 previously qualified pair/snapshot semantics remain intact. This facade layers
-newer cross-process restore exclusion and the closed run-store schema check on
-that implementation without duplicating the backup state machine.
+newer cross-process restore exclusion, closed run-store schema validation and a
+fail-closed runs-first snapshot boundary on that implementation without
+duplicating the backup state machine.
 """
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from . import backup_schema5 as _impl
@@ -14,6 +16,7 @@ from .agent3.authority_pair import (
     EVENTS_TABLE_SQL as _EVENTS_TABLE_SQL,
     PAIR_TABLE as _PAIR_TABLE,
     PAIR_TABLE_SQL as _PAIR_TABLE_SQL,
+    RUNS_ROLE as _RUNS_ROLE,
     RUNS_TABLE_SQL as _RUNS_TABLE_SQL,
 )
 from .agent3.runtime_restore_guard import agent3_restore_guard
@@ -28,6 +31,54 @@ for _name in dir(_impl):
 
 _original_restore = _impl.restore
 _original_runs_row_count_path = _impl._agent3_runs_row_count_path
+_original_sqlite_snapshot = _impl._sqlite_snapshot
+_snapshot_state = threading.local()
+
+
+def _runs_first_sqlite_snapshot(source: str, destination: str) -> None:
+    """Keep the qualified core API while reversing its unsafe paired call order.
+
+    ``backup_schema5.create`` historically asks for the progress snapshot first
+    and the run snapshot second. Defer that first progress copy until the paired
+    run copy arrives. The actual SQLite snapshot order then becomes runs first,
+    progress second. If execution crosses the boundary, the staged progress
+    ledger can only be as new as or newer than the staged run payload; the
+    existing semantic validator therefore fails closed instead of silently
+    losing the only watermark proving a non-idempotent step started.
+
+    State is thread-local so independent backup callers cannot borrow or flush
+    another caller's deferred snapshot.
+    """
+    pending = getattr(_snapshot_state, "pending_progress", None)
+    destination_name = _impl.os.path.basename(destination)
+
+    if pending is not None:
+        if destination_name == "runs.db":
+            try:
+                _original_sqlite_snapshot(source, destination)
+                _original_sqlite_snapshot(*pending)
+            finally:
+                _snapshot_state.pending_progress = None
+            return
+        # A future core changed the expected paired sequence. Preserve ordinary
+        # snapshot semantics rather than carrying deferred state into another
+        # operation; the dedicated regression will then fail instead of hiding
+        # the contract drift.
+        _snapshot_state.pending_progress = None
+        _original_sqlite_snapshot(*pending)
+
+    if destination_name == "progress.db" and source.endswith(".execution-progress"):
+        _snapshot_state.pending_progress = (source, destination)
+        return
+
+    _original_sqlite_snapshot(source, destination)
+
+
+# Functions defined in backup_schema5 resolve globals in that module. Interpose
+# the snapshot primitive there so direct ``backup_schema5.create`` callers also
+# retain the safe paired ordering.
+_impl._sqlite_snapshot = _runs_first_sqlite_snapshot
+globals()["_sqlite_snapshot"] = _runs_first_sqlite_snapshot
 
 
 def _run_store_schema_problem_path(
@@ -123,10 +174,26 @@ def _agent3_runs_row_count_path(
     snapshot_id: Optional[str] = None,
     pair_id: Optional[str] = None,
 ) -> tuple[Optional[int], Optional[str]]:
+    # create() performs an initial structural run-store read before it resolves
+    # the cross-store pair id. A canonical binding already present in this run
+    # store is therefore structural evidence we must account for, not schema
+    # drift. Equality with the progress-store binding is still checked later by
+    # _live_pair_id_problem before any snapshot is published.
+    effective_pair_id = pair_id
+    if effective_pair_id is None:
+        binding, binding_problem = _impl._read_pair_binding_path(path)
+        if binding_problem:
+            return None, binding_problem
+        if binding is not None:
+            detected_pair_id, detected_role = binding
+            if detected_role != _RUNS_ROLE:
+                return None, "persistent Agent 3 pair binding has the wrong run-store role"
+            effective_pair_id = detected_pair_id
+
     count, problem = _original_runs_row_count_path(
         path,
         snapshot_id=snapshot_id,
-        pair_id=pair_id,
+        pair_id=effective_pair_id,
     )
     if problem or count is None:
         return count, problem
@@ -134,7 +201,7 @@ def _agent3_runs_row_count_path(
         path,
         run_count=count,
         snapshot_id=snapshot_id,
-        pair_id=pair_id,
+        pair_id=effective_pair_id,
     )
     if schema_problem:
         return None, schema_problem
