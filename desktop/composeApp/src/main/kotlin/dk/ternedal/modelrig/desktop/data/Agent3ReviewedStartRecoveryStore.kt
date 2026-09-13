@@ -8,6 +8,12 @@ class Agent3ReviewedStartRecoveryStore(
     private val db: DesktopChatDb,
     private val credentialTokenProvider: (() -> String?)? = null,
 ) {
+    // Clear authority belongs to this store/UI instance. Keeping it instance-local
+    // prevents another in-flight callback/store from replacing or retiring the
+    // reservation generation that this exact callback captured.
+    private val originEnvelopes = mutableMapOf<String, String>()
+    private val retiredAuthorities = mutableSetOf<String>()
+
     fun read(baseUrl: String?): String? {
         val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return null
         val raw = db.getSetting(key)?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -55,6 +61,14 @@ class Agent3ReviewedStartRecoveryStore(
         }
     }
 
+    private fun rememberFirstOriginEnvelope(authorityKey: String, envelope: String) {
+        if (authorityKey !in originEnvelopes) originEnvelopes[authorityKey] = envelope
+    }
+
+    private fun forgetOriginEnvelopeIfSame(authorityKey: String, envelope: String) {
+        if (originEnvelopes[authorityKey] == envelope) originEnvelopes.remove(authorityKey)
+    }
+
     private fun currentCredentialFingerprint(baseUrl: String?): String? {
         Agent3DevConnectionBinding.recentCredentialFingerprint(baseUrl)?.let { return it }
         val persistedToken = runCatching {
@@ -66,17 +80,8 @@ class Agent3ReviewedStartRecoveryStore(
     }
 
     private companion object {
+        // Persistence CAS must still serialize across store instances in-process.
         val slotLock = Any()
-        val originEnvelopes = mutableMapOf<String, String>()
-        val retiredAuthorities = mutableSetOf<String>()
-
-        fun rememberFirstOriginEnvelope(authorityKey: String, envelope: String) {
-            if (authorityKey !in originEnvelopes) originEnvelopes[authorityKey] = envelope
-        }
-
-        fun forgetOriginEnvelopeIfSame(authorityKey: String, envelope: String) {
-            if (originEnvelopes[authorityKey] == envelope) originEnvelopes.remove(authorityKey)
-        }
     }
 }
 
