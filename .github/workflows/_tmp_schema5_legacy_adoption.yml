@@ -1,0 +1,41 @@
+name: tmp-schema5-legacy-adoption
+
+on:
+  push:
+    branches:
+      - fix/agent3-schema5-legacy-adoption-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-schema5-legacy-adoption-20260913
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+      - name: Compile authority modules
+        run: python -m compileall -q worker/app/backup.py worker/app/backup_schema5.py worker/app/agent3
+      - name: Run focused authority regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          for t in \
+            tests/worker_agent3_pair_adoption.py \
+            tests/worker_agent3_run_schema_guard.py \
+            tests/worker_backup.py \
+            tests/worker_agent3_restore_guard.py \
+            tests/worker_agent3_reviewed_start_p1m.py; do
+            echo "==> $t"
+            python "$t"
+          done
+      - name: Diff hygiene
+        run: git diff --check
