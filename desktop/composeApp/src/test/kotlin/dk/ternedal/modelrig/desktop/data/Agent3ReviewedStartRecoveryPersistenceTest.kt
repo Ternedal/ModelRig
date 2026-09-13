@@ -1,6 +1,5 @@
 package dk.ternedal.modelrig.desktop.data
 
-import dk.ternedal.modelrig.desktop.Agent3DevConnectionBinding
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -22,30 +21,45 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
         val rigA = "https://rig-a.example:8443/"
         val rigB = "https://rig-b.example:8443"
         val encoded = "{\"schema\":\"test-authority\"}"
+        var currentToken = "token-a"
 
-        assertNotNull(Agent3DevConnectionBinding.capture(rigA, "token-a"))
         DesktopChatDb(dbPath, TestProtector).use { db ->
-            val store = Agent3ReviewedStartRecoveryStore(db)
+            val store = Agent3ReviewedStartRecoveryStore(db) { currentToken }
             assertTrue(store.write(rigA, encoded))
         }
 
         DesktopChatDb(dbPath, TestProtector).use { reopened ->
-            val store = Agent3ReviewedStartRecoveryStore(reopened)
+            val store = Agent3ReviewedStartRecoveryStore(reopened) { currentToken }
             assertEquals(encoded, store.read("https://rig-a.example:8443"))
             assertNull(store.read(rigB))
 
-            assertNotNull(Agent3DevConnectionBinding.capture(rigA, "token-b"))
+            currentToken = "token-b"
             val mismatched = store.read(rigA)
             assertNotNull(mismatched)
             assertNotEquals(encoded, mismatched)
 
-            assertNotNull(Agent3DevConnectionBinding.capture(rigA, "token-a"))
+            currentToken = "token-a"
             assertEquals(encoded, store.read(rigA))
             assertTrue(store.write(rigA, null))
         }
 
         DesktopChatDb(dbPath, TestProtector).use { reopenedAgain ->
-            assertNull(Agent3ReviewedStartRecoveryStore(reopenedAgain).read(rigA))
+            assertNull(Agent3ReviewedStartRecoveryStore(reopenedAgain) { currentToken }.read(rigA))
+        }
+    }
+
+    @Test
+    fun legacyUnboundAuthorityStaysNonemptyButCannotBeRecovered() {
+        val dbPath = Files.createTempFile("modelrig-reviewed-start-legacy-", ".db").toString()
+        val rig = "https://rig.example:8443"
+        val encoded = "{\"schema\":\"test-authority\"}"
+
+        DesktopChatDb(dbPath, TestProtector).use { db ->
+            val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
+            db.putSetting(key, encoded)
+            val visible = Agent3ReviewedStartRecoveryStore(db) { "token-a" }.read(rig)
+            assertNotNull(visible)
+            assertNotEquals(encoded, visible)
         }
     }
 }
