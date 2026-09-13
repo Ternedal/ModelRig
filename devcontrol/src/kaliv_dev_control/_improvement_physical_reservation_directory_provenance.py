@@ -59,7 +59,7 @@ class DirectoryBoundProvenanceError(ValueError):
 
 
 class _Node:
-    __slots__ = ("path", "descriptor", "identity")
+    __slots__ = ("path", "descriptor", "identity", "arming_stamp")
 
     def __init__(
         self,
@@ -67,10 +67,12 @@ class _Node:
         path: Path,
         descriptor: int,
         identity: _DirObjectIdentity,
+        arming_stamp: int,
     ) -> None:
         self.path = path
         self.descriptor = descriptor
         self.identity = identity
+        self.arming_stamp = arming_stamp
 
 
 class _Binding:
@@ -103,6 +105,13 @@ class _Binding:
         self.transaction_token = transaction_token
         self.reference = None
         self.revoked = False
+
+
+def _metadata_stamp(observed: os.stat_result) -> int:
+    value = getattr(observed, "st_ctime_ns", None)
+    if value is None:
+        value = int(float(observed.st_ctime) * 1_000_000_000)
+    return int(value)
 
 
 def _object_identity(observed: os.stat_result) -> _DirObjectIdentity:
@@ -160,10 +169,12 @@ def _capture_nodes(ledger: Path) -> tuple[_Node, ...]:
                 os.close(descriptor)
                 raise
             identity = _object_identity(observed)
+            arming_stamp = _metadata_stamp(observed)
             if (
                 not stat.S_ISDIR(current.st_mode)
                 or current.st_nlink < 1
                 or _object_identity(current) != identity
+                or _metadata_stamp(current) != arming_stamp
             ):
                 os.close(descriptor)
                 raise DirectoryBoundProvenanceError(
@@ -174,6 +185,7 @@ def _capture_nodes(ledger: Path) -> tuple[_Node, ...]:
                     path=path,
                     descriptor=descriptor,
                     identity=identity,
+                    arming_stamp=arming_stamp,
                 )
             )
         return tuple(nodes)
@@ -339,6 +351,29 @@ def _history_clean(binding: _Binding) -> bool:
     return False
 
 
+def _arming_snapshot_matches(nodes: tuple[_Node, ...]) -> bool:
+    """Close the capture→monitor-arm gap with one setup-only metadata stamp."""
+
+    try:
+        for node in nodes:
+            held = os.fstat(node.descriptor)
+            current = os.stat(node.path, follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(held.st_mode)
+                or held.st_nlink < 1
+                or not stat.S_ISDIR(current.st_mode)
+                or current.st_nlink < 1
+                or _object_identity(held) != node.identity
+                or _object_identity(current) != node.identity
+                or _metadata_stamp(held) != node.arming_stamp
+                or _metadata_stamp(current) != node.arming_stamp
+            ):
+                return False
+    except OSError:
+        return False
+    return True
+
+
 def _capture_binding(ledger_path: Path, transaction_token: object) -> _Binding:
     ledger = Path(ledger_path).resolve(strict=True)
     nodes = _capture_nodes(ledger)
@@ -347,6 +382,10 @@ def _capture_binding(ledger_path: Path, transaction_token: object) -> _Binding:
     history_expected: dict[int, bytes] | None = None
     try:
         history_kind, history_handle, history_expected = _start_history(nodes)
+        if not _arming_snapshot_matches(nodes):
+            raise DirectoryBoundProvenanceError(
+                "reservation directory-chain changed while arming history monitor"
+            )
         binding = _Binding(
             ledger_path=ledger,
             nodes=nodes,
