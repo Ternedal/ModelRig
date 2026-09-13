@@ -119,3 +119,18 @@ ikke vedvarende frozen `main` og giver ingen campaign-start, pilot, publication
 eller activation authority.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
+
+## ADR-DC-010 — One-shot RSI physical campaign admission før DC-L15 execution
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Gør den forbrugte human request til præcis én, manuel DC-L15 campaign-admission
+først efter en ny frisk `main`-observation på samme lokale repo og Trusted-Git
+identitet. Admissionen binder samtidig qualification-tasken til det eksisterende
+11-probe physical-report-univers. Den må autorisere campaign-start, men kan ikke
+starte noget automatisk, erklære campaign completed eller udstede pilot,
+publication, merge/release/deploy eller activation authority. En senere
+post-campaign main-observation er fortsat obligatorisk, og denne ADR hævder ikke
+kontinuerlig frozen `main`.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-010_RSI_PHYSICAL_CAMPAIGN_ADMISSION_BOUNDARY.md`
