@@ -280,3 +280,20 @@ Production resolver kun en host-admin-kontrolleret verification-only public-key
 keyring og indeholder ingen signer/private key eller produktentrypoint.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-015_RSI_HUMAN_PILOT_DECISION.md`
+
+## ADR-DC-016 — Single-trial scope projection without pilot-start authority
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Indsnævrer et allerede verificeret positivt ADR-DC-015 human pilot decision proof
+til præcis én allowlisted lokal trial. Projection binder exact decision proof,
+campaign/task/base/main, decision maker, operator surface, workspace digest, ét
+selected task ID, local-commit narrowing og signed decision notes/conditions.
+
+`GO WITH CONDITIONS` bevarer conditions og kan ikke deserialiseres uden mindst
+én note. Successful projection beviser kun scope; runtime verification, faktisk
+feature-flag observation, pilot-start og product-pilot-start forbliver false.
+Ingen command registration, remote write/push/PR/merge/release/deploy eller
+production activation autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-016_RSI_SINGLE_TRIAL_SCOPE_PROJECTION.md`
