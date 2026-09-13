@@ -1,0 +1,103 @@
+name: tmp-fix-reviewed-start-p1q
+
+on:
+  push:
+    branches:
+      - fix/agent3-reviewed-start-recovery-p1q-20260913
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-reviewed-start-recovery-p1q-20260913
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Apply P1q fix
+        run: python .tmp_fix_reviewed_start_p1q.py
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+      - name: Compile Agent3 Python
+        run: python -m compileall -q worker/app/agent3
+      - name: Run reviewed-Start recovery and cancellation regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          for t in tests/worker_agent3_reviewed_start_p1*.py; do
+            echo "==> $t"
+            python "$t"
+          done
+          for t in \
+            tests/worker_agent3_planner_review.py \
+            tests/worker_agent3_review_reads.py \
+            tests/worker_agent3_recovery.py \
+            tests/worker_agent3_plan_store.py \
+            tests/worker_agent3_cancellation_contract.py \
+            tests/worker_agent3_late_cancel.py; do
+            if [[ -f "$t" ]]; then
+              echo "==> $t"
+              python "$t"
+            fi
+          done
+      - name: Test desktop atomic recovery slot
+        working-directory: desktop
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :composeApp:test --tests dk.ternedal.modelrig.desktop.data.Agent3ReviewedStartRecoveryStoreTest
+      - name: Test Android atomic recovery slot
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest --tests dk.ternedal.modelrig.data.Agent3ReviewedStartRecoveryStoreTest
+      - name: Source authority guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R "recoveryStore\.write(" -n \
+            android/app/src/main/java/dk/ternedal/modelrig/ui/Agent3ReviewScreen.kt \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3ReviewDevApp.kt
+          grep -q "reserveSettingIfEmpty" desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/DesktopChatDb.kt
+          grep -q "clearSettingIfEquals" desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/DesktopChatDb.kt
+          grep -q "fun reserve" desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/Agent3ReviewedStartRecoveryStore.kt
+          grep -q "fun clearIfMatches" desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/Agent3ReviewedStartRecoveryStore.kt
+          grep -q "fun reserve" android/app/src/main/java/dk/ternedal/modelrig/data/Agent3ReviewedStartRecoveryStore.kt
+          grep -q "fun clearIfMatches" android/app/src/main/java/dk/ternedal/modelrig/data/Agent3ReviewedStartRecoveryStore.kt
+      - name: Regenerate canonical current state
+        run: |
+          python scripts/current_state.py
+          python scripts/current_state.py --check
+      - name: Diff hygiene
+        run: |
+          git diff --check
+          git status --short
+      - name: Commit retained P1q fix and remove temporary machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git rm .tmp_fix_reviewed_start_p1q.py .github/workflows/_tmp_fix_reviewed_start_p1q.yml
+          git add \
+            CURRENT_STATE.md \
+            android/app/src/main/java/dk/ternedal/modelrig/data/Agent3ReviewedStartRecoveryStore.kt \
+            android/app/src/main/java/dk/ternedal/modelrig/ui/Agent3ReviewScreen.kt \
+            android/app/src/test/java/dk/ternedal/modelrig/data/Agent3ReviewedStartRecoveryStoreTest.kt \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3ReviewDevApp.kt \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/Agent3ReviewedStartRecoveryStore.kt \
+            desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/data/DesktopChatDb.kt \
+            desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/data/Agent3ReviewedStartRecoveryStoreTest.kt
+          git diff --cached --check
+          git commit -m "fix(agent3): make reviewed Start recovery slot atomic (#1309)" -m "Reserve one exact rig-scoped recovery authority before Start and clear it only by compare-and-match. Desktop uses SQLite atomic statements across processes; Android serializes concurrent screen instances. Draft/off-main only; production_activation=false."
+          git push origin HEAD:fix/agent3-reviewed-start-recovery-p1q-20260913
