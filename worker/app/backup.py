@@ -607,17 +607,18 @@ def create(out_dir: str = ".") -> str:
         with tempfile.TemporaryDirectory(prefix="kaliv-agent3-backup-") as stage_dir:
             archive_sources: dict[str, str] = {}
 
-            # A paired snapshot is created progress-first and runs-second. This
-            # ordering cannot manufacture a newer watermark than the run payload
-            # from ordinary live execution; both copies are then bound to the
-            # same random generation so independently copied files cannot later
-            # masquerade as one authority snapshot.
+            # A paired snapshot is created runs-first and progress-second. If
+            # execution crosses this boundary, the sidecar can only be as new as
+            # or newer than the run payload. That is the safe monotone direction:
+            # an execution watermark ahead of a rolled-back PENDING run makes
+            # reviewed recovery fail closed, while the inverse could lose the
+            # only evidence that a non-idempotent side effect already started.
             if runs_exists and progress_exists:
                 snapshot_id = str(uuid.uuid4())
                 progress_snapshot = os.path.join(stage_dir, "progress.db")
                 runs_snapshot = os.path.join(stage_dir, "runs.db")
-                _sqlite_snapshot(progress.path, progress_snapshot)
                 _sqlite_snapshot(runs.path, runs_snapshot)
+                _sqlite_snapshot(progress.path, progress_snapshot)
                 _add_snapshot_binding(
                     progress_snapshot,
                     snapshot_id=snapshot_id,
