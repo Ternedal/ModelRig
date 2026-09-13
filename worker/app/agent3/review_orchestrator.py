@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -219,10 +220,13 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
         proactive: bool = False,
         allow_private_cloud: bool = False,
         review_reads: bool = False,
+        run_id: str | None = None,
     ) -> AgentRun:
         route = self.router.route(request, caps)
         if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:
-            return self._blocked_run(request, route, route.reason, proactive, allow_private_cloud)
+            return self._blocked_run(
+                request, route, route.reason, proactive, allow_private_cloud, run_id=run_id
+            )
         return self._start_reviewed(
             request,
             route,
@@ -230,6 +234,7 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
             review_reads=review_reads,
+            run_id=run_id,
         )
 
     def _start_reviewed(
@@ -241,6 +246,7 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
         proactive: bool,
         allow_private_cloud: bool,
         review_reads: bool,
+        run_id: str | None = None,
     ) -> AgentRun:
         if len(steps) > self.max_steps:
             return self._blocked_run(
@@ -250,11 +256,13 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                 proactive,
                 allow_private_cloud,
                 steps[: self.max_steps],
+                run_id=run_id,
             )
         run = AgentRun(
             request=request,
             route=route,
             steps=steps,
+            id=run_id or str(uuid.uuid4()),
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
@@ -293,6 +301,76 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                 break
             end += 1
         return (start, end) if end > start else None
+
+    def recover_read_review_checkpoint_if_due(self, run_id: str) -> AgentRun | None:
+        """Rebuild a reviewed-read checkpoint lost in a cross-store crash gap.
+
+        The run DB and read-review DB cannot share a transaction. A crash can
+        therefore persist a successful READ (and possibly its advanced
+        ``current_step``) before ``set_waiting`` reaches the review DB. Reviewed
+        Start recovery must restore that human authority before it considers
+        calling ``advance``; otherwise the next pending reads would execute
+        without the explicit Resume the review policy requires.
+
+        Returning ``None`` means no checkpoint is due. Returning the run means
+        recovery must stop at the existing or reconstructed checkpoint.
+        """
+        run = self._require(run_id)
+        review = self.review_store.get(run.id)
+        if not review["enabled"]:
+            return None
+        if review["waiting"]:
+            return run
+
+        completed: AgentStep | None = None
+
+        # Crash window A: _execute() persisted the successful read, but the
+        # orchestrator had not yet advanced current_step and saved the run.
+        if run.current_step < len(run.steps):
+            current = run.steps[run.current_step]
+            if current.state == StepState.SUCCEEDED and current.risk == RiskClass.READ:
+                completed = current
+                run.current_step += 1
+                run.state = RunState.RUNNING
+                self.store.save(run)
+
+        # Crash window B: current_step was already saved, but set_waiting() had
+        # not yet made the human checkpoint durable in the review DB.
+        if completed is None and run.current_step > 0:
+            previous = run.steps[run.current_step - 1]
+            if previous.state == StepState.SUCCEEDED and previous.risk == RiskClass.READ:
+                completed = previous
+
+        if completed is None:
+            return None
+
+        window = self._pending_read_window(run)
+        if window is None:
+            return None
+
+        start, end = window
+        removable_ids = [item.id for item in run.steps[start:end]]
+        self.review_store.set_waiting(
+            run.id,
+            completed_step_id=completed.id,
+            completed_tool=completed.tool,
+            window_start=start,
+            window_end=end,
+            removable_step_ids=removable_ids,
+        )
+        self.store.event(
+            run.id,
+            "replan_review_required",
+            {
+                "completed_step_id": completed.id,
+                "completed_tool": completed.tool,
+                "window_start": start,
+                "window_end": end,
+                "removable_step_ids": removable_ids,
+                "recovered": True,
+            },
+        )
+        return run
 
     def advance(
         self,
