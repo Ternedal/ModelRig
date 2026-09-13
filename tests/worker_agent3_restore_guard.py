@@ -6,6 +6,7 @@ import tempfile
 from app.agent3.core import AgentRunStore
 from app.agent3.runtime_restore_guard import (
     acquire_agent3_restore_lease,
+    agent3_maintenance_guard,
     agent3_restore_guard,
 )
 
@@ -25,19 +26,52 @@ def check(condition: bool, name: str) -> None:
 with tempfile.TemporaryDirectory(prefix="agent3-restore-guard-") as root:
     run_path = os.path.join(root, "agent3-runs.db")
 
-    # A live runtime owns shared authority. Restore must fail before it can make
-    # its durable marker or touch a live destination.
+    # A live runtime owns shared authority. Restore and maintenance must both
+    # fail before either transition can touch persistent Agent3 authority.
     runtime = AgentRunStore(run_path)
     try:
-        acquire_agent3_restore_lease(run_path)
-        check(False, "live runtime blocks exclusive restore authority")
-    except RuntimeError as exc:
-        check(
-            "runtime is active" in str(exc),
-            "live runtime blocks exclusive restore authority",
-        )
+        try:
+            acquire_agent3_restore_lease(run_path)
+            check(False, "live runtime blocks exclusive restore authority")
+        except RuntimeError as exc:
+            check(
+                "runtime" in str(exc) and "active" in str(exc),
+                "live runtime blocks exclusive restore authority",
+            )
+        try:
+            with agent3_maintenance_guard(run_path):
+                pass
+            check(False, "live runtime blocks exclusive maintenance authority")
+        except RuntimeError as exc:
+            check(
+                "runtime is active" in str(exc),
+                "live runtime blocks exclusive maintenance authority",
+            )
     finally:
         runtime.close()
+
+    # Maintenance is atomic and needs exclusion, not a durable restore marker.
+    # While it owns EXCLUSIVE authority, fresh runtime startup is rejected.
+    with agent3_maintenance_guard(run_path):
+        try:
+            AgentRunStore(run_path)
+            check(False, "active maintenance blocks fresh runtime startup")
+        except RuntimeError as exc:
+            check(
+                "maintenance is in progress" in str(exc),
+                "active maintenance blocks fresh runtime startup",
+            )
+
+    # A failed maintenance transaction simply rolls back and releases exclusion;
+    # unlike a partial restore it must not leave the durable restore blocker set.
+    try:
+        with agent3_maintenance_guard(run_path):
+            raise OSError("injected maintenance failure")
+    except OSError:
+        check(True, "injected maintenance failure propagates")
+    after_maintenance_failure = AgentRunStore(run_path)
+    after_maintenance_failure.close()
+    check(True, "failed maintenance does not manufacture restore-incomplete state")
 
     # Once the runtime releases its lease, restore can enter. While EXCLUSIVE is
     # held, fresh runtime startup must fail closed on both POSIX and Windows.
@@ -56,8 +90,8 @@ with tempfile.TemporaryDirectory(prefix="agent3-restore-guard-") as root:
     check(True, "successful restore clears startup guard")
 
     # A failed restore leaves restore_in_progress durably set after the EXCLUSIVE
-    # transaction rolls back. Starting Agent3 is forbidden until a complete retry
-    # reaches the context manager's successful exit.
+    # transaction rolls back. Starting Agent3 and entering unrelated maintenance
+    # are forbidden until a complete retry reaches successful exit.
     try:
         with agent3_restore_guard(run_path):
             raise OSError("injected restore failure")
@@ -71,6 +105,16 @@ with tempfile.TemporaryDirectory(prefix="agent3-restore-guard-") as root:
         check(
             "restore is incomplete" in str(exc),
             "failed restore leaves durable startup blocker",
+        )
+
+    try:
+        with agent3_maintenance_guard(run_path):
+            pass
+        check(False, "incomplete restore blocks maintenance adoption boundary")
+    except RuntimeError as exc:
+        check(
+            "restore is incomplete" in str(exc),
+            "incomplete restore blocks maintenance adoption boundary",
         )
 
     with agent3_restore_guard(run_path):
