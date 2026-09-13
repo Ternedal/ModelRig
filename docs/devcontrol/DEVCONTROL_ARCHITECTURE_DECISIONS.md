@@ -133,9 +133,13 @@ Replay-marker og final receipt beholder deres originale create-once
 descriptors/fil-identiteter gennem provenance-registration. Live provenance
 binder exact receipt identity, PID, receipt-SHA, exact bytes og metadata history;
 durable mismatch revokerer monotont, mens ren in-memory content mutation kun er
-midlertidigt invalid. På POSIX bindes desuden ledger-rootens directory identity
-og parent-directory `(dev, ino, ctime_ns)` fra første permanente publication,
-så whole-ledger rename→replay→restore ikke kan genoplive et gammelt receipt.
+midlertidigt invalid. På POSIX bindes desuden den oprindelige ledger-root
+directory object identity til et kernel-event history monitor, armet før første
+permanente publication. Linux bruger inotify self-move/delete/unmount history;
+BSD-style POSIX bruger kqueue vnode rename/delete/revoke, hvor tilgængeligt.
+Whole-ledger rename→replay→restore kan derfor ikke genoplive et gammelt receipt,
+mens unrelated sibling-directory churn under samme host-state parent ikke
+revokerer den. Unsupported POSIX exact history monitoring fejler lukket.
 Outer transaction-failure revokerer allerede registreret provenance før en
 traceback bliver caller-visible.
 
