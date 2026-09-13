@@ -1,17 +1,16 @@
 """Create-once descriptor-bound provenance for RSI physical reservation receipts.
 
 Persisted bytes are replay/recovery state, never reloadable authority. Production
-installation replaces the reservation implementation's create-once publication
-for the permanent replay marker and final receipt with a primitive that keeps the
-*original publication descriptor* open from O_CREAT|O_EXCL creation through
-provenance registration. A byte-identical replacement between publication and
-registration therefore cannot become the authority baseline.
+installation replaces reservation create-once publication for the permanent
+replay marker and final receipt with a primitive that keeps the *original
+publication descriptor* open from O_CREAT|O_EXCL creation through provenance
+registration.
 
-The held descriptors are transaction-scoped with a ContextVar. Failed
-transactions close any unclaimed descriptors while leaving durable files in
-recovery state. Successful registration transfers the exact original final and
-replay-marker descriptors into the live receipt registry. Unlink, replacement,
-content mutation, receipt mutation, or fork invalidates provenance.
+The retained identity also includes a monotonic metadata stamp (`ctime_ns`). On
+POSIX a rename changes ctime even when inode and bytes are preserved, so
+rename-away/replay/rename-back cannot restore an old receipt. Live registry
+entries are transaction-token-bound and are revoked on any exception from the
+outer consume scope, including a private-runtime cleanup failure after commit.
 """
 from __future__ import annotations
 
@@ -34,14 +33,31 @@ _PUBLICATION_TOKEN: contextvars.ContextVar[object | None] = contextvars.ContextV
     "rsi_physical_reservation_publication_token",
     default=None,
 )
-# (transaction token, canonical path) -> (payload, descriptor, (dev, ino))
+# Identity is (device, inode/file-id projection, monotonic metadata stamp).
+_FileIdentity = tuple[int, int, int]
+# (transaction token, canonical path) -> (payload, descriptor, identity)
 _HELD_PUBLICATIONS: dict[
-    tuple[object, Path], tuple[bytes, int, tuple[int, int]]
+    tuple[object, Path], tuple[bytes, int, _FileIdentity]
 ] = {}
 
 
 class DescriptorBoundProvenanceError(ValueError):
     """Live transaction provenance could not be bound safely."""
+
+
+def _metadata_stamp(observed: os.stat_result) -> int:
+    value = getattr(observed, "st_ctime_ns", None)
+    if value is None:
+        value = int(float(observed.st_ctime) * 1_000_000_000)
+    return int(value)
+
+
+def _file_identity(observed: os.stat_result) -> _FileIdentity:
+    return (
+        int(observed.st_dev),
+        int(observed.st_ino),
+        _metadata_stamp(observed),
+    )
 
 
 def _read_descriptor_exact(
@@ -60,6 +76,7 @@ def _read_descriptor_exact(
             raise DescriptorBoundProvenanceError(
                 "reservation marker descriptor is unsafe"
             )
+        before_identity = _file_identity(before)
         os.lseek(descriptor, 0, os.SEEK_SET)
         remaining = before.st_size
         chunks: list[bytes] = []
@@ -77,8 +94,8 @@ def _read_descriptor_exact(
             )
         after = os.fstat(descriptor)
         if (
-            (before.st_dev, before.st_ino, before.st_size)
-            != (after.st_dev, after.st_ino, after.st_size)
+            before_identity != _file_identity(after)
+            or before.st_size != after.st_size
             or after.st_nlink != 1
         ):
             raise DescriptorBoundProvenanceError(
@@ -174,6 +191,7 @@ def _publish_bound_file(path: Path, payload: bytes, *, mode: int) -> None:
             raise DurablePublicationError(
                 "create-once bound file identity is unsafe"
             )
+        identity = _file_identity(observed)
         sync_directory(parent)
         try:
             current = os.stat(destination, follow_symlinks=False)
@@ -181,11 +199,10 @@ def _publish_bound_file(path: Path, payload: bytes, *, mode: int) -> None:
             raise DurablePublicationError(
                 "create-once bound file disappeared after publication"
             ) from exc
-        identity = (int(observed.st_dev), int(observed.st_ino))
         if (
             not stat.S_ISREG(current.st_mode)
             or current.st_nlink != 1
-            or (int(current.st_dev), int(current.st_ino)) != identity
+            or _file_identity(current) != identity
         ):
             raise DurablePublicationError(
                 "create-once bound file path changed after publication"
@@ -212,9 +229,6 @@ def _publish_bound_file(path: Path, payload: bytes, *, mode: int) -> None:
 
 def _requires_identity_retention(path: Path) -> bool:
     name = Path(path).name
-    # Reservation transaction creates exactly three files: .lock, .pending.json,
-    # and final <sha>.json. Pending is temporary recovery state and does not carry
-    # live provenance; the permanent lock and final receipt do.
     return name.endswith(".lock") or (
         name.endswith(".json") and not name.startswith(".")
     )
@@ -236,7 +250,7 @@ def _path_matches_held_marker(
     path: Path,
     expected_payload: bytes,
     held_descriptor: int,
-    held_identity: tuple[int, int],
+    held_identity: _FileIdentity,
 ) -> bool:
     try:
         held_payload, held_stat = _read_descriptor_exact(
@@ -248,7 +262,7 @@ def _path_matches_held_marker(
     if (
         held_payload != expected_payload
         or held_stat.st_nlink != 1
-        or (int(held_stat.st_dev), int(held_stat.st_ino)) != held_identity
+        or _file_identity(held_stat) != held_identity
     ):
         return False
 
@@ -273,8 +287,7 @@ def _path_matches_held_marker(
         return (
             current_payload == expected_payload
             and current_stat.st_nlink == 1
-            and (int(current_stat.st_dev), int(current_stat.st_ino))
-            == held_identity
+            and _file_identity(current_stat) == held_identity
         )
     except DescriptorBoundProvenanceError:
         return False
@@ -285,7 +298,7 @@ def _path_matches_held_marker(
 def _claim_original_publication(
     path: Path,
     expected_payload: bytes,
-) -> tuple[int, tuple[int, int]]:
+) -> tuple[int, _FileIdentity]:
     token = _PUBLICATION_TOKEN.get()
     if token is None:
         raise DescriptorBoundProvenanceError(
@@ -326,7 +339,7 @@ def _release_unclaimed_publications(token: object) -> None:
 
 def _descriptor_bound_transaction_registry():
     # identity -> (pid, receipt sha, final path/payload/fd/id,
-    #              lock path/payload/fd/id, weakref)
+    #              lock path/payload/fd/ref/id, transaction token)
     references: dict[int, tuple[Any, ...]] = {}
 
     def close_entry(entry: tuple[Any, ...]) -> None:
@@ -336,6 +349,20 @@ def _descriptor_bound_transaction_registry():
             except OSError:
                 pass
 
+    def revoke_identity(identity: int) -> None:
+        entry = references.pop(identity, None)
+        if entry is not None:
+            close_entry(entry)
+
+    def revoke_transaction(transaction_token: object) -> None:
+        identities = [
+            identity
+            for identity, entry in references.items()
+            if entry[11] is transaction_token
+        ]
+        for identity in identities:
+            revoke_identity(identity)
+
     def mark(
         value: Any,
         *,
@@ -344,6 +371,11 @@ def _descriptor_bound_transaction_registry():
         lock_path: Path,
         lock_payload: bytes,
     ) -> None:
+        transaction_token = _PUBLICATION_TOKEN.get()
+        if transaction_token is None:
+            raise DescriptorBoundProvenanceError(
+                "reservation provenance registration has no transaction token"
+            )
         final_descriptor, final_identity = _claim_original_publication(
             final_path,
             final_payload,
@@ -361,17 +393,14 @@ def _descriptor_bound_transaction_registry():
             raise
 
         identity = id(value)
-        previous = references.pop(identity, None)
-        if previous is not None:
-            close_entry(previous)
+        revoke_identity(identity)
         origin_pid = os.getpid()
         authenticated_sha256 = value.sha256
 
         def discard(reference: Any, *, identity: int = identity) -> None:
             entry = references.get(identity)
             if entry is not None and entry[9] is reference:
-                references.pop(identity, None)
-                close_entry(entry)
+                revoke_identity(identity)
 
         reference = weakref.ref(value, discard)
         references[identity] = (
@@ -386,10 +415,12 @@ def _descriptor_bound_transaction_registry():
             lock_descriptor,
             reference,
             lock_identity,
+            transaction_token,
         )
 
     def contains(value: Any) -> bool:
-        entry = references.get(id(value))
+        identity = id(value)
+        entry = references.get(identity)
         if entry is None:
             return False
         (
@@ -404,25 +435,32 @@ def _descriptor_bound_transaction_registry():
             lock_descriptor,
             reference,
             lock_identity,
+            _transaction_token,
         ) = entry
-        if origin_pid != os.getpid() or reference() is not value:
+        valid = origin_pid == os.getpid() and reference() is value
+        if valid:
+            try:
+                valid = value.sha256 == authenticated_sha256
+            except (AttributeError, TypeError, ValueError):
+                valid = False
+        if valid:
+            valid = _path_matches_held_marker(
+                final_path,
+                final_payload,
+                final_descriptor,
+                final_identity,
+            ) and _path_matches_held_marker(
+                lock_path,
+                lock_payload,
+                lock_descriptor,
+                lock_identity,
+            )
+        if not valid:
+            # Provenance is monotonic: once any mismatch is observed, the old
+            # receipt can never become authenticated again by restoring state.
+            revoke_identity(identity)
             return False
-        try:
-            if value.sha256 != authenticated_sha256:
-                return False
-        except (AttributeError, TypeError, ValueError):
-            return False
-        return _path_matches_held_marker(
-            final_path,
-            final_payload,
-            final_descriptor,
-            final_identity,
-        ) and _path_matches_held_marker(
-            lock_path,
-            lock_payload,
-            lock_descriptor,
-            lock_identity,
-        )
+        return True
 
     def after_fork_child() -> None:
         for entry in tuple(references.values()):
@@ -439,12 +477,14 @@ def _descriptor_bound_transaction_registry():
     if hasattr(os, "register_at_fork"):
         os.register_at_fork(after_in_child=after_fork_child)
 
-    return mark, contains
+    return mark, contains, revoke_transaction
 
 
-mark_transaction_authenticated, is_transaction_authenticated = (
-    _descriptor_bound_transaction_registry()
-)
+(
+    mark_transaction_authenticated,
+    is_transaction_authenticated,
+    revoke_transaction_authenticated,
+) = _descriptor_bound_transaction_registry()
 
 
 def _install_transaction_scope(implementation: Any) -> None:
@@ -455,6 +495,12 @@ def _install_transaction_scope(implementation: Any) -> None:
         context_token = _PUBLICATION_TOKEN.set(transaction_token)
         try:
             return original_consume(*args, **kwargs)
+        except BaseException:
+            # Any exception means the transaction did not successfully return.
+            # Revoke even already-registered provenance before the traceback can
+            # expose an in-frame receipt object to the caller.
+            revoke_transaction_authenticated(transaction_token)
+            raise
         finally:
             _release_unclaimed_publications(transaction_token)
             _PUBLICATION_TOKEN.reset(context_token)
