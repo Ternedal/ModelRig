@@ -2,6 +2,7 @@
 """Adversarial regressions for the RSI host-local reservation authority boundary."""
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 import workflow_physical_validation_final_gate as base
 
 import kaliv_dev_control.improvement_physical_reservation as reservation_module
+import kaliv_dev_control.improvement_physical_reservation_impl as reservation_impl
 from kaliv_dev_control.improvement_physical_reservation import (
     PhysicalQualificationReservationError,
     _consume_physical_qualification_request_once,
@@ -61,6 +63,19 @@ def _expect(fragment: str, fn) -> None:
         raise AssertionError(
             f"expected PhysicalQualificationReservationError containing {fragment!r}"
         )
+
+
+def test_public_consume_cannot_accept_caller_selected_verifier() -> None:
+    public_parameters = set(
+        inspect.signature(
+            reservation_module.consume_physical_qualification_request_once
+        ).parameters
+    )
+    assert "verifier" not in public_parameters
+    assert "ledger_root" not in public_parameters
+    assert "repository_root" not in public_parameters
+    assert "operation_root" not in public_parameters
+    assert "consumed_at_utc" not in public_parameters
 
 
 def test_runtime_subclass_is_rejected() -> None:
@@ -118,7 +133,7 @@ def test_runtime_source_mutation_after_private_snapshot_cannot_change_observatio
             verifier,
         ) = _fixture(root)
         source_executable = trusted_git.executable_path
-        original_verify = reservation_module._verify_request_at
+        original_verify = reservation_impl._verify_request_at
         calls = 0
 
         def verify_then_mutate_source(**kwargs):
@@ -132,7 +147,7 @@ def test_runtime_source_mutation_after_private_snapshot_cannot_change_observatio
                 source_executable.chmod(0o755)
             return receipt
 
-        reservation_module._verify_request_at = verify_then_mutate_source
+        reservation_impl._verify_request_at = verify_then_mutate_source
         try:
             consumed = _consume_physical_qualification_request_once(
                 ledger_root=ledger_root,
@@ -147,7 +162,7 @@ def test_runtime_source_mutation_after_private_snapshot_cannot_change_observatio
                 now_provider=_clock(),
             )
         finally:
-            reservation_module._verify_request_at = original_verify
+            reservation_impl._verify_request_at = original_verify
 
         assert calls == 2
         assert consumed.observed_main_sha == main_sha
@@ -173,7 +188,7 @@ def test_verified_input_snapshot_survives_caller_mutation_after_verify() -> None
             verifier,
         ) = _fixture(root)
         authenticated_qualification_sha = qualification.sha256
-        original_verify = reservation_module._verify_request_at
+        original_verify = reservation_impl._verify_request_at
         calls = 0
 
         def verify_then_mutate(**kwargs):
@@ -184,7 +199,7 @@ def test_verified_input_snapshot_survives_caller_mutation_after_verify() -> None
                 object.__setattr__(qualification, "baseline_eval_sha256", "0" * 64)
             return receipt
 
-        reservation_module._verify_request_at = verify_then_mutate
+        reservation_impl._verify_request_at = verify_then_mutate
         try:
             consumed = _consume_physical_qualification_request_once(
                 ledger_root=ledger_root,
@@ -199,7 +214,7 @@ def test_verified_input_snapshot_survives_caller_mutation_after_verify() -> None
                 now_provider=_clock(),
             )
         finally:
-            reservation_module._verify_request_at = original_verify
+            reservation_impl._verify_request_at = original_verify
 
         assert calls == 2
         assert qualification.sha256 != authenticated_qualification_sha
@@ -223,7 +238,7 @@ def test_final_swap_cannot_be_upgraded_to_live_authority() -> None:
             verifier,
         ) = _fixture(root)
         expected_final_name = f"{request.sha256}.json"
-        original_create_once = reservation_module.create_once_file
+        original_create_once = reservation_impl.create_once_file
         swapped = False
 
         def create_then_swap(path, payload, *args, **kwargs):
@@ -234,12 +249,12 @@ def test_final_swap_cannot_be_upgraded_to_live_authority() -> None:
                 value = json.loads(payload.decode("utf-8"))
                 value["requester_actor_id"] = "attacker.actor"
                 candidate.write_bytes(
-                    reservation_module._canonical(value).encode("utf-8")
+                    reservation_impl._canonical(value).encode("utf-8")
                 )
                 swapped = True
             return result
 
-        reservation_module.create_once_file = create_then_swap
+        reservation_impl.create_once_file = create_then_swap
         try:
             _expect(
                 "durably host-consumed but reservation requires recovery",
@@ -257,7 +272,7 @@ def test_final_swap_cannot_be_upgraded_to_live_authority() -> None:
                 ),
             )
         finally:
-            reservation_module.create_once_file = original_create_once
+            reservation_impl.create_once_file = original_create_once
 
         assert swapped is True
         loaded = reservation_module._PhysicalQualificationRequestLedger(ledger_root).load(
@@ -283,7 +298,7 @@ def test_final_removed_during_cleanup_fails_before_provenance_registration() -> 
             verifier,
         ) = _fixture(root)
         final_path = ledger_root / f"{request.sha256}.json"
-        original_unlink = reservation_module.unlink_durable
+        original_unlink = reservation_impl.unlink_durable
         removed = False
 
         def unlink_then_remove_final(path):
@@ -294,7 +309,7 @@ def test_final_removed_during_cleanup_fails_before_provenance_registration() -> 
                 removed = True
             return result
 
-        reservation_module.unlink_durable = unlink_then_remove_final
+        reservation_impl.unlink_durable = unlink_then_remove_final
         try:
             _expect(
                 "durably host-consumed but reservation requires recovery",
@@ -312,7 +327,7 @@ def test_final_removed_during_cleanup_fails_before_provenance_registration() -> 
                 ),
             )
         finally:
-            reservation_module.unlink_durable = original_unlink
+            reservation_impl.unlink_durable = original_unlink
 
         assert removed is True
         replay_marker = ledger_root / f".{request.sha256}.lock"
@@ -387,6 +402,7 @@ def test_live_provenance_tracks_exact_final_and_permanent_replay_marker() -> Non
 
 
 def main() -> None:
+    test_public_consume_cannot_accept_caller_selected_verifier()
     if os.name == "nt":
         print("RSI physical reservation authority-race regressions: SKIP (POSIX fixture)")
         return
