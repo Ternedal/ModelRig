@@ -20,7 +20,7 @@ class Agent3ReviewedStartRecoveryStore(
             ?: return UNRESOLVED_CREDENTIAL_BINDING
         if (currentFingerprint != bound.credentialFingerprint) return UNRESOLVED_CREDENTIAL_BINDING
         synchronized(slotLock) {
-            originEnvelopes[authorityKey(key, bound.encodedAuthority)] = raw
+            rememberFirstOriginEnvelope(authorityKey(key, bound.encodedAuthority), raw)
         }
         return bound.encodedAuthority
     }
@@ -38,7 +38,7 @@ class Agent3ReviewedStartRecoveryStore(
             val current = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() }
             if (current != null) return false
             val saved = prefs.edit().putString(key, boundEnvelope).commit()
-            if (saved) originEnvelopes[authorityKey] = boundEnvelope
+            if (saved) rememberFirstOriginEnvelope(authorityKey, boundEnvelope)
             return saved
         }
     }
@@ -51,10 +51,13 @@ class Agent3ReviewedStartRecoveryStore(
         synchronized(slotLock) {
             val expectedEnvelope = originEnvelopes[authorityKey] ?: return false
             val current = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() }
-            if (current != expectedEnvelope) return false
+            if (current != expectedEnvelope) {
+                forgetOriginEnvelopeIfSame(authorityKey, expectedEnvelope)
+                return false
+            }
             val cleared = prefs.edit().remove(key).commit()
             if (cleared) {
-                originEnvelopes.remove(authorityKey)
+                forgetOriginEnvelopeIfSame(authorityKey, expectedEnvelope)
                 retiredAuthorities.add(authorityKey)
             }
             return cleared
@@ -72,6 +75,14 @@ class Agent3ReviewedStartRecoveryStore(
         val slotLock = Any()
         val originEnvelopes = mutableMapOf<String, String>()
         val retiredAuthorities = mutableSetOf<String>()
+
+        fun rememberFirstOriginEnvelope(authorityKey: String, envelope: String) {
+            if (authorityKey !in originEnvelopes) originEnvelopes[authorityKey] = envelope
+        }
+
+        fun forgetOriginEnvelopeIfSame(authorityKey: String, envelope: String) {
+            if (originEnvelopes[authorityKey] == envelope) originEnvelopes.remove(authorityKey)
+        }
     }
 }
 
