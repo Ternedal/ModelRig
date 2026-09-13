@@ -80,9 +80,7 @@ class CampaignAdapterRaceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         for store in self.stores:
-            if store._conn.in_transaction:
-                store._conn.rollback()
-            store._conn.close()
+            store.close()
         self.temp.cleanup()
 
     def stack(
