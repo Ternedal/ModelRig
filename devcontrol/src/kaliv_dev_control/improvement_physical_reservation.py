@@ -44,8 +44,12 @@ _consume_physical_qualification_request_once = (
 _observe_with_reader = _implementation._observe_with_reader
 _canonical = _implementation._canonical
 _canonical_host_ledger_root = _implementation._canonical_host_ledger_root
+_canonical_host_state_root = _implementation._canonical_host_state_root
 _canonical_repository_root = _implementation._canonical_repository_root
 _canonical_operation_root = _implementation._canonical_operation_root
+_ensure_link_free_directory = _implementation._ensure_link_free_directory
+_path_sha256 = _implementation._path_sha256
+_read_bound_file = _implementation._read_bound_file
 _now_utc_seconds = _implementation._now_utc_seconds
 
 del _implementation
