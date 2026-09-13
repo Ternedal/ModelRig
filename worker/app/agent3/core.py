@@ -594,11 +594,16 @@ class Agent3Orchestrator:
         *,
         proactive: bool = False,
         allow_private_cloud: bool = False,
+        run_id: str | None = None,
     ) -> AgentRun:
         route = self.router.route(request, caps)
         if route.kind in {RouteKind.UNAVAILABLE, RouteKind.ASK_BEFORE_DOWNGRADE}:
-            return self._blocked_run(request, route, route.reason, proactive, allow_private_cloud)
-        return self._start_routed(request, route, list(steps), proactive, allow_private_cloud)
+            return self._blocked_run(
+                request, route, route.reason, proactive, allow_private_cloud, run_id=run_id
+            )
+        return self._start_routed(
+            request, route, list(steps), proactive, allow_private_cloud, run_id=run_id
+        )
 
     def _start_routed(
         self,
@@ -607,6 +612,8 @@ class Agent3Orchestrator:
         steps: list[AgentStep],
         proactive: bool,
         allow_private_cloud: bool,
+        *,
+        run_id: str | None = None,
     ) -> AgentRun:
         if len(steps) > self.max_steps:
             return self._blocked_run(
@@ -616,11 +623,13 @@ class Agent3Orchestrator:
                 proactive,
                 allow_private_cloud,
                 steps[: self.max_steps],
+                run_id=run_id,
             )
         run = AgentRun(
             request=request,
             route=route,
             steps=steps,
+            id=run_id or str(uuid.uuid4()),
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,
         )
@@ -636,12 +645,15 @@ class Agent3Orchestrator:
         proactive: bool,
         allow_private_cloud: bool,
         steps: list[AgentStep] | None = None,
+        *,
+        run_id: str | None = None,
     ) -> AgentRun:
         run = AgentRun(
             request=request,
             route=route,
             steps=steps or [],
             state=RunState.BLOCKED,
+            id=run_id or str(uuid.uuid4()),
             error=reason,
             proactive=proactive,
             allow_private_cloud=allow_private_cloud,

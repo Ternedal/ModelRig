@@ -74,7 +74,7 @@ internal fun desktopGitHubConnectorError(raw: String?): String {
         message.contains("Connection refused", ignoreCase = true) ||
             message.contains("ConnectException") -> "Kan ikke nå riggen for GitHub connector-status."
         message.isBlank() -> "GitHub connector-status kunne ikke hentes."
-        else -> message.take(300)
+        else -> "GitHub connector-status kunne ikke hentes."
     }
 }
 

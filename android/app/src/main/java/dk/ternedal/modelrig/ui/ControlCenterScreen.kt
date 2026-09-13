@@ -114,6 +114,20 @@ internal fun controlCenterScheduleGrantLabel(grant: ControlCenterScheduleGrant):
     else -> "Blokeret"
 }
 
+internal fun controlCenterStatusError(raw: String?): String =
+    "Kontrolcenter-status kunne ikke hentes."
+
+internal fun controlCenterCapabilitiesError(raw: String?): String =
+    "Capability-listen kunne ikke hentes."
+
+internal fun controlCenterSchedulesError(raw: String?): String =
+    "Planstatus kunne ikke hentes."
+
+internal fun controlCenterSchedulerRuntimeErrorLabel(raw: String?): String? =
+    raw?.takeIf { it.isNotBlank() }?.let {
+        "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer."
+    }
+
 @Composable
 fun ControlCenterScreen(
     store: TokenStore,
@@ -166,21 +180,21 @@ fun ControlCenterScreen(
             error = null
         }.onFailure {
             status = null
-            error = it.message ?: "Kontrolcenter-status kunne ikke hentes."
+            error = controlCenterStatusError(it.message)
         }
         results.second.onSuccess {
             capabilityInventory = it
             capabilityError = null
         }.onFailure {
             capabilityInventory = null
-            capabilityError = it.message ?: "Capability-listen kunne ikke hentes."
+            capabilityError = controlCenterCapabilitiesError(it.message)
         }
         results.third.onSuccess {
             scheduleSnapshot = it
             scheduleError = null
         }.onFailure {
             scheduleSnapshot = null
-            scheduleError = it.message ?: "Planstatus kunne ikke hentes."
+            scheduleError = controlCenterSchedulesError(it.message)
         }
         loading = false
     }
@@ -532,8 +546,8 @@ private fun SchedulerRuntimeCard(runtime: ControlCenterScheduleRuntime, schedule
             color = KalivTheme.colors.textMuted,
             fontSize = 11.sp,
         )
-        runtime.lastError?.let {
-            Text("Runtime-fejl: $it", color = KalivTheme.colors.danger, fontSize = 11.sp)
+        controlCenterSchedulerRuntimeErrorLabel(runtime.lastError)?.let { label ->
+            Text(label, color = KalivTheme.colors.danger, fontSize = 11.sp)
         }
     }
 }

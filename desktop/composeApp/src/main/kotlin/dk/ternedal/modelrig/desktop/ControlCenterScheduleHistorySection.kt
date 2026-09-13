@@ -84,7 +84,7 @@ internal fun desktopControlCenterScheduleHistoryError(raw: String?): String {
             message.contains("ConnectException") ->
             "Kan ikke nå riggen for execution-historik."
         message.isBlank() -> "Execution-historikken kunne ikke hentes."
-        else -> message.take(300)
+        else -> "Execution-historikken kunne ikke hentes."
     }
 }
 

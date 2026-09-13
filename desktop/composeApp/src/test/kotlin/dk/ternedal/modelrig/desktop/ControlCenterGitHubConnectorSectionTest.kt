@@ -60,4 +60,9 @@ class ControlCenterGitHubConnectorSectionTest {
             desktopGitHubConnectorError("request failed (503): unavailable"),
         )
     }
+    @Test
+    fun unknownConnectorFailuresDoNotEchoRawDetails() {
+        val raw = "IllegalStateException: https://rig.local/?token=secret-123 C:\\Users\\operator"
+        assertEquals("GitHub connector-status kunne ikke hentes.", desktopGitHubConnectorError(raw))
+    }
 }

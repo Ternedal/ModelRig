@@ -109,6 +109,30 @@ fun KalivNavRail(
     vramTotalGb: Double,
     modelBackend: String,
 ) {
+    // Compatibility surface for older explicit callers and the L2a overload gate.
+    // Supplied numeric values are treated as observations; no defaults are invented.
+    KalivNavRail(
+        active = active,
+        onSelect = onSelect,
+        status = KalivSidebarStatus(
+            modelName = modelName.ifBlank { "Lokal model ikke valgt" },
+            modelAuthority = "Lokal · $modelBackend",
+            privacyTitle = "Chat: kun lokal",
+            privacyDetail = "Legacy-kald uden cloud-routing authority",
+            titleSubtitle = "— lokal AI på din maskine",
+            localOnly = true,
+        ),
+        vram = KalivVramTelemetry.Measured(vramUsedGb, vramTotalGb),
+    )
+}
+
+@Composable
+fun KalivNavRail(
+    active: KalivScreen,
+    onSelect: (KalivScreen) -> Unit,
+    status: KalivSidebarStatus,
+    vram: KalivVramTelemetry,
+) {
     val c = KalivTheme.colors
     val railBackground = if (c.isDark) Color(0x8C14110E) else c.Surface
 
@@ -129,9 +153,9 @@ fun KalivNavRail(
         }
 
         Spacer(Modifier.weight(1f))
-        LightShellActiveModelCard(modelName, vramUsedGb, vramTotalGb, modelBackend)
+        LightShellActiveModelCard(status, vram)
         Spacer(Modifier.height(12.dp))
-        LightShellPrivacySeal()
+        LightShellPrivacySeal(status)
     }
 }
 
@@ -181,14 +205,13 @@ private fun LightShellNavRow(
 
 @Composable
 private fun LightShellActiveModelCard(
-    modelName: String,
-    usedGb: Double,
-    totalGb: Double,
-    backend: String,
+    status: KalivSidebarStatus,
+    vram: KalivVramTelemetry,
 ) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
     val border = if (c.isDark) Color(0x33785A37) else c.Border
+    val vramPresentation = presentVram(vram)
     Column(
         Modifier
             .fillMaxWidth()
@@ -197,21 +220,25 @@ private fun LightShellActiveModelCard(
             .border(1.dp, border, shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
     ) {
-        SectionLabel("Aktiv model")
+        SectionLabel("Primær model")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(c.Success))
+            Box(
+                Modifier.size(7.dp).clip(CircleShape)
+                    .background(if (status.localOnly) c.Success else c.Amber),
+            )
             Spacer(Modifier.width(7.dp))
-            Text(modelName, color = c.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(status.modelName, color = c.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = c.TextMuted, fontSize = 11.5.sp)
-        Spacer(Modifier.height(9.dp))
-        val fraction = if (totalGb > 0.0) (usedGb / totalGb).toFloat() else 0f
-        LightShellMetaBar(fraction)
+        Text(status.modelAuthority, color = c.TextMuted, fontSize = 11.5.sp)
+        vramPresentation.fraction?.let { fraction ->
+            Spacer(Modifier.height(9.dp))
+            LightShellMetaBar(fraction)
+        }
         Spacer(Modifier.height(5.dp))
         Text(
-            "VRAM ${lightShellFmtGb(usedGb)} / ${lightShellFmtGb(totalGb)} GB",
+            vramPresentation.label,
             color = c.TextMuted,
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
@@ -241,7 +268,7 @@ private fun LightShellMetaBar(fraction: Float) {
 }
 
 @Composable
-private fun LightShellPrivacySeal() {
+private fun LightShellPrivacySeal(status: KalivSidebarStatus) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
     val background = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
@@ -257,11 +284,11 @@ private fun LightShellPrivacySeal() {
             .padding(horizontal = 13.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("\uD83D\uDD12", color = c.Highlight, fontSize = 15.sp)
+        Text(if (status.localOnly) "\uD83D\uDD12" else "\u2197", color = c.Highlight, fontSize = 15.sp)
         Spacer(Modifier.width(9.dp))
         Column {
-            Text("100 % lokal", color = headline, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-            Text("Intet forlader maskinen", color = c.TextMuted, fontSize = 10.5.sp)
+            Text(status.privacyTitle, color = headline, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text(status.privacyDetail, color = c.TextMuted, fontSize = 10.5.sp)
         }
     }
 }
@@ -281,8 +308,32 @@ fun KalivContextPanel(
     responseSeconds: Double,
     sparkline: List<Float>,
 ) {
+    // Compatibility surface: callers supplying observations are explicitly
+    // declaring them measured. The normal App path uses the typed overload.
+    KalivContextPanel(
+        ragOn = ragOn,
+        onToggleRag = onToggleRag,
+        docs = docs,
+        onAddDocument = onAddDocument,
+        performance = KalivPerformanceTelemetry.Measured(
+            tokensPerSecond = tokensPerSec,
+            responseSeconds = responseSeconds,
+            sparkline = sparkline,
+        ),
+    )
+}
+
+@Composable
+fun KalivContextPanel(
+    ragOn: Boolean,
+    onToggleRag: () -> Unit,
+    docs: List<RagDocRow>,
+    onAddDocument: () -> Unit,
+    performance: KalivPerformanceTelemetry,
+) {
     val c = KalivTheme.colors
     val panelBackground = if (c.isDark) Color(0x8014110E) else c.Surface
+    val performancePresentation = presentPerformance(performance)
 
     Column(
         Modifier
@@ -301,9 +352,9 @@ fun KalivContextPanel(
             Spacer(Modifier.height(8.dp))
             Text(
                 if (ragOn) {
-                    "Dokumenter indg\u00e5r i svar. Kun lokalt \u2014 intet sendes til sky uden dit samtykke."
+                    "Dokumenter indgår i svar. Kun lokalt — intet sendes til sky uden dit samtykke."
                 } else {
-                    "RAG er sl\u00e5et fra. Sl\u00e5 til for at lade Kaliv svare ud fra dine dokumenter."
+                    "RAG er slået fra. Slå til for at lade Kaliv svare ud fra dine dokumenter."
                 },
                 color = c.TextMuted,
                 fontSize = 12.sp,
@@ -346,7 +397,7 @@ fun KalivContextPanel(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            LightShellOutlineChip("+ Tilf\u00f8j dokument", onAddDocument)
+            LightShellOutlineChip("+ Tilføj dokument", onAddDocument)
         }
 
         LightShellCard {
@@ -355,19 +406,34 @@ fun KalivContextPanel(
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
                     Text("Tokens / sek.", color = c.TextMuted, fontSize = 11.sp)
-                    Text("$tokensPerSec", color = c.Highlight, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        performancePresentation.tokensPerSecondText,
+                        color = if (performancePresentation.measured) c.Highlight else c.TextMuted,
+                        fontSize = if (performancePresentation.measured) 22.sp else 12.5.sp,
+                        fontWeight = if (performancePresentation.measured) FontWeight.SemiBold else FontWeight.Normal,
+                    )
                 }
-                Sparkline(sparkline, Modifier.width(120.dp).height(34.dp))
+                performancePresentation.sparkline?.let { points ->
+                    Sparkline(points, Modifier.width(120.dp).height(34.dp))
+                }
             }
             Spacer(Modifier.height(10.dp))
             Row {
                 Text("Svartid", color = c.TextMuted, fontSize = 11.sp)
                 Spacer(Modifier.weight(1f))
                 Text(
-                    String.format(java.util.Locale.US, "%.2f", responseSeconds).replace('.', ',') + " s",
-                    color = c.TextHigh,
+                    performancePresentation.responseTimeText,
+                    color = if (performancePresentation.measured) c.TextHigh else c.TextMuted,
                     fontSize = 12.5.sp,
                     fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (!performancePresentation.measured) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Vises først, når en rigtig svartur er målt.",
+                    color = c.TextMuted,
+                    fontSize = 10.5.sp,
                 )
             }
         }

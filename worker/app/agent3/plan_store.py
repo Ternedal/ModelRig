@@ -56,6 +56,12 @@ class PlanStore:
                 connection.execute(
                     "ALTER TABLE agent_plans ADD COLUMN start_terminal_at REAL"
                 )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS agent_reviewed_starts ("
+                "plan_id TEXT PRIMARY KEY, state TEXT NOT NULL, run_id TEXT, "
+                "owner TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL, "
+                "expires_at REAL NOT NULL)"
+            )
             connection.commit()
 
         # Safe opportunistic cleanup: active Start recovery rows are excluded by
@@ -191,6 +197,223 @@ class PlanStore:
                     ).rowcount
                     connection.commit()
                     return changed == 1
+                except Exception:
+                    connection.rollback()
+                    raise
+
+
+    def reviewed_start_recovery(
+        self,
+        plan_id: str,
+    ) -> tuple[str, str | None, str | None] | None:
+        """Return durable reviewed-Start state without granting new execution authority."""
+        with self._lock:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT state,run_id,owner,expires_at FROM agent_reviewed_starts WHERE plan_id=?",
+                    (plan_id,),
+                ).fetchone()
+        if row is None:
+            return None
+        state, run_id, owner_raw, expires_at = row
+        if time.time() > float(expires_at):
+            return "refused", None, None
+        if state == "refused":
+            return "refused", None, None
+        if state not in {"pending", "accepted"}:
+            raise PlanStoreError("reviewed Start has invalid state")
+        if not isinstance(run_id, str) or not run_id:
+            raise PlanStoreError("reviewed Start is missing its reserved run id")
+        return str(state), run_id, self._owner_value(owner_raw)
+
+    def claim_reviewed_start(self, plan_id: str, run_id: str) -> str:
+        """Atomically consume one plan and bind a reserved reviewed-run id before execution."""
+        if not run_id:
+            raise PlanStoreError("reviewed Start run id is missing")
+        now = time.time()
+        recovery_expires = now + max(self.ttl_seconds, 86_400)
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    existing = connection.execute(
+                        "SELECT state FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if existing is not None:
+                        raise PlanStoreError("reviewed Start is already claimed")
+                    row = connection.execute(
+                        "SELECT payload,expires_at,consumed_at,start_result FROM agent_plans WHERE id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("plan not found")
+                    payload, expires_at, consumed_at, task_start_result = row
+                    if consumed_at is not None or task_start_result is not None:
+                        raise PlanStoreError("plan already used")
+                    if now > float(expires_at):
+                        connection.execute(
+                            "UPDATE agent_plans SET consumed_at=? WHERE id=? AND consumed_at IS NULL",
+                            (now, plan_id),
+                        )
+                        connection.commit()
+                        raise PlanStoreError("plan expired")
+                    changed = connection.execute(
+                        "UPDATE agent_plans SET consumed_at=?,expires_at=? "
+                        "WHERE id=? AND consumed_at IS NULL AND start_result IS NULL",
+                        (now, max(float(expires_at), recovery_expires), plan_id),
+                    ).rowcount
+                    if changed != 1:
+                        raise PlanStoreError("plan already used")
+                    connection.execute(
+                        "INSERT INTO agent_reviewed_starts("
+                        "plan_id,state,run_id,owner,created_at,updated_at,expires_at) "
+                        "VALUES(?,'pending',?,?,?,?,?)",
+                        (
+                            plan_id,
+                            run_id,
+                            self._start_owner,
+                            now,
+                            now,
+                            recovery_expires,
+                        ),
+                    )
+                    connection.commit()
+                    return str(payload)
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def reviewed_start_materialization(self, plan_id: str, run_id: str) -> str:
+        """Return immutable reviewed-plan authority bound to one reserved run."""
+        with self._lock:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT p.payload,r.state,r.run_id FROM agent_plans p "
+                    "JOIN agent_reviewed_starts r ON r.plan_id=p.id WHERE p.id=?",
+                    (plan_id,),
+                ).fetchone()
+        if row is None:
+            raise PlanStoreError("reviewed Start plan not found")
+        payload, state, existing_run_id = row
+        if state not in {"pending", "accepted"} or existing_run_id != run_id:
+            raise PlanStoreError("plan is not materializable for this reviewed run")
+        return str(payload)
+
+    def claim_reviewed_start_recovery(
+        self,
+        plan_id: str,
+        run_id: str,
+        previous_owner: str | None,
+    ) -> bool:
+        """Transfer a pending reviewed Start only from a dead worker generation."""
+        now = time.time()
+        recovery_expires = now + max(self.ttl_seconds, 86_400)
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT state,run_id,owner,expires_at FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("reviewed Start recovery not found")
+                    state, existing_run_id, owner_raw, expires_at = row
+                    if state != "pending" or existing_run_id != run_id:
+                        raise PlanStoreError("reviewed Start is not pending for this run")
+                    owner = self._owner_value(owner_raw)
+                    if owner == self._start_owner or owner != previous_owner:
+                        connection.commit()
+                        return False
+                    connection.execute(
+                        "UPDATE agent_reviewed_starts SET owner=?,updated_at=?,expires_at=? "
+                        "WHERE plan_id=? AND state='pending' AND run_id=?",
+                        (
+                            self._start_owner,
+                            now,
+                            max(float(expires_at), recovery_expires),
+                            plan_id,
+                            run_id,
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE agent_plans SET expires_at=MAX(expires_at,?) WHERE id=?",
+                        (recovery_expires, plan_id),
+                    )
+                    connection.commit()
+                    return True
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def mark_reviewed_start_accepted(self, plan_id: str, run_id: str) -> None:
+        """Publish same-plan recovery only for the exact reserved run id."""
+        now = time.time()
+        recovery_expires = now + max(self.ttl_seconds, 86_400)
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT state,run_id,expires_at FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        raise PlanStoreError("reviewed Start recovery not found")
+                    state, existing_run_id, expires_at = row
+                    if existing_run_id != run_id:
+                        raise PlanStoreError("reviewed Start is bound to another run")
+                    if state == "accepted":
+                        connection.commit()
+                        return
+                    if state != "pending":
+                        raise PlanStoreError("reviewed Start is not pending")
+                    connection.execute(
+                        "UPDATE agent_reviewed_starts SET state='accepted',owner=?,updated_at=?,expires_at=? "
+                        "WHERE plan_id=? AND run_id=?",
+                        (
+                            self._start_owner,
+                            now,
+                            max(float(expires_at), recovery_expires),
+                            plan_id,
+                            run_id,
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE agent_plans SET expires_at=MAX(expires_at,?) WHERE id=?",
+                        (recovery_expires, plan_id),
+                    )
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+
+    def mark_reviewed_start_refused(self, plan_id: str, run_id: str) -> None:
+        """Finalize a claimed reviewed Start only if its reserved run never existed."""
+        now = time.time()
+        with self._lock:
+            with self._connection() as connection:
+                try:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT state,run_id FROM agent_reviewed_starts WHERE plan_id=?",
+                        (plan_id,),
+                    ).fetchone()
+                    if row is None:
+                        connection.commit()
+                        return
+                    state, existing_run_id = row
+                    if state == "accepted":
+                        raise PlanStoreError("accepted reviewed Start cannot be refused")
+                    if existing_run_id != run_id:
+                        raise PlanStoreError("reviewed Start refusal targets another run")
+                    connection.execute(
+                        "UPDATE agent_reviewed_starts SET state='refused',run_id=NULL,owner=NULL,updated_at=? "
+                        "WHERE plan_id=? AND state='pending'",
+                        (now, plan_id),
+                    )
+                    connection.commit()
                 except Exception:
                     connection.rollback()
                     raise
@@ -560,6 +783,10 @@ class PlanStore:
         now = time.time()
         with self._lock:
             with self._connection() as connection:
+                connection.execute(
+                    "DELETE FROM agent_reviewed_starts WHERE expires_at < ?",
+                    (now,),
+                )
                 cursor = connection.execute(
                     "DELETE FROM agent_plans WHERE expires_at < ? AND ("
                     "start_result IS NULL OR start_result='refused' OR "

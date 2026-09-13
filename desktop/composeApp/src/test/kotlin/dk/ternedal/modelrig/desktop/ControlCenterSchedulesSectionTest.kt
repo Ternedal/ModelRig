@@ -56,6 +56,18 @@ class ControlCenterSchedulesSectionTest {
         )
     }
 
+    @Test
+    fun unknownSchedulerFailuresAndRuntimeDetailsAreRedacted() {
+        val raw = "RuntimeError: C:\\Users\\operator\\scheduler.db token=secret-123"
+        assertEquals("Scheduler-status kunne ikke hentes.", desktopControlCenterSchedulesError(raw))
+        assertEquals(
+            "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer.",
+            desktopScheduleRuntimeErrorLabel(raw),
+        )
+        assertEquals(null, desktopScheduleRuntimeErrorLabel(null))
+        assertEquals(null, desktopScheduleRuntimeErrorLabel(""))
+    }
+
     private fun runtime(
         running: Boolean,
         configured: Boolean = true,

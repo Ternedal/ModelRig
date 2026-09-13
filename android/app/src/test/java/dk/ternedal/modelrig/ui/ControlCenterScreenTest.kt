@@ -85,6 +85,20 @@ class ControlCenterScreenTest {
         assertEquals("Blokeret", controlCenterScheduleGrantLabel(grant(eligible = false)))
     }
 
+    @Test
+    fun primaryControlCenterAndRuntimeErrorsDoNotEchoRawDetails() {
+        val raw = "RuntimeException: /data/user/0/private.db Bearer device-token-123"
+        assertEquals("Kontrolcenter-status kunne ikke hentes.", controlCenterStatusError(raw))
+        assertEquals("Capability-listen kunne ikke hentes.", controlCenterCapabilitiesError(raw))
+        assertEquals("Planstatus kunne ikke hentes.", controlCenterSchedulesError(raw))
+        assertEquals(
+            "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer.",
+            controlCenterSchedulerRuntimeErrorLabel(raw),
+        )
+        assertNull(controlCenterSchedulerRuntimeErrorLabel(null))
+        assertNull(controlCenterSchedulerRuntimeErrorLabel(""))
+    }
+
     private fun runtime(
         configured: Boolean,
         running: Boolean,

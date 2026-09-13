@@ -342,6 +342,7 @@ fun App() {
                             "confirmation_required" -> {
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
+                                    source = ChatResult.Source.LOCAL,
                                     streaming = false,
                                 )
                                 pendingCardError = null
@@ -350,7 +351,11 @@ fun App() {
                             }
                             else -> {
                                 val ans = turn.answer.ifBlank { "(tomt svar, status: ${turn.status})" }
-                                messages[assistantIdxT] = messages[assistantIdxT].copy(text = ans, streaming = false)
+                                messages[assistantIdxT] = messages[assistantIdxT].copy(
+                                    text = ans,
+                                    source = ChatResult.Source.LOCAL,
+                                    streaming = false,
+                                )
                                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", ans) }
                             }
                         }
@@ -491,6 +496,14 @@ fun App() {
         // App.kt's old tall Header is gone (it duplicated the KALIV wordmark
         // and was the reason none of the three screens read like the design).
         Column(Modifier.fillMaxSize().background(KalivTheme.colors.Graphite)) {
+        val chatRouteStatus = presentSidebarStatus(
+            preferLocal = preferLocal,
+            autoCloudFallback = autoCloudFallback,
+            cloudConfigured = cloudKey.isNotBlank() && cloudModel.isNotBlank(),
+            localModel = localModel,
+            cloudModel = cloudModel,
+        )
+
         KalivTitleBar(
             subtitle = when (activeScreen) {
                 KalivScreen.AGENT -> "\u2014 agent"
@@ -871,8 +884,8 @@ fun App() {
                         RagDocRow(kind = kind, name = s, size = "")
                     },
                     onAddDocument = { ragMode = true; loadRagSources() },
-                    // There is no response-performance measurement pipeline yet.
-                    // Missing evidence is an explicit state, never demo telemetry.
+                    // No response-performance measurement pipeline exists yet.
+                    // Missing evidence is explicit; never substitute demo telemetry.
                     performance = KalivPerformanceTelemetry.Unavailable,
                 )
             }
@@ -917,7 +930,7 @@ fun App() {
                             pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
-                            messages.add(UiMessage("assistant", text))
+                            messages.add(UiMessage("assistant", text, source = ChatResult.Source.LOCAL))
                             val cid = convId
                             if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
                         }
@@ -997,8 +1010,16 @@ private fun ConversationsPanel(
     onNew: () -> Unit,
     onDeleted: (Long) -> Unit,
 ) {
-    var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
-    var panelError by remember { mutableStateOf<String?>(null) }
+    val initialConversationLoad = remember { runCatching { db.listConversations() } }
+    var convos by remember { mutableStateOf(initialConversationLoad.getOrElse { emptyList() }) }
+    var listAvailable by remember { mutableStateOf(initialConversationLoad.isSuccess) }
+    var panelError by remember {
+        mutableStateOf(
+            initialConversationLoad.exceptionOrNull()?.let {
+                presentConversationBrowserFailure(KalivConversationBrowserFailure.LOAD)
+            },
+        )
+    }
     var query by remember { mutableStateOf("") }
     var renamingId by remember { mutableStateOf<Long?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -1036,7 +1057,9 @@ private fun ConversationsPanel(
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
-            if (convos.isEmpty()) {
+            if (!listAvailable) {
+                Text("Samtalelisten er ikke tilgængelig lige nu", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
+            } else if (convos.isEmpty()) {
                 Text("Ingen samtaler endnu", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
             } else if (shown.isEmpty()) {
                 Text("Ingen match på \"$query\"", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
@@ -1050,10 +1073,26 @@ private fun ConversationsPanel(
                                 singleLine = true, modifier = Modifier.weight(1f),
                             )
                             TextButton(onClick = {
-                                runCatching {
-                                    db.renameConversation(c.id, renameText.trim())
-                                    convos = db.listConversations()
-                                }.onFailure { panelError = it.message }
+                                runCatching { db.renameConversation(c.id, renameText.trim()) }
+                                    .onSuccess {
+                                        runCatching { db.listConversations() }
+                                            .onSuccess { loaded ->
+                                                convos = loaded
+                                                listAvailable = true
+                                                panelError = null
+                                            }
+                                            .onFailure {
+                                                listAvailable = false
+                                                panelError = presentConversationBrowserFailure(
+                                                    KalivConversationBrowserFailure.LOAD,
+                                                )
+                                            }
+                                    }
+                                    .onFailure {
+                                        panelError = presentConversationBrowserFailure(
+                                            KalivConversationBrowserFailure.RENAME,
+                                        )
+                                    }
                                 renamingId = null
                             }) { Text("Gem", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                             TextButton(onClick = { renamingId = null }) {
@@ -1082,7 +1121,13 @@ private fun ConversationsPanel(
                                 runCatching {
                                     clipboard.setText(AnnotatedString(db.conversationAsMarkdown(c.id)))
                                     copiedId = c.id
-                                }.onFailure { panelError = it.message }
+                                }.onSuccess {
+                                    panelError = null
+                                }.onFailure {
+                                    panelError = presentConversationBrowserFailure(
+                                        KalivConversationBrowserFailure.COPY,
+                                    )
+                                }
                             }) {
                                 Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = KalivTheme.colors.Signal, fontSize = 12.sp)
                             }
@@ -1090,13 +1135,29 @@ private fun ConversationsPanel(
                                 enabled = presentation.contextMutationEnabled,
                                 onClick = {
                                     if (presentation.contextMutationEnabled) {
-                                        runCatching {
-                                            db.deleteConversation(c.id)
-                                            // Every successful delete invalidates pending conversation
-                                            // loads; the parent clears the view as well when this was active.
-                                            onDeleted(c.id)
-                                            convos = db.listConversations()
-                                        }.onFailure { panelError = it.message }
+                                        runCatching { db.deleteConversation(c.id) }
+                                            .onSuccess {
+                                                // Every successful delete invalidates pending conversation
+                                                // loads; the parent clears the view as well when this was active.
+                                                onDeleted(c.id)
+                                                runCatching { db.listConversations() }
+                                                    .onSuccess { loaded ->
+                                                        convos = loaded
+                                                        listAvailable = true
+                                                        panelError = null
+                                                    }
+                                                    .onFailure {
+                                                        listAvailable = false
+                                                        panelError = presentConversationBrowserFailure(
+                                                            KalivConversationBrowserFailure.LOAD,
+                                                        )
+                                                    }
+                                            }
+                                            .onFailure {
+                                                panelError = presentConversationBrowserFailure(
+                                                    KalivConversationBrowserFailure.DELETE,
+                                                )
+                                            }
                                     }
                                 },
                             ) {

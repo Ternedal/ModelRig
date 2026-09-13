@@ -35,4 +35,9 @@ class ControlCenterAuditSectionTest {
         assertTrue(desktopControlCenterAuditError("failed (502)").contains("utilgængelig"))
         assertTrue(desktopControlCenterAuditError("").contains("kunne ikke hentes"))
     }
+    @Test
+    fun unknownAuditFailuresDoNotEchoRawDetails() {
+        val raw = "RuntimeException: C:\\Users\\operator\\secret.txt Bearer device-token-123"
+        assertEquals("Audit kunne ikke hentes.", desktopControlCenterAuditError(raw))
+    }
 }
