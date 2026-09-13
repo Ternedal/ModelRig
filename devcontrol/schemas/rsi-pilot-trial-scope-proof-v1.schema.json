@@ -45,6 +45,27 @@
     "unattended_cadence_allowed",
     "workspace_root_path_sha256"
   ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "go_with_conditions"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "decision_notes": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schema": {
       "const": "kaliv-rsi-dc-l16-single-trial-scope-proof/v1"
