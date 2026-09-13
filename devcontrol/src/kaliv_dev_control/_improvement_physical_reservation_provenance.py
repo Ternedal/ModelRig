@@ -437,27 +437,32 @@ def _descriptor_bound_transaction_registry():
             lock_identity,
             _transaction_token,
         ) = entry
-        valid = origin_pid == os.getpid() and reference() is value
-        if valid:
-            try:
-                valid = value.sha256 == authenticated_sha256
-            except (AttributeError, TypeError, ValueError):
-                valid = False
-        if valid:
-            valid = _path_matches_held_marker(
-                final_path,
-                final_payload,
-                final_descriptor,
-                final_identity,
-            ) and _path_matches_held_marker(
-                lock_path,
-                lock_payload,
-                lock_descriptor,
-                lock_identity,
-            )
-        if not valid:
-            # Provenance is monotonic: once any mismatch is observed, the old
-            # receipt can never become authenticated again by restoring state.
+        if origin_pid != os.getpid() or reference() is not value:
+            revoke_identity(identity)
+            return False
+        try:
+            if value.sha256 != authenticated_sha256:
+                # Receipt-object mutation invalidates the current observation but
+                # does not destroy the descriptor/file provenance. Restoring the
+                # exact authenticated value may therefore make this same object
+                # valid again, matching the established transaction contract.
+                return False
+        except (AttributeError, TypeError, ValueError):
+            return False
+        markers_valid = _path_matches_held_marker(
+            final_path,
+            final_payload,
+            final_descriptor,
+            final_identity,
+        ) and _path_matches_held_marker(
+            lock_path,
+            lock_payload,
+            lock_descriptor,
+            lock_identity,
+        )
+        if not markers_valid:
+            # Durable marker provenance is monotonic: once file/path/identity
+            # mismatch is observed, byte-identical recreation must not revive it.
             revoke_identity(identity)
             return False
         return True
