@@ -336,6 +336,9 @@ with tempfile.TemporaryDirectory(prefix="kaliv-t033-protected-planner-") as raw:
         client.close()
         plan_store.close()
         reader.close()
+        run_progress_connection = getattr(run_store, "_progress_conn", None)
+        if run_progress_connection is not None:
+            run_progress_connection.close()
         run_connection = getattr(run_store, "_conn", None)
         if run_connection is not None:
             run_connection.close()
