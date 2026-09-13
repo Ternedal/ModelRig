@@ -106,6 +106,91 @@ def test_live_receipt_weakref_cleanup_uses_shared_registry_lock() -> None:
         assert holder == []
 
 
+def test_directory_registration_failure_revokes_inner_file_provenance() -> None:
+    if not _is_linux():
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            _fixture_ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = race._fixture(root)
+        state_root = root / "host-state"
+        ledger_root = state_root / "ledger"
+        ledger_root.mkdir(parents=True)
+        moved = root / "host-state-moved"
+
+        original_matches = file_provenance._path_matches_held_marker
+        calls = 0
+        raced = False
+
+        def match_then_race(path, expected_payload, held_descriptor, held_identity):
+            nonlocal calls, raced
+            result = original_matches(
+                path,
+                expected_payload,
+                held_descriptor,
+                held_identity,
+            )
+            calls += 1
+            if calls == 2 and result:
+                state_root.rename(moved)
+                moved.rename(state_root)
+                raced = True
+            return result
+
+        file_provenance._path_matches_held_marker = match_then_race
+        try:
+            try:
+                race._consume(
+                    ledger_root=ledger_root,
+                    trusted_git=trusted_git,
+                    repository_root=repository_root,
+                    operation_root=operation_root,
+                    request=request,
+                    qualification=qualification,
+                    snapshot_receipt=snapshot_receipt,
+                    signature=signature,
+                    verifier=verifier,
+                )
+            except reservation_module.PhysicalQualificationReservationError as exc:
+                recovered = []
+                traceback = exc.__traceback__
+                while traceback is not None:
+                    for value in traceback.tb_frame.f_locals.values():
+                        if isinstance(
+                            value,
+                            reservation_module.PhysicalQualificationReservation,
+                        ):
+                            recovered.append(value)
+                    traceback = traceback.tb_next
+                assert raced is True
+                assert recovered, (
+                    "split-layer registration failure traceback must expose a receipt"
+                )
+                assert all(
+                    value.transaction_authenticated is False for value in recovered
+                )
+                assert all(
+                    file_provenance.is_transaction_authenticated(value) is False
+                    for value in recovered
+                )
+            else:
+                raise AssertionError(
+                    "directory history must reject registration after ancestry race"
+                )
+        finally:
+            file_provenance._path_matches_held_marker = original_matches
+
+
 def test_ledger_root_rename_replay_restore_cannot_restore_first_receipt() -> None:
     if os.name != "posix":
         return
@@ -387,6 +472,7 @@ def main() -> None:
     test_transaction_revocation_uses_shared_registry_lock()
     test_composed_live_authentication_uses_shared_registry_lock()
     test_live_receipt_weakref_cleanup_uses_shared_registry_lock()
+    test_directory_registration_failure_revokes_inner_file_provenance()
     test_ledger_root_rename_replay_restore_cannot_restore_first_receipt()
     test_ancestor_rename_replay_restore_cannot_restore_first_receipt()
     test_linux_watch_precedes_identity_capture_even_without_ctime_signal()
