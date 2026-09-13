@@ -1,0 +1,92 @@
+name: review-windows-pkt8-0eff363b
+
+on:
+  push:
+    branches:
+      - "review/windows-pkt8-0eff363b"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-review-kit:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact qualified candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 0eff363b7de788f4fbae165c248eb23e783269e9
+
+      - name: Assert exact review authority
+        shell: pwsh
+        run: |
+          $expected = "0eff363b7de788f4fbae165c248eb23e783269e9"
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "Wrong checkout: expected=$expected actual=$actual" }
+          if (git status --short) { throw "Review checkout is not clean" }
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -ne "2.0.13") { throw "Unexpected version: $version" }
+
+      - name: Set up Java 21
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Re-run desktop unit tests for review build
+        working-directory: desktop
+        shell: bash
+        run: ./gradlew :composeApp:test --no-daemon --console=plain
+
+      - name: Package runnable Windows jar
+        working-directory: desktop
+        shell: bash
+        run: ./gradlew :composeApp:packageUberJarForCurrentOS --no-daemon --console=plain
+
+      - name: Assemble exact-head review kit
+        shell: pwsh
+        run: |
+          $sha = "0eff363b7de788f4fbae165c248eb23e783269e9"
+          $short = $sha.Substring(0,12)
+          $version = (Get-Content VERSION -Raw).Trim()
+          $jars = @(Get-ChildItem -Path "desktop/composeApp/build/compose/jars" -Filter "*.jar" -File -Recurse)
+          if ($jars.Count -ne 1) { throw "Expected exactly one packaged jar, found $($jars.Count)" }
+          New-Item -ItemType Directory -Force -Path review-kit | Out-Null
+          $name = "Kaliv-windows-x64-$version-review-$short.jar"
+          $dest = Join-Path "review-kit" $name
+          Copy-Item $jars[0].FullName $dest
+          $hash = (Get-FileHash -Algorithm SHA256 $dest).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content -Encoding ascii "review-kit/SHA256SUMS.txt"
+          @"
+          Kaliv Windows desktop UX human-review kit
+          ==========================================
+          version=$version
+          exact_candidate_sha=$sha
+          exact_candidate_tree=9f0cdfcb9bc7e4f272b7dbfa672f62cfc40c60e7
+          source_pr=#1337
+          source_branch=candidate/pkt8-reviewed-start-final
+          ci_run=5586
+          agent3_diagnostics_run=3605
+          agent3_full_diagnostics_run=4687
+          exact_head_qualification_run=1467
+          loc_metrics_run=332
+          codeql_run=3836
+          production_activation=false
+          purpose=human desktop UX review only
+          promotion_authority=false
+          release_authority=false
+          merge_authority=false
+          jar_sha256=$hash
+
+          This package is for the required human desktop UX review of #779 pkt. 8.
+          It is not a release and does not authorize Stage A, merge, release, or production activation.
+          "@ | Set-Content -Encoding utf8 "review-kit/REVIEW_AUTHORITY.txt"
+
+      - name: Upload exact-head review kit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kaliv-windows-review-0eff363b7de7
+          path: review-kit/*
+          if-no-files-found: error
+          retention-days: 14
