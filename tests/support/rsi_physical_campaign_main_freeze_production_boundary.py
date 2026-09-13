@@ -365,13 +365,7 @@ def run_contract() -> None:
             "rsi-physical-campaign-main-freeze-proof-v1.schema.json"
         ) == set(proof.to_dict())
 
-    source = (
-        ROOT
-        / "devcontrol"
-        / "src"
-        / "kaliv_dev_control"
-        / "_improvement_physical_campaign_main_freeze_watcher.py"
-    ).read_text(encoding="utf-8")
+    source = inspect.getsource(watcher_module)
     for required in (
         "inotify",
         "ReadDirectoryChangesW",
@@ -383,9 +377,7 @@ def run_contract() -> None:
     ):
         assert required in source, required
 
-    package_init = (
-        ROOT / "devcontrol" / "src" / "kaliv_dev_control" / "__init__.py"
-    ).read_text(encoding="utf-8")
+    package_init = inspect.getsource(sys.modules["kaliv_dev_control"])
     assert "improvement_physical_campaign_main_freeze" not in package_init
 
 
