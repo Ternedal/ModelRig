@@ -466,6 +466,18 @@ def build_planner_router(
             orchestrator.review_store.clear_waiting_if_matches(run_id)
         plan_store.mark_reviewed_start_refused(plan_id, run_id)
 
+    def _assert_reviewed_run_binding(existing: AgentRun, expected_run_id: str) -> None:
+        # The SQLite row key is not enough: payload corruption or a partial
+        # restore can leave a row under the reserved key whose embedded AgentRun
+        # id points somewhere else. Never let such a snapshot borrow authority
+        # from the reviewed Start binding.
+        if existing.id != expected_run_id:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start run id does not match its reserved binding",
+                status_code=503,
+            )
+
     def _publish_reviewed_start_acceptance(
         plan_id: str,
         run_id: str,
@@ -486,6 +498,7 @@ def build_planner_router(
                     "reviewed Start run disappeared before publication",
                     status_code=503,
                 )
+            _assert_reviewed_run_binding(current, run_id)
             if current.state is RunState.CANCELLED:
                 raise _ReviewedStartCancelled()
             plan_store.mark_reviewed_start_accepted(plan_id, run_id)
@@ -550,13 +563,16 @@ def build_planner_router(
                 "persisted reviewed Start run is not yet materialized",
                 status_code=503,
             )
-        # Only RUNNING snapshots can be advanced. BLOCKED is terminal authority
-        # and may legitimately carry a fail-closed route produced by capability
-        # drift rather than the reviewed executable route. Observe terminal state
-        # unchanged; bind identity immediately before any path that could advance.
+        _assert_reviewed_run_binding(existing, run_id)
+        # WAITING_CONFIRMATION is observation-only here but still resumable by a
+        # later confirm call, so it must be bound to the reviewed immutable plan
+        # just like RUNNING before Start recovery can publish acceptance.
+        if existing.state in {RunState.RUNNING, RunState.WAITING_CONFIRMATION}:
+            _assert_reviewed_run_identity(existing, reviewed_template)
+        # Only RUNNING snapshots can be advanced. BLOCKED/terminal snapshots may
+        # legitimately carry a fail-closed route produced by capability drift.
         if existing.state is not RunState.RUNNING:
             return existing
-        _assert_reviewed_run_identity(existing, reviewed_template)
         # The immutable plan bit and the separate review-policy row are two
         # persisted views of the same execution authority. They must agree in
         # BOTH directions before recovery can advance. Otherwise corruption from
@@ -692,7 +708,8 @@ def build_planner_router(
                             "accepted reviewed Start lost its bound run during recovery",
                             status_code=503,
                         )
-                    if existing.state is RunState.RUNNING:
+                    _assert_reviewed_run_binding(existing, reserved_run_id)
+                    if existing.state in {RunState.RUNNING, RunState.WAITING_CONFIRMATION}:
                         _assert_reviewed_run_identity(existing, reviewed_template)
                     if existing.state is RunState.CANCELLED and reviewing:
                         orchestrator.review_store.clear_waiting_if_matches(reserved_run_id)
