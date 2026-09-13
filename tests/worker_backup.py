@@ -166,8 +166,36 @@ def execution_progress_bytes_with_erasing_trigger() -> bytes:
             "WHERE run_id=NEW.run_id AND step_index=NEW.step_index "
             "AND step_sha256=NEW.step_sha256; END"
         )
+        # A catalog name is attacker-controlled after writable_schema edits. Hide
+        # the still-active trigger behind sqlite_* so validation must inspect the
+        # complete catalog instead of treating the reserved prefix as trusted.
+        con.execute("PRAGMA writable_schema=ON")
+        con.execute(
+            "UPDATE sqlite_master SET name='sqlite_erasing_trigger', "
+            "sql=replace(sql,'erase_execution_start','sqlite_erasing_trigger') "
+            "WHERE type='trigger' AND name='erase_execution_start'"
+        )
         con.commit()
         con.close()
+
+        # Reopen exactly as restore would: the reserved-name trigger must still
+        # be live and capable of erasing an inserted watermark.
+        probe = sqlite3.connect(path)
+        probe.execute(
+            "INSERT OR IGNORE INTO agent_execution_starts("
+            "run_id,step_index,step_sha256,started_at) VALUES(?,?,?,?)",
+            ("reserved-trigger-probe", 1, "b" * 64, 2.0),
+        )
+        probe.commit()
+        retained = probe.execute(
+            "SELECT COUNT(*) FROM agent_execution_starts WHERE run_id=?",
+            ("reserved-trigger-probe",),
+        ).fetchone()[0]
+        integrity = probe.execute("PRAGMA integrity_check").fetchone()[0]
+        probe.close()
+        if retained != 0 or integrity != "ok":
+            raise AssertionError("reserved-name trigger fixture is not a valid active exploit")
+
         with open(path, "rb") as f:
             return f.read()
     finally:
@@ -175,7 +203,6 @@ def execution_progress_bytes_with_erasing_trigger() -> bytes:
             os.remove(path)
         except FileNotFoundError:
             pass
-
 
 
 def execution_progress_bytes_with_rejecting_check() -> bytes:
@@ -313,10 +340,10 @@ except ValueError:
 check(snapshot() == pre_invalid_restore, "restore: invalid authority refusal writes NOTHING")
 
 # A syntactically valid sidecar can still be unsafe if extra schema objects can
-# mutate watermark semantics. In particular, an AFTER INSERT trigger can erase
-# the just-inserted execution marker while all expected columns/PKs and
-# integrity_check remain valid. The dedicated authority DB therefore admits no
-# user-defined object other than the canonical table.
+# mutate watermark semantics. The fixture is stronger than an ordinary trigger:
+# writable_schema renames the still-active erasing trigger into sqlite_* while
+# integrity_check remains OK. Reserved catalog prefixes are therefore never
+# trusted; the complete catalog must match the canonical authority schema.
 trigger_progress_bytes = execution_progress_bytes_with_erasing_trigger()
 trigger_progress = os.path.join(_root, "trigger-execution-progress.tar.gz")
 archive_with_schema(
@@ -328,21 +355,21 @@ archive_with_schema(
 trigger_verify = backup.verify(trigger_progress)
 check(
     not trigger_verify["ok"],
-    "verify: trigger-bearing execution-progress sidecar is refused with matching manifest hash",
+    "verify: reserved-name trigger execution-progress sidecar is refused with matching manifest hash",
 )
 check(
-    any("unexpected user-defined schema objects" in problem for problem in trigger_verify["problems"]),
-    "verify: trigger-bearing sidecar names the closed-schema authority failure",
+    any("canonical authority schema" in problem for problem in trigger_verify["problems"]),
+    "verify: reserved-name trigger names the canonical closed-schema authority failure",
 )
 pre_trigger_restore = snapshot()
 try:
     backup.restore(trigger_progress, force=True)
-    check(False, "restore: trigger-bearing execution-progress authority is refused")
+    check(False, "restore: reserved-name trigger execution-progress authority is refused")
 except ValueError:
-    check(True, "restore: trigger-bearing execution-progress authority is refused")
+    check(True, "restore: reserved-name trigger execution-progress authority is refused")
 check(
     snapshot() == pre_trigger_restore,
-    "restore: trigger-bearing authority refusal writes NOTHING",
+    "restore: reserved-name trigger authority refusal writes NOTHING",
 )
 
 # Inline constraints are part of execution authority even though they do not
@@ -363,7 +390,7 @@ check(
     "verify: CHECK-constrained execution-progress sidecar is refused with matching manifest hash",
 )
 check(
-    any("canonical CREATE TABLE authority" in problem for problem in check_verify["problems"]),
+    any("canonical authority schema" in problem for problem in check_verify["problems"]),
     "verify: inline constraint failure names canonical table authority",
 )
 pre_check_restore = snapshot()
@@ -458,17 +485,17 @@ except ValueError:
     check(True, "create: invalid execution-progress authority is refused")
 wipe()
 
-# A structurally correct live sidecar with an erasing trigger must also be
-# rejected before create can publish a backup.
+# A structurally correct live sidecar with a reserved-name erasing trigger must
+# also be rejected before create can publish a backup.
 _seed_sqlite(runs_item.path, runs_item.key)
 os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
 with open(progress_item.path, "wb") as f:
     f.write(trigger_progress_bytes)
 try:
     backup.create(os.path.join(_root, "trigger-progress-create"))
-    check(False, "create: trigger-bearing execution-progress authority is refused")
+    check(False, "create: reserved-name trigger execution-progress authority is refused")
 except ValueError:
-    check(True, "create: trigger-bearing execution-progress authority is refused")
+    check(True, "create: reserved-name trigger execution-progress authority is refused")
 wipe()
 
 # A structurally correct live sidecar with an inline constraint that suppresses
