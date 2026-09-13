@@ -151,3 +151,33 @@ Reservationen er fortsat evidence-only: `frozen_main_confirmed=false`,
 pilot, publication og activation forbliver separate authority-gates.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
+
+## ADR-DC-010 — Authenticated one-shot admission før DC-L15 physical campaign
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Gør den live transaction-authenticated host-reservation plus en separat
+human-signeret exact runner-pin til en smal, host-local one-shot campaign-start
+admission. Production resolver runner-signature trust fra en fast host-admin-
+kontrolleret verification-only keyring; caller-valgt verifier er ikke authority.
+Den exact `TrustedGitRuntime` skal samtidig være host-admin-kontrolleret og køres
+direkte gennem den restricted read-only Git-reader — production kopierer ikke
+executable bytes til en same-user staging-root. Private underscored tests kan
+fortsat bruge injectable verifier + transaction-private runtime staging.
+
+Admission-lock og final receipt arver ADR-DC-009's original-publication
+provenance: de oprindelige `O_CREAT|O_EXCL` descriptors/filidentiteter beholdes
+gennem registration, og live authority bindes til exact objekt/PID/SHA og de
+oprindelige marker-identiteter. På Linux bindes admission-ledgeren og dens
+ancestor-kæde desuden til watch-before-trust directory-history før første
+permanente publication. Byte-identisk unlink/recreate, whole-ledger
+rename→replay→restore og ancestor rename→replay→restore kan derfor ikke etablere
+en ny authority-baseline; unrelated sibling-churn forbliver neutral.
+Runner-budgettet er højst 16.000.000 bytes inden for den allerede hardened
+stable-read boundary.
+
+Admission kan kun give `campaign_start_authorized=true` for én manuel fysisk
+kampagne. Den kører ingen probes og giver ikke frozen-main, physical-complete,
+pilot, merge, publication, release, deploy eller activation authority.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-010_RSI_PHYSICAL_CAMPAIGN_ADMISSION_BOUNDARY.md`
