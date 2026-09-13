@@ -12,11 +12,13 @@ Reservation-laget skal derfor lukke observation-, time- og replay-huller uden at
 
 Desuden er en `TrustedGitRuntime`-instans ikke i sig selv en trust-beslutning. H2-kontrakten gør runtime-manifestet content-addressed og re-verificerbart, men kræver separat review/pinning. Reservationen må derfor kun bruge den staged Git-runtime, hvis dens manifest- og executable-digests matcher den `CandidateSnapshotReceipt`, hvis SHA allerede er bundet ind i den human-signerede qualification chain.
 
+Caller-ejede Python-objekter er heller ikke immutable authority bare fordi deres dataclasses er `frozen=True`: subclasses kan override adfærd, og `object.__setattr__` kan mutere felter mellem verification og receipt-building. Authority-transaktionen skal derfor selv skabe lokale exact-type value snapshots af alle signerede/verificerede inputs og rekonstruere den Trusted Git-runtime fra dens verificerede transaction-root, før nogen authority-beslutning bruges videre.
+
 ## Beslutning
 
 Der foreslås et separat evidence-only reservation-led:
 
-`verified human request → signed runtime pin → trusted preflight → irreversible host lock → trusted main re-read → signed-chain reverify → create-once replay state → transaction-authenticated in-memory receipt`
+`caller input snapshot → verified human request → signed runtime pin → trusted preflight → irreversible host lock → trusted main re-read → signed-chain reverify → create-once replay state → exact-byte read-back → transaction-authenticated in-memory receipt`
 
 ### 1. Caller leverer ikke authority-evidence eller authority-paths
 
@@ -30,9 +32,21 @@ Den authority-bærende public consume-path må ikke acceptere:
 
 Observationer er fortsat serialiserbar `evidence-only` data, men typen eller schema-validitet er ikke provenance. Produktionens repository-root udledes af checkoutet, der indeholder authority-koden, og host-state/operation-root er canonical lokale paths.
 
+Før første authority-verifikation skal transaktionen desuden snapshotte caller-ejede inputs til nye, exact-type value objects:
+
+- `PhysicalQualificationRequest` via canonical JSON parse;
+- `QualificationPacket` via canonical JSON parse;
+- `CandidateSnapshotReceipt` via canonical mapping reconstruction;
+- `DetachedEd25519AuthoritySignature` via canonical mapping reconstruction;
+- `Ed25519AuthorityVerifier` via en ny verifier bygget af exact-type, canonical-rekonstruerede trusted keys og samme minimum keyring epoch.
+
+Subclasses af disse authority-typer afvises. Efter snapshot må transactionen kun bruge de lokale snapshots, så efterfølgende caller-mutation ikke kan ændre den request, qualification, signature, snapshot receipt eller keyring, som receiptet bindes til.
+
 ### 2. Git-runtime skal være pinned af den signerede softwarekæde
 
-Public consume modtager den `CandidateSnapshotReceipt`, som qualification-pakken refererer til. Før observation accepteres skal reservation-laget bevise:
+Public consume modtager den `CandidateSnapshotReceipt`, som qualification-pakken refererer til. Callerens `TrustedGitRuntime` skal være exact type; subclasses afvises. Transaktionen rekonstruerer derefter sin egen `TrustedGitRuntime` fra den caller-instans' transaction-root og bruger kun den rekonstruerede runtime videre.
+
+Før observation accepteres skal reservation-laget bevise:
 
 - `snapshot_receipt.sha256 == qualification.snapshot_receipt_sha256`;
 - samme task- og materialization-receipt-identitet;
@@ -40,7 +54,7 @@ Public consume modtager den `CandidateSnapshotReceipt`, som qualification-pakken
 - observationens `git_runtime_manifest_sha256` matcher snapshot-receiptet;
 - observationens `git_executable_sha256` matcher snapshot-receiptet.
 
-Dermed kan en caller ikke stage en anden integritetsgyldig Git-pakke, lade den lyve om `refs/heads/main` og få observationen behandlet som den runtime, som den signerede RSI-kæde faktisk bandt.
+Dermed kan en caller hverken bruge en overridable `TrustedGitRuntime` subclass eller stage en anden integritetsgyldig Git-pakke, lade den lyve om `refs/heads/main` og få observationen behandlet som den runtime, som den signerede RSI-kæde faktisk bandt.
 
 ### 3. Trusted main læses efter den irreversible lock
 
@@ -48,7 +62,7 @@ Et preflight-read må bruges til at undgå at brænde en åbenlyst mismatchende 
 
 Den post-lock observation skal:
 
-- læse præcis `refs/heads/main^{commit}` gennem den pinned staged `TrustedGitRuntime`;
+- læse præcis `refs/heads/main^{commit}` gennem den lokalt rekonstruerede, pinned staged `TrustedGitRuntime`;
 - være lokal og read-only;
 - udføre ingen network-operation;
 - mutere intet repository;
@@ -60,9 +74,9 @@ Hvis `main` flytter mellem preflight og post-lock read, fejler operationen **eft
 
 ### 4. Signatur og expiry re-verificeres efter lock
 
-Human request-signaturen og qualification-bindingen re-verificeres igen ved et internt current-time timestamp efter lock og post-lock observation.
+Human request-signaturen og qualification-bindingen re-verificeres igen ved et internt current-time timestamp efter lock og post-lock observation. Re-verifikationen bruger fortsat kun transactionens lokale snapshots af request, qualification, signature og verifier/keyring.
 
-Caller kan derfor ikke backdate consumption for at genbruge en udløbet request. Hvis requesten udløber efter lock men før final commit, forbliver lock-state fail-closed/recovery-required.
+Caller kan derfor ikke backdate consumption for at genbruge en udløbet request eller mutere signerede inputs efter en tidligere verification og få de nye værdier ind i reservation-receiptet. Hvis requesten udløber efter lock men før final commit, forbliver lock-state fail-closed/recovery-required.
 
 ### 5. Durable ledger-state er ikke reloadable authority
 
@@ -78,26 +92,28 @@ Derfor gælder følgende:
 - live provenance bindes til **objekt-identitet + originating PID + SHA-256 af de autentificerede canonical receipt-contents**;
 - et efterfølgende `object.__setattr__`-angreb eller anden feltmutation ændrer canonical digest og gør straks `transaction_authenticated=false`;
 - en POSIX child-process må ikke arve authority: PID skal matche, og registry ryddes desuden via `os.register_at_fork(after_in_child=...)`;
-- kun den igangværende authenticated consume-transaktion må registrere live provenance, og først efter create-once final write, canonical byte-identisk read-back og succesfuld cleanup.
+- final read-back skal være **byte-identisk med præcis den canonical payload, som transactionen netop gav til create-once write**; en anden schema-valid canonical fil på samme path må ikke kunne blive upgraded til live authority;
+- kun den igangværende authenticated consume-transaktion må registrere live provenance, og først efter exact-payload read-back og succesfuld cleanup.
 
 Den canonical rækkefølge er:
 
-1. re-verificér request + qualification ved internt current time;
-2. trusted preflight af `main` gennem den signed/pinned Git-runtime;
-3. create-once host-local lock keyed af requestens canonical SHA-256;
-4. trusted post-lock `main` observation gennem samme pinned runtime;
-5. trusted-current-time re-verifikation af signed request + qualification;
-6. create-once pending payload;
-7. create-once final canonical payload;
-8. parse + canonical byte-identisk read-back uden at grant'e authority;
-9. durable cleanup af pending/lock;
-10. registrér kun den returnerede in-memory instans med `(origin_pid, authenticated_receipt_sha256, object identity)`.
+1. snapshot exact-type caller authority-inputs og rekonstruér Trusted Git-runtime lokalt;
+2. re-verificér request + qualification ved internt current time med de lokale snapshots;
+3. trusted preflight af `main` gennem den signed/pinned rekonstruerede Git-runtime;
+4. create-once host-local lock keyed af snapshot-requestens canonical SHA-256;
+5. trusted post-lock `main` observation gennem samme rekonstruerede pinned runtime;
+6. trusted-current-time re-verifikation af den lokale signed request + qualification;
+7. create-once pending payload;
+8. create-once final canonical payload;
+9. læs final tilbage og kræv byte-identitet med payloaden fra trin 8, derefter parse + canonical validation uden at grant'e authority;
+10. durable cleanup af pending/lock;
+11. registrér kun den returnerede in-memory instans med `(origin_pid, authenticated_receipt_sha256, object identity)`.
 
-`transaction_authenticated=true` kræver derefter ved hver læsning, at samme objekt stadig lever, at processen har samme PID, og at receiptets aktuelle canonical SHA-256 er identisk med den digest, der blev registreret ved trin 10.
+`transaction_authenticated=true` kræver derefter ved hver læsning, at samme objekt stadig lever, at processen har samme PID, og at receiptets aktuelle canonical SHA-256 er identisk med den digest, der blev registreret ved trin 11.
 
-Hvis noget fejler efter trin 3, må requesten ikke genbruges på samme canonical host ledger uden en separat eksplicit recovery-procedure. Hvis processen crasher efter final write men før trin 10, bevares replay-state, men authority må ikke rekonstrueres automatisk fra filen.
+Hvis noget fejler efter trin 4, må requesten ikke genbruges på samme canonical host ledger uden en separat eksplicit recovery-procedure. Hvis processen crasher efter final write men før trin 11, bevares replay-state, men authority må ikke rekonstrueres automatisk fra filen.
 
-Direkte filesystem-injektion af en perfekt canonical final-fil kan derfor højst brænde/blokere den lokale request og skabe recovery/DoS-state. Den kan ikke gennem denne boundary skabe et transaction-authenticated receipt.
+Direkte filesystem-injektion eller race-replacement af en perfekt canonical final-fil kan derfor højst brænde/blokere den lokale request og skabe recovery/DoS-state. Det kan ikke gennem denne boundary skabe et transaction-authenticated receipt.
 
 ### 6. Replay-scope er host-local, ikke global
 
@@ -159,22 +175,25 @@ Implementationen skal mindst afvise eller fail-close ved:
 1. forged/caller-supplied observation i authority-pathen;
 2. caller-supplied/backdated consumption time;
 3. caller-valgt repository/operation/ledger path i public authority-pathen;
-4. staged Git-runtime der ikke matcher snapshot-receiptet i den signerede qualification chain;
-5. forkert eller malformed `main` SHA;
-6. `main` der flytter mellem preflight og post-lock read;
-7. expired eller ugyldig human request ved post-lock re-verifikation;
-8. duplicate consumption i canonical host ledger;
-9. enhver eksisterende final/pending/lock-state som genbrugelig request;
-10. direct persistence af prebuilt/fabricated final receipt som authority;
-11. perfekt canonical direct-written final file må stadig have `transaction_authenticated=false` ved load;
-12. mutation af et legitimt live receipt med `object.__setattr__` eller tilsvarende må straks miste transaction provenance;
-13. POSIX fork-child må ikke arve parentens transaction provenance;
-14. tampering med canonical final reservation;
-15. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+4. subclasses/overridable varianter af authority-inputs eller `TrustedGitRuntime`;
+5. staged Git-runtime der ikke matcher snapshot-receiptet i den signerede qualification chain;
+6. mutation af caller-owned request/qualification/snapshot/signature/verifier efter snapshot/verification må ikke ændre det receipt, transactionen bygger;
+7. forkert eller malformed `main` SHA;
+8. `main` der flytter mellem preflight og post-lock read;
+9. expired eller ugyldig human request ved post-lock re-verifikation;
+10. duplicate consumption i canonical host ledger;
+11. enhver eksisterende final/pending/lock-state som genbrugelig request;
+12. direct persistence af prebuilt/fabricated final receipt som authority;
+13. perfekt canonical direct-written final file må stadig have `transaction_authenticated=false` ved load;
+14. final-file replacement mellem create-once write og read-back skal fejle, også hvis replacement er schema-valid og canonical;
+15. mutation af et legitimt live receipt med `object.__setattr__` eller tilsvarende må straks miste transaction provenance;
+16. POSIX fork-child må ikke arve parentens transaction provenance;
+17. tampering med canonical final reservation;
+18. receipt-forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
 ## Konsekvenser
 
-Efter denne boundary kan DevControl i **den samme succesfulde authenticated transaction, i den oprindelige proces og så længe receiptets canonical contents er uændrede** sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret, at observationen brugte den Git-runtime-identitet som den signerede softwarekæde allerede bandt, at den canonical lokale `main` matchede ved post-lock observationen, og at create-once replay-state blev committed på den lokale host.
+Efter denne boundary kan DevControl i **den samme succesfulde authenticated transaction, i den oprindelige proces og så længe receiptets canonical contents er uændrede** sandfærdigt bevise, at en specifik human-signeret request blev re-verificeret fra lokale immutable value snapshots, at observationen brugte en exact, lokalt rekonstrueret Git-runtime-identitet som den signerede softwarekæde allerede bandt, at den canonical lokale `main` matchede ved post-lock observationen, og at præcis de bytes transactionen byggede blev create-once committed og læst tilbage før live provenance blev registreret.
 
 Efter process exit eller fork kan ledger-state stadig fail-close replay og drive en særskilt recovery-procedure, men den kan ikke alene rekonstruere authenticated authority. Det næste host/freeze/campaign-admission-led skal derfor enten fortsætte direkte fra en live `transaction_authenticated=true` reservation i den oprindelige proces eller definere sin egen særskilt autentificerede recovery/attestation; det må ikke stole på et reloadet eller process-arvet ledger-artifact alene.
 
