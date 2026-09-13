@@ -442,11 +442,14 @@ def build_planner_router(
         # and advancing it would try to complete a non-RUNNING run forever.
         if existing.state is not RunState.RUNNING:
             return existing
-        # A waiting read-review checkpoint is explicit human authority. A retry
-        # that is only recovering a previously ambiguous Start must never consume
-        # that checkpoint by calling advance() without an expected review step.
-        if reviewing and orchestrator.review_store.get(run_id)["waiting"]:
-            return existing
+        # Reviewed Start recovery must restore human review authority before
+        # advancing. This covers both an already-durable waiting checkpoint and
+        # the cross-store crash windows where a READ succeeded but set_waiting()
+        # had not yet reached the review DB.
+        if reviewing:
+            checkpointed = orchestrator.recover_read_review_checkpoint_if_due(run_id)
+            if checkpointed is not None:
+                return checkpointed
         try:
             return orchestrator.advance(run_id)
         except Exception as exc:

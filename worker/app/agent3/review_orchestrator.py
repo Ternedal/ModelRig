@@ -302,6 +302,76 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             end += 1
         return (start, end) if end > start else None
 
+    def recover_read_review_checkpoint_if_due(self, run_id: str) -> AgentRun | None:
+        """Rebuild a reviewed-read checkpoint lost in a cross-store crash gap.
+
+        The run DB and read-review DB cannot share a transaction. A crash can
+        therefore persist a successful READ (and possibly its advanced
+        ``current_step``) before ``set_waiting`` reaches the review DB. Reviewed
+        Start recovery must restore that human authority before it considers
+        calling ``advance``; otherwise the next pending reads would execute
+        without the explicit Resume the review policy requires.
+
+        Returning ``None`` means no checkpoint is due. Returning the run means
+        recovery must stop at the existing or reconstructed checkpoint.
+        """
+        run = self._require(run_id)
+        review = self.review_store.get(run.id)
+        if not review["enabled"]:
+            return None
+        if review["waiting"]:
+            return run
+
+        completed: AgentStep | None = None
+
+        # Crash window A: _execute() persisted the successful read, but the
+        # orchestrator had not yet advanced current_step and saved the run.
+        if run.current_step < len(run.steps):
+            current = run.steps[run.current_step]
+            if current.state == StepState.SUCCEEDED and current.risk == RiskClass.READ:
+                completed = current
+                run.current_step += 1
+                run.state = RunState.RUNNING
+                self.store.save(run)
+
+        # Crash window B: current_step was already saved, but set_waiting() had
+        # not yet made the human checkpoint durable in the review DB.
+        if completed is None and run.current_step > 0:
+            previous = run.steps[run.current_step - 1]
+            if previous.state == StepState.SUCCEEDED and previous.risk == RiskClass.READ:
+                completed = previous
+
+        if completed is None:
+            return None
+
+        window = self._pending_read_window(run)
+        if window is None:
+            return None
+
+        start, end = window
+        removable_ids = [item.id for item in run.steps[start:end]]
+        self.review_store.set_waiting(
+            run.id,
+            completed_step_id=completed.id,
+            completed_tool=completed.tool,
+            window_start=start,
+            window_end=end,
+            removable_step_ids=removable_ids,
+        )
+        self.store.event(
+            run.id,
+            "replan_review_required",
+            {
+                "completed_step_id": completed.id,
+                "completed_tool": completed.tool,
+                "window_start": start,
+                "window_end": end,
+                "removable_step_ids": removable_ids,
+                "recovered": True,
+            },
+        )
+        return run
+
     def advance(
         self,
         run_id: str,
