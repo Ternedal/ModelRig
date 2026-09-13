@@ -16,6 +16,14 @@ import kaliv_dev_control._improvement_physical_runtime_host_control as host_runt
 import kaliv_dev_control.improvement_physical_reservation as reservation_module
 
 
+def _is_linux() -> bool:
+    return (
+        os.name == "posix"
+        and hasattr(os, "uname")
+        and os.uname().sysname == "Linux"
+    )
+
+
 def test_ledger_root_rename_replay_restore_cannot_restore_first_receipt() -> None:
     if os.name != "posix":
         return
@@ -51,9 +59,6 @@ def test_ledger_root_rename_replay_restore_cannot_restore_first_receipt() -> Non
         ledger_root.rename(original_ledger)
         ledger_root.mkdir()
 
-        # Replay succeeds while the canonical ledger path points at a fresh
-        # directory. Do not inspect the first receipt while the attack is live;
-        # restoration itself must not be able to hide the intervening replay.
         second = race._consume(
             ledger_root=ledger_root,
             trusted_git=trusted_git,
@@ -114,10 +119,6 @@ def test_ancestor_rename_replay_restore_cannot_restore_first_receipt() -> None:
         replacement_ledger = state_root / "ledger"
         replacement_ledger.mkdir(parents=True)
 
-        # The ledger directory itself was never renamed relative to its own
-        # parent; only an ancestor moved. A ledger-root-only IN_MOVE_SELF watch
-        # therefore misses this attack. The ancestry binding must retain a
-        # monotonic event for the moved host-state entry.
         second = race._consume(
             ledger_root=replacement_ledger,
             trusted_git=trusted_git,
@@ -138,8 +139,8 @@ def test_ancestor_rename_replay_restore_cannot_restore_first_receipt() -> None:
         assert second.transaction_authenticated is False
 
 
-def test_rename_restore_during_history_arming_fails_closed() -> None:
-    if os.name != "posix":
+def test_linux_watch_precedes_identity_capture_even_without_ctime_signal() -> None:
+    if not _is_linux():
         return
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory).resolve()
@@ -148,26 +149,59 @@ def test_rename_restore_during_history_arming_fails_closed() -> None:
         ledger_root.mkdir(parents=True)
         moved = root / "host-state-moved"
 
-        original_start = directory_history._start_history
+        original_capture = directory_history._capture_nodes
+        original_stamp = directory_history._metadata_stamp
+        calls = 0
 
-        def racing_start(nodes):
+        def constant_stamp(_observed) -> int:
+            return 1
+
+        def racing_capture(ledger: Path):
+            nonlocal calls
+            calls += 1
             state_root.rename(moved)
             moved.rename(state_root)
-            return original_start(nodes)
+            return original_capture(ledger)
 
-        directory_history._start_history = racing_start
+        directory_history._metadata_stamp = constant_stamp
+        directory_history._capture_nodes = racing_capture
         try:
             try:
                 binding = directory_history._capture_binding(ledger_root, object())
             except directory_history.DirectoryBoundProvenanceError as exc:
-                assert "arming history monitor" in str(exc)
+                assert "identities were captured" in str(exc)
             else:
                 directory_history._close_binding(binding)
                 raise AssertionError(
-                    "rename→restore during monitor arming must fail closed"
+                    "rename→restore after watch arming must fail without ctime evidence"
                 )
         finally:
-            directory_history._start_history = original_start
+            directory_history._capture_nodes = original_capture
+            directory_history._metadata_stamp = original_stamp
+
+        assert calls == 1
+
+
+def test_non_linux_posix_watch_before_trust_fails_closed() -> None:
+    if not _is_linux():
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        ledger_root = Path(directory).resolve() / "ledger"
+        ledger_root.mkdir()
+        original_is_linux = directory_history._is_linux
+        directory_history._is_linux = lambda: False
+        try:
+            try:
+                directory_history._capture_binding(ledger_root, object())
+            except directory_history.DirectoryBoundProvenanceError as exc:
+                assert "race-free" in str(exc)
+                assert "unsupported" in str(exc)
+            else:
+                raise AssertionError(
+                    "production guard must fail closed without Linux watch-before-trust"
+                )
+        finally:
+            directory_history._is_linux = original_is_linux
 
 
 def test_unrelated_sibling_churn_does_not_revoke_live_receipt() -> None:
@@ -178,9 +212,6 @@ def test_unrelated_sibling_churn_does_not_revoke_live_receipt() -> None:
         consumed, ledger_root, _request = race._consume_fixture(root)
         assert consumed.transaction_authenticated is True
 
-        # Campaign admission creates sibling directories below the canonical
-        # host-state root before it rechecks the live reservation. Sibling
-        # entry churn must not revoke an otherwise unchanged ledger receipt.
         sibling_ledger = ledger_root.parent / "rsi-physical-campaign-admission-ledger-v1"
         sibling_operation = ledger_root.parent / "rsi-physical-campaign-git-operation-v1"
         sibling_ledger.mkdir()
@@ -273,7 +304,8 @@ def test_public_consume_routes_through_host_controlled_runtime_boundary() -> Non
 def main() -> None:
     test_ledger_root_rename_replay_restore_cannot_restore_first_receipt()
     test_ancestor_rename_replay_restore_cannot_restore_first_receipt()
-    test_rename_restore_during_history_arming_fails_closed()
+    test_linux_watch_precedes_identity_capture_even_without_ctime_signal()
+    test_non_linux_posix_watch_before_trust_fails_closed()
     test_unrelated_sibling_churn_does_not_revoke_live_receipt()
     test_non_admin_posix_runtime_metadata_is_rejected()
     test_public_consume_routes_through_host_controlled_runtime_boundary()
