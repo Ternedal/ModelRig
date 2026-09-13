@@ -166,6 +166,81 @@ check(
 )
 check(backup.verify(archive)["ok"], "adoption: exported adopted pair verifies")
 
+# The paired snapshot boundary must be monotone in the replay-safe direction.
+# Start with a coherent pair whose non-idempotent step is still PENDING and has
+# no execution watermark. Immediately after the first *physical* SQLite copy,
+# simulate execution crossing the boundary: the live run becomes EXECUTING and
+# the durable watermark appears. Runs-first snapshotting leaves the staged run
+# at PENDING but captures the newer watermark, so the existing semantic check
+# must refuse the backup. Progress-first would instead lose the only watermark
+# and could publish an apparently coherent, replayable archive.
+wipe()
+seed_unbound(state="pending", include_progress=False)
+progress = sqlite3.connect(progress_path)
+progress.execute(authority_pair.PROGRESS_TABLE_SQL)
+progress.commit()
+progress.close()
+race_pair_id = adopt_current_pair(offline_confirmed=True)
+check(isinstance(race_pair_id, str), "snapshot race: pending pair is explicitly adopted")
+
+physical_snapshots: list[tuple[str, str]] = []
+real_snapshot = backup._original_sqlite_snapshot
+race_dir = os.path.join(_root, "snapshot-crossing-race")
+
+
+def crossing_snapshot(source: str, destination: str) -> None:
+    physical_snapshots.append((source, destination))
+    real_snapshot(source, destination)
+    if len(physical_snapshots) != 1:
+        return
+
+    progress = sqlite3.connect(progress_path)
+    progress.execute(
+        "INSERT INTO agent_execution_starts(run_id,step_index,step_sha256,started_at) "
+        "VALUES(?,?,?,?)",
+        ("legacy-run", 0, execution_step_sha256(), 2.0),
+    )
+    progress.commit()
+    progress.close()
+
+    run = sqlite3.connect(runs_path)
+    raw = run.execute("SELECT payload FROM agent_runs WHERE id='legacy-run'").fetchone()[0]
+    payload = json.loads(raw)
+    payload["steps"][0]["state"] = "executing"
+    run.execute(
+        "UPDATE agent_runs SET payload=?, updated_at=? WHERE id='legacy-run'",
+        (json.dumps(payload, sort_keys=True), 2.0),
+    )
+    run.commit()
+    run.close()
+
+
+backup._original_sqlite_snapshot = crossing_snapshot
+race_problem = ""
+try:
+    backup.create(race_dir)
+    check(False, "snapshot race: crossing execution cannot publish a backup")
+except ValueError as exc:
+    race_problem = str(exc)
+    check(True, "snapshot race: crossing execution cannot publish a backup")
+finally:
+    backup._original_sqlite_snapshot = real_snapshot
+
+check(
+    len(physical_snapshots) == 2
+    and os.path.abspath(physical_snapshots[0][0]) == os.path.abspath(runs_path)
+    and os.path.abspath(physical_snapshots[1][0]) == os.path.abspath(progress_path),
+    "snapshot race: physical SQLite order is runs first, progress second",
+)
+check(
+    "non-idempotent pending" in race_problem,
+    "snapshot race: staged semantic validation names the replay-risk relation",
+)
+check(
+    os.path.isdir(race_dir) and not os.listdir(race_dir),
+    "snapshot race: refused crossing leaves no archive or temp publication",
+)
+
 # Same-pair semantic inconsistency must be refused before any provenance row is
 # written. PENDING + non-idempotent with an existing execution watermark is the
 # replay-risk shape the schema-5 validator is designed to reject.
