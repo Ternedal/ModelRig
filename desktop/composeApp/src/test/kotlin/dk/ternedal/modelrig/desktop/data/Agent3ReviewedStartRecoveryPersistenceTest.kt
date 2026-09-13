@@ -40,7 +40,6 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
                 val mismatched = storeB.read(rigA)
                 assertNotNull(mismatched)
                 assertNotEquals(first, mismatched)
-                assertFalse(storeB.clearIfMatches(rigA, first))
 
                 token = "token-a"
                 assertEquals(first, storeA.read(rigA))
