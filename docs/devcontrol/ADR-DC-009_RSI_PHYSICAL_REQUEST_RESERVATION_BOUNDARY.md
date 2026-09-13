@@ -127,14 +127,16 @@ Derfor:
 - live provenance registreres først efter pending-cleanup og verification af både final og permanent replay-marker;
 - registration skal **claim'e de oprindelige create-once descriptors/fil-identiteter** for final og replay-marker fra samme transaction-token. Mangler de, er bytes ændret, er original inode blevet unlinked, eller peger pathen på en anden inode, fejler transactionen lukket;
 - byte-identisk replacement mellem create-once publication og provenance-registration kan derfor ikke blive registreret som ny authority-baseline;
-- live provenance bindes til exact receipt object identity, originating PID, authenticated receipt SHA-256, de oprindelige create-once fil-identiteter og exact bytes;
-- hver senere `transaction_authenticated` validerer de holdte descriptors/handles og kræver, at canonical paths stadig peger på de samme fil-identiteter med de samme bytes;
-- unlink/replacement skaber derfor en anden eller unlinked fil-identitet og kan ikke repareres ved at skrive de gamle bytes tilbage på samme path;
-- receipt-mutation ændrer digest og invaliderer provenance;
+- live provenance bindes til exact receipt object identity, originating PID, authenticated receipt SHA-256, de oprindelige create-once fil-identiteter, exact bytes og en metadata-stamp (`ctime_ns` hvor platformen eksponerer den; på POSIX ændres den ved rename);
+- hver senere `transaction_authenticated` validerer de holdte descriptors/handles og kræver, at canonical paths stadig peger på de samme fil-identiteter, metadata-stamps og bytes;
+- unlink/replacement skaber en anden eller unlinked fil-identitet og kan ikke repareres ved at skrive de gamle bytes tilbage på samme path;
+- same-inode rename-away/replay/rename-back kan på POSIX ikke skjules af bevaret inode/bytes, fordi rename ændrer den retained `ctime_ns`; observeres mismatch én gang, revokeres den durable provenance-entry permanent;
+- receipt-object mutation ændrer digest og giver `transaction_authenticated=false` mens indholdet afviger; restoration til præcis den oprindelige authenticated receipt-content kan igen blive valid, så længe den durable descriptor/path/file-identity provenance aldrig har mismatchet;
 - POSIX fork-child arver ingen authority: PID skal matche, registry ryddes med `os.register_at_fork(after_in_child=...)`, inherited descriptors lukkes, og child-receiptet kan ikke være authenticated;
-- transaction-scopet er isoleret med en per-context token; failed transactions frigiver alle unclaimed retained descriptors, så ingen senere transaction kan claim'e dem.
+- transaction-scopet er isoleret med en per-context token; enhver exception fra outer consume revokerer også allerede registrerede live provenance-entries for samme token **før** exceptionen når caller, og frigiver derefter eventuelle unclaimed retained descriptors;
+- en cleanup-failure efter commit kan derfor ikke efterlade et authenticated receipt i traceback-locals eller anden exception-retained frame state.
 
-Removal, replacement eller tamper af final/replay-marker invaliderer dermed live provenance irreversibelt for den receipt-instans. Byte-identisk replacement **både før og efter registration** kan ikke mint'e eller genoplive `transaction_authenticated=true`. Durable bytes kan højst skabe replay/DoS/recovery-state; de kan ikke mint'e eller resurrecte live authority.
+Removal, replacement, rename-away/replay/rename-back eller tamper af final/replay-marker invaliderer dermed live durable provenance irreversibelt for den receipt-instans. Byte-identisk replacement **både før og efter registration** kan ikke mint'e eller genoplive `transaction_authenticated=true`. Durable bytes kan højst skabe replay/DoS/recovery-state; de kan ikke mint'e eller resurrecte live authority.
 
 ### 7. Replay-scope er eksplicit host-local
 
@@ -178,9 +180,9 @@ Denne boundary må ikke starte de 11 DC-L15 probes, oprette cadence, erklære pe
 10. create-once final canonical payload, og behold descriptor/fil-identitet fra den oprindelige publication;
 11. exact-byte read-back + canonical parse uden authority grant;
 12. cleanup kun pending; replay-marker bevares;
-13. claim de oprindelige final + replay-marker create-once descriptors fra samme transaction-token og kræv, at paths stadig peger på samme identiteter/bytes;
-14. registrér kun den returnerede live instans med process/content/original-file-identity provenance;
-15. frigiv eventuelle unclaimed transaction descriptors og cleanup transaction-private Git-runtime fail-closed.
+13. claim de oprindelige final + replay-marker create-once descriptors fra samme transaction-token og kræv, at paths stadig peger på samme identiteter/metadata-stamps/bytes;
+14. registrér kun den returnerede live instans med process/content/original-file-identity provenance og samme transaction-token;
+15. cleanup transaction-private Git-runtime fail-closed; ved enhver outer exception revokér først alle registrerede provenance-entries for transaction-tokenet, frigiv unclaimed descriptors og propagér derefter fejlen.
 
 Hvis noget fejler efter trin 6, kan requesten ikke genbruges på samme canonical host-ledger uden en separat eksplicit recovery-procedure.
 
@@ -207,10 +209,12 @@ Implementationen skal mindst afvise eller fail-close ved:
 17. manglende/mismatched original create-once descriptor ved provenance claim;
 18. final/replay-marker tamper efter registration;
 19. delete→byte-identical recreate af final eller replay-marker efter registration;
-20. live receipt mutation;
-21. POSIX fork inheritance;
-22. cross-transaction descriptor claim eller lækkede unclaimed descriptors efter failure;
-23. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+20. same-inode rename-away/replay/rename-back af final/replay-marker på POSIX;
+21. live receipt mutation uden at genverificere exact authenticated content;
+22. POSIX fork inheritance;
+23. cross-transaction descriptor claim eller lækkede unclaimed descriptors efter failure;
+24. outer consume/cleanup exception, der ellers ville efterlade et traceback-reachable authenticated receipt;
+25. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
 ## Artefakter
 
@@ -220,11 +224,11 @@ Implementationen skal mindst afvise eller fail-close ved:
 - `consume_physical_qualification_request_once(...)` — eneste public authority-bearing consume path;
 - canonical host ledger — final + permanent replay-marker som replay/recovery-state;
 - transaction-private Trusted Git staging under canonical operation-root;
-- transaction-scoped original-publication descriptor registry for final/replay-marker;
-- process-local live provenance registry med de claimed oprindelige final/replay-marker descriptors/handles og fil-identiteter.
+- transaction-scoped original-publication descriptor registry for final/replay-marker med fil-identitet + metadata-stamp;
+- process-local live provenance registry med claimed oprindelige descriptors/handles, exact bytes, process/content binding og transaction-token-bound exception revocation.
 
 ## Konsekvens
 
-Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en **host-pinned, caller-uafhængig public-key trust root med platform-specifik host-control validation**, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem pinned trusted Git efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de **oprindelige create-once durable fil-identiteter fra publicationstidspunktet** — ikke til senere path-bytes eller en fil, der først blev åbnet ved registration.
+Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en **host-pinned, caller-uafhængig public-key trust root med platform-specifik host-control validation**, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem pinned trusted Git efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de **oprindelige create-once durable fil-identiteter fra publicationstidspunktet** — ikke til senere path-bytes eller en fil, der først blev åbnet ved registration. Durable provenance-mismatch er monoton og kan ikke repareres ved rename-back eller byte-identisk recreation; en outer transaction-fejl revokerer allerede registreret live provenance før fejlen bliver caller-visible.
 
 Det beviser fortsat ikke global replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og skal behandles i separate senere ADR'er/boundaries.
