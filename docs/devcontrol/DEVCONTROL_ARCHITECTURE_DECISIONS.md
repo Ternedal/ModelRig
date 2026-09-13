@@ -181,3 +181,23 @@ kampagne. Den kører ingen probes og giver ikke frozen-main, physical-complete,
 pilot, merge, publication, release, deploy eller activation authority.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-010_RSI_PHYSICAL_CAMPAIGN_ADMISSION_BOUNDARY.md`
+
+## ADR-DC-011 — Host-pinned post-campaign physical evidence uden DC-L15 completion authority
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Verificerer eksisterende DC-L04 Windows physical-report evidence efter en live
+ADR-DC-010 admission og binder resultatet til en frisk post-campaign `main`-
+observation. Production afviser caller-valgt verifier/evidence-root og resolver i
+stedet en fast host-admin-kontrolleret evidence-root og HMAC-keyring; Trusted Git
+skal fortsat være host-admin-kontrolleret og kører gennem den direct read-only
+Git-boundary uden same-user runtime-copy.
+
+Det legacy HMAC-format giver verifieren signing-equivalent secret-materiale og
+binder hverken `campaign_id` eller exact runner-bytes. En frisk post-campaign SHA
+beviser heller ikke continuous freeze. Snapshot'et er derfor eksplicit
+`verified-physical-evidence-only`: runner-execution binding, continuous-main
+freeze, DC-L15 completion, independent human verdict og pilot GO forbliver åbne
+gates. Ingen merge, publication, release, deploy eller activation autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-011_RSI_POST_CAMPAIGN_PHYSICAL_EVIDENCE_BOUNDARY.md`
