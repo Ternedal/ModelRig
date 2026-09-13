@@ -37,14 +37,16 @@ def _run_store_schema_problem_path(
     snapshot_id: Optional[str],
     pair_id: Optional[str],
 ) -> Optional[str]:
-    """Require a closed SQLite schema for materialized Agent3 run authority.
+    """Require a closed SQLite schema for Agent3 run authority.
 
     Progress authority has always been checked against complete sqlite_master.
     Run authority must have the same property: an unexpected trigger, view or
     index can otherwise survive a hash-valid backup and alter future run state
-    after restore. A genuinely empty, never-paired legacy run table remains a
-    safe compatibility exception because it carries no execution authority.
+    after restore. Two exact variants are valid: the minimal historical run
+    store and the full runtime store with its event log. Neither permits any
+    extra SQLite object.
     """
+    del run_count  # row count is semantic authority, not a reason to allow drift.
     try:
         con = _impl._readonly_sqlite(path)
     except _impl.sqlite3.Error as exc:
@@ -67,37 +69,46 @@ def _run_store_schema_problem_path(
         for row in rows
     ]
 
-    full = [
+    common = [
         ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
-        ("table", "agent_events", "agent_events", _impl._normalize_sql(_EVENTS_TABLE_SQL)),
         ("table", "agent_runs", "agent_runs", _impl._normalize_sql(_RUNS_TABLE_SQL)),
-        ("table", "sqlite_sequence", "sqlite_sequence", "CREATE TABLE sqlite_sequence(name,seq)"),
     ]
     if pair_id is not None:
-        full.append(
+        common.append(
             ("table", _PAIR_TABLE, _PAIR_TABLE, _impl._normalize_sql(_PAIR_TABLE_SQL))
         )
     if snapshot_id is not None:
-        full.append(
+        common.append(
             (
                 "table",
                 _impl._SNAPSHOT_TABLE,
                 _impl._SNAPSHOT_TABLE,
-                _impl._SNAPSHOT_TABLE_SQL,
+                _impl._normalize_sql(_impl._SNAPSHOT_TABLE_SQL),
             )
         )
+
+    minimal = sorted(common, key=lambda row: (row[0], row[1], row[2]))
+    full = list(common)
+    full.extend(
+        [
+            (
+                "table",
+                "agent_events",
+                "agent_events",
+                _impl._normalize_sql(_EVENTS_TABLE_SQL),
+            ),
+            (
+                "table",
+                "sqlite_sequence",
+                "sqlite_sequence",
+                "CREATE TABLE sqlite_sequence(name,seq)",
+            ),
+        ]
+    )
     full = sorted(full, key=lambda row: (row[0], row[1], row[2]))
 
-    if actual == full:
+    if actual in {tuple(minimal), tuple(full)}:
         return None
-
-    if run_count == 0 and pair_id is None and snapshot_id is None:
-        minimal = [
-            ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
-            ("table", "agent_runs", "agent_runs", _impl._normalize_sql(_RUNS_TABLE_SQL)),
-        ]
-        if actual == minimal:
-            return None
 
     rendered = [f"{kind}:{name}->{table} sql={sql!r}" for kind, name, table, sql in actual]
     return (
