@@ -73,6 +73,70 @@ def test_ledger_root_rename_replay_restore_cannot_restore_first_receipt() -> Non
         assert second.transaction_authenticated is False
 
 
+def test_ancestor_rename_replay_restore_cannot_restore_first_receipt() -> None:
+    if os.name != "posix":
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            _fixture_ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = race._fixture(root)
+
+        state_root = root / "host-state"
+        ledger_root = state_root / "ledger"
+        ledger_root.mkdir(parents=True)
+
+        first = race._consume(
+            ledger_root=ledger_root,
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
+            request=request,
+            qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
+            signature=signature,
+            verifier=verifier,
+        )
+        assert first.transaction_authenticated is True
+
+        original_state = root / "host-state-original"
+        state_root.rename(original_state)
+        replacement_ledger = state_root / "ledger"
+        replacement_ledger.mkdir(parents=True)
+
+        # The ledger directory itself was never renamed relative to its own
+        # parent; only an ancestor moved. A ledger-root-only IN_MOVE_SELF watch
+        # therefore misses this attack. The ancestry binding must retain a
+        # monotonic event for the moved host-state entry.
+        second = race._consume(
+            ledger_root=replacement_ledger,
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
+            request=request,
+            qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
+            signature=signature,
+            verifier=verifier,
+        )
+        assert second.transaction_authenticated is True
+
+        shutil.rmtree(state_root)
+        original_state.rename(state_root)
+
+        assert first.transaction_authenticated is False
+        assert second.transaction_authenticated is False
+
+
 def test_unrelated_sibling_churn_does_not_revoke_live_receipt() -> None:
     if os.name != "posix":
         return
@@ -175,6 +239,7 @@ def test_public_consume_routes_through_host_controlled_runtime_boundary() -> Non
 
 def main() -> None:
     test_ledger_root_rename_replay_restore_cannot_restore_first_receipt()
+    test_ancestor_rename_replay_restore_cannot_restore_first_receipt()
     test_unrelated_sibling_churn_does_not_revoke_live_receipt()
     test_non_admin_posix_runtime_metadata_is_rejected()
     test_public_consume_routes_through_host_controlled_runtime_boundary()
