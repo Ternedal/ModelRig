@@ -5,6 +5,7 @@ import json
 import re
 import threading
 import uuid
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -478,6 +479,24 @@ def build_planner_router(
             )
 
     def _reconcile_reviewed_start_run(
+        run_id: str,
+        *,
+        review_reads: bool,
+        reviewed_template: AgentRun,
+    ) -> AgentRun:
+        # Recovery identity checks, checkpoint reconstruction and the possible
+        # advance must linearize with ordinary Resume for this exact run.
+        # ReviewingAgent3Orchestrator uses an RLock, so the nested advance()
+        # below is re-entrant; non-reviewing fixtures keep their old behavior.
+        execution_guard = (
+            orchestrator.run_execution_guard(run_id) if reviewing else nullcontext()
+        )
+        with execution_guard:
+            return _reconcile_reviewed_start_run_locked(
+                run_id, review_reads=review_reads, reviewed_template=reviewed_template
+            )
+
+    def _reconcile_reviewed_start_run_locked(
         run_id: str,
         *,
         review_reads: bool,

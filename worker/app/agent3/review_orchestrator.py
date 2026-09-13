@@ -16,6 +16,7 @@ from .core import (
     CapabilitySnapshot,
     RiskClass,
     RouteKind,
+    RunConflict,
     RunState,
     StepState,
     TurnRequest,
@@ -184,6 +185,15 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
     ):
         super().__init__(store, executor, **kwargs)
         self.review_store = review_store
+        # Same-run execution must be single-flight inside one worker. A fixed
+        # stripe set avoids an unbounded lock registry while still ensuring
+        # recovery and ordinary Resume for the same run share one RLock.
+        # Cancel deliberately does NOT take this lock: it must remain able to
+        # win through the store CAS while an external tool is still running.
+        self._run_execution_locks = tuple(threading.RLock() for _ in range(64))
+
+    def run_execution_guard(self, run_id: str):
+        return self._run_execution_locks[hash(run_id) % len(self._run_execution_locks)]
 
     def start(
         self,
@@ -330,9 +340,9 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             current = run.steps[run.current_step]
             if current.state == StepState.SUCCEEDED and current.risk == RiskClass.READ:
                 completed = current
-                run.current_step += 1
-                run.state = RunState.RUNNING
-                self.store.save(run)
+                conflict = self._advance_succeeded_step(run)
+                if conflict is not None:
+                    return conflict
 
         # Crash window B: current_step was already saved, but set_waiting() had
         # not yet made the human checkpoint durable in the review DB.
@@ -378,6 +388,17 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
         *,
         expected_review_step_id: str | None = None,
     ) -> AgentRun:
+        with self.run_execution_guard(run_id):
+            return self._advance_locked(
+                run_id, expected_review_step_id=expected_review_step_id
+            )
+
+    def _advance_locked(
+        self,
+        run_id: str,
+        *,
+        expected_review_step_id: str | None = None,
+    ) -> AgentRun:
         run = self._require(run_id)
         if expected_review_step_id is not None and run.state in {
             RunState.COMPLETED,
@@ -410,8 +431,9 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
             step = run.steps[run.current_step]
 
             if step.state == StepState.SUCCEEDED:
-                run.current_step += 1
-                self.store.save(run)
+                conflict = self._advance_succeeded_step(run)
+                if conflict is not None:
+                    return conflict
                 continue
             if step.state == StepState.EXECUTING:
                 step.state = StepState.BLOCKED
@@ -476,12 +498,12 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                 return run
 
             self._execute(run, step)
-            if run.state == RunState.FAILED:
+            if run.state in {RunState.FAILED, RunState.CANCELLED, RunState.BLOCKED}:
                 return run
             completed_read = step.risk == RiskClass.READ and step.state == StepState.SUCCEEDED
-            run.current_step += 1
-            run.state = RunState.RUNNING
-            self.store.save(run)
+            conflict = self._advance_succeeded_step(run)
+            if conflict is not None:
+                return conflict
 
             review = self.review_store.get(run.id)
             if completed_read and review["enabled"]:
@@ -510,8 +532,19 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                     )
                     return run
 
+        expected_payload = run.to_json()
+        answer = self.answerer(run)
         run.state = RunState.COMPLETED
-        run.answer = self.answerer(run)
-        self.store.save(run)
-        self.store.event(run.id, "run_completed", {"steps": len(run.steps)})
+        run.answer = answer
+        if not self.store.save_with_event_if_unchanged(
+            run,
+            expected_state=RunState.RUNNING,
+            expected_payload=expected_payload,
+            kind="run_completed",
+            payload={"steps": len(run.steps)},
+        ):
+            fresh = self._require(run.id)
+            if fresh.state == RunState.CANCELLED:
+                return fresh
+            raise RunConflict("run changed while final completion was being committed")
         return run
