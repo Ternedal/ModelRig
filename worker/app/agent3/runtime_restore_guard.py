@@ -101,7 +101,7 @@ def acquire_agent3_runtime_lease(run_db_path: str) -> Agent3RuntimeLease:
     except sqlite3.OperationalError as exc:
         if "locked" in str(exc).lower():
             raise RuntimeError(
-                "Agent3 restore is in progress; runtime startup is blocked"
+                "Agent3 restore or maintenance is in progress; runtime startup is blocked"
             ) from exc
         raise
     try:
@@ -115,8 +115,8 @@ def acquire_agent3_runtime_lease(run_db_path: str) -> Agent3RuntimeLease:
                 "Agent3 restore is incomplete; rerun a verified restore before starting Agent3"
             )
         # Keep this read transaction open for the lifetime of AgentRunStore. In
-        # rollback-journal mode it owns a SHARED lock, so BEGIN EXCLUSIVE in the
-        # restore process cannot succeed while this runtime is alive.
+        # rollback-journal mode it owns a SHARED lock, so exclusive restore or
+        # maintenance cannot succeed while this runtime is alive.
         return Agent3RuntimeLease(con)
     except sqlite3.OperationalError as exc:
         try:
@@ -126,7 +126,7 @@ def acquire_agent3_runtime_lease(run_db_path: str) -> Agent3RuntimeLease:
             con.close()
         if "locked" in str(exc).lower():
             raise RuntimeError(
-                "Agent3 restore is in progress; runtime startup is blocked"
+                "Agent3 restore or maintenance is in progress; runtime startup is blocked"
             ) from exc
         raise
     except Exception:
@@ -158,7 +158,7 @@ def acquire_agent3_restore_lease(run_db_path: str) -> Agent3RestoreLease:
         con.close()
         if "locked" in str(exc).lower():
             raise RuntimeError(
-                "Agent3 runtime is active; stop the worker before restoring persistent state"
+                "Agent3 runtime or maintenance is active; stop it before restoring persistent state"
             ) from exc
         raise
 
@@ -190,6 +190,58 @@ def acquire_agent3_restore_lease(run_db_path: str) -> Agent3RestoreLease:
         # The committed marker intentionally remains 1 on every failure after
         # restore authority was acquired.
         raise
+
+
+@contextmanager
+def agent3_maintenance_guard(run_db_path: str) -> Iterator[None]:
+    """Hold exclusive runtime authority for an atomic non-restore transition.
+
+    Unlike restore, maintenance does not publish multiple files and therefore
+    needs no durable incomplete marker. A crash rolls the maintenance operation
+    back and releases this SQLite lock. Existing restore-incomplete authority is
+    never bypassed or cleared by maintenance.
+    """
+    try:
+        con = _open_guard(run_db_path)
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower():
+            raise RuntimeError(
+                "Agent3 restore or maintenance is active; maintenance is refused"
+            ) from exc
+        raise
+    try:
+        con.execute("PRAGMA busy_timeout=0")
+        con.execute("BEGIN EXCLUSIVE")
+        row = con.execute(
+            f"SELECT restore_in_progress FROM {_GUARD_TABLE} WHERE id=1"
+        ).fetchone()
+        if row != (0,):
+            raise RuntimeError(
+                "Agent3 restore is incomplete; maintenance is refused until verified restore recovery"
+            )
+    except sqlite3.OperationalError as exc:
+        con.close()
+        if "locked" in str(exc).lower():
+            raise RuntimeError(
+                "Agent3 runtime is active; stop it before maintenance"
+            ) from exc
+        raise
+    except Exception:
+        if con.in_transaction:
+            con.rollback()
+        con.close()
+        raise
+
+    try:
+        yield
+    except BaseException:
+        if con.in_transaction:
+            con.rollback()
+        raise
+    else:
+        con.commit()
+    finally:
+        con.close()
 
 
 @contextmanager
