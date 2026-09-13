@@ -23,17 +23,20 @@ Those are installation/configuration inputs, not portable data archives.
 
 Schema 1 is the original V7 inventory. Schema 2 expanded the 2.x inventory.
 Schema 3 adds the separate Agent 3 execution-progress authority introduced to
-fence rollback/replay of non-idempotent steps. New code can read schemas 1/2/3,
-but a legacy archive that contains Agent 3 runs without the matching progress
-sidecar is refused as unsafe rather than silently restoring weaker authority.
+fence rollback/replay of non-idempotent steps. New code can read schemas 1/2/3.
+A legacy archive may omit that sidecar only when its archived Agent 3 run table
+is provably empty; any materialized run state requires the matching authority.
 New archives use schema 3 so older code fails closed instead of accepting a
 backup whose execution-authority key it would silently skip.
 
 The manifest records a schema version and every stored file's sha256, so a
 restore can refuse a corrupt or truncated archive instead of writing half of one
-over live data. For a cross-machine migration, stop the appliance first; the
-Windows migration wrapper in scripts/migrate-new-rig-state.ps1 does that and
-fails closed if ModelRig processes remain alive.
+over live data. Agent 3 execution authority is additionally validated as SQLite
+with the exact watermark table/columns used by AgentRunStore; a matching hash is
+not enough to turn an empty/truncated/wrong-schema file into trusted authority.
+For a cross-machine migration, stop the appliance first; the Windows migration
+wrapper in scripts/migrate-new-rig-state.ps1 does that and fails closed if
+ModelRig processes remain alive.
 
 Usage:
     python -m worker.app.backup create  [--out DIR]
@@ -47,8 +50,11 @@ import hashlib
 import io
 import json
 import os
+from pathlib import Path
+import sqlite3
 import sys
 import tarfile
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -57,6 +63,20 @@ BACKUP_SCHEMA = 3
 SUPPORTED_BACKUP_SCHEMAS = frozenset({1, 2, BACKUP_SCHEMA})
 AGENT3_RUNS_KEY = "agent3-runs.db"
 AGENT3_EXECUTION_PROGRESS_KEY = "agent3-execution-progress.db"
+AGENT3_RUNS_TABLE = "agent_runs"
+AGENT3_EXECUTION_PROGRESS_TABLE = "agent_execution_starts"
+_AGENT3_RUNS_SCHEMA = {
+    "id": ("TEXT", 0, 1),
+    "state": ("TEXT", 1, 0),
+    "payload": ("TEXT", 1, 0),
+    "updated_at": ("REAL", 1, 0),
+}
+_AGENT3_EXECUTION_PROGRESS_SCHEMA = {
+    "run_id": ("TEXT", 1, 1),
+    "step_index": ("INTEGER", 1, 2),
+    "step_sha256": ("TEXT", 1, 3),
+    "started_at": ("REAL", 1, 0),
+}
 
 # Resolve paths exactly like the worker. Relative defaults are anchored under
 # the stable Kaliv data root; explicit env overrides continue to win.
@@ -184,13 +204,127 @@ def _walk(path: str) -> list[str]:
     return sorted(out)
 
 
-def _agent3_authority_problem(files: dict) -> Optional[str]:
-    if AGENT3_RUNS_KEY in files and AGENT3_EXECUTION_PROGRESS_KEY not in files:
-        return (
-            "Agent 3 run state is present without execution-progress authority; "
-            "restoring it could replay a previously-started non-idempotent step"
-        )
+def _open_sqlite_readonly(path: str) -> sqlite3.Connection:
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
+    return sqlite3.connect(uri, uri=True)
+
+
+def _sqlite_table_problem(
+    path: str,
+    *,
+    table: str,
+    expected_columns: dict[str, tuple[str, int, int]],
+) -> Optional[str]:
+    """Return a structural SQLite problem without mutating the inspected file."""
+    try:
+        con = _open_sqlite_readonly(path)
+        try:
+            integrity = con.execute("PRAGMA integrity_check").fetchall()
+            if integrity != [("ok",)]:
+                detail = "; ".join(str(row[0]) for row in integrity) or "unknown failure"
+                return f"SQLite integrity_check failed: {detail}"
+            info = con.execute(f"PRAGMA table_info({table})").fetchall()
+        finally:
+            con.close()
+    except (OSError, sqlite3.Error) as exc:
+        return f"cannot read SQLite authority: {exc}"
+
+    if not info:
+        return f"required table {table!r} is missing"
+    actual = {
+        str(row[1]): (str(row[2]).upper(), int(row[3]), int(row[5]))
+        for row in info
+    }
+    for name, expected in expected_columns.items():
+        got = actual.get(name)
+        if got != expected:
+            return (
+                f"required table {table!r} has invalid column {name!r}: "
+                f"expected {expected}, got {got}"
+            )
     return None
+
+
+def _with_temp_sqlite(data: bytes, fn):
+    # NamedTemporaryFile is closed before SQLite opens it, which is required on
+    # Windows. The temporary copy is verification scratch only and is never a
+    # restore destination.
+    tmp = tempfile.NamedTemporaryFile(prefix="kaliv-backup-verify-", suffix=".db", delete=False)
+    try:
+        path = tmp.name
+        tmp.write(data)
+        tmp.flush()
+        tmp.close()
+        return fn(path)
+    finally:
+        try:
+            tmp.close()
+        except Exception:
+            pass
+        try:
+            os.remove(tmp.name)
+        except FileNotFoundError:
+            pass
+
+
+def _execution_progress_problem(path: str) -> Optional[str]:
+    return _sqlite_table_problem(
+        path,
+        table=AGENT3_EXECUTION_PROGRESS_TABLE,
+        expected_columns=_AGENT3_EXECUTION_PROGRESS_SCHEMA,
+    )
+
+
+def _execution_progress_problem_bytes(data: bytes) -> Optional[str]:
+    return _with_temp_sqlite(data, _execution_progress_problem)
+
+
+def _agent3_runs_have_rows(path: str) -> tuple[Optional[bool], Optional[str]]:
+    problem = _sqlite_table_problem(
+        path,
+        table=AGENT3_RUNS_TABLE,
+        expected_columns=_AGENT3_RUNS_SCHEMA,
+    )
+    if problem:
+        return None, problem
+    try:
+        con = _open_sqlite_readonly(path)
+        try:
+            row = con.execute(
+                f"SELECT EXISTS(SELECT 1 FROM {AGENT3_RUNS_TABLE} LIMIT 1)"
+            ).fetchone()
+        finally:
+            con.close()
+    except (OSError, sqlite3.Error) as exc:
+        return None, f"cannot inspect Agent 3 run rows: {exc}"
+    return bool(row and row[0]), None
+
+
+def _agent3_runs_have_rows_bytes(data: bytes) -> tuple[Optional[bool], Optional[str]]:
+    return _with_temp_sqlite(data, _agent3_runs_have_rows)
+
+
+def _live_agent3_authority_problems(runs_path: str, progress_path: str) -> list[str]:
+    problems: list[str] = []
+    progress_exists = os.path.exists(progress_path)
+    if progress_exists:
+        problem = _execution_progress_problem(progress_path)
+        if problem:
+            problems.append(f"invalid Agent 3 execution-progress authority: {problem}")
+
+    if os.path.exists(runs_path) and not progress_exists:
+        has_rows, problem = _agent3_runs_have_rows(runs_path)
+        if problem:
+            problems.append(
+                "cannot prove Agent 3 run store is empty without execution-progress authority: "
+                + problem
+            )
+        elif has_rows:
+            problems.append(
+                "Agent 3 run state is present without execution-progress authority; "
+                "backing it up could make a previously-started non-idempotent step replayable"
+            )
+    return problems
 
 
 def create(out_dir: str = ".") -> str:
@@ -203,11 +337,9 @@ def create(out_dir: str = ".") -> str:
     by_key = {item.key: item for item in inventory}
     runs = by_key[AGENT3_RUNS_KEY]
     progress = by_key[AGENT3_EXECUTION_PROGRESS_KEY]
-    if os.path.exists(runs.path) and not os.path.exists(progress.path):
-        raise ValueError(
-            "refusing to back up Agent 3 runs without the execution-progress sidecar: "
-            + progress.path
-        )
+    authority_problems = _live_agent3_authority_problems(runs.path, progress.path)
+    if authority_problems:
+        raise ValueError("refusing unsafe Agent 3 backup: " + "; ".join(authority_problems))
 
     manifest: dict = {"schema": BACKUP_SCHEMA, "created": stamp, "files": {}}
 
@@ -253,18 +385,64 @@ def _read_manifest(archive: str) -> dict:
         return json.loads(f.read())
 
 
+def _archive_agent3_authority_problems(
+    tar: tarfile.TarFile,
+    manifest: dict,
+    verified_file_keys: set[str],
+) -> list[str]:
+    problems: list[str] = []
+    files = manifest.get("files", {})
+    progress_meta = files.get(AGENT3_EXECUTION_PROGRESS_KEY)
+    runs_meta = files.get(AGENT3_RUNS_KEY)
+
+    if progress_meta is not None:
+        if progress_meta.get("kind") != "file":
+            problems.append("Agent 3 execution-progress authority is not a file")
+        elif AGENT3_EXECUTION_PROGRESS_KEY in verified_file_keys:
+            data = _member_bytes(tar, f"data/{AGENT3_EXECUTION_PROGRESS_KEY}")
+            if data is not None:
+                problem = _execution_progress_problem_bytes(data)
+                if problem:
+                    problems.append(f"invalid Agent 3 execution-progress authority: {problem}")
+        return problems
+
+    if runs_meta is None:
+        return problems
+    if runs_meta.get("kind") != "file":
+        problems.append(
+            "Agent 3 run state has no execution-progress authority and is not a file; "
+            "cannot prove it is empty"
+        )
+        return problems
+    if AGENT3_RUNS_KEY not in verified_file_keys:
+        return problems  # hash/member errors already make verification fail closed
+
+    data = _member_bytes(tar, f"data/{AGENT3_RUNS_KEY}")
+    if data is None:
+        return problems
+    has_rows, problem = _agent3_runs_have_rows_bytes(data)
+    if problem:
+        problems.append(
+            "cannot prove Agent 3 run store is empty without execution-progress authority: "
+            + problem
+        )
+    elif has_rows:
+        problems.append(
+            "Agent 3 run state is present without execution-progress authority; "
+            "restoring it could replay a previously-started non-idempotent step"
+        )
+    return problems
+
+
 def verify(archive: str) -> dict:
-    """Check every stored file against its recorded hash WITHOUT extracting."""
+    """Check stored hashes plus Agent 3 authority semantics WITHOUT extracting."""
     manifest = _read_manifest(archive)
     if manifest.get("schema") not in SUPPORTED_BACKUP_SCHEMAS:
         raise ValueError(f"unsupported backup schema: {manifest.get('schema')}")
 
     problems: list[str] = []
-    authority_problem = _agent3_authority_problem(manifest.get("files", {}))
-    if authority_problem:
-        problems.append(authority_problem)
-
     checked = 0
+    verified_file_keys: set[str] = set()
     with tarfile.open(archive, "r:gz") as tar:
         for key, meta in manifest["files"].items():
             if meta["kind"] == "file":
@@ -276,6 +454,7 @@ def verify(archive: str) -> dict:
                     problems.append(f"hash mismatch: {key}")
                 else:
                     checked += 1
+                    verified_file_keys.add(key)
             else:
                 for rel, want in meta["files"].items():
                     member = f"data/{key}/{rel}"
@@ -286,17 +465,28 @@ def verify(archive: str) -> dict:
                         problems.append(f"hash mismatch: {key}/{rel}")
                     else:
                         checked += 1
+
+        problems.extend(
+            _archive_agent3_authority_problems(tar, manifest, verified_file_keys)
+        )
     return {"ok": not problems, "checked": checked, "problems": problems}
 
 
-def _member_sha(tar: tarfile.TarFile, name: str) -> Optional[str]:
+def _member_bytes(tar: tarfile.TarFile, name: str) -> Optional[bytes]:
     try:
         f = tar.extractfile(name)
     except KeyError:
         return None
     if f is None:
         return None
-    return _sha256_bytes(f.read())
+    return f.read()
+
+
+def _member_sha(tar: tarfile.TarFile, name: str) -> Optional[str]:
+    data = _member_bytes(tar, name)
+    if data is None:
+        return None
+    return _sha256_bytes(data)
 
 
 def restore(archive: str, force: bool = False) -> dict:
