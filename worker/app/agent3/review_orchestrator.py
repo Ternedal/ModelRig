@@ -473,6 +473,36 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                 run_id, expected_review_step_id=expected_review_step_id
             )
 
+    def _commit_running_transition(
+        self,
+        run: AgentRun,
+        *,
+        expected_payload: str,
+        kind: str | None = None,
+        payload: dict | None = None,
+    ) -> AgentRun | None:
+        """Commit a reviewed RUNNING transition without overwriting Cancel authority."""
+        if kind is None:
+            changed = self.store.save_if_unchanged(
+                run,
+                expected_state=RunState.RUNNING,
+                expected_payload=expected_payload,
+            )
+        else:
+            changed = self.store.save_with_event_if_unchanged(
+                run,
+                expected_state=RunState.RUNNING,
+                expected_payload=expected_payload,
+                kind=kind,
+                payload=payload or {},
+            )
+        if changed:
+            return None
+        fresh = self._require(run.id)
+        if fresh.state == RunState.CANCELLED:
+            return fresh
+        raise RunConflict("run changed while reviewed transition was being committed")
+
     def _advance_locked(
         self,
         run_id: str,
@@ -516,66 +546,80 @@ class ReviewingAgent3Orchestrator(Agent3Orchestrator):
                     return conflict
                 continue
             if step.state == StepState.EXECUTING:
+                expected_payload = run.to_json()
                 step.state = StepState.BLOCKED
                 step.error = "Execution was interrupted; verify the side effect manually before resuming"
                 run.state = RunState.BLOCKED
                 run.error = step.error
-                self.store.save(run)
-                self.store.event(
-                    run.id,
-                    "interrupted_execution",
-                    {"step_id": step.id, "tool": step.tool},
+                conflict = self._commit_running_transition(
+                    run,
+                    expected_payload=expected_payload,
+                    kind="interrupted_execution",
+                    payload={"step_id": step.id, "tool": step.tool},
                 )
-                return run
+                return conflict if conflict is not None else run
             if step.state == StepState.WAITING_CONFIRMATION:
+                expected_payload = run.to_json()
                 run.state = RunState.WAITING_CONFIRMATION
-                self.store.save(run)
-                return run
+                conflict = self._commit_running_transition(
+                    run,
+                    expected_payload=expected_payload,
+                )
+                return conflict if conflict is not None else run
             if step.state in {StepState.DENIED, StepState.BLOCKED, StepState.FAILED}:
+                expected_payload = run.to_json()
                 run.state = RunState.BLOCKED if step.state == StepState.BLOCKED else RunState.FAILED
                 run.error = step.error or f"Step {step.state.value}"
-                self.store.save(run)
-                return run
+                conflict = self._commit_running_transition(
+                    run,
+                    expected_payload=expected_payload,
+                )
+                return conflict if conflict is not None else run
 
             decision = self.policy.evaluate(
                 step,
                 proactive=run.proactive,
                 allow_private_cloud=run.allow_private_cloud,
             )
-            self.store.event(
-                run.id,
-                "policy_decision",
-                {
-                    "step_id": step.id,
-                    "tool": step.tool,
-                    "action": decision.action,
-                    "reason": decision.reason,
-                },
-            )
+            decision_payload = {
+                "step_id": step.id,
+                "tool": step.tool,
+                "action": decision.action,
+                "reason": decision.reason,
+            }
             if decision.action == "block":
+                expected_payload = run.to_json()
                 step.state = StepState.BLOCKED
                 step.error = decision.reason
                 run.state = RunState.BLOCKED
                 run.error = decision.reason
-                self.store.save(run)
-                return run
+                conflict = self._commit_running_transition(
+                    run,
+                    expected_payload=expected_payload,
+                    kind="policy_decision",
+                    payload=decision_payload,
+                )
+                return conflict if conflict is not None else run
+
+            self.store.event(run.id, "policy_decision", decision_payload)
             if decision.action == "confirm" and step.state != StepState.APPROVED:
+                expected_payload = run.to_json()
                 step.state = StepState.WAITING_CONFIRMATION
                 step.confirmation_digest = self._digest(step)
                 step.confirmation_expires_at = time.time() + self.confirmation_ttl_seconds
                 run.state = RunState.WAITING_CONFIRMATION
-                self.store.save(run)
-                self.store.event(
-                    run.id,
-                    "confirmation_required",
-                    {
+                conflict = self._commit_running_transition(
+                    run,
+                    expected_payload=expected_payload,
+                    kind="confirmation_required",
+                    payload={
                         "step_id": step.id,
                         "tool": step.tool,
                         "summary": step.summary,
                         "expires_at": step.confirmation_expires_at,
                     },
                 )
-                return run
+                return conflict if conflict is not None else run
 
             self._execute(run, step)
             if run.state in {RunState.FAILED, RunState.CANCELLED, RunState.BLOCKED}:
