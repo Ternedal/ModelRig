@@ -1,0 +1,60 @@
+name: tmp-fix-backup-progress-schema-p1p
+
+on:
+  push:
+    branches:
+      - fix/agent3-backup-progress-schema-p1p-20260913
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-backup-progress-schema-p1p-20260913
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Apply P1p fix
+        run: python .tmp_fix_backup_progress_schema_p1p.py
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+      - name: Compile worker
+        run: python -m compileall -q worker/app
+      - name: Run backup and reviewed-Start regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          python tests/worker_backup.py
+          for t in tests/worker_agent3_reviewed_start_p1*.py; do
+            echo "==> $t"
+            python "$t"
+          done
+      - name: Regenerate canonical current state
+        run: |
+          python scripts/current_state.py
+          python scripts/current_state.py --check
+      - name: Diff hygiene
+        run: |
+          git diff --check
+          git status --short
+          grep -q 'unexpected user-defined schema objects' worker/app/backup.py
+          grep -q 'table_xinfo(agent_execution_starts)' worker/app/backup.py
+          grep -q 'erase_execution_start' tests/worker_backup.py
+      - name: Commit retained fix and remove temporary machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git rm .tmp_fix_backup_progress_schema_p1p.py .github/workflows/_tmp_fix_backup_progress_schema_p1p.yml
+          git add worker/app/backup.py tests/worker_backup.py CURRENT_STATE.md
+          git diff --cached --check
+          git commit -m "fix(agent3): close execution-progress backup schema (#1309)" -m "Require the dedicated execution-progress SQLite sidecar to contain only the canonical watermark table/columns, reject trigger-bearing authority on create and restore, and preserve fail-closed backup semantics. Draft/off-main only; production_activation=false."
+          git push origin HEAD:fix/agent3-backup-progress-schema-p1p-20260913
