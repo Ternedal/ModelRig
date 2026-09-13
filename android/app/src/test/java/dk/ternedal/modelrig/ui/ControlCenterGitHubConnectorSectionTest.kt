@@ -65,4 +65,9 @@ class ControlCenterGitHubConnectorSectionTest {
             ),
         )
     }
+    @Test
+    fun unknownConnectorErrorsDoNotEchoRawDetails() {
+        val raw = "IllegalStateException: https://rig.local/?token=secret-123 /data/user/0/private"
+        assertEquals("GitHub connector-status kunne ikke hentes.", controlCenterGitHubError(raw))
+    }
 }

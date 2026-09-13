@@ -65,9 +65,14 @@ internal fun desktopControlCenterSchedulesError(raw: String?): String {
             message.contains("ConnectException") ->
             "Kan ikke nå riggen for scheduler-status."
         message.isBlank() -> "Scheduler-status kunne ikke hentes."
-        else -> message.take(300)
+        else -> "Scheduler-status kunne ikke hentes."
     }
 }
+
+internal fun desktopScheduleRuntimeErrorLabel(raw: String?): String? =
+    raw?.takeIf { it.isNotBlank() }?.let {
+        "Scheduleren rapporterer en intern fejl. Se teknisk log for detaljer."
+    }
 
 @Composable
 internal fun DesktopControlCenterSchedulesSection(
@@ -178,8 +183,8 @@ private fun DesktopScheduleRuntimeCard(runtime: ControlCenterScheduleRuntime) {
             color = KalivTheme.colors.TextMuted,
             fontSize = 10.sp,
         )
-        runtime.lastError?.let {
-            Text("Seneste scheduler-fejl: $it", color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+        desktopScheduleRuntimeErrorLabel(runtime.lastError)?.let { label ->
+            Text(label, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
         }
     }
 }
