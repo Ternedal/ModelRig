@@ -52,6 +52,59 @@ class Agent3ReviewedStartRecoveryPersistenceTest {
     }
 
     @Test
+    fun `stale completion cannot clear identical authority with a newer reservation generation`() {
+        val rig = "https://aba-rig-${System.nanoTime()}.example"
+        val authority = "{\"schema\":\"same-authority-${System.nanoTime()}\"}"
+        val store = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
+        val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
+        val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
+
+        assertTrue(store.reserve(rig, authority))
+        val originalEnvelope = requireNotNull(prefs.getString(key, null))
+        val parts = originalEnvelope.split('\n', limit = 4)
+        assertEquals(4, parts.size)
+        assertEquals("kaliv-agent3-reviewed-start-storage/v3", parts[0])
+
+        val replacementGeneration = if (parts[2] == "11111111-1111-4111-8111-111111111111") {
+            "22222222-2222-4222-8222-222222222222"
+        } else {
+            "11111111-1111-4111-8111-111111111111"
+        }
+        val replacementEnvelope = listOf(parts[0], parts[1], replacementGeneration, parts[3]).joinToString("\n")
+
+        // Simulate another process clearing the old slot and re-reserving the exact
+        // same encoded authority. This process still holds the old origin envelope.
+        assertTrue(prefs.edit().remove(key).commit())
+        assertTrue(prefs.edit().putString(key, replacementEnvelope).commit())
+
+        assertFalse(store.clearIfMatches(rig, authority))
+        assertEquals(replacementEnvelope, prefs.getString(key, null))
+
+        // Once this process explicitly reads the newer generation it owns that
+        // exact envelope and can clear it normally.
+        assertEquals(authority, store.read(rig))
+        assertTrue(store.clearIfMatches(rig, authority))
+        assertNull(prefs.getString(key, null))
+    }
+
+    @Test
+    fun `legacy v2 credential-bound authority stays unresolved instead of being adopted`() {
+        val rig = "https://legacy-v2-${System.nanoTime()}.example"
+        val encoded = "{\"schema\":\"legacy-v2-authority\"}"
+        val key = requireNotNull(agent3ReviewedStartRecoveryStorageKey(rig))
+        val raw = "kaliv-agent3-reviewed-start-storage/v2\n${"a".repeat(64)}\n$encoded"
+        val prefs = context.getSharedPreferences("modelrig", Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().putString(key, raw).commit())
+
+        val store = Agent3ReviewedStartRecoveryStore(context) { "token-a" }
+        val visible = store.read(rig)
+        assertNotNull(visible)
+        assertNotEquals(encoded, visible)
+        assertFalse(store.clearIfMatches(rig, encoded))
+        assertEquals(raw, prefs.getString(key, null))
+    }
+
+    @Test
     fun `legacy unbound authority stays unresolved and is never adopted by current credential`() {
         val rig = "https://legacy-rig-${System.nanoTime()}.example"
         val encoded = "{\"schema\":\"legacy-authority\"}"
