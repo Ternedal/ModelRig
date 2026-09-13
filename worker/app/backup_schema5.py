@@ -1328,6 +1328,156 @@ def _extract_to(tar: tarfile.TarFile, member: str, dest: str) -> None:
             pass
 
 
+# ---- schema-5 core authority hardening ------------------------------------
+# These bindings deliberately live in this module, not in app.backup. Direct
+# imports and ``python -m app.backup_schema5`` therefore receive the same
+# authority checks as the public facade without relying on import side effects.
+_schema5_basic_runs_row_count_path = _agent3_runs_row_count_path
+_schema5_unlocked_restore = restore
+
+
+def _run_store_schema_problem_path(
+    path: str,
+    *,
+    snapshot_id: Optional[str] = None,
+    pair_id: Optional[str] = None,
+) -> Optional[str]:
+    """Require the exact closed Agent3 run-store SQLite catalog."""
+    from .agent3.authority_pair import (
+        EVENTS_TABLE_SQL,
+        RUNS_TABLE_SQL,
+    )
+
+    try:
+        con = _readonly_sqlite(path)
+    except sqlite3.Error as exc:
+        return f"cannot open Agent 3 run store for closed-schema validation: {exc}"
+    try:
+        try:
+            rows = list(
+                con.execute(
+                    "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                    "ORDER BY type,name,tbl_name"
+                )
+            )
+        except sqlite3.Error as exc:
+            return f"cannot inspect Agent 3 run-store schema: {exc}"
+    finally:
+        con.close()
+
+    actual = [
+        (str(row[0]), str(row[1]), str(row[2]), _normalize_sql(row[3]))
+        for row in rows
+    ]
+
+    allow_pair_table = pair_id is not None
+    if not allow_pair_table:
+        discovered_binding, binding_problem = _read_pair_binding_path(path)
+        if binding_problem:
+            return binding_problem
+        allow_pair_table = discovered_binding is not None
+
+    common: list[tuple[str, str, str, Optional[str]]] = [
+        ("index", "sqlite_autoindex_agent_runs_1", "agent_runs", None),
+        ("table", "agent_runs", "agent_runs", _normalize_sql(RUNS_TABLE_SQL)),
+    ]
+    if allow_pair_table:
+        common.append(("table", _PAIR_TABLE, _PAIR_TABLE, _normalize_sql(_PAIR_TABLE_SQL)))
+    if snapshot_id is not None:
+        common.append(
+            (
+                "table",
+                _SNAPSHOT_TABLE,
+                _SNAPSHOT_TABLE,
+                _normalize_sql(_SNAPSHOT_TABLE_SQL),
+            )
+        )
+
+    minimal = sorted(common, key=lambda row: (row[0], row[1], row[2]))
+    full = list(common)
+    full.extend(
+        [
+            ("table", "agent_events", "agent_events", _normalize_sql(EVENTS_TABLE_SQL)),
+            (
+                "table",
+                "sqlite_sequence",
+                "sqlite_sequence",
+                "CREATE TABLE sqlite_sequence(name,seq)",
+            ),
+        ]
+    )
+    full = sorted(full, key=lambda row: (row[0], row[1], row[2]))
+
+    if actual == minimal or actual == full:
+        return None
+    rendered = [f"{kind}:{name}->{table} sql={sql!r}" for kind, name, table, sql in actual]
+    return (
+        "Agent 3 run database does not match the canonical closed authority schema: "
+        + (", ".join(rendered) if rendered else "none")
+    )
+
+
+def _agent3_runs_row_count_path(
+    path: str,
+    *,
+    snapshot_id: Optional[str] = None,
+    pair_id: Optional[str] = None,
+) -> tuple[Optional[int], Optional[str]]:
+    count, problem = _schema5_basic_runs_row_count_path(
+        path,
+        snapshot_id=snapshot_id,
+        pair_id=pair_id,
+    )
+    if problem or count is None:
+        return count, problem
+    schema_problem = _run_store_schema_problem_path(
+        path,
+        snapshot_id=snapshot_id,
+        pair_id=pair_id,
+    )
+    if schema_problem:
+        return None, schema_problem
+    return count, None
+
+
+def _restore_preflight(archive: str, *, force: bool) -> dict[str, Item]:
+    """Reject invalid/no-clobber restores before durable restore authority."""
+    check = verify(archive)
+    if not check["ok"]:
+        raise ValueError(
+            f"archive failed verification, refusing to restore: {check['problems']}"
+        )
+    manifest = _read_manifest(archive)
+    targets = {item.key: item for item in items()}
+    files = manifest["files"]
+    if not force:
+        clashes = []
+        for key in files:
+            item = targets.get(key)
+            if item and os.path.exists(item.path):
+                clashes.append(item.path)
+        if clashes:
+            raise FileExistsError(
+                "these already exist (use --force to overwrite): " + ", ".join(clashes)
+            )
+    return targets
+
+
+def restore(archive: str, force: bool = False) -> dict:
+    """Restore only while Agent3 runtime authority is quiescent.
+
+    Verification and the ordinary no-clobber check happen before the durable
+    restore marker is acquired. Once publication authority is acquired, any
+    failure intentionally leaves the marker set until a complete verified retry.
+    """
+    from .agent3.runtime_restore_guard import agent3_restore_guard
+
+    targets = _restore_preflight(archive, force=force)
+    run_path = targets[AGENT3_RUNS_KEY].path
+    with agent3_restore_guard(run_path):
+        return _schema5_unlocked_restore(archive, force=force)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="kaliv-backup")
     sub = parser.add_subparsers(dest="cmd", required=True)
