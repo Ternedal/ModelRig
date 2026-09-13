@@ -49,7 +49,7 @@
     "git_executable_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "runner_relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
     "runner_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "runner_bytes": {"type": "integer", "minimum": 1, "maximum": 33554432},
+    "runner_bytes": {"type": "integer", "minimum": 1, "maximum": 16000000},
     "required_operator_actor_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
     "required_approver_actor_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
     "required_report_schema": {"const": "kaliv-windows-isolation-physical-report/v1"},
