@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import inspect
 import os
 import shutil
 import stat
@@ -349,6 +350,40 @@ def test_linux_watch_precedes_identity_capture_even_without_ctime_signal() -> No
         assert calls == 1
 
 
+def test_inotify_history_rechecked_after_identity_validation() -> None:
+    if not _is_linux():
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        state_root = root / "host-state"
+        ledger_root = state_root / "ledger"
+        ledger_root.mkdir(parents=True)
+        moved = root / "host-state-moved"
+        binding = directory_history._capture_binding(ledger_root, object())
+        original_stat = directory_history.os.stat
+        raced = False
+
+        def stat_after_queued_rename(path, *args, **kwargs):
+            nonlocal raced
+            if not raced:
+                state_root.rename(moved)
+                moved.rename(state_root)
+                raced = True
+            return original_stat(path, *args, **kwargs)
+
+        try:
+            assert directory_history._binding_matches(binding) is True
+            directory_history.os.stat = stat_after_queued_rename
+            assert directory_history._binding_matches(binding) is False, (
+                "history queued during ancestry validation must fail before true"
+            )
+            assert raced is True
+            assert binding.revoked is True
+        finally:
+            directory_history.os.stat = original_stat
+            directory_history._close_binding(binding)
+
+
 def test_non_linux_posix_watch_before_trust_fails_closed() -> None:
     if not _is_linux():
         return
@@ -404,6 +439,15 @@ def test_non_admin_posix_runtime_metadata_is_rejected() -> None:
         assert "not root-controlled" in str(exc)
     else:
         raise AssertionError("non-admin runtime ownership must fail closed")
+
+
+def test_public_host_git_reader_does_not_relaunch_package_supervisor() -> None:
+    run = host_runtime._HostControlledPhysicalGitReader.run
+    source = inspect.getsource(run)
+    assert run.__module__.endswith("_improvement_physical_runtime_direct_git")
+    assert "run_bounded_subprocess" not in source
+    assert "subprocess.Popen" in source
+    assert getattr(host_runtime, "_direct_host_git_process_installed", False) is True
 
 
 def test_public_consume_routes_through_host_controlled_runtime_boundary() -> None:
@@ -476,9 +520,11 @@ def main() -> None:
     test_ledger_root_rename_replay_restore_cannot_restore_first_receipt()
     test_ancestor_rename_replay_restore_cannot_restore_first_receipt()
     test_linux_watch_precedes_identity_capture_even_without_ctime_signal()
+    test_inotify_history_rechecked_after_identity_validation()
     test_non_linux_posix_watch_before_trust_fails_closed()
     test_unrelated_sibling_churn_does_not_revoke_live_receipt()
     test_non_admin_posix_runtime_metadata_is_rejected()
+    test_public_host_git_reader_does_not_relaunch_package_supervisor()
     test_public_consume_routes_through_host_controlled_runtime_boundary()
     print("physical reservation provenance/directory/runtime regressions: PASS")
 
