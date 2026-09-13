@@ -13,7 +13,7 @@ Reservation-laget skal derfor lukke fire forskellige huller uden at blande dem s
 1. **trust root** — caller må ikke selv vælge den Ed25519-keyring, der afgør om callerens egen signatur er trusted;
 2. **runtime/observation** — caller må ikke levere en fabrikeret `main`-observation eller en mutable Git-runtime, der kan udskiftes mellem verification og execution;
 3. **time/replay** — caller må ikke backdate consumption eller genbruge samme request på den canonical host-ledger;
-4. **provenance** — schema-valid persisted bytes må ikke kunne opgraderes til live authenticated authority alene ved at ligge på den rigtige path eller ved senere at blive genskabt byte-identisk.
+4. **provenance** — schema-valid persisted bytes må ikke kunne opgraderes til live authenticated authority alene ved at ligge på den rigtige path, ved at blive udskiftet byte-identisk før registration eller ved senere at blive genskabt.
 
 En lokal filesystem-ledger kan kun etablere fail-closed replay/recovery-state på den konkrete host. Den kan ikke bevise distribueret/global one-time use. Denne ADR holder derfor `global_replay_safe=false` og reserverer enhver senere fysisk campaign-admission til en separat boundary.
 
@@ -21,7 +21,7 @@ En lokal filesystem-ledger kan kun etablere fail-closed replay/recovery-state p�
 
 Den authority-bærende sekvens er:
 
-`host-pinned request trust root → caller value snapshots → signed request verification → signed runtime pin → transaction-private runtime staging → trusted preflight → irreversible permanent host replay-marker → trusted main re-read → post-marker signed-chain reverify → create-once final replay state → exact-byte read-back → descriptor/file-identity-bound transaction-authenticated in-memory receipt`
+`host-pinned request trust root → caller value snapshots → signed request verification → signed runtime pin → transaction-private runtime staging → trusted preflight → create-once permanent replay-marker med retained original descriptor → trusted main re-read → post-marker signed-chain reverify → create-once final med retained original descriptor → exact-byte/canonical read-back → claim af de oprindelige create-once fil-identiteter → transaction-authenticated in-memory receipt`
 
 ### 1. Public consume må ikke acceptere caller-valgt trust root
 
@@ -60,7 +60,7 @@ Host-control verificeres platform-specifikt:
 
 Der tilføjes ingen private-key loader, signer, credential transport eller network lookup. Modulet er verification-only.
 
-En underscored/private transaction-seam må fortsat modtage en injected verifier til deterministic tests. Den seam er ikke package-root API og har intet non-underscored verifier-taking consume-alias. Den tidligere implementation-namespace er authority-løs og eksponerer kun eksplicitte underscore-testseams; der findes ingen generel module-forwarding/traversal til en verifier-taking production route.
+En underscored/private transaction-seam må fortsat modtage en injected verifier til deterministic tests. Den seam er ikke package-root API. Det tidligere non-underscored `improvement_physical_reservation_impl` compatibility-modul er fjernet fra pakken, så der ikke findes et importérbart compatibility-namespace, der via forwarded functions, `__globals__` eller closure-state kan traverseres til verifier-injection. Denne ADR påstår ikke, at Python-underscore-navne beskytter mod vilkårlig kompromitteret kode i samme proces; authority-kontrakten er, at production entrypoint ikke giver caller-valg af trust-root.
 
 ### 2. Caller-ejede authority-objekter snapshots før brug
 
@@ -95,11 +95,13 @@ Mutation eller replacement af callerens oprindelige executable/helpers efter sna
 
 Et preflight-read må bruges til at undgå at brænde en åbenlyst forkert request. Den authority-bærende observation sker først efter create-once host reservation.
 
-Create-once request-markeren er permanent replay-state, ikke midlertidig lock-cleanup. Efter markerens oprettelse læses præcis `refs/heads/main^{commit}` igen gennem transactionens private pinned runtime.
+Create-once request-markeren er permanent replay-state, ikke midlertidig lock-cleanup. Den reservation-specifikke publication opretter markeren med `O_CREAT|O_EXCL`, skriver og fsync'er payloaden, persisterer parent directory og **beholder den oprindelige åbne descriptor/fil-identitet** under transactionens private token. Descriptoren genåbnes ikke senere for at vælge authority-baseline.
+
+Efter markerens oprettelse læses præcis `refs/heads/main^{commit}` igen gennem transactionens private pinned runtime.
 
 Observationen skal være lokal/read-only, uden network eller repository mutation, og binde canonical repository-root samt runtime manifest/executable identity.
 
-Hvis `main` flytter efter preflight, eller trusted Git fejler efter replay-marker, er requesten stadig host-lokalt consumed/recovery-required. Markeren rulles ikke tilbage til en genbrugelig request.
+Hvis `main` flytter efter preflight, eller trusted Git fejler efter replay-marker, er requesten stadig host-lokalt consumed/recovery-required. Markeren rulles ikke tilbage til en genbrugelig request. En fejlet transaction lukker eventuelle endnu ikke claimed descriptors/handles, mens den durable marker/final-state forbliver fail-closed recovery-state.
 
 ### 5. Trusted time og signatur re-verificeres efter marker
 
@@ -119,15 +121,20 @@ Derfor:
 - private ledger reload giver `transaction_authenticated=false`;
 - der findes ingen public authority-loader for persisted reservation bytes;
 - `transaction_authenticated` serialiseres ikke;
-- final read-back skal være byte-identisk med præcis den in-memory payload, transactionen create-once skrev;
-- live provenance registreres først efter pending-cleanup og ny verification af både final og permanent replay-marker;
-- transactionen åbner og **beholder** descriptor/handle til final og replay-marker og binder provenance til exact object identity, originating PID, authenticated receipt SHA-256, åbnet fil-identitet og exact bytes;
-- senere `transaction_authenticated` validerer de holdte descriptors/handles og deres oprindelige fil-identitet/contents, ikke blot et nyt path lookup;
+- permanent replay-marker og final receipt publiceres create-once med descriptors/handles, der beholdes fra **selve `O_CREAT|O_EXCL` publicationen**;
+- final read-back skal være byte-identisk med præcis den in-memory payload, transactionen create-once skrev, men et senere path-open må aldrig definere provenance-baselinen;
+- pending-state er midlertidig recovery-state og behøver ingen live provenance-descriptor; den ryddes efter final publication;
+- live provenance registreres først efter pending-cleanup og verification af både final og permanent replay-marker;
+- registration skal **claim'e de oprindelige create-once descriptors/fil-identiteter** for final og replay-marker fra samme transaction-token. Mangler de, er bytes ændret, er original inode blevet unlinked, eller peger pathen på en anden inode, fejler transactionen lukket;
+- byte-identisk replacement mellem create-once publication og provenance-registration kan derfor ikke blive registreret som ny authority-baseline;
+- live provenance bindes til exact receipt object identity, originating PID, authenticated receipt SHA-256, de oprindelige create-once fil-identiteter og exact bytes;
+- hver senere `transaction_authenticated` validerer de holdte descriptors/handles og kræver, at canonical paths stadig peger på de samme fil-identiteter med de samme bytes;
 - unlink/replacement skaber derfor en anden eller unlinked fil-identitet og kan ikke repareres ved at skrive de gamle bytes tilbage på samme path;
 - receipt-mutation ændrer digest og invaliderer provenance;
-- POSIX fork-child arver ingen authority: PID skal matche, registry ryddes med `os.register_at_fork(after_in_child=...)`, og inherited descriptors kan ikke gøre child-receiptet authenticated.
+- POSIX fork-child arver ingen authority: PID skal matche, registry ryddes med `os.register_at_fork(after_in_child=...)`, inherited descriptors lukkes, og child-receiptet kan ikke være authenticated;
+- transaction-scopet er isoleret med en per-context token; failed transactions frigiver alle unclaimed retained descriptors, så ingen senere transaction kan claim'e dem.
 
-Removal, replacement eller tamper af final/replay-marker invaliderer dermed live provenance irreversibelt for den receipt-instans. Byte-identisk delete→recreate kan ikke genoplive `transaction_authenticated=true`. Durable bytes kan højst skabe replay/DoS/recovery-state; de kan ikke mint'e eller resurrecte live authority.
+Removal, replacement eller tamper af final/replay-marker invaliderer dermed live provenance irreversibelt for den receipt-instans. Byte-identisk replacement **både før og efter registration** kan ikke mint'e eller genoplive `transaction_authenticated=true`. Durable bytes kan højst skabe replay/DoS/recovery-state; de kan ikke mint'e eller resurrecte live authority.
 
 ### 7. Replay-scope er eksplicit host-local
 
@@ -162,18 +169,18 @@ Denne boundary må ikke starte de 11 DC-L15 probes, oprette cadence, erklære pe
 1. resolve og host-control-validér RSI request-authority keyring/verifier;
 2. snapshot exact-type request/qualification/snapshot/signature og den host-resolved verifier;
 3. verificér callerens exact `TrustedGitRuntime` og stage transaction-private runtime-copy;
-4. re-verificér signed request ved trusted current time;
+4. opret transaction-private publication token og re-verificér signed request ved trusted current time;
 5. trusted preflight af `main` gennem private pinned runtime;
-6. create-once permanent host-local replay-marker keyed af request SHA-256;
+6. create-once permanent host-local replay-marker keyed af request SHA-256, og behold descriptor/fil-identitet fra den oprindelige publication;
 7. trusted post-marker `main` read gennem samme private pinned runtime;
 8. trusted-current-time re-verifikation af signed request + qualification;
 9. create-once pending payload;
-10. create-once final canonical payload;
+10. create-once final canonical payload, og behold descriptor/fil-identitet fra den oprindelige publication;
 11. exact-byte read-back + canonical parse uden authority grant;
 12. cleanup kun pending; replay-marker bevares;
-13. åbn final + replay-marker, bind descriptors/handles til fil-identitet og exact payloads;
-14. registrér kun den returnerede live instans med process/content/file-identity provenance;
-15. cleanup transaction-private Git-runtime fail-closed.
+13. claim de oprindelige final + replay-marker create-once descriptors fra samme transaction-token og kræv, at paths stadig peger på samme identiteter/bytes;
+14. registrér kun den returnerede live instans med process/content/original-file-identity provenance;
+15. frigiv eventuelle unclaimed transaction descriptors og cleanup transaction-private Git-runtime fail-closed.
 
 Hvis noget fejler efter trin 6, kan requesten ikke genbruges på samme canonical host-ledger uden en separat eksplicit recovery-procedure.
 
@@ -185,7 +192,7 @@ Implementationen skal mindst afvise eller fail-close ved:
 2. manglende, malformed, wrong-domain, non-canonical eller unsafe host keyring;
 3. POSIX ownership/mode-brud eller Windows owner/DACL, der giver ikke-admin principals write/control authority;
 4. authority key for forkert issuer-system eller stale minimum keyring epoch;
-5. non-underscored verifier-taking consume-alias eller generel implementation-module forwarding fra public/compatibility namespace;
+5. et packaged/non-underscored verifier-taking compatibility-modul eller forwarded live implementation objects, som kan traverseres til private verifier-injection;
 6. forged/caller-supplied observation, clock eller authority-path;
 7. subclasses/overridable authority-inputs eller `TrustedGitRuntime`;
 8. caller-owned signed input mutation efter snapshot/verification;
@@ -195,13 +202,15 @@ Implementationen skal mindst afvise eller fail-close ved:
 12. expired/invalid signed request efter marker;
 13. duplicate canonical-host consume eller crash-left marker/pending/final state;
 14. direct/prebuilt/fabricated final receipt persistence;
-15. schema-valid final replacement mellem create-once write og read-back;
-16. final/replay-marker removal eller replacement før provenance-registration;
-17. final/replay-marker tamper efter registration;
-18. delete→byte-identical recreate af final eller replay-marker;
-19. live receipt mutation;
-20. POSIX fork inheritance;
-21. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
+15. non-canonical eller non-identical final read-back;
+16. byte-identisk eller ændret final/replay-marker inode replacement mellem create-once publication og provenance-registration;
+17. manglende/mismatched original create-once descriptor ved provenance claim;
+18. final/replay-marker tamper efter registration;
+19. delete→byte-identical recreate af final eller replay-marker efter registration;
+20. live receipt mutation;
+21. POSIX fork inheritance;
+22. cross-transaction descriptor claim eller lækkede unclaimed descriptors efter failure;
+23. ethvert forsøg på at hæve global replay-, freeze-, campaign-, pilot-, publication- eller activation-authority.
 
 ## Artefakter
 
@@ -211,10 +220,11 @@ Implementationen skal mindst afvise eller fail-close ved:
 - `consume_physical_qualification_request_once(...)` — eneste public authority-bearing consume path;
 - canonical host ledger — final + permanent replay-marker som replay/recovery-state;
 - transaction-private Trusted Git staging under canonical operation-root;
-- process-local provenance registry med holdte final/replay-marker descriptors/handles og fil-identitet.
+- transaction-scoped original-publication descriptor registry for final/replay-marker;
+- process-local live provenance registry med de claimed oprindelige final/replay-marker descriptors/handles og fil-identiteter.
 
 ## Konsekvens
 
-Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en **host-pinned, caller-uafhængig public-key trust root med platform-specifik host-control validation**, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem pinned trusted Git efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de oprindeligt åbnede durable fil-identiteter — ikke blot til senere path-bytes.
+Efter denne boundary kan DevControl bevise, at en human-signed request blev verificeret mod en **host-pinned, caller-uafhængig public-key trust root med platform-specifik host-control validation**, matchede den signerede software/runtime chain, observerede det ønskede `main` gennem pinned trusted Git efter permanent host reservation og producerede et live process-bound receipt, hvis provenance er bundet til de **oprindelige create-once durable fil-identiteter fra publicationstidspunktet** — ikke til senere path-bytes eller en fil, der først blev åbnet ved registration.
 
 Det beviser fortsat ikke global replay-sikkerhed, persistent frozen `main`, fysisk campaign completion, pilot-GO, publication eller activation. De authority-led forbliver åbne og skal behandles i separate senere ADR'er/boundaries.
