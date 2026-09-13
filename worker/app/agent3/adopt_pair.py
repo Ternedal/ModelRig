@@ -7,18 +7,19 @@ from typing import Optional
 
 from .. import backup
 from .authority_pair import adopt_live_pair, read_binding_path
+from .runtime_restore_guard import agent3_maintenance_guard
 
 
 def adopt_current_pair(*, offline_confirmed: bool = False) -> Optional[str]:
-    """Adopt pre-schema-5 Agent 3 authority under an explicit offline boundary.
+    """Adopt pre-schema-5 Agent 3 authority under an enforced offline boundary.
 
     Normal startup never calls this. The migration operator stops the appliance
     first and then opts in explicitly. Before any persistent pair id is written,
     the existing run/progress stores must both be present, structurally valid
-    and semantically coherent at the execution-watermark boundary. The complete
-    structural + semantic check is repeated while ``adopt_live_pair`` holds
-    write locks on both attached databases, so a successful transition cannot
-    race a writer or bless schema drift in the pre-lock validation gap.
+    and semantically coherent at the execution-watermark boundary. The final
+    structural + semantic validation and atomic pair write run while an
+    exclusive maintenance guard prevents any Agent3 runtime or restore from
+    entering the boundary.
 
     A genuinely empty run-only store needs no adoption because it carries no
     execution authority yet. An already-bound valid pair is accepted
@@ -97,7 +98,12 @@ def adopt_current_pair(*, offline_confirmed: bool = False) -> Optional[str]:
         _run_count, locked_problem = authority_problem()
         return locked_problem
 
-    return adopt_live_pair(runs.path, locked_validator)
+    # Offline confirmation is operator intent; this guard is the enforcement.
+    # It blocks a runtime that restarted after the operator check and refuses to
+    # cross an incomplete restore boundary. The pair write itself remains one
+    # ATTACHed multi-database transaction inside adopt_live_pair.
+    with agent3_maintenance_guard(runs.path):
+        return adopt_live_pair(runs.path, locked_validator)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
