@@ -36,12 +36,12 @@ _KEYRING_FIELDS = {
     "trusted_keys",
 }
 _POSIX_ACL_XATTRS = ("system.posix_acl_access", "system.posix_acl_default")
+# Only an explicit "attribute absent" result proves there is no POSIX ACL.
+# Unsupported xattr/ACL inspection is unknown security state and must fail closed.
 _NO_POSIX_ACL_XATTR_ERRNOS = frozenset(
     {
         errno.ENODATA,
         getattr(errno, "ENOATTR", errno.ENODATA),
-        errno.ENOTSUP,
-        getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
     }
 )
 
