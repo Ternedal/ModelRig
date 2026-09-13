@@ -27,6 +27,13 @@ from kaliv_dev_control.asymmetric_authority import (  # noqa: E402
     asymmetric_authority_key_custody_policy_sha256,
     authority_signing_message,
 )
+from kaliv_dev_control.improvement_physical_campaign_admission import (  # noqa: E402
+    PhysicalCampaignAdmission,
+    PhysicalCampaignAdmissionError,
+    PhysicalCampaignAdmissionLedger,
+    build_physical_campaign_admission,
+    issue_physical_campaign_admission_once,
+)
 from kaliv_dev_control.improvement_physical_request import (  # noqa: E402
     PHYSICAL_REQUEST_ISSUER_SYSTEM_ID,
     PhysicalQualificationRequest,
@@ -46,6 +53,7 @@ from kaliv_dev_control.improvement_qualification_packet import (  # noqa: E402
     MISSING_PHYSICAL_GATES,
     QualificationPacket,
 )
+from kaliv_dev_control.physical_isolation import REQUIRED_PROBES  # noqa: E402
 
 
 def load_module():
@@ -329,6 +337,15 @@ def _expect_reservation_error(fragment: str, fn) -> None:
         raise AssertionError(f"expected PhysicalQualificationReservationError containing {fragment!r}")
 
 
+def _expect_admission_error(fragment: str, fn) -> None:
+    try:
+        fn()
+    except PhysicalCampaignAdmissionError as exc:
+        assert fragment in str(exc), str(exc)
+    else:
+        raise AssertionError(f"expected PhysicalCampaignAdmissionError containing {fragment!r}")
+
+
 def reservation_contract() -> None:
     qualification = _qualification_fixture()
     request = _request_fixture(qualification)
@@ -511,6 +528,243 @@ def reservation_contract() -> None:
             )
 
 
+def campaign_admission_contract() -> None:
+    qualification = _qualification_fixture()
+    request = _request_fixture(qualification)
+    signature, verifier = _sign_request(request)
+    with tempfile.TemporaryDirectory() as directory:
+        repo_root = Path(directory).resolve()
+        reservation_observation = _observe_with_reader(
+            reader=_FakeMainReader(request.requested_frozen_main_sha),
+            repository_root=repo_root,
+            repository="Ternedal/ModelRig",
+            observed_at_utc="2026-09-12T19:11:30Z",
+            git_runtime_manifest_sha256="e" * 64,
+            git_executable_sha256="f" * 64,
+        )
+        reservation = build_physical_qualification_reservation(
+            request=request,
+            qualification=qualification,
+            signature=signature,
+            verifier=verifier,
+            observation=reservation_observation,
+            ledger_id="rsi-dc-l15-admission-source-v1",
+            consumed_at_utc="2026-09-12T19:12:00Z",
+        )
+        pre_start = LocalMainHeadObservation.from_mapping(
+            {
+                **reservation_observation.to_dict(),
+                "observed_at_utc": "2026-09-12T19:12:20Z",
+            }
+        )
+        admission = build_physical_campaign_admission(
+            reservation=reservation,
+            qualification=qualification,
+            reservation_observation=reservation_observation,
+            pre_start_observation=pre_start,
+            admission_id="rsi-dc-l15-admission-001",
+            campaign_id="rsi-dc-l15-campaign-001",
+            operator_actor_id="collector.one",
+            admitted_at_utc="2026-09-12T19:12:30Z",
+        )
+        assert admission.campaign_start_authorized is True
+        assert admission.manual_operator_required is True
+        assert admission.single_campaign_only is True
+        assert admission.automatic_start is False
+        assert admission.physical_campaign_completed is False
+        assert admission.post_campaign_main_observation_required is True
+        assert admission.frozen_main_confirmed is False
+        assert admission.pilot_go_authorized is False
+        assert admission.activation_authorized is False
+        assert admission.remote_publication_authorized is False
+        assert admission.merge_authority == "human"
+        assert admission.task_id == qualification.task_id
+        assert admission.task_sha256 == qualification.task_sha256
+        assert admission.base_sha == qualification.base_sha
+        assert admission.required_probes == tuple(probe.value for probe in REQUIRED_PROBES)
+        assert PhysicalCampaignAdmission.from_mapping(
+            admission.to_dict()
+        ).canonical_json() == admission.canonical_json()
+
+        _expect_admission_error(
+            "campaign operator must be the human-requested collector",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=pre_start,
+                admission_id="rsi-dc-l15-admission-wrong-operator",
+                campaign_id="rsi-dc-l15-campaign-wrong-operator",
+                operator_actor_id="approver.two",
+                admitted_at_utc="2026-09-12T19:12:30Z",
+            ),
+        )
+        wrong_main = LocalMainHeadObservation.from_mapping(
+            {**pre_start.to_dict(), "observed_sha": "e" * 40}
+        )
+        _expect_admission_error(
+            "pre-start main head does not match",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=wrong_main,
+                admission_id="rsi-dc-l15-admission-wrong-main",
+                campaign_id="rsi-dc-l15-campaign-wrong-main",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:12:30Z",
+            ),
+        )
+        wrong_root = LocalMainHeadObservation.from_mapping(
+            {**pre_start.to_dict(), "repository_root_path_sha256": "0" * 64}
+        )
+        _expect_admission_error(
+            "another local repository root",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=wrong_root,
+                admission_id="rsi-dc-l15-admission-wrong-root",
+                campaign_id="rsi-dc-l15-campaign-wrong-root",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:12:30Z",
+            ),
+        )
+        wrong_git = LocalMainHeadObservation.from_mapping(
+            {**pre_start.to_dict(), "git_runtime_manifest_sha256": "0" * 64}
+        )
+        _expect_admission_error(
+            "trusted Git identity changed",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=wrong_git,
+                admission_id="rsi-dc-l15-admission-wrong-git",
+                campaign_id="rsi-dc-l15-campaign-wrong-git",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:12:30Z",
+            ),
+        )
+        stale_pre_start = LocalMainHeadObservation.from_mapping(
+            {**pre_start.to_dict(), "observed_at_utc": "2026-09-12T19:12:01Z"}
+        )
+        _expect_admission_error(
+            "pre-start main observation is stale",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=stale_pre_start,
+                admission_id="rsi-dc-l15-admission-stale-prestart",
+                campaign_id="rsi-dc-l15-campaign-stale-prestart",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:13:02Z",
+            ),
+        )
+        old_reservation_pre_start = LocalMainHeadObservation.from_mapping(
+            {**pre_start.to_dict(), "observed_at_utc": "2026-09-12T19:27:00Z"}
+        )
+        _expect_admission_error(
+            "consumed request reservation is stale",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=old_reservation_pre_start,
+                admission_id="rsi-dc-l15-admission-stale-reservation",
+                campaign_id="rsi-dc-l15-campaign-stale-reservation",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:27:01Z",
+            ),
+        )
+        wrong_qualification_mapping = qualification.to_dict()
+        wrong_qualification_mapping["task_sha256"] = "0" * 64
+        wrong_qualification = QualificationPacket.from_mapping(wrong_qualification_mapping)
+        _expect_admission_error(
+            "qualification packet does not match reservation",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=wrong_qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=pre_start,
+                admission_id="rsi-dc-l15-admission-wrong-qualification",
+                campaign_id="rsi-dc-l15-campaign-wrong-qualification",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:12:30Z",
+            ),
+        )
+        wrong_reservation_observation = LocalMainHeadObservation.from_mapping(
+            {
+                **reservation_observation.to_dict(),
+                "observed_at_utc": "2026-09-12T19:11:31Z",
+            }
+        )
+        _expect_admission_error(
+            "reservation observation does not match consumed reservation",
+            lambda: build_physical_campaign_admission(
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=wrong_reservation_observation,
+                pre_start_observation=pre_start,
+                admission_id="rsi-dc-l15-admission-wrong-observation",
+                campaign_id="rsi-dc-l15-campaign-wrong-observation",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:12:30Z",
+            ),
+        )
+        elevated = admission.to_dict()
+        elevated["pilot_go_authorized"] = True
+        _expect_admission_error(
+            "campaign admission authority boundary is invalid",
+            lambda: PhysicalCampaignAdmission.from_mapping(elevated),
+        )
+        missing_probe = admission.to_dict()
+        missing_probe["required_probes"] = missing_probe["required_probes"][:-1]
+        _expect_admission_error(
+            "exact DC-L15 probe set",
+            lambda: PhysicalCampaignAdmission.from_mapping(missing_probe),
+        )
+
+        with tempfile.TemporaryDirectory() as ledger_directory:
+            ledger_root = Path(ledger_directory)
+            ledger = PhysicalCampaignAdmissionLedger(root=ledger_root)
+            issued = issue_physical_campaign_admission_once(
+                ledger=ledger,
+                reservation=reservation,
+                qualification=qualification,
+                reservation_observation=reservation_observation,
+                pre_start_observation=pre_start,
+                admission_id="rsi-dc-l15-admission-ledger-001",
+                campaign_id="rsi-dc-l15-campaign-ledger-001",
+                operator_actor_id="collector.one",
+                admitted_at_utc="2026-09-12T19:12:30Z",
+            )
+            loaded = ledger.load(reservation.sha256)
+            assert loaded.canonical_json() == issued.canonical_json()
+            _expect_admission_error(
+                "already has a campaign admission",
+                lambda: issue_physical_campaign_admission_once(
+                    ledger=ledger,
+                    reservation=reservation,
+                    qualification=qualification,
+                    reservation_observation=reservation_observation,
+                    pre_start_observation=pre_start,
+                    admission_id="rsi-dc-l15-admission-ledger-002",
+                    campaign_id="rsi-dc-l15-campaign-ledger-002",
+                    operator_actor_id="collector.one",
+                    admitted_at_utc="2026-09-12T19:12:31Z",
+                ),
+            )
+            final_path = ledger_root / f"{reservation.sha256}.campaign-admission.json"
+            final_path.write_bytes(issued.canonical_json().encode("utf-8") + b"\n")
+            _expect_admission_error(
+                "not canonical",
+                lambda: ledger.load(reservation.sha256),
+            )
+
+
 def main() -> None:
     module = load_module()
     doc = " ".join((module.__doc__ or "").split())
@@ -566,7 +820,10 @@ def main() -> None:
         assert any("candidate.git_sha" in error for error in report["summary"]["errors"])
 
     reservation_contract()
-    print("physical validation final eight-proof gate + RSI request reservation: PASS")
+    campaign_admission_contract()
+    print(
+        "physical validation final eight-proof gate + RSI request reservation/campaign admission: PASS"
+    )
 
 
 if __name__ == "__main__":
