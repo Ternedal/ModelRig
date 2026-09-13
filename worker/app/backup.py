@@ -230,7 +230,7 @@ def _sqlite_table_problem(
 
 
 def _execution_progress_problem_path(path: str) -> Optional[str]:
-    return _sqlite_table_problem(
+    problem = _sqlite_table_problem(
         path,
         table="agent_execution_starts",
         required={
@@ -240,6 +240,53 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
             "started_at": ("REAL", 1, 0),
         },
     )
+    if problem:
+        return problem
+
+    # This sidecar is a dedicated execution-authority database, not a general
+    # extension point. Column/PK checks alone are insufficient: SQLite triggers
+    # can silently erase a just-inserted watermark while integrity_check remains
+    # "ok". Fail closed unless the complete user-defined schema is exactly the
+    # canonical watermark table and exactly its four visible columns.
+    try:
+        con = _readonly_sqlite(path)
+    except sqlite3.Error as exc:
+        return f"cannot open SQLite database: {exc}"
+    try:
+        try:
+            schema_rows = list(
+                con.execute(
+                    "SELECT type,name,tbl_name FROM sqlite_master "
+                    "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+                )
+            )
+            column_rows = list(con.execute("PRAGMA table_xinfo(agent_execution_starts)"))
+        except sqlite3.Error as exc:
+            return f"cannot inspect SQLite execution-authority schema: {exc}"
+
+        expected_schema = [("table", "agent_execution_starts", "agent_execution_starts")]
+        if schema_rows != expected_schema:
+            rendered = [f"{row[0]}:{row[1]}->{row[2]}" for row in schema_rows]
+            return (
+                "execution-progress database has unexpected user-defined schema objects: "
+                + (", ".join(rendered) if rendered else "none")
+            )
+
+        expected_columns = [
+            ("run_id", "TEXT", 1, 1, 0),
+            ("step_index", "INTEGER", 1, 2, 0),
+            ("step_sha256", "TEXT", 1, 3, 0),
+            ("started_at", "REAL", 1, 0, 0),
+        ]
+        actual_columns = [
+            (str(row[1]), str(row[2]).upper(), int(row[3]), int(row[5]), int(row[6]))
+            for row in column_rows
+        ]
+        if actual_columns != expected_columns:
+            return "execution-progress table does not match the exact authority column schema"
+        return None
+    finally:
+        con.close()
 
 
 def _agent3_runs_row_count_path(path: str) -> tuple[Optional[int], Optional[str]]:

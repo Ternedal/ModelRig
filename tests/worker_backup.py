@@ -154,6 +154,29 @@ def archive_with_schema(
             dst.addfile(replacement, io.BytesIO(data))
 
 
+def execution_progress_bytes_with_erasing_trigger() -> bytes:
+    fd, path = tempfile.mkstemp(prefix="kaliv-trigger-progress-", suffix=".db")
+    os.close(fd)
+    try:
+        _seed_sqlite(path, backup.AGENT3_EXECUTION_PROGRESS_KEY)
+        con = sqlite3.connect(path)
+        con.execute(
+            "CREATE TRIGGER erase_execution_start AFTER INSERT ON agent_execution_starts "
+            "BEGIN DELETE FROM agent_execution_starts "
+            "WHERE run_id=NEW.run_id AND step_index=NEW.step_index "
+            "AND step_sha256=NEW.step_sha256; END"
+        )
+        con.commit()
+        con.close()
+        with open(path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
 # --- inventory --------------------------------------------------------------
 required_keys = {
     "rag.db",
@@ -266,6 +289,39 @@ except ValueError:
     check(True, "restore: invalid execution-progress authority is refused")
 check(snapshot() == pre_invalid_restore, "restore: invalid authority refusal writes NOTHING")
 
+# A syntactically valid sidecar can still be unsafe if extra schema objects can
+# mutate watermark semantics. In particular, an AFTER INSERT trigger can erase
+# the just-inserted execution marker while all expected columns/PKs and
+# integrity_check remain valid. The dedicated authority DB therefore admits no
+# user-defined object other than the canonical table.
+trigger_progress_bytes = execution_progress_bytes_with_erasing_trigger()
+trigger_progress = os.path.join(_root, "trigger-execution-progress.tar.gz")
+archive_with_schema(
+    archive,
+    trigger_progress,
+    3,
+    replace_files={backup.AGENT3_EXECUTION_PROGRESS_KEY: trigger_progress_bytes},
+)
+trigger_verify = backup.verify(trigger_progress)
+check(
+    not trigger_verify["ok"],
+    "verify: trigger-bearing execution-progress sidecar is refused with matching manifest hash",
+)
+check(
+    any("unexpected user-defined schema objects" in problem for problem in trigger_verify["problems"]),
+    "verify: trigger-bearing sidecar names the closed-schema authority failure",
+)
+pre_trigger_restore = snapshot()
+try:
+    backup.restore(trigger_progress, force=True)
+    check(False, "restore: trigger-bearing execution-progress authority is refused")
+except ValueError:
+    check(True, "restore: trigger-bearing execution-progress authority is refused")
+check(
+    snapshot() == pre_trigger_restore,
+    "restore: trigger-bearing authority refusal writes NOTHING",
+)
+
 future = os.path.join(_root, "unsupported-schema.tar.gz")
 archive_with_schema(archive, future, 999)
 try:
@@ -345,6 +401,19 @@ try:
     check(False, "create: invalid execution-progress authority is refused")
 except ValueError:
     check(True, "create: invalid execution-progress authority is refused")
+wipe()
+
+# A structurally correct live sidecar with an erasing trigger must also be
+# rejected before create can publish a backup.
+_seed_sqlite(runs_item.path, runs_item.key)
+os.makedirs(os.path.dirname(progress_item.path), exist_ok=True)
+with open(progress_item.path, "wb") as f:
+    f.write(trigger_progress_bytes)
+try:
+    backup.create(os.path.join(_root, "trigger-progress-create"))
+    check(False, "create: trigger-bearing execution-progress authority is refused")
+except ValueError:
+    check(True, "create: trigger-bearing execution-progress authority is refused")
 wipe()
 
 # A non-empty run database without its execution authority must never produce a new backup.
