@@ -114,7 +114,7 @@ review = replace_once(
     "        run.answer = self.answerer(run)\n"
     "        self.store.save(run)\n"
     "        self.store.event(run.id, \"run_completed\", {\"steps\": len(run.steps)})\n"
-    "        return run\n",
+    "        return run",
     "        expected_payload = run.to_json()\n"
     "        answer = self.answerer(run)\n"
     "        run.state = RunState.COMPLETED\n"
@@ -130,7 +130,7 @@ review = replace_once(
     "            if fresh.state == RunState.CANCELLED:\n"
     "                return fresh\n"
     "            raise RunConflict(\"run changed while final completion was being committed\")\n"
-    "        return run\n",
+    "        return run",
     "completion CAS",
 )
 REVIEW.write_text(review, encoding="utf-8")
@@ -255,7 +255,7 @@ def recovery_vs_resume_is_single_flight(root: str) -> None:
     plan_id, _ = old.save(materialization(reviewed))
     run_id = "race-run"
     old.claim_reviewed_start(plan_id, run_id)
-    old.close()  # next PlanStore generation must claim the pending recovery
+    old.close()
 
     runs = AgentRunStore(os.path.join(root, "race-runs.db"))
     reviews = ReadReviewStore(os.path.join(root, "race-reviews.db"))
