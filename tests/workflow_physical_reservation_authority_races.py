@@ -102,6 +102,61 @@ def test_runtime_subclass_is_rejected() -> None:
         assert not any(ledger_root.iterdir())
 
 
+def test_runtime_source_mutation_after_private_snapshot_cannot_change_observation() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = _fixture(root)
+        source_executable = trusted_git.executable_path
+        original_verify = reservation_module._verify_request_at
+        calls = 0
+
+        def verify_then_mutate_source(**kwargs):
+            nonlocal calls
+            receipt = original_verify(**kwargs)
+            calls += 1
+            if calls == 1:
+                source_executable.write_bytes(
+                    b"#!/bin/sh\nprintf '%s\\n' '" + b"e" * 40 + b"'\n"
+                )
+                source_executable.chmod(0o755)
+            return receipt
+
+        reservation_module._verify_request_at = verify_then_mutate_source
+        try:
+            consumed = _consume_physical_qualification_request_once(
+                ledger_root=ledger_root,
+                trusted_git=trusted_git,
+                repository_root=repository_root,
+                operation_root=operation_root,
+                request=request,
+                qualification=qualification,
+                snapshot_receipt=snapshot_receipt,
+                signature=signature,
+                verifier=verifier,
+                now_provider=_clock(),
+            )
+        finally:
+            reservation_module._verify_request_at = original_verify
+
+        assert calls == 2
+        assert consumed.observed_main_sha == main_sha
+        assert consumed.transaction_authenticated is True
+        # The transaction-private runtime is removed after use; the caller-owned
+        # source is allowed to remain mutated because it is no longer authority.
+        assert source_executable.read_bytes().endswith(b"'\n")
+
+
 def test_verified_input_snapshot_survives_caller_mutation_after_verify() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory).resolve()
@@ -212,13 +267,135 @@ def test_final_swap_cannot_be_upgraded_to_live_authority() -> None:
         assert loaded.transaction_authenticated is False
 
 
+def test_final_removed_during_cleanup_fails_before_provenance_registration() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = _fixture(root)
+        final_path = ledger_root / f"{request.sha256}.json"
+        original_unlink = reservation_module.unlink_durable
+        removed = False
+
+        def unlink_then_remove_final(path):
+            nonlocal removed
+            result = original_unlink(path)
+            if Path(path).name.endswith(".pending.json") and final_path.exists():
+                final_path.unlink()
+                removed = True
+            return result
+
+        reservation_module.unlink_durable = unlink_then_remove_final
+        try:
+            _expect(
+                "durably host-consumed but reservation requires recovery",
+                lambda: _consume_physical_qualification_request_once(
+                    ledger_root=ledger_root,
+                    trusted_git=trusted_git,
+                    repository_root=repository_root,
+                    operation_root=operation_root,
+                    request=request,
+                    qualification=qualification,
+                    snapshot_receipt=snapshot_receipt,
+                    signature=signature,
+                    verifier=verifier,
+                    now_provider=_clock(),
+                ),
+            )
+        finally:
+            reservation_module.unlink_durable = original_unlink
+
+        assert removed is True
+        replay_marker = ledger_root / f".{request.sha256}.lock"
+        assert replay_marker.is_file()
+        _expect(
+            "host-locally consumed but reservation requires recovery",
+            lambda: reservation_module._PhysicalQualificationRequestLedger(
+                ledger_root
+            ).load(request.sha256),
+        )
+
+
+def test_live_provenance_tracks_exact_final_and_permanent_replay_marker() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = _fixture(root)
+        consumed = _consume_physical_qualification_request_once(
+            ledger_root=ledger_root,
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
+            request=request,
+            qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
+            signature=signature,
+            verifier=verifier,
+            now_provider=_clock(),
+        )
+        final_path = ledger_root / f"{request.sha256}.json"
+        replay_marker = ledger_root / f".{request.sha256}.lock"
+        assert final_path.is_file()
+        assert replay_marker.is_file()
+        assert consumed.transaction_authenticated is True
+
+        final_payload = final_path.read_bytes()
+        final_path.unlink()
+        assert consumed.transaction_authenticated is False
+        _expect(
+            "already been host-locally consumed or requires recovery",
+            lambda: _consume_physical_qualification_request_once(
+                ledger_root=ledger_root,
+                trusted_git=trusted_git,
+                repository_root=repository_root,
+                operation_root=operation_root,
+                request=request,
+                qualification=qualification,
+                snapshot_receipt=snapshot_receipt,
+                signature=signature,
+                verifier=verifier,
+                now_provider=_clock(),
+            ),
+        )
+
+        final_path.write_bytes(final_payload)
+        assert consumed.transaction_authenticated is True
+        replay_payload = replay_marker.read_bytes()
+        replay_marker.unlink()
+        assert consumed.transaction_authenticated is False
+        replay_marker.write_bytes(replay_payload)
+        assert consumed.transaction_authenticated is True
+
+
 def main() -> None:
     if os.name == "nt":
         print("RSI physical reservation authority-race regressions: SKIP (POSIX fixture)")
         return
     test_runtime_subclass_is_rejected()
+    test_runtime_source_mutation_after_private_snapshot_cannot_change_observation()
     test_verified_input_snapshot_survives_caller_mutation_after_verify()
     test_final_swap_cannot_be_upgraded_to_live_authority()
+    test_final_removed_during_cleanup_fails_before_provenance_registration()
+    test_live_provenance_tracks_exact_final_and_permanent_replay_marker()
     print("RSI physical reservation authority-race regressions: PASS")
 
 
