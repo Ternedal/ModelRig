@@ -111,33 +111,41 @@ Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDA
 
 **Dato 12/09-2026. Status: foreslået til beslutning.**
 
-Gør request-reservation til én authenticated host-local transaction. Public
-consume-pathen kan ikke få observation, clock eller authority-paths indsprøjtet;
-den udleder canonical repository/host-state selv. Caller-ejede request,
-qualification, snapshot receipt, signature og verifier/keyring kopieres først
-til exact-type canonical value snapshots, og subclasses af authority-typer
-afvises.
+Gør request-reservation til én authenticated host-local transaction med en
+caller-uafhængig Ed25519 trust-root. Public consume-pathen accepterer ikke
+verifier/keyring, observation, clock eller authority-paths; den resolver selv en
+fast host-admin-kontrolleret RSI request-keyring og fejler lukket, hvis trust-
+rooten mangler, er malformed, wrong-domain eller unsafe. Host-control valideres
+platform-specifikt: POSIX kræver root ownership og ikke-writable directory-chain,
+og Windows kræver native owner/DACL-evidence uden write/control grants til
+almindelige eller brede principals. Det tidligere non-underscored reservation-
+compatibility-modul er fjernet, så production trust-root ikke kan omgås gennem
+forwarded functions eller compatibility-module traversal. Den eksplicit private
+underscore-testseam er ikke en public authority-kontrakt; beslutningen påstår
+ikke isolation mod vilkårligt kompromitteret same-process Python-kode.
 
-Den caller-leverede `TrustedGitRuntime` skal være exact type og verificeres mod
-den signed/pinned runtime-identitet fra `CandidateSnapshotReceipt`. Derefter
-kopieres hele runtime-treeet create-once til en transaction-private staging-root
-under canonical operation-root, re-verificeres dér og bruges som den eneste
-execution-path for preflight og post-marker `main`-observation. Callerens mutable
-runtime-tree bruges ikke efter staging.
+Caller-ejede signed value-objekter og den host-resolved verifier kopieres til
+exact-type canonical snapshots før authority-brug. Den caller-leverede
+`TrustedGitRuntime` skal være exact type og verificeres mod den signed/pinned
+runtime-identitet fra `CandidateSnapshotReceipt`; hele runtime-treeet kopieres
+derefter create-once til en transaction-private staging-root og bruges som den
+eneste execution-path for preflight og post-marker `main`-observation.
 
-Den irreversible create-once request-marker bevares som **permanent host-local
-replay-marker** efter succes. Final receipt skal læses byte-identisk tilbage, og
-live provenance bindes ikke kun til exact objekt-identitet, originating PID og
-canonical receipt-SHA, men også til de aktuelle exact bytes for både final og
-replay-marker. Removal eller replacement af en af dem invaliderer straks
-`transaction_authenticated`.
+Den irreversible create-once request-marker bevares som permanent host-local
+replay-marker efter succes. Både replay-marker og final receipt beholder deres
+**oprindelige descriptors/handles og fil-identiteter fra selve O_CREAT|O_EXCL
+publicationen** gennem provenance-registration. Registration må claim'e netop
+disse originaler; et byte-identisk inode-swap før registration fejler derfor
+lukket i stedet for at blive den nye baseline. Live provenance binder desuden
+exact receipt-identitet, originating PID, canonical receipt-SHA og exact bytes.
+Unlink/replacement/tamper invaliderer provenance, og byte-identisk recreate kan
+ikke genoplive et gammelt receipt.
 
-Den durable ledger er fortsat kun host-local replay/recovery-state og kan ikke
-reloades som authenticated authority. Persisted, manuelt fremstillede eller
-race-udskiftede canonical bytes forbliver `transaction_authenticated=false`.
-Replay-scope er eksplicit host-local (`host_replay_guard_committed=true`,
-`global_replay_safe=false`). Vedvarende frozen `main`, campaign-start, pilot,
-publication og activation forbliver separate authority-gates.
+Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
+som authenticated authority. Replay-scope er eksplicit host-local
+(`host_replay_guard_committed=true`, `global_replay_safe=false`). Persistent
+frozen `main`, campaign-start, pilot, publication og activation forbliver
+separate authority-gates.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-009_RSI_PHYSICAL_REQUEST_RESERVATION_BOUNDARY.md`
 
