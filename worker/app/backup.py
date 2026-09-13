@@ -243,11 +243,12 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
     if problem:
         return problem
 
-    # This sidecar is a dedicated execution-authority database, not a general
-    # extension point. Column/PK checks alone are insufficient: SQLite triggers
-    # can silently erase a just-inserted watermark while integrity_check remains
-    # "ok". Fail closed unless the complete user-defined schema is exactly the
-    # canonical watermark table and exactly its four visible columns.
+    # This sidecar is dedicated execution authority, not a general SQLite
+    # extension point. Attesting only visible columns is insufficient: inline
+    # constraints such as CHECK(0) can suppress INSERT OR IGNORE, and hostile
+    # writable_schema edits can hide active objects behind attacker-selected
+    # sqlite_* names. Inspect every catalog row and require the exact canonical
+    # CREATE TABLE plus the one SQLite-generated primary-key autoindex.
     try:
         con = _readonly_sqlite(path)
     except sqlite3.Error as exc:
@@ -257,35 +258,49 @@ def _execution_progress_problem_path(path: str) -> Optional[str]:
             schema_rows = list(
                 con.execute(
                     "SELECT type,name,tbl_name,sql FROM sqlite_master "
-                    "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+                    "ORDER BY type,name,tbl_name"
                 )
             )
             column_rows = list(con.execute("PRAGMA table_xinfo(agent_execution_starts)"))
         except sqlite3.Error as exc:
             return f"cannot inspect SQLite execution-authority schema: {exc}"
 
-        expected_schema = [("table", "agent_execution_starts", "agent_execution_starts")]
-        schema_objects = [(str(row[0]), str(row[1]), str(row[2])) for row in schema_rows]
-        if schema_objects != expected_schema:
-            rendered = [f"{row[0]}:{row[1]}->{row[2]}" for row in schema_rows]
-            return (
-                "execution-progress database has unexpected user-defined schema objects: "
-                + (", ".join(rendered) if rendered else "none")
-            )
-
-        # sqlite_master.sql is execution authority too. table_xinfo cannot expose
-        # inline CHECK/UNIQUE/FOREIGN KEY clauses, and INSERT OR IGNORE means a
-        # hostile CHECK can silently suppress every watermark while preserving
-        # the expected columns and PK. Accept only the exact table definition
-        # emitted by AgentRunStore for this dedicated sidecar.
         expected_create_sql = (
             "CREATE TABLE agent_execution_starts ("
             "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
             "started_at REAL NOT NULL, PRIMARY KEY(run_id,step_index,step_sha256))"
         )
-        actual_create_sql = " ".join(str(schema_rows[0][3] or "").split())
-        if actual_create_sql != expected_create_sql:
-            return "execution-progress table does not match the canonical CREATE TABLE authority"
+        expected_schema = [
+            (
+                "index",
+                "sqlite_autoindex_agent_execution_starts_1",
+                "agent_execution_starts",
+                None,
+            ),
+            (
+                "table",
+                "agent_execution_starts",
+                "agent_execution_starts",
+                expected_create_sql,
+            ),
+        ]
+        normalized_schema = [
+            (
+                str(row[0]),
+                str(row[1]),
+                str(row[2]),
+                None if row[3] is None else " ".join(str(row[3]).split()),
+            )
+            for row in schema_rows
+        ]
+        if normalized_schema != expected_schema:
+            rendered = [
+                f"{row[0]}:{row[1]}->{row[2]} sql={row[3]!r}" for row in normalized_schema
+            ]
+            return (
+                "execution-progress database does not match the canonical authority schema: "
+                + (", ".join(rendered) if rendered else "none")
+            )
 
         expected_columns = [
             ("run_id", "TEXT", 1, 1, 0),
