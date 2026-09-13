@@ -11,6 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import kaliv_dev_control._improvement_physical_runtime_direct_git as direct_git
+import kaliv_dev_control._improvement_physical_runtime_host_control as host_runtime
 import kaliv_dev_control._improvement_physical_state_host_control as state_control
 import kaliv_dev_control.improvement_physical_reservation as reservation
 import kaliv_dev_control.physical_isolation as physical_module
@@ -228,6 +230,88 @@ class PhysicalReplayStateHostControlTests(unittest.TestCase):
         )
         self.assertIn("Program Files", os.fspath(state_control._WINDOWS_LEDGER))
         self.assertNotIn("ProgramData", os.fspath(state_control._WINDOWS_LEDGER))
+
+
+class PhysicalRepositoryHostControlTests(unittest.TestCase):
+    def test_direct_git_checks_repository_before_process_start(self):
+        reader = SimpleNamespace(runtime=object())
+        with (
+            patch.object(
+                direct_git,
+                "_require_host_controlled_repository",
+                side_effect=host_runtime.PhysicalHostRuntimeError(
+                    "synthetic mutable repository"
+                ),
+            ),
+            patch.object(direct_git.subprocess, "Popen") as popen,
+        ):
+            with self.assertRaisesRegex(
+                host_runtime.PhysicalHostRuntimeError,
+                "synthetic mutable repository",
+            ):
+                direct_git._run_direct_host_git(
+                    reader,
+                    ("rev-parse", "--verify", "refs/heads/main^{commit}"),
+                    cwd=Path("/synthetic/repository"),
+                    maximum=4096,
+                )
+        popen.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX repository regression")
+    def test_repository_host_control_covers_checkout_and_git_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "repository"
+            git_dir = root / ".git"
+            git_dir.mkdir(parents=True)
+            config = git_dir / "config"
+            config.write_text(
+                "[core]\n\trepositoryformatversion = 0\n",
+                encoding="utf-8",
+            )
+            checked: list[Path] = []
+
+            def record(path: Path, *, is_directory: bool) -> None:
+                del is_directory
+                checked.append(Path(path))
+
+            with patch.object(host_runtime, "_require_posix_object", side_effect=record):
+                observed = direct_git._require_host_controlled_repository(root)
+
+            self.assertEqual(observed, root)
+            self.assertIn(root, checked)
+            self.assertIn(git_dir, checked)
+            self.assertIn(config, checked)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX repository regression")
+    def test_repository_config_include_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "repository"
+            git_dir = root / ".git"
+            git_dir.mkdir(parents=True)
+            (git_dir / "config").write_text(
+                "[include]\n\tpath = /tmp/caller-controlled-gitconfig\n",
+                encoding="utf-8",
+            )
+            with patch.object(host_runtime, "_require_posix_object", return_value=None):
+                with self.assertRaisesRegex(
+                    host_runtime.PhysicalHostRuntimeError,
+                    "includes external state",
+                ):
+                    direct_git._require_host_controlled_repository(root)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX repository regression")
+    def test_repository_external_object_alternates_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "repository"
+            alternates = root / ".git" / "objects" / "info" / "alternates"
+            alternates.parent.mkdir(parents=True)
+            alternates.write_text("/tmp/caller-controlled-objects\n", encoding="utf-8")
+            with patch.object(host_runtime, "_require_posix_object", return_value=None):
+                with self.assertRaisesRegex(
+                    host_runtime.PhysicalHostRuntimeError,
+                    "external Git object alternates",
+                ):
+                    direct_git._require_host_controlled_repository(root)
 
 
 if __name__ == "__main__":
