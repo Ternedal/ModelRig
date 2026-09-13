@@ -26,9 +26,37 @@ class Agent3ConfirmationContractTest {
     private fun jsonResponse(body: String) =
         MockResponse().setHeader("Content-Type", "application/json").setBody(body)
 
-    private fun runEnvelope(state: String) = """
-        {"run":{"id":"run-1","plan_id":"plan-1","state":"$state","steps":[]}}
-    """.trimIndent()
+    private fun runEnvelope(state: String): String {
+        // Step-level `denied` becomes terminal run state `failed` on the worker.
+        val runState = if (state == "denied") "failed" else state
+        val terminal = runState in setOf("blocked", "completed", "failed", "cancelled")
+        val planState = if (terminal) "terminal" else "available"
+        val canRequest = !terminal
+        return """
+            {
+              "run":{"id":"run-1","state":"$runState","current_step":0,"steps":[]},
+              "termination":{
+                "schema":"kaliv-agent3-termination/v1",
+                "plan":{
+                  "state":"$planState",
+                  "can_request":$canRequest,
+                  "request_scope":"plan",
+                  "effect":"prevent_future_steps",
+                  "reason":"fixture"
+                },
+                "model_stream":{
+                  "state":"not_active",
+                  "active":false,
+                  "can_request":false,
+                  "handle_present":false,
+                  "reason":"fixture"
+                },
+                "active_tool":null,
+                "production_activation":false
+              }
+            }
+        """.trimIndent()
+    }
 
     @Test
     fun confirmSendsBackExactlyTheDigestItWasGiven() {

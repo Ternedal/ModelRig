@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import threading
 import time
@@ -10,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.agent3 import capability_probe
-from app.agent3.core import Agent3Orchestrator, AgentRunStore
+from app.agent3.core import Agent3Orchestrator, AgentRunStore, StepState
 from app.agent3.integration import V2ToolAdapter
 from app.agent3.plan_store import PlanStore
 from app.agent3.planner import TypedPlanner
@@ -149,12 +150,18 @@ class PlannerChat:
 
 
 class Fixture:
-    def __init__(self, response: str, *, workers: int = 1) -> None:
-        self.temp = tempfile.TemporaryDirectory(prefix="kaliv-task-surface-")
-        root = Path(self.temp.name)
-        self.store = AgentRunStore(str(root / "runs.db"))
+    def __init__(
+        self,
+        response: str,
+        *,
+        workers: int = 1,
+        root: Path | None = None,
+    ) -> None:
+        self.temp = None if root is not None else tempfile.TemporaryDirectory(prefix="kaliv-task-surface-")
+        self.root = root if root is not None else Path(self.temp.name)
+        self.store = AgentRunStore(str(self.root / "runs.db"))
         self.orchestrator = Agent3Orchestrator(self.store, adapter.execute)
-        self.plans = PlanStore(str(root / "plans.db"))
+        self.plans = PlanStore(str(self.root / "plans.db"))
         self.state = Readiness()
         self.chat = PlannerChat(response)
         self.pool = TaskExecutionPool(workers)
@@ -173,8 +180,12 @@ class Fixture:
 
     def close(self) -> None:
         gate.slow_release.set()
+        self.client.close()
         self.pool.shutdown()
-        self.temp.cleanup()
+        self.plans.close()
+        self.store._conn.close()
+        if self.temp is not None:
+            self.temp.cleanup()
 
 
 def plan(fixture: Fixture, tool: str = "rig_status") -> str:
@@ -231,13 +242,60 @@ check(
     and gate.proposals == ["rig_status"],
     "polling observes exactly the reviewed read step complete",
 )
+with sqlite3.connect(fixture.plans.path) as connection:
+    terminal_retention = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (plan_id,),
+    ).fetchone()
+check(
+    terminal_retention is not None
+    and terminal_retention[0] is not None
+    and float(terminal_retention[1]) > time.time(),
+    "completed task retains same-plan Start recovery for a bounded grace",
+)
 check(
     completed["production_activation"] is False
     and completed["normal_chat_route_unchanged"] is True,
     "task execution cannot claim activation or normal-chat changes",
 )
 reused = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
-check(reused.status_code == 409, "task plan token is single-use")
+check(
+    reused.status_code == 202 and reused.json()["run"]["id"] == run_id,
+    "accepted task Start replays the exact same task run",
+)
+check(gate.proposals == ["rig_status"], "accepted Start replay never executes the tool twice")
+with sqlite3.connect(fixture.plans.path) as connection:
+    replay_retention = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (plan_id,),
+    ).fetchone()
+check(
+    replay_retention == terminal_retention,
+    "same-plan replay does not extend terminal recovery grace forever",
+)
+with sqlite3.connect(fixture.plans.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, plan_id),
+    )
+    connection.commit()
+expired_replay = fixture.client.post(
+    f"/experimental/agent3/task/plans/{plan_id}/start"
+)
+check(
+    expired_replay.status_code == 409
+    and expired_replay.json().get("detail", {}).get("reason") == "task_start_refused"
+    and gate.proposals == ["rig_status"],
+    "expired terminal same-plan recovery is refused without another tool execution",
+)
+known_status = fixture.client.get(f"/experimental/agent3/task/runs/{run_id}")
+check(
+    known_status.status_code == 200
+    and known_status.json().get("run", {}).get("id") == run_id
+    and known_status.json().get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"],
+    "known run-id status remains available after plan recovery grace expires",
+)
 fixture.close()
 
 
@@ -281,9 +339,18 @@ changed = readiness()
 changed["pilot"] = dict(changed["pilot"], report_sha256="d" * 64)
 fixture.state.value = changed
 changed_start = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
-check(changed_start.status_code == 409 and gate.proposals == [], "plan is bound to the exact physical pilot report")
+check(
+    changed_start.status_code == 409
+    and changed_start.json().get("detail", {}).get("reason") == "task_start_refused"
+    and gate.proposals == [],
+    "plan is bound to the exact physical pilot report",
+)
 consumed_after_mismatch = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
-check(consumed_after_mismatch.status_code == 409, "evidence-mismatched plan fails closed as consumed")
+check(
+    consumed_after_mismatch.status_code == 409
+    and consumed_after_mismatch.json().get("detail", {}).get("reason") == "task_start_refused",
+    "evidence-mismatched plan remains definitively refused on replay",
+)
 fixture.close()
 
 
@@ -324,6 +391,17 @@ started = fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start"
 check(started.status_code == 202, "slow read returns a run id before the tool completes")
 run_id = started.json()["run"]["id"]
 check(gate.slow_started.wait(timeout=2), "background worker actually entered the slow read")
+with sqlite3.connect(fixture.plans.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, plan_id),
+    )
+    connection.commit()
+check(
+    fixture.plans.purge() == 0
+    and fixture.plans.start_recovery(plan_id) is not None,
+    "cleanup never drops an active Start recovery record solely on TTL",
+)
 fixture.state.value = readiness(
     selected_surface="agent2",
     eligible_for_task_ui=False,
@@ -334,6 +412,17 @@ cancelled = fixture.client.post(f"/experimental/agent3/task/runs/{run_id}/cancel
 check(
     cancelled.status_code == 200 and cancelled.json()["run"]["state"] == "cancelled",
     "Stop remains reachable and cancels the task after readiness fallback",
+)
+with sqlite3.connect(fixture.plans.path) as connection:
+    cancelled_retention = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (plan_id,),
+    ).fetchone()
+check(
+    cancelled_retention is not None
+    and cancelled_retention[0] is not None
+    and float(cancelled_retention[1]) > time.time(),
+    "cancelled task starts bounded same-plan recovery retention",
 )
 gate.slow_release.set()
 terminal = wait_terminal(fixture, run_id)
@@ -378,6 +467,449 @@ check(
 if second.status_code == 202:
     wait_terminal(fixture, second.json()["run"]["id"])
 fixture.close()
+
+
+# Executor-submit failure happens after run acceptance. Replay returns that same
+# cancelled run instead of consuming the plan into an unrecoverable ambiguity.
+gate.reset()
+fixture = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"read status"}'
+)
+executor_plan = plan(fixture)
+fixture.pool.submit_reserved = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("executor unavailable"))  # type: ignore[method-assign]
+executor_failed = fixture.client.post(f"/experimental/agent3/task/plans/{executor_plan}/start")
+check(executor_failed.status_code == 503, "executor-submit failure is reported on the first Start")
+executor_replay = fixture.client.post(f"/experimental/agent3/task/plans/{executor_plan}/start")
+check(
+    executor_replay.status_code == 409
+    and executor_replay.json().get("detail", {}).get("reason") == "task_start_refused",
+    "executor-submit failure remains definitively refused on replay",
+)
+check(gate.proposals == [], "executor-submit failure never executes the task")
+fixture.close()
+
+
+
+
+class SimulatedWorkerRestart(BaseException):
+    pass
+
+
+# A worker can die after terminal RunStore truth is durable but before #1034's
+# PlanStore terminal-retention marker is committed. A new task surface repairs
+# only that bookkeeping at construction time, before any client status/replay.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-terminal-reconcile-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"terminal reconcile"}',
+    root=root,
+)
+reconcile_plan = plan(first)
+reconcile_started = first.client.post(
+    f"/experimental/agent3/task/plans/{reconcile_plan}/start"
+)
+reconcile_run = reconcile_started.json()["run"]["id"]
+reconcile_terminal = wait_terminal(first, reconcile_run)
+check(
+    reconcile_terminal.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"],
+    "terminal-reconcile fixture persists one completed task execution",
+)
+# Simulate abrupt death in the exact post-run/pre-retention window by erasing
+# only the PlanStore marker while preserving terminal RunStore truth.
+with sqlite3.connect(first.plans.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET start_terminal_at=NULL,expires_at=? WHERE id=?",
+        (time.time() - 1, reconcile_plan),
+    )
+    connection.commit()
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"terminal reconcile"}',
+    root=root,
+)
+with sqlite3.connect(second.plans.path) as connection:
+    reconciled_row = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (reconcile_plan,),
+    ).fetchone()
+check(
+    reconciled_row is not None
+    and reconciled_row[0] is not None
+    and float(reconciled_row[1]) > time.time(),
+    "startup repairs missing terminal Start retention before any client replay",
+)
+check(
+    gate.proposals == ["rig_status"],
+    "startup terminal reconciliation never re-executes the completed task",
+)
+second.close()
+third = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"terminal reconcile"}',
+    root=root,
+)
+with sqlite3.connect(third.plans.path) as connection:
+    reconciled_again = connection.execute(
+        "SELECT start_terminal_at,expires_at FROM agent_plans WHERE id=?",
+        (reconcile_plan,),
+    ).fetchone()
+check(
+    reconciled_again == reconciled_row,
+    "repeated startup reconciliation does not slide terminal recovery grace",
+)
+third.close()
+shared.cleanup()
+
+
+# A pre-materialization Start claim has no RunStore row. Startup reconciliation
+# must preserve it exactly and must never materialize or execute it implicitly.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-terminal-reconcile-missing-")
+root = Path(shared.name)
+seed_store = PlanStore(str(root / "plans.db"), ttl_seconds=30)
+missing_plan, _ = seed_store.save("missing-run")
+seed_store.claim_task_start(
+    missing_plan, "run-missing-startup", "prepared-missing-startup"
+)
+with sqlite3.connect(seed_store.path) as connection:
+    connection.execute(
+        "UPDATE agent_plans SET expires_at=? WHERE id=?",
+        (time.time() - 1, missing_plan),
+    )
+    connection.commit()
+seed_store.close()
+missing_fixture = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"missing startup"}',
+    root=root,
+)
+missing_recovery = missing_fixture.plans.start_recovery(missing_plan)
+with sqlite3.connect(missing_fixture.plans.path) as connection:
+    missing_marker = connection.execute(
+        "SELECT start_terminal_at FROM agent_plans WHERE id=?",
+        (missing_plan,),
+    ).fetchone()
+check(
+    missing_recovery is not None
+    and missing_recovery[0] == "pending"
+    and missing_recovery[1] == "run-missing-startup"
+    and missing_marker == (None,),
+    "startup preserves a bound Start whose RunStore row does not exist yet",
+)
+check(
+    missing_fixture.store.load("run-missing-startup") is None and gate.proposals == [],
+    "startup reconciliation never materializes or executes a missing run",
+)
+missing_fixture.close()
+shared.cleanup()
+
+
+def leave_bound_start_without_executor(fixture: Fixture) -> tuple[str, str, str | None]:
+    plan_id = plan(fixture)
+    original_submit = fixture.pool.submit_reserved
+
+    def crash_before_submit(*_args, **_kwargs) -> None:
+        raise SimulatedWorkerRestart()
+
+    fixture.pool.submit_reserved = crash_before_submit  # type: ignore[method-assign]
+    crashed = False
+    try:
+        # BaseException bypasses normal Start cleanup, matching abrupt process
+        # death after the claimed run is persisted and task-bound but pre-submit.
+        fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+    except SimulatedWorkerRestart:
+        crashed = True
+    finally:
+        fixture.pool.submit_reserved = original_submit  # type: ignore[method-assign]
+    check(crashed, "simulated worker restart lands after pending run binding")
+    recovery = fixture.plans.start_recovery(plan_id)
+    check(
+        recovery is not None and recovery[0] == "pending" and bool(recovery[1]),
+        "crash leaves one persisted pending run and no executor acceptance",
+    )
+    assert recovery is not None and recovery[1] is not None
+    return plan_id, recovery[1], recovery[2]
+
+
+def leave_claim_without_run(fixture: Fixture) -> tuple[str, str, str | None]:
+    plan_id = plan(fixture)
+    original_claim = fixture.plans.claim_task_start
+
+    def claim_then_crash(bound_plan_id: str, run_id: str, prepared_run: str) -> None:
+        original_claim(bound_plan_id, run_id, prepared_run)
+        raise SimulatedWorkerRestart()
+
+    fixture.plans.claim_task_start = claim_then_crash  # type: ignore[method-assign]
+    crashed = False
+    try:
+        fixture.client.post(f"/experimental/agent3/task/plans/{plan_id}/start")
+    except SimulatedWorkerRestart:
+        crashed = True
+    finally:
+        fixture.plans.claim_task_start = original_claim  # type: ignore[method-assign]
+    check(crashed, "simulated worker restart lands immediately after atomic Start claim")
+    recovery = fixture.plans.start_recovery(plan_id)
+    check(
+        recovery is not None
+        and recovery[0] == "pending"
+        and bool(recovery[1])
+        and fixture.store.load(recovery[1]) is None,
+        "atomic claim persists one run id before RunStore materialization",
+    )
+    assert recovery is not None and recovery[1] is not None
+    return plan_id, recovery[1], recovery[2]
+
+
+# Same-generation replay cannot parallel-materialize a Start that crashed just
+# after the atomic claim; a new worker generation can recover that exact run id.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-prebind-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart prebind"}',
+    root=root,
+)
+prebind_plan, prebind_run, prebind_owner = leave_claim_without_run(first)
+same_generation = first.client.post(f"/experimental/agent3/task/plans/{prebind_plan}/start")
+check(
+    same_generation.status_code == 409
+    and same_generation.json().get("detail", {}).get("reason") == "task_start_pending"
+    and first.store.load(prebind_run) is None
+    and gate.proposals == [],
+    "same worker generation leaves claimed-but-unmaterialized Start pending",
+)
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart prebind"}',
+    root=root,
+)
+check(second.plans.start_owner != prebind_owner, "prebind recovery sees a new worker generation")
+prebind_recovered = second.client.post(f"/experimental/agent3/task/plans/{prebind_plan}/start")
+check(
+    prebind_recovered.status_code == 202
+    and prebind_recovered.json()["run"]["id"] == prebind_run,
+    "new worker materializes the exact server-generated run id from atomic claim",
+)
+terminal = wait_terminal(second, prebind_run)
+check(
+    terminal.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"],
+    "prebind crash recovery executes the reviewed read exactly once",
+)
+second.close()
+shared.cleanup()
+
+
+# Crash after run_created but before task_surface_bound is repaired by adding
+# only the missing binding to the exact prepared run, then executing once.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-run-created-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart run created"}',
+    root=root,
+)
+run_created_plan = plan(first)
+original_event = first.store.event
+
+def crash_before_binding(run_id: str, kind: str, payload) -> None:
+    if kind == "task_surface_bound":
+        raise SimulatedWorkerRestart()
+    original_event(run_id, kind, payload)
+
+first.store.event = crash_before_binding  # type: ignore[method-assign]
+crashed = False
+try:
+    first.client.post(f"/experimental/agent3/task/plans/{run_created_plan}/start")
+except SimulatedWorkerRestart:
+    crashed = True
+finally:
+    first.store.event = original_event  # type: ignore[method-assign]
+recovery = first.plans.start_recovery(run_created_plan)
+assert recovery is not None and recovery[1] is not None
+run_created_run = recovery[1]
+check(
+    crashed
+    and first.store.load(run_created_run) is not None
+    and not any(event.get("kind") == "task_surface_bound" for event in first.store.events(run_created_run))
+    and gate.proposals == [],
+    "worker crash can leave exact run_created truth without task binding or execution",
+)
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart run created"}',
+    root=root,
+)
+run_created_recovered = second.client.post(
+    f"/experimental/agent3/task/plans/{run_created_plan}/start"
+)
+check(
+    run_created_recovered.status_code == 202
+    and run_created_recovered.json()["run"]["id"] == run_created_run,
+    "restart binds and resumes the exact already-created run",
+)
+terminal = wait_terminal(second, run_created_run)
+events = terminal.get("events", [])
+check(
+    terminal.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"]
+    and sum(event.get("kind") == "run_created" for event in events) == 1
+    and sum(event.get("kind") == "task_surface_bound" for event in events) == 1,
+    "run-created crash recovery adds one binding and never duplicates run/tool execution",
+)
+second.close()
+shared.cleanup()
+
+
+# A new worker generation reclaims the exact pending run; no second run is created.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-pending-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart"}',
+    root=root,
+)
+pending_plan, pending_run, pending_owner = leave_bound_start_without_executor(first)
+check(gate.proposals == [], "pre-submit worker crash executes no tool")
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart"}',
+    root=root,
+)
+check(second.plans.start_owner != pending_owner, "restarted task store has a distinct generation")
+check(
+    gate.proposals == [],
+    "startup terminal reconciliation does not auto-resume a nonterminal task",
+)
+recovered = second.client.post(f"/experimental/agent3/task/plans/{pending_plan}/start")
+check(
+    recovered.status_code == 202 and recovered.json()["run"]["id"] == pending_run,
+    "same-plan replay after worker restart reclaims the exact existing run",
+)
+terminal = wait_terminal(second, pending_run)
+check(
+    terminal.get("run", {}).get("state") == "completed" and gate.proposals == ["rig_status"],
+    "reclaimed pending run executes the reviewed read exactly once",
+)
+replayed = second.client.post(f"/experimental/agent3/task/plans/{pending_plan}/start")
+check(
+    replayed.status_code == 202
+    and replayed.json()["run"]["id"] == pending_run
+    and gate.proposals == ["rig_status"],
+    "post-recovery replay returns the same run without a second execution",
+)
+second.close()
+shared.cleanup()
+
+
+# Persisted EXECUTING idempotent read is atomically reset and resumed on restart.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-executing-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart executing"}',
+    root=root,
+)
+executing_plan, executing_run, _ = leave_bound_start_without_executor(first)
+run = first.store.load(executing_run)
+assert run is not None
+run.steps[run.current_step].state = StepState.EXECUTING
+first.store.save_with_event(
+    run,
+    "step_started",
+    {"step_id": run.steps[run.current_step].id, "tool": run.steps[run.current_step].tool},
+)
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart executing"}',
+    root=root,
+)
+executing_recovery = second.client.post(f"/experimental/agent3/task/plans/{executing_plan}/start")
+check(
+    executing_recovery.status_code == 202
+    and executing_recovery.json()["run"]["id"] == executing_run,
+    "dead-owner EXECUTING run keeps its original run id",
+)
+terminal = wait_terminal(second, executing_run)
+check(
+    terminal.get("run", {}).get("state") == "completed"
+    and gate.proposals == ["rig_status"]
+    and any(
+        event.get("kind") == "task_interrupted_execution_replayable"
+        for event in terminal.get("events", [])
+    ),
+    "idempotent EXECUTING state is CAS-reset before one resumed read",
+)
+second.close()
+shared.cleanup()
+
+
+# Persisted SUCCEEDED result advances after restart without invoking the tool again.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-succeeded-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart succeeded"}',
+    root=root,
+)
+succeeded_plan, succeeded_run, _ = leave_bound_start_without_executor(first)
+run = first.store.load(succeeded_run)
+assert run is not None
+step = run.steps[run.current_step]
+step.state = StepState.SUCCEEDED
+step.result = {"status": "executed", "result": {"ok": True}}
+first.store.save_with_event(
+    run,
+    "step_succeeded",
+    {"step_id": step.id, "tool": step.tool},
+)
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"restart succeeded"}',
+    root=root,
+)
+succeeded_recovery = second.client.post(f"/experimental/agent3/task/plans/{succeeded_plan}/start")
+check(
+    succeeded_recovery.status_code == 202
+    and succeeded_recovery.json()["run"]["id"] == succeeded_run,
+    "SUCCEEDED crash recovery retains the original run",
+)
+terminal = wait_terminal(second, succeeded_run)
+check(
+    terminal.get("run", {}).get("state") == "completed" and gate.proposals == [],
+    "persisted SUCCEEDED step advances without duplicate tool execution",
+)
+second.close()
+shared.cleanup()
+
+
+# Even an already-accepted nonterminal run is reattached by scoped status after restart.
+gate.reset()
+shared = tempfile.TemporaryDirectory(prefix="kaliv-task-restart-accepted-")
+root = Path(shared.name)
+first = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"accepted restart"}',
+    root=root,
+)
+accepted_plan, accepted_run, _ = leave_bound_start_without_executor(first)
+first.plans.mark_start_accepted(accepted_plan, accepted_run)
+first.close()
+second = Fixture(
+    '{"steps":[{"tool":"rig_status","args":{}}],"rationale":"accepted restart"}',
+    root=root,
+)
+status = second.client.get(f"/experimental/agent3/task/runs/{accepted_run}")
+check(
+    status.status_code == 200 and status.json()["run"]["id"] == accepted_run,
+    "retained run-id status authority reattaches accepted work after worker restart",
+)
+terminal = wait_terminal(second, accepted_run)
+check(
+    terminal.get("run", {}).get("state") == "completed" and gate.proposals == ["rig_status"],
+    "accepted restart recovery resumes the same idempotent read exactly once",
+)
+second.close()
+shared.cleanup()
 
 
 print(f"\n===== AGENT3 READONLY TASK SURFACE: {passed} passed, {failed} failed =====")

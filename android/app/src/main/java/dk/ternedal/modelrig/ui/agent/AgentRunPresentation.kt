@@ -33,6 +33,39 @@ object AgentRunPresentation {
     fun isTerminal(run: Agent3Client.Run): Boolean = run.state.trim().lowercase() in TERMINAL
 
     /**
+     * Stop-authority kommer KUN fra serverens termination-plan.
+     *
+     * En manglende receipt er ikke implicit tilladelse. Den betyder, at
+     * klienten mangler authority og derfor skal fail-close. Terminal truth
+     * vinder desuden altid over en eventuelt stale canRequest=true receipt.
+     */
+    fun canRequestStop(run: Agent3Client.Run): Boolean =
+        !isTerminal(run) && run.termination?.plan?.canRequest == true
+
+    fun stopBlockedReason(run: Agent3Client.Run): String? {
+        if (canRequestStop(run)) return null
+        val serverReason = run.termination?.plan?.reason?.trim().orEmpty()
+        if (serverReason.isNotBlank()) return serverReason
+        return if (isTerminal(run)) {
+            "Kørslen er afsluttet."
+        } else {
+            "Riggen gav ingen Stop-tilladelse."
+        }
+    }
+
+    /**
+     * Local publication authority for the chat panel's async polling.
+     * A Stop attempt advances the epoch before I/O, invalidating a listRuns()
+     * request that started against older run truth. This never changes server
+     * state; it only prevents stale responses from resurrecting old UI state.
+     */
+    fun nextRunPanelPublicationEpoch(current: Long): Long =
+        if (current == Long.MAX_VALUE) 1L else current + 1L
+
+    fun canPublishRunPanelPoll(requestEpoch: Long, currentEpoch: Long): Boolean =
+        requestEpoch == currentEpoch
+
+    /**
      * Trinnene som kortet viser dem. Et trins egen state vinder; mangler den,
      * afgør currentStep. Vi GÆTTER aldrig "done" på et trin riggen ikke har
      * meldt færdigt — kortet skal ikke påstå fremdrift der ikke er sket.

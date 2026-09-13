@@ -93,7 +93,7 @@ class KalivRiskDecisionTest {
     @Test
     fun `known finished states are terminal`() {
         listOf("done", "completed", "succeeded", "success",
-               "denied", "cancelled", "canceled", "failed", "error")
+               "denied", "cancelled", "canceled", "failed", "error", "blocked")
             .forEach { assertTrue(isTerminal(it), "$it should be terminal") }
     }
 
@@ -118,6 +118,7 @@ class KalivRiskDecisionTest {
     fun `server state drives the icon`() {
         assertEquals(StepStatus.DONE, statusOf(step("completed"), isCurrent = false))
         assertEquals(StepStatus.CANCELLED, statusOf(step("denied"), isCurrent = false))
+        assertEquals(StepStatus.CANCELLED, statusOf(step("blocked"), isCurrent = true))
         assertEquals(StepStatus.ACTIVE, statusOf(step("running"), isCurrent = false))
         assertEquals(StepStatus.ACTIVE, statusOf(step("awaiting_confirmation"), isCurrent = false))
     }

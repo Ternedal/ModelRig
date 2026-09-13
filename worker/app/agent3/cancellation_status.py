@@ -7,7 +7,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .. import tools
+from .capability_graph_api import build_runtime_capability_graph
+from .capability_receipt import evaluate_run_capabilities
 from .core import AgentRun, RunState, StepState
+from .integration import V2ToolAdapter
 
 SCHEMA = "kaliv-agent3-termination/v1"
 _TERMINAL_RUNS = {
@@ -109,8 +112,45 @@ def termination_view(run: AgentRun) -> dict[str, Any]:
     }
 
 
+def _is_exact_run_get(request: Request) -> bool:
+    if request.method != "GET":
+        return False
+    prefix = "/experimental/agent3/runs/"
+    path = request.url.path
+    if not path.startswith(prefix):
+        return False
+    remainder = path[len(prefix):].strip("/")
+    return bool(remainder) and "/" not in remainder
+
+
+def _snapshot_capability_receipt(app: FastAPI, run: AgentRun) -> dict[str, Any] | None:
+    """Evaluate current capability evidence for this exact serialized run snapshot.
+
+    The full production mount already proves that the orchestrator executor is
+    the V2 adapter. If that authority is unavailable, or current capability
+    measurement fails, ordinary run visibility remains available without
+    inventing evidence. Reviewed recovery that requires plan evidence will then
+    fail closed at the client boundary.
+    """
+
+    if not getattr(app.state, "agent3_mounted", False):
+        return None
+    orchestrator = getattr(app.state, "agent3_orchestrator", None)
+    runtime_adapter = getattr(getattr(orchestrator, "executor", None), "__self__", None)
+    if not isinstance(runtime_adapter, V2ToolAdapter):
+        return None
+    try:
+        graph = build_runtime_capability_graph(
+            runtime_adapter,
+            worker_version=getattr(app, "version", None),
+        )
+        return evaluate_run_capabilities(graph, run).to_dict()
+    except Exception:
+        return None
+
+
 def install_termination_contract(app: FastAPI) -> None:
-    """Attach the receipt to the isolated Agent 3 HTTP surface exactly once."""
+    """Attach server-owned run evidence to the Agent 3 HTTP surface exactly once."""
 
     if getattr(app.state, "agent3_termination_contract_mounted", False):
         return
@@ -126,10 +166,17 @@ def install_termination_contract(app: FastAPI) -> None:
         body = b"".join([chunk async for chunk in response.body_iterator])
         payload = json.loads(body)
         if isinstance(payload, dict) and isinstance(payload.get("run"), dict):
+            # Reconstruct from the exact bytes that will be returned. Both
+            # termination and optional capability evidence are therefore bound
+            # to this response snapshot, not to a later independent store read.
             run = AgentRun.from_json(
                 json.dumps(payload["run"], ensure_ascii=False, sort_keys=True)
             )
             payload["termination"] = termination_view(run)
+            if _is_exact_run_get(request):
+                receipt = _snapshot_capability_receipt(app, run)
+                if receipt is not None:
+                    payload["capability_receipt"] = receipt
 
         headers = {
             key: value

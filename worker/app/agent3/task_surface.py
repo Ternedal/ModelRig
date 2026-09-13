@@ -31,6 +31,12 @@ from .routing import StrictTurnRouter
 
 TASK_SURFACE = "agent3_readonly"
 TASK_REASON = "agent3_readonly_selected"
+_TERMINAL_TASK_STATES = {
+    RunState.COMPLETED,
+    RunState.FAILED,
+    RunState.CANCELLED,
+    RunState.BLOCKED,
+}
 ReadinessProvider = Callable[[], dict[str, Any]]
 CapabilityGraphProvider = Callable[[], CapabilityGraph]
 
@@ -174,6 +180,29 @@ def _assert_readonly_template(template: AgentRun) -> None:
         )
 
 
+def _reconcile_terminal_start_recovery(
+    orchestrator: Agent3Orchestrator,
+    plan_store: PlanStore,
+) -> None:
+    """Repair only missing terminal-retention bookkeeping after worker restart.
+
+    Recovery authority wins on every uncertainty: enumeration/load/mark failures
+    leave the PlanStore row untouched. This helper never claims an executor,
+    creates/materializes a run, consumes a plan or changes run state.
+    """
+    try:
+        run_ids = plan_store.unmarked_start_recovery_run_ids()
+    except Exception:
+        return
+    for run_id in run_ids:
+        try:
+            run = orchestrator.store.load(run_id)
+            if run is not None and run.state in _TERMINAL_TASK_STATES:
+                plan_store.mark_start_terminal_for_run(run_id)
+        except Exception:
+            continue
+
+
 def build_task_surface_router(
     adapter: V2ToolAdapter,
     orchestrator: Agent3Orchestrator,
@@ -198,6 +227,7 @@ def build_task_surface_router(
     )
     planner = planner or TypedPlanner(adapter)
     turn_router = StrictTurnRouter()
+    _reconcile_terminal_start_recovery(orchestrator, plan_store)
 
     def capability_receipt(template: AgentRun) -> dict[str, Any] | None:
         if capability_graph_provider is None:
@@ -238,14 +268,28 @@ def build_task_surface_router(
         _assert_readonly_template(run)
         return run, {str(k): str(v) for k, v in binding.items()}, receipt, events
 
+    def retain_terminal_start_recovery(run: AgentRun) -> None:
+        if run.state not in _TERMINAL_TASK_STATES:
+            return
+        try:
+            plan_store.mark_start_terminal_for_run(run.id)
+        except Exception:
+            # This is retention bookkeeping only. The persisted run remains the
+            # outcome authority; a failed mark safely retains recovery longer.
+            return
+
     def task_response(run_id: str) -> dict[str, Any]:
         run, binding, receipt, events = task_context(run_id)
         if run.state == RunState.WAITING_CONFIRMATION:
             orchestrator.cancel(run.id)
+            cancelled = orchestrator.store.load(run.id)
+            if cancelled is not None:
+                retain_terminal_start_recovery(cancelled)
             raise HTTPException(
                 status_code=500,
                 detail="read-only task unexpectedly requested confirmation",
             )
+        retain_terminal_start_recovery(run)
         response: dict[str, Any] = {
             "task_surface": TASK_SURFACE,
             "selected_surface": TASK_SURFACE,
@@ -254,12 +298,7 @@ def build_task_surface_router(
             "run": json.loads(run.to_json()),
             "events": events,
             "readiness_binding": binding,
-            "terminal": run.state in {
-                RunState.COMPLETED,
-                RunState.FAILED,
-                RunState.CANCELLED,
-                RunState.BLOCKED,
-            },
+            "terminal": run.state in _TERMINAL_TASK_STATES,
             "production_activation": False,
             "normal_chat_route_unchanged": True,
         }
@@ -268,16 +307,7 @@ def build_task_surface_router(
         return response
 
     def execute_task(run_id: str) -> None:
-        """Advance only the promoted read path and stop immediately on cancel.
-
-        The generic orchestrator also owns write confirmations and recovery. Its
-        broad advance loop historically continued after `_execute()` had marked a
-        late read as COMPLETED_AFTER_CANCEL, incremented the step and wrote a
-        contradictory run_completed event. The normal task surface has a smaller
-        authority, so its executor is smaller too: pending, local, idempotent reads
-        only, with an explicit cancellation check before every step and before the
-        terminal completion write.
-        """
+        """Advance only the promoted read path, including crash-safe idempotent resume."""
         try:
             run = orchestrator.store.load(run_id)
             if run is None or run.state in {
@@ -293,9 +323,42 @@ def build_task_surface_router(
                 fresh = orchestrator.store.load(run.id)
                 if fresh is None or fresh.state == RunState.CANCELLED:
                     return
+                run = fresh
                 step = run.steps[run.current_step]
+
+                # A worker restart can leave the exact persisted idempotent read
+                # either EXECUTING or already SUCCEEDED before current_step was
+                # advanced. Resume that same run; never clone a second task run.
+                if step.state == StepState.SUCCEEDED:
+                    conflict = orchestrator._advance_succeeded_step(run)
+                    if conflict is not None:
+                        return
+                    refreshed = orchestrator.store.load(run.id)
+                    if refreshed is None:
+                        return
+                    run = refreshed
+                    continue
+                if step.state == StepState.EXECUTING:
+                    if not step.idempotent:
+                        raise RuntimeError("read-only task interrupted a non-idempotent step")
+                    expected_payload = run.to_json()
+                    step.state = StepState.PENDING
+                    step.result = None
+                    step.error = None
+                    if not orchestrator.store.save_with_event_if_unchanged(
+                        run,
+                        expected_state=RunState.RUNNING,
+                        expected_payload=expected_payload,
+                        kind="task_interrupted_execution_replayable",
+                        payload={"step_id": step.id, "tool": step.tool},
+                    ):
+                        fresh = orchestrator.store.load(run.id)
+                        if fresh is None or fresh.state == RunState.CANCELLED:
+                            return
+                        raise RuntimeError("task changed during interrupted read recovery")
+                    continue
                 if step.state != StepState.PENDING:
-                    raise RuntimeError("read-only task step left the pending state")
+                    raise RuntimeError("read-only task step left the recoverable state")
 
                 decision = orchestrator.policy.evaluate(
                     step,
@@ -328,28 +391,33 @@ def build_task_surface_router(
                     )
                     return
 
-                # Reuse the shared execution primitive for atomic step events and
-                # COMPLETED_AFTER_CANCEL detection, but own the surrounding loop
-                # so CANCELLED is terminal here rather than falling through.
                 orchestrator._execute(run, step)
                 if run.state in {RunState.FAILED, RunState.CANCELLED}:
                     return
                 if step.state != StepState.SUCCEEDED:
                     raise RuntimeError("read-only task step did not finish successfully")
-                run.current_step += 1
-                run.state = RunState.RUNNING
-                orchestrator.store.save(run)
+                conflict = orchestrator._advance_succeeded_step(run)
+                if conflict is not None:
+                    return
+                refreshed = orchestrator.store.load(run.id)
+                if refreshed is None:
+                    return
+                run = refreshed
 
-            fresh = orchestrator.store.load(run.id)
-            if fresh is None or fresh.state == RunState.CANCELLED:
-                return
+            expected_payload = run.to_json()
             run.state = RunState.COMPLETED
             run.answer = orchestrator.answerer(run)
-            orchestrator.store.save_with_event(
+            if not orchestrator.store.save_with_event_if_unchanged(
                 run,
-                "run_completed",
-                {"steps": len(run.steps)},
-            )
+                expected_state=RunState.RUNNING,
+                expected_payload=expected_payload,
+                kind="run_completed",
+                payload={"steps": len(run.steps)},
+            ):
+                fresh = orchestrator.store.load(run.id)
+                if fresh is None or fresh.state == RunState.CANCELLED:
+                    return
+                raise RuntimeError("task changed while final completion was committed")
         except Exception as exc:
             run = orchestrator.store.load(run_id)
             if run is not None and run.state not in {
@@ -364,6 +432,10 @@ def build_task_surface_router(
                     "task_execution_failed",
                     {"error": str(exc)},
                 )
+        finally:
+            terminal_run = orchestrator.store.load(run_id)
+            if terminal_run is not None:
+                retain_terminal_start_recovery(terminal_run)
 
     @router.post("/plan")
     async def preview(req: TaskPlanReq) -> dict[str, Any]:
@@ -463,103 +535,360 @@ def build_task_surface_router(
             response["capability_receipt"] = receipt
         return response
 
+    @staticmethod
+    def _stable_run_payload(run: AgentRun) -> dict[str, Any]:
+        payload = json.loads(run.to_json())
+        payload.pop("updated_at", None)
+        return payload
+
+    @staticmethod
+    def _step_plan_shape(step: Any) -> tuple[Any, ...]:
+        return (
+            step.tool,
+            step.args,
+            step.risk,
+            step.sensitivity,
+            step.egress,
+            step.origin,
+            step.idempotent,
+            step.conversation_id,
+            step.summary,
+        )
+
+    def materialize_claimed_run(
+        plan_id: str,
+        run_id: str,
+    ) -> tuple[AgentRun, dict[str, str], dict[str, Any] | None, list[dict[str, Any]]]:
+        # Old #1030 records already have a fully persisted/bound run and do not
+        # carry start_run. Preserve that recovery contract without migration.
+        try:
+            return task_context(run_id)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+
+        raw_envelope, prepared_raw = plan_store.start_materialization(plan_id, run_id)
+        envelope = json.loads(raw_envelope)
+        if envelope.get("task_surface") != TASK_SURFACE:
+            raise PlanStoreError("claimed task Start has the wrong surface")
+        stored_binding = envelope.get("readiness_binding")
+        if not isinstance(stored_binding, dict):
+            raise PlanStoreError("claimed task Start lost its readiness binding")
+        template = AgentRun.from_json(envelope["run"])
+        prepared = AgentRun.from_json(prepared_raw)
+        _assert_readonly_template(template)
+        _assert_readonly_template(prepared)
+        if prepared.id != run_id:
+            raise PlanStoreError("prepared task run id does not match Start authority")
+        if (
+            prepared.request != template.request
+            or prepared.route != template.route
+            or prepared.proactive is not False
+            or prepared.allow_private_cloud is not False
+            or prepared.state != RunState.RUNNING
+            or prepared.current_step != 0
+            or prepared.answer is not None
+            or prepared.error is not None
+            or len(prepared.steps) != len(template.steps)
+            or len(prepared.steps) > orchestrator.max_steps
+            or any(
+                _step_plan_shape(candidate) != _step_plan_shape(reviewed)
+                for candidate, reviewed in zip(prepared.steps, template.steps)
+            )
+            or any(
+                step.state != StepState.PENDING
+                or step.result is not None
+                or step.error is not None
+                or step.confirmation_digest is not None
+                or step.confirmation_expires_at is not None
+                for step in prepared.steps
+            )
+        ):
+            raise PlanStoreError("prepared task run does not match the reviewed plan")
+
+        stored_receipt = envelope.get("capability_receipt")
+        if stored_receipt is not None:
+            if not isinstance(stored_receipt, dict):
+                raise PlanStoreError("claimed task Start has an invalid capability receipt")
+            if stored_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
+                raise PlanStoreError("claimed task Start capability receipt does not match plan")
+
+        bound_payload: dict[str, Any] = {
+            "surface": TASK_SURFACE,
+            "readiness_binding": stored_binding,
+        }
+        if stored_receipt is not None:
+            bound_payload["capability_receipt"] = stored_receipt
+
+        existing = orchestrator.store.load(run_id)
+        if existing is None:
+            orchestrator.store.save_with_event(
+                prepared,
+                "run_created",
+                {"route": prepared.route.kind.value, "steps": len(prepared.steps)},
+            )
+            existing = orchestrator.store.load(run_id)
+            if existing is None:
+                raise RuntimeError("claimed task run was not persisted")
+        elif _stable_run_payload(existing) != _stable_run_payload(prepared):
+            raise PlanStoreError("persisted task run does not match prepared Start authority")
+
+        events = orchestrator.store.events(run_id)
+        bound_events = [
+            event
+            for event in events
+            if event.get("kind") == "task_surface_bound"
+            and isinstance(event.get("payload"), dict)
+            and event["payload"].get("surface") == TASK_SURFACE
+        ]
+        if not bound_events:
+            orchestrator.store.event(run_id, "task_surface_bound", bound_payload)
+        return task_context(run_id)
+
+    def recover_bound_execution(
+        plan_id: str,
+        state: str,
+        run_id: str,
+        owner: str | None,
+    ) -> dict[str, Any] | None:
+        context: tuple[AgentRun, dict[str, str], dict[str, Any] | None, list[dict[str, Any]]] | None
+        try:
+            context = task_context(run_id)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            context = None
+
+        if context is not None:
+            run, _binding, _receipt, events = context
+            if run.state in {
+                RunState.COMPLETED,
+                RunState.FAILED,
+                RunState.CANCELLED,
+                RunState.BLOCKED,
+            }:
+                if state == "pending":
+                    plan_store.mark_start_accepted(plan_id, run_id)
+                return task_response(run_id)
+        else:
+            run = None
+            events = []
+
+        if owner == plan_store.start_owner:
+            # Same-generation missing materialization can still belong to the
+            # original in-flight Start request. Never create a parallel run.
+            if context is None:
+                return None
+            if state == "accepted":
+                return task_response(run_id)
+            execution_evidence = any(
+                event.get("kind") in {
+                    "policy_decision",
+                    "step_started",
+                    "step_succeeded",
+                    "step_failed",
+                    "task_interrupted_execution_replayable",
+                    "task_execution_failed",
+                    "run_completed",
+                }
+                for event in events
+            )
+            if execution_evidence:
+                plan_store.mark_start_accepted(plan_id, run_id)
+                return task_response(run_id)
+            return None
+
+        # The shipped worker launcher owns exactly one uvicorn process. A bound
+        # owner from another PlanStore generation therefore cannot still have a
+        # live in-process executor. Reclaim only the exact server-generated run.
+        if not execution_pool.reserve():
+            return None
+        reserved = True
+        try:
+            claimed_state = plan_store.claim_start_recovery(plan_id, run_id, owner)
+            if claimed_state is None:
+                return None
+            try:
+                run, _binding, _receipt, _events = materialize_claimed_run(plan_id, run_id)
+            except Exception:
+                plan_store.release_start_recovery_claim(plan_id, run_id)
+                return None
+            if run.state in {
+                RunState.COMPLETED,
+                RunState.FAILED,
+                RunState.CANCELLED,
+                RunState.BLOCKED,
+            }:
+                if claimed_state == "pending":
+                    plan_store.mark_start_accepted(plan_id, run_id)
+                return task_response(run_id)
+            try:
+                execution_pool.submit_reserved(execute_task, run_id)
+            except Exception:
+                plan_store.release_start_recovery_claim(plan_id, run_id)
+                return None
+            reserved = False
+            if claimed_state == "pending":
+                try:
+                    plan_store.mark_start_accepted(plan_id, run_id)
+                except PlanStoreError:
+                    # Executor owns this exact run; replay promotes from durable
+                    # execution evidence rather than risking duplicate work.
+                    return None
+            return task_response(run_id)
+        finally:
+            if reserved:
+                execution_pool.release_reserved()
+
+    def replay_start(plan_id: str) -> dict[str, Any] | None:
+        result = plan_store.start_recovery(plan_id)
+        if result is None:
+            return None
+        state, run_id, owner = result
+        if state in {"pending", "accepted"} and run_id is not None:
+            recovered = recover_bound_execution(plan_id, state, run_id, owner)
+            if recovered is not None:
+                return recovered
+            raise HTTPException(status_code=409, detail={"reason": "task_start_pending"})
+        reason = "task_start_pending" if state == "pending" else "task_start_refused"
+        raise HTTPException(status_code=409, detail={"reason": reason})
+
+    def refuse_first_start(plan_id: str) -> dict[str, Any] | None:
+        try:
+            refused = plan_store.refuse_unconsumed(plan_id)
+        except PlanStoreError as exc:
+            raise HTTPException(
+                status_code=409, detail={"reason": "task_start_refused"}
+            ) from exc
+        if refused:
+            raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+        replayed = replay_start(plan_id)
+        if replayed is not None:
+            return replayed
+        raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+
     @router.post("/plans/{plan_id}/start", status_code=202)
     def start(plan_id: str) -> dict[str, Any]:
+        replayed = replay_start(plan_id)
+        if replayed is not None:
+            return replayed
+
         _readiness, current_binding = _require_readiness(readiness_provider)
         if not execution_pool.reserve():
             raise HTTPException(
                 status_code=503,
-                detail="all read-only task workers are busy; retry the same plan token",
+                detail={"reason": "task_start_capacity_unavailable"},
             )
         reserved = True
         try:
-            envelope = json.loads(plan_store.consume(plan_id))
-            if envelope.get("task_surface") != TASK_SURFACE:
-                raise ValueError("wrong task surface")
-            stored_binding = envelope["readiness_binding"]
-            template = AgentRun.from_json(envelope["run"])
-            stored_caps = CapabilitySnapshot(**envelope["capabilities"])
-            stored_receipt = envelope.get("capability_receipt")
-
-            if stored_binding != current_binding:
+            try:
+                raw_envelope = plan_store.inspect_unconsumed(plan_id)
+            except PlanStoreError as exc:
+                replayed = replay_start(plan_id)
+                if replayed is not None:
+                    return replayed
+                replayed = refuse_first_start(plan_id)
+                if replayed is not None:
+                    return replayed
                 raise HTTPException(
-                    status_code=409,
-                    detail="task readiness evidence changed; preview the task again",
+                    status_code=409, detail={"reason": "task_start_refused"}
+                ) from exc
+
+            try:
+                envelope = json.loads(raw_envelope)
+                if envelope.get("task_surface") != TASK_SURFACE:
+                    raise ValueError("wrong task surface")
+                stored_binding = envelope["readiness_binding"]
+                template = AgentRun.from_json(envelope["run"])
+                stored_caps = CapabilitySnapshot(**envelope["capabilities"])
+                stored_receipt = envelope.get("capability_receipt")
+
+                if stored_binding != current_binding:
+                    raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+                _assert_readonly_template(template)
+
+                current_receipt: dict[str, Any] | None = None
+                if stored_receipt is not None:
+                    if not isinstance(stored_receipt, dict):
+                        raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+                    if capability_graph_provider is None:
+                        raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+                    if stored_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
+                        raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+                    current_receipt = capability_receipt(template)
+                    if current_receipt != stored_receipt:
+                        raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+                    if not bool(current_receipt.get("allowed", False)):
+                        raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+
+                caps = CapabilitySnapshot(
+                    rig_reachable=stored_caps.rig_reachable,
+                    worker_ready=stored_caps.worker_ready,
+                    tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
+                    cloud_ready=False,
+                    rag_ready=False,
+                    voice_ready=False,
                 )
-            _assert_readonly_template(template)
+                route = orchestrator.router.route(template.request, caps)
+                run = AgentRun(
+                    request=template.request,
+                    route=route,
+                    steps=[step.cloned_for_retry() for step in template.steps],
+                    proactive=False,
+                    allow_private_cloud=False,
+                )
+                _assert_readonly_template(run)
+                if len(run.steps) > orchestrator.max_steps:
+                    raise HTTPException(status_code=409, detail={"reason": "task_start_refused"})
+            except HTTPException:
+                replayed = refuse_first_start(plan_id)
+                if replayed is not None:
+                    return replayed
+                raise
+            except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
+                replayed = refuse_first_start(plan_id)
+                if replayed is not None:
+                    return replayed
+                raise HTTPException(
+                    status_code=409, detail={"reason": "task_start_refused"}
+                ) from exc
 
-            current_receipt: dict[str, Any] | None = None
-            if stored_receipt is not None:
-                if not isinstance(stored_receipt, dict):
-                    raise HTTPException(status_code=409, detail="stored capability receipt is invalid")
-                if capability_graph_provider is None:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="capability receipt validation is not mounted",
-                    )
-                if stored_receipt.get("plan_sha256") != agent_run_plan_sha256(template):
-                    raise HTTPException(
-                        status_code=409,
-                        detail="stored capability receipt does not match the task plan",
-                    )
-                current_receipt = capability_receipt(template)
-                if current_receipt != stored_receipt:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="capability receipt is stale; preview the task again",
-                    )
-                if not bool(current_receipt.get("allowed", False)):
-                    raise HTTPException(
-                        status_code=409,
-                        detail="task plan is blocked by current capabilities",
-                    )
+            try:
+                plan_store.claim_task_start(plan_id, run.id, run.to_json())
+            except PlanStoreError as exc:
+                replayed = replay_start(plan_id)
+                if replayed is not None:
+                    return replayed
+                raise HTTPException(
+                    status_code=409, detail={"reason": "task_start_refused"}
+                ) from exc
 
-            caps = CapabilitySnapshot(
-                rig_reachable=stored_caps.rig_reachable,
-                worker_ready=stored_caps.worker_ready,
-                tools_ready=bool(adapter.tools.GATE.enabled and not adapter.tools.GATE.state_error),
-                cloud_ready=False,
-                rag_ready=False,
-                voice_ready=False,
-            )
-            route = orchestrator.router.route(template.request, caps)
-            run = AgentRun(
-                request=template.request,
-                route=route,
-                steps=[step.cloned_for_retry() for step in template.steps],
-                proactive=False,
-                allow_private_cloud=False,
-            )
-            _assert_readonly_template(run)
-            if len(run.steps) > orchestrator.max_steps:
-                raise HTTPException(status_code=409, detail="task plan exceeds the execution limit")
+            try:
+                materialize_claimed_run(plan_id, run.id)
+            except Exception as exc:
+                plan_store.release_start_recovery_claim(plan_id, run.id)
+                raise HTTPException(
+                    status_code=503, detail={"reason": "task_start_pending"}
+                ) from exc
 
-            orchestrator.store.save_with_event(
-                run,
-                "run_created",
-                {"route": route.kind.value, "steps": len(run.steps)},
-            )
-            bound_payload: dict[str, Any] = {
-                "surface": TASK_SURFACE,
-                "readiness_binding": current_binding,
-            }
-            if current_receipt is not None:
-                bound_payload["capability_receipt"] = current_receipt
-            orchestrator.store.event(run.id, "task_surface_bound", bound_payload)
             try:
                 execution_pool.submit_reserved(execute_task, run.id)
             except Exception as exc:
                 orchestrator.cancel(run.id)
+                plan_store.mark_start_refused(plan_id)
                 raise HTTPException(
                     status_code=503,
-                    detail="read-only task executor is unavailable",
+                    detail={"reason": "task_start_executor_unavailable"},
                 ) from exc
             reserved = False
+            try:
+                plan_store.mark_start_accepted(plan_id, run.id)
+            except PlanStoreError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"reason": "task_start_pending"},
+                ) from exc
             return task_response(run.id)
-        except PlanStoreError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as exc:
-            raise HTTPException(status_code=409, detail="stored task plan is invalid") from exc
         finally:
             if reserved:
                 execution_pool.release_reserved()
@@ -567,8 +896,19 @@ def build_task_surface_router(
     @router.get("/runs/{run_id}")
     def get_run(run_id: str) -> dict[str, Any]:
         # Outcome visibility remains available if readiness later falls back to
-        # Agent 2. A running task must never disappear merely because its evidence
-        # expired between start and poll.
+        # Agent 2. If the single worker process restarted, a persisted active run
+        # can reclaim its exact idempotent read executor through this same scoped
+        # status authority; no generic run discovery is introduced.
+        recovery = plan_store.start_recovery_for_run(run_id)
+        if recovery is not None:
+            plan_id, state, owner = recovery
+            recovered = recover_bound_execution(plan_id, state, run_id, owner)
+            if recovered is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"reason": "task_execution_recovery_pending"},
+                )
+            return recovered
         return task_response(run_id)
 
     @router.post("/runs/{run_id}/cancel")

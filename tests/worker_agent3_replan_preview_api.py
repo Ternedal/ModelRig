@@ -165,6 +165,8 @@ assert preview["window"]["removable_step_ids"] == [run.steps[1].id, run.steps[2]
 assert preview["window"]["immutable_tail_ids"] == [write_id]
 assert preview["plan"][0]["tool"] == "rig_status"
 assert preview["plan"][0]["risk"] == "read"
+preview_step_id = preview["plan"][0]["id"]
+assert isinstance(preview_step_id, str) and preview_step_id
 assert plan_digest(store.load(run.id)) == before
 assert journal.history(run.id) == []
 assert calls["count"] == 1
@@ -184,6 +186,7 @@ assert applied["run"]["steps"][-1]["id"] == write_id
 assert applied["run"]["steps"][-1]["args"] == {"text": "fixed-tail-normal"}
 assert applied["replan"]["to_revision"] == 1
 assert applied["replan"]["added_tools"] == ["rig_status"]
+assert applied["replan"]["added_step_ids"] == [preview_step_id]
 assert applied["preview"]["prompt_sha256"] == preview["prompt_sha256"]
 assert journal.revision_state(run.id) == (1, 1)
 assert calls["count"] == 1
@@ -225,4 +228,4 @@ assert client.post(
     "/experimental/agent3/replan-previews/does-not-exist/apply"
 ).status_code == 409
 
-print("25 passed, 0 failed")
+print("27 passed, 0 failed")

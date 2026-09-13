@@ -9,7 +9,13 @@ import kotlin.test.assertTrue
 class KalivAgentControlPolicyTest {
     @Test
     fun inFlightWorkerTurnExposesNoClearOrCancellationClaim() {
-        val presentation = presentAgentClear(true, true, false, false)
+        val presentation = presentAgentClear(
+            taskStarted = true,
+            busy = true,
+            hasPendingConfirmation = false,
+            hasError = false,
+        )
+
         assertFalse(presentation.visible)
         assertNull(presentation.label)
         assertFalse(presentation.claimsRemoteCancellation)
@@ -17,21 +23,39 @@ class KalivAgentControlPolicyTest {
 
     @Test
     fun pendingWriteConfirmationCannotBeClearedLocally() {
-        val presentation = presentAgentClear(true, false, true, false)
+        val presentation = presentAgentClear(
+            taskStarted = true,
+            busy = false,
+            hasPendingConfirmation = true,
+            hasError = false,
+        )
+
         assertFalse(presentation.visible)
         assertNull(presentation.label)
     }
 
     @Test
-    fun failedOrUnknownTurnDoesNotExposeReset() {
-        val presentation = presentAgentClear(true, false, false, true)
+    fun failedOrUnknownTurnDoesNotExposeAResetThatCouldImplyCancellation() {
+        val presentation = presentAgentClear(
+            taskStarted = true,
+            busy = false,
+            hasPendingConfirmation = false,
+            hasError = true,
+        )
+
         assertFalse(presentation.visible)
         assertNull(presentation.label)
     }
 
     @Test
     fun completedLocalViewCanBeClearedWithoutRemoteCancellationLanguage() {
-        val presentation = presentAgentClear(true, false, false, false)
+        val presentation = presentAgentClear(
+            taskStarted = true,
+            busy = false,
+            hasPendingConfirmation = false,
+            hasError = false,
+        )
+
         assertTrue(presentation.visible)
         assertEquals("Ryd visning", presentation.label)
         assertFalse(presentation.claimsRemoteCancellation)
@@ -41,7 +65,13 @@ class KalivAgentControlPolicyTest {
 
     @Test
     fun idleAgentShowsNoClearAffordance() {
-        val presentation = presentAgentClear(false, false, false, false)
+        val presentation = presentAgentClear(
+            taskStarted = false,
+            busy = false,
+            hasPendingConfirmation = false,
+            hasError = false,
+        )
+
         assertFalse(presentation.visible)
         assertNull(presentation.label)
     }

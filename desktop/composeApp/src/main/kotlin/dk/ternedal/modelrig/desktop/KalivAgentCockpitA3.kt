@@ -83,7 +83,12 @@ fun KalivAgentCockpitA3(
     var planId by remember { mutableStateOf<String?>(null) }
     var previewSteps by remember { mutableStateOf<List<Agent3Step>>(emptyList()) }
     var rationale by remember { mutableStateOf("") }
+    var previewIntent by remember { mutableStateOf<KalivAgent3CockpitPreviewIntent?>(null) }
+    var previewConnection by remember { mutableStateOf<KalivAgent3CockpitPreviewConnection?>(null) }
+    var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+    var previewExpired by remember { mutableStateOf(false) }
     var run by remember { mutableStateOf<Agent3Run?>(null) }
+    var runConnection by remember { mutableStateOf<KalivAgent3CockpitPreviewConnection?>(null) }
     // A replan may replace the remaining pending read-suffix, so the total is
     // not eternal. The mockup's "2 af 4" becomes "Plan 2 · 2 af 5" when that
     // happens -- pretending the first total still holds would be a lie.
@@ -91,8 +96,30 @@ fun KalivAgentCockpitA3(
     var lastTotal by remember { mutableStateOf(0) }
     val log = remember { mutableStateListOf<String>() }
     var publicationEpoch by remember { mutableStateOf(0L) }
+    var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
 
     fun client() = Agent3Client(baseUrl, bearer.orEmpty())
+
+    fun currentPreviewIntent(): KalivAgent3CockpitPreviewIntent? =
+        KalivAgent3CockpitPreviewIntent.capture(input)
+
+    fun currentPreviewConnection(): KalivAgent3CockpitPreviewConnection? =
+        KalivAgent3CockpitPreviewConnection.capture(baseUrl, bearer)
+
+    fun previewClient(connection: KalivAgent3CockpitPreviewConnection): Agent3Client =
+        Agent3Client(connection.baseUrl, connection.bearer)
+
+    fun clearPreviewAuthority() {
+        planId = null
+        previewSteps = emptyList()
+        rationale = ""
+        previewIntent = null
+        previewConnection = null
+        previewDeadlineMillis = null
+        previewExpired = false
+        revision = 1
+        lastTotal = 0
+    }
 
     fun advancePublicationEpoch(): Long {
         publicationEpoch = nextAgent3CockpitPublicationEpoch(publicationEpoch)
@@ -110,8 +137,15 @@ fun KalivAgentCockpitA3(
     }
 
     fun refresh(runId: String, requestEpoch: Long = publicationEpoch) {
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Ingen run-data hentes på en anden forbindelse."
+            return
+        }
         scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { client().getRun(runId) } }
+            val r = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).getRun(runId) }
+            }
             if (!canPublishAgent3CockpitResponse(requestEpoch, publicationEpoch)) return@launch
             r.onSuccess { fresh ->
                 val total = fresh.steps.size
@@ -120,7 +154,9 @@ fun KalivAgentCockpitA3(
                 run = fresh
             }.onFailure { error = it.message }
 
-            val ev = withContext(Dispatchers.IO) { runCatching { client().events(runId) } }
+            val ev = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).events(runId) }
+            }
             if (!canPublishAgent3CockpitResponse(requestEpoch, publicationEpoch)) return@launch
             ev.onSuccess { list ->
                 log.clear()
@@ -130,17 +166,46 @@ fun KalivAgentCockpitA3(
     }
 
     fun preview() {
-        val text = input.trim()
-        if (!canAgent3CockpitPreview(text, busy = busy, hasRun = run != null)) return
-        busy = true; error = null
+        val requestIntent = currentPreviewIntent() ?: return
+        if (!canAgent3CockpitPreview(requestIntent.message, busy = busy, hasRun = run != null)) return
+        val requestConnection = currentPreviewConnection()
+        if (requestConnection == null) {
+            error = "Forbindelsen er ugyldig"
+            return
+        }
+        val requestStartedAtMillis = System.nanoTime() / 1_000_000L
+        busy = true
+        error = null
+        clearPreviewAuthority()
         scope.launch {
             val r = withContext(Dispatchers.IO) {
-                runCatching { client().previewPlan(message = text) }
+                runCatching { previewClient(requestConnection).previewPlan(message = requestIntent.message) }
             }
             r.onSuccess { p ->
+                if (!KalivAgent3CockpitPreviewAuthorityPolicy.canPublish(
+                        requestIntent = requestIntent,
+                        currentIntent = currentPreviewIntent(),
+                        requestConnection = requestConnection,
+                        currentConnection = currentPreviewConnection(),
+                    )
+                ) {
+                    error = "Preview blev forældet, fordi opgaven eller forbindelsen ændrede sig"
+                    return@onSuccess
+                }
+                val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                    requestStartedAtMillis,
+                    p.expiresInSeconds,
+                )
                 planId = p.planId
                 previewSteps = p.plan
                 rationale = p.rationale
+                previewIntent = requestIntent
+                previewConnection = requestConnection
+                previewDeadlineMillis = deadline
+                previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
                 lastTotal = p.plan.size
                 revision = 1
                 run = null
@@ -150,7 +215,25 @@ fun KalivAgentCockpitA3(
     }
 
     fun start() {
+        val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+            previewDeadlineMillis,
+            System.nanoTime() / 1_000_000L,
+        )
+        if (!previewFresh) previewExpired = true
+        if (!KalivAgent3CockpitPreviewAuthorityPolicy.canStart(
+                planId = planId,
+                hasSteps = previewSteps.isNotEmpty(),
+                previewFresh = previewFresh,
+                busy = busy,
+                hasRun = run != null,
+                currentIntent = currentPreviewIntent(),
+                previewIntent = previewIntent,
+                currentConnection = currentPreviewConnection(),
+                previewConnection = previewConnection,
+            )
+        ) return
         val id = planId ?: return
+        val connection = previewConnection ?: return
         val presentation = presentAgent3CockpitInteraction(
             busy = busy,
             runState = run?.state,
@@ -159,16 +242,26 @@ fun KalivAgentCockpitA3(
         )
         if (!presentation.previewStartEnabled) return
         val mutationEpoch = advancePublicationEpoch()
-        busy = true; error = null
+        busy = true
+        error = null
+        // The worker consumes plan_id before Start is guaranteed to return.
+        // Once this request begins, the same local Preview must never become
+        // retryable again after an uncertain/lost response.
+        clearPreviewAuthority()
         scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { client().startPlan(id) } }
+            val r = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).startPlan(id) }
+            }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 r.onSuccess {
+                    runConnection = connection
                     run = it
                     lastTotal = it.steps.size
-                    planId = null // single-use: the id cannot be started twice
                     refresh(it.id, mutationEpoch)
-                }.onFailure { error = it.message }
+                }.onFailure {
+                    val detail = it.message ?: "Planen kunne ikke startes"
+                    error = "$detail. Start-resultatet kan allerede være ændret på serveren; det gamle plan-preview er forbrugt lokalt og kan ikke genbruges. Lav et nyt preview eller genindlæs run-sandhed før nyt forsøg."
+                }
             }
             busy = false
         }
@@ -184,38 +277,47 @@ fun KalivAgentCockpitA3(
         if (!presentation.previewDiscardEnabled) return
         // Preview discard is local-only. No server run exists in this state, so
         // this must never be presented as cancellation of remote work.
-        planId = null
-        previewSteps = emptyList()
-        rationale = ""
-        revision = 1
-        lastTotal = 0
+        clearPreviewAuthority()
     }
 
     fun decide(step: Agent3Step, approve: Boolean) {
-        val nowEpochSeconds = System.currentTimeMillis() / 1000.0
-        if (!canAgent3CockpitDecide(
-                confirmationDigest = step.confirmationDigest,
-                confirmationExpiresAt = step.confirmationExpiresAt,
-                stepState = step.state,
-                busy = busy,
-                nowEpochSeconds = nowEpochSeconds,
-            )
-        ) return
         val r = run ?: return
         val sid = step.id ?: return
         val digest = step.confirmationDigest ?: return
+        val authority = Agent3ConfirmationAuthority.capture(r.id, sid, digest) ?: return
+        val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(authority, consumedConfirmation)
+        val nowEpochSeconds = System.currentTimeMillis() / 1000.0
+        if (!canAgent3CockpitDecide(
+                confirmationDigest = digest,
+                confirmationExpiresAt = step.confirmationExpiresAt,
+                runState = r.state,
+                stepState = step.state,
+                busy = busy,
+                nowEpochSeconds = nowEpochSeconds,
+                confirmationConsumed = confirmationConsumed,
+            )
+        ) return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Beslutningen sendes ikke på en anden forbindelse."
+            return
+        }
         val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
+        consumedConfirmation = authority
         scope.launch {
             val res = withContext(Dispatchers.IO) {
-                runCatching { client().confirm(r.id, sid, digest, approve) }
+                runCatching { previewClient(connection).confirm(r.id, sid, digest, approve) }
             }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 res.onSuccess {
                     run = it
                     refresh(it.id, mutationEpoch)
-                }.onFailure { error = it.message }
+                }.onFailure {
+                    val detail = it.message ?: "Godkendelsen fejlede"
+                    error = "$detail. Beslutningen kan allerede være gennemført på serveren; den gamle godkendelse genbruges ikke. Opdatér run-status."
+                }
             }
             busy = false
         }
@@ -229,17 +331,62 @@ fun KalivAgentCockpitA3(
             planCanRequestStop = r.termination?.plan?.canRequest,
         )
         if (!presentation.stopPlanEnabled) return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Stop sendes ikke på en anden forbindelse."
+            return
+        }
         val mutationEpoch = advancePublicationEpoch()
         busy = true
         error = null
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { client().cancel(r.id) } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).cancel(r.id) }
+            }
             if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
                 result.onSuccess { fresh ->
                     run = fresh
                     refresh(fresh.id, mutationEpoch)
                 }.onFailure {
-                    error = it.message ?: "Planen kunne ikke stoppes"
+                    val detail = it.message ?: "Stop-kaldet gav ikke et autoritativt svar"
+                    error = "$detail. Stop-resultatet er ukendt; serveren kan allerede have stoppet planen. Opdatér run-status før du konkluderer eller prøver igen."
+                }
+            }
+            busy = false
+        }
+    }
+
+    fun refreshTerminalToolStatus() {
+        val current = run ?: return
+        val presentation = presentAgent3CockpitInteraction(
+            busy = busy,
+            runState = current.state,
+            planCanRequestStop = current.termination?.plan?.canRequest,
+            activeToolState = current.termination?.activeTool?.state,
+            activeToolRequestState = current.termination?.activeTool?.requestState,
+        )
+        if (!presentation.refreshTerminalToolEnabled) return
+        val connection = runConnection
+        if (connection == null) {
+            error = "Run-forbindelsen mangler. Task-status hentes ikke på en anden forbindelse."
+            return
+        }
+        val mutationEpoch = advancePublicationEpoch()
+        busy = true
+        error = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { previewClient(connection).getRun(current.id) }
+            }
+            if (canPublishAgent3CockpitResponse(mutationEpoch, publicationEpoch)) {
+                result.onSuccess { fresh ->
+                    val total = fresh.steps.size
+                    if (lastTotal != 0 && total != lastTotal) revision += 1
+                    lastTotal = total
+                    run = fresh
+                    refresh(fresh.id, mutationEpoch)
+                }.onFailure {
+                    error = it.message ?: "Task-status kunne ikke hentes"
                 }
             }
             busy = false
@@ -248,7 +395,13 @@ fun KalivAgentCockpitA3(
 
     fun clearTerminalRun() {
         val current = run ?: return
-        val presentation = presentAgent3CockpitInteraction(busy = busy, runState = current.state)
+        val presentation = presentAgent3CockpitInteraction(
+            busy = busy,
+            runState = current.state,
+            planCanRequestStop = current.termination?.plan?.canRequest,
+            activeToolState = current.termination?.activeTool?.state,
+            activeToolRequestState = current.termination?.activeTool?.requestState,
+        )
         if (!presentation.clearTerminalRunEnabled) return
         // Invalidate any detached refresh so it cannot resurrect the locally
         // cleared terminal history after this explicit reset.
@@ -256,21 +409,63 @@ fun KalivAgentCockpitA3(
         // Local history reset only. The server run is already terminal; this
         // action never claims to cancel or mutate remote execution.
         run = null
-        planId = null
-        previewSteps = emptyList()
-        rationale = ""
-        revision = 1
-        lastTotal = 0
+        runConnection = null
+        clearPreviewAuthority()
+        consumedConfirmation = null
         log.clear()
         error = null
         input = ""
+    }
+
+    LaunchedEffect(planId, previewDeadlineMillis) {
+        val currentPlanId = planId ?: return@LaunchedEffect
+        val deadline = previewDeadlineMillis
+        if (deadline == null) {
+            previewExpired = true
+            return@LaunchedEffect
+        }
+        val remaining = deadline - (System.nanoTime() / 1_000_000L)
+        if (remaining > 0L) delay(remaining)
+        if (
+            planId == currentPlanId &&
+            previewDeadlineMillis == deadline &&
+            Agent3TaskUiPolicy.isPreviewExpired(
+                deadline,
+                System.nanoTime() / 1_000_000L,
+            )
+        ) {
+            previewExpired = true
+        }
     }
 
     val interaction = presentAgent3CockpitInteraction(
         busy = busy,
         runState = run?.state,
         planCanRequestStop = run?.termination?.plan?.canRequest,
+        activeToolState = run?.termination?.activeTool?.state,
+        activeToolRequestState = run?.termination?.activeTool?.requestState,
         hasPreview = planId != null,
+    )
+    val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+        previewDeadlineMillis,
+        System.nanoTime() / 1_000_000L,
+    )
+    val previewStartAuthorized = KalivAgent3CockpitPreviewAuthorityPolicy.canStart(
+        planId = planId,
+        hasSteps = previewSteps.isNotEmpty(),
+        previewFresh = previewFresh,
+        busy = busy,
+        hasRun = run != null,
+        currentIntent = currentPreviewIntent(),
+        previewIntent = previewIntent,
+        currentConnection = currentPreviewConnection(),
+        previewConnection = previewConnection,
+    )
+    val previewConnectionMatches =
+        previewConnection != null && currentPreviewConnection() == previewConnection
+    val currentConnectionBlocksCockpit = shouldBlockAgent3CockpitForCurrentConnection(
+        currentConnectionUnavailable = unavailable != null,
+        hasRun = run != null,
     )
     val steps = run?.steps ?: previewSteps
     val doneCount = steps.count { isTerminal(it.state) }
@@ -291,14 +486,19 @@ fun KalivAgentCockpitA3(
             )
             Spacer(Modifier.height(16.dp))
 
-            if (unavailable != null) {
+            if (currentConnectionBlocksCockpit) {
                 KalivCard {
                     Text(unavailable!!, color = KalivTheme.colors.Warning, fontSize = 12.5.sp)
                 }
             } else {
                 AgentComposer(
-                    value = input, onValue = { input = it },
-                    enabled = interaction.composerEnabled, placeholder = "Ny opgave \u2026",
+                    value = input,
+                    onValue = {
+                        input = it
+                        clearPreviewAuthority()
+                    },
+                    enabled = interaction.composerEnabled,
+                    placeholder = "Ny opgave \u2026",
                     onSend = { preview() },
                 )
                 if (rationale.isNotBlank()) {
@@ -309,8 +509,26 @@ fun KalivAgentCockpitA3(
                 }
                 if (planId != null) {
                     Spacer(Modifier.height(16.dp))
+                    if (previewExpired || !previewFresh) {
+                        Text(
+                            "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                            color = KalivTheme.colors.Warning,
+                            fontSize = 11.5.sp,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    } else if (!previewConnectionMatches) {
+                        Text(
+                            "Plan-previewet tilhører en anden forbindelse. Lav et nyt preview.",
+                            color = KalivTheme.colors.Warning,
+                            fontSize = 11.5.sp,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                     Row {
-                        PrimaryButton("Start planen", enabled = interaction.previewStartEnabled) { start() }
+                        PrimaryButton(
+                            "Start planen",
+                            enabled = interaction.previewStartEnabled && previewStartAuthorized,
+                        ) { start() }
                         Spacer(Modifier.width(8.dp))
                         OutlineButton("Kassér", enabled = interaction.previewDiscardEnabled) { discardPreview() }
                     }
@@ -318,6 +536,16 @@ fun KalivAgentCockpitA3(
                 if (interaction.stopPlanEnabled) {
                     Spacer(Modifier.height(16.dp))
                     OutlineButton("\u25A0  Stop") { cancel() }
+                }
+                if (interaction.refreshTerminalToolEnabled) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Planen er afsluttet, men et aktivt værktøj kan stadig køre på riggen.",
+                        color = KalivTheme.colors.Warning,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlineButton("Opdater status") { refreshTerminalToolStatus() }
                 }
                 if (interaction.clearTerminalRunEnabled) {
                     Spacer(Modifier.height(16.dp))
@@ -358,7 +586,7 @@ fun KalivAgentCockpitA3(
 
             if (steps.isEmpty()) {
                 Text(
-                    if (unavailable != null) "\u2014" else
+                    if (currentConnectionBlocksCockpit) "\u2014" else
                         "Skriv en opgave til venstre.\nAgent 3 planlægger hele forløbet, " +
                             "og du godkender hver skrivning.",
                     color = KalivTheme.colors.TextMuted, fontSize = 13.sp,
@@ -368,7 +596,10 @@ fun KalivAgentCockpitA3(
                     A3StepRow(
                         index = i + 1,
                         step = s,
+                        runId = run?.id,
+                        runState = run?.state,
                         isCurrent = run?.currentStep == i,
+                        consumedConfirmation = consumedConfirmation,
                         onApprove = { decide(s, true) },
                         onReject = { decide(s, false) },
                         busy = busy,
@@ -409,7 +640,7 @@ fun KalivAgentCockpitA3(
  */
 internal fun isTerminal(state: String?): Boolean = when (state?.lowercase()) {
     "done", "completed", "succeeded", "success",
-    "denied", "cancelled", "canceled", "failed", "error",
+    "denied", "cancelled", "canceled", "failed", "error", "blocked",
     "completed_after_cancel",
     -> true
     else -> false
@@ -418,7 +649,7 @@ internal fun isTerminal(state: String?): Boolean = when (state?.lowercase()) {
 internal fun statusOf(step: Agent3Step, isCurrent: Boolean): StepStatus =
     when (step.state?.lowercase()) {
         "done", "completed", "succeeded", "success" -> StepStatus.DONE
-        "denied", "cancelled", "canceled", "failed", "error" -> StepStatus.CANCELLED
+        "denied", "cancelled", "canceled", "failed", "error", "blocked" -> StepStatus.CANCELLED
         "running", "executing", "active", "awaiting_confirmation" -> StepStatus.ACTIVE
         else -> if (isCurrent) StepStatus.ACTIVE else StepStatus.PENDING
     }
@@ -427,7 +658,10 @@ internal fun statusOf(step: Agent3Step, isCurrent: Boolean): StepStatus =
 private fun A3StepRow(
     index: Int,
     step: Agent3Step,
+    runId: String?,
+    runState: String?,
     isCurrent: Boolean,
+    consumedConfirmation: Agent3ConfirmationAuthority?,
     onApprove: () -> Unit,
     onReject: () -> Unit,
     busy: Boolean,
@@ -464,12 +698,16 @@ private fun A3StepRow(
         }
     }
 
+    val currentAuthority = Agent3ConfirmationAuthority.capture(runId, step.id, step.confirmationDigest)
+    val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(currentAuthority, consumedConfirmation)
     val confirmation = presentAgent3CockpitConfirmation(
         confirmationDigest = step.confirmationDigest,
         confirmationExpiresAt = step.confirmationExpiresAt,
+        runState = runState,
         stepState = step.state,
         busy = busy,
         nowEpochSeconds = confirmationNow,
+        confirmationConsumed = confirmationConsumed,
     )
 
     Row(Modifier.fillMaxWidth()) {
@@ -517,6 +755,14 @@ private fun A3StepRow(
                         onApprove = onApprove,
                         onReject = onReject,
                         enabled = confirmation.actionEnabled,
+                    )
+                }
+                Agent3CockpitConfirmationState.CONSUMED -> {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Beslutningen er allerede sendt. Samme godkendelse genbruges ikke; opdatér run-status for serverens aktuelle sandhed.",
+                        color = KalivTheme.colors.Warning,
+                        fontSize = 11.5.sp,
                     )
                 }
                 Agent3CockpitConfirmationState.EXPIRED -> {

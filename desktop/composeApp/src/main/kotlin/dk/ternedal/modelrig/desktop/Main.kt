@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.desktop
 
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,16 +24,19 @@ fun main(args: Array<String>) = application {
     var showTasks by remember { mutableStateOf(tasks) }
     var forceNormalChat by remember { mutableStateOf(false) }
 
-    // The design frames every direction at 1240x740 (.win in the mockup).
-    // Developer evidence surfaces stay narrow; the normal task surface needs
-    // enough width for plan review, receipts and events without changing App().
+    val sizing = desktopWindowSizing(
+        showTasks = showTasks,
+        experimental = experimental,
+        forceNormalChat = forceNormalChat,
+    )
+
+    // The design frames every normal direction at 1240x740 (.win in the
+    // mockup). Developer evidence surfaces stay narrow. WindowState controls
+    // the initial size only; the native minimum below prevents the fixed shell
+    // columns from squeezing the flexible work area into an unusable sliver.
     val state = rememberWindowState(
-        width = when {
-            showTasks -> 1100.dp
-            experimental && !forceNormalChat -> 900.dp
-            else -> 1240.dp
-        },
-        height = 820.dp,
+        width = sizing.initialWidthDp.dp,
+        height = sizing.initialHeightDp.dp,
     )
     Window(
         onCloseRequest = ::exitApplication,
@@ -50,6 +54,22 @@ fun main(args: Array<String>) = application {
         },
         icon = painterResource("icon.png"),
     ) {
+        // Compose desktop and AWT top-level windows both expose logical screen
+        // coordinates. Do not multiply this policy by LocalDensity: that would
+        // double-scale the minimum on HiDPI displays. SideEffect keeps the
+        // native floor in sync when a task/dev surface falls back to normal.
+        val nativeMinimum = remember(
+            sizing.minimumWidthDp,
+            sizing.minimumHeightDp,
+        ) {
+            sizing.awtMinimumSize()
+        }
+        SideEffect {
+            if (window.minimumSize != nativeMinimum) {
+                window.minimumSize = nativeMinimum
+            }
+        }
+
         when {
             showTasks -> Agent3TaskApp(
                 onUseAgent2 = {

@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import dk.ternedal.modelrig.desktop.net.Agent3PlanPreview
 import dk.ternedal.modelrig.desktop.net.Agent3Run
 import dk.ternedal.modelrig.desktop.net.Agent3Step
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -64,67 +66,145 @@ fun Agent3DevApp() {
         var useMemory by remember { mutableStateOf(false) }
         var memorySubjects by remember { mutableStateOf("") }
         var preview by remember { mutableStateOf<Agent3PlanPreview?>(null) }
+        var previewConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
+        var previewIntent by remember { mutableStateOf<Agent3DevPreviewIntent?>(null) }
+        var previewDeadlineMillis by remember { mutableStateOf<Long?>(null) }
+        var previewExpired by remember { mutableStateOf(false) }
         var run by remember { mutableStateOf<Agent3Run?>(null) }
+        var runConnection by remember { mutableStateOf<Agent3DevConnectionBinding?>(null) }
+        var consumedConfirmation by remember { mutableStateOf<Agent3ConfirmationAuthority?>(null) }
         var busy by remember { mutableStateOf(false) }
         var error by remember { mutableStateOf<String?>(null) }
 
-        fun client(): Agent3Client {
+        fun currentConnection(): Agent3DevConnectionBinding {
             require(baseUrl.isNotBlank()) { "Base-URL mangler" }
             require(token.isNotBlank()) { "Device-token mangler" }
-            return Agent3Client(baseUrl.trim(), token.trim())
+            return requireNotNull(Agent3DevConnectionBinding.capture(baseUrl, token)) {
+                "Forbindelsen er ugyldig"
+            }
         }
 
-        fun selectedSubjects(): List<String> = memorySubjects
-            .split(',')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-            .take(20)
+        fun client(connection: Agent3DevConnectionBinding): Agent3Client =
+            Agent3Client(connection.baseUrl, connection.token)
+
+        fun currentIntent(): Agent3DevPreviewIntent? =
+            Agent3DevPreviewIntent.capture(message, useMemory, memorySubjects)
+
+        fun clearPreviewAuthority() {
+            preview = null
+            previewConnection = null
+            previewIntent = null
+            previewDeadlineMillis = null
+            previewExpired = false
+        }
 
         fun previewPlan() {
-            val text = message.trim()
-            if (text.isEmpty() || busy) return
+            val intent = currentIntent() ?: return
+            val currentRun = run
+            if (!Agent3DevInteractionPolicy.canPreview(
+                    message = intent.message,
+                    busy = busy,
+                    runState = currentRun?.state,
+                    activeToolState = currentRun?.termination?.activeTool?.state,
+                    activeToolRequestState = currentRun?.termination?.activeTool?.requestState,
+                )
+            ) return
+            val connection = runCatching { currentConnection() }
+                .getOrElse {
+                    error = it.message ?: "Forbindelsen er ugyldig"
+                    return
+                }
+            val requestStartedAtMillis = System.nanoTime() / 1_000_000L
             busy = true
             error = null
-            run = null
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        client().previewPlan(
-                            message = text,
+                        client(connection).previewPlan(
+                            message = intent.message,
                             mode = "rig",
-                            useMemory = useMemory,
-                            memorySubjects = if (useMemory) selectedSubjects() else emptyList(),
+                            useMemory = intent.useMemory,
+                            memorySubjects = intent.memorySubjects,
                         )
                     }
                 }
                 busy = false
-                result.onSuccess { preview = it }
-                    .onFailure { error = it.message ?: "Planlægning fejlede" }
+                result.onSuccess { planned ->
+                    if (!Agent3DevInteractionPolicy.canPublishPreview(intent, currentIntent())) {
+                        return@onSuccess
+                    }
+                    // Replace terminal history only after the exact reviewed intent
+                    // succeeded. Failure or stale publication keeps prior truth visible.
+                    run = null
+                    runConnection = null
+                    val deadline = Agent3TaskUiPolicy.previewDeadlineMillis(
+                        requestStartedAtMillis,
+                        planned.expiresInSeconds,
+                    )
+                    preview = planned
+                    previewConnection = connection
+                    previewIntent = intent
+                    previewDeadlineMillis = deadline
+                    previewExpired = !Agent3TaskUiPolicy.isPreviewFresh(
+                        deadline,
+                        System.nanoTime() / 1_000_000L,
+                    )
+                }.onFailure { error = it.message ?: "Planlægning fejlede" }
             }
         }
 
         fun startPlan() {
             val current = preview ?: return
+            val boundConnection = previewConnection
+            val boundIntent = previewIntent
+            val currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token)
+            val currentIntent = currentIntent()
+            val nowMillis = System.nanoTime() / 1_000_000L
+            val previewFresh = Agent3TaskUiPolicy.isPreviewFresh(previewDeadlineMillis, nowMillis)
+            if (!previewFresh) previewExpired = true
+            if (!Agent3DevInteractionPolicy.canStart(
+                    planId = current.planId,
+                    planSize = current.plan.size,
+                    capabilityAllowed = current.capabilityReceipt?.allowed,
+                    previewFresh = previewFresh,
+                    busy = busy,
+                    hasRun = run != null,
+                    currentConnection = currentConnection,
+                    previewConnection = boundConnection,
+                    currentIntent = currentIntent,
+                    previewIntent = boundIntent,
+                )
+            ) return
             val id = current.planId ?: return
-            if (current.capabilityReceipt?.allowed == false || busy) return
+            val connection = boundConnection ?: return
             busy = true
             error = null
+            clearPreviewAuthority()
             scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { client().startPlan(id) } }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { client(connection).startPlan(id) }
+                }
                 busy = false
-                result.onSuccess { run = it }
-                    .onFailure { error = it.message ?: "Planen kunne ikke startes" }
+                result.onSuccess { started ->
+                    run = started
+                    runConnection = connection
+                }.onFailure {
+                    val detail = it.message ?: "Planen kunne ikke startes"
+                    error = "$detail. Plan-preview-authority er forbrugt lokalt; lav et nyt preview før nyt forsøg."
+                }
             }
         }
 
         fun refreshRun() {
             val id = run?.id ?: return
+            val connection = runConnection ?: return
             if (busy) return
             busy = true
             error = null
             scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { client().getRun(id) } }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { client(connection).getRun(id) }
+                }
                 busy = false
                 result.onSuccess { run = it }
                     .onFailure { error = it.message ?: "Run-status kunne ikke hentes" }
@@ -133,32 +213,77 @@ fun Agent3DevApp() {
 
         fun decide(approve: Boolean) {
             val current = run ?: return
+            val connection = runConnection ?: return
             val step = current.steps.getOrNull(current.currentStep) ?: return
             val stepId = step.id ?: return
             val digest = step.confirmationDigest ?: return
-            if (busy) return
+            val authority = Agent3ConfirmationAuthority.capture(current.id, stepId, digest) ?: return
+            val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(authority, consumedConfirmation)
+            if (!Agent3DevInteractionPolicy.canDecide(
+                    confirmationDigest = digest,
+                    confirmationExpiresAt = step.confirmationExpiresAt,
+                    runState = current.state,
+                    stepState = step.state,
+                    busy = busy,
+                    nowEpochSeconds = System.currentTimeMillis() / 1000.0,
+                    confirmationConsumed = confirmationConsumed,
+                )
+            ) return
             busy = true
             error = null
+            consumedConfirmation = authority
             scope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { client().confirm(current.id, stepId, digest, approve) }
+                    runCatching { client(connection).confirm(current.id, stepId, digest, approve) }
                 }
                 busy = false
                 result.onSuccess { run = it }
-                    .onFailure { error = it.message ?: "Godkendelsen fejlede" }
+                    .onFailure {
+                        val detail = it.message ?: "Godkendelsen fejlede"
+                        error = "$detail. Beslutningen kan allerede være gennemført på serveren; den gamle godkendelse genbruges ikke. Opdatér run-status."
+                    }
             }
         }
 
         fun stopPlan() {
-            val id = run?.id ?: return
-            if (busy) return
+            val current = run ?: return
+            val connection = runConnection ?: return
+            if (!Agent3DevInteractionPolicy.canStopPlan(
+                    runState = current.state,
+                    planCanRequest = current.termination?.plan?.canRequest,
+                    busy = busy,
+                )
+            ) return
             busy = true
             error = null
             scope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { client().cancel(id) } }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { client(connection).cancel(current.id) }
+                }
                 busy = false
                 result.onSuccess { run = it }
-                    .onFailure { error = it.message ?: "Planen kunne ikke stoppes" }
+                    .onFailure {
+                        val detail = it.message ?: "Stop-kaldet gav ikke et autoritativt svar"
+                        error = "$detail. Stop-resultatet er ukendt; serveren kan allerede have stoppet planen. Opdatér run-status før du konkluderer eller prøver igen."
+                    }
+            }
+        }
+
+        LaunchedEffect(preview?.planId, previewDeadlineMillis) {
+            val planId = preview?.planId ?: return@LaunchedEffect
+            val deadline = previewDeadlineMillis
+            if (deadline == null) {
+                previewExpired = true
+                return@LaunchedEffect
+            }
+            val remaining = deadline - (System.nanoTime() / 1_000_000L)
+            if (remaining > 0L) delay(remaining)
+            if (preview?.planId == planId && Agent3TaskUiPolicy.isPreviewExpired(
+                    deadline,
+                    System.nanoTime() / 1_000_000L,
+                )
+            ) {
+                previewExpired = true
             }
         }
 
@@ -220,7 +345,11 @@ fun Agent3DevApp() {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = message,
-                    onValueChange = { message = it },
+                    onValueChange = { value ->
+                        message = value
+                        clearPreviewAuthority()
+                    },
+                    enabled = !busy,
                     label = { Text("Hvad skal agenten planlægge?") },
                     minLines = 3,
                     maxLines = 8,
@@ -229,11 +358,24 @@ fun Agent3DevApp() {
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (useMemory) {
-                        Button(onClick = { useMemory = false; memorySubjects = ""; preview = null }) {
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                useMemory = false
+                                memorySubjects = ""
+                                clearPreviewAuthority()
+                            },
+                        ) {
                             Text("Memory: til")
                         }
                     } else {
-                        OutlinedButton(onClick = { useMemory = true; preview = null }) {
+                        OutlinedButton(
+                            enabled = !busy,
+                            onClick = {
+                                useMemory = true
+                                clearPreviewAuthority()
+                            },
+                        ) {
                             Text("Memory: fra")
                         }
                     }
@@ -248,7 +390,11 @@ fun Agent3DevApp() {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = memorySubjects,
-                        onValueChange = { memorySubjects = it; preview = null },
+                        onValueChange = { value ->
+                            memorySubjects = value
+                            clearPreviewAuthority()
+                        },
+                        enabled = !busy,
                         label = { Text("Valgfrit subject-filter, kommasepareret") },
                         supportingText = { Text("Tomt felt bruger alle eligible memories inden for serverens budget.") },
                         singleLine = true,
@@ -256,7 +402,15 @@ fun Agent3DevApp() {
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                Button(enabled = !busy && message.isNotBlank(), onClick = ::previewPlan) {
+                val currentRun = run
+                val previewEnabled = Agent3DevInteractionPolicy.canPreview(
+                    message = message,
+                    busy = busy,
+                    runState = currentRun?.state,
+                    activeToolState = currentRun?.termination?.activeTool?.state,
+                    activeToolRequestState = currentRun?.termination?.activeTool?.requestState,
+                )
+                Button(enabled = previewEnabled, onClick = ::previewPlan) {
                     Text(if (busy) "Arbejder…" else "Lav plan-preview")
                 }
             }
@@ -268,12 +422,34 @@ fun Agent3DevApp() {
 
             preview?.let {
                 Spacer(Modifier.height(12.dp))
-                PlanCard(it, busy, ::startPlan)
+                PlanCard(
+                    preview = it,
+                    busy = busy,
+                    hasRun = run != null,
+                    currentConnection = Agent3DevConnectionBinding.capture(baseUrl, token),
+                    previewConnection = previewConnection,
+                    currentIntent = currentIntent(),
+                    previewIntent = previewIntent,
+                    previewFresh = Agent3TaskUiPolicy.isPreviewFresh(
+                        previewDeadlineMillis,
+                        System.nanoTime() / 1_000_000L,
+                    ),
+                    previewExpired = previewExpired,
+                    onStart = ::startPlan,
+                )
             }
 
             run?.let {
                 Spacer(Modifier.height(12.dp))
-                RunCard(it, busy, ::refreshRun, { decide(true) }, { decide(false) }, ::stopPlan)
+                RunCard(
+                    run = it,
+                    busy = busy,
+                    consumedConfirmation = consumedConfirmation,
+                    onRefresh = ::refreshRun,
+                    onApprove = { decide(true) },
+                    onDeny = { decide(false) },
+                    onStopPlan = ::stopPlan,
+                )
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -293,8 +469,18 @@ private fun DevCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> Unit) {
-    val capabilityAllowed = preview.capabilityReceipt?.allowed != false
+private fun PlanCard(
+    preview: Agent3PlanPreview,
+    busy: Boolean,
+    hasRun: Boolean,
+    currentConnection: Agent3DevConnectionBinding?,
+    previewConnection: Agent3DevConnectionBinding?,
+    currentIntent: Agent3DevPreviewIntent?,
+    previewIntent: Agent3DevPreviewIntent?,
+    previewFresh: Boolean,
+    previewExpired: Boolean,
+    onStart: () -> Unit,
+) {
     DevCard {
         Text("Plan-preview", color = KalivTheme.colors.TextHigh, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(
@@ -354,11 +540,30 @@ private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> U
         }
         Spacer(Modifier.height(12.dp))
         Button(
-            enabled = !busy && capabilityAllowed && preview.planId != null && preview.plan.isNotEmpty(),
+            enabled = Agent3DevInteractionPolicy.canStart(
+                planId = preview.planId,
+                planSize = preview.plan.size,
+                capabilityAllowed = preview.capabilityReceipt?.allowed,
+                previewFresh = previewFresh,
+                busy = busy,
+                hasRun = hasRun,
+                currentConnection = currentConnection,
+                previewConnection = previewConnection,
+                currentIntent = currentIntent,
+                previewIntent = previewIntent,
+            ),
             onClick = onStart,
         ) { Text("Start den viste plan") }
-        preview.expiresInSeconds?.let {
-            Text("Plan-id udløber om ca. $it sek.", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+        if (previewExpired) {
+            Text(
+                "Plan-previewet er udløbet eller mangler gyldig TTL. Lav et nyt preview.",
+                color = KalivTheme.colors.Danger,
+                fontSize = 11.sp,
+            )
+        } else {
+            preview.expiresInSeconds?.let {
+                Text("Plan-id udløber om ca. $it sek.", color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+            }
         }
     }
 }
@@ -367,15 +572,66 @@ private fun PlanCard(preview: Agent3PlanPreview, busy: Boolean, onStart: () -> U
 private fun RunCard(
     run: Agent3Run,
     busy: Boolean,
+    consumedConfirmation: Agent3ConfirmationAuthority?,
     onRefresh: () -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     onStopPlan: () -> Unit,
 ) {
     val current = run.steps.getOrNull(run.currentStep)
-    val waiting = run.state == "waiting_confirmation" && current?.id != null && current.confirmationDigest != null
+    val currentAuthority = Agent3ConfirmationAuthority.capture(run.id, current?.id, current?.confirmationDigest)
+    val confirmationConsumed = isAgent3ConfirmationAuthorityConsumed(currentAuthority, consumedConfirmation)
+    var confirmationNow by remember(
+        run.state,
+        current?.id,
+        current?.state,
+        current?.confirmationDigest,
+        current?.confirmationExpiresAt,
+    ) { mutableStateOf(System.currentTimeMillis() / 1000.0) }
+
+    LaunchedEffect(
+        run.state,
+        current?.id,
+        current?.state,
+        current?.confirmationDigest,
+        current?.confirmationExpiresAt,
+    ) {
+        val expiry = current?.confirmationExpiresAt
+        if (
+            current?.confirmationDigest != null &&
+            expiry != null &&
+            expiry.isFinite() &&
+            !isTerminal(current.state) &&
+            isAgent3CockpitWaitingForConfirmation(run.state)
+        ) {
+            while (true) {
+                val now = System.currentTimeMillis() / 1000.0
+                confirmationNow = now
+                if (now >= expiry) break
+                val remainingMillis = ((expiry - now) * 1000.0)
+                    .toLong()
+                    .coerceIn(1L, 1_000L)
+                delay(remainingMillis)
+            }
+        }
+    }
+
+    val confirmation = Agent3DevInteractionPolicy.confirmation(
+        confirmationDigest = current?.confirmationDigest,
+        confirmationExpiresAt = current?.confirmationExpiresAt,
+        runState = run.state,
+        stepState = current?.state,
+        busy = busy,
+        nowEpochSeconds = confirmationNow,
+        confirmationConsumed = confirmationConsumed,
+    )
     val termination = run.termination
-    val canStopPlan = termination?.plan?.canRequest == true
+    val stopPlanVisible = termination?.plan?.canRequest == true && !isTerminal(run.state)
+    val canStopPlan = Agent3DevInteractionPolicy.canStopPlan(
+        runState = run.state,
+        planCanRequest = termination?.plan?.canRequest,
+        busy = busy,
+    )
     DevCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -396,22 +652,55 @@ private fun RunCard(
         run.error?.takeIf { it.isNotBlank() }?.let {
             Spacer(Modifier.height(8.dp)); Text(it, color = KalivTheme.colors.Danger, fontSize = 13.sp)
         }
-        if (waiting) {
-            Spacer(Modifier.height(12.dp))
-            Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = !busy, onClick = onApprove) { Text("Godkend") }
-                OutlinedButton(enabled = !busy, onClick = onDeny) { Text("Afvis") }
+        when (confirmation.state) {
+            Agent3CockpitConfirmationState.LIVE -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = confirmation.actionEnabled, onClick = onApprove) { Text("Godkend") }
+                    OutlinedButton(enabled = confirmation.actionEnabled, onClick = onDeny) { Text("Afvis") }
+                }
             }
+            Agent3CockpitConfirmationState.CONSUMED -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Beslutningen er allerede sendt. Samme godkendelse genbruges ikke; opdatér run-status for serverens aktuelle sandhed.",
+                    color = KalivTheme.colors.Warning,
+                    fontSize = 11.5.sp,
+                )
+            }
+            Agent3CockpitConfirmationState.EXPIRED -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Bekræftelsen er udløbet. Ingen beslutning sendes på den gamle godkendelse; opdatér run-status.",
+                    color = KalivTheme.colors.Warning,
+                    fontSize = 11.5.sp,
+                )
+            }
+            Agent3CockpitConfirmationState.INVALID -> {
+                Spacer(Modifier.height(12.dp))
+                Text(current?.summary.orEmpty(), color = KalivTheme.colors.Amber, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Bekræftelsen mangler en gyldig udløbstid. Godkend/Afvis er låst fail-closed.",
+                    color = KalivTheme.colors.Warning,
+                    fontSize = 11.5.sp,
+                )
+            }
+            Agent3CockpitConfirmationState.HIDDEN -> Unit
         }
         Spacer(Modifier.height(10.dp))
         TerminationCard(termination, run.state)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(enabled = !busy, onClick = onRefresh) { Text("Opdatér") }
-            if (canStopPlan) {
-                OutlinedButton(enabled = !busy, onClick = onStopPlan) { Text("Stop plan") }
+            if (stopPlanVisible) {
+                OutlinedButton(enabled = canStopPlan, onClick = onStopPlan) { Text("Stop plan") }
             }
         }
     }

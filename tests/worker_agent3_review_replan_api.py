@@ -208,8 +208,13 @@ assert loaded_response.status_code == 200, loaded_response.text
 loaded = loaded_response.json()
 assert loaded["read_review"]["waiting"] is True
 assert loaded["read_review"]["removable_step_ids"] == [new_read_id]
+checkpoint_step_id = loaded["read_review"]["completed_step_id"]
+assert checkpoint_step_id
 
-resume_response = client.post(f"/experimental/agent3/runs/{run_id}/resume")
+resume_response = client.post(
+    f"/experimental/agent3/runs/{run_id}/resume",
+    json={"completed_step_id": checkpoint_step_id},
+)
 assert resume_response.status_code == 200, resume_response.text
 resumed = resume_response.json()
 assert resumed["run"]["state"] == "waiting_confirmation"

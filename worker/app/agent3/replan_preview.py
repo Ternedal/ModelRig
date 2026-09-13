@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from dataclasses import asdict, dataclass
 from typing import Any, TYPE_CHECKING
@@ -23,6 +25,24 @@ if TYPE_CHECKING:
 
 class ReplanPreviewError(RuntimeError):
     pass
+
+
+def _payload_sha256(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _split_bound_preview_id(preview_id: str) -> tuple[str, str]:
+    if not isinstance(preview_id, str):
+        raise ReplanPreviewError("replan preview id has invalid payload binding")
+    internal_id, separator, expected_digest = preview_id.rpartition(".")
+    if (
+        separator != "."
+        or not internal_id
+        or len(expected_digest) != 64
+        or any(character not in "0123456789abcdef" for character in expected_digest)
+    ):
+        raise ReplanPreviewError("replan preview id has invalid payload binding")
+    return internal_id, expected_digest
 
 
 @dataclass(frozen=True)
@@ -101,6 +121,7 @@ def _step_payload(step: AgentStep) -> dict[str, Any]:
         "sensitivity": step.sensitivity.value,
         "egress": step.egress.value,
         "origin": step.origin,
+        "idempotent": step.idempotent,
         "conversation_id": step.conversation_id,
         "summary": step.summary,
     }
@@ -115,11 +136,14 @@ def _step_from_payload(payload: dict[str, Any]) -> AgentStep:
         "sensitivity",
         "egress",
         "origin",
+        "idempotent",
         "conversation_id",
         "summary",
     }
     if set(payload) != expected or not isinstance(payload.get("args"), dict):
         raise ReplanPreviewError("stored replacement step has an unsupported schema")
+    if type(payload.get("idempotent")) is not bool:
+        raise ReplanPreviewError("stored replacement step has invalid field types")
     try:
         return AgentStep(
             id=str(payload["id"]),
@@ -129,6 +153,7 @@ def _step_from_payload(payload: dict[str, Any]) -> AgentStep:
             sensitivity=Sensitivity(payload["sensitivity"]),
             egress=EgressClass(payload["egress"]),
             origin=str(payload["origin"]),
+            idempotent=payload["idempotent"],
             conversation_id=(
                 None
                 if payload["conversation_id"] is None
@@ -200,16 +225,24 @@ class ReplanPreviewService:
             immutable_tail_ids=proposal.window.immutable_tail_ids,
             steps=tuple(_step_payload(step) for step in proposal.steps),
         )
-        preview_id, ttl = self.preview_store.save(stored.to_json())
+        stored_payload = stored.to_json()
+        internal_id, ttl = self.preview_store.save(stored_payload)
+        preview_id = f"{internal_id}.{_payload_sha256(stored_payload)}"
         return preview_id, ttl, stored, proposal
 
     def apply(self, preview_id: str) -> tuple[AgentRun, dict[str, Any], StoredReplanPreview]:
-        # Consume first. A crash or stale run after this point requires a fresh
-        # preview and can never replay the old model proposal.
+        # The public token binds the exact stored bytes reviewed by the client.
+        # Consume the internal row first so a mismatch is still a terminal,
+        # single-use refusal rather than a retryable way to probe store state.
+        internal_id, expected_digest = _split_bound_preview_id(preview_id)
         try:
-            stored = StoredReplanPreview.from_json(self.preview_store.consume(preview_id))
+            stored_payload = self.preview_store.consume(internal_id)
         except PlanStoreError as exc:
             raise ReplanPreviewError(str(exc)) from exc
+        actual_digest = _payload_sha256(stored_payload)
+        if not hmac.compare_digest(actual_digest, expected_digest):
+            raise ReplanPreviewError("stored replan preview payload integrity mismatch")
+        stored = StoredReplanPreview.from_json(stored_payload)
 
         try:
             self._recover_or_raise(stored.run_id)

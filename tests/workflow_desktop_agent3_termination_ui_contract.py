@@ -33,11 +33,17 @@ checks = {
     "screen renders all three termination scopes": (
         'Text("Plan"' in screen
         and 'Text("Modelstream"' in screen
-        and 'Text("Aktivt tool"' in screen
+        and 'Text("Aktivt værktøj"' in screen
     ),
     "screen explains active tool continuation": (
         "prevent_future_steps_active_tool_continues" in screen
-        and "det aktive tool fortsætter" in screen
+        and "det aktive værktøj kan fortsætte" in screen
+    ),
+    "screen keeps exact termination receipt as secondary evidence": (
+        'DesktopTechnicalReceipt("Plan"' in screen
+        and 'DesktopTechnicalReceipt("Modelstream"' in screen
+        and 'DesktopTechnicalReceipt("Aktivt værktøj"' in screen
+        and "terminationActiveToolEvidence(active)" in screen
     ),
     "screen exposes no invented active-tool stop route": (
         "cancelTool" not in screen
