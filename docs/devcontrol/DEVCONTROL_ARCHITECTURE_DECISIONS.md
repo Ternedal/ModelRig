@@ -201,3 +201,25 @@ freeze, DC-L15 completion, independent human verdict og pilot GO forbliver åbne
 gates. Ingen merge, publication, release, deploy eller activation autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-011_RSI_POST_CAMPAIGN_PHYSICAL_EVIDENCE_BOUNDARY.md`
+
+## ADR-DC-012 — Human/Ed25519 exact-runner execution binding efter physical evidence
+
+**Dato 13/09-2026. Status: foreslået til beslutning.**
+
+Lukker kun `exact_runner_execution_binding` med en separat human-signeret
+Ed25519-claim, der binder hele ADR-DC-011 snapshot-digesten til exact
+campaign/admission/task/base, exact runner path/SHA/byte-count og exact physical
+report-digests/ID. Signeren skal være den fysiske operator/collector og må ikke
+være approveren.
+
+Production afviser caller-valgt verifier og resolver kun en fast host-admin-
+kontrolleret public-key keyring. Successful verification er eksplicit
+`verified-human-exact-runner-execution-binding-only`: den menneskelige signatur
+er en execution-attestation, ikke kernel telemetry, og den re-verificerer ikke
+det legacy HMAC report.
+
+Continuous-main freeze, DC-L15 completion, independent human verdict og pilot GO
+forbliver separate gates. Ingen Git/GitHub write, merge, publication, release,
+deploy eller activation autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-012_RSI_EXACT_RUNNER_EXECUTION_BINDING.md`
