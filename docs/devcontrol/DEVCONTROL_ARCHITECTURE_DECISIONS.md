@@ -139,11 +139,14 @@ Linux bruger én inotify-instance med parent-directory watches og exact child-na
 filtrering pr. ancestry-led; flyt/slet af den beskyttede ledger-path eller en
 ancestor, parent self-move/delete/unmount, ignored watch eller queue overflow
 fejler lukket. BSD-style POSIX bruger kqueue vnode rename/delete/revoke på hvert
-retained directory-object, hvor tilgængeligt. Både ledger-root- og
-ancestor-rename→replay→restore kan derfor ikke genoplive et gammelt receipt,
-mens unrelated sibling-entry churn fortsat ikke revokerer den. Unsupported POSIX
-exact directory-chain history monitoring fejler lukket. Outer transaction-failure
-revokerer allerede registreret provenance før en traceback bliver caller-visible.
+retained directory-object, hvor tilgængeligt. Capture→monitor-arm-vinduet lukkes
+med setup-only directory metadata-stamps, som revalideres umiddelbart efter
+arming men ikke bruges som live-history bagefter; rename→restore under arming
+fejler derfor lukket uden at gøre unrelated sibling-churn autoritetsbærende.
+Både ledger-root- og ancestor-rename→replay→restore kan derfor ikke genoplive et
+gammelt receipt. Unsupported POSIX exact directory-chain history monitoring
+fejler lukket. Outer transaction-failure revokerer allerede registreret
+provenance før en traceback bliver caller-visible.
 
 Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
 som authenticated authority. Replay-scope er eksplicit host-local
