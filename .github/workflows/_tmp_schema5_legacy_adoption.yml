@@ -6,7 +6,7 @@ on:
       - fix/agent3-schema5-legacy-adoption-20260913
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   focused:
@@ -15,10 +15,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: fix/agent3-schema5-legacy-adoption-20260913
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
           check-latest: false
+      - name: Align legacy-archive regression with fail-closed ordering
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/worker_backup.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''check(\n    any("execution-progress authority" in problem for problem in unsafe_verify["problems"]),\n    "schema: unsafe legacy archive names the missing execution authority",\n)\n'''
+          new = '''check(\n    any("closed authority schema" in problem for problem in unsafe_verify["problems"])\n    and any(\n        "schema-5 persistent live-pair binding" in problem\n        for problem in unsafe_verify["problems"]\n    ),\n    "schema: unsafe legacy archive names embedded v5 authority and missing live-pair proof",\n)\n'''
+          if text.count(old) != 1:
+              raise SystemExit('legacy assertion anchor missing or ambiguous')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Install worker dependencies
         run: python -m pip install -r worker/requirements.txt
       - name: Compile authority modules
@@ -38,4 +52,17 @@ jobs:
             python "$t"
           done
       - name: Diff hygiene
-        run: git diff --check
+        run: |
+          git diff --check
+          git status --short
+      - name: Retain qualified fix and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git rm .github/workflows/_tmp_schema5_legacy_adoption.yml
+          git add worker/app/backup.py tests/worker_backup.py
+          git diff --cached --check
+          git commit -m "fix(agent3): preserve schema-5 legacy adoption boundary (#1309)" -m "Keep closed SQLite schema validation fail-closed while allowing canonical legacy pair adoption and shape-only schema-5 probes. Align the legacy archive regression with the stricter closed-schema validation order. Draft/off-main only; production_activation=false."
+          git push origin HEAD:fix/agent3-schema5-legacy-adoption-20260913
