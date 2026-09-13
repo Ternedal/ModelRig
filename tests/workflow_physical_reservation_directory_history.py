@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 import workflow_physical_reservation_authority_races as race
 
+import kaliv_dev_control._improvement_physical_reservation_directory_provenance as directory_history
 import kaliv_dev_control._improvement_physical_runtime_host_control as host_runtime
 import kaliv_dev_control.improvement_physical_reservation as reservation_module
 
@@ -137,6 +138,38 @@ def test_ancestor_rename_replay_restore_cannot_restore_first_receipt() -> None:
         assert second.transaction_authenticated is False
 
 
+def test_rename_restore_during_history_arming_fails_closed() -> None:
+    if os.name != "posix":
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        state_root = root / "host-state"
+        ledger_root = state_root / "ledger"
+        ledger_root.mkdir(parents=True)
+        moved = root / "host-state-moved"
+
+        original_start = directory_history._start_history
+
+        def racing_start(nodes):
+            state_root.rename(moved)
+            moved.rename(state_root)
+            return original_start(nodes)
+
+        directory_history._start_history = racing_start
+        try:
+            try:
+                binding = directory_history._capture_binding(ledger_root, object())
+            except directory_history.DirectoryBoundProvenanceError as exc:
+                assert "arming history monitor" in str(exc)
+            else:
+                directory_history._close_binding(binding)
+                raise AssertionError(
+                    "rename→restore during monitor arming must fail closed"
+                )
+        finally:
+            directory_history._start_history = original_start
+
+
 def test_unrelated_sibling_churn_does_not_revoke_live_receipt() -> None:
     if os.name != "posix":
         return
@@ -240,6 +273,7 @@ def test_public_consume_routes_through_host_controlled_runtime_boundary() -> Non
 def main() -> None:
     test_ledger_root_rename_replay_restore_cannot_restore_first_receipt()
     test_ancestor_rename_replay_restore_cannot_restore_first_receipt()
+    test_rename_restore_during_history_arming_fails_closed()
     test_unrelated_sibling_churn_does_not_revoke_live_receipt()
     test_non_admin_posix_runtime_metadata_is_rejected()
     test_public_consume_routes_through_host_controlled_runtime_boundary()
