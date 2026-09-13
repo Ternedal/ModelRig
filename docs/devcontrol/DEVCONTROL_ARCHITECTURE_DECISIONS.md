@@ -112,34 +112,32 @@ Fuldtekst: `docs/devcontrol/ADR-DC-008_RSI_PHYSICAL_QUALIFICATION_REQUEST_BOUNDA
 **Dato 12/09-2026. Status: foreslået til beslutning.**
 
 Gør request-reservation til én authenticated host-local transaction med en
-caller-uafhængig Ed25519 trust-root. Public consume-pathen accepterer ikke
-verifier/keyring, observation, clock eller authority-paths; den resolver selv en
-fast host-admin-kontrolleret RSI request-keyring og fejler lukket, hvis trust-
-rooten mangler, er malformed, wrong-domain eller unsafe. Host-control valideres
-platform-specifikt: POSIX kræver root ownership og ikke-writable directory-chain,
-og Windows kræver native owner/DACL-evidence uden write/control grants til
-almindelige eller brede principals. Det tidligere non-underscored reservation-
-compatibility-modul er fjernet, så production trust-root ikke kan omgås gennem
-forwarded functions eller compatibility-module traversal. Den eksplicit private
-underscore-testseam er ikke en public authority-kontrakt; beslutningen påstår
-ikke isolation mod vilkårligt kompromitteret same-process Python-kode.
+caller-uafhængig Ed25519 trust-root. Public consume accepterer ikke
+verifier/keyring, observation, clock eller authority-paths; produktion resolver
+en fast host-admin-kontrolleret request-keyring og fejler lukket ved manglende,
+malformed, wrong-domain eller unsafe trust state. POSIX kræver root ownership og
+ikke-writable directory-chain; Windows kræver native owner/DACL-evidence uden
+write/control grants til ordinary/broad principals. Det tidligere
+non-underscored reservation-compatibility-modul er fjernet.
 
-Caller-ejede signed value-objekter og den host-resolved verifier kopieres til
-exact-type canonical snapshots før authority-brug. Den caller-leverede
-`TrustedGitRuntime` skal være exact type og verificeres mod den signed/pinned
-runtime-identitet fra `CandidateSnapshotReceipt`; hele runtime-treeet kopieres
-derefter create-once til en transaction-private staging-root og bruges som den
-eneste execution-path for preflight og post-marker `main`-observation.
+Caller-ejede signed value-objekter og den host-resolved verifier snapshots til
+exact-type canonical values. Production Git execution bruger **ikke** længere en
+same-user `0700` transaction-copy som authority: public consume kræver en exact
+`TrustedGitRuntime`, hvis tree og ancestor chain er host-admin-kontrolleret
+(POSIX root-owned/no group-world write; Windows Program Files + owner/DACL), og
+kører kun den bounded `main`-observation gennem en restricted Git-reader. Den
+private underscore-testseam kan fortsat bruge transaction-private staging til
+deterministiske regressions, men er ikke production authority.
 
-Den irreversible create-once request-marker bevares som permanent host-local
-replay-marker efter succes. Både replay-marker og final receipt beholder deres
-**oprindelige descriptors/handles og fil-identiteter fra selve O_CREAT|O_EXCL
-publicationen** gennem provenance-registration. Registration må claim'e netop
-disse originaler; et byte-identisk inode-swap før registration fejler derfor
-lukket i stedet for at blive den nye baseline. Live provenance binder desuden
-exact receipt-identitet, originating PID, canonical receipt-SHA og exact bytes.
-Unlink/replacement/tamper invaliderer provenance, og byte-identisk recreate kan
-ikke genoplive et gammelt receipt.
+Replay-marker og final receipt beholder deres originale create-once
+descriptors/fil-identiteter gennem provenance-registration. Live provenance
+binder exact receipt identity, PID, receipt-SHA, exact bytes og metadata history;
+durable mismatch revokerer monotont, mens ren in-memory content mutation kun er
+midlertidigt invalid. På POSIX bindes desuden ledger-rootens directory identity
+og parent-directory `(dev, ino, ctime_ns)` fra første permanente publication,
+så whole-ledger rename→replay→restore ikke kan genoplive et gammelt receipt.
+Outer transaction-failure revokerer allerede registreret provenance før en
+traceback bliver caller-visible.
 
 Durable ledger-bytes er fortsat kun replay/recovery-state og kan ikke reloades
 som authenticated authority. Replay-scope er eksplicit host-local
