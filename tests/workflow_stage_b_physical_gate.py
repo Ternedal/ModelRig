@@ -221,7 +221,7 @@ print(f"Stage B final-gate contracts: {passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)
 
-# ADR-DC-010 through ADR-DC-015 remain proposed, so their heavy adversarial
+# ADR-DC-010 through ADR-DC-016 remain proposed, so their heavy adversarial
 # contracts live under tests/support and are explicitly attached to this already-
 # discovered physical gate rather than extending test-glob inventory.
 def _run_support_contract(filename: str, module_name: str) -> None:
@@ -281,3 +281,9 @@ _run_support_contract(
     "rsi_human_pilot_decision_production_boundary",
 )
 print("RSI human pilot GO/NO-GO decision contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_trial_scope_contract.py",
+    "rsi_pilot_trial_scope_contract",
+)
+print("RSI DC-L16 inert single-trial scope contract: PASS")
