@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.desktop.data
 
 import dk.ternedal.modelrig.desktop.Agent3DevConnectionBinding
+import java.util.UUID
 
 /** Separate URL-scoped persistence for reviewed Start; task-surface authority is never reused. */
 class Agent3ReviewedStartRecoveryStore(
@@ -25,7 +26,8 @@ class Agent3ReviewedStartRecoveryStore(
         val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
         val authority = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
         val fingerprint = currentCredentialFingerprint(baseUrl) ?: return false
-        val boundEnvelope = encodeBoundAuthority(fingerprint, authority)
+        val reservationGeneration = UUID.randomUUID().toString()
+        val boundEnvelope = encodeBoundAuthority(fingerprint, reservationGeneration, authority)
         val authorityKey = authorityKey(key, authority)
         synchronized(slotLock) {
             if (authorityKey in retiredAuthorities) return false
@@ -35,7 +37,7 @@ class Agent3ReviewedStartRecoveryStore(
         }
     }
 
-    /** Clear only the exact credential-bound authority that originated this completion. */
+    /** Clear only the exact credential-bound reservation generation that originated this completion. */
     fun clearIfMatches(baseUrl: String?, encodedAuthority: String?): Boolean {
         val key = agent3ReviewedStartRecoveryStorageKey(baseUrl) ?: return false
         val authority = encodedAuthority?.trim()?.takeIf { it.isNotEmpty() } ?: return false
@@ -77,27 +79,36 @@ internal fun agent3ReviewedStartRecoveryStorageKey(baseUrl: String?): String? =
 
 private data class CredentialBoundAuthority(
     val credentialFingerprint: String,
+    val reservationGeneration: String,
     val encodedAuthority: String,
 )
 
 private fun authorityKey(storageKey: String, authority: String): String =
     "$storageKey\u0000$authority"
 
-private fun encodeBoundAuthority(fingerprint: String, authority: String): String =
-    "$RECOVERY_STORAGE_SCHEMA\n$fingerprint\n$authority"
+private fun encodeBoundAuthority(
+    fingerprint: String,
+    reservationGeneration: String,
+    authority: String,
+): String = "$RECOVERY_STORAGE_SCHEMA\n$fingerprint\n$reservationGeneration\n$authority"
 
 private fun decodeBoundAuthority(raw: String): CredentialBoundAuthority? {
     val firstBreak = raw.indexOf('\n')
     if (firstBreak <= 0 || raw.substring(0, firstBreak) != RECOVERY_STORAGE_SCHEMA) return null
     val secondBreak = raw.indexOf('\n', firstBreak + 1)
     if (secondBreak <= firstBreak + 1) return null
+    val thirdBreak = raw.indexOf('\n', secondBreak + 1)
+    if (thirdBreak <= secondBreak + 1) return null
     val fingerprint = raw.substring(firstBreak + 1, secondBreak)
     if (!SHA256.matches(fingerprint)) return null
-    val authority = raw.substring(secondBreak + 1).trim().takeIf { it.isNotEmpty() } ?: return null
-    return CredentialBoundAuthority(fingerprint, authority)
+    val reservationGeneration = raw.substring(secondBreak + 1, thirdBreak)
+    if (!UUID_LOWERCASE.matches(reservationGeneration)) return null
+    val authority = raw.substring(thirdBreak + 1).trim().takeIf { it.isNotEmpty() } ?: return null
+    return CredentialBoundAuthority(fingerprint, reservationGeneration, authority)
 }
 
 private const val REVIEWED_START_RECOVERY_KEY_PREFIX = "agent3ReviewedStartRecovery"
-private const val RECOVERY_STORAGE_SCHEMA = "kaliv-agent3-reviewed-start-storage/v2"
+private const val RECOVERY_STORAGE_SCHEMA = "kaliv-agent3-reviewed-start-storage/v3"
 private const val UNRESOLVED_CREDENTIAL_BINDING = "kaliv-agent3-reviewed-start-unresolved-credential-binding"
 private val SHA256 = Regex("^[0-9a-f]{64}$")
+private val UUID_LOWERCASE = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
