@@ -14,6 +14,7 @@ import workflow_physical_validation_final_gate as base
 import kaliv_dev_control.improvement_physical_authority_keyring as keyring_module
 import kaliv_dev_control.improvement_physical_reservation as reservation_module
 import kaliv_dev_control._improvement_physical_reservation_impl as reservation_impl
+from kaliv_dev_control.durable_publication import DurablePublicationError
 from kaliv_dev_control.improvement_physical_reservation import (
     PhysicalQualificationReservationError,
     _consume_physical_qualification_request_once,
@@ -76,6 +77,32 @@ def _expect_keyring(fragment: str, fn) -> None:
         raise AssertionError(
             f"expected PhysicalRequestAuthorityKeyringError containing {fragment!r}"
         )
+
+
+def _consume(
+    *,
+    ledger_root,
+    trusted_git,
+    repository_root,
+    operation_root,
+    request,
+    qualification,
+    snapshot_receipt,
+    signature,
+    verifier,
+):
+    return _consume_physical_qualification_request_once(
+        ledger_root=ledger_root,
+        trusted_git=trusted_git,
+        repository_root=repository_root,
+        operation_root=operation_root,
+        request=request,
+        qualification=qualification,
+        snapshot_receipt=snapshot_receipt,
+        signature=signature,
+        verifier=verifier,
+        now_provider=_clock(),
+    )
 
 
 def test_public_surface_cannot_select_or_traverse_verifier() -> None:
@@ -154,7 +181,7 @@ def test_runtime_subclass_is_rejected() -> None:
         attacker_runtime = OverridableTrustedGitRuntime(trusted_git.transaction_root)
         _expect(
             "exact TrustedGitRuntime",
-            lambda: _consume_physical_qualification_request_once(
+            lambda: _consume(
                 ledger_root=ledger_root,
                 trusted_git=attacker_runtime,
                 repository_root=repository_root,
@@ -164,7 +191,6 @@ def test_runtime_subclass_is_rejected() -> None:
                 snapshot_receipt=snapshot_receipt,
                 signature=signature,
                 verifier=verifier,
-                now_provider=_clock(),
             ),
         )
         assert not any(ledger_root.iterdir())
@@ -202,7 +228,7 @@ def test_runtime_source_mutation_after_private_snapshot_cannot_change_observatio
 
         reservation_impl._verify_request_at = verify_then_mutate_source
         try:
-            consumed = _consume_physical_qualification_request_once(
+            consumed = _consume(
                 ledger_root=ledger_root,
                 trusted_git=trusted_git,
                 repository_root=repository_root,
@@ -212,7 +238,6 @@ def test_runtime_source_mutation_after_private_snapshot_cannot_change_observatio
                 snapshot_receipt=snapshot_receipt,
                 signature=signature,
                 verifier=verifier,
-                now_provider=_clock(),
             )
         finally:
             reservation_impl._verify_request_at = original_verify
@@ -252,7 +277,7 @@ def test_verified_input_snapshot_survives_caller_mutation_after_verify() -> None
 
         reservation_impl._verify_request_at = verify_then_mutate
         try:
-            consumed = _consume_physical_qualification_request_once(
+            consumed = _consume(
                 ledger_root=ledger_root,
                 trusted_git=trusted_git,
                 repository_root=repository_root,
@@ -262,7 +287,6 @@ def test_verified_input_snapshot_survives_caller_mutation_after_verify() -> None
                 snapshot_receipt=snapshot_receipt,
                 signature=signature,
                 verifier=verifier,
-                now_provider=_clock(),
             )
         finally:
             reservation_impl._verify_request_at = original_verify
@@ -309,7 +333,7 @@ def test_final_swap_cannot_be_upgraded_to_live_authority() -> None:
         try:
             _expect(
                 "durably host-consumed but reservation requires recovery",
-                lambda: _consume_physical_qualification_request_once(
+                lambda: _consume(
                     ledger_root=ledger_root,
                     trusted_git=trusted_git,
                     repository_root=repository_root,
@@ -319,7 +343,6 @@ def test_final_swap_cannot_be_upgraded_to_live_authority() -> None:
                     snapshot_receipt=snapshot_receipt,
                     signature=signature,
                     verifier=verifier,
-                    now_provider=_clock(),
                 ),
             )
         finally:
@@ -364,7 +387,7 @@ def test_final_removed_during_cleanup_fails_before_provenance_registration() -> 
         try:
             _expect(
                 "durably host-consumed but reservation requires recovery",
-                lambda: _consume_physical_qualification_request_once(
+                lambda: _consume(
                     ledger_root=ledger_root,
                     trusted_git=trusted_git,
                     repository_root=repository_root,
@@ -374,7 +397,6 @@ def test_final_removed_during_cleanup_fails_before_provenance_registration() -> 
                     snapshot_receipt=snapshot_receipt,
                     signature=signature,
                     verifier=verifier,
-                    now_provider=_clock(),
                 ),
             )
         finally:
@@ -424,7 +446,7 @@ def test_byte_identical_final_replacement_before_registration_fails_closed() -> 
         try:
             _expect(
                 "durably host-consumed but reservation requires recovery",
-                lambda: _consume_physical_qualification_request_once(
+                lambda: _consume(
                     ledger_root=ledger_root,
                     trusted_git=trusted_git,
                     repository_root=repository_root,
@@ -434,7 +456,6 @@ def test_byte_identical_final_replacement_before_registration_fails_closed() -> 
                     snapshot_receipt=snapshot_receipt,
                     signature=signature,
                     verifier=verifier,
-                    now_provider=_clock(),
                 ),
             )
         finally:
@@ -480,7 +501,7 @@ def test_byte_identical_replay_marker_replacement_before_registration_fails_clos
         try:
             _expect(
                 "durably host-consumed but reservation requires recovery",
-                lambda: _consume_physical_qualification_request_once(
+                lambda: _consume(
                     ledger_root=ledger_root,
                     trusted_git=trusted_git,
                     repository_root=repository_root,
@@ -490,7 +511,6 @@ def test_byte_identical_replay_marker_replacement_before_registration_fails_clos
                     snapshot_receipt=snapshot_receipt,
                     signature=signature,
                     verifier=verifier,
-                    now_provider=_clock(),
                 ),
             )
         finally:
@@ -513,7 +533,7 @@ def _consume_fixture(root: Path):
         signature,
         verifier,
     ) = _fixture(root)
-    consumed = _consume_physical_qualification_request_once(
+    consumed = _consume(
         ledger_root=ledger_root,
         trusted_git=trusted_git,
         repository_root=repository_root,
@@ -523,7 +543,6 @@ def _consume_fixture(root: Path):
         snapshot_receipt=snapshot_receipt,
         signature=signature,
         verifier=verifier,
-        now_provider=_clock(),
     )
     return consumed, ledger_root, request
 
@@ -554,6 +573,116 @@ def test_recreated_replay_marker_bytes_cannot_restore_live_provenance() -> None:
         assert consumed.transaction_authenticated is False
 
 
+def test_same_inode_rename_replay_restore_cannot_restore_first_receipt() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = _fixture(root)
+        first = _consume(
+            ledger_root=ledger_root,
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
+            request=request,
+            qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
+            signature=signature,
+            verifier=verifier,
+        )
+        assert first.transaction_authenticated is True
+
+        final_path = ledger_root / f"{request.sha256}.json"
+        lock_path = ledger_root / f".{request.sha256}.lock"
+        saved_final = ledger_root / ".saved-original-final"
+        saved_lock = ledger_root / ".saved-original-lock"
+        final_path.rename(saved_final)
+        lock_path.rename(saved_lock)
+
+        second = _consume(
+            ledger_root=ledger_root,
+            trusted_git=trusted_git,
+            repository_root=repository_root,
+            operation_root=operation_root,
+            request=request,
+            qualification=qualification,
+            snapshot_receipt=snapshot_receipt,
+            signature=signature,
+            verifier=verifier,
+        )
+        assert second.transaction_authenticated is True
+
+        final_path.unlink()
+        lock_path.unlink()
+        saved_final.rename(final_path)
+        saved_lock.rename(lock_path)
+
+        # No provenance read occurred while the originals were absent. The
+        # retained metadata stamp must still make the rename history visible.
+        assert first.transaction_authenticated is False
+        assert second.transaction_authenticated is False
+
+
+def test_cleanup_failure_revokes_traceback_recoverable_receipt() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        (
+            _main_sha,
+            trusted_git,
+            operation_root,
+            repository_root,
+            ledger_root,
+            snapshot_receipt,
+            qualification,
+            request,
+            signature,
+            verifier,
+        ) = _fixture(root)
+        original_remove_tree = reservation_impl.remove_tree_durable
+
+        def fail_runtime_cleanup(_path):
+            raise DurablePublicationError("synthetic runtime cleanup failure")
+
+        reservation_impl.remove_tree_durable = fail_runtime_cleanup
+        try:
+            try:
+                _consume(
+                    ledger_root=ledger_root,
+                    trusted_git=trusted_git,
+                    repository_root=repository_root,
+                    operation_root=operation_root,
+                    request=request,
+                    qualification=qualification,
+                    snapshot_receipt=snapshot_receipt,
+                    signature=signature,
+                    verifier=verifier,
+                )
+            except PhysicalQualificationReservationError as exc:
+                assert "private Git runtime cleanup failed closed" in str(exc)
+                recovered = []
+                traceback = exc.__traceback__
+                while traceback is not None:
+                    value = traceback.tb_frame.f_locals.get("result")
+                    if isinstance(value, reservation_module.PhysicalQualificationReservation):
+                        recovered.append(value)
+                    traceback = traceback.tb_next
+                assert recovered, "cleanup failure traceback must expose the committed local result"
+                assert all(value.transaction_authenticated is False for value in recovered)
+            else:
+                raise AssertionError("expected cleanup failure to abort the transaction")
+        finally:
+            reservation_impl.remove_tree_durable = original_remove_tree
+
+
 def main() -> None:
     test_public_surface_cannot_select_or_traverse_verifier()
     test_windows_acl_policy_rejects_untrusted_write_or_owner()
@@ -569,6 +698,8 @@ def main() -> None:
     test_byte_identical_replay_marker_replacement_before_registration_fails_closed()
     test_recreated_final_bytes_cannot_restore_live_provenance()
     test_recreated_replay_marker_bytes_cannot_restore_live_provenance()
+    test_same_inode_rename_replay_restore_cannot_restore_first_receipt()
+    test_cleanup_failure_revokes_traceback_recoverable_receipt()
     print("RSI physical reservation authority-race regressions: PASS")
 
 
