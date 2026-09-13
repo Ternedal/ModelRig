@@ -1,0 +1,74 @@
+name: tmp-qualify-agent3-restore-guard-p1m2
+
+on:
+  push:
+    branches:
+      - fix/agent3-live-restore-guard-p1m-20260913
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-live-restore-guard-p1m-20260913
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Install worker dependencies
+        run: python -m pip install -r worker/requirements.txt
+      - name: Run restore guard regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          python tests/worker_agent3_restore_guard.py
+          python tests/worker_backup.py
+      - name: Run reviewed Start recovery chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$PWD/worker"
+          for t in tests/worker_agent3_reviewed_start_p1*.py; do python "$t"; done
+          python tests/worker_agent3_cancellation_contract.py
+          python tests/worker_agent3_late_cancel.py
+          python tests/worker_agent3_capability_receipt_api.py
+      - name: Regenerate current state and retain clean tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/current_state.py
+          python scripts/current_state.py --check
+          git diff --check
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git rm .github/workflows/_tmp_qualify_agent3_restore_guard_p1m2.yml
+          git add CURRENT_STATE.md
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: retain cross-platform restore guard qualification state"
+            git push origin HEAD:fix/agent3-live-restore-guard-p1m-20260913
+          fi
+
+  windows:
+    needs: linux
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/agent3-live-restore-guard-p1m-20260913
+          fetch-depth: 1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Run targeted restore guard regression on Windows
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\worker"
+          python tests/worker_agent3_restore_guard.py
