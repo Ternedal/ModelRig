@@ -827,13 +827,15 @@ def create(out_dir: str = ".") -> str:
                 progress_snapshot = os.path.join(stage_dir, "progress.db")
                 runs_snapshot = os.path.join(stage_dir, "runs.db")
 
-                # Progress-first / runs-second prevents ordinary live execution
-                # from manufacturing a watermark newer than the run snapshot.
-                # Persistent pair identity proves common provenance; semantic
-                # validation below catches stale/partial source copies that still
-                # share that provenance but disagree at the execution boundary.
-                _sqlite_snapshot(progress.path, progress_snapshot)
+                # Runs-first / progress-second is the replay-safe monotone
+                # boundary. If execution crosses the two physical copies, the
+                # staged progress ledger is newer than the staged run payload;
+                # semantic validation below then observes the watermark against
+                # stale PENDING authority and refuses publication. The inverse
+                # order can silently omit the only watermark proving a
+                # non-idempotent step already started.
                 _sqlite_snapshot(runs.path, runs_snapshot)
+                _sqlite_snapshot(progress.path, progress_snapshot)
                 _add_snapshot_binding(
                     progress_snapshot,
                     snapshot_id=snapshot_id,
