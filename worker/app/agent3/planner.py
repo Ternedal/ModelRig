@@ -501,6 +501,14 @@ def build_planner_router(
         template = AgentRun.from_json(envelope["run"])
         return envelope, template, raw_review_reads
 
+    def _assert_reserved_run_binding(existing: AgentRun, reserved_run_id: str) -> None:
+        if existing.id != reserved_run_id:
+            raise _reviewed_start_error(
+                "reviewed_start_pending",
+                "persisted reviewed Start payload has the wrong reserved run id",
+                status_code=503,
+            )
+
     def _assert_reviewed_run_identity(existing: AgentRun, reviewed_template: AgentRun) -> None:
         # Never execute a recovered row merely because its run id matches. The
         # canonical plan digest binds route + tool/args + risk/sensitivity/egress
@@ -550,6 +558,7 @@ def build_planner_router(
                 "persisted reviewed Start run is not yet materialized",
                 status_code=503,
             )
+        _assert_reserved_run_binding(existing, run_id)
         # Only RUNNING snapshots can be advanced. BLOCKED is terminal authority
         # and may legitimately carry a fail-closed route produced by capability
         # drift rather than the reviewed executable route. Observe terminal state
@@ -692,6 +701,7 @@ def build_planner_router(
                             "accepted reviewed Start lost its bound run during recovery",
                             status_code=503,
                         )
+                    _assert_reserved_run_binding(existing, reserved_run_id)
                     # Accepted replay is observation-only, but any state that
                     # can still resume execution must remain bound to the exact
                     # immutable reviewed plan before later Resume/Confirm may run.
@@ -710,6 +720,7 @@ def build_planner_router(
                     "pending reviewed Start is missing its bound run; recovery remains ambiguous",
                     status_code=503,
                 )
+            _assert_reserved_run_binding(existing, reserved_run_id)
 
             if owner == plan_store.start_owner:
                 if not _take_reviewed_start_retry_ready(plan_id, reserved_run_id):

@@ -178,9 +178,18 @@ fun Agent3ReviewDevApp() {
             connection: Agent3DevConnectionBinding,
             authority: Agent3ReviewedStartRecoveryAuthority,
         ) {
+            // Resolve the durable authority in the URL scope that issued this
+            // request even if the operator has since navigated to another rig.
+            // Never publish that stale completion into the new rig's shared UI
+            // state, where it could clear an unrelated unresolved Start.
+            val cleared = recoveryStore.write(connection.baseUrl, null)
+            val current = Agent3DevConnectionBinding.capture(baseUrl, token)
+            if (!Agent3DevInteractionPolicy.canPublishReviewedStartCompletion(current, connection)) {
+                return
+            }
             run = envelope.run
             review = envelope.readReview
-            if (recoveryStore.write(connection.baseUrl, null)) {
+            if (cleared) {
                 pendingStartRecovery = null
                 startRecoveryUnresolved = false
             } else {
@@ -198,6 +207,10 @@ fun Agent3ReviewDevApp() {
             val detail = failure.message ?: "Planen kunne ikke startes"
             if (!shouldRetainReviewedStartRecovery(failure)) {
                 val cleared = recoveryStore.write(connection.baseUrl, null)
+                val current = Agent3DevConnectionBinding.capture(baseUrl, token)
+                if (!Agent3DevInteractionPolicy.canPublishReviewedStartCompletion(current, connection)) {
+                    return
+                }
                 if (cleared) {
                     pendingStartRecovery = null
                     startRecoveryUnresolved = false
@@ -209,6 +222,10 @@ fun Agent3ReviewDevApp() {
                 } else {
                     "$detail. Serveren afviste Start definitivt, men lokal recovery kunne ikke ryddes."
                 }
+                return
+            }
+            val current = Agent3DevConnectionBinding.capture(baseUrl, token)
+            if (!Agent3DevInteractionPolicy.canPublishReviewedStartCompletion(current, connection)) {
                 return
             }
             pendingStartRecovery = authority

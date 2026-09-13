@@ -36,6 +36,20 @@ class Agent3DevInteractionPolicyTest {
         assertFalse(connection == binding("http://rig-a:8080", "token-b"))
     }
 
+    @Test fun reviewedStartCompletionPublishesOnlyIntoSameUrlScopedRecoveryState() {
+        assertTrue(
+            Agent3DevInteractionPolicy.canPublishReviewedStartCompletion(
+                binding(" http://rig-a:8080/ ", "new-token"), connection
+            )
+        )
+        assertFalse(
+            Agent3DevInteractionPolicy.canPublishReviewedStartCompletion(
+                binding("http://rig-b:8080", "token-a"), connection
+            )
+        )
+        assertFalse(Agent3DevInteractionPolicy.canPublishReviewedStartCompletion(null, connection))
+    }
+
     @Test fun previewIntentNormalizesExactPlannerInputs() {
         val value = intent("  vis status  ", true, " beta, alpha, beta,  ")
         assertEquals("vis status", value.message)

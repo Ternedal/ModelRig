@@ -75,6 +75,11 @@ internal object Agent3DevInteractionPolicy {
         currentIntent: Agent3DevPreviewIntent?,
     ): Boolean = requestIntent != null && requestIntent == currentIntent
 
+    fun canPublishReviewedStartCompletion(
+        currentConnection: Agent3DevConnectionBinding?,
+        requestConnection: Agent3DevConnectionBinding,
+    ): Boolean = currentConnection?.baseUrl == requestConnection.baseUrl
+
     fun canStart(
         planId: String?,
         planSize: Int,
