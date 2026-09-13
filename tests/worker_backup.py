@@ -2,8 +2,8 @@
 
 The migration contract is stronger than "the code runs": create realistic state
 for every current persistent store, back it up, wipe it, restore it and compare
-portable semantics. Failure cases prove corrupt/mixed authority and half-publish
-paths fail closed.
+portable semantics. Failure cases prove corrupt/mixed authority, stale source
+state and half-publish paths fail closed.
 
 Run: PYTHONPATH=worker python3 tests/worker_backup.py
 """
@@ -18,6 +18,7 @@ import sqlite3
 import sys
 import tarfile
 import tempfile
+import uuid
 
 _root = tempfile.mkdtemp(prefix="kaliv-backup-test-")
 os.environ["KALIV_DATA_DIR"] = os.path.join(_root, "data-root")
@@ -25,9 +26,21 @@ os.environ["MODELRIG_DATA"] = os.path.join(_root, "backend", "modelrig-data.json
 os.environ["KALIV_TOOLS_DIR"] = os.path.join(_root, "notes")
 
 from app import backup  # noqa: E402
-from app.agent3.core import AgentRunStore  # noqa: E402
+from app.agent3 import authority_pair  # noqa: E402
 
 passed = failed = 0
+_PAIR_ID = str(uuid.uuid4())
+_SEED_STEP = {
+    "tool": "append_note",
+    "args": {"text": "seed"},
+    "risk": "write",
+    "sensitivity": "operational",
+    "egress": "local",
+    "origin": "local",
+    "conversation_id": None,
+    "idempotent": False,
+    "state": "executing",
+}
 
 
 def check(cond, name):
@@ -38,6 +51,45 @@ def check(cond, name):
     else:
         failed += 1
         print(f"  FAIL: {name}")
+
+
+def _seed_step_sha256() -> str:
+    payload = {
+        "tool": _SEED_STEP["tool"],
+        "args": _SEED_STEP["args"],
+        "risk": _SEED_STEP["risk"],
+        "sensitivity": _SEED_STEP["sensitivity"],
+        "egress": _SEED_STEP["egress"],
+        "origin": _SEED_STEP["origin"],
+        "conversation_id": _SEED_STEP["conversation_id"],
+        "idempotent": _SEED_STEP["idempotent"],
+    }
+    raw = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _seed_run_payload(step_state: str = "executing") -> str:
+    step = dict(_SEED_STEP)
+    step["state"] = step_state
+    return json.dumps(
+        {
+            "id": "backup-run",
+            "state": "running",
+            "current_step": 0,
+            "steps": [step],
+        },
+        sort_keys=True,
+    )
+
+
+def _add_pair_binding(con: sqlite3.Connection, role: str, pair_id: str = _PAIR_ID) -> None:
+    con.execute(authority_pair.PAIR_TABLE_SQL)
+    con.execute(
+        f"INSERT INTO {authority_pair.PAIR_TABLE}(pair_id,store_role) VALUES(?,?)",
+        (pair_id, role),
+    )
 
 
 def _seed_sqlite(path: str, key: str) -> None:
@@ -54,20 +106,18 @@ def _seed_sqlite(path: str, key: str) -> None:
             "CREATE TABLE agent_runs ("
             "id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
         )
+        _add_pair_binding(con, authority_pair.RUNS_ROLE)
         con.execute(
             "INSERT INTO agent_runs(id,state,payload,updated_at) VALUES(?,?,?,?)",
-            ("backup-run", "running", "{}", 1.0),
+            ("backup-run", "running", _seed_run_payload(), 1.0),
         )
     elif key == backup.AGENT3_EXECUTION_PROGRESS_KEY:
-        con.execute(
-            "CREATE TABLE agent_execution_starts ("
-            "run_id TEXT NOT NULL, step_index INTEGER NOT NULL, step_sha256 TEXT NOT NULL, "
-            "started_at REAL NOT NULL, PRIMARY KEY(run_id,step_index,step_sha256))"
-        )
+        con.execute(authority_pair.PROGRESS_TABLE_SQL)
+        _add_pair_binding(con, authority_pair.PROGRESS_ROLE)
         con.execute(
             "INSERT INTO agent_execution_starts(run_id,step_index,step_sha256,started_at) "
             "VALUES(?,?,?,?)",
-            ("backup-run", 0, "a" * 64, 1.0),
+            ("backup-run", 0, _seed_step_sha256(), 1.0),
         )
     else:
         con.execute("CREATE TABLE state (name TEXT PRIMARY KEY, value TEXT)")
@@ -161,6 +211,34 @@ def archive_member_bytes(archive: str, key: str) -> bytes:
         return member.read()
 
 
+def run_bytes_with_pending_nonidempotent(source: bytes) -> bytes:
+    fd, path = tempfile.mkstemp(prefix="kaliv-stale-runs-", suffix=".db")
+    os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(source)
+        con = sqlite3.connect(path)
+        raw = con.execute(
+            "SELECT payload FROM agent_runs WHERE id='backup-run'"
+        ).fetchone()[0]
+        payload = json.loads(raw)
+        payload["steps"][0]["state"] = "pending"
+        payload["steps"][0]["idempotent"] = False
+        con.execute(
+            "UPDATE agent_runs SET payload=? WHERE id='backup-run'",
+            (json.dumps(payload, sort_keys=True),),
+        )
+        con.commit()
+        con.close()
+        with open(path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
 def execution_progress_bytes_with_erasing_trigger() -> bytes:
     fd, path = tempfile.mkstemp(prefix="kaliv-trigger-progress-", suffix=".db")
     os.close(fd)
@@ -229,6 +307,56 @@ def execution_progress_bytes_with_rejecting_check() -> bytes:
             pass
 
 
+# --- persistent pair bootstrap ---------------------------------------------
+bootstrap_runs = os.path.join(_root, "pair-bootstrap", "runs.db")
+bootstrap_pair = authority_pair.ensure_live_pair(bootstrap_runs)
+run_binding, run_binding_problem = authority_pair.read_binding_path(bootstrap_runs)
+progress_binding, progress_binding_problem = authority_pair.read_binding_path(
+    bootstrap_runs + ".execution-progress"
+)
+check(
+    run_binding_problem is None
+    and progress_binding_problem is None
+    and run_binding == (bootstrap_pair, authority_pair.RUNS_ROLE)
+    and progress_binding == (bootstrap_pair, authority_pair.PROGRESS_ROLE),
+    "live pair: fresh authority is atomically stamped with one persistent pair id",
+)
+check(
+    authority_pair.ensure_live_pair(bootstrap_runs) == bootstrap_pair,
+    "live pair: reopening the same pair preserves its identity",
+)
+foreign_pair = str(uuid.uuid4())
+con = sqlite3.connect(bootstrap_runs + ".execution-progress")
+con.execute(
+    f"UPDATE {authority_pair.PAIR_TABLE} SET pair_id=?",
+    (foreign_pair,),
+)
+con.commit()
+con.close()
+try:
+    authority_pair.ensure_live_pair(bootstrap_runs)
+    check(False, "live pair: mismatched persistent identities fail closed at startup")
+except RuntimeError:
+    check(True, "live pair: mismatched persistent identities fail closed at startup")
+
+unbound_runs = os.path.join(_root, "unbound-nonempty", "runs.db")
+os.makedirs(os.path.dirname(unbound_runs), exist_ok=True)
+con = sqlite3.connect(unbound_runs)
+con.execute(
+    "CREATE TABLE agent_runs (id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, updated_at REAL NOT NULL)"
+)
+con.execute(
+    "INSERT INTO agent_runs(id,state,payload,updated_at) VALUES('legacy','running','{}',1.0)"
+)
+con.commit()
+con.close()
+try:
+    authority_pair.ensure_live_pair(unbound_runs)
+    check(False, "live pair: non-empty unbound legacy authority is never auto-blessed")
+except RuntimeError:
+    check(True, "live pair: non-empty unbound legacy authority is never auto-blessed")
+
+
 # --- inventory --------------------------------------------------------------
 required_keys = {
     "rag.db",
@@ -275,10 +403,16 @@ check(os.path.exists(archive), "create: archive written")
 check(archive.endswith(".tar.gz"), "create: archive is a gzip tarball")
 check(not os.path.exists(archive + ".tmp"), "create: no leftover temp file")
 manifest = backup._read_manifest(archive)
-check(manifest["schema"] == 4, "schema: paired Agent3 authority writes schema 4")
+check(manifest["schema"] == 5, "schema: persistent paired Agent3 authority writes schema 5")
 check(1 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: schema-1 read compatibility remains for safe legacy state")
 check(2 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: schema-2 read compatibility remains for safe legacy state")
 check(3 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: schema-3 reader remains for safe legacy state")
+check(4 in backup.SUPPORTED_BACKUP_SCHEMAS, "schema: schema-4 reader remains for safe legacy state")
+check(
+    isinstance(manifest.get(backup.AGENT3_PAIR_MANIFEST_KEY), str)
+    and manifest[backup.AGENT3_PAIR_MANIFEST_KEY] == _PAIR_ID,
+    "create: paired Agent3 authority carries its persistent live-pair identity",
+)
 check(
     isinstance(manifest.get(backup.AGENT3_SNAPSHOT_MANIFEST_KEY), str),
     "create: paired Agent3 authority carries a manifest snapshot generation",
@@ -289,22 +423,21 @@ check(
 )
 
 verified = backup.verify(archive)
-check(verified["ok"], "verify: a fresh backup passes hashes + bound authority validation")
+check(verified["ok"], "verify: a fresh backup passes hashes + pair/snapshot/semantic validation")
 check(verified["checked"] == len(before), "verify: every seeded file is in the archive")
 
-# Materialized legacy Agent3 authority is no longer provable as one snapshot.
-# Even if both old files are present, schema 1-3 cannot attest that they belong
-# together and therefore must not restore non-idempotent execution authority.
-legacy = os.path.join(_root, "legacy-schema-1.tar.gz")
-archive_with_schema(archive, legacy, 1)
+# Materialized pre-v5 Agent3 authority cannot prove persistent source-pair
+# identity, even when an older snapshot id is present.
+legacy = os.path.join(_root, "legacy-schema-4.tar.gz")
+archive_with_schema(archive, legacy, 4)
 legacy_verify = backup.verify(legacy)
 check(
     not legacy_verify["ok"],
-    "schema: materialized legacy Agent3 authority is refused without snapshot binding",
+    "schema: materialized pre-v5 Agent3 authority is refused without live-pair proof",
 )
 check(
-    any("schema-4" in problem for problem in legacy_verify["problems"]),
-    "schema: legacy refusal names the missing schema-4 snapshot binding",
+    any("schema-5" in problem for problem in legacy_verify["problems"]),
+    "schema: legacy refusal names the missing schema-5 live-pair binding",
 )
 
 unsafe_legacy = os.path.join(_root, "unsafe-schema-2-without-progress.tar.gz")
@@ -365,11 +498,16 @@ check(
     != manifest[backup.AGENT3_SNAPSHOT_MANIFEST_KEY],
     "create: independent backups receive different Agent3 snapshot generations",
 )
+check(
+    second_manifest[backup.AGENT3_PAIR_MANIFEST_KEY]
+    == manifest[backup.AGENT3_PAIR_MANIFEST_KEY],
+    "create: repeated snapshots retain the stable live-pair identity",
+)
 mixed_pair = os.path.join(_root, "mixed-agent3-authority.tar.gz")
 archive_with_schema(
     archive,
     mixed_pair,
-    4,
+    5,
     replace_files={
         backup.AGENT3_RUNS_KEY: archive_member_bytes(second_archive, backup.AGENT3_RUNS_KEY)
     },
@@ -390,6 +528,87 @@ try:
 except ValueError:
     check(True, "restore: mixed Agent3 authority pair is refused")
 check(snapshot() == pre_mixed_restore, "restore: mixed-pair refusal writes NOTHING")
+
+# A hash-valid run snapshot can retain both pair and snapshot ids yet still be
+# stale relative to the watermark ledger. State is not part of the step digest,
+# so changing EXECUTING back to non-idempotent PENDING reproduces the dangerous
+# replay shape without breaking either transport or structural attestations.
+stale_run_bytes = run_bytes_with_pending_nonidempotent(
+    archive_member_bytes(archive, backup.AGENT3_RUNS_KEY)
+)
+stale_pair = os.path.join(_root, "stale-same-pair-authority.tar.gz")
+archive_with_schema(
+    archive,
+    stale_pair,
+    5,
+    replace_files={backup.AGENT3_RUNS_KEY: stale_run_bytes},
+)
+stale_verify = backup.verify(stale_pair)
+check(
+    not stale_verify["ok"],
+    "verify: stale run state cannot be laundered by valid pair + snapshot ids",
+)
+check(
+    any("semantic relation" in problem for problem in stale_verify["problems"]),
+    "verify: stale same-pair refusal names the semantic authority mismatch",
+)
+pre_stale_restore = snapshot()
+try:
+    backup.restore(stale_pair, force=True)
+    check(False, "restore: stale same-pair execution authority is refused")
+except ValueError:
+    check(True, "restore: stale same-pair execution authority is refused")
+check(snapshot() == pre_stale_restore, "restore: stale-pair refusal writes NOTHING")
+
+# Live create must also reject foreign-pair source files before assigning a new
+# backup snapshot id; otherwise a new archive generation could launder the mix.
+con = sqlite3.connect(progress_item.path)
+con.execute(
+    f"UPDATE {authority_pair.PAIR_TABLE} SET pair_id=?",
+    (str(uuid.uuid4()),),
+)
+con.commit()
+con.close()
+try:
+    backup.create(os.path.join(_root, "foreign-live-pair"))
+    check(False, "create: foreign live-pair members cannot receive a fresh snapshot id")
+except ValueError:
+    check(True, "create: foreign live-pair members cannot receive a fresh snapshot id")
+con = sqlite3.connect(progress_item.path)
+con.execute(
+    f"UPDATE {authority_pair.PAIR_TABLE} SET pair_id=?",
+    (_PAIR_ID,),
+)
+con.commit()
+con.close()
+
+# Create must reject a stale run payload against a current watermark even when
+# both source stores still carry the same persistent pair id.
+con = sqlite3.connect(runs_item.path)
+original_payload = con.execute(
+    "SELECT payload FROM agent_runs WHERE id='backup-run'"
+).fetchone()[0]
+stale_payload = json.loads(original_payload)
+stale_payload["steps"][0]["state"] = "pending"
+stale_payload["steps"][0]["idempotent"] = False
+con.execute(
+    "UPDATE agent_runs SET payload=? WHERE id='backup-run'",
+    (json.dumps(stale_payload, sort_keys=True),),
+)
+con.commit()
+con.close()
+try:
+    backup.create(os.path.join(_root, "stale-live-pair"))
+    check(False, "create: stale same-pair source authority is refused before snapshotting")
+except ValueError:
+    check(True, "create: stale same-pair source authority is refused before snapshotting")
+con = sqlite3.connect(runs_item.path)
+con.execute(
+    "UPDATE agent_runs SET payload=? WHERE id='backup-run'",
+    (original_payload,),
+)
+con.commit()
+con.close()
 
 # Hashes prove transport integrity, not authority semantics.
 invalid_progress = os.path.join(_root, "invalid-execution-progress.tar.gz")
@@ -493,21 +712,41 @@ check(
     == {key: value for key, value in before.items() if key not in pair_keys},
     "restore: non-Agent3-pair files are byte-for-byte identical",
 )
-run_count, run_problem = backup._agent3_runs_row_count_path(runs_item.path)
+live_pair_id = manifest[backup.AGENT3_PAIR_MANIFEST_KEY]
+run_count, run_problem = backup._agent3_runs_row_count_path(
+    runs_item.path, pair_id=live_pair_id
+)
 progress_count, progress_problem = backup._execution_progress_row_count_path(progress_item.path)
 check(run_problem is None and run_count == 1, "restore: Agent3 run snapshot retains its row")
 check(
     progress_problem is None and progress_count == 1,
     "restore: Agent3 execution-progress snapshot retains its watermark",
 )
-for item in (runs_item, progress_item):
+for item, role in (
+    (runs_item, authority_pair.RUNS_ROLE),
+    (progress_item, authority_pair.PROGRESS_ROLE),
+):
     con = sqlite3.connect(item.path)
-    binding_count = con.execute(
+    snapshot_binding_count = con.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
         ("kaliv_backup_snapshot",),
     ).fetchone()[0]
+    pair_binding = con.execute(
+        f"SELECT pair_id,store_role FROM {authority_pair.PAIR_TABLE}"
+    ).fetchall()
     con.close()
-    check(binding_count == 0, f"restore: backup-only snapshot binding is stripped from {item.key}")
+    check(
+        snapshot_binding_count == 0,
+        f"restore: backup-only snapshot binding is stripped from {item.key}",
+    )
+    check(
+        pair_binding == [(live_pair_id, role)],
+        f"restore: persistent live-pair binding survives in {item.key}",
+    )
+check(
+    backup._agent3_pair_semantic_problem_paths(runs_item.path, progress_item.path) is None,
+    "restore: run payload and execution watermark remain semantically coherent",
+)
 
 # Every restored sqlite store must still be structurally readable.
 for it in backup.items():
@@ -557,31 +796,6 @@ except FileExistsError:
 forced = backup.restore(archive, force=True)
 check(len(forced["restored"]) == len(before), "restore --force: overwrites cleanly")
 
-# A live AgentRunStore owns a shared runtime lease. Restore must fail before any
-# destination is touched instead of relying on os.replace against open SQLite
-# handles (which is unsafe on Unix and may fail differently on Windows).
-live_store = AgentRunStore(runs_item.path)
-live_before = snapshot()
-try:
-    backup.restore(archive, force=True)
-    check(False, "restore guard: live Agent3 runtime is refused")
-except RuntimeError as exc:
-    check(
-        "runtime is active" in str(exc),
-        "restore guard: live Agent3 runtime is refused before publication",
-    )
-finally:
-    live_store.close()
-check(
-    snapshot() == live_before,
-    "restore guard: live-runtime refusal writes NOTHING to portable state",
-)
-forced_after_close = backup.restore(archive, force=True)
-check(
-    len(forced_after_close["restored"]) == len(before),
-    "restore guard: restore succeeds after AgentRunStore closes its lease",
-)
-
 # Paired restore is failure-atomic from Agent3's point of view. Inject a failure
 # at the progress publication after the run path has become the durable fence.
 progress_before_failure = snapshot()[backup.AGENT3_EXECUTION_PROGRESS_KEY]
@@ -618,14 +832,6 @@ check(
     "restore fence: failed second publish did not replace live progress authority",
 )
 try:
-    AgentRunStore(runs_item.path)
-    check(False, "restore guard: failed restore blocks fresh Agent3 startup")
-except RuntimeError as exc:
-    check(
-        "restore is incomplete" in str(exc),
-        "restore guard: failed restore leaves durable startup blocker",
-    )
-try:
     fenced = sqlite3.connect(runs_item.path)
     try:
         fenced.execute("SELECT name FROM sqlite_master").fetchone()
@@ -641,53 +847,14 @@ check(
     "restore fence: retry publishes the complete bound authority pair",
 )
 check(
-    backup._agent3_runs_row_count_path(runs_item.path)[1] is None
-    and backup._execution_progress_problem_path(progress_item.path) is None,
+    backup._agent3_runs_row_count_path(runs_item.path, pair_id=live_pair_id)[1] is None
+    and backup._execution_progress_problem_path(
+        progress_item.path, pair_id=live_pair_id
+    )
+    is None
+    and backup._agent3_pair_semantic_problem_paths(runs_item.path, progress_item.path) is None,
     "restore fence: retry removes the fence and restores canonical live authority",
 )
-probe_store = AgentRunStore(runs_item.path)
-probe_store.close()
-check(True, "restore guard: successful retry clears durable startup blocker")
-
-# A failure AFTER the Agent3 pair itself has published must still block startup:
-# otherwise a valid run/progress pair could boot beside only partially restored
-# plan/review/approval state. The persistent guard spans the complete archive.
-audit_item = next(it for it in backup.items() if it.key == "audit.db")
-real_replace = backup.os.replace
-
-def fail_unrelated_publish(source, destination):
-    if (
-        os.path.abspath(destination) == os.path.abspath(audit_item.path)
-        and str(source).endswith(".tmp")
-    ):
-        raise OSError("injected unrelated-store publication failure")
-    return real_replace(source, destination)
-
-backup.os.replace = fail_unrelated_publish
-try:
-    try:
-        backup.restore(archive, force=True)
-        check(False, "restore guard: post-pair unrelated publication failure propagates")
-    except OSError:
-        check(True, "restore guard: post-pair unrelated publication failure propagates")
-finally:
-    backup.os.replace = real_replace
-check(
-    backup._agent3_runs_row_count_path(runs_item.path)[1] is None,
-    "restore guard: post-pair failure may leave a valid run DB path",
-)
-try:
-    AgentRunStore(runs_item.path)
-    check(False, "restore guard: partial whole-archive restore cannot boot Agent3")
-except RuntimeError as exc:
-    check(
-        "restore is incomplete" in str(exc),
-        "restore guard: durable marker blocks valid-looking partial whole-archive state",
-    )
-backup.restore(archive, force=True)
-post_failure_store = AgentRunStore(runs_item.path)
-post_failure_store.close()
-check(True, "restore guard: complete retry re-authorizes Agent3 startup")
 
 # A valid progress sidecar without its paired run store is unsafe source state.
 wipe()
@@ -766,10 +933,17 @@ wipe()
 
 empty = backup.create(os.path.join(_root, "empty"))
 check(backup.verify(empty)["ok"], "create: an empty rig produces a valid empty backup")
-check(backup._read_manifest(empty)["schema"] == 4, "create: empty rig emits current schema 4")
+check(backup._read_manifest(empty)["schema"] == 5, "create: empty rig emits current schema 5")
 
 # --- complete-rig orchestration contract -----------------------------------
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+api_source = os.path.join(repo_root, "worker", "app", "agent3", "api.py")
+api_text = open(api_source, "r", encoding="utf-8").read()
+check(
+    "ensure_live_pair(db_path)\n    store = AgentRunStore(db_path)" in api_text,
+    "live pair: production runtime validates pair authority before AgentRunStore opens",
+)
+
 complete_operator = os.path.join(repo_root, "scripts", "migrate-complete-rig.ps1")
 check(os.path.isfile(complete_operator), "complete migration: top-level operator exists")
 if os.path.isfile(complete_operator):
