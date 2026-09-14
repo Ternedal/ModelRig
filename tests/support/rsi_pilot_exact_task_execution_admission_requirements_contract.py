@@ -221,9 +221,14 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_execution_revalidation_observation_contract import (
         run_contract as run_revalidation_observation_contract,
     )
+    # ADR-032 verifies ADR-031 but still runs through the locked Stage-B chain.
+    from rsi_pilot_exact_task_execution_revalidation_attestation_contract import (
+        run_contract as run_revalidation_attestation_contract,
+    )
 
     run_execution_authorization_contract()
     run_revalidation_observation_contract()
+    run_revalidation_attestation_contract()
 
 
 if __name__ == "__main__":
