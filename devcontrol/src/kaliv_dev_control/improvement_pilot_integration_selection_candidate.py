@@ -1,12 +1,10 @@
 """Fail-closed candidate validation for a future DC-L16 product integration selection.
 
-ADR-DC-020 deliberately stops before human selection authority.  The caller may
-propose concrete product-design values, but this module only proves that the
-proposal is structurally complete, exact-bound to ADR-DC-018/019 evidence and no
-broader than one verified ADR-DC-016 trial scope.
-
-It does not record a human selection, observe runtime state, enable a feature
-flag, register a command, start a pilot or authorize any product/remote action.
+ADR-DC-020 stops before human selection authority. A caller may propose product
+design values, but this module only proves that the proposal is complete,
+exact-bound to ADR-DC-018/019 evidence and no broader than one verified
+ADR-DC-016 trial scope. It never records human selection, observes runtime,
+enables flags, registers commands, starts a pilot or grants remote authority.
 """
 from __future__ import annotations
 
@@ -16,10 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .improvement_pilot_trial_scope import (
-    PILOT_TRIAL_SCOPE_AUTHORITY,
-    PilotTrialScopeProof,
-)
+from .improvement_pilot_trial_scope import PILOT_TRIAL_SCOPE_AUTHORITY, PilotTrialScopeProof
 
 PILOT_INTEGRATION_SELECTION_CANDIDATE_SCHEMA = (
     "kaliv-rsi-dc-l16-product-integration-selection-candidate-proof/v1"
@@ -27,11 +22,8 @@ PILOT_INTEGRATION_SELECTION_CANDIDATE_SCHEMA = (
 PILOT_INTEGRATION_SELECTION_CANDIDATE_AUTHORITY = (
     "dc-l16-product-integration-selection-candidate-only"
 )
-
 INVENTORY_SCHEMA = "kaliv-rsi-dc-l16-product-integration-inventory/v1"
-SELECTION_REQUIREMENTS_SCHEMA = (
-    "kaliv-rsi-dc-l16-product-integration-selection-requirements/v1"
-)
+SELECTION_REQUIREMENTS_SCHEMA = "kaliv-rsi-dc-l16-product-integration-selection-requirements/v1"
 INVENTORY_SOURCE_HEAD_SHA = "30be16b320acd6655c07ab1476cceaead547e3e3"
 INVENTORY_GIT_BLOB_SHA = "babad0dfc82ad359ee053817bae2674a8f8b38a0"
 SELECTION_REQUIREMENTS_GIT_BLOB_SHA = "36253b5a0ee8807f51eaeb8c0cf10276e0bc7a63"
@@ -41,11 +33,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$")
 _FLAG = re.compile(r"^KALIV_[A-Z0-9_]{3,96}$")
 _ROUTE = re.compile(r"^/api/v1/[a-z0-9][a-z0-9/_-]{1,127}$")
-_FORBIDDEN_FLAG_NAMES = {
-    "KALIV_AGENT3_ENABLED",
-    "KALIV_AGENT4_OPERATOR_API",
-}
-
+_FORBIDDEN_FLAG_NAMES = {"KALIV_AGENT3_ENABLED", "KALIV_AGENT4_OPERATOR_API"}
 _EXPECTED_CANDIDATES = {
     "desktop.control-center": {
         "kind": "operator-ui-candidate",
@@ -63,53 +51,20 @@ _EXPECTED_CANDIDATES = {
         "git_blob_sha": "6085d525ff86a3d2b5c7cdece20bcaeace896e85",
     },
 }
-
 _FIELDS = {
-    "schema",
-    "trial_scope_sha256",
-    "decision_proof_sha256",
-    "repository",
-    "base_sha",
-    "requested_main_sha",
-    "trial_id",
-    "operator_surface",
-    "selected_pilot_task_id",
-    "workspace_root_path_sha256",
-    "local_commits_allowed",
-    "inventory_source_head_sha",
-    "inventory_git_blob_sha",
-    "selection_requirements_git_blob_sha",
-    "candidate_id",
-    "candidate_kind",
-    "candidate_path",
-    "candidate_git_blob_sha",
-    "feature_flag_name",
-    "product_route",
-    "runtime_observer_id",
-    "task_registry_id",
-    "workspace_policy_id",
-    "review_authorization_roles_id",
-    "kill_revoke_cleanup_id",
-    "local_commit_policy",
-    "human_pilot_go_verified",
-    "pilot_scope_verified",
-    "source_inventory_verified",
-    "selection_requirements_verified",
-    "design_candidate_validated",
-    "human_selection_recorded",
-    "integration_ready",
-    "preflight_observed",
-    "preflight_satisfied",
-    "pilot_start_authorized",
-    "product_pilot_started",
-    "remote_write_authorized",
-    "push_authorized",
-    "pr_mutation_authorized",
-    "merge_authorized",
-    "release_authorized",
-    "deploy_authorized",
-    "production_activation_authorized",
-    "authority",
+    "schema", "trial_scope_sha256", "decision_proof_sha256", "repository", "base_sha",
+    "requested_main_sha", "trial_id", "operator_surface", "selected_pilot_task_id",
+    "workspace_root_path_sha256", "local_commits_allowed", "inventory_source_head_sha",
+    "inventory_git_blob_sha", "selection_requirements_git_blob_sha", "candidate_id",
+    "candidate_kind", "candidate_path", "candidate_git_blob_sha", "feature_flag_name",
+    "product_route", "runtime_observer_id", "task_registry_id", "workspace_policy_id",
+    "review_authorization_roles_id", "kill_revoke_cleanup_id", "local_commit_policy",
+    "human_pilot_go_verified", "pilot_scope_verified", "source_inventory_verified",
+    "selection_requirements_verified", "design_candidate_validated", "human_selection_recorded",
+    "integration_ready", "preflight_observed", "preflight_satisfied", "pilot_start_authorized",
+    "product_pilot_started", "remote_write_authorized", "push_authorized",
+    "pr_mutation_authorized", "merge_authorized", "release_authorized", "deploy_authorized",
+    "production_activation_authorized", "authority",
 }
 
 
@@ -119,28 +74,17 @@ class PilotIntegrationSelectionCandidateError(ValueError):
 
 def _canonical(value: Mapping[str, Any]) -> str:
     try:
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     except (TypeError, ValueError) as exc:
-        raise PilotIntegrationSelectionCandidateError(
-            "integration selection candidate is not canonical JSON"
-        ) from exc
+        raise PilotIntegrationSelectionCandidateError("selection candidate is not canonical JSON") from exc
 
 
 def _git_blob_sha(raw: bytes) -> str:
-    header = f"blob {len(raw)}\0".encode("ascii")
-    return hashlib.sha1(header + raw).hexdigest()
+    return hashlib.sha1(f"blob {len(raw)}\0".encode("ascii") + raw).hexdigest()
 
 
 def _load_exact_json(raw: Any, *, name: str, expected_blob_sha: str) -> dict[str, Any]:
-    if type(raw) is not bytes:
-        raise PilotIntegrationSelectionCandidateError(f"{name} must be exact raw bytes")
-    if _git_blob_sha(raw) != expected_blob_sha:
+    if type(raw) is not bytes or _git_blob_sha(raw) != expected_blob_sha:
         raise PilotIntegrationSelectionCandidateError(f"{name} exact Git blob identity mismatch")
     try:
         value = json.loads(raw.decode("utf-8"))
@@ -160,25 +104,19 @@ def _identifier(value: Any, *, name: str) -> str:
 def _require_inert_scope(value: Any) -> PilotTrialScopeProof:
     if type(value) is not PilotTrialScopeProof:
         raise PilotIntegrationSelectionCandidateError("exact PilotTrialScopeProof is required")
+    false_fields = (
+        value.pilot_runtime_verified, value.feature_flag_off_observed, value.pilot_start_authorized,
+        value.product_pilot_started, value.remote_write_authorized, value.push_authorized,
+        value.pr_mutation_authorized, value.merge_authorized, value.release_authorized,
+        value.deploy_authorized, value.production_activation_authorized,
+    )
     if (
         value.authority != PILOT_TRIAL_SCOPE_AUTHORITY
         or value.human_pilot_go_verified is not True
         or value.pilot_scope_verified is not True
-        or value.pilot_runtime_verified is not False
-        or value.feature_flag_off_observed is not False
-        or value.pilot_start_authorized is not False
-        or value.product_pilot_started is not False
-        or value.remote_write_authorized is not False
-        or value.push_authorized is not False
-        or value.pr_mutation_authorized is not False
-        or value.merge_authorized is not False
-        or value.release_authorized is not False
-        or value.deploy_authorized is not False
-        or value.production_activation_authorized is not False
+        or any(item is not False for item in false_fields)
     ):
-        raise PilotIntegrationSelectionCandidateError(
-            "pilot trial scope is not an inert verified positive human scope"
-        )
+        raise PilotIntegrationSelectionCandidateError("trial scope is not inert verified human authority")
     return value
 
 
@@ -193,81 +131,60 @@ def _verify_inventory(value: Mapping[str, Any]) -> dict[str, dict[str, str]]:
     resolved: dict[str, dict[str, str]] = {}
     for candidate in candidates:
         if not isinstance(candidate, dict):
-            raise PilotIntegrationSelectionCandidateError("inventory candidate is malformed")
+            raise PilotIntegrationSelectionCandidateError("inventory candidate malformed")
         candidate_id = candidate.get("candidate_id")
         expected = _EXPECTED_CANDIDATES.get(candidate_id)
-        if expected is None:
-            raise PilotIntegrationSelectionCandidateError("inventory contains an unknown candidate")
-        if candidate.get("selected") is not False:
-            raise PilotIntegrationSelectionCandidateError("inventory must remain non-selecting")
-        for key in ("kind", "path", "git_blob_sha"):
-            if candidate.get(key) != expected[key]:
-                raise PilotIntegrationSelectionCandidateError(
-                    f"inventory candidate source mismatch: {candidate_id}:{key}"
-                )
+        if expected is None or candidate.get("selected") is not False:
+            raise PilotIntegrationSelectionCandidateError("inventory candidate is unknown or selected")
+        if any(candidate.get(key) != expected[key] for key in ("kind", "path", "git_blob_sha")):
+            raise PilotIntegrationSelectionCandidateError(f"inventory source mismatch: {candidate_id}")
         resolved[candidate_id] = expected
     if set(resolved) != set(_EXPECTED_CANDIDATES):
-        raise PilotIntegrationSelectionCandidateError("inventory candidate set is incomplete")
+        raise PilotIntegrationSelectionCandidateError("inventory candidate set incomplete")
     authority = value.get("authority_state")
-    if not isinstance(authority, dict):
-        raise PilotIntegrationSelectionCandidateError("inventory authority state is missing")
-    if authority.get("normal_command_catalog_empty") is not True:
-        raise PilotIntegrationSelectionCandidateError("inventory command catalog boundary is invalid")
-    for key in (
-        "integration_ready",
-        "preflight_observed",
-        "preflight_satisfied",
-        "pilot_start_authorized",
-        "product_pilot_started",
-        "remote_write_authorized",
-        "push_authorized",
-        "pr_mutation_authorized",
-        "merge_authorized",
-        "release_authorized",
-        "deploy_authorized",
-        "production_activation_authorized",
-    ):
-        if authority.get(key) is not False:
+    if not isinstance(authority, dict) or authority.get("normal_command_catalog_empty") is not True:
+        raise PilotIntegrationSelectionCandidateError("inventory authority state invalid")
+    for key, item in authority.items():
+        if key == "normal_command_catalog_empty":
+            continue
+        if key == "authority":
+            if item != "dc-l16-product-integration-inventory-only":
+                raise PilotIntegrationSelectionCandidateError("inventory authority label mismatch")
+        elif item is not False:
             raise PilotIntegrationSelectionCandidateError(f"inventory over-authorizes: {key}")
-    if authority.get("authority") != "dc-l16-product-integration-inventory-only":
-        raise PilotIntegrationSelectionCandidateError("inventory authority label mismatch")
     return resolved
 
 
 def _verify_requirements(value: Mapping[str, Any]) -> None:
-    if (
-        value.get("schema") != SELECTION_REQUIREMENTS_SCHEMA
-        or value.get("repository") != "Ternedal/ModelRig"
-    ):
+    if value.get("schema") != SELECTION_REQUIREMENTS_SCHEMA or value.get("repository") != "Ternedal/ModelRig":
         raise PilotIntegrationSelectionCandidateError("selection requirements identity mismatch")
     source = value.get("source_inventory")
     if not isinstance(source, dict):
-        raise PilotIntegrationSelectionCandidateError("selection requirements source binding missing")
-    if source.get("source_head_sha") != INVENTORY_SOURCE_HEAD_SHA:
-        raise PilotIntegrationSelectionCandidateError("requirements inventory head mismatch")
-    if source.get("inventory_git_blob_sha") != INVENTORY_GIT_BLOB_SHA:
-        raise PilotIntegrationSelectionCandidateError("requirements inventory blob mismatch")
-    if source.get("candidate_ids") != list(_EXPECTED_CANDIDATES):
-        raise PilotIntegrationSelectionCandidateError("requirements candidate IDs mismatch")
-    binding = value.get("binding_requirements")
-    decisions = value.get("product_design_decisions_required")
+        raise PilotIntegrationSelectionCandidateError("requirements source binding missing")
+    if (
+        source.get("source_head_sha") != INVENTORY_SOURCE_HEAD_SHA
+        or source.get("inventory_git_blob_sha") != INVENTORY_GIT_BLOB_SHA
+        or source.get("candidate_ids") != list(_EXPECTED_CANDIDATES)
+    ):
+        raise PilotIntegrationSelectionCandidateError("requirements inventory binding mismatch")
+    for name in ("binding_requirements", "product_design_decisions_required"):
+        section = value.get(name)
+        if not isinstance(section, dict) or not section or any(item is not True for item in section.values()):
+            raise PilotIntegrationSelectionCandidateError(f"{name} was weakened")
     selection = value.get("selection_state")
-    authority = value.get("authority_state")
-    if not isinstance(binding, dict) or not binding or any(item is not True for item in binding.values()):
-        raise PilotIntegrationSelectionCandidateError("selection binding requirements were weakened")
-    if not isinstance(decisions, dict) or not decisions or any(item is not True for item in decisions.values()):
-        raise PilotIntegrationSelectionCandidateError("required product decisions were weakened")
     if not isinstance(selection, dict) or not selection or any(item is not False for item in selection.values()):
-        raise PilotIntegrationSelectionCandidateError("requirements manifest already records a selection")
+        raise PilotIntegrationSelectionCandidateError("requirements already record a selection")
+    authority = value.get("authority_state")
     if not isinstance(authority, dict) or authority.get("normal_command_catalog_empty") is not True:
-        raise PilotIntegrationSelectionCandidateError("requirements authority state is invalid")
+        raise PilotIntegrationSelectionCandidateError("requirements authority state invalid")
     for key, item in authority.items():
-        if key in {"normal_command_catalog_empty", "authority"}:
+        if key == "normal_command_catalog_empty":
             continue
-        if item is not False:
+        if key == "authority":
+            if item != "dc-l16-product-integration-selection-requirements-only":
+                raise PilotIntegrationSelectionCandidateError("requirements authority label mismatch")
+        elif item is not False:
             raise PilotIntegrationSelectionCandidateError(f"requirements over-authorize: {key}")
-    if authority.get("authority") != "dc-l16-product-integration-selection-requirements-only":
-        raise PilotIntegrationSelectionCandidateError("requirements authority label mismatch")
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,7 +237,7 @@ class PilotIntegrationSelectionCandidateProof:
 
     def __post_init__(self) -> None:
         if self.schema != PILOT_INTEGRATION_SELECTION_CANDIDATE_SCHEMA:
-            raise PilotIntegrationSelectionCandidateError("selection candidate schema is unsupported")
+            raise PilotIntegrationSelectionCandidateError("selection candidate schema unsupported")
         for name, value, pattern in (
             ("trial_scope_sha256", self.trial_scope_sha256, _HEX64),
             ("decision_proof_sha256", self.decision_proof_sha256, _HEX64),
@@ -335,56 +252,55 @@ class PilotIntegrationSelectionCandidateProof:
             if not isinstance(value, str) or pattern.fullmatch(value) is None:
                 raise PilotIntegrationSelectionCandidateError(f"{name} is invalid")
         for name, value in (
-            ("trial_id", self.trial_id),
-            ("operator_surface", self.operator_surface),
-            ("selected_pilot_task_id", self.selected_pilot_task_id),
-            ("candidate_id", self.candidate_id),
-            ("runtime_observer_id", self.runtime_observer_id),
-            ("task_registry_id", self.task_registry_id),
+            ("trial_id", self.trial_id), ("operator_surface", self.operator_surface),
+            ("selected_pilot_task_id", self.selected_pilot_task_id), ("candidate_id", self.candidate_id),
+            ("runtime_observer_id", self.runtime_observer_id), ("task_registry_id", self.task_registry_id),
             ("workspace_policy_id", self.workspace_policy_id),
             ("review_authorization_roles_id", self.review_authorization_roles_id),
             ("kill_revoke_cleanup_id", self.kill_revoke_cleanup_id),
         ):
             _identifier(value, name=name)
-        if self.repository != "Ternedal/ModelRig":
-            raise PilotIntegrationSelectionCandidateError("repository is unsupported")
-        if type(self.local_commits_allowed) is not bool:
-            raise PilotIntegrationSelectionCandidateError("local_commits_allowed must be boolean")
+        if self.repository != "Ternedal/ModelRig" or type(self.local_commits_allowed) is not bool:
+            raise PilotIntegrationSelectionCandidateError("repository/local commit scope invalid")
+        if (
+            self.inventory_source_head_sha != INVENTORY_SOURCE_HEAD_SHA
+            or self.inventory_git_blob_sha != INVENTORY_GIT_BLOB_SHA
+            or self.selection_requirements_git_blob_sha != SELECTION_REQUIREMENTS_GIT_BLOB_SHA
+        ):
+            raise PilotIntegrationSelectionCandidateError("selection evidence identity mismatch")
+        expected = _EXPECTED_CANDIDATES.get(self.candidate_id)
+        if expected is None or self.operator_surface != self.candidate_id:
+            raise PilotIntegrationSelectionCandidateError("candidate does not equal signed operator surface")
+        if (
+            self.candidate_kind != expected["kind"]
+            or self.candidate_path != expected["path"]
+            or self.candidate_git_blob_sha != expected["git_blob_sha"]
+        ):
+            raise PilotIntegrationSelectionCandidateError("candidate source identity mismatch")
         if _FLAG.fullmatch(self.feature_flag_name) is None or self.feature_flag_name in _FORBIDDEN_FLAG_NAMES:
-            raise PilotIntegrationSelectionCandidateError("feature_flag_name is invalid or reuses foreign authority")
+            raise PilotIntegrationSelectionCandidateError("feature flag invalid or reuses foreign authority")
         if _ROUTE.fullmatch(self.product_route) is None or "devcontrol" not in self.product_route:
-            raise PilotIntegrationSelectionCandidateError("product_route must be an explicit DC-L16 DevControl route")
-        expected_local_policy = "allow-local-only" if self.local_commits_allowed else "forbid"
-        if self.local_commit_policy != expected_local_policy:
-            raise PilotIntegrationSelectionCandidateError("local commit policy broadens or contradicts trial scope")
+            raise PilotIntegrationSelectionCandidateError("product route must be explicit DevControl scope")
+        expected_policy = "allow-local-only" if self.local_commits_allowed else "forbid"
+        if self.local_commit_policy != expected_policy:
+            raise PilotIntegrationSelectionCandidateError("local commit policy broadens trial scope")
         required_true = (
-            self.human_pilot_go_verified,
-            self.pilot_scope_verified,
-            self.source_inventory_verified,
-            self.selection_requirements_verified,
-            self.design_candidate_validated,
+            self.human_pilot_go_verified, self.pilot_scope_verified, self.source_inventory_verified,
+            self.selection_requirements_verified, self.design_candidate_validated,
         )
         required_false = (
-            self.human_selection_recorded,
-            self.integration_ready,
-            self.preflight_observed,
-            self.preflight_satisfied,
-            self.pilot_start_authorized,
-            self.product_pilot_started,
-            self.remote_write_authorized,
-            self.push_authorized,
-            self.pr_mutation_authorized,
-            self.merge_authorized,
-            self.release_authorized,
-            self.deploy_authorized,
+            self.human_selection_recorded, self.integration_ready, self.preflight_observed,
+            self.preflight_satisfied, self.pilot_start_authorized, self.product_pilot_started,
+            self.remote_write_authorized, self.push_authorized, self.pr_mutation_authorized,
+            self.merge_authorized, self.release_authorized, self.deploy_authorized,
             self.production_activation_authorized,
         )
         if (
-            any(value is not True for value in required_true)
-            or any(value is not False for value in required_false)
+            any(item is not True for item in required_true)
+            or any(item is not False for item in required_false)
             or self.authority != PILOT_INTEGRATION_SELECTION_CANDIDATE_AUTHORITY
         ):
-            raise PilotIntegrationSelectionCandidateError("selection candidate authority boundary is invalid")
+            raise PilotIntegrationSelectionCandidateError("selection candidate authority boundary invalid")
 
     @classmethod
     def from_mapping(cls, value: Any) -> "PilotIntegrationSelectionCandidateProof":
@@ -404,63 +320,41 @@ class PilotIntegrationSelectionCandidateProof:
 
 
 def validate_pilot_integration_selection_candidate(
-    *,
-    scope_proof: PilotTrialScopeProof,
-    inventory_bytes: bytes,
-    selection_requirements_bytes: bytes,
-    feature_flag_name: str,
-    product_route: str,
-    runtime_observer_id: str,
-    task_registry_id: str,
-    workspace_policy_id: str,
-    review_authorization_roles_id: str,
-    kill_revoke_cleanup_id: str,
+    *, scope_proof: PilotTrialScopeProof, inventory_bytes: bytes, selection_requirements_bytes: bytes,
+    feature_flag_name: str, product_route: str, runtime_observer_id: str, task_registry_id: str,
+    workspace_policy_id: str, review_authorization_roles_id: str, kill_revoke_cleanup_id: str,
     local_commit_policy: str,
 ) -> PilotIntegrationSelectionCandidateProof:
-    """Validate one inert proposed selection without recording human selection authority."""
+    """Validate one inert proposal without recording human selection authority."""
     scope = _require_inert_scope(scope_proof)
-    inventory = _load_exact_json(
-        inventory_bytes,
-        name="product integration inventory",
-        expected_blob_sha=INVENTORY_GIT_BLOB_SHA,
-    )
+    inventory = _load_exact_json(inventory_bytes, name="inventory", expected_blob_sha=INVENTORY_GIT_BLOB_SHA)
     requirements = _load_exact_json(
-        selection_requirements_bytes,
-        name="product integration selection requirements",
+        selection_requirements_bytes, name="selection requirements",
         expected_blob_sha=SELECTION_REQUIREMENTS_GIT_BLOB_SHA,
     )
     candidates = _verify_inventory(inventory)
     _verify_requirements(requirements)
-
     candidate = candidates.get(scope.operator_surface)
     if candidate is None:
         raise PilotIntegrationSelectionCandidateError(
-            "operator surface is absent from exact inventory; fresh exact-source inventory is required"
+            "operator surface absent from exact inventory; fresh exact-source inventory required"
         )
-
     for name, value in (
-        ("runtime_observer_id", runtime_observer_id),
-        ("task_registry_id", task_registry_id),
+        ("runtime_observer_id", runtime_observer_id), ("task_registry_id", task_registry_id),
         ("workspace_policy_id", workspace_policy_id),
         ("review_authorization_roles_id", review_authorization_roles_id),
         ("kill_revoke_cleanup_id", kill_revoke_cleanup_id),
     ):
         _identifier(value, name=name)
     if not isinstance(feature_flag_name, str) or _FLAG.fullmatch(feature_flag_name) is None:
-        raise PilotIntegrationSelectionCandidateError("feature_flag_name is invalid")
+        raise PilotIntegrationSelectionCandidateError("feature flag invalid")
     if feature_flag_name in _FORBIDDEN_FLAG_NAMES:
         raise PilotIntegrationSelectionCandidateError("feature flag reuses unrelated Agent authority")
-    if not isinstance(product_route, str) or _ROUTE.fullmatch(product_route) is None:
-        raise PilotIntegrationSelectionCandidateError("product_route is invalid")
-    if "devcontrol" not in product_route:
-        raise PilotIntegrationSelectionCandidateError("product_route must be explicitly DevControl-scoped")
-
-    expected_local_policy = "allow-local-only" if scope.local_commits_allowed else "forbid"
-    if local_commit_policy != expected_local_policy:
-        raise PilotIntegrationSelectionCandidateError(
-            "local commit policy differs from or broadens the exact trial scope"
-        )
-
+    if not isinstance(product_route, str) or _ROUTE.fullmatch(product_route) is None or "devcontrol" not in product_route:
+        raise PilotIntegrationSelectionCandidateError("product route invalid or not DevControl-scoped")
+    expected_policy = "allow-local-only" if scope.local_commits_allowed else "forbid"
+    if local_commit_policy != expected_policy:
+        raise PilotIntegrationSelectionCandidateError("local commit policy differs from exact trial scope")
     return PilotIntegrationSelectionCandidateProof(
         trial_scope_sha256=scope.sha256,
         decision_proof_sha256=scope.decision_proof_sha256,
@@ -493,10 +387,7 @@ def validate_pilot_integration_selection_candidate(
 __all__ = [
     "PILOT_INTEGRATION_SELECTION_CANDIDATE_SCHEMA",
     "PILOT_INTEGRATION_SELECTION_CANDIDATE_AUTHORITY",
-    "INVENTORY_SOURCE_HEAD_SHA",
-    "INVENTORY_GIT_BLOB_SHA",
-    "SELECTION_REQUIREMENTS_GIT_BLOB_SHA",
-    "PilotIntegrationSelectionCandidateError",
-    "PilotIntegrationSelectionCandidateProof",
+    "INVENTORY_SOURCE_HEAD_SHA", "INVENTORY_GIT_BLOB_SHA", "SELECTION_REQUIREMENTS_GIT_BLOB_SHA",
+    "PilotIntegrationSelectionCandidateError", "PilotIntegrationSelectionCandidateProof",
     "validate_pilot_integration_selection_candidate",
 ]
