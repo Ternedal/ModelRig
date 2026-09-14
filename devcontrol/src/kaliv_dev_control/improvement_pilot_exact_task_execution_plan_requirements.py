@@ -149,7 +149,7 @@ _REQUIRED_TRUE = (
     "one_shot_executor_consumption_required",
     "host_pinned_task_registry_required",
     "exact_development_task_required",
-    "selected_task_identity_match_required",
+    "selected_pilot_task_mapping_required",
     "task_repository_base_match_required",
     "canonical_workspace_match_required",
     "single_fixed_command_required",
@@ -211,7 +211,7 @@ class PilotExactTaskExecutionPlanRequirements:
     one_shot_executor_consumption_required: bool = True
     host_pinned_task_registry_required: bool = True
     exact_development_task_required: bool = True
-    selected_task_identity_match_required: bool = True
+    selected_pilot_task_mapping_required: bool = True
     task_repository_base_match_required: bool = True
     canonical_workspace_match_required: bool = True
     single_fixed_command_required: bool = True
