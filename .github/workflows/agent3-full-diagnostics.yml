@@ -68,12 +68,20 @@ jobs:
             [ -e "$f" ] || continue
             echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/modelrig-full-test.log
-            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-full-test.log || {
-              status=${PIPESTATUS[0]}
+            started_at="$(date +%s)"
+            timeout --signal=TERM --kill-after=30s 600s env PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-full-test.log
+            test_status=${PIPESTATUS[0]}
+            elapsed=$(( $(date +%s) - started_at ))
+            echo "TIMING: $f ${elapsed}s (exit $test_status)" | tee -a /tmp/modelrig-full-test.log
+            if [ "$test_status" -ne 0 ]; then
+              status=$test_status
+              if [ "$test_status" -eq 124 ] || [ "$test_status" -eq 137 ]; then
+                echo "TIMEOUT: $f exceeded 600s per-file bound" | tee -a /tmp/modelrig-full-test.log
+              fi
               echo "FAILED: $f (exit $status)" | tee -a /tmp/modelrig-full-test.log
               echo "::endgroup::"
               break
-            }
+            fi
             echo "::endgroup::"
           done
           exit "$status"
