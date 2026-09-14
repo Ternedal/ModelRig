@@ -17,6 +17,9 @@ DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
 
+from kaliv_dev_control import (  # noqa: E402
+    _improvement_pilot_start_consumption_production_boundary as production_boundary,
+)
 from kaliv_dev_control import catalog  # noqa: E402
 from kaliv_dev_control.durable_publication import create_once_file  # noqa: E402
 import kaliv_dev_control.improvement_pilot_start_authorization as start_auth  # noqa: E402
@@ -160,6 +163,94 @@ def run_contract() -> None:
             )
         )
 
+        # Production consumption must freshly call ADR-DC-024's host-pinned
+        # verifier (which itself re-verifies ADR-DC-023 provenance), forward the
+        # detached preflight signature, and only then reach canonical replay state.
+        public_sig = inspect.signature(consume.consume_pilot_start_authorization)
+        assert public_sig.parameters["preflight_signature"].default is inspect.Parameter.empty
+        assert "ledger_root" not in public_sig.parameters
+        assert "now_provider" not in public_sig.parameters
+
+        production_root = temp / "production-ledger"
+        production_root.mkdir()
+        production_proof, production_signature = _proof(nonce="9" * 64)
+        preflight_signature_marker = object()
+        seen: dict[str, object] = {}
+        original_verify = production_boundary.verify_pilot_start_authorization
+        original_root = production_boundary._host_controlled_pilot_start_consumption_root
+        original_now = consume._implementation._now_utc_seconds
+        try:
+            def _fresh_verify(*, preflight_proof, authorization, signature, preflight_signature):
+                seen["preflight_proof"] = preflight_proof
+                seen["authorization"] = authorization
+                seen["signature"] = signature
+                seen["preflight_signature"] = preflight_signature
+                return production_proof
+
+            production_boundary.verify_pilot_start_authorization = _fresh_verify
+            production_boundary._host_controlled_pilot_start_consumption_root = (
+                lambda: production_root
+            )
+            consume._implementation._now_utc_seconds = lambda: "2026-09-14T08:27:00Z"
+
+            production_receipt = consume.consume_pilot_start_authorization(
+                proof=production_proof,
+                signature=production_signature,
+                preflight_signature=preflight_signature_marker,
+            )
+            assert seen["preflight_proof"] == production_proof.authorization.preflight_proof
+            assert seen["authorization"] == production_proof.authorization
+            assert seen["signature"] == production_signature
+            assert seen["preflight_signature"] is preflight_signature_marker
+            assert production_receipt.authorization_proof == production_proof
+            assert production_receipt.start_consumed is True
+            assert production_receipt.pilot_execution_authorized is False
+
+            # Even if a compromised/stubbed fresh verifier returns the presented
+            # proof, a different detached ADR-DC-024 signature cannot reach the ledger.
+            drift_root = temp / "signature-drift-ledger"
+            drift_root.mkdir()
+            drift_proof, drift_signature = _proof(nonce="8" * 64)
+            production_boundary._host_controlled_pilot_start_consumption_root = (
+                lambda: drift_root
+            )
+            production_boundary.verify_pilot_start_authorization = (
+                lambda **_: drift_proof
+            )
+            _reject(
+                lambda: consume.consume_pilot_start_authorization(
+                    proof=drift_proof,
+                    signature=replace(drift_signature, signature_hex="0" * 128),
+                    preflight_signature=preflight_signature_marker,
+                )
+            )
+            assert not any(drift_root.iterdir())
+
+            # Fresh proof metadata must reproduce the presented ADR-DC-024
+            # identity before replay state can be mutated. verified_at may change;
+            # signer/key/scope/authority identity may not.
+            identity_root = temp / "identity-drift-ledger"
+            identity_root.mkdir()
+            identity_proof, identity_signature = _proof(nonce="7" * 64)
+            production_boundary._host_controlled_pilot_start_consumption_root = (
+                lambda: identity_root
+            )
+            production_boundary.verify_pilot_start_authorization = (
+                lambda **_: replace(identity_proof, key_id="forged-start-key")
+            )
+            _reject(
+                lambda: consume.consume_pilot_start_authorization(
+                    proof=identity_proof,
+                    signature=identity_signature,
+                    preflight_signature=preflight_signature_marker,
+                )
+            )
+            assert not any(identity_root.iterdir())
+        finally:
+            production_boundary.verify_pilot_start_authorization = original_verify
+            production_boundary._host_controlled_pilot_start_consumption_root = original_root
+            consume._implementation._now_utc_seconds = original_now
+
         # Proof-shaped authority escalation cannot enter the consumption boundary.
         for field in (
             "start_consumed",
@@ -232,9 +323,6 @@ def run_contract() -> None:
         assert props["production_activation_authorized"]["const"] is False
         assert props["authority"]["const"] == consume.PILOT_START_CONSUMPTION_AUTHORITY
 
-        public_sig = inspect.signature(consume.consume_pilot_start_authorization)
-        assert "ledger_root" not in public_sig.parameters
-        assert "now_provider" not in public_sig.parameters
         source = inspect.getsource(consume._implementation).lower()
         for forbidden in (
             "subprocess",
