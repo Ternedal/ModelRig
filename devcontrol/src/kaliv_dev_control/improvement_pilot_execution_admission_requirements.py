@@ -141,6 +141,7 @@ class PilotExecutionAdmissionRequirements:
     local_commits_allowed_by_human_scope: bool
     host_ledger_revalidation_required: bool = True
     fresh_upstream_authority_reverification_required: bool = True
+    live_consumption_receipt_required_at_admission: bool = True
     allowlisted_task_registry_required: bool = True
     exact_selected_task_required: bool = True
     canonical_workspace_revalidation_required: bool = True
@@ -211,6 +212,7 @@ class PilotExecutionAdmissionRequirements:
         required_true = (
             "host_ledger_revalidation_required",
             "fresh_upstream_authority_reverification_required",
+            "live_consumption_receipt_required_at_admission",
             "allowlisted_task_registry_required",
             "exact_selected_task_required",
             "canonical_workspace_revalidation_required",
