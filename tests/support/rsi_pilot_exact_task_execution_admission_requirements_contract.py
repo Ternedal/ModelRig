@@ -212,13 +212,17 @@ def run_contract() -> None:
     finally:
         temp.cleanup()
 
-    # Keep ADR-030 transitively wired through ADR-029 and the same Stage-B
-    # support entrypoint instead of expanding the locked top-level inventory.
+    # Keep ADR-030 and ADR-031 transitively wired through ADR-029 and the same
+    # Stage-B support entrypoint instead of expanding the locked top-level inventory.
     from rsi_pilot_exact_task_execution_authorization_contract import (
         run_contract as run_execution_authorization_contract,
     )
+    from rsi_pilot_exact_task_execution_revalidation_observation_contract import (
+        run_contract as run_revalidation_observation_contract,
+    )
 
     run_execution_authorization_contract()
+    run_revalidation_observation_contract()
 
 
 if __name__ == "__main__":
