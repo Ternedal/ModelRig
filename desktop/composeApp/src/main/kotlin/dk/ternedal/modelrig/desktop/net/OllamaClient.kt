@@ -1,11 +1,14 @@
 package dk.ternedal.modelrig.desktop.net
 
+import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.net.ConnectException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.net.http.HttpTimeoutException
 import java.time.Duration
 
 @Serializable
@@ -64,6 +67,24 @@ private data class PullProgressLine(
 
 class OllamaException(message: String) : RuntimeException(message)
 
+internal fun ollamaFailureMessage(operation: String, statusCode: Int? = null): String =
+    if (statusCode == null) "$operation failed" else "$operation failed ($statusCode)"
+
+private fun Throwable.hasCause(type: Class<out Throwable>): Boolean {
+    var current: Throwable? = this
+    while (current != null) {
+        if (type.isInstance(current)) return true
+        current = current.cause
+    }
+    return false
+}
+
+internal fun ollamaTransportFailureMessage(operation: String, cause: Throwable): String = when {
+    cause.hasCause(HttpTimeoutException::class.java) -> "$operation failed (HttpTimeoutException)"
+    cause.hasCause(ConnectException::class.java) -> "$operation failed (ConnectException)"
+    else -> "$operation request failed"
+}
+
 /**
  * Minimal non-streaming chat client for any Ollama-compatible /api/chat endpoint.
  *
@@ -89,13 +110,29 @@ class OllamaClient(
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    private fun endpoint(path: String): URI = try {
+        URI.create(baseUrl.trimEnd('/') + path)
+    } catch (_: Exception) {
+        throw OllamaException("invalid endpoint configuration")
+    }
+
+    private fun <T> decodeServerResponse(
+        serializer: DeserializationStrategy<T>,
+        body: String,
+        operation: String,
+    ): T = try {
+        json.decodeFromString(serializer, body)
+    } catch (_: Exception) {
+        throw OllamaException("$operation returned invalid response")
+    }
+
     fun chat(model: String, messages: List<ChatMessage>): String {
         val payload = json.encodeToString(
             ChatRequest.serializer(),
             ChatRequest(model = model, messages = messages, stream = false, think = think),
         )
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + chatPath))
+            .uri(endpoint(chatPath))
             .timeout(requestTimeout)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(payload))
@@ -104,12 +141,12 @@ class OllamaClient(
         val resp: HttpResponse<String> = try {
             http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+            throw OllamaException(ollamaTransportFailureMessage("chat", e))
         }
         if (resp.statusCode() !in 200..299) {
-            throw OllamaException("chat failed (${resp.statusCode()}): ${resp.body().take(200)}")
+            throw OllamaException(ollamaFailureMessage("chat", resp.statusCode()))
         }
-        return json.decodeFromString(ChatResponse.serializer(), resp.body()).message.content
+        return decodeServerResponse(ChatResponse.serializer(), resp.body(), "chat").message.content
     }
 
     /**
@@ -123,7 +160,7 @@ class OllamaClient(
             ChatRequest(model = model, messages = messages, stream = true, think = think),
         )
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + chatPath))
+            .uri(endpoint(chatPath))
             .timeout(requestTimeout)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(payload))
@@ -132,10 +169,10 @@ class OllamaClient(
         val resp = try {
             http.send(builder.build(), HttpResponse.BodyHandlers.ofLines())
         } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+            throw OllamaException(ollamaTransportFailureMessage("chat stream", e))
         }
         if (resp.statusCode() !in 200..299) {
-            throw OllamaException("chat failed (${resp.statusCode()})")
+            throw OllamaException(ollamaFailureMessage("chat stream", resp.statusCode()))
         }
         // Fail-closed streaming (analysis F-005, ported from PR #3): EOF is not
         // success. A dropped socket or proxy timeout also ends the sequence
@@ -144,13 +181,9 @@ class OllamaClient(
         var sawDone = false
         resp.body().forEach { line ->
             if (line.isBlank()) return@forEach
-            val item = runCatching {
-                json.decodeFromString(ChatResponse.serializer(), line)
-            }.getOrElse {
-                throw OllamaException("invalid chat stream line: ${line.take(160)}")
-            }
+            val item = decodeServerResponse(ChatResponse.serializer(), line, "chat stream")
             item.error?.takeIf { it.isNotBlank() }
-                ?.let { throw OllamaException("chat stream: $it") }
+                ?.let { throw OllamaException(ollamaFailureMessage("chat stream")) }
             if (item.message.content.isNotEmpty()) onDelta(item.message.content)
             if (item.done) sawDone = true
         }
@@ -164,19 +197,19 @@ class OllamaClient(
     /** Lists available model names via /api/tags (local) or the backend equivalent. */
     fun listModels(modelsPath: String = "/api/tags"): List<String> {
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + modelsPath))
+            .uri(endpoint(modelsPath))
             .timeout(Duration.ofSeconds(10))
             .GET()
         bearer?.let { builder.header("Authorization", "Bearer $it") }
         val resp = try {
             http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+            throw OllamaException(ollamaTransportFailureMessage("models", e))
         }
         if (resp.statusCode() !in 200..299) {
-            throw OllamaException("models failed (${resp.statusCode()})")
+            throw OllamaException(ollamaFailureMessage("models", resp.statusCode()))
         }
-        return json.decodeFromString(TagsResponse.serializer(), resp.body())
+        return decodeServerResponse(TagsResponse.serializer(), resp.body(), "models")
             .models.map { it.name }.filter { it.isNotEmpty() }
     }
 
@@ -186,34 +219,38 @@ class OllamaClient(
     /** Installed models with size (vs. listModels()'s plain names for the chat picker). */
     fun listModelsDetailed(modelsPath: String = "/api/tags"): List<ModelInfo> {
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + modelsPath))
+            .uri(endpoint(modelsPath))
             .timeout(Duration.ofSeconds(10))
             .GET()
         bearer?.let { builder.header("Authorization", "Bearer $it") }
         val resp = try {
             http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+            throw OllamaException(ollamaTransportFailureMessage("models", e))
         }
-        if (resp.statusCode() !in 200..299) throw OllamaException("models failed (${resp.statusCode()})")
-        return json.decodeFromString(DetailedTagsResponse.serializer(), resp.body())
+        if (resp.statusCode() !in 200..299) {
+            throw OllamaException(ollamaFailureMessage("models", resp.statusCode()))
+        }
+        return decodeServerResponse(DetailedTagsResponse.serializer(), resp.body(), "models")
             .models.filter { it.name.isNotEmpty() }.map { ModelInfo(it.name, it.size) }
     }
 
     /** Models currently loaded in memory (Ollama's /api/ps, direct or via backend), with VRAM usage. */
     fun listRunningModels(psPath: String = "/api/ps"): List<RunningModel> {
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + psPath))
+            .uri(endpoint(psPath))
             .timeout(Duration.ofSeconds(10))
             .GET()
         bearer?.let { builder.header("Authorization", "Bearer $it") }
         val resp = try {
             http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+            throw OllamaException(ollamaTransportFailureMessage("running models", e))
         }
-        if (resp.statusCode() !in 200..299) throw OllamaException("running models failed (${resp.statusCode()})")
-        return json.decodeFromString(RunningModelsResponse.serializer(), resp.body())
+        if (resp.statusCode() !in 200..299) {
+            throw OllamaException(ollamaFailureMessage("running models", resp.statusCode()))
+        }
+        return decodeServerResponse(RunningModelsResponse.serializer(), resp.body(), "running models")
             .models.filter { it.name.isNotEmpty() }.map { RunningModel(it.name, it.size_vram, it.expires_at) }
     }
 
@@ -225,7 +262,7 @@ class OllamaClient(
     fun pullModel(model: String, pullPath: String = "/api/pull", onProgress: (String, Long, Long) -> Unit) {
         val payload = json.encodeToString(PullRequest.serializer(), PullRequest(model))
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + pullPath))
+            .uri(endpoint(pullPath))
             .timeout(Duration.ofHours(2))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(payload))
@@ -233,21 +270,19 @@ class OllamaClient(
         val resp = try {
             http.send(builder.build(), HttpResponse.BodyHandlers.ofLines())
         } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+            throw OllamaException(ollamaTransportFailureMessage("pull", e))
         }
-        if (resp.statusCode() !in 200..299) throw OllamaException("pull failed (${resp.statusCode()})")
+        if (resp.statusCode() !in 200..299) {
+            throw OllamaException(ollamaFailureMessage("pull", resp.statusCode()))
+        }
         // Same contract as Kaliv's pullModel (1.58.39) and chatStream above:
         // stream end is NOT success. Completion requires BOTH the final
         // status=success line AND the model appearing in the installed list.
         var sawSuccess = false
         resp.body().forEach { line ->
             if (line.isBlank()) return@forEach
-            val p = runCatching {
-                json.decodeFromString(PullProgressLine.serializer(), line)
-            }.getOrElse {
-                throw OllamaException("invalid pull stream line: ${line.take(160)}")
-            }
-            if (p.error.isNotEmpty()) throw OllamaException("pull error: ${p.error}")
+            val p = decodeServerResponse(PullProgressLine.serializer(), line, "pull stream")
+            if (p.error.isNotEmpty()) throw OllamaException(ollamaFailureMessage("pull"))
             if (p.status == "success") sawSuccess = true
             onProgress(p.status, p.completed, p.total)
         }
@@ -259,9 +294,9 @@ class OllamaClient(
         val modelsPath = if (pullPath.startsWith("/api/v1/")) "/api/v1/models" else "/api/tags"
         val installed = try {
             listModels(modelsPath)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             throw OllamaException(
-                "pull reported success, but installed-model verification failed: ${e.message}"
+                "pull reported success, but installed-model verification failed"
             )
         }
         val latestName = if (model.contains(':')) model else "$model:latest"
@@ -276,7 +311,7 @@ class OllamaClient(
     fun deleteModel(model: String, deletePath: String = "/api/delete") {
         val payload = json.encodeToString(PullRequest.serializer(), PullRequest(model))
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + deletePath))
+            .uri(endpoint(deletePath))
             .timeout(Duration.ofSeconds(15))
             .header("Content-Type", "application/json")
             .method("DELETE", HttpRequest.BodyPublishers.ofString(payload))
@@ -284,8 +319,10 @@ class OllamaClient(
         val resp = try {
             http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
+            throw OllamaException(ollamaTransportFailureMessage("delete", e))
         }
-        if (resp.statusCode() !in 200..299) throw OllamaException("delete failed (${resp.statusCode()}): ${resp.body()}")
+        if (resp.statusCode() !in 200..299) {
+            throw OllamaException(ollamaFailureMessage("delete", resp.statusCode()))
+        }
     }
 }
