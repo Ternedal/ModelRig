@@ -33,6 +33,9 @@ from rsi_pilot_integration_human_selection_contract import (  # noqa: E402
 from rsi_pilot_runtime_preflight_attestation_contract import (  # noqa: E402
     run_contract as run_runtime_preflight_contract,
 )
+from rsi_pilot_start_authorization_contract import (  # noqa: E402
+    run_contract as run_pilot_start_authorization_contract,
+)
 
 INVENTORY = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-inventory.json"
 REQUIREMENTS = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-selection-requirements.json"
@@ -208,6 +211,7 @@ def run_contract() -> None:
 
     run_human_selection_contract()
     run_runtime_preflight_contract()
+    run_pilot_start_authorization_contract()
 
 
 if __name__ == "__main__":
