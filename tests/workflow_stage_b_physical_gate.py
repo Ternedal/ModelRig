@@ -317,3 +317,9 @@ _run_support_contract(
     "rsi_pilot_start_authorization_preflight_provenance_contract",
 )
 print("RSI DC-L16 ADR-DC-024 fresh preflight provenance contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_start_consumption_contract.py",
+    "rsi_pilot_start_consumption_contract",
+)
+print("RSI DC-L16 ADR-DC-025 one-shot start consumption contract: PASS")
