@@ -5,7 +5,6 @@ import json
 import sys
 import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -175,23 +174,28 @@ class PilotStartConsumptionTests(unittest.TestCase):
                 b"pre-existing-replay-marker",
             )
 
-    def test_rejects_broadened_or_already_consumed_proof(self):
+    def test_malformed_or_broadened_proof_cannot_reach_consumption(self):
         _, _, _, proof = self._proof()
-        for bad in (
-            replace(proof, start_consumed=True),
-            replace(proof, product_pilot_started=True),
-            replace(proof, local_commit_authorized=True),
-            replace(proof, production_activation_authorized=True),
+        for field in (
+            "start_consumed",
+            "product_pilot_started",
+            "local_commit_authorized",
+            "production_activation_authorized",
         ):
-            with tempfile.TemporaryDirectory(
-                prefix="modelrig-pilot-start-invalid-"
-            ) as raw:
-                with self.assertRaises(consumption.PilotStartConsumptionError):
-                    consumption._consume_verified_pilot_start_authorization_once(
-                        proof=bad,
-                        ledger_root=Path(raw).resolve(),
-                        now_provider=lambda: "2026-09-14T08:27:00Z",
-                    )
+            with self.assertRaises(ValueError):
+                start_auth.PilotStartAuthorizationProof.from_mapping(
+                    {**proof.to_dict(), field: True}
+                )
+
+        with tempfile.TemporaryDirectory(
+            prefix="modelrig-pilot-start-invalid-"
+        ) as raw:
+            with self.assertRaises(consumption.PilotStartConsumptionError):
+                consumption._consume_verified_pilot_start_authorization_once(
+                    proof=proof.to_dict(),
+                    ledger_root=Path(raw).resolve(),
+                    now_provider=lambda: "2026-09-14T08:27:00Z",
+                )
 
     def test_schema_is_exact_and_non_authorizing(self):
         schema = json.loads(RECEIPT_SCHEMA.read_text(encoding="utf-8"))
