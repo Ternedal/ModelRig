@@ -1,0 +1,115 @@
+name: patch-desktop-tools-error-redaction
+
+on:
+  push:
+    branches:
+      - "helper/patch-desktop-tools-error-redaction"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact fix branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: fix/desktop-tools-error-redaction
+          fetch-depth: 0
+
+      - name: Assert parent authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "b15e5aa06eab7c1f544d86696b953261a3ab0e66"
+          test -z "$(git status --porcelain)"
+
+      - name: Apply bounded privacy patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/ToolsClient.kt")
+          src = path.read_text(encoding="utf-8")
+
+          anchor = 'class ToolsException(message: String) : RuntimeException(message)\n\n'
+          helper = '''class ToolsException(message: String) : RuntimeException(message)\n\ninternal fun toolsFailureMessage(operation: String, statusCode: Int? = null): String =\n    if (statusCode == null) "$operation failed" else "$operation failed ($statusCode)"\n\n'''
+          if src.count(anchor) != 1:
+              raise SystemExit(f"expected one ToolsException anchor, got {src.count(anchor)}")
+          src = src.replace(anchor, helper, 1)
+
+          replacements = {
+              'throw ToolsException("pair/start failed (${resp.statusCode()}): ${resp.body().take(200)}")':
+                  'throw ToolsException(toolsFailureMessage("pair/start", resp.statusCode()))',
+              'throw ToolsException("pair/start failed (${startResp.statusCode()}): ${startResp.body().take(200)}")':
+                  'throw ToolsException(toolsFailureMessage("pair/start", startResp.statusCode()))',
+              'throw ToolsException("pair/claim failed (${claimResp.statusCode()}): ${claimResp.body().take(200)}")':
+                  'throw ToolsException(toolsFailureMessage("pair/claim", claimResp.statusCode()))',
+              'throw ToolsException("tools chat failed (${resp.statusCode()}): ${resp.body().take(300)}")':
+                  'throw ToolsException(toolsFailureMessage("tools chat", resp.statusCode()))',
+              'throw ToolsException("tools chat: ${parsed.error}")':
+                  'throw ToolsException(toolsFailureMessage("tools chat"))',
+              'throw ToolsException("tools confirm failed (${resp.statusCode()}): ${resp.body().take(300)}")':
+                  'throw ToolsException(toolsFailureMessage("tools confirm", resp.statusCode()))',
+              'throw ToolsException("tools audit failed (${resp.statusCode()}): ${resp.body().take(200)}")':
+                  'throw ToolsException(toolsFailureMessage("tools audit", resp.statusCode()))',
+          }
+          for old, new in replacements.items():
+              count = src.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one exact occurrence of {old!r}, got {count}")
+              src = src.replace(old, new, 1)
+
+          if '.body().take(' in '\n'.join(line for line in src.splitlines() if 'ToolsException' in line):
+              raise SystemExit("raw HTTP response body still reaches ToolsException")
+          if '${parsed.error}' in src:
+              raise SystemExit("raw streamed server error still reaches ToolsException")
+
+          path.write_text(src, encoding="utf-8")
+
+          test_path = Path("desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/ToolsClientPrivacyTest.kt")
+          test_path.parent.mkdir(parents=True, exist_ok=True)
+          test_path.write_text('''package dk.ternedal.modelrig.desktop.net\n\nimport kotlin.test.Test\nimport kotlin.test.assertEquals\nimport kotlin.test.assertFalse\n\nclass ToolsClientPrivacyTest {\n    @Test\n    fun serverFailurePresentationCarriesOnlyOperationAndStatus() {\n        val rendered = toolsFailureMessage("tools chat", 500)\n        assertEquals("tools chat failed (500)", rendered)\n        assertFalse(rendered.contains("Bearer"))\n        assertFalse(rendered.contains("/data/"))\n        assertFalse(rendered.contains("token="))\n    }\n\n    @Test\n    fun streamedFailurePresentationDoesNotNeedRawServerText() {\n        assertEquals("tools chat failed", toolsFailureMessage("tools chat"))\n    }\n}\n''', encoding="utf-8")
+
+      - name: Source privacy guard
+        shell: python
+        run: |
+          from pathlib import Path
+          src = Path("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/ToolsClient.kt").read_text(encoding="utf-8")
+          forbidden = [
+              'ToolsException("pair/start failed (${resp.statusCode()}):',
+              'ToolsException("pair/start failed (${startResp.statusCode()}):',
+              'ToolsException("pair/claim failed (${claimResp.statusCode()}):',
+              'ToolsException("tools chat failed (${resp.statusCode()}):',
+              'ToolsException("tools chat: ${parsed.error}")',
+              'ToolsException("tools confirm failed (${resp.statusCode()}):',
+              'ToolsException("tools audit failed (${resp.statusCode()}):',
+          ]
+          hits = [needle for needle in forbidden if needle in src]
+          if hits:
+              raise SystemExit("raw server failure presentation remains: " + repr(hits))
+
+      - name: Set up Java 21
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Run desktop tests
+        working-directory: desktop
+        shell: bash
+        run: ./gradlew :composeApp:test --no-daemon --console=plain
+
+      - name: Commit clean product patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain --untracked-files=no | grep -v '^ M desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/ToolsClient.kt$' || true)"
+          git add desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/ToolsClient.kt \
+                  desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/ToolsClientPrivacyTest.kt
+          git config user.name "Ternedal"
+          git config user.email "a.nielbaek@gmail.com"
+          git commit -m "fix(desktop): redact raw tools server failures"
+          git push origin HEAD:fix/desktop-tools-error-redaction
