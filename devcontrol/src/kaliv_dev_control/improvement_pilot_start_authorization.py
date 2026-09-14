@@ -16,9 +16,13 @@ _original_authorization_from_mapping = (
 )
 
 
-def _normalized_authorization_from_mapping(cls, value):
+def _normalized_authorization_from_mapping(
+    cls,
+    value,
+    _original=_original_authorization_from_mapping,
+):
     try:
-        return _original_authorization_from_mapping(cls, value)
+        return _original(cls, value)
     except _implementation.PilotStartAuthorizationError:
         raise
     except ValueError as exc:
