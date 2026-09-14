@@ -46,6 +46,7 @@ CANDIDATE = {
     "dirty_entries": 0,
     "identity_source": "git",
     "version_stamps_consistent": True,
+    "version_check_detail": None,
 }
 
 
