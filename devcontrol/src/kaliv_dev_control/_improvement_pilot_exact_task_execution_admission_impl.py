@@ -259,20 +259,17 @@ def _scope(
 def _admission_key(
     proof: PilotExactTaskExecutionRevalidationAttestationProof,
 ) -> str:
-    """Stable one-shot identity independent of a later re-attestation of the same intent."""
-    scope = _scope(proof)
-    material = _canonical(
-        {
-            "execution_authorization_proof_sha256": scope[
-                "execution_authorization_proof_sha256"
-            ],
-            "start_receipt_sha256": scope["start_receipt_sha256"],
-            "execution_nonce_sha256": scope["execution_nonce_sha256"],
-            "selected_pilot_task_id": scope["selected_pilot_task_id"],
-            "workspace_root_path_sha256": scope["workspace_root_path_sha256"],
-        }
-    ).encode("utf-8")
-    return hashlib.sha256(material).hexdigest()
+    """Use the human-signed execution nonce itself as the create-once replay key.
+
+    The nonce is the one-shot identity from ADR-DC-030.  Keying the ledger only
+    by a larger authorization/task composite would allow the same signed nonce
+    to acquire another slot after a separately issued authorization changed one
+    of those surrounding identities.  Scope is still bound in the durable lock
+    and receipt, but the nonce can be admitted at most once per canonical host
+    ledger regardless of re-attestation or re-authorization.
+    """
+    exact = _require_satisfied_revalidation_proof(proof)
+    return _hex64(exact.execution_nonce_sha256, name="execution_nonce_sha256")
 
 
 def _transaction_registry():
@@ -533,7 +530,7 @@ class PilotExactTaskExecutionAdmissionReceipt:
 
 
 class _PilotExactTaskExecutionAdmissionLedger:
-    """Private create-once replay ledger keyed by the signed execution intent."""
+    """Private create-once replay ledger keyed by the signed execution nonce."""
 
     def __init__(self, root: Path) -> None:
         self.root = _safe_ledger_root(root)
@@ -556,7 +553,7 @@ class _PilotExactTaskExecutionAdmissionLedger:
         final, pending, lock = self._paths(key)
         if any(path.exists() or path.is_symlink() for path in (final, pending, lock)):
             raise PilotExactTaskExecutionAdmissionError(
-                "exact execution authorization/nonce was already admitted or requires recovery"
+                "exact execution nonce was already admitted or requires recovery"
             )
         scope = _scope(proof)
         payload = _canonical(
