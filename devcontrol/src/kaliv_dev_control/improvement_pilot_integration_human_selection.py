@@ -1,7 +1,7 @@
 """Public host-pinned verification facade for ADR-DC-021 human selection."""
 from __future__ import annotations
 
-from . import improvement_pilot_integration_human_selection as _implementation
+from . import _improvement_pilot_integration_human_selection_impl as _implementation
 from ._improvement_pilot_integration_human_selection_production_boundary import (
     install_pilot_integration_human_selection_production_boundary,
 )
