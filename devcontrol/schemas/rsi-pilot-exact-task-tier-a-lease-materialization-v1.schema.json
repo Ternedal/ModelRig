@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/devcontrol/rsi-pilot-exact-task-tier-a-lease-materialization-v1.schema.json",
+  "title": "ModelRig RSI DC-L16 exact Tier-A lease materialization v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "development_task_binding",
+    "development_task_binding_sha256",
+    "admission_receipt_sha256",
+    "execution_nonce_sha256",
+    "profile_sha256",
+    "catalog_sha256",
+    "toolchain_sha256",
+    "isolation_attestation",
+    "isolation_attestation_sha256",
+    "execution_lease",
+    "execution_lease_sha256",
+    "fixed_command_id",
+    "workspace_root_path_sha256",
+    "workspace_root_authority_sha256",
+    "toolhost_sha256",
+    "process_memory_bytes",
+    "active_process_limit",
+    "host_profile_verified",
+    "reviewed_catalog_verified",
+    "exact_toolchain_materialized",
+    "isolation_attestation_verified",
+    "execution_lease_materialized",
+    "workspace_authority_verified",
+    "toolhost_authority_verified",
+    "runtime_closure_materialized",
+    "execution_plan_materialized",
+    "execution_consumed",
+    "task_execution_started",
+    "task_execution_completed",
+    "integration_ready",
+    "product_pilot_started",
+    "local_commit_authorized",
+    "remote_write_authorized",
+    "push_authorized",
+    "pr_mutation_authorized",
+    "merge_authorized",
+    "release_authorized",
+    "deploy_authorized",
+    "production_activation_authorized",
+    "authority",
+    "schema"
+  ],
+  "properties": {
+    "development_task_binding": {"$ref": "rsi-pilot-exact-task-development-task-binding-v1.schema.json"},
+    "development_task_binding_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "admission_receipt_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "execution_nonce_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "profile_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "catalog_sha256": {"const": "b687f940160ba6ca7a14ae84f8315da851a9698b0c50039f8bb6d02dfee458c4"},
+    "toolchain_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "isolation_attestation": {
+      "allOf": [
+        {"$ref": "development-isolation-attestation-v1.schema.json"},
+        {
+          "type": "object",
+          "properties": {
+            "catalog_sha256": {"const": "b687f940160ba6ca7a14ae84f8315da851a9698b0c50039f8bb6d02dfee458c4"}
+          }
+        }
+      ]
+    },
+    "isolation_attestation_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "execution_lease": {
+      "allOf": [
+        {"$ref": "development-execution-lease-v1.schema.json"},
+        {
+          "type": "object",
+          "properties": {
+            "catalog_sha256": {"const": "b687f940160ba6ca7a14ae84f8315da851a9698b0c50039f8bb6d02dfee458c4"}
+          }
+        }
+      ]
+    },
+    "execution_lease_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "fixed_command_id": {"const": "modelrig.version.check"},
+    "workspace_root_path_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "workspace_root_authority_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "toolhost_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"},
+    "process_memory_bytes": {"const": 134217728},
+    "active_process_limit": {"const": 1},
+    "host_profile_verified": {"const": true},
+    "reviewed_catalog_verified": {"const": true},
+    "exact_toolchain_materialized": {"const": true},
+    "isolation_attestation_verified": {"const": true},
+    "execution_lease_materialized": {"const": true},
+    "workspace_authority_verified": {"const": true},
+    "toolhost_authority_verified": {"const": true},
+    "runtime_closure_materialized": {"const": false},
+    "execution_plan_materialized": {"const": false},
+    "execution_consumed": {"const": false},
+    "task_execution_started": {"const": false},
+    "task_execution_completed": {"const": false},
+    "integration_ready": {"const": false},
+    "product_pilot_started": {"const": false},
+    "local_commit_authorized": {"const": false},
+    "remote_write_authorized": {"const": false},
+    "push_authorized": {"const": false},
+    "pr_mutation_authorized": {"const": false},
+    "merge_authorized": {"const": false},
+    "release_authorized": {"const": false},
+    "deploy_authorized": {"const": false},
+    "production_activation_authorized": {"const": false},
+    "authority": {"const": "host-materialized-one-exact-tier-a-lease-only"},
+    "schema": {"const": "kaliv-rsi-dc-l16-exact-task-tier-a-lease-materialization/v1"}
+  }
+}

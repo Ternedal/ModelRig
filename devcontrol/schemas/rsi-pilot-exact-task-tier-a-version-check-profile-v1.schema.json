@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/devcontrol/rsi-pilot-exact-task-tier-a-version-check-profile-v1.schema.json",
+  "title": "ModelRig RSI DC-L16 exact Tier-A version-check profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile_id",
+    "tool_binding",
+    "workspace_root",
+    "control_plane_root",
+    "isolation_attestation",
+    "physical_verifier",
+    "process_memory_bytes",
+    "active_process_limit"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-dc-l16-exact-task-tier-a-version-check-profile/v1"},
+    "profile_id": {"const": "modelrig-version-check-v1"},
+    "tool_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_id", "executable", "executable_sha256"],
+      "properties": {
+        "tool_id": {"const": "modelrig-version-check"},
+        "executable": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "executable_sha256": {"type": "string", "pattern": "^(?!0{64}$)[0-9a-f]{64}$"}
+      }
+    },
+    "workspace_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "control_plane_root": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "isolation_attestation": {
+      "allOf": [
+        {"$ref": "development-isolation-attestation-v1.schema.json"},
+        {
+          "type": "object",
+          "properties": {
+            "catalog_sha256": {"const": "b687f940160ba6ca7a14ae84f8315da851a9698b0c50039f8bb6d02dfee458c4"}
+          }
+        }
+      ]
+    },
+    "physical_verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_age_seconds", "max_file_bytes", "trusted_keys"],
+      "properties": {
+        "max_age_seconds": {"type": "integer", "minimum": 1, "maximum": 31622400},
+        "max_file_bytes": {"type": "integer", "minimum": 1024, "maximum": 16000000},
+        "trusted_keys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key_id", "secret_hex"],
+            "properties": {
+              "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+              "secret_hex": {"type": "string", "pattern": "^(?:[0-9a-f]{2}){32,4096}$"}
+            }
+          }
+        }
+      }
+    },
+    "process_memory_bytes": {"const": 134217728},
+    "active_process_limit": {"const": 1}
+  }
+}
