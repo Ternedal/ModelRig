@@ -1,0 +1,62 @@
+{
+  "schema": "kaliv-rsi-dc-l16-product-integration-inventory/v1",
+  "repository": "Ternedal/ModelRig",
+  "source_parent_sha": "7cc350fc50baad9f48fae88f76b6ad17b3a3817f",
+  "candidate_surfaces": [
+    {
+      "candidate_id": "desktop.control-center",
+      "kind": "operator-ui-candidate",
+      "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt",
+      "git_blob_sha": "0a9498ac0fe61ea742a47c1d6be1cf7886992321",
+      "selected": false
+    },
+    {
+      "candidate_id": "android.control-center",
+      "kind": "operator-ui-candidate",
+      "path": "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt",
+      "git_blob_sha": "82643d7cefe9a9c249e8e7cc8b480d9989b38606",
+      "selected": false
+    },
+    {
+      "candidate_id": "backend.local-api-host-pattern",
+      "kind": "route-host-pattern-candidate",
+      "path": "backend/internal/httpapi/server.go",
+      "git_blob_sha": "6085d525ff86a3d2b5c7cdece20bcaeace896e85",
+      "selected": false
+    }
+  ],
+  "verified_existing_patterns": {
+    "paired_bearer_control_center_routes_present": true,
+    "default_off_experimental_route_patterns_present": true,
+    "manual_refresh_no_automatic_polling_present": true
+  },
+  "verified_absence": {
+    "devcontrol_product_import_present": false,
+    "devcontrol_product_route_present": false,
+    "devcontrol_product_flag_present": false,
+    "kalivdev_product_route_present": false
+  },
+  "selection_state": {
+    "operator_surface_selected": false,
+    "feature_flag_selected": false,
+    "product_route_selected": false,
+    "runtime_observer_selected": false,
+    "task_registry_selected": false
+  },
+  "authority_state": {
+    "normal_command_catalog_empty": true,
+    "integration_ready": false,
+    "preflight_observed": false,
+    "preflight_satisfied": false,
+    "pilot_start_authorized": false,
+    "product_pilot_started": false,
+    "remote_write_authorized": false,
+    "push_authorized": false,
+    "pr_mutation_authorized": false,
+    "merge_authorized": false,
+    "release_authorized": false,
+    "deploy_authorized": false,
+    "production_activation_authorized": false,
+    "authority": "dc-l16-product-integration-inventory-only"
+  }
+}
