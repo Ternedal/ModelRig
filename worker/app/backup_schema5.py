@@ -989,10 +989,26 @@ def verify(archive: str) -> dict:
         raise ValueError("invalid backup manifest: files must be an object")
 
     problems: list[str] = []
+    canonical_kinds = {item.key: item.kind for item in items()}
+    kind_mismatches: set[str] = set()
+    for key, meta in files.items():
+        expected_kind = canonical_kinds.get(key)
+        if expected_kind is None:
+            continue
+        actual_kind = meta.get("kind") if isinstance(meta, dict) else None
+        if actual_kind != expected_kind:
+            kind_mismatches.add(str(key))
+            problems.append(
+                f"manifest kind mismatch for {key}: got {actual_kind!r}, expected {expected_kind!r}"
+            )
+
     checked = 0
     with tarfile.open(archive, "r:gz") as tar:
-        has_runs = AGENT3_RUNS_KEY in files
-        has_progress = AGENT3_EXECUTION_PROGRESS_KEY in files
+        has_runs = AGENT3_RUNS_KEY in files and AGENT3_RUNS_KEY not in kind_mismatches
+        has_progress = (
+            AGENT3_EXECUTION_PROGRESS_KEY in files
+            and AGENT3_EXECUTION_PROGRESS_KEY not in kind_mismatches
+        )
         run_bytes = (
             _member_bytes(tar, f"data/{AGENT3_RUNS_KEY}") if has_runs else None
         )
@@ -1043,7 +1059,12 @@ def verify(archive: str) -> dict:
                 runs_have_rows = bool(run_count)
 
         authority_problem = _agent3_authority_problem(
-            files, runs_have_rows=runs_have_rows
+            {
+                key: meta
+                for key, meta in files.items()
+                if key not in kind_mismatches
+            },
+            runs_have_rows=runs_have_rows,
         )
         if authority_problem:
             problems.append(authority_problem)
@@ -1099,6 +1120,8 @@ def verify(archive: str) -> dict:
             problems.append("schema-5 Agent 3 authority requires both paired stores")
 
         for key, meta in files.items():
+            if key in kind_mismatches:
+                continue
             if not isinstance(meta, dict) or meta.get("kind") not in {"file", "dir"}:
                 problems.append(f"invalid manifest entry: {key}")
                 continue
