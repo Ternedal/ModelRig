@@ -94,7 +94,7 @@ def run_contract() -> None:
             "trusted_git_closure_revalidation_required",
             "kill_switch_armed_revalidation_required",
             "revoke_not_asserted_revalidation_required",
-            "restart_recovery_revalidated_required" if False else "restart_recovery_revalidation_required",
+            "restart_recovery_revalidation_required",
             "network_write_blocked_revalidation_required",
             "credentials_absent_revalidation_required",
             "general_shell_forbidden",
