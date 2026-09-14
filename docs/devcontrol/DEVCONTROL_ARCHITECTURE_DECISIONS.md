@@ -357,3 +357,24 @@ forbliver false. Ingen produktimport, command registration, remote write/push/PR
 merge/release/deploy eller production activation autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-019_RSI_PILOT_PRODUCT_INTEGRATION_SELECTION_REQUIREMENTS.md`
+
+## ADR-DC-020 — Fail-closed product integration selection candidate before human recording
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Validerer en konkret product-integration candidate mod exact ADR-DC-016 scope,
+ADR-DC-018 inventory og ADR-DC-019 requirements uden at registrere et
+menneskeligt valg. Kandidatens surface skal være identisk med den signerede
+operator surface og dens kind/path/blob skal matche pinned source identity.
+
+Feature flag, route, runtime observer, task registry, workspace policy,
+review/authorization roles, kill/revoke/cleanup og local-commit policy skal være
+komplette, men proofet er kun en valideret kandidat. Unknown surfaces kræver
+frisk exact-source inventory, og deserialisering revaliderer source binding.
+
+`human_selection_recorded`, `integration_ready`, runtime/preflight claims,
+pilot-start og product-pilot-start forbliver false. Ingen produktkode,
+remote write/push/PR/merge/release/deploy eller production activation
+autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-020_RSI_PILOT_PRODUCT_INTEGRATION_SELECTION_CANDIDATE.md`

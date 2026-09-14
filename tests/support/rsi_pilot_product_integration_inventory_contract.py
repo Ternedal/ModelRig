@@ -18,6 +18,9 @@ if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
 
 from kaliv_dev_control import catalog  # noqa: E402
+from rsi_pilot_integration_selection_candidate_contract import (  # noqa: E402
+    run_contract as run_selection_candidate_contract,
+)
 
 INVENTORY_PATH = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-inventory.json"
 SCHEMA_PATH = ROOT / "devcontrol" / "schemas" / "rsi-pilot-product-integration-inventory-v1.schema.json"
@@ -260,6 +263,7 @@ def run_contract() -> None:
             assert schema["properties"]["authority_state"]["properties"][key]["const"] is False
 
     _assert_selection_requirements()
+    run_selection_candidate_contract()
 
 
 if __name__ == "__main__":
