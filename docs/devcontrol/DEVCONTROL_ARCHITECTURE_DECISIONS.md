@@ -399,3 +399,41 @@ Der oprettes ingen faktisk signed selection artifact og ingen product surface
 vælges i denne slice.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-021_RSI_PILOT_PRODUCT_INTEGRATION_HUMAN_SELECTION.md`
+
+## ADR-DC-022 — Exact-bound runtime-preflight evidence packet before host verification
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Binder et komplet sæt på tolv SHA-256 evidence-digests til exact ADR-DC-021
+human-selection proof og exact ADR-DC-017 preflight requirements. Packetet
+krydstjekker trial-scope, decision proof, repository, base/main SHA, operator
+surface, selected task, workspace-root digest og local-commit policy, så et
+evidence-set ikke kan rebinde til en anden pilot-scope.
+
+`observation_set_complete=true` betyder kun, at alle tolv evidence-referencer er
+til stede og exact-bound. Packetet læser ingen host-state og verificerer ikke de
+refererede artifacts; `evidence_verified`, `preflight_observed`,
+`preflight_satisfied`, pilot-start, local commit og alle remote/publication/
+activation authorities forbliver false.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-022_RSI_PILOT_RUNTIME_PREFLIGHT_OBSERVATION_PACKET.md`
+
+## ADR-DC-023 — Host-attested runtime-preflight proof over exact ADR-DC-022 evidence packet
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Gør exact ADR-DC-022 packetet til canonical input for en separat host-attesteret
+Ed25519-verifikation. Attestationens signerede bytes indlejrer hele packetet og
+dermed alle tolv individuelle evidence-digests, human-selection proof,
+requirements og trial/workspace/source-bindinger. Production accepterer ikke
+caller-valgt verifier og resolver kun en separat host-controlled verification-
+only public-key keyring under elevated host operator.
+
+Et cryptographically valid proof kan kun sætte `host_attestation_verified=true`,
+`preflight_observed=true` og `preflight_satisfied` ud fra alle tolv signerede
+resultater. Et gyldigt signeret failed preflight bevares som observed men ikke
+satisfied. `integration_ready`, pilot-start, product-pilot-start, local commit,
+remote write/push/PR/merge/release/deploy og production activation forbliver
+false.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-023_RSI_PILOT_RUNTIME_PREFLIGHT_ATTESTATION.md`
