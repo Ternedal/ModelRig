@@ -437,3 +437,30 @@ remote write/push/PR/merge/release/deploy og production activation forbliver
 false.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-023_RSI_PILOT_RUNTIME_PREFLIGHT_ATTESTATION.md`
+
+## ADR-DC-024 — Human-signed one-shot pilot-start authorization after satisfied host preflight
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Indfører en separat, kortlivet Ed25519-signeret human authorization over ét exact
+fully satisfied ADR-DC-023 host-attested preflight proof. Authorizationen
+indlejrer hele proofet og binder ADR-DC-023 attestation, ADR-DC-022 packet,
+ADR-DC-021 selection, candidate/requirements/trial-scope samt exact
+repository/base/main/operator/task/workspace/local-commit scope. Start-authorizeren
+skal være samme human actor som ADR-DC-021 selection og være forskellig fra
+preflight-observer/attestor.
+
+Production må ikke stole på et deserialiseret ADR-DC-023 proof alene. Før human
+start-authority kan vurderes, skal den detached ADR-DC-023-signatur re-verificeres
+frisk mod den host-controlled preflight-keyring, og proofets signatur-, signer-,
+attestation- og packet-identitet skal matche den friske verification.
+
+Authorization-vinduet er højst 15 minutter og binder en separat one-shot
+`start_nonce_sha256`. Claimen autoriserer intet; først host-pinned detached
+Ed25519-verifikation kan sætte `pilot_start_authorized=true`. Selv proofet holder
+`one_shot_start_required=true`, `start_consumed=false`, `integration_ready=false`,
+`product_pilot_started=false`, local commit, remote write/push/PR/merge/release/
+deploy og production activation false. Replay-safe consumption/start-receipt er
+en separat senere authority-boundary.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-024_RSI_PILOT_START_AUTHORIZATION.md`
