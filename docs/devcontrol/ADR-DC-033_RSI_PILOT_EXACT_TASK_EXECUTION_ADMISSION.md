@@ -32,7 +32,7 @@ Noncen er dermed den stabile one-shot identity på tværs af både re-attestatio
 
 Den exact authorization/task/workspace scope bliver fortsat bundet i den durable lock marker og i receiptet. Nonce-keying gør replay-reglen strengere; det fjerner ikke scope-bindingen.
 
-Ledgeren publicerer først en create-once lock marker. Replay eller usikker publication fejler lukket og efterlader noncen reserveret for fremtidig admission.
+Ledgeren publicerer først en create-once lock marker. Replay eller usikker publication fejler lukket og efterlader noncen permanent reserveret/ikke-genbrugelig, indtil en særskilt recovery-model eventuelt besluttes. En usikker transaktion må aldrig automatisk åbne den samme nonce for en ny admission.
 
 Canonical production roots er:
 
@@ -91,7 +91,7 @@ Den exact receipt-instans, som returneres fra den successfulde durable transacti
 
 En senere executor-boundary skal kræve den exact live receipt med `transaction_authenticated=true`, consume execution-admissionen one-shot og udstede separat post-execution evidence. Det er ikke en del af ADR-DC-033.
 
-## Freshness
+## Freshness og clock-integritet
 
 Admission må kun ske efter den fresh ADR-DC-032 verification og før det tidligste af:
 
@@ -99,6 +99,10 @@ Admission må kun ske efter den fresh ADR-DC-032 verification og før det tidlig
 - 300 sekunder efter ADR-DC-032 attestation time.
 
 Hvis freshness udløber efter durable reservation men før receipt-publication, fejler transaktionen lukket og reservationen genbruges ikke.
+
+Production binder desuden de to wall-clock reads omkring den durable nonce-reservation til en transaction-local non-decreasing guard. Hvis hostens wall clock bevæger sig baglæns mellem reservation og receipt-publication, fejler admission lukket i stedet for at publicere et audit-inkonsistent receipt. Samme canonical sekund accepteres, fordi production-clockens opløsning er ét sekund.
+
+Denne clock-guard er ikke en påstand om trusted monotonic hardware time; den lukker specifikt rollback mellem de to wall-clock samples i én ADR-DC-033 production-transaktion.
 
 ## Authority stop
 
