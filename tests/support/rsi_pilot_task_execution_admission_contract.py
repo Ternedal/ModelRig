@@ -161,6 +161,41 @@ def run_contract() -> None:
             )
         )
 
+        # Re-attesting the same live start-consumption and exact task must not
+        # create a fresh replay slot. The stable one-shot key is anchored to the
+        # ADR-025 receipt/nonce/task identity, not the replaceable attestation SHA.
+        alternate_claim = att.build_pilot_execution_admission_attestation(
+            packet=proof.attestation.packet,
+            attestation_id="execution-admission-attestation-029-retry",
+            observer_host_id="modelrig-host-001",
+            attested_at_utc="2026-09-14T08:30:10Z",
+            results={name: True for name in att.RESULT_FIELDS},
+        )
+        alternate_verifier, alternate_signature = _authority(alternate_claim)
+        alternate_proof = att._verify_pilot_execution_admission_attestation(
+            attestation=alternate_claim,
+            signature=alternate_signature,
+            verifier=alternate_verifier,
+            now_provider=lambda: "2026-09-14T08:30:20Z",
+        )
+        alternate_fresh = att._verify_pilot_execution_admission_attestation(
+            attestation=alternate_claim,
+            signature=alternate_signature,
+            verifier=alternate_verifier,
+            now_provider=lambda: "2026-09-14T08:30:25Z",
+        )
+        assert alternate_proof.attestation_sha256 != proof.attestation_sha256
+        assert alternate_proof.start_receipt_sha256 == proof.start_receipt_sha256
+        reattest_times = iter(("2026-09-14T08:31:04Z", "2026-09-14T08:31:05Z"))
+        _reject(
+            lambda: admission._admit_verified_pilot_task_execution(
+                supplied_proof=alternate_proof,
+                fresh_proof=alternate_fresh,
+                ledger=ledger,
+                now_provider=lambda: next(reattest_times),
+            )
+        )
+
         # Admission is tied to the short ADR-028 host-attestation freshness window.
         stale_temp, stale_ledger = _ledger("rsi-task-admission-stale-")
         try:
