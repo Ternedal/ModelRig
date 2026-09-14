@@ -634,3 +634,27 @@ ADR-DC-031 packet. Replay-safe one-shot consumption/admission og actual executor
 transaction forbliver senere separate boundaries.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-031_RSI_PILOT_EXACT_TASK_EXECUTION_REVALIDATION_OBSERVATION.md`
+
+## ADR-DC-032 — Host-attested exact-task execution revalidation without execution admission authority
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Verificerer en separat host-signeret Ed25519-attestation over ét exact ADR-DC-031
+revalidation packet. Claimen binder packetet, ADR-DC-030 proof/signatur,
+ADR-DC-028 proof/signatur, execution nonce og præcis ét boolsk resultat for hver
+af de 25 ADR-DC-029/031 fresh-revalidation gates.
+
+Production fresh-reverificerer ADR-DC-028 og ADR-DC-030 mod deres separate
+canonical host-controlled trust roots før ADR-DC-032-signaturen accepteres.
+`execution_revalidation_satisfied=true` kræver alle 25 signerede resultater true.
+
+Dette er host-attestation, ikke selvstændig kernel telemetry eller artifact
+collection: ModelRig verifierer den betroede host-signers resultater og exact
+provenance, men genmåler ikke selv alle 25 underliggende host-artifacts.
+
+Selv et fully satisfied proof holder execution admission, task execution/start,
+local commit samt alle remote/publication/activation authorities false. Replay-safe
+one-shot admission-capability og actual executor transaction er senere separate
+boundaries.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-032_RSI_PILOT_EXACT_TASK_EXECUTION_REVALIDATION_ATTESTATION.md`
