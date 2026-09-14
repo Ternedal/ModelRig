@@ -579,3 +579,29 @@ Denne requirements-slice udsteder ingen admission. `task_execution_authorized=fa
 authorities forbliver false. Der registreres ingen command og kaldes ingen executor.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-029_RSI_PILOT_EXACT_TASK_EXECUTION_ADMISSION_REQUIREMENTS.md`
+
+## ADR-DC-030 — Human-signed exact-task execution authorization without executor authority
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Indfører en separat, kortlivet Ed25519-signeret human authorization over ét exact
+ADR-DC-029 requirements-manifest. Claimen binder hele requirements-manifestet og
+dermed ADR-DC-028/027/026/025-lineagen samt exact repository/base/main, trial,
+operator surface, selected task, workspace og human local-commit upper bound.
+Execution-authorizeren skal være samme human actor som signerede ADR-DC-024
+pilot-start authorization og være forskellig fra ADR-DC-028 host-attestoren.
+
+Production kræver fresh host-pinned re-verifikation af den detached ADR-DC-028
+attestation-signatur før den nye human-signatur vurderes. Authorization-vinduet
+er højst 10 minutter og binder en separat execution nonce, som ikke må genbruge
+pilot-start noncen.
+
+Et verificeret proof kan kun sætte
+`human_task_execution_authorization_verified=true` og
+`one_shot_execution_required=true`; consumption, execution-admission,
+task-execution/start, local commit og alle remote/publication/activation
+authorities forbliver false. En senere separat host-local replay-safe
+consume/admission-boundary skal fresh revalidere de resterende ADR-DC-029 gates
+før task execution kan autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-030_RSI_PILOT_EXACT_TASK_EXECUTION_HUMAN_AUTHORIZATION.md`
