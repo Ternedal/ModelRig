@@ -378,3 +378,24 @@ remote write/push/PR/merge/release/deploy eller production activation
 autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-020_RSI_PILOT_PRODUCT_INTEGRATION_SELECTION_CANDIDATE.md`
+
+## ADR-DC-021 — Human-signed exact product-integration selection before runtime preflight
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Indfører en separat Ed25519-signeret human selection over ét exact ADR-DC-020
+candidate proof. De signerede bytes indlejrer hele candidate proofet og binder
+dets SHA-256, selection maker, selection ID og canonical selection time, så
+candidate/design/source rebinding kræver en ny menneskelig signatur.
+
+Production accepterer ikke caller-valgt verifier og resolver kun en separat
+host-admin-kontrolleret verification-only public-key keyring. Et verificeret
+proof kan kun sætte `human_selection_recorded=true` og
+`candidate_selection_verified=true`; `integration_ready`, runtime/preflight,
+pilot-start, remote write/push/PR/merge/release/deploy og production activation
+forbliver false.
+
+Der oprettes ingen faktisk signed selection artifact og ingen product surface
+vælges i denne slice.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-021_RSI_PILOT_PRODUCT_INTEGRATION_HUMAN_SELECTION.md`

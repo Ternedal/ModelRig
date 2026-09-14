@@ -7,6 +7,9 @@ from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+SUPPORT = ROOT / "tests" / "support"
+if str(SUPPORT) not in sys.path:
+    sys.path.insert(0, str(SUPPORT))
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
@@ -23,6 +26,9 @@ from kaliv_dev_control.improvement_pilot_integration_selection_candidate import 
 )
 from kaliv_dev_control.improvement_pilot_trial_scope import (  # noqa: E402
     PilotTrialScopeProof,
+)
+from rsi_pilot_integration_human_selection_contract import (  # noqa: E402
+    run_contract as run_human_selection_contract,
 )
 
 INVENTORY = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-inventory.json"
@@ -196,6 +202,8 @@ def run_contract() -> None:
     assert properties["pilot_start_authorized"]["const"] is False
     assert properties["production_activation_authorized"]["const"] is False
     assert properties["authority"]["const"] == PILOT_INTEGRATION_SELECTION_CANDIDATE_AUTHORITY
+
+    run_human_selection_contract()
 
 
 if __name__ == "__main__":
