@@ -399,3 +399,22 @@ Der oprettes ingen faktisk signed selection artifact og ingen product surface
 vælges i denne slice.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-021_RSI_PILOT_PRODUCT_INTEGRATION_HUMAN_SELECTION.md`
+
+## ADR-DC-022 — Exact binding between human integration selection and runtime-preflight requirements
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Binder exact ADR-DC-017 preflight requirements til ét verificeret ADR-DC-021
+human product-integration selection proof før nogen runtime-observation må ske.
+Begge upstream-artifacts indlejres og replay-valideres, og trial scope, decision,
+repository/base/main, trial, operator surface, selected task, workspace digest og
+local-commit policy skal matche fail-closed.
+
+Planen arver feature flag, product route, runtime observer, task registry,
+workspace policy, review/authorization roles og kill/revoke/cleanup direkte fra
+den menneskeligt valgte exact candidate. Successful binding kan kun sætte
+`preflight_binding_verified=true`; `integration_ready`, `preflight_observed`,
+`preflight_satisfied`, pilot-start, product-pilot-start og al remote/publication/
+release/deploy/activation authority forbliver false.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-022_RSI_PILOT_RUNTIME_PREFLIGHT_BINDING.md`
