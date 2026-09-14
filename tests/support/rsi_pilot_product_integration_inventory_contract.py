@@ -1,4 +1,4 @@
-"""Adversarial contract for ADR-DC-018 product integration inventory."""
+"""Adversarial contracts for ADR-DC-018 inventory and ADR-DC-019 selection requirements."""
 from __future__ import annotations
 
 import hashlib
@@ -21,6 +21,15 @@ from kaliv_dev_control import catalog  # noqa: E402
 
 INVENTORY_PATH = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-inventory.json"
 SCHEMA_PATH = ROOT / "devcontrol" / "schemas" / "rsi-pilot-product-integration-inventory-v1.schema.json"
+SELECTION_REQUIREMENTS_PATH = (
+    ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-selection-requirements.json"
+)
+SELECTION_REQUIREMENTS_SCHEMA_PATH = (
+    ROOT
+    / "devcontrol"
+    / "schemas"
+    / "rsi-pilot-product-integration-selection-requirements-v1.schema.json"
+)
 
 EXPECTED = (
     (
@@ -50,6 +59,107 @@ def _git_blob_sha(path: Path) -> str:
 def _load(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _assert_selection_requirements() -> None:
+    requirements = _load(SELECTION_REQUIREMENTS_PATH)
+    schema = _load(SELECTION_REQUIREMENTS_SCHEMA_PATH)
+
+    assert requirements["schema"] == "kaliv-rsi-dc-l16-product-integration-selection-requirements/v1"
+    assert requirements["repository"] == "Ternedal/ModelRig"
+    assert schema["properties"]["schema"]["const"] == requirements["schema"]
+    assert schema["properties"]["repository"]["const"] == requirements["repository"]
+
+    source = requirements["source_inventory"]
+    assert source == {
+        "source_head_sha": "30be16b320acd6655c07ab1476cceaead547e3e3",
+        "inventory_path": "docs/devcontrol/dc-l16/product-integration-inventory.json",
+        "inventory_git_blob_sha": "babad0dfc82ad359ee053817bae2674a8f8b38a0",
+        "candidate_ids": [candidate_id for candidate_id, _, _ in EXPECTED],
+    }
+    assert _git_blob_sha(INVENTORY_PATH) == source["inventory_git_blob_sha"]
+
+    source_schema = schema["properties"]["source_inventory"]["properties"]
+    assert source_schema["source_head_sha"]["const"] == source["source_head_sha"]
+    assert source_schema["inventory_path"]["const"] == source["inventory_path"]
+    assert source_schema["inventory_git_blob_sha"]["const"] == source["inventory_git_blob_sha"]
+    schema_candidate_ids = [item["const"] for item in source_schema["candidate_ids"]["prefixItems"]]
+    assert schema_candidate_ids == source["candidate_ids"]
+
+    binding = requirements["binding_requirements"]
+    assert binding == {
+        "verified_human_pilot_decision_required": True,
+        "positive_human_pilot_decision_required": True,
+        "exact_single_trial_scope_required": True,
+        "operator_surface_must_equal_signed_scope": True,
+        "known_surface_must_bind_inventory_candidate": True,
+        "unknown_surface_requires_fresh_exact_source_inventory": True,
+        "selected_task_must_equal_single_trial_task": True,
+        "workspace_digest_must_equal_single_trial_scope": True,
+        "local_commit_policy_must_not_broaden_signed_scope": True,
+    }
+    for key, value in binding.items():
+        assert value is True, key
+        assert schema["properties"]["binding_requirements"]["properties"][key]["const"] is True
+
+    decisions = requirements["product_design_decisions_required"]
+    assert set(decisions) == {
+        "operator_surface",
+        "feature_flag_name",
+        "product_route",
+        "runtime_observer",
+        "task_registry",
+        "workspace_policy",
+        "review_authorization_roles",
+        "kill_revoke_cleanup",
+        "local_commit_policy",
+    }
+    for key, value in decisions.items():
+        assert value is True, key
+        assert schema["properties"]["product_design_decisions_required"]["properties"][key]["const"] is True
+
+    selection = requirements["selection_state"]
+    assert set(selection) == {
+        "human_selection_recorded",
+        "operator_surface_selected",
+        "feature_flag_selected",
+        "product_route_selected",
+        "runtime_observer_selected",
+        "task_registry_selected",
+        "workspace_policy_selected",
+        "review_authorization_roles_selected",
+        "kill_revoke_cleanup_selected",
+        "local_commit_policy_selected",
+    }
+    for key, value in selection.items():
+        assert value is False, key
+        assert schema["properties"]["selection_state"]["properties"][key]["const"] is False
+
+    authority = requirements["authority_state"]
+    assert authority["normal_command_catalog_empty"] is True
+    assert authority["authority"] == "dc-l16-product-integration-selection-requirements-only"
+    for key in (
+        "integration_ready",
+        "preflight_observed",
+        "preflight_satisfied",
+        "pilot_start_authorized",
+        "product_pilot_started",
+        "remote_write_authorized",
+        "push_authorized",
+        "pr_mutation_authorized",
+        "merge_authorized",
+        "release_authorized",
+        "deploy_authorized",
+        "production_activation_authorized",
+    ):
+        assert authority[key] is False, key
+
+    authority_schema = schema["properties"]["authority_state"]["properties"]
+    assert authority_schema["normal_command_catalog_empty"]["const"] is True
+    assert authority_schema["authority"]["const"] == authority["authority"]
+    for key in authority:
+        if key not in {"normal_command_catalog_empty", "authority"}:
+            assert authority_schema[key]["const"] is False
 
 
 def run_contract() -> None:
@@ -148,6 +258,8 @@ def run_contract() -> None:
             assert schema["properties"]["authority_state"]["properties"][key]["const"] == value
         else:
             assert schema["properties"]["authority_state"]["properties"][key]["const"] is False
+
+    _assert_selection_requirements()
 
 
 if __name__ == "__main__":

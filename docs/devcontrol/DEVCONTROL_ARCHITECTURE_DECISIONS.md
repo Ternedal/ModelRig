@@ -334,3 +334,26 @@ Ingen remote write/push/PR/merge/release/deploy eller production activation
 autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-018_RSI_PILOT_PRODUCT_INTEGRATION_INVENTORY.md`
+
+## ADR-DC-019 — Human-bound product integration selection requirements before DC-L16 runtime preflight
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Fastlåser kun requirements for en senere human-bound product-integration
+selection. En senere selection skal være exact bundet til et verificeret positivt
+ADR-DC-015 human pilot decision proof og exact ADR-DC-016 single-trial scope,
+så operator surface, task, workspace-digest og local-commit policy ikke kan
+udvides af model- eller produktlaget.
+
+Kendte surfaces skal bindes til ADR-DC-018 exact-source inventory; en ukendt
+surface kræver frisk exact-source inventory evidence. Feature flag, route,
+runtime observer, task registry, workspace policy, review/authorization roles og
+kill/revoke/cleanup er eksplicit påkrævede senere designvalg, men ingen af dem
+vælges i denne slice.
+
+`human_selection_recorded`, alle konkrete selection-state felter,
+`integration_ready`, runtime/preflight claims, pilot-start og product-pilot-start
+forbliver false. Ingen produktimport, command registration, remote write/push/PR/
+merge/release/deploy eller production activation autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-019_RSI_PILOT_PRODUCT_INTEGRATION_SELECTION_REQUIREMENTS.md`

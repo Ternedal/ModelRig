@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kaliv-rsi-dc-l16-product-integration-selection-requirements/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "source_inventory",
+    "binding_requirements",
+    "product_design_decisions_required",
+    "selection_state",
+    "authority_state"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-dc-l16-product-integration-selection-requirements/v1"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "source_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_head_sha",
+        "inventory_path",
+        "inventory_git_blob_sha",
+        "candidate_ids"
+      ],
+      "properties": {
+        "source_head_sha": {"const": "30be16b320acd6655c07ab1476cceaead547e3e3"},
+        "inventory_path": {"const": "docs/devcontrol/dc-l16/product-integration-inventory.json"},
+        "inventory_git_blob_sha": {"const": "babad0dfc82ad359ee053817bae2674a8f8b38a0"},
+        "candidate_ids": {
+          "type": "array",
+          "prefixItems": [
+            {"const": "desktop.control-center"},
+            {"const": "android.control-center"},
+            {"const": "backend.local-api-host-pattern"}
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      }
+    },
+    "binding_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified_human_pilot_decision_required",
+        "positive_human_pilot_decision_required",
+        "exact_single_trial_scope_required",
+        "operator_surface_must_equal_signed_scope",
+        "known_surface_must_bind_inventory_candidate",
+        "unknown_surface_requires_fresh_exact_source_inventory",
+        "selected_task_must_equal_single_trial_task",
+        "workspace_digest_must_equal_single_trial_scope",
+        "local_commit_policy_must_not_broaden_signed_scope"
+      ],
+      "properties": {
+        "verified_human_pilot_decision_required": {"const": true},
+        "positive_human_pilot_decision_required": {"const": true},
+        "exact_single_trial_scope_required": {"const": true},
+        "operator_surface_must_equal_signed_scope": {"const": true},
+        "known_surface_must_bind_inventory_candidate": {"const": true},
+        "unknown_surface_requires_fresh_exact_source_inventory": {"const": true},
+        "selected_task_must_equal_single_trial_task": {"const": true},
+        "workspace_digest_must_equal_single_trial_scope": {"const": true},
+        "local_commit_policy_must_not_broaden_signed_scope": {"const": true}
+      }
+    },
+    "product_design_decisions_required": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator_surface",
+        "feature_flag_name",
+        "product_route",
+        "runtime_observer",
+        "task_registry",
+        "workspace_policy",
+        "review_authorization_roles",
+        "kill_revoke_cleanup",
+        "local_commit_policy"
+      ],
+      "properties": {
+        "operator_surface": {"const": true},
+        "feature_flag_name": {"const": true},
+        "product_route": {"const": true},
+        "runtime_observer": {"const": true},
+        "task_registry": {"const": true},
+        "workspace_policy": {"const": true},
+        "review_authorization_roles": {"const": true},
+        "kill_revoke_cleanup": {"const": true},
+        "local_commit_policy": {"const": true}
+      }
+    },
+    "selection_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "human_selection_recorded",
+        "operator_surface_selected",
+        "feature_flag_selected",
+        "product_route_selected",
+        "runtime_observer_selected",
+        "task_registry_selected",
+        "workspace_policy_selected",
+        "review_authorization_roles_selected",
+        "kill_revoke_cleanup_selected",
+        "local_commit_policy_selected"
+      ],
+      "properties": {
+        "human_selection_recorded": {"const": false},
+        "operator_surface_selected": {"const": false},
+        "feature_flag_selected": {"const": false},
+        "product_route_selected": {"const": false},
+        "runtime_observer_selected": {"const": false},
+        "task_registry_selected": {"const": false},
+        "workspace_policy_selected": {"const": false},
+        "review_authorization_roles_selected": {"const": false},
+        "kill_revoke_cleanup_selected": {"const": false},
+        "local_commit_policy_selected": {"const": false}
+      }
+    },
+    "authority_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normal_command_catalog_empty",
+        "integration_ready",
+        "preflight_observed",
+        "preflight_satisfied",
+        "pilot_start_authorized",
+        "product_pilot_started",
+        "remote_write_authorized",
+        "push_authorized",
+        "pr_mutation_authorized",
+        "merge_authorized",
+        "release_authorized",
+        "deploy_authorized",
+        "production_activation_authorized",
+        "authority"
+      ],
+      "properties": {
+        "normal_command_catalog_empty": {"const": true},
+        "integration_ready": {"const": false},
+        "preflight_observed": {"const": false},
+        "preflight_satisfied": {"const": false},
+        "pilot_start_authorized": {"const": false},
+        "product_pilot_started": {"const": false},
+        "remote_write_authorized": {"const": false},
+        "push_authorized": {"const": false},
+        "pr_mutation_authorized": {"const": false},
+        "merge_authorized": {"const": false},
+        "release_authorized": {"const": false},
+        "deploy_authorized": {"const": false},
+        "production_activation_authorized": {"const": false},
+        "authority": {"const": "dc-l16-product-integration-selection-requirements-only"}
+      }
+    }
+  }
+}
