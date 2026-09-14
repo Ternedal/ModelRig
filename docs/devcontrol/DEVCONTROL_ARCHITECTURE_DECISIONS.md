@@ -484,3 +484,28 @@ authorities false. Serialized reload genvinder ikke live transaction provenance,
 `global_replay_safe=false` er eksplicit.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-025_RSI_PILOT_START_CONSUMPTION_RECEIPT.md`
+
+## ADR-DC-026 — Exact-bound requirements before one DC-L16 pilot execution admission
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Afleder et inert requirements-manifest fra ét exact ADR-DC-025 start-consumption
+receipt. Manifestet binder receipt/proof/signature/nonce/ledger-identitet samt
+repository, base/main SHA, trial, operator surface, selected task, workspace og
+det menneskeligt signerede local-commit scope. Et durable/reloaded receipt må
+beskrive requirements, men kan ikke genvinde live transaction authority.
+
+Et senere admission-led skal derfor revalidere canonical host-ledger og fresh
+ADR-DC-023/024 authority, kræve live consumption-receipt ved admission,
+allowlisted exact task, canonical workspace, explicit enabled feature-flag
+observation, native Windows isolation, trusted-Git closure, kill/revoke/restart
+gates, network-write block, credentials absent, ingen unattended cadence/general
+shell/model-defined commands, exact source/base/head + toolchain binding,
+execution receipt og manual operator invocation.
+
+Alle observations-, execution-, local/remote publication- og activation-authority
+felter forbliver false. Authority er kun
+`dc-l16-pilot-execution-admission-requirements-only`; der registreres ingen
+kommando, udføres ingen task og startes ingen product pilot.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-026_RSI_PILOT_EXECUTION_ADMISSION_REQUIREMENTS.md`
