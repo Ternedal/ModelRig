@@ -30,6 +30,9 @@ from kaliv_dev_control.improvement_pilot_trial_scope import (  # noqa: E402
 from rsi_pilot_integration_human_selection_contract import (  # noqa: E402
     run_contract as run_human_selection_contract,
 )
+from rsi_pilot_runtime_preflight_attestation_contract import (  # noqa: E402
+    run_contract as run_runtime_preflight_contract,
+)
 
 INVENTORY = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-inventory.json"
 REQUIREMENTS = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-selection-requirements.json"
@@ -204,6 +207,7 @@ def run_contract() -> None:
     assert properties["authority"]["const"] == PILOT_INTEGRATION_SELECTION_CANDIDATE_AUTHORITY
 
     run_human_selection_contract()
+    run_runtime_preflight_contract()
 
 
 if __name__ == "__main__":
