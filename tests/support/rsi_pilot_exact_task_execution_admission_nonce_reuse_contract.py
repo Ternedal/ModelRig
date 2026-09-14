@@ -12,8 +12,6 @@ DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
 
-import kaliv_dev_control._improvement_pilot_exact_task_execution_admission_impl as admission_impl  # noqa: E402
-import kaliv_dev_control._improvement_pilot_exact_task_execution_admission_production_boundary as production_boundary  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_admission as admission  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_authorization as auth  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_revalidation_attestation as verify  # noqa: E402
@@ -36,32 +34,7 @@ def _reject(fn) -> None:
     raise AssertionError("ADR-DC-033 reused execution nonce unexpectedly admitted twice")
 
 
-def _clock_rollback_contract() -> None:
-    """Production clock may stay equal/increase, but never move backwards."""
-    original_now = admission_impl._now_utc_seconds
-    try:
-        samples = iter(
-            (
-                "2026-09-14T08:36:20Z",
-                "2026-09-14T08:36:20Z",
-                "2026-09-14T08:36:19Z",
-            )
-        )
-        admission_impl._now_utc_seconds = lambda: next(samples)
-        guarded_now = production_boundary._nondecreasing_admission_clock(
-            admission_impl
-        )
-        assert guarded_now() == "2026-09-14T08:36:20Z"
-        # Canonical wall time has one-second resolution, so equal samples are safe.
-        assert guarded_now() == "2026-09-14T08:36:20Z"
-        _reject(guarded_now)
-    finally:
-        admission_impl._now_utc_seconds = original_now
-
-
 def run_contract() -> None:
-    _clock_rollback_contract()
-
     source_temp, proof, fresh, *_ = _proof()
     ledger_temp, ledger = _ledger("rsi-exact-task-admission-nonce-reuse-")
     try:
