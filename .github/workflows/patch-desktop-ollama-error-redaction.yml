@@ -1,0 +1,211 @@
+name: patch-desktop-ollama-error-redaction
+
+on:
+  push:
+    branches:
+      - helper/patch-desktop-ollama-error-redaction
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout product branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/desktop-ollama-error-redaction
+          fetch-depth: 0
+
+      - name: Assert exact parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "84a6e8b3c9638559009150b015283c8051f30408"
+          test -z "$(git status --porcelain)"
+
+      - name: Apply bounded Ollama error redaction
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/OllamaClient.kt")
+          text = path.read_text(encoding="utf-8")
+
+          def once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one occurrence, found {count}: {old[:80]!r}")
+              text = text.replace(old, new)
+
+          once(
+              "import kotlinx.serialization.Serializable\n",
+              "import kotlinx.serialization.DeserializationStrategy\nimport kotlinx.serialization.Serializable\n",
+          )
+          once(
+              "import java.net.URI\nimport java.net.http.HttpClient\n",
+              "import java.net.ConnectException\nimport java.net.URI\nimport java.net.http.HttpClient\nimport java.net.http.HttpTimeoutException\n",
+          )
+          once(
+              "class OllamaException(message: String) : RuntimeException(message)\n",
+              '''class OllamaException(message: String) : RuntimeException(message)\n\ninternal fun ollamaFailureMessage(operation: String, statusCode: Int? = null): String =\n    if (statusCode == null) "$operation failed" else "$operation failed ($statusCode)"\n\nprivate fun Throwable.hasCause(type: Class<out Throwable>): Boolean {\n    var current: Throwable? = this\n    while (current != null) {\n        if (type.isInstance(current)) return true\n        current = current.cause\n    }\n    return false\n}\n\ninternal fun ollamaTransportFailureMessage(operation: String, cause: Throwable): String = when {\n    cause.hasCause(HttpTimeoutException::class.java) -> "$operation failed (HttpTimeoutException)"\n    cause.hasCause(ConnectException::class.java) -> "$operation failed (ConnectException)"\n    else -> "$operation request failed"\n}\n''',
+          )
+          once(
+              "    private val json = Json { ignoreUnknownKeys = true }\n",
+              '''    private val json = Json { ignoreUnknownKeys = true }\n\n    private fun endpoint(path: String): URI = try {\n        URI.create(baseUrl.trimEnd('/') + path)\n    } catch (_: Exception) {\n        throw OllamaException("invalid endpoint configuration")\n    }\n\n    private fun <T> decodeServerResponse(\n        serializer: DeserializationStrategy<T>,\n        body: String,\n        operation: String,\n    ): T = try {\n        json.decodeFromString(serializer, body)\n    } catch (_: Exception) {\n        throw OllamaException("$operation returned invalid response")\n    }\n''',
+          )
+
+          endpoint_replacements = [
+              ('.uri(URI.create(baseUrl.trimEnd(\'/\') + chatPath))', '.uri(endpoint(chatPath))', 2),
+              ('.uri(URI.create(baseUrl.trimEnd(\'/\') + modelsPath))', '.uri(endpoint(modelsPath))', 2),
+              ('.uri(URI.create(baseUrl.trimEnd(\'/\') + psPath))', '.uri(endpoint(psPath))', 1),
+              ('.uri(URI.create(baseUrl.trimEnd(\'/\') + pullPath))', '.uri(endpoint(pullPath))', 1),
+              ('.uri(URI.create(baseUrl.trimEnd(\'/\') + deletePath))', '.uri(endpoint(deletePath))', 1),
+          ]
+          for old, new, expected in endpoint_replacements:
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"endpoint replacement count {count} != {expected}: {old}")
+              text = text.replace(old, new)
+
+          raw_transport = '            throw OllamaException("cannot reach $baseUrl: ${e.message}")'
+          operations = ["chat", "chat stream", "models", "models", "running models", "pull", "delete"]
+          if text.count(raw_transport) != len(operations):
+              raise SystemExit(f"unexpected raw transport count: {text.count(raw_transport)}")
+          for op in operations:
+              text = text.replace(
+                  raw_transport,
+                  f'            throw OllamaException(ollamaTransportFailureMessage("{op}", e))',
+                  1,
+              )
+
+          once(
+              '            throw OllamaException("chat failed (${resp.statusCode()}): ${resp.body().take(200)}")',
+              '            throw OllamaException(ollamaFailureMessage("chat", resp.statusCode()))',
+          )
+          once(
+              '        return json.decodeFromString(ChatResponse.serializer(), resp.body()).message.content',
+              '        return decodeServerResponse(ChatResponse.serializer(), resp.body(), "chat").message.content',
+          )
+          once(
+              '            throw OllamaException("chat failed (${resp.statusCode()})")',
+              '            throw OllamaException(ollamaFailureMessage("chat stream", resp.statusCode()))',
+          )
+          once(
+              '''            val item = runCatching {\n                json.decodeFromString(ChatResponse.serializer(), line)\n            }.getOrElse {\n                throw OllamaException("invalid chat stream line: ${line.take(160)}")\n            }''',
+              '            val item = decodeServerResponse(ChatResponse.serializer(), line, "chat stream")',
+          )
+          once(
+              '''            item.error?.takeIf { it.isNotBlank() }\n                ?.let { throw OllamaException("chat stream: $it") }''',
+              '''            item.error?.takeIf { it.isNotBlank() }\n                ?.let { throw OllamaException(ollamaFailureMessage("chat stream")) }''',
+          )
+          once(
+              '            throw OllamaException("models failed (${resp.statusCode()})")',
+              '            throw OllamaException(ollamaFailureMessage("models", resp.statusCode()))',
+          )
+          once(
+              '        return json.decodeFromString(TagsResponse.serializer(), resp.body())',
+              '        return decodeServerResponse(TagsResponse.serializer(), resp.body(), "models")',
+          )
+          once(
+              '        if (resp.statusCode() !in 200..299) throw OllamaException("models failed (${resp.statusCode()})")',
+              '        if (resp.statusCode() !in 200..299) throw OllamaException(ollamaFailureMessage("models", resp.statusCode()))',
+          )
+          once(
+              '        return json.decodeFromString(DetailedTagsResponse.serializer(), resp.body())',
+              '        return decodeServerResponse(DetailedTagsResponse.serializer(), resp.body(), "models")',
+          )
+          once(
+              '        if (resp.statusCode() !in 200..299) throw OllamaException("running models failed (${resp.statusCode()})")',
+              '        if (resp.statusCode() !in 200..299) throw OllamaException(ollamaFailureMessage("running models", resp.statusCode()))',
+          )
+          once(
+              '        return json.decodeFromString(RunningModelsResponse.serializer(), resp.body())',
+              '        return decodeServerResponse(RunningModelsResponse.serializer(), resp.body(), "running models")',
+          )
+          once(
+              '        if (resp.statusCode() !in 200..299) throw OllamaException("pull failed (${resp.statusCode()})")',
+              '        if (resp.statusCode() !in 200..299) throw OllamaException(ollamaFailureMessage("pull", resp.statusCode()))',
+          )
+          once(
+              '''            val p = runCatching {\n                json.decodeFromString(PullProgressLine.serializer(), line)\n            }.getOrElse {\n                throw OllamaException("invalid pull stream line: ${line.take(160)}")\n            }''',
+              '            val p = decodeServerResponse(PullProgressLine.serializer(), line, "pull stream")',
+          )
+          once(
+              '            if (p.error.isNotEmpty()) throw OllamaException("pull error: ${p.error}")',
+              '            if (p.error.isNotEmpty()) throw OllamaException(ollamaFailureMessage("pull"))',
+          )
+          once(
+              '        if (resp.statusCode() !in 200..299) throw OllamaException("delete failed (${resp.statusCode()}): ${resp.body()}")',
+              '        if (resp.statusCode() !in 200..299) throw OllamaException(ollamaFailureMessage("delete", resp.statusCode()))',
+          )
+
+          path.write_text(text, encoding="utf-8")
+
+          test = Path("desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/OllamaClientPrivacyTest.kt")
+          if test.exists():
+              raise SystemExit("privacy test unexpectedly already exists")
+          test.write_text('''package dk.ternedal.modelrig.desktop.net\n\nimport java.net.ConnectException\nimport java.net.http.HttpTimeoutException\nimport kotlin.test.Test\nimport kotlin.test.assertEquals\nimport kotlin.test.assertFalse\n\nclass OllamaClientPrivacyTest {\n    @Test\n    fun serverFailureCarriesOnlyOperationAndStatus() {\n        val rendered = ollamaFailureMessage("chat", 500)\n        assertEquals("chat failed (500)", rendered)\n        assertFalse(rendered.contains("Bearer"))\n        assertFalse(rendered.contains("/data/"))\n        assertFalse(rendered.contains("token="))\n    }\n\n    @Test\n    fun transportFailureDoesNotEchoCauseMessage() {\n        val rendered = ollamaTransportFailureMessage(\n            "chat",\n            RuntimeException("Bearer SECRET token=abc /data/private"),\n        )\n        assertEquals("chat request failed", rendered)\n        assertFalse(rendered.contains("SECRET"))\n        assertFalse(rendered.contains("token="))\n        assertFalse(rendered.contains("/data/"))\n    }\n\n    @Test\n    fun safeTransportCategoriesRemainRecognizable() {\n        assertEquals(\n            "chat failed (HttpTimeoutException)",\n            ollamaTransportFailureMessage("chat", HttpTimeoutException("https://secret.invalid?q=token")),\n        )\n        assertEquals(\n            "chat failed (ConnectException)",\n            ollamaTransportFailureMessage("chat", ConnectException("https://secret.invalid?q=token")),\n        )\n    }\n}\n''', encoding="utf-8")
+
+      - name: Assert bounded scope and privacy guards
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          changed = subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines()
+          expected = {
+              "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/OllamaClient.kt",
+              "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/OllamaClientPrivacyTest.kt",
+          }
+          if set(changed) != expected:
+              raise SystemExit(f"unexpected changed paths: {changed}")
+
+          text = Path("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/OllamaClient.kt").read_text(encoding="utf-8")
+          forbidden = [
+              "resp.body().take(",
+              'invalid chat stream line:',
+              'chat stream: $it',
+              'invalid pull stream line:',
+              'pull error: ${p.error}',
+              'cannot reach $baseUrl:',
+              'delete failed (${resp.statusCode()}): ${resp.body()}',
+              ".uri(URI.create(baseUrl.trimEnd('/')",
+          ]
+          for needle in forbidden:
+              if needle in text:
+                  raise SystemExit(f"raw error detail remains: {needle}")
+          required = [
+              "ollamaFailureMessage",
+              "ollamaTransportFailureMessage",
+              "decodeServerResponse",
+              "invalid endpoint configuration",
+          ]
+          for needle in required:
+              if needle not in text:
+                  raise SystemExit(f"required privacy boundary missing: {needle}")
+
+      - name: Set up Java 21
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Run desktop tests
+        working-directory: desktop
+        run: ./gradlew :composeApp:test --no-daemon
+
+      - name: Commit qualified product change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/OllamaClient.kt \
+                  desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/OllamaClientPrivacyTest.kt
+          git commit -m "fix(desktop): redact Ollama server failure details"
+          test "$(git rev-parse HEAD^)" = "84a6e8b3c9638559009150b015283c8051f30408"
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:fix/desktop-ollama-error-redaction
