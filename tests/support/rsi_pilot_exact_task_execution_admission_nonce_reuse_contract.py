@@ -144,8 +144,20 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_execution_plan_requirements_contract import (
         run_contract as run_execution_plan_requirements_contract,
     )
+    # ADR-DC-035 resolves only the host-pinned exact DevelopmentTask and remains
+    # non-executing on the same locked Stage-B support chain.
+    from rsi_pilot_exact_task_development_task_binding_contract import (
+        run_contract as run_development_task_binding_contract,
+    )
+    # Live ADR-DC-035 provenance is separate process-local authority and must not
+    # reappear after serialization/reload. Keep that regression on Stage-B too.
+    from rsi_pilot_exact_task_development_task_binding_live_provenance_contract import (
+        run_contract as run_development_task_binding_live_provenance_contract,
+    )
 
     run_execution_plan_requirements_contract()
+    run_development_task_binding_contract()
+    run_development_task_binding_live_provenance_contract()
 
 
 if __name__ == "__main__":
