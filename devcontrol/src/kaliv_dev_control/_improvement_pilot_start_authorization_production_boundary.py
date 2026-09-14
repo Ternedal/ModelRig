@@ -4,11 +4,16 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
+from . import _improvement_pilot_runtime_preflight_attestation_impl as _preflight_impl
 from ._improvement_physical_state_host_control import (
     PhysicalHostStateError,
     _require_elevated_operator,
+)
+from ._improvement_pilot_runtime_preflight_attestation_production_boundary import (
+    PilotRuntimePreflightAttestationProductionBoundaryError,
+    _canonical_pilot_runtime_preflight_attestation_verifier,
 )
 from .asymmetric_authority import (
     AsymmetricAuthorityError,
@@ -167,6 +172,68 @@ def _canonical_pilot_start_authorization_verifier(
     )
 
 
+def _verify_preflight_provenance(
+    *,
+    preflight_proof: Any,
+    preflight_signature: Any,
+    verifier: Ed25519AuthorityVerifier,
+    now_provider: Callable[[], str],
+) -> None:
+    """Freshly re-verify ADR-DC-023 before any ADR-DC-024 human authority."""
+    if type(preflight_proof) is not _preflight_impl.PilotRuntimePreflightAttestationProof:
+        raise PilotStartAuthorizationProductionBoundaryError(
+            "exact ADR-DC-023 preflight proof is required"
+        )
+    if preflight_signature is None:
+        raise PilotStartAuthorizationProductionBoundaryError(
+            "detached ADR-DC-023 preflight signature is required"
+        )
+    try:
+        reverified = _preflight_impl._verify_pilot_runtime_preflight_attestation(
+            attestation=preflight_proof.attestation,
+            signature=preflight_signature,
+            verifier=verifier,
+            now_provider=now_provider,
+        )
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise PilotStartAuthorizationProductionBoundaryError(
+            "ADR-DC-023 preflight provenance verification failed"
+        ) from exc
+
+    if getattr(preflight_signature, "sha256", None) != preflight_proof.signature_sha256:
+        raise PilotStartAuthorizationProductionBoundaryError(
+            "ADR-DC-023 detached signature does not match supplied preflight proof"
+        )
+
+    for field in (
+        "attestation_sha256",
+        "signature_sha256",
+        "key_id",
+        "issuer_actor_id",
+        "issuer_system_id",
+        "packet_sha256",
+        "host_attestation_verified",
+        "preflight_observed",
+        "preflight_satisfied",
+        "integration_ready",
+        "pilot_start_authorized",
+        "product_pilot_started",
+        "local_commit_authorized",
+        "remote_write_authorized",
+        "push_authorized",
+        "pr_mutation_authorized",
+        "merge_authorized",
+        "release_authorized",
+        "deploy_authorized",
+        "production_activation_authorized",
+        "authority",
+    ):
+        if getattr(reverified, field) != getattr(preflight_proof, field):
+            raise PilotStartAuthorizationProductionBoundaryError(
+                f"ADR-DC-023 fresh provenance mismatch: {field}"
+            )
+
+
 def install_pilot_start_authorization_production_boundary(
     implementation: Any,
 ) -> None:
@@ -187,12 +254,39 @@ def install_pilot_start_authorization_production_boundary(
         preflight_proof: Any,
         authorization: Any,
         signature: Any,
+        preflight_signature: Any = None,
         verifier: Ed25519AuthorityVerifier | None = None,
     ) -> Any:
         if verifier is not None:
             raise implementation.PilotStartAuthorizationError(
                 "caller-selected pilot-start verifier is not production authority"
             )
+        if preflight_signature is None:
+            raise implementation.PilotStartAuthorizationError(
+                "detached ADR-DC-023 preflight signature is required"
+            )
+        verification_now = implementation._now_utc_seconds()
+        try:
+            preflight_verifier = (
+                _canonical_pilot_runtime_preflight_attestation_verifier(
+                    issuer_system_id=(
+                        _preflight_impl.PILOT_RUNTIME_PREFLIGHT_ATTESTATION_ISSUER_SYSTEM_ID
+                    )
+                )
+            )
+            _verify_preflight_provenance(
+                preflight_proof=preflight_proof,
+                preflight_signature=preflight_signature,
+                verifier=preflight_verifier,
+                now_provider=lambda: verification_now,
+            )
+        except (
+            PilotRuntimePreflightAttestationProductionBoundaryError,
+            PilotStartAuthorizationProductionBoundaryError,
+        ) as exc:
+            raise implementation.PilotStartAuthorizationError(
+                "host-controlled ADR-DC-023 preflight provenance is unavailable or invalid"
+            ) from exc
         try:
             host_verifier = _canonical_pilot_start_authorization_verifier(
                 issuer_system_id=(
@@ -208,7 +302,7 @@ def install_pilot_start_authorization_production_boundary(
             authorization=authorization,
             signature=signature,
             verifier=host_verifier,
-            now_provider=implementation._now_utc_seconds,
+            now_provider=lambda: verification_now,
         )
 
     implementation.verify_pilot_start_authorization = (
