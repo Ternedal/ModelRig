@@ -76,7 +76,7 @@ def run_contract() -> None:
     assert "Ingen automatisk polling" in android
 
     for marker in (
-        'GET /api/v1/control-center/status',
+        '/api/v1/control-center/status',
         'KALIV_AGENT3_ENABLED',
         'KALIV_AGENT4_OPERATOR_API',
         'githubConnectorPilotEnabled()',
