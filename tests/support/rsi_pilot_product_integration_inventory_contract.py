@@ -22,6 +22,7 @@ from kaliv_dev_control import catalog  # noqa: E402
 INVENTORY_PATH = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-inventory.json"
 SCHEMA_PATH = ROOT / "devcontrol" / "schemas" / "rsi-pilot-product-integration-inventory-v1.schema.json"
 HANDOFF_PATH = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-implementation-handoff.json"
+UI_HANDOFF_PATH = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-ui-observer-handoff.json"
 
 EXPECTED = (
     (
@@ -57,17 +58,29 @@ def run_contract() -> None:
     inventory = _load(INVENTORY_PATH)
     schema = _load(SCHEMA_PATH)
     handoff = _load(HANDOFF_PATH) if HANDOFF_PATH.is_file() else None
+    ui_handoff = _load(UI_HANDOFF_PATH) if UI_HANDOFF_PATH.is_file() else None
 
     assert inventory["schema"] == "kaliv-rsi-dc-l16-product-integration-inventory/v1"
     assert inventory["repository"] == "Ternedal/ModelRig"
     assert inventory["source_parent_sha"] == "7cc350fc50baad9f48fae88f76b6ad17b3a3817f"
     assert schema["properties"]["source_parent_sha"]["const"] == inventory["source_parent_sha"]
 
-    transition = handoff["tracked_source_transition"] if handoff is not None else None
+    transitions: dict[str, dict] = {}
     if handoff is not None:
+        transition = handoff["tracked_source_transition"]
         assert handoff["source_inventory_head_sha"] == "30be16b320acd6655c07ab1476cceaead547e3e3"
         assert transition["path"] == "backend/internal/httpapi/server.go"
         assert transition["from_git_blob_sha"] == "6085d525ff86a3d2b5c7cdece20bcaeace896e85"
+        transitions[transition["path"]] = transition
+
+    if ui_handoff is not None:
+        ui_transition = ui_handoff["tracked_source_transition"]
+        assert ui_handoff["source_product_status_head_sha"] == "b7acd3db6e88a4316375923d4cf1f5be2cde51a8"
+        assert ui_handoff["implementation_choice"]["human_pilot_go_verified"] is False
+        assert ui_transition["path"] == "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
+        assert ui_transition["from_git_blob_sha"] == "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
+        assert ui_transition["path"] not in transitions
+        transitions[ui_transition["path"]] = ui_transition
 
     candidates = inventory["candidate_surfaces"]
     assert len(candidates) == len(EXPECTED) == 3
@@ -78,7 +91,8 @@ def run_contract() -> None:
         assert item["selected"] is False
         path = ROOT / relative_path
         assert path.is_file(), relative_path
-        if transition is not None and relative_path == transition["path"]:
+        transition = transitions.get(relative_path)
+        if transition is not None:
             assert transition["from_git_blob_sha"] == expected_sha
             assert _git_blob_sha(path) == transition["to_git_blob_sha"], f"unbound selected-source drift: {relative_path}"
         else:
@@ -114,12 +128,15 @@ def run_contract() -> None:
         assert 'GET /api/v1/experimental/devcontrol-pilot/status' in backend
         assert 'POST /api/v1/experimental/devcontrol-pilot' not in backend
 
+    if ui_handoff is not None:
+        assert "DevControlPilotStatusSection(" in desktop
+
     patterns = inventory["verified_existing_patterns"]
     assert all(value is True for value in patterns.values())
 
-    # These are historical exact-source claims in the immutable inventory. A
-    # later handoff may authorize a pinned source transition without rewriting
-    # what ADR-DC-018 observed at inventory time.
+    # These are historical exact-source claims in the immutable inventory. Later
+    # handoffs may authorize pinned source transitions without rewriting what
+    # ADR-DC-018 observed at inventory time.
     absence = inventory["verified_absence"]
     assert all(value is False for value in absence.values())
 
