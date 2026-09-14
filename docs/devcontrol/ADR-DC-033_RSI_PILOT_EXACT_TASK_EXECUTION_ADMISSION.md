@@ -26,17 +26,13 @@ Den supplied ADR-DC-032 proof-identitet skal reproduceres af den fresh verificat
 
 ## One-shot replay identity
 
-Ledgerens create-once key bindes under ADR-DC-032 attestationens replaceable identity og består af den stabile execution-intent:
+Ledgerens create-once key er den menneskeligt signerede `execution_nonce_sha256` fra ADR-DC-030.
 
-- exact ADR-DC-030 execution-authorization proof SHA-256;
-- exact ADR-DC-025 start-receipt SHA-256;
-- den menneskeligt signerede `execution_nonce_sha256`;
-- exact selected task;
-- exact workspace digest.
+Noncen er dermed den stabile one-shot identity på tværs af både re-attestation og eventuel genudstedelse af surrounding authorization metadata. Den samme nonce kan ikke få en ny replay-slot, blot fordi authorization proof, attestation-id, selected-task binding eller andre omkringliggende identiteter ændres.
 
-En ny eller genudstedt ADR-DC-032 re-attestation over samme execution authorization/nonce kan derfor ikke skabe en ny replay-slot.
+Den exact authorization/task/workspace scope bliver fortsat bundet i den durable lock marker og i receiptet. Nonce-keying gør replay-reglen strengere; det fjerner ikke scope-bindingen.
 
-Ledgeren publicerer først en create-once lock marker. Replay eller usikker publication fejler lukket og efterlader den reserverede identity ubrugt for fremtidig admission.
+Ledgeren publicerer først en create-once lock marker. Replay eller usikker publication fejler lukket og efterlader noncen reserveret for fremtidig admission.
 
 Canonical production roots er:
 
@@ -61,6 +57,8 @@ Et successfuldt live receipt binder transitivt og eksplicit:
 - canonical ledger identity;
 - fresh verification time og admission time.
 
+Receiptets `admission_key_sha256` er exact lig `execution_nonce_sha256`, så den durable replay identity kan auditeres direkte uden en separat composite-key derivation.
+
 Receiptet må sætte:
 
 - `host_replay_guard_committed=true`;
@@ -83,7 +81,7 @@ Authority er kun:
 
 `host-admitted-one-dc-l16-exact-task-execution-only`
 
-Admission er host-lokal replay-sikkerhed for den exact execution-intent; denne ADR fremsætter ingen påstand om global/distribueret replay-sikkerhed.
+Admission er host-lokal replay-sikkerhed for den signerede execution nonce; denne ADR fremsætter ingen påstand om global/distribueret replay-sikkerhed på tværs af uafhængige hosts eller ledger roots.
 
 ## Live transaction provenance
 
