@@ -1,0 +1,43 @@
+name: fix-ollama-helper-guard
+
+on:
+  push:
+    branches:
+      - helper/fix-ollama-helper-guard
+
+permissions:
+  contents: write
+
+jobs:
+  patch-helper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout helper workflow branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: helper/patch-desktop-ollama-error-redaction
+          fetch-depth: 0
+
+      - name: Patch untracked-file guard only
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('.github/workflows/patch-desktop-ollama-error-redaction.yml')
+          text = p.read_text(encoding='utf-8')
+          old = '          changed = subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines()\n'
+          new = '''          tracked = subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines()\n          untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], text=True).splitlines()\n          changed = tracked + untracked\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one changed-files guard, found {text.count(old)}')
+          p.write_text(text.replace(old, new), encoding='utf-8')
+
+      - name: Assert helper-only diff and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only | wc -l)" -eq 1
+          test "$(git diff --name-only)" = ".github/workflows/patch-desktop-ollama-error-redaction.yml"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/patch-desktop-ollama-error-redaction.yml
+          git commit -m "ci(helper): include untracked privacy test in scope guard"
+          git push origin HEAD:helper/patch-desktop-ollama-error-redaction
