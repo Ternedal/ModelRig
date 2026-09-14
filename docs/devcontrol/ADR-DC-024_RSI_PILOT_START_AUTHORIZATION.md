@@ -18,12 +18,17 @@ authority. Den tidligere menneskelige GO-beslutning og product-selection ligger
 transitivt i chain-of-custody, men starttidspunkt, freshness og one-shot intent
 skal være en ny, separat menneskelig beslutning efter den grønne preflight.
 
+Et serialiseret ADR-DC-023 proof er desuden ikke selv-autentificerende. Proofet
+indeholder signaturmetadata og signaturhash, men den detached Ed25519-signatur er
+separat. ADR-DC-024 må derfor ikke opgradere caller-leveret "proof-shaped data"
+til start-authority uden frisk host-side re-verifikation af ADR-DC-023-signaturen.
+
 ## Beslutning
 
 ADR-DC-024 indfører en kortlivet, separat Ed25519-signeret human authorization
 til præcis én fremtidig lokal pilot-start.
 
-### 1. Exact canonical ADR-DC-023 proof er eneste input
+### 1. Exact canonical ADR-DC-023 proof er eneste signerede preflight-input
 
 Authorizationen indlejrer hele exact `PilotRuntimePreflightAttestationProof` og
 binder separat dets canonical SHA-256 samt:
@@ -78,9 +83,34 @@ Selve claimen er kun signable bytes og holder derfor:
 - `local_commit_authorized=false`;
 - alle remote/publication/activation-authorities false.
 
-### 4. Separat host-pinned human verification trust-root
+### 4. Fresh host-side ADR-DC-023 provenance før human start-authority
 
-Detached Ed25519-signaturen bruger issuer-systemet:
+Public ADR-DC-024-verifikation skal modtage både det human-signerede start-artifact
+og den detached ADR-DC-023-signatur, som hører til det indlejrede preflight proof.
+Et proof-objekt eller en JSON-roundtrip er ikke i sig selv host-attestation.
+
+Før human start-signaturen verificeres skal production:
+
+1. resolve den canonical host-controlled ADR-DC-023 verification-only keyring;
+2. re-verificere den detached ADR-DC-023-signatur over exact indlejrede
+   attestation-bytes ved den aktuelle verification time;
+3. kræve at detached-signaturens SHA-256 matcher `signature_sha256` i det
+   caller-leverede preflight proof;
+4. kræve at fresh re-verifikation reproducerer exact attestation hash, key ID,
+   issuer actor/system, packet hash og alle preflight-/authority-semantikker i
+   det proof, som den menneskelige start-authorization binder.
+
+`verified_at_utc` fra den historiske ADR-DC-023 proof-identitet må gerne afvige
+fra tidspunktet for den friske re-verifikation; cryptographic payload identity,
+signer identity og authority-semantik må ikke afvige.
+
+Missing detached signature, revoked/stale/untrusted ADR-DC-023 key, invalid
+signature, payload drift eller proof/signature metadata drift fejler lukket før
+ADR-DC-024 human authority vurderes.
+
+### 5. Separat host-pinned human verification trust-root
+
+Detached ADR-DC-024-signaturen bruger issuer-systemet:
 
 `kaliv-rsi-dc-l16-pilot-start-human-authority-v1`
 
@@ -93,7 +123,7 @@ Signaturens actor skal være exact `start_authorizer_actor_id`, og signature tim
 skal være exact `authorized_at_utc`. Verification skal ske inden for det signerede
 gyldighedsvindue.
 
-### 5. Successful verification autoriserer kun et fremtidigt start-consume
+### 6. Successful verification autoriserer kun et fremtidigt start-consume
 
 Et cryptographically valid ADR-DC-024 proof må sætte præcis:
 
@@ -149,16 +179,19 @@ ADR-DC-024 skal mindst afvise:
 
 1. ADR-DC-023 proof med failed preflight;
 2. rebound/tampered nested preflight proof;
-3. human authorizer som ikke matcher exact ADR-DC-021 selection maker;
-4. human authorizer som er preflight-observer eller host-attestor;
-5. placeholder start nonce;
-6. authorization før preflight verification;
-7. authorization window over 15 minutter;
-8. verification efter expiry;
-9. wrong signer actor eller issuer domain;
-10. nonce rebinding uden ny signatur;
-11. caller-selected production verifier;
-12. replay der sætter consumed/product-start/local-commit/remote/publication/activation authority true.
+3. caller-konstrueret ADR-DC-023 proof med forged signature-hash/key metadata;
+4. missing detached ADR-DC-023 signature;
+5. invalid/revoked/untrusted detached ADR-DC-023 signature ved fresh host verification;
+6. human authorizer som ikke matcher exact ADR-DC-021 selection maker;
+7. human authorizer som er preflight-observer eller host-attestor;
+8. placeholder start nonce;
+9. authorization før preflight verification;
+10. authorization window over 15 minutter;
+11. verification efter expiry;
+12. wrong human signer actor eller issuer domain;
+13. nonce rebinding uden ny human signatur;
+14. caller-selected production verifier;
+15. replay der sætter consumed/product-start/local-commit/remote/publication/activation authority true.
 
 Kontrakten skal køre gennem den eksisterende Stage-B support-chain uden at
 udvide den låste top-level `tests/*.py` inventory.
