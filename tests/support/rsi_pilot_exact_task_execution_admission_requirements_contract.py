@@ -225,10 +225,15 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_execution_revalidation_attestation_contract import (
         run_contract as run_revalidation_attestation_contract,
     )
+    # ADR-033 consumes the exact signed execution nonce but still executes no task.
+    from rsi_pilot_exact_task_execution_admission_contract import (
+        run_contract as run_exact_task_execution_admission_contract,
+    )
 
     run_execution_authorization_contract()
     run_revalidation_observation_contract()
     run_revalidation_attestation_contract()
+    run_exact_task_execution_admission_contract()
 
 
 if __name__ == "__main__":
