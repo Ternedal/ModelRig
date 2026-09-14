@@ -84,6 +84,7 @@ def run_contract() -> None:
         required_true = (
             "host_ledger_revalidation_required",
             "fresh_upstream_authority_reverification_required",
+            "live_consumption_receipt_required_at_admission",
             "allowlisted_task_registry_required",
             "exact_selected_task_required",
             "canonical_workspace_revalidation_required",
@@ -138,10 +139,13 @@ def run_contract() -> None:
         )
         assert replayed_requirements == requirements
         assert replayed_requirements.sha256 == requirements.sha256
+        assert replayed_requirements.start_receipt == receipt
+        assert replayed_requirements.start_receipt.transaction_authenticated is False
 
-        # Durable ADR-DC-025 evidence may define requirements, but cannot become
-        # admission authority after reload. ADR-026 therefore requires later
-        # fresh host-ledger + upstream authority revalidation instead.
+        # Durable ADR-DC-025 evidence may define inert requirements, but cannot become
+        # admission authority after reload. ADR-026 requires the later admission to
+        # receive live consumption provenance again and revalidate ledger + upstream
+        # authority before any execution-admission decision.
         reloaded_receipt = consume.PilotStartConsumptionReceipt.from_mapping(
             receipt.to_dict()
         )
@@ -152,6 +156,7 @@ def run_contract() -> None:
         assert from_reloaded.task_execution_authorized is False
         assert from_reloaded.host_ledger_revalidation_required is True
         assert from_reloaded.fresh_upstream_authority_reverification_required is True
+        assert from_reloaded.live_consumption_receipt_required_at_admission is True
 
         _reject(
             lambda: req.PilotExecutionAdmissionRequirements.from_mapping(
