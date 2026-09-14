@@ -5,7 +5,6 @@ import inspect
 import json
 import sys
 import tempfile
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +59,7 @@ def run_contract() -> None:
         requirements = req.build_pilot_execution_admission_requirements(receipt)
         assert requirements.schema == req.PILOT_EXECUTION_ADMISSION_REQUIREMENTS_SCHEMA
         assert requirements.authority == req.PILOT_EXECUTION_ADMISSION_REQUIREMENTS_AUTHORITY
+        assert requirements.start_receipt is receipt
         assert requirements.start_receipt_sha256 == receipt.sha256
         assert requirements.authorization_proof_sha256 == receipt.authorization_proof_sha256
         assert requirements.fresh_authorization_proof_sha256 == receipt.fresh_authorization_proof_sha256
@@ -153,11 +153,31 @@ def run_contract() -> None:
         assert from_reloaded.host_ledger_revalidation_required is True
         assert from_reloaded.fresh_upstream_authority_reverification_required is True
 
-        forged_receipt = replace(receipt, task_execution_authorized=True)
-        _reject(lambda: req.build_pilot_execution_admission_requirements(forged_receipt))
         _reject(
             lambda: req.PilotExecutionAdmissionRequirements.from_mapping(
-                {**requirements.to_dict(), "start_receipt_sha256": "0" * 64}
+                {
+                    **requirements.to_dict(),
+                    "start_receipt_sha256": "0" * 64,
+                }
+            )
+        )
+        _reject(
+            lambda: req.PilotExecutionAdmissionRequirements.from_mapping(
+                {
+                    **requirements.to_dict(),
+                    "start_receipt": {
+                        **requirements.to_dict()["start_receipt"],
+                        "task_execution_authorized": True,
+                    },
+                }
+            )
+        )
+        _reject(
+            lambda: req.PilotExecutionAdmissionRequirements.from_mapping(
+                {
+                    **requirements.to_dict(),
+                    "selected_pilot_task_id": "different.task",
+                }
             )
         )
 
@@ -165,6 +185,7 @@ def run_contract() -> None:
         props = schema["properties"]
         assert set(props) == set(requirements.to_dict())
         assert schema["additionalProperties"] is False
+        assert props["start_receipt"]["$ref"] == "rsi-pilot-start-consumption-receipt-v1.schema.json"
         assert props["schema"]["const"] == req.PILOT_EXECUTION_ADMISSION_REQUIREMENTS_SCHEMA
         assert props["authority"]["const"] == req.PILOT_EXECUTION_ADMISSION_REQUIREMENTS_AUTHORITY
         for field in required_true:
