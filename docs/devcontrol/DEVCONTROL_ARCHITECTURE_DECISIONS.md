@@ -464,3 +464,23 @@ deploy og production activation false. Replay-safe consumption/start-receipt er
 en separat senere authority-boundary.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-024_RSI_PILOT_START_AUTHORIZATION.md`
+
+## ADR-DC-025 — Host-local replay-safe one-shot pilot-start authorization consumption
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Consumer exact ADR-DC-024 authorization én gang i en canonical host-admin-kontrolleret
+ledger. Før replay-state røres, re-verificerer production fresh hele upstream chain via
+ADR-DC-024 production-boundaryen med både detached ADR-DC-023 og ADR-DC-024 signaturer.
+Signed `start_nonce_sha256` er create-once replay key; en permanent lock publiceres før
+final receipt, og expiry efter lock fejler lukket uden at genåbne authorizationen.
+
+Et successful receipt kan kun bevise `start_consumed=true`,
+`start_receipt_issued=true` og host-local replay commitment. Det bevarer
+`pilot_start_authorized=true` som historisk provenance, men kræver samtidig
+`task_execution_authorized=false`, `integration_ready=false`,
+`product_pilot_started=false`, local commit samt alle remote/publication/activation
+authorities false. Serialized reload genvinder ikke live transaction provenance, og
+`global_replay_safe=false` er eksplicit.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-025_RSI_PILOT_START_CONSUMPTION_RECEIPT.md`
