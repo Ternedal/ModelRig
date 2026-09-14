@@ -57,13 +57,20 @@ consume og efter durable reload. Det er tilsigtet: requirements er data, ikke
 authority.
 
 Et reloaded receipt genvinder ikke live transaction provenance. ADR-DC-026
-kræver derfor eksplicit, at et senere admission-led udfører:
+kræver derfor eksplicit, at et senere admission-led:
 
-- fresh host-ledger revalidation;
-- fresh upstream ADR-DC-023/024 authority re-verification.
+- revaliderer den canonical host-ledger;
+- re-verificerer upstream ADR-DC-023/024 authority frisk;
+- kræver live ADR-DC-025 consumption-receipt provenance igen ved admission.
 
-Ingen downstream implementation må springe disse krav over ved at pege på, at
-receiptet tidligere var transaction-authenticated.
+Det sidste krav kan opfyldes af det originale live receipt i samme trusted
+transaction eller af en senere, separat recovery-boundary, der eksplicit
+reetablerer tilsvarende live provenance. ADR-DC-026 implementerer ikke en sådan
+recovery-boundary. Efter reload alene skal admission derfor fejle lukket.
+
+Manifestets indlejrede durable receipt og dets historiske
+`transaction_authenticated`-tilstand må aldrig bruges som erstatning for denne
+live admission-time provenance.
 
 ### 3. Execution-admission requirements
 
@@ -71,24 +78,25 @@ Et senere admission-led skal mindst bevise alle følgende krav som sande:
 
 1. `host_ledger_revalidation_required=true`;
 2. `fresh_upstream_authority_reverification_required=true`;
-3. `allowlisted_task_registry_required=true`;
-4. `exact_selected_task_required=true`;
-5. `canonical_workspace_revalidation_required=true`;
-6. `feature_flag_enabled_observation_required=true`;
-7. `native_windows_isolation_required=true`;
-8. `trusted_git_closure_required=true`;
-9. `kill_switch_armed_required=true`;
-10. `revoke_not_asserted_required=true`;
-11. `restart_recovery_proof_required=true`;
-12. `network_write_blocked_required=true`;
-13. `credentials_absent_required=true`;
-14. `unattended_cadence_forbidden=true`;
-15. `general_shell_forbidden=true`;
-16. `model_defined_commands_forbidden=true`;
-17. `exact_source_base_head_binding_required=true`;
-18. `exact_toolchain_binding_required=true`;
-19. `execution_receipt_required=true`;
-20. `manual_operator_invocation_required=true`.
+3. `live_consumption_receipt_required_at_admission=true`;
+4. `allowlisted_task_registry_required=true`;
+5. `exact_selected_task_required=true`;
+6. `canonical_workspace_revalidation_required=true`;
+7. `feature_flag_enabled_observation_required=true`;
+8. `native_windows_isolation_required=true`;
+9. `trusted_git_closure_required=true`;
+10. `kill_switch_armed_required=true`;
+11. `revoke_not_asserted_required=true`;
+12. `restart_recovery_proof_required=true`;
+13. `network_write_blocked_required=true`;
+14. `credentials_absent_required=true`;
+15. `unattended_cadence_forbidden=true`;
+16. `general_shell_forbidden=true`;
+17. `model_defined_commands_forbidden=true`;
+18. `exact_source_base_head_binding_required=true`;
+19. `exact_toolchain_binding_required=true`;
+20. `execution_receipt_required=true`;
+21. `manual_operator_invocation_required=true`.
 
 Kravene er conjunctive. Et senere admission-led må ikke slå ét krav fra som en
 "optional" eller degraded mode.
@@ -145,17 +153,18 @@ ADR-DC-026 skal mindst afvise:
 
 ## Test- og integrationsstrategi
 
-Den adversarielle ADR-DC-026 support-contract skal køres gennem den eksisterende
+Den adversarielle ADR-DC-026 support-contract køres gennem den eksisterende
 Stage-B support-chain, så den låste top-level testinventory ikke udvides med et
 nyt selvstændigt workflow-entrypoint.
 
-Kontrakten skal bl.a. bevise:
+Kontrakten beviser bl.a.:
 
-- exact receipt-binding og canonical roundtrip;
-- at alle 20 requirements er obligatorisk true;
+- exact embedded receipt-binding og canonical roundtrip;
+- at alle 21 requirements er obligatorisk true;
 - at alle authority-expansion fields er obligatorisk false;
-- at et durable/reloaded receipt fortsat kun kan definere requirements og ikke
-  genvinde live transaction authority;
+- at manifest-roundtrip ikke kan bevare ADR-DC-025 live transaction provenance;
+- at et durable/reloaded receipt fortsat kun kan definere requirements;
+- at en senere admission eksplicit kræver live receipt provenance igen;
 - at forged execution-authority i receiptet afvises;
 - at normal `modelrig_command_catalog()` fortsat er tom;
 - at requirements-modulet ikke indeholder subprocess/socket/network/GitHub
@@ -168,6 +177,7 @@ ADR-DC-026 tilføjer ikke:
 - product feature-flag enable/read;
 - host-ledger revalidation implementation;
 - upstream signature re-verification implementation;
+- live-receipt recovery/re-authentication implementation;
 - task registry eller executor;
 - general shell eller model-defined commands;
 - workspace mutation eller local commit;
