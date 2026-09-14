@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kaliv-rsi-dc-l16-product-integration-implementation-handoff/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "source_inventory_head_sha",
+    "source_selection_proposal_head_sha",
+    "implementation_choice",
+    "tracked_source_transition",
+    "new_product_files",
+    "authority_state"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-dc-l16-product-integration-implementation-handoff/v1"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "source_inventory_head_sha": {"const": "30be16b320acd6655c07ab1476cceaead547e3e3"},
+    "source_selection_proposal_head_sha": {"const": "5978052d593033cbea545a34ddca6e45cfd4e39f"},
+    "implementation_choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_direction_selected",
+        "operator_surface",
+        "route_host_pattern",
+        "feature_flag",
+        "route",
+        "manual_refresh_only",
+        "human_pilot_go_verified"
+      ],
+      "properties": {
+        "implementation_direction_selected": {"const": true},
+        "operator_surface": {"const": "desktop.control-center"},
+        "route_host_pattern": {"const": "backend.local-api-host-pattern"},
+        "feature_flag": {"const": "KALIV_DEVCONTROL_PILOT"},
+        "route": {"const": "GET /api/v1/experimental/devcontrol-pilot/status"},
+        "manual_refresh_only": {"const": true},
+        "human_pilot_go_verified": {"const": false}
+      }
+    },
+    "tracked_source_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "from_git_blob_sha", "to_git_blob_sha"],
+      "properties": {
+        "path": {"const": "backend/internal/httpapi/server.go"},
+        "from_git_blob_sha": {"const": "6085d525ff86a3d2b5c7cdece20bcaeace896e85"},
+        "to_git_blob_sha": {"const": "3b202c783b288f77572611ee71e0d732183e5404"}
+      }
+    },
+    "new_product_files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "git_blob_sha"],
+          "properties": {
+            "path": {"const": "backend/internal/httpapi/devcontrol_pilot.go"},
+            "git_blob_sha": {"const": "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "git_blob_sha"],
+          "properties": {
+            "path": {"const": "backend/internal/httpapi/devcontrol_pilot_test.go"},
+            "git_blob_sha": {"const": "07b787298bfd02259f97cb7800e4b5c48d895304"}
+          }
+        }
+      ],
+      "items": false
+    },
+    "authority_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_preflight_satisfied",
+        "pilot_start_authorized",
+        "product_pilot_started",
+        "local_commit_authorized",
+        "remote_write_authorized",
+        "push_authorized",
+        "pr_mutation_authorized",
+        "merge_authorized",
+        "release_authorized",
+        "deploy_authorized",
+        "production_activation_authorized",
+        "authority"
+      ],
+      "properties": {
+        "runtime_preflight_satisfied": {"const": false},
+        "pilot_start_authorized": {"const": false},
+        "product_pilot_started": {"const": false},
+        "local_commit_authorized": {"const": false},
+        "remote_write_authorized": {"const": false},
+        "push_authorized": {"const": false},
+        "pr_mutation_authorized": {"const": false},
+        "merge_authorized": {"const": false},
+        "release_authorized": {"const": false},
+        "deploy_authorized": {"const": false},
+        "production_activation_authorized": {"const": false},
+        "authority": {"const": "dc-l16-product-implementation-handoff-only"}
+      }
+    }
+  }
+}
