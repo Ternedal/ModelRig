@@ -605,3 +605,32 @@ consume/admission-boundary skal fresh revalidere de resterende ADR-DC-029 gates
 før task execution kan autoriseres.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-030_RSI_PILOT_EXACT_TASK_EXECUTION_HUMAN_AUTHORIZATION.md`
+
+## ADR-DC-031 — Exact-task execution revalidation observation before host verification
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Binder et komplet sæt på 25 SHA-256 evidence-referencer til ét exact verificeret
+ADR-DC-030 human execution-authorization proof og dermed ADR-DC-029/028/025-
+lineagen, exact repository/base/main, trial, operator surface, selected task,
+workspace og signed execution nonce.
+
+Observationen skal ligge efter ADR-DC-030 verification og senest ved den signerede
+authorization expiry. `fresh_human_task_execution_authorization_evidence_sha256`
+skal matche exact ADR-DC-030 proof SHA-256, og
+`one_shot_execution_nonce_evidence_sha256` skal matche den signerede execution
+nonce. De øvrige slots er non-placeholder evidence-referencer for alle resterende
+ADR-DC-029 fresh-revalidation gates.
+
+`observation_set_complete=true` betyder kun, at alle 25 references er til stede
+og exact-bound. Packetet udfører ingen host-I/O og verificerer ingen referenced
+artifacts; derfor forbliver `evidence_verified=false`,
+`task_execution_admission_observed=false`, `task_execution_authorized=false`,
+`task_execution_started=false`, local commit og alle remote/publication/activation
+authorities false.
+
+Næste separate led er host-kontrolleret verification/attestation over exact
+ADR-DC-031 packet. Replay-safe one-shot consumption/admission og actual executor
+transaction forbliver senere separate boundaries.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-031_RSI_PILOT_EXACT_TASK_EXECUTION_REVALIDATION_OBSERVATION.md`

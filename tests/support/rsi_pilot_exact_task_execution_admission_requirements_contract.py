@@ -217,8 +217,13 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_execution_authorization_contract import (
         run_contract as run_execution_authorization_contract,
     )
+    # ADR-031 follows ADR-030 but remains on this same Stage-B support chain.
+    from rsi_pilot_exact_task_execution_revalidation_observation_contract import (
+        run_contract as run_revalidation_observation_contract,
+    )
 
     run_execution_authorization_contract()
+    run_revalidation_observation_contract()
 
 
 if __name__ == "__main__":
