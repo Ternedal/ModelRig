@@ -26,6 +26,9 @@ PilotExactTaskDevelopmentTaskBinding = (
 bind_pilot_exact_task_development_task = (
     _implementation.bind_pilot_exact_task_development_task
 )
+require_live_pilot_exact_task_development_task_binding = (
+    _implementation.require_live_pilot_exact_task_development_task_binding
+)
 
 # Deterministic seams for adversarial contracts. Production stays host-pinned above.
 _parse_registry_payload = _implementation._parse_registry_payload
@@ -39,6 +42,7 @@ __all__ = [
     "PilotExactTaskDevelopmentTaskBindingError",
     "PilotExactTaskDevelopmentTaskBinding",
     "bind_pilot_exact_task_development_task",
+    "require_live_pilot_exact_task_development_task_binding",
 ]
 
 del install_pilot_exact_task_development_task_binding_production_boundary

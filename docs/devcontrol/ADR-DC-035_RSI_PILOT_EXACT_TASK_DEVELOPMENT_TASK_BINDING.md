@@ -48,10 +48,27 @@ ADR-DC-035 vælger ikke catalog, toolchain eller binary. Den binder kun den exac
 Binding kræver samtidig:
 
 1. det exact ADR-DC-034 requirements-artifact;
-2. den **samme live ADR-DC-033 receipt-instans** med `transaction_authenticated=true`;
+2. den **samme live ADR-DC-033 receipt-instans** med `transaction_authenticated=true`, leveret separat;
 3. exact receipt SHA, execution nonce, selected pilot task og workspace digest skal matche ADR-DC-034.
 
-En reloaded ADR-DC-033 receipt kan derfor ikke materialisere en ny task binding. Durable JSON kan fortsat bruges som audit-evidence, men live authority kan ikke genopstå efter serialization.
+ADR-DC-034 requirements er med vilje serializable/reloadable. Den nested ADR-DC-033 receipt i et reloaded requirements-artifact er derfor inert og behøver ikke være samme Python-instans som den separat leverede live receipt. ADR-DC-035 validerer semantic identity mellem requirements og den live receipt og binder derefter live provenance til den separat leverede receipt-instans.
+
+Det serialized binding-artifact er kun audit-evidence. `host_registry_verified=true` i JSON er derfor ikke i sig selv live materialization authority: en caller kunne ellers konstruere et syntaktisk gyldigt binding-artifact uden nogensinde at have læst den host-kontrollerede registry.
+
+Kun den exact binding-instans, som returneres direkte af production-boundaryen efter succesfuld læsning af den canonical host-admin registry, får process-local `transaction_authenticated=true`. Provenance bindes til exact binding-object identity, bindingens canonical SHA-256 og den **separat leverede exact live ADR-DC-033 receipt-instans**. Den process-lokale registry holder både binding og receipt stærkt, så Python object-ID reuse ikke kan overføre authority til en anden instans.
+
+Live-provenance-registryen er bounded til 1024 bindings. Hvis grænsen overskrides, evictes den ældste entry; det revokerer kun authority og er derfor fail-closed. Registryen nulstilles efter `fork`, så child-processer ikke arver host-registry authority.
+
+`transaction_authenticated` er bevidst **ikke** et dataclass-/JSON-schemafelt og serialiseres ikke. Den deterministic/private binding-seam får aldrig live provenance. `from_mapping(...)` og enhver anden reload skaber en ny binding-instans og giver derfor `transaction_authenticated=false`, selv hvis de serialized bytes er identiske og den oprindelige live ADR-DC-033 receipt stadig findes i processen.
+
+Public production-verifier `require_live_pilot_exact_task_development_task_binding(binding, admission_receipt)` kræver både den exact registrerede binding-instans og den exact live receipt-instans, som production registrerede sammen med den. En inert/reloaded receipt eller en reloaded binding afvises fail-closed.
+
+En senere Tier-A materialization-boundary skal derfor kræve både:
+
+- ADR-DC-035 binding med `transaction_authenticated=true`; og
+- den samme live ADR-DC-033 receipt separat gennem production-verifieren.
+
+Durable ADR-DC-035 JSON kan bruges som historisk evidens, men kan ikke mint'e en execution-plan capability efter serialization/reload.
 
 ## Binding artifact
 
@@ -68,12 +85,14 @@ Et successfuldt `kaliv-rsi-dc-l16-exact-task-development-task-binding/v1` binder
 - workspace digest;
 - human local-commit upper bound.
 
-Positive evidence flags er kun:
+Positive serialized evidence flags er kun:
 
 - `host_registry_verified=true`;
 - `pilot_task_mapping_verified=true`;
 - `development_task_materialized=true`;
 - `single_fixed_command_verified=true`.
+
+De flags er historical evidence; live downstream authority kræver desuden process-local `transaction_authenticated=true` som beskrevet ovenfor.
 
 Authority er kun `host-bound-one-exact-development-task-only`.
 
@@ -99,7 +118,7 @@ Det er ikke nok kun at gemme `DevelopmentTask.task_id`. Task-kontrakten indehold
 
 ## Next boundary
 
-Næste sikre boundary er exact Tier-A capability/materialization over ADR-DC-035 bindingen:
+Næste sikre boundary er exact Tier-A capability/materialization over en **live-authenticated** ADR-DC-035 binding plus den samme live ADR-DC-033 receipt:
 
 - reviewed non-empty one-command catalog;
 - exact toolchain;
