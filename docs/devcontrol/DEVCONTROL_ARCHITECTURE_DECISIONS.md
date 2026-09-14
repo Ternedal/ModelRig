@@ -509,3 +509,25 @@ felter forbliver false. Authority er kun
 kommando, udføres ingen task og startes ingen product pilot.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-026_RSI_PILOT_EXECUTION_ADMISSION_REQUIREMENTS.md`
+
+## ADR-DC-027 — Exact-bound execution-admission observation packet before host verification
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Binder et komplet sæt på 21 SHA-256 evidence-referencer til ét exact ADR-DC-026
+requirements-manifest og den samme ADR-DC-025 start-receipt lineage. Packetet
+indlejrer requirements-manifestet, dets digest og `start_receipt_sha256`, så
+evidence fra en anden trial, task, workspace eller consumption ikke kan rebinde.
+
+`observation_set_complete=true` betyder kun, at alle 21 evidence-slots er til
+stede og exact-bound. Packetet udfører ingen host-I/O og verificerer ikke de
+refererede artifacts; derfor forbliver `evidence_verified=false`,
+`execution_admission_observed=false`, `task_execution_authorized=false`,
+`product_pilot_started=false` og alle local/remote publication/activation-
+authorities false.
+
+Næste separate boundary er host-kontrolleret verification/attestation over exact
+ADR-DC-027 packet. Selv en senere green host-verification er ikke automatisk task
+execution uden en særskilt execution-admission/executor boundary.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-027_RSI_PILOT_EXECUTION_ADMISSION_OBSERVATION.md`
