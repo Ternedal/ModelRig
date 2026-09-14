@@ -136,11 +136,9 @@ def run_contract() -> None:
             )
         )
 
-    # Structurally valid proof-shaped data cannot substitute for fresh proof identity.
     forged = replace(supplied, signature_sha256="f" * 64)
     _reject(lambda: consume.require_fresh_proof_identity(forged, fresh))
 
-    # Stale before reservation creates no durable replay marker.
     with tempfile.TemporaryDirectory(prefix="rsi-pilot-consume-stale-") as raw:
         root = Path(raw).resolve()
         ledger = consume._PilotStartConsumptionLedger(root)
@@ -155,7 +153,6 @@ def run_contract() -> None:
         )
         assert tuple(root.iterdir()) == ()
 
-    # Expiry after the irreversible lock fails closed and leaves recovery state.
     with tempfile.TemporaryDirectory(prefix="rsi-pilot-consume-race-") as raw:
         root = Path(raw).resolve()
         ledger = consume._PilotStartConsumptionLedger(root)
@@ -172,7 +169,6 @@ def run_contract() -> None:
         names = sorted(path.name for path in root.iterdir())
         assert names == [f".{supplied.start_nonce_sha256}.lock"]
 
-    # Serialized receipt data cannot escalate the consume-only authority boundary.
     with tempfile.TemporaryDirectory(prefix="rsi-pilot-consume-fields-") as raw:
         ledger = consume._PilotStartConsumptionLedger(Path(raw).resolve())
         receipt = consume._consume_verified_pilot_start_authorization(
@@ -227,11 +223,11 @@ def run_contract() -> None:
     assert props["production_activation_authorized"]["const"] is False
     assert props["authority"]["const"] == consume.PILOT_START_CONSUMPTION_AUTHORITY
 
-    # Production facade must fresh-verify upstream and must not accept caller-selected state.
     with tempfile.TemporaryDirectory(prefix="rsi-pilot-consume-prod-") as raw:
         root = Path(raw).resolve()
         original_verify = production._start_auth.verify_pilot_start_authorization
         original_root = production._canonical_ledger_root
+        original_now = consume._implementation._now_utc_seconds
         calls = []
 
         def fake_verify(**kwargs):
@@ -245,6 +241,7 @@ def run_contract() -> None:
         try:
             production._start_auth.verify_pilot_start_authorization = fake_verify
             production._canonical_ledger_root = lambda: root
+            consume._implementation._now_utc_seconds = lambda: "2026-09-14T08:28:00Z"
             prod_receipt = consume.consume_pilot_start_authorization(
                 authorization_proof=supplied,
                 preflight_signature=preflight_signature,
@@ -271,6 +268,7 @@ def run_contract() -> None:
         finally:
             production._start_auth.verify_pilot_start_authorization = original_verify
             production._canonical_ledger_root = original_root
+            consume._implementation._now_utc_seconds = original_now
 
     root_source = inspect.getsource(kaliv_dev_control)
     assert "improvement_pilot_start_consumption" not in root_source
