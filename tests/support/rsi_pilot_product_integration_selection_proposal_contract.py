@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+SUPPORT = ROOT / "tests" / "support"
+if str(SUPPORT) not in sys.path:
+    sys.path.insert(0, str(SUPPORT))
+
+from source_code import code_of  # noqa: E402
+
 INVENTORY = ROOT / "docs/devcontrol/dc-l16/product-integration-inventory.json"
 PROPOSAL = ROOT / "docs/devcontrol/dc-l16/product-integration-selection-proposal.json"
 DESKTOP = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
@@ -58,8 +65,8 @@ def run_contract() -> None:
         if key != "authority":
             assert value is False, key
 
-    desktop = DESKTOP.read_text(encoding="utf-8")
-    backend = BACKEND.read_text(encoding="utf-8")
+    desktop = code_of(DESKTOP)
+    backend = code_of(BACKEND)
 
     assert "Ingen automatisk polling" in desktop
     assert 'GET /api/v1/control-center/status' in backend
