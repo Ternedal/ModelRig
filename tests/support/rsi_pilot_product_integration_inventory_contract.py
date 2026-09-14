@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from source_code import code_of
+
 ROOT = Path(__file__).resolve().parents[2]
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
@@ -66,9 +68,9 @@ def run_contract() -> None:
         assert path.is_file(), relative_path
         assert _git_blob_sha(path) == expected_sha, f"source drift: {relative_path}"
 
-    desktop = (ROOT / EXPECTED[0][1]).read_text(encoding="utf-8")
-    android = (ROOT / EXPECTED[1][1]).read_text(encoding="utf-8")
-    backend = (ROOT / EXPECTED[2][1]).read_text(encoding="utf-8")
+    desktop = code_of(ROOT / EXPECTED[0][1])
+    android = code_of(ROOT / EXPECTED[1][1])
+    backend = code_of(ROOT / EXPECTED[2][1])
 
     assert "fun DesktopControlCenterDialog(" in desktop
     assert "Ingen automatisk polling" in desktop
