@@ -556,3 +556,26 @@ Næste separate led er explicit execution-admission/executor authority for præc
 den valgte task; ADR-DC-028 udfører ingen command eller pilot-task.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-028_RSI_PILOT_EXECUTION_ADMISSION_ATTESTATION.md`
+
+## ADR-DC-029 — Exact task-execution admission requirements without execution authority
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Fastlåser requirements for en senere one-shot execution-admission over ét exact,
+fully satisfied ADR-DC-028 host-attestation proof. Manifestet binder proof,
+attestation, detached signature, packet/start-receipt lineage samt exact
+repository/base/main, trial, operator surface, selected task og workspace.
+
+Et senere authority-led skal bl.a. re-verificere ADR-DC-028 fresh, revalidere den
+live ADR-DC-025 consumption, kræve en separat fresh human task-execution
+authorization, one-shot execution nonce + canonical host-local replay-ledger,
+exact task-registry entry, source/toolchain/workspace binding, feature flag,
+isolation/trusted-Git, kill/revoke/restart, blocked network writes, absent
+credentials, fixed command plan, bounded execution budget, manual invocation og
+post-execution receipt.
+
+Denne requirements-slice udsteder ingen admission. `task_execution_authorized=false`,
+`task_execution_started=false`, local commit og alle remote/publication/activation
+authorities forbliver false. Der registreres ingen command og kaldes ingen executor.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-029_RSI_PILOT_EXACT_TASK_EXECUTION_ADMISSION_REQUIREMENTS.md`
