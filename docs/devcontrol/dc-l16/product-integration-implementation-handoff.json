@@ -1,0 +1,44 @@
+{
+  "schema": "kaliv-rsi-dc-l16-product-integration-implementation-handoff/v1",
+  "repository": "Ternedal/ModelRig",
+  "source_inventory_head_sha": "30be16b320acd6655c07ab1476cceaead547e3e3",
+  "source_selection_proposal_head_sha": "5978052d593033cbea545a34ddca6e45cfd4e39f",
+  "implementation_choice": {
+    "implementation_direction_selected": true,
+    "operator_surface": "desktop.control-center",
+    "route_host_pattern": "backend.local-api-host-pattern",
+    "feature_flag": "KALIV_DEVCONTROL_PILOT",
+    "route": "GET /api/v1/experimental/devcontrol-pilot/status",
+    "manual_refresh_only": true,
+    "human_pilot_go_verified": false
+  },
+  "tracked_source_transition": {
+    "path": "backend/internal/httpapi/server.go",
+    "from_git_blob_sha": "6085d525ff86a3d2b5c7cdece20bcaeace896e85",
+    "to_git_blob_sha": "3b202c783b288f77572611ee71e0d732183e5404"
+  },
+  "new_product_files": [
+    {
+      "path": "backend/internal/httpapi/devcontrol_pilot.go",
+      "git_blob_sha": "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
+    },
+    {
+      "path": "backend/internal/httpapi/devcontrol_pilot_test.go",
+      "git_blob_sha": "07b787298bfd02259f97cb7800e4b5c48d895304"
+    }
+  ],
+  "authority_state": {
+    "runtime_preflight_satisfied": false,
+    "pilot_start_authorized": false,
+    "product_pilot_started": false,
+    "local_commit_authorized": false,
+    "remote_write_authorized": false,
+    "push_authorized": false,
+    "pr_mutation_authorized": false,
+    "merge_authorized": false,
+    "release_authorized": false,
+    "deploy_authorized": false,
+    "production_activation_authorized": false,
+    "authority": "dc-l16-product-implementation-handoff-only"
+  }
+}
