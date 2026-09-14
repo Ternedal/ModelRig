@@ -149,9 +149,15 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_development_task_binding_contract import (
         run_contract as run_development_task_binding_contract,
     )
+    # ADR-DC-036 materializes only the reviewed Tier-A lease capability and still
+    # performs no runtime-closure materialization or task execution.
+    from rsi_pilot_exact_task_tier_a_lease_materialization_contract import (
+        run_contract as run_tier_a_lease_materialization_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
+    run_tier_a_lease_materialization_contract()
 
 
 if __name__ == "__main__":
