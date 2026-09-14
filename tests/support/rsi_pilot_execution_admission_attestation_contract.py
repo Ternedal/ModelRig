@@ -304,6 +304,14 @@ def run_contract() -> None:
     finally:
         temp.cleanup()
 
+    # Keep ADR-DC-029 transitively wired through ADR-DC-028 and the same
+    # Stage-B support entrypoint instead of expanding the locked top-level inventory.
+    from rsi_pilot_exact_task_execution_admission_requirements_contract import (
+        run_contract as run_exact_task_execution_admission_requirements_contract,
+    )
+
+    run_exact_task_execution_admission_requirements_contract()
+
 
 if __name__ == "__main__":
     run_contract()
