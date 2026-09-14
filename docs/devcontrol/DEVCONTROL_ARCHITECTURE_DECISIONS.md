@@ -217,6 +217,7 @@ kontrolleret public-key keyring. Successful verification er eksplicit
 `verified-human-exact-runner-execution-binding-only`: den menneskelige signatur
 er en execution-attestation, ikke kernel telemetry, og den re-verificerer ikke
 det legacy HMAC report.
+
 Continuous-main freeze, DC-L15 completion, independent human verdict og pilot GO
 forbliver separate gates. Ingen Git/GitHub write, merge, publication, release,
 deploy eller activation autoriseres.
@@ -425,7 +426,8 @@ Gør exact ADR-DC-022 packetet til canonical input for en separat host-attestere
 Ed25519-verifikation. Attestationens signerede bytes indlejrer hele packetet og
 dermed alle tolv individuelle evidence-digests, human-selection proof,
 requirements og trial/workspace/source-bindinger. Production accepterer ikke
-caller-valgt verifier og resolver kun en separat host-controlled verification-only public-key keyring under elevated host operator.
+caller-valgt verifier og resolver kun en separat host-controlled verification-
+only public-key keyring under elevated host operator.
 
 Et cryptographically valid proof kan kun sætte `host_attestation_verified=true`,
 `preflight_observed=true` og `preflight_satisfied` ud fra alle tolv signerede
