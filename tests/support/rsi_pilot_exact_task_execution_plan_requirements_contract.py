@@ -100,6 +100,8 @@ def run_contract() -> None:
             "exact_toolchain_binding_required",
             "signed_runtime_closure_required",
             "host_pinned_physical_verifier_required",
+            "host_resolved_isolation_attestation_required",
+            "caller_selected_isolation_attestation_forbidden",
             "host_pinned_runtime_closure_verifier_required",
             "canonical_trusted_runtime_root_required",
             "host_pinned_trusted_git_runner_required",
