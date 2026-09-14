@@ -149,9 +149,24 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_development_task_binding_contract import (
         run_contract as run_development_task_binding_contract,
     )
+    # ADR-DC-036 remains capability-only. The legacy broad contract is imported
+    # only as a helper by the focused contracts below and is not executed because
+    # it predates the workspace-snapshot hardening of execution-plan authority.
+    from rsi_pilot_exact_task_executor_capability_live_guard_contract import (
+        run_contract as run_executor_capability_live_guard_contract,
+    )
+    from rsi_pilot_exact_task_executor_secret_custody_contract import (
+        run_contract as run_executor_secret_custody_contract,
+    )
+    from rsi_pilot_exact_task_executor_capability_semantics_contract import (
+        run_contract as run_executor_capability_semantics_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
+    run_executor_capability_live_guard_contract()
+    run_executor_secret_custody_contract()
+    run_executor_capability_semantics_contract()
 
 
 if __name__ == "__main__":
