@@ -1,0 +1,64 @@
+{
+  "schema": "kaliv-rsi-dc-l16-product-integration-selection-requirements/v1",
+  "repository": "Ternedal/ModelRig",
+  "source_inventory": {
+    "source_head_sha": "30be16b320acd6655c07ab1476cceaead547e3e3",
+    "inventory_path": "docs/devcontrol/dc-l16/product-integration-inventory.json",
+    "inventory_git_blob_sha": "babad0dfc82ad359ee053817bae2674a8f8b38a0",
+    "candidate_ids": [
+      "desktop.control-center",
+      "android.control-center",
+      "backend.local-api-host-pattern"
+    ]
+  },
+  "binding_requirements": {
+    "verified_human_pilot_decision_required": true,
+    "positive_human_pilot_decision_required": true,
+    "exact_single_trial_scope_required": true,
+    "operator_surface_must_equal_signed_scope": true,
+    "known_surface_must_bind_inventory_candidate": true,
+    "unknown_surface_requires_fresh_exact_source_inventory": true,
+    "selected_task_must_equal_single_trial_task": true,
+    "workspace_digest_must_equal_single_trial_scope": true,
+    "local_commit_policy_must_not_broaden_signed_scope": true
+  },
+  "product_design_decisions_required": {
+    "operator_surface": true,
+    "feature_flag_name": true,
+    "product_route": true,
+    "runtime_observer": true,
+    "task_registry": true,
+    "workspace_policy": true,
+    "review_authorization_roles": true,
+    "kill_revoke_cleanup": true,
+    "local_commit_policy": true
+  },
+  "selection_state": {
+    "human_selection_recorded": false,
+    "operator_surface_selected": false,
+    "feature_flag_selected": false,
+    "product_route_selected": false,
+    "runtime_observer_selected": false,
+    "task_registry_selected": false,
+    "workspace_policy_selected": false,
+    "review_authorization_roles_selected": false,
+    "kill_revoke_cleanup_selected": false,
+    "local_commit_policy_selected": false
+  },
+  "authority_state": {
+    "normal_command_catalog_empty": true,
+    "integration_ready": false,
+    "preflight_observed": false,
+    "preflight_satisfied": false,
+    "pilot_start_authorized": false,
+    "product_pilot_started": false,
+    "remote_write_authorized": false,
+    "push_authorized": false,
+    "pr_mutation_authorized": false,
+    "merge_authorized": false,
+    "release_authorized": false,
+    "deploy_authorized": false,
+    "production_activation_authorized": false,
+    "authority": "dc-l16-product-integration-selection-requirements-only"
+  }
+}
