@@ -182,6 +182,10 @@ _REQUIRED_TRUE = (
     "exact_execution_budget_required",
     "manual_operator_invocation_required",
     "pre_execution_git_snapshot_required",
+    "host_resolved_pre_execution_git_snapshot_required",
+    "execution_plan_workspace_state_binding_required",
+    "pre_launch_git_snapshot_revalidation_required",
+    "workspace_state_change_after_plan_materialization_forbidden",
     "post_execution_tier_a_receipt_required",
     "workspace_drift_fail_closed_reset_required",
     "post_execution_consumption_receipt_required",
@@ -260,6 +264,10 @@ class PilotExactTaskExecutionPlanRequirements:
     exact_execution_budget_required: bool = True
     manual_operator_invocation_required: bool = True
     pre_execution_git_snapshot_required: bool = True
+    host_resolved_pre_execution_git_snapshot_required: bool = True
+    execution_plan_workspace_state_binding_required: bool = True
+    pre_launch_git_snapshot_revalidation_required: bool = True
+    workspace_state_change_after_plan_materialization_forbidden: bool = True
     post_execution_tier_a_receipt_required: bool = True
     workspace_drift_fail_closed_reset_required: bool = True
     post_execution_consumption_receipt_required: bool = True
