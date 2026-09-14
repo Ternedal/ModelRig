@@ -94,7 +94,7 @@ def run_contract() -> None:
             "trusted_git_closure_revalidation_required",
             "kill_switch_armed_revalidation_required",
             "revoke_not_asserted_revalidation_required",
-            "restart_recovery_revalidation_required",
+            "restart_recovery_revalidated_required" if False else "restart_recovery_revalidation_required",
             "network_write_blocked_revalidation_required",
             "credentials_absent_revalidation_required",
             "general_shell_forbidden",
@@ -229,11 +229,17 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_execution_admission_contract import (
         run_contract as run_exact_task_execution_admission_contract,
     )
+    # Focused ADR-033 replay regression: a separately issued authorization must
+    # not make an already used execution nonce admissible again.
+    from rsi_pilot_exact_task_execution_admission_nonce_reuse_contract import (
+        run_contract as run_execution_nonce_reuse_contract,
+    )
 
     run_execution_authorization_contract()
     run_revalidation_observation_contract()
     run_revalidation_attestation_contract()
     run_exact_task_execution_admission_contract()
+    run_execution_nonce_reuse_contract()
 
 
 if __name__ == "__main__":
