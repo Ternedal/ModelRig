@@ -71,6 +71,12 @@ def run_contract() -> None:
         ledger_root = temp / "ledger"
         ledger_root.mkdir()
         ledger = consume.PilotStartConsumptionLedger(root=ledger_root)
+        _reject(
+            lambda: consume.PilotStartConsumptionLedger(
+                root=ledger_root,
+                ledger_id="alternate-pilot-start-ledger",
+            )
+        )
         proof, signature = _proof()
 
         receipt = consume._consume_pilot_start_authorization(
@@ -203,6 +209,11 @@ def run_contract() -> None:
         _reject(
             lambda: consume.PilotStartConsumptionReceipt.from_mapping(
                 {**receipt.to_dict(), "authorization_proof_sha256": "1" * 64}
+            )
+        )
+        _reject(
+            lambda: consume.PilotStartConsumptionReceipt.from_mapping(
+                {**receipt.to_dict(), "ledger_id": "alternate-pilot-start-ledger"}
             )
         )
 
