@@ -299,3 +299,9 @@ _run_support_contract(
     "rsi_pilot_product_integration_inventory_contract",
 )
 print("RSI DC-L16 exact-source product integration inventory contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_product_integration_selection_proposal_contract.py",
+    "rsi_pilot_product_integration_selection_proposal_contract",
+)
+print("RSI DC-L16 product integration selection proposal contract: PASS")
