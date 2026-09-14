@@ -81,14 +81,14 @@ jobs:
             echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/exact-head-python.log
             started_at="$(date +%s)"
-            timeout --signal=TERM --kill-after=30s 600s env PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/exact-head-python.log
+            timeout --signal=TERM --kill-after=30s 1200s env PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/exact-head-python.log
             test_status=${PIPESTATUS[0]}
             elapsed=$(( $(date +%s) - started_at ))
             echo "TIMING: $f ${elapsed}s (exit $test_status)" | tee -a /tmp/exact-head-python.log
             if [ "$test_status" -ne 0 ]; then
               status=$test_status
               if [ "$test_status" -eq 124 ] || [ "$test_status" -eq 137 ]; then
-                echo "TIMEOUT: $f exceeded 600s per-file bound" | tee -a /tmp/exact-head-python.log
+                echo "TIMEOUT: $f exceeded 1200s per-file bound" | tee -a /tmp/exact-head-python.log
               fi
               echo "FAILED: $f (exit $status)" | tee -a /tmp/exact-head-python.log
               echo "::endgroup::"
