@@ -420,3 +420,22 @@ product-pilot-start, remote write/push/PR/merge/release/deploy og production
 activation false.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-022_RSI_PILOT_RUNTIME_PREFLIGHT_ATTESTATION.md`
+
+## ADR-DC-023 — Human-signed one-shot pilot-start authorization without consuming or starting the pilot
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Indfører en separat, kortlivet Ed25519-signeret human start-authorization over
+ét fully satisfied ADR-DC-022 runtime-preflight proof. Authorizationen indlejrer
+hele preflight proofet og binder observation/selection/candidate/requirements/
+trial-scope/runtime-receipt digests samt exact repo/base/main/trial/surface/task/
+workspace/local-commit scope og en separat start-nonce.
+
+Start-authorizeren skal være samme human actor som det exact ADR-DC-021 valg og
+må ikke være ADR-DC-022 host-observeren. Validity-vinduet er højst 15 minutter.
+Et verificeret proof kan sætte `pilot_start_authorized=true`, men
+`one_shot_start_required=true`, `start_consumed=false`,
+`product_pilot_started=false` og alle remote/production-authorities forbliver
+false. Replay-safe consumption og faktisk pilot-start er en separat senere gate.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-023_RSI_PILOT_START_AUTHORIZATION.md`
