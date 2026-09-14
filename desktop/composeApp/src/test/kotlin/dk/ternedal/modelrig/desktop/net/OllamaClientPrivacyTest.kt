@@ -112,7 +112,7 @@ class OllamaClientPrivacyTest {
     fun streamedServerErrorDoesNotEchoPayload() {
         val server = server(
             200,
-            """{"error":"Bearer SECRET token=abc /data/private"}\n""",
+            """{"error":"Bearer SECRET token=abc /data/private"}""" + "\n",
         )
         try {
             val client = OllamaClient(
@@ -131,7 +131,7 @@ class OllamaClientPrivacyTest {
     fun pullStreamErrorDoesNotEchoPayload() {
         val server = server(
             200,
-            """{"error":"Bearer SECRET token=abc /data/private"}\n""",
+            """{"error":"Bearer SECRET token=abc /data/private"}""" + "\n",
         )
         try {
             val client = OllamaClient("http://127.0.0.1:${server.address.port}")
