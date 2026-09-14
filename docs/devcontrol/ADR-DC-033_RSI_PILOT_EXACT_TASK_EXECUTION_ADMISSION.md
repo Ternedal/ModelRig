@@ -83,6 +83,14 @@ Authority er kun:
 
 Admission er host-lokal replay-sikkerhed for den signerede execution nonce; denne ADR fremsætter ingen påstand om global/distribueret replay-sikkerhed på tværs af uafhængige hosts eller ledger roots.
 
+## Durable artifact-bound
+
+ADR-DC-033 ejer selv byte-budgettet for sine durable admission-artifacts. Canonical receipt-publication og den efterfølgende read-back/provenance-kontrol bruger samme maksimale bound på **1 MiB**.
+
+ADR-DC-033 må ikke arve et mindre privat read-budget fra en tidligere boundary. Et receipt, som er inden for ADR-DC-033's publication-bound, må derfor ikke først reservere noncen og derefter fejle alene fordi read-back benytter et lavere, uvedkommende artifact-budget.
+
+Den bounded reader accepterer non-empty artifacts til og med 1 MiB og fejler lukket for artifacts over 1 MiB, ikke-absolutte paths, linkish path components eller read-fejl. Contracten dækker eksplicit 512 KiB + 1 byte, præcis 1 MiB og 1 MiB + 1 byte, så publication- og read-back-budgetterne ikke kan drive fra hinanden igen.
+
 ## Live transaction provenance
 
 Den exact receipt-instans, som returneres fra den successfulde durable transaction, registreres med process-lokal live provenance bundet til de eksakte durable lock- og receipt-bytes.
