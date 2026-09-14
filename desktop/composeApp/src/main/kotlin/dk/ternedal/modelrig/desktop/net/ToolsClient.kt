@@ -88,6 +88,9 @@ private data class AuditResponse(val entries: List<AuditEntry> = emptyList())
 
 class ToolsException(message: String) : RuntimeException(message)
 
+internal fun toolsFailureMessage(operation: String, statusCode: Int? = null): String =
+    if (statusCode == null) "$operation failed" else "$operation failed ($statusCode)"
+
 class ToolsClient(baseUrl: String, private val bearer: String?) {
     private val base = baseUrl.trimEnd('/')
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
@@ -117,7 +120,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
             .build()
         val resp = http.send(startReq, HttpResponse.BodyHandlers.ofString())
         if (resp.statusCode() !in 200..299)
-            throw ToolsException("pair/start failed (${resp.statusCode()}): ${resp.body().take(200)}")
+            throw ToolsException(toolsFailureMessage("pair/start", resp.statusCode()))
         val code = json.decodeFromString<PairStartResponse>(resp.body()).code
         if (code.isEmpty()) throw ToolsException("pair/start returned no code")
         return code
@@ -132,7 +135,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
             .build()
         val startResp = http.send(startReq, HttpResponse.BodyHandlers.ofString())
         if (startResp.statusCode() !in 200..299)
-            throw ToolsException("pair/start failed (${startResp.statusCode()}): ${startResp.body().take(200)}")
+            throw ToolsException(toolsFailureMessage("pair/start", startResp.statusCode()))
         val code = json.decodeFromString<PairStartResponse>(startResp.body()).code
         if (code.isEmpty()) throw ToolsException("pair/start returned no code")
 
@@ -142,7 +145,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
             .build()
         val claimResp = http.send(claimReq, HttpResponse.BodyHandlers.ofString())
         if (claimResp.statusCode() !in 200..299)
-            throw ToolsException("pair/claim failed (${claimResp.statusCode()}): ${claimResp.body().take(200)}")
+            throw ToolsException(toolsFailureMessage("pair/claim", claimResp.statusCode()))
         val token = json.decodeFromString<PairClaimResponse>(claimResp.body()).token
         if (token.isEmpty()) throw ToolsException("pairing response missing token")
         return token
@@ -167,7 +170,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
             .build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
         if (resp.statusCode() !in 200..299)
-            throw ToolsException("tools chat failed (${resp.statusCode()}): ${resp.body().take(300)}")
+            throw ToolsException(toolsFailureMessage("tools chat", resp.statusCode()))
         return json.decodeFromString<ToolTurn>(resp.body())
     }
 
@@ -216,7 +219,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
             }.getOrNull()?.let { parsed ->
                 when {
                     parsed.error != null ->
-                        throw ToolsException("tools chat: ${parsed.error}")
+                        throw ToolsException(toolsFailureMessage("tools chat"))
                     parsed.result != null -> turn = parsed.result
                     parsed.phase != null -> onPhase(parsed.phase)
                 }
@@ -239,7 +242,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
             .build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
         if (resp.statusCode() !in 200..299)
-            throw ToolsException("tools confirm failed (${resp.statusCode()}): ${resp.body().take(300)}")
+            throw ToolsException(toolsFailureMessage("tools confirm", resp.statusCode()))
         return json.decodeFromString<ToolTurn>(resp.body())
     }
 
@@ -247,7 +250,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
         val req = builder("/api/v1/tools/audit?limit=$limit").GET().build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
         if (resp.statusCode() !in 200..299)
-            throw ToolsException("tools audit failed (${resp.statusCode()}): ${resp.body().take(200)}")
+            throw ToolsException(toolsFailureMessage("tools audit", resp.statusCode()))
         return json.decodeFromString<AuditResponse>(resp.body()).entries
     }
 }
