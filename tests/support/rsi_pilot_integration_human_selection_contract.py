@@ -267,6 +267,11 @@ def run_contract() -> None:
     assert proof_props["production_activation_authorized"]["const"] is False
     assert proof_props["authority"]["const"] == PILOT_INTEGRATION_HUMAN_SELECTION_PROOF_AUTHORITY
 
+    from rsi_pilot_runtime_preflight_observation_contract import (  # noqa: E402
+        run_contract as run_preflight_observation_contract,
+    )
+    run_preflight_observation_contract()
+
 
 if __name__ == "__main__":
     run_contract()
