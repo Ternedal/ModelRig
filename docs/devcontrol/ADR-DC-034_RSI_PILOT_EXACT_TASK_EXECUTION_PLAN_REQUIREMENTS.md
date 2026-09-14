@@ -6,7 +6,7 @@
 
 ADR-DC-033 kan udstede én live, host-local, replay-safe admission for præcis den human-authorized execution nonce. Det receipt kan sætte `task_execution_authorized=true`, men holder bevidst `task_execution_started=false` og `execution_consumed=false`.
 
-Det er stadig ikke sikkert at kalde en executor direkte. ADR-DC-033 binder task-ID, workspace-scope og upstream host-attested evidence, men den materialiserer ikke de konkrete runtime-objekter som eksisterende Tier-A execution kræver: `DevelopmentTask`, reviewed command catalog, toolchain, signed runtime closure, trusted Git runtime, Windows isolation evidence og exact workspace.
+Det er stadig ikke sikkert at kalde en executor direkte. ADR-DC-033 binder pilot-task-ID, workspace-scope og upstream host-attested evidence, men den materialiserer ikke de konkrete runtime-objekter som eksisterende Tier-A execution kræver: `DevelopmentTask`, reviewed command catalog, toolchain, signed runtime closure, trusted Git runtime, Windows isolation evidence og exact workspace.
 
 De objekter må ikke blive caller-valgt authority blot fordi en tidligere host-attestation sagde, at tilsvarende gates var grønne. Der skal først være en separat boundary, som fastlåser hvilke konkrete objekter og identitetschecks den senere executor-transaktion skal materialisere.
 
@@ -29,6 +29,18 @@ ADR-DC-034 binder:
 - workspace-root digest;
 - human-signed local-commit upper bound.
 
+## Pilot task ID vs. DevelopmentTask ID
+
+`selected_pilot_task_id` og `DevelopmentTask.task_id` er bevidst to forskellige identitetsdomæner og må ikke sammenlignes direkte som samme streng.
+
+Det eksisterende pilot-scope bruger IDs som fx `task-local-001`, mens `DevelopmentTask.task_id` følger den strengere control-plane syntaks `[A-Z][A-Z0-9_-]{2,63}`. En direkte equality-gate ville derfor gøre en ellers legitim pilot umulig at materialisere.
+
+Den senere host-pinned task registry skal i stedet levere en canonical, exact-bound mapping:
+
+`selected_pilot_task_id -> DevelopmentTask.task_id + DevelopmentTask SHA-256`.
+
+Mappingen må ikke være model-valgt eller caller-valgt. Den skal komme fra den host-pinned registry, bindes til exact ADR-DC-034 requirements og verificeres før nogen Tier-A plan kan materialiseres.
+
 ## Mandatory later executor gates
 
 En senere executor-consumption boundary skal conjunctively materialisere og verificere alle følgende. Ingen må degraderes til optional mode:
@@ -37,7 +49,7 @@ En senere executor-consumption boundary skal conjunctively materialisere og veri
 2. exact receipt identity og one-shot executor consumption;
 3. host-pinned task registry;
 4. exact `DevelopmentTask` for den valgte pilot-task;
-5. task-ID equality med ADR-DC-033 scope;
+5. canonical pilot-task-ID → `DevelopmentTask` ID + SHA-256 mapping;
 6. repository/base binding mod signed scope;
 7. canonical workspace equality mod signed workspace digest;
 8. præcis én fixed required command;
@@ -109,6 +121,6 @@ Hvis en senere execution ønsker at materialisere en lokal commit efter successf
 
 ## Next boundary
 
-Næste sikre boundary er host-pinned materialization af ét exact executor plan/capability fra ADR-DC-034 requirements og den **samme live ADR-DC-033 receipt**. Først når concrete task/catalog/toolchain/runtime/workspace identities er verificeret mod den signed chain, kan en separat one-shot executor transaction kalde den eksisterende Tier-A runtime og udstede post-execution consumption evidence.
+Næste sikre boundary er host-pinned materialization af ét exact executor plan/capability fra ADR-DC-034 requirements og den **samme live ADR-DC-033 receipt**. Først når pilot→DevelopmentTask mapping og concrete task/catalog/toolchain/runtime/workspace identities er verificeret mod den signed chain, kan en separat one-shot executor transaction kalde den eksisterende Tier-A runtime og udstede post-execution consumption evidence.
 
 `production_activation=false`.
