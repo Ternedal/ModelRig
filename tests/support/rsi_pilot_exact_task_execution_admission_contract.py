@@ -17,6 +17,8 @@ if str(DEVCONTROL_SRC) not in sys.path:
 
 import kaliv_dev_control  # noqa: E402
 from kaliv_dev_control import catalog  # noqa: E402
+import kaliv_dev_control._improvement_pilot_exact_task_execution_admission_impl as admission_impl  # noqa: E402
+import kaliv_dev_control._improvement_pilot_exact_task_execution_admission_production_boundary as admission_boundary  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_admission as admission  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_revalidation_attestation as verify  # noqa: E402
 from rsi_pilot_exact_task_execution_revalidation_attestation_contract import (  # noqa: E402
@@ -39,6 +41,17 @@ def _reject(fn) -> None:
     except (ValueError, TypeError):
         return
     raise AssertionError("ADR-DC-033 unexpectedly accepted invalid input")
+
+
+class _ClockHarness:
+    PilotExactTaskExecutionAdmissionError = admission.PilotExactTaskExecutionAdmissionError
+    _utc = staticmethod(admission_impl._utc)
+
+    def __init__(self, values: tuple[str, ...]) -> None:
+        self._values = iter(values)
+
+    def _now_utc_seconds(self) -> str:
+        return next(self._values)
 
 
 def _proof(*, all_green: bool = True):
@@ -225,6 +238,56 @@ def run_contract() -> None:
             )
         finally:
             stale_temp.cleanup()
+
+        # Production samples wall time both before and after the durable nonce
+        # reservation. A backwards jump must fail closed even when both samples
+        # would independently remain inside the signed freshness window. The
+        # create-once lock must remain, so rollback cannot reopen the nonce.
+        rollback_temp, rollback_ledger = _ledger("rsi-exact-task-admission-clock-rollback-")
+        try:
+            rollback_clock = admission_boundary._nondecreasing_admission_clock(
+                _ClockHarness(
+                    (
+                        "2026-09-14T08:36:20Z",
+                        "2026-09-14T08:36:19Z",
+                    )
+                )
+            )
+            _reject(
+                lambda: admission._admit_verified_exact_task_execution(
+                    supplied_proof=proof,
+                    fresh_proof=fresh,
+                    ledger=rollback_ledger,
+                    now_provider=rollback_clock,
+                )
+            )
+            assert any(rollback_ledger.root.iterdir())
+            retry_times = iter(("2026-09-14T08:36:21Z", "2026-09-14T08:36:22Z"))
+            _reject(
+                lambda: admission._admit_verified_exact_task_execution(
+                    supplied_proof=proof,
+                    fresh_proof=fresh,
+                    ledger=rollback_ledger,
+                    now_provider=lambda: next(retry_times),
+                )
+            )
+
+            equal_clock = admission_boundary._nondecreasing_admission_clock(
+                _ClockHarness(
+                    (
+                        "2026-09-14T08:36:20Z",
+                        "2026-09-14T08:36:20Z",
+                    )
+                )
+            )
+            assert equal_clock() == "2026-09-14T08:36:20Z"
+            assert equal_clock() == "2026-09-14T08:36:20Z"
+            invalid_clock = admission_boundary._nondecreasing_admission_clock(
+                _ClockHarness(("not-a-time",))
+            )
+            _reject(invalid_clock)
+        finally:
+            rollback_temp.cleanup()
 
         # A cryptographically valid signed failed ADR-032 revalidation is audit
         # evidence only and cannot be promoted into execution admission.
