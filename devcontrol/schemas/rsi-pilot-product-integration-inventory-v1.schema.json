@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kaliv-rsi-dc-l16-product-integration-inventory/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "source_parent_sha",
+    "candidate_surfaces",
+    "verified_existing_patterns",
+    "verified_absence",
+    "selection_state",
+    "authority_state"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-dc-l16-product-integration-inventory/v1"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "source_parent_sha": {"const": "7cc350fc50baad9f48fae88f76b6ad17b3a3817f"},
+    "candidate_surfaces": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate_id", "kind", "path", "git_blob_sha", "selected"],
+          "properties": {
+            "candidate_id": {"const": "desktop.control-center"},
+            "kind": {"const": "operator-ui-candidate"},
+            "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"},
+            "git_blob_sha": {"const": "0a9498ac0fe61ea742a47c1d6be1cf7886992321"},
+            "selected": {"const": false}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate_id", "kind", "path", "git_blob_sha", "selected"],
+          "properties": {
+            "candidate_id": {"const": "android.control-center"},
+            "kind": {"const": "operator-ui-candidate"},
+            "path": {"const": "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"},
+            "git_blob_sha": {"const": "82643d7cefe9a9c249e8e7cc8b480d9989b38606"},
+            "selected": {"const": false}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["candidate_id", "kind", "path", "git_blob_sha", "selected"],
+          "properties": {
+            "candidate_id": {"const": "backend.local-api-host-pattern"},
+            "kind": {"const": "route-host-pattern-candidate"},
+            "path": {"const": "backend/internal/httpapi/server.go"},
+            "git_blob_sha": {"const": "6085d525ff86a3d2b5c7cdece20bcaeace896e85"},
+            "selected": {"const": false}
+          }
+        }
+      ],
+      "items": false
+    },
+    "verified_existing_patterns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paired_bearer_control_center_routes_present",
+        "default_off_experimental_route_patterns_present",
+        "manual_refresh_no_automatic_polling_present"
+      ],
+      "properties": {
+        "paired_bearer_control_center_routes_present": {"const": true},
+        "default_off_experimental_route_patterns_present": {"const": true},
+        "manual_refresh_no_automatic_polling_present": {"const": true}
+      }
+    },
+    "verified_absence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "devcontrol_product_import_present",
+        "devcontrol_product_route_present",
+        "devcontrol_product_flag_present",
+        "kalivdev_product_route_present"
+      ],
+      "properties": {
+        "devcontrol_product_import_present": {"const": false},
+        "devcontrol_product_route_present": {"const": false},
+        "devcontrol_product_flag_present": {"const": false},
+        "kalivdev_product_route_present": {"const": false}
+      }
+    },
+    "selection_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator_surface_selected",
+        "feature_flag_selected",
+        "product_route_selected",
+        "runtime_observer_selected",
+        "task_registry_selected"
+      ],
+      "properties": {
+        "operator_surface_selected": {"const": false},
+        "feature_flag_selected": {"const": false},
+        "product_route_selected": {"const": false},
+        "runtime_observer_selected": {"const": false},
+        "task_registry_selected": {"const": false}
+      }
+    },
+    "authority_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normal_command_catalog_empty",
+        "integration_ready",
+        "preflight_observed",
+        "preflight_satisfied",
+        "pilot_start_authorized",
+        "product_pilot_started",
+        "remote_write_authorized",
+        "push_authorized",
+        "pr_mutation_authorized",
+        "merge_authorized",
+        "release_authorized",
+        "deploy_authorized",
+        "production_activation_authorized",
+        "authority"
+      ],
+      "properties": {
+        "normal_command_catalog_empty": {"const": true},
+        "integration_ready": {"const": false},
+        "preflight_observed": {"const": false},
+        "preflight_satisfied": {"const": false},
+        "pilot_start_authorized": {"const": false},
+        "product_pilot_started": {"const": false},
+        "remote_write_authorized": {"const": false},
+        "push_authorized": {"const": false},
+        "pr_mutation_authorized": {"const": false},
+        "merge_authorized": {"const": false},
+        "release_authorized": {"const": false},
+        "deploy_authorized": {"const": false},
+        "production_activation_authorized": {"const": false},
+        "authority": {"const": "dc-l16-product-integration-inventory-only"}
+      }
+    }
+  }
+}
