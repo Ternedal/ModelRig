@@ -161,12 +161,18 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_executor_capability_semantics_contract import (
         run_contract as run_executor_capability_semantics_contract,
     )
+    # ADR-DC-037 is the first boundary allowed to set execution_plan_materialized:
+    # it freezes an exact trusted-Git workspace snapshot but still runs no task.
+    from rsi_pilot_exact_task_execution_plan_contract import (
+        run_contract as run_exact_task_execution_plan_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
     run_executor_capability_live_guard_contract()
     run_executor_secret_custody_contract()
     run_executor_capability_semantics_contract()
+    run_exact_task_execution_plan_contract()
 
 
 if __name__ == "__main__":
