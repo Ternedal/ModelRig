@@ -305,3 +305,9 @@ _run_support_contract(
     "rsi_pilot_runtime_preflight_attestation_proof_contract",
 )
 print("RSI DC-L16 ADR-DC-023 host-attested preflight packet contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_start_authorization_contract.py",
+    "rsi_pilot_start_authorization_contract",
+)
+print("RSI DC-L16 ADR-DC-024 human pilot-start authorization contract: PASS")
