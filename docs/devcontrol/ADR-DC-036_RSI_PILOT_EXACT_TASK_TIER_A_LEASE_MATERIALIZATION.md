@@ -30,7 +30,7 @@ Materialization kræver samtidigt:
 2. den samme **live** ADR-DC-033 admission receipt med `transaction_authenticated=true`;
 3. exact receipt SHA, execution nonce, selected pilot task og signed workspace-path identity fra upstream kæden.
 
-En serialized/reloaded ADR-DC-033 receipt er audit evidence בלבד og kan ikke materialisere en ny Tier-A capability.
+En serialized/reloaded ADR-DC-033 receipt er alene audit evidence og kan ikke materialisere en ny Tier-A capability.
 
 ## Host-owned production roots
 
