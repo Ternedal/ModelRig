@@ -156,6 +156,14 @@ _REQUIRED_TRUE = (
     "reviewed_nonempty_command_catalog_required",
     "exact_toolchain_binding_required",
     "signed_runtime_closure_required",
+    "host_pinned_physical_verifier_required",
+    "host_pinned_runtime_closure_verifier_required",
+    "canonical_trusted_runtime_root_required",
+    "host_pinned_trusted_git_runner_required",
+    "control_plane_toolhost_binding_required",
+    "reviewed_source_environment_required",
+    "exact_native_process_limits_required",
+    "caller_selected_executable_verifier_forbidden",
     "trusted_git_runtime_required",
     "native_windows_tier_a_required",
     "network_deny_required",
@@ -218,6 +226,14 @@ class PilotExactTaskExecutionPlanRequirements:
     reviewed_nonempty_command_catalog_required: bool = True
     exact_toolchain_binding_required: bool = True
     signed_runtime_closure_required: bool = True
+    host_pinned_physical_verifier_required: bool = True
+    host_pinned_runtime_closure_verifier_required: bool = True
+    canonical_trusted_runtime_root_required: bool = True
+    host_pinned_trusted_git_runner_required: bool = True
+    control_plane_toolhost_binding_required: bool = True
+    reviewed_source_environment_required: bool = True
+    exact_native_process_limits_required: bool = True
+    caller_selected_executable_verifier_forbidden: bool = True
     trusted_git_runtime_required: bool = True
     native_windows_tier_a_required: bool = True
     network_deny_required: bool = True
