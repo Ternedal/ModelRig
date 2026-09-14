@@ -6,9 +6,13 @@ import json
 import sys
 from pathlib import Path
 
-from source_code import code_of
-
 ROOT = Path(__file__).resolve().parents[2]
+SUPPORT = ROOT / "tests" / "support"
+if str(SUPPORT) not in sys.path:
+    sys.path.insert(0, str(SUPPORT))
+
+from source_code import code_of  # noqa: E402
+
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
