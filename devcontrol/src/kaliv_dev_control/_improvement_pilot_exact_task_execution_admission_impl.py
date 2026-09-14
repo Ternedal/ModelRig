@@ -20,7 +20,6 @@ from typing import Any, Callable, Mapping
 
 from ._improvement_pilot_start_consumption_impl import (
     _path_sha256,
-    _read_bound_file,
     _safe_ledger_root,
 )
 from .durable_publication import DurablePublicationError, create_once_file, unlink_durable
@@ -28,6 +27,7 @@ from .improvement_pilot_exact_task_execution_revalidation_attestation import (
     PILOT_EXACT_TASK_EXECUTION_REVALIDATION_ATTESTATION_PROOF_AUTHORITY,
     PilotExactTaskExecutionRevalidationAttestationProof,
 )
+from .trusted_git_runtime_model import _has_linkish_component
 
 PILOT_EXACT_TASK_EXECUTION_ADMISSION_RECEIPT_SCHEMA = (
     "kaliv-rsi-dc-l16-exact-task-execution-admission-receipt/v1"
@@ -134,6 +134,20 @@ def _now_utc_seconds() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
+
+
+def _read_bound_file(path: Path) -> bytes | None:
+    """Read one ADR-DC-033 artifact using this boundary's own byte budget."""
+    candidate = Path(path)
+    if not candidate.is_absolute() or _has_linkish_component(candidate):
+        return None
+    try:
+        payload = candidate.read_bytes()
+    except OSError:
+        return None
+    if not payload or len(payload) > _MAX_ARTIFACT_BYTES:
+        return None
+    return payload
 
 
 def _require_satisfied_revalidation_proof(

@@ -87,8 +87,29 @@ def _ledger(prefix: str):
     return temp, admission._PilotExactTaskExecutionAdmissionLedger(root)
 
 
+def _assert_artifact_read_bound() -> None:
+    """ADR-DC-033 must enforce one coherent 1 MiB publication/read-back budget."""
+    with tempfile.TemporaryDirectory(prefix="rsi-exact-task-admission-artifact-bound-") as temp:
+        root = Path(temp).resolve()
+
+        legacy_plus_one = b"x" * (512 * 1024 + 1)
+        legacy_plus_one_path = root / "legacy-plus-one.bin"
+        legacy_plus_one_path.write_bytes(legacy_plus_one)
+        assert admission_impl._read_bound_file(legacy_plus_one_path) == legacy_plus_one
+
+        at_limit = b"y" * admission_impl._MAX_ARTIFACT_BYTES
+        at_limit_path = root / "at-limit.bin"
+        at_limit_path.write_bytes(at_limit)
+        assert admission_impl._read_bound_file(at_limit_path) == at_limit
+
+        oversized_path = root / "oversized.bin"
+        oversized_path.write_bytes(b"z" * (admission_impl._MAX_ARTIFACT_BYTES + 1))
+        assert admission_impl._read_bound_file(oversized_path) is None
+
+
 def run_contract() -> None:
     assert catalog.modelrig_command_catalog().command_ids == ()
+    _assert_artifact_read_bound()
 
     source_temp, proof, fresh, _signature, _human_signature, _admission_signature = _proof()
     ledger_temp, ledger = _ledger("rsi-exact-task-admission-")
