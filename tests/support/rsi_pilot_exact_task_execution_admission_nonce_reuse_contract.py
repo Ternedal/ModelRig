@@ -139,6 +139,14 @@ def run_contract() -> None:
         ledger_temp.cleanup()
         source_temp.cleanup()
 
+    # ADR-DC-034 follows admission but remains inert and runs through the same
+    # locked Stage-B support chain rather than expanding top-level test inventory.
+    from rsi_pilot_exact_task_execution_plan_requirements_contract import (
+        run_contract as run_execution_plan_requirements_contract,
+    )
+
+    run_execution_plan_requirements_contract()
+
 
 if __name__ == "__main__":
     run_contract()
