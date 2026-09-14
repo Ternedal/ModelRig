@@ -47,41 +47,60 @@ En senere executor-consumption boundary skal conjunctively materialisere og veri
 
 1. den exact live ADR-DC-033 admission receipt;
 2. exact receipt identity og one-shot executor consumption;
-3. host-pinned task registry;
-4. exact `DevelopmentTask` for den valgte pilot-task;
-5. canonical pilot-task-ID → `DevelopmentTask` ID + SHA-256 mapping;
-6. repository/base binding mod signed scope;
-7. canonical workspace equality mod signed workspace digest;
-8. præcis én fixed required command;
-9. et reviewed **non-empty** command catalog for denne execution — det normale ModelRig catalog forbliver tomt;
-10. exact toolchain binding;
-11. en exact host-resolved signed runtime closure; caller må ikke vælge mellem signer-godkendte closure-artifacts;
-12. en host-pinned `WindowsPhysicalIsolationVerifier`, inklusive dens physical-evidence root, keyring, freshness policy, clock og file bound;
-13. en host-resolved exact `IsolationAttestation`, bundet til task/catalog/toolchain og den samme canonical physical-evidence authority;
-14. caller-selected `IsolationAttestation` forbidden, også når objektet isoleret set har korrekt Python-type og schema;
-15. en host-pinned `RuntimeClosureVerifier`, inklusive dens verification keyring og closure budgets;
-16. en canonical **host-resolved** trusted-runtime-root, som den signerede runtime closure er bundet til; caller-selected root er forbidden;
-17. en host-pinned `TrustedGitRunner`, ikke en caller-konstrueret Git authority;
-18. signed control-plane/toolhost identity, så caller ikke kan vælge en anden `control_plane_root`;
-19. reviewed host-owned source environment for den native launch path; caller-valgt `source_env` er forbidden;
-20. exact host-resolved native process limits, inklusive memory- og active-process bounds, i tillæg til taskens runtime/output budget; caller-valgte limits er forbidden;
-21. caller-selected executable verifier forbidden; den eksisterende materializer accepterer ikke en alternativ verifier;
-22. trusted Git runtime identity;
-23. native Windows Tier-A isolation;
-24. network deny;
-25. credentials absent;
-26. general shell forbidden;
-27. model-defined commands forbidden;
-28. unattended cadence forbidden;
-29. exact bounded execution budget;
-30. manual operator invocation;
-31. en host-resolved pre-execution `GitWorkspaceSnapshot` med exact base HEAD, staged-patch SHA-256/byte count og dokumenteret tom unstaged/untracked state;
-32. exact workspace-state snapshot bundet ind i det materialiserede executor-plan/capability;
-33. fresh trusted-Git re-snapshot umiddelbart før process launch og exact equality med planens snapshot;
-34. enhver workspace-state ændring efter plan-materialization og før launch skal fail closed uden task execution;
-35. post-execution canonical Tier-A command receipt;
-36. fail-closed exact-base reset hvis workspace drift opdages;
-37. separat post-execution consumption receipt, så ADR-DC-033 admission ikke kan eksekveres to gange.
+3. en durable create-once **pre-launch execution-consumption reservation** før `task_execution_started` kan blive sand;
+4. den human-signed `execution_nonce_sha256` som canonical consumption/replay key, så ny plan/attestation/receipt-identitet ikke kan åbne et ekstra execution-slot;
+5. enhver concurrent eller senere execution mod samme consumption key forbidden;
+6. uklar/crashed publication efter durable reservation fails closed; reservationen må ikke automatisk frigives eller gøre nonce’en genbrugelig;
+7. post-execution consumption receipt skal finalisere og bevise den samme pre-launch reservation — det må ikke være den mekanisme, som først etablerer replay protection efter execution;
+8. host-pinned task registry;
+9. exact `DevelopmentTask` for den valgte pilot-task;
+10. canonical pilot-task-ID → `DevelopmentTask` ID + SHA-256 mapping;
+11. repository/base binding mod signed scope;
+12. canonical workspace equality mod signed workspace digest;
+13. præcis én fixed required command;
+14. et reviewed **non-empty** command catalog for denne execution — det normale ModelRig catalog forbliver tomt;
+15. exact toolchain binding;
+16. en exact host-resolved signed runtime closure; caller må ikke vælge mellem signer-godkendte closure-artifacts;
+17. en host-pinned `WindowsPhysicalIsolationVerifier`, inklusive dens physical-evidence root, keyring, freshness policy, clock og file bound;
+18. en host-resolved exact `IsolationAttestation`, bundet til task/catalog/toolchain og den samme canonical physical-evidence authority;
+19. caller-selected `IsolationAttestation` forbidden, også når objektet isoleret set har korrekt Python-type og schema;
+20. en host-pinned `RuntimeClosureVerifier`, inklusive dens verification keyring og closure budgets;
+21. en canonical **host-resolved** trusted-runtime-root, som den signerede runtime closure er bundet til; caller-selected root er forbidden;
+22. en host-pinned `TrustedGitRunner`, ikke en caller-konstrueret Git authority;
+23. signed control-plane/toolhost identity, så caller ikke kan vælge en anden `control_plane_root`;
+24. reviewed host-owned source environment for den native launch path; caller-valgt `source_env` er forbidden;
+25. exact host-resolved native process limits, inklusive memory- og active-process bounds, i tillæg til taskens runtime/output budget; caller-valgte limits er forbidden;
+26. caller-selected executable verifier forbidden; den eksisterende materializer accepterer ikke en alternativ verifier;
+27. trusted Git runtime identity;
+28. native Windows Tier-A isolation;
+29. network deny;
+30. credentials absent;
+31. general shell forbidden;
+32. model-defined commands forbidden;
+33. unattended cadence forbidden;
+34. exact bounded execution budget;
+35. manual operator invocation;
+36. en host-resolved pre-execution `GitWorkspaceSnapshot` med exact base HEAD, staged-patch SHA-256/byte count og dokumenteret tom unstaged/untracked state;
+37. exact workspace-state snapshot bundet ind i det materialiserede executor-plan/capability;
+38. fresh trusted-Git re-snapshot umiddelbart før process launch og exact equality med planens snapshot;
+39. enhver workspace-state ændring efter plan-materialization og før launch skal fail closed uden task execution;
+40. post-execution canonical Tier-A command receipt;
+41. fail-closed exact-base reset hvis workspace drift opdages;
+42. separat post-execution consumption receipt, bundet til den allerede durable pre-launch reservation.
+
+## Durable pre-launch execution consumption
+
+ADR-DC-033 beskytter mod at udstede samme human-signed execution nonce som execution admission flere gange. Den beskyttelse er nødvendig, men den er ikke alene en executor mutex: et live ADR-DC-033 receipt kan eksistere i én proces, og en senere executor-boundary kan ellers risikere to samtidige launch-forsøg, hvis replay først markeres som consumed **efter** command completion.
+
+Derfor må `post_execution_consumption_receipt_required` ikke fortolkes som replay-beskyttelsen i sig selv. Den senere one-shot executor transaction skal først durably reservere execution consumption under en canonical host-controlled ledger **før** process launch og før `task_execution_started=true`.
+
+Den stabile replay-identitet skal være den signerede ADR-DC-030 `execution_nonce_sha256`, som allerede er lig med ADR-DC-033 admission key. Plan-hash, isolation-attestation-hash, runtime-closure-hash eller andre omkringliggende identiteter må gerne bindes i reservationen, men må ikke danne en alternativ key, der kan give samme nonce et nyt execution-slot.
+
+Hvis pre-launch reservation allerede eksisterer, skal concurrent/replayed execution afvises før process launch. Hvis durable publication er uklar efter reservationen er oprettet, skal systemet fail closed: execution-slotten må ikke automatisk gøres tilgængelig igen. En senere recovery-model kan klassificere og finalisere tilstanden, men almindelig execution må ikke gætte på, om den tidligere launch nåede at starte.
+
+Efter command completion skal den separate consumption receipt finalisere **samme** reservation og binde pre-launch reservation identity, exact plan identity, pre/post Git evidence, Tier-A command receipt og execution result. Final receipt er audit/finalization evidence; replay safety starter ved pre-launch reservationen.
+
+Dette giver at-most-once launch authority på den canonical host-local execution-consumption ledger. Det er ikke en distributed exactly-once claim på tværs af uafhængige hosts/ledger roots.
 
 ## Host-pinned executor authority
 
@@ -107,7 +126,7 @@ ADR-DC-030 human execution authorization binder task, base, canonical workspace 
 
 Den næste materialization boundary skal selv læse workspace gennem den host-pinned `TrustedGitRunner`, kræve exact base `HEAD`, kræve tom unstaged/untracked state og fryse hele `GitWorkspaceSnapshot` ind i plan/capability-identiteten. Hvis en staged patch findes, bliver dens exact SHA-256 og byte count dermed en del af den materialiserede plan-identitet.
 
-Den separate one-shot executor transaction skal tage en fresh trusted-Git snapshot **umiddelbart før launch** og kræve byte-identisk snapshot-identitet med planen. Enhver ændring af HEAD, staged patch, unstaged state eller untracked paths mellem materialization og launch skal afvises før `task_execution_started` kan blive sand.
+Den separate one-shot executor transaction skal tage en fresh trusted-Git snapshot **umiddelbart før launch** og kræve byte-identisk snapshot-identitet med planen. Enhver ændring af HEAD, staged patch, unstaged state eller untracked paths mellem materialization og launch skal afvises før execution-consumption reservation kan føre til process launch.
 
 Dette er en TOCTOU-grænse, ikke en påstand om at human authorization signer staged-patch bytes. Hvis en senere policy kræver menneskelig godkendelse af selve patch-indholdet, skal den authority tilføjes eksplicit som en særskilt signed scope/boundary; den må ikke udledes af ADR-DC-030. Lokale commits og al publication authority forbliver fortsat separate gates.
 
@@ -152,7 +171,7 @@ Et gyldigt ADR-DC-034 requirements-artifact holder obligatorisk:
 
 Authority er kun `dc-l16-exact-task-execution-plan-requirements-only`.
 
-Det resolver ingen task registry, opretter ingen command catalog, læser ingen workspace, starter ingen subprocess, ændrer ingen Git-state og giver ingen publication authority.
+Det resolver ingen task registry, opretter ingen command catalog, opretter ingen execution-consumption reservation, læser ingen workspace, starter ingen subprocess, ændrer ingen Git-state og giver ingen publication authority.
 
 ## Local commit scope
 
@@ -164,6 +183,6 @@ Hvis en senere execution ønsker at materialisere en lokal commit efter successf
 
 Næste sikre boundary er host-pinned materialization af ét exact executor plan/capability fra ADR-DC-034 requirements og den **samme live ADR-DC-033 receipt**. Materialization skal selv resolve pilot→DevelopmentTask mapping, exact isolation attestation, exact signed runtime closure, canonical authority inputs og exact pre-execution `GitWorkspaceSnapshot`; caller må ikke levere verifiers, attestation, closure, keyrings, roots, environment, native process limits eller workspace snapshot identity.
 
-Den separate one-shot executor transaction skal derefter fresh re-snapshotte workspace lige før launch og kræve exact match med planens snapshot. Først når concrete task/catalog/toolchain/runtime/workspace/toolhost identities og workspace-state er verificeret mod planen, kan den kalde den eksisterende Tier-A runtime og udstede post-execution consumption evidence.
+Den separate one-shot executor transaction skal derefter fresh re-snapshotte workspace og kræve exact match med planens snapshot, durably create-once reservere den signerede execution nonce **før launch**, og kun derefter kalde den eksisterende Tier-A runtime. Concurrent/replayed reservations skal afvises, og uklar reservation/launch state skal forblive fail-closed. Efter execution skal den finalisere samme reservation med post-execution consumption evidence.
 
 `production_activation=false`.
