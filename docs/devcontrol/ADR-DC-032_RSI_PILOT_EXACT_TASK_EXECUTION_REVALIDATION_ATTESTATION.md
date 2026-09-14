@@ -61,6 +61,12 @@ Et cryptographically valid proof sætter altid `host_attestation_verified=true` 
 
 Et gyldigt signeret failed check bevares som audit-evidence med `execution_revalidation_observed=true` og `execution_revalidation_satisfied=false`.
 
+## Attestationens evidensgrænse
+
+ADR-DC-032 er en kryptografisk host-attestation af attestorens 25 signerede resultater. Modulet genindlæser eller måler ikke selv de 25 host-artifacts, operativsystemets kernel-state eller de konkrete evidence-kilder bag ADR-DC-031-digests.
+
+`execution_revalidation_satisfied=true` betyder derfor præcist, at en betroet host-signer har attesteret alle 25 checks som `true` for det exact-bound packet, og at signaturen samt upstream provenance er verificeret. Det er ikke et selvstændigt kernel-telemetry- eller artifact-collection proof.
+
 ## Fresh upstream provenance
 
 Production må ikke stole på indlejrede/deserialiserede ADR-DC-028 eller ADR-DC-030 proofs som selv-autentificerende.
@@ -101,13 +107,13 @@ Authority er kun:
 
 `verified-dc-l16-exact-task-execution-revalidation-attestation-only`
 
-ADR-DC-032 verifierer revalidation evidence; den consumer ikke execution authorization/noncen, udsteder ikke execution admission og kalder ingen executor.
+ADR-DC-032 verifierer den signerede revalidation-attestation og dens exact provenance; den consumer ikke execution authorization/noncen, udsteder ikke execution admission og kalder ingen executor.
 
 ## Næste boundary
 
-En senere separat host-local replay-safe boundary kan bruge et fully satisfied exact ADR-DC-032 proof som én nødvendig input til at consume den signerede execution authorization/nonce og udstede en one-shot execution-admission receipt.
+En senere separat host-local replay-safe boundary kan bruge et fully satisfied exact ADR-DC-032 proof som én nødvendig input til at consume den signerede execution authorization/nonce og udstede en one-shot execution-admission capability.
 
-Den senere admission må fortsat være adskilt fra selve executor-transaktionen. Ingen task bør køre som sideeffekt af verification eller admission.
+Den senere admission må fortsat være adskilt fra selve executor-transaktionen. Ingen task bør køre som sideeffekt af verification eller admission, og durable/reloaded admission-evidence må ikke alene kunne genvinde live execution authority.
 
 ## Ikke omfattet
 
