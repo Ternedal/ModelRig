@@ -8,7 +8,7 @@ ADR-DC-033 kan udstede én live, host-local, replay-safe admission for præcis d
 
 Det er stadig ikke sikkert at kalde en executor direkte. ADR-DC-033 binder pilot-task-ID, workspace-scope og upstream host-attested evidence, men den materialiserer ikke de konkrete runtime-objekter som eksisterende Tier-A execution kræver: `DevelopmentTask`, reviewed command catalog, toolchain, signed runtime closure, trusted Git runtime, Windows isolation evidence og exact workspace.
 
-De objekter må ikke blive caller-valgt authority blot fordi en tidligere host-attestation sagde, at tilsvarende gates var grønne. Der skal først være en separat boundary, som fastlåser hvilke konkrete objekter, trust roots og identitetschecks den senere executor-transaktion skal materialisere.
+De objekter må ikke blive caller-valgt authority blot fordi en tidligere host-attestation sagde, at tilsvarende gates var grønne. Der skal først være en separat boundary, som fastlåser hvilke konkrete objekter, trust roots, workspace-state og identitetschecks den senere executor-transaktion skal materialisere.
 
 ## Decision
 
@@ -75,10 +75,13 @@ En senere executor-consumption boundary skal conjunctively materialisere og veri
 28. unattended cadence forbidden;
 29. exact bounded execution budget;
 30. manual operator invocation;
-31. pre-execution Git snapshot;
-32. post-execution canonical Tier-A command receipt;
-33. fail-closed exact-base reset hvis workspace drift opdages;
-34. separat post-execution consumption receipt, så ADR-DC-033 admission ikke kan eksekveres to gange.
+31. en host-resolved pre-execution `GitWorkspaceSnapshot` med exact base HEAD, staged-patch SHA-256/byte count og dokumenteret tom unstaged/untracked state;
+32. exact workspace-state snapshot bundet ind i det materialiserede executor-plan/capability;
+33. fresh trusted-Git re-snapshot umiddelbart før process launch og exact equality med planens snapshot;
+34. enhver workspace-state ændring efter plan-materialization og før launch skal fail closed uden task execution;
+35. post-execution canonical Tier-A command receipt;
+36. fail-closed exact-base reset hvis workspace drift opdages;
+37. separat post-execution consumption receipt, så ADR-DC-033 admission ikke kan eksekveres to gange.
 
 ## Host-pinned executor authority
 
@@ -95,6 +98,18 @@ De eksplicitte host-pinning krav er nødvendige, fordi den eksisterende hardened
 `run_single_verified_tier_a_command_with_receipt(...)` tager desuden `git_runner`, `control_plane_root`, `source_env`, `process_memory_bytes` og `active_process_limit`. Den senere boundary skal derfor pinne den trusted Git authority, bevise signed toolhost/control-plane identity, bruge den host-ejede source environment gennem den eksisterende positive allowlist og resolve én canonical native process-limit policy. Caller må ikke levere `source_env`, memory-limit eller process-count. `executable_verifier` skal forblive `None`/ikke caller-valgt, i tråd med den eksisterende `LeasedCatalogMaterializer`-boundary.
 
 Disse krav giver ikke ADR-DC-034 process authority. De beskriver præcist, hvilke authority inputs en senere host-pinned materialization/executor boundary skal eje, før eksisterende Tier-A kode må kaldes.
+
+## Pre-execution workspace-state binding
+
+Den eksisterende `run_single_verified_tier_a_command_with_receipt(...)` kræver exact task base som `HEAD`, afviser unstaged og untracked state, men tillader bevidst en optional **staged patch** før execution. `GitWorkspaceSnapshot` binder allerede `head_sha`, staged patch SHA-256/byte count, unstaged patch SHA-256/byte count og untracked-path SHA-256/count.
+
+ADR-DC-030 human execution authorization binder task, base, canonical workspace og one-shot nonce, men binder ikke staged-patch hash direkte. ADR-DC-034 må derfor ikke lade en senere executor-plan sige blot "pre-execution snapshot required" og derefter acceptere hvad der tilfældigvis ligger staged ved launch.
+
+Den næste materialization boundary skal selv læse workspace gennem den host-pinned `TrustedGitRunner`, kræve exact base `HEAD`, kræve tom unstaged/untracked state og fryse hele `GitWorkspaceSnapshot` ind i plan/capability-identiteten. Hvis en staged patch findes, bliver dens exact SHA-256 og byte count dermed en del af den materialiserede plan-identitet.
+
+Den separate one-shot executor transaction skal tage en fresh trusted-Git snapshot **umiddelbart før launch** og kræve byte-identisk snapshot-identitet med planen. Enhver ændring af HEAD, staged patch, unstaged state eller untracked paths mellem materialization og launch skal afvises før `task_execution_started` kan blive sand.
+
+Dette er en TOCTOU-grænse, ikke en påstand om at human authorization signer staged-patch bytes. Hvis en senere policy kræver menneskelig godkendelse af selve patch-indholdet, skal den authority tilføjes eksplicit som en særskilt signed scope/boundary; den må ikke udledes af ADR-DC-030. Lokale commits og al publication authority forbliver fortsat separate gates.
 
 ## Existing executor substrate
 
@@ -147,8 +162,8 @@ Hvis en senere execution ønsker at materialisere en lokal commit efter successf
 
 ## Next boundary
 
-Næste sikre boundary er host-pinned materialization af ét exact executor plan/capability fra ADR-DC-034 requirements og den **samme live ADR-DC-033 receipt**. Materialization skal selv resolve pilot→DevelopmentTask mapping, exact isolation attestation, exact signed runtime closure og alle canonical trust roots/authority inputs ovenfor; caller må ikke levere verifiers, attestation, closure, keyrings, roots, environment eller native process limits.
+Næste sikre boundary er host-pinned materialization af ét exact executor plan/capability fra ADR-DC-034 requirements og den **samme live ADR-DC-033 receipt**. Materialization skal selv resolve pilot→DevelopmentTask mapping, exact isolation attestation, exact signed runtime closure, canonical authority inputs og exact pre-execution `GitWorkspaceSnapshot`; caller må ikke levere verifiers, attestation, closure, keyrings, roots, environment, native process limits eller workspace snapshot identity.
 
-Først når concrete task/catalog/toolchain/runtime/workspace/toolhost identities er verificeret mod den signed chain, kan en separat one-shot executor transaction kalde den eksisterende Tier-A runtime og udstede post-execution consumption evidence.
+Den separate one-shot executor transaction skal derefter fresh re-snapshotte workspace lige før launch og kræve exact match med planens snapshot. Først når concrete task/catalog/toolchain/runtime/workspace/toolhost identities og workspace-state er verificeret mod planen, kan den kalde den eksisterende Tier-A runtime og udstede post-execution consumption evidence.
 
 `production_activation=false`.
