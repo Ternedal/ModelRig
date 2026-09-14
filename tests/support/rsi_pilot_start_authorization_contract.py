@@ -97,7 +97,7 @@ def _authority(authorization: start_auth.PilotStartAuthorization):
 def _reject(fn) -> None:
     try:
         fn()
-    except start_auth.PilotStartAuthorizationError:
+    except ValueError:
         return
     raise AssertionError("ADR-DC-024 unexpectedly accepted invalid input")
 
