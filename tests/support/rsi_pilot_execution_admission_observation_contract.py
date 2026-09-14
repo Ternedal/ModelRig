@@ -225,6 +225,14 @@ def run_contract() -> None:
 
     run_attestation_contract()
 
+    # ADR-029 remains on the same transitive chain.  It may issue one live
+    # exact-task admission receipt but still does not execute the task itself.
+    from rsi_pilot_task_execution_admission_contract import (
+        run_contract as run_task_execution_admission_contract,
+    )
+
+    run_task_execution_admission_contract()
+
 
 if __name__ == "__main__":
     run_contract()
