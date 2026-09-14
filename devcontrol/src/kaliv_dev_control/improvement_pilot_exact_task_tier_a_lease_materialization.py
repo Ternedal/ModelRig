@@ -67,10 +67,14 @@ def _validate_internal_evidence(
 class PilotExactTaskTierALeaseMaterialization:
     """Hardened durable ADR-DC-036 evidence; never a live execution capability."""
 
-    __slots__ = ("_inner",)
+    __slots__ = ("__inner",)
 
     def __init__(self, inner: Any) -> None:
-        object.__setattr__(self, "_inner", _validate_internal_evidence(inner))
+        object.__setattr__(
+            self,
+            "_PilotExactTaskTierALeaseMaterialization__inner",
+            _validate_internal_evidence(inner),
+        )
 
     def __setattr__(self, name: str, value: Any) -> None:
         del name, value
@@ -92,23 +96,23 @@ class PilotExactTaskTierALeaseMaterialization:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        return getattr(self._inner, name)
+        return getattr(self.__inner, name)
 
     def __eq__(self, other: object) -> bool:
         return (
             type(other) is PilotExactTaskTierALeaseMaterialization
-            and self._inner == other._inner
+            and self.__inner == other.__inner
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return self._inner.to_dict()
+        return self.__inner.to_dict()
 
     def canonical_json(self) -> str:
-        return self._inner.canonical_json()
+        return self.__inner.canonical_json()
 
     @property
     def sha256(self) -> str:
-        return self._inner.sha256
+        return self.__inner.sha256
 
 
 class PilotExactTaskTierALeaseCapability:
@@ -215,10 +219,6 @@ class PilotExactTaskTierALeaseCapability:
         return True
 
     @property
-    def leased_registry(self) -> LeasedCommandRegistry:
-        return self._validate_live_authority()
-
-    @property
     def workspace_root(self) -> Path:
         self._validate_live_authority()
         return Path(self.__inner.workspace_root)
@@ -237,6 +237,18 @@ class PilotExactTaskTierALeaseCapability:
     def active_process_limit(self) -> int:
         self._validate_live_authority()
         return PILOT_EXACT_TASK_TIER_A_ACTIVE_PROCESS_LIMIT
+
+
+def _extract_live_leased_registry(
+    capability: PilotExactTaskTierALeaseCapability,
+) -> LeasedCommandRegistry:
+    """Private handoff seam for a later host-owned materialization boundary."""
+
+    if type(capability) is not PilotExactTaskTierALeaseCapability:
+        raise PilotExactTaskTierALeaseMaterializationError(
+            "exact live ADR-DC-036 capability is required"
+        )
+    return capability._validate_live_authority()
 
 
 def materialize_pilot_exact_task_tier_a_lease(
