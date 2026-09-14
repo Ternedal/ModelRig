@@ -464,3 +464,28 @@ deploy og production activation false. Replay-safe consumption/start-receipt er
 en separat senere authority-boundary.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-024_RSI_PILOT_START_AUTHORIZATION.md`
+
+## ADR-DC-025 — Host-local one-shot consumption of one verified pilot-start authorization
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Indfører en separat host-local replay-boundary, som kun kan forbruge ét exact
+verificeret ADR-DC-024 one-shot start-proof. Production re-verificerer frisk den
+host-pinnede ADR-DC-024 authority — inklusive detached ADR-DC-023 provenance —
+før ledger-state må muteres, og kræver at signer-, signature-, proof- og
+scope-identitet matcher det præsenterede proof.
+
+Start-noncen er ledger-key i en pre-provisioned host-admin-kontrolleret ledger.
+Create-once reservation, pending og final receipt gør crash-uncertainty monotont
+fail-closed: efter publiceret reservation kan noncen ikke blive brugbar igen,
+heller ikke hvis processen fejler før et final receipt findes.
+
+Et gyldigt receipt kan kun bevise host-local consumption:
+`host_local_replay_guard_committed=true`, `start_consumed=true` og
+`pilot_start_authorized=true`. `global_replay_safe=false`,
+`pilot_execution_authorized=false`, `integration_ready=false`,
+`product_pilot_started=false`, local commit, remote write/push/PR/merge/release/
+deploy og production activation forbliver false. Consumption er token-accounting,
+ikke pilot execution.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-025_RSI_PILOT_START_CONSUMPTION.md`
