@@ -92,7 +92,7 @@ def run_contract() -> None:
             "one_shot_executor_consumption_required",
             "host_pinned_task_registry_required",
             "exact_development_task_required",
-            "selected_task_identity_match_required",
+            "selected_pilot_task_mapping_required",
             "task_repository_base_match_required",
             "canonical_workspace_match_required",
             "single_fixed_command_required",
