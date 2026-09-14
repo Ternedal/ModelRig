@@ -157,6 +157,8 @@ _REQUIRED_TRUE = (
     "exact_toolchain_binding_required",
     "signed_runtime_closure_required",
     "host_pinned_physical_verifier_required",
+    "host_resolved_isolation_attestation_required",
+    "caller_selected_isolation_attestation_forbidden",
     "host_pinned_runtime_closure_verifier_required",
     "canonical_trusted_runtime_root_required",
     "host_pinned_trusted_git_runner_required",
@@ -227,6 +229,8 @@ class PilotExactTaskExecutionPlanRequirements:
     exact_toolchain_binding_required: bool = True
     signed_runtime_closure_required: bool = True
     host_pinned_physical_verifier_required: bool = True
+    host_resolved_isolation_attestation_required: bool = True
+    caller_selected_isolation_attestation_forbidden: bool = True
     host_pinned_runtime_closure_verifier_required: bool = True
     canonical_trusted_runtime_root_required: bool = True
     host_pinned_trusted_git_runner_required: bool = True
