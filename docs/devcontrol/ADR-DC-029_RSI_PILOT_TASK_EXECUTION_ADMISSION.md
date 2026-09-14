@@ -27,18 +27,25 @@ En execution-admission kræver samtidig:
 
 Production må ikke acceptere caller-valgt ledger, verifier eller clock.
 
-## Exact binding
+## Stable one-shot identity og exact evidence binding
 
-Admission-keyen binder mindst:
+Replay-keyen skal være stabil på tværs af ny host-attestation af det samme start-
+consumption scope. Den binder derfor kun den authority-identitet, der ikke må
+kunne fornyes ved re-attestation:
 
-- ADR-DC-028 `attestation_sha256`;
 - ADR-DC-025 `start_receipt_sha256`;
 - signed `start_nonce_sha256`;
 - exact `selected_pilot_task_id`.
 
-Receiptet binder derudover:
+ADR-DC-028 `attestation_sha256` må **ikke** indgå i replay-keyen. Ellers ville en
+ny gyldig host-attestation over samme ADR-DC-025 consumption og samme task kunne
+producere en ny ledger-key og dermed omgå one-shot-grænsen.
+
+Den exact ADR-DC-028 attestation for den konkrete admission forbliver stadig
+bundet som evidens i replay-marker og receipt. Receiptet binder desuden:
 
 - exact ADR-DC-028 proof + proof digest;
+- exact ADR-DC-028 `attestation_sha256`;
 - detached attestation-signaturens digest;
 - ADR-DC-027 packet digest;
 - exact workspace-root digest;
@@ -46,8 +53,10 @@ Receiptet binder derudover:
 - canonical admission-ledger identity;
 - fresh verification- og admission-timestamps.
 
-Task-, workspace-, nonce-, receipt-, proof- eller attestation-rebinding kræver ny
-upstream authority og en ny create-once admission identity.
+Task-, workspace-, nonce-, receipt-, proof- eller attestation-rebinding må ikke
+svække evidensbindingen. En ny ADR-DC-028 attestation over samme start-receipt,
+nonce og task rammer stadig samme create-once replay-slot og kan derfor ikke
+udstede en anden one-shot admission.
 
 ## Live authority og reload
 
@@ -92,16 +101,16 @@ ADR-DC-029 registrerer ingen normal ModelRig-command, starter ingen subprocess,
 udfører ingen shell/task, skriver ikke workspace/Git og foretager ingen network-
 eller GitHub-mutation.
 
-En senere separat executor-boundary skal kræve det exact live ADR-029 receipt,
+En senere separat executor-boundary skal kræve det exact live ADR-DC-029 receipt,
 consume det one-shot og udstede separat execution evidence. Først det senere led
 må udføre den allowlistede task.
 
 ## Failure semantics
 
-Replay, stale admission, failed ADR-DC-028 check, manglende live ADR-DC-025
-provenance, fresh-proof drift, ledger collision, partial publication eller
-post-reservation expiry fejler lukket. En permanent reservation må ikke slettes
-for at genåbne authority efter usikker/crashed publication.
+Replay, re-attestation replay, stale admission, failed ADR-DC-028 check, manglende
+live ADR-DC-025 provenance, fresh-proof drift, ledger collision, partial
+publication eller post-reservation expiry fejler lukket. En permanent reservation
+må ikke slettes for at genåbne authority efter usikker/crashed publication.
 
 ## Konsekvens
 
