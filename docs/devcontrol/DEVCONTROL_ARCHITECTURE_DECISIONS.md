@@ -556,3 +556,27 @@ Næste separate led er explicit execution-admission/executor authority for præc
 den valgte task; ADR-DC-028 udfører ingen command eller pilot-task.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-028_RSI_PILOT_EXECUTION_ADMISSION_ATTESTATION.md`
+
+## ADR-DC-029 — Replay-safe one-shot admission for one exact DC-L16 pilot task
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Udsteder kun én live, host-local execution-admission til præcis den allerede
+valgte pilot-task efter et fully satisfied ADR-DC-028 proof. Production kræver
+fresh host-pinned re-verifikation af ADR-DC-028-signaturen, exact stable-proof
+identity, den oprindelige live ADR-DC-025 consumption-transaction og en canonical
+host-admin-kontrolleret create-once ledger.
+
+Replay-keyen er stabil på tværs af re-attestation og bindes til ADR-DC-025
+`start_receipt_sha256`, signed `start_nonce_sha256` og exact selected task. En ny
+gyldig ADR-DC-028 attestation over samme consumption/task kan derfor ikke åbne en
+ny replay-slot. Den konkrete ADR-DC-028 attestation/signatur, packet, workspace og
+local-commit scope forbliver samtidig exact-bundet som receipt/lock evidence.
+
+Et live receipt kan sætte `task_execution_authorized=true`, men kræver samtidig
+`one_shot_execution_required=true` og `execution_consumed=false`. Serialized
+reload genvinder ikke live transaction authority. Der udføres ingen task,
+registreres ingen normal command og gives ingen local-commit, remote publication,
+merge/release/deploy eller production-activation authority.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-029_RSI_PILOT_TASK_EXECUTION_ADMISSION.md`
