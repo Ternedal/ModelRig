@@ -10,6 +10,9 @@ SUPPORT = ROOT / "tests" / "support"
 if str(SUPPORT) not in sys.path:
     sys.path.insert(0, str(SUPPORT))
 
+from rsi_pilot_product_integration_implementation_handoff_contract import (  # noqa: E402
+    run_contract as run_handoff_contract,
+)
 from source_code import code_of  # noqa: E402
 
 INVENTORY = ROOT / "docs/devcontrol/dc-l16/product-integration-inventory.json"
@@ -94,3 +97,4 @@ def run_contract() -> None:
         assert 'const devControlPilotFlag = "KALIV_DEVCONTROL_PILOT"' in pilot
         assert 'os.Getenv(devControlPilotFlag) == "1"' in pilot
         assert "kaliv_dev_control" not in pilot
+        run_handoff_contract()
