@@ -55,16 +55,16 @@ En senere executor-consumption boundary skal conjunctively materialisere og veri
 8. præcis én fixed required command;
 9. et reviewed **non-empty** command catalog for denne execution — det normale ModelRig catalog forbliver tomt;
 10. exact toolchain binding;
-11. signed runtime closure;
+11. en exact host-resolved signed runtime closure; caller må ikke vælge mellem signer-godkendte closure-artifacts;
 12. en host-pinned `WindowsPhysicalIsolationVerifier`, inklusive dens physical-evidence root, keyring, freshness policy, clock og file bound;
 13. en host-resolved exact `IsolationAttestation`, bundet til task/catalog/toolchain og den samme canonical physical-evidence authority;
 14. caller-selected `IsolationAttestation` forbidden, også når objektet isoleret set har korrekt Python-type og schema;
 15. en host-pinned `RuntimeClosureVerifier`, inklusive dens verification keyring og closure budgets;
-16. canonical trusted-runtime-root, som den signerede runtime closure er bundet til;
+16. en canonical **host-resolved** trusted-runtime-root, som den signerede runtime closure er bundet til; caller-selected root er forbidden;
 17. en host-pinned `TrustedGitRunner`, ikke en caller-konstrueret Git authority;
 18. signed control-plane/toolhost identity, så caller ikke kan vælge en anden `control_plane_root`;
-19. reviewed source environment for den native launch path; caller-valgt `source_env` må ikke blive credential/environment authority;
-20. exact native process limits, inklusive memory- og active-process bounds, i tillæg til taskens runtime/output budget;
+19. reviewed host-owned source environment for den native launch path; caller-valgt `source_env` er forbidden;
+20. exact host-resolved native process limits, inklusive memory- og active-process bounds, i tillæg til taskens runtime/output budget; caller-valgte limits er forbidden;
 21. caller-selected executable verifier forbidden; den eksisterende materializer accepterer ikke en alternativ verifier;
 22. trusted Git runtime identity;
 23. native Windows Tier-A isolation;
@@ -82,15 +82,17 @@ En senere executor-consumption boundary skal conjunctively materialisere og veri
 
 ## Host-pinned executor authority
 
-De eksplicitte host-pinning krav er nødvendige, fordi den eksisterende hardened Tier-A API med vilje tager flere authority-bearing objekter som inputs. En korrekt Python-type er ikke i sig selv en canonical trust root.
+De eksplicitte host-pinning krav er nødvendige, fordi den eksisterende hardened Tier-A API med vilje tager flere authority-bearing objekter som inputs. En korrekt Python-type eller en isoleret gyldig signatur er ikke i sig selv en canonical current execution authority.
 
 `WindowsPhysicalIsolationVerifier` konstrueres blandt andet med `evidence_root` og `keyring`. En caller-konstrueret verifier kunne derfor ellers verificere caller-valgt fysisk evidence med caller-valgte signing keys. Den senere materialization boundary skal selv eje og resolve den canonical verifier; caller må ikke levere den.
 
 `IsolationAttestation` er samtidig et separat input til `run_verified_tier_a_command(...)`. Selvom den eksisterende `LeasedCatalogMaterializer` revaliderer attestationens task/catalog/toolchain-identitet og kræver et report fra `WindowsPhysicalIsolationVerifier`, må caller ikke vælge mellem eller konstruere attestationer som execution authority. Den senere boundary skal host-resolve den exact attestation fra den canonical physical-evidence context og bevise dens binding til exact `DevelopmentTask`, reviewed catalog og exact toolchain før Tier-A materialization.
 
-`RuntimeClosureVerifier` konstrueres med sin egen keyring og verifier budgets, mens `trusted_runtime_root` er en separat path authority bundet ind i runtime-closure manifestet. Begge skal resolves fra host-controlled configuration, ikke fra execution-requestet.
+`SignedRuntimeClosureManifest` er også et direkte executor-input. Runtime-closure signaturen beviser, at en closure er signer-godkendt og binder den til task/catalog/toolchain/lease/workspace/root, men den udpeger ikke alene hvilken af flere potentielt signer-godkendte closures der er den current execution authority. Den senere boundary skal derfor host-resolve den exact signed closure; caller-selected closure er forbidden.
 
-`run_single_verified_tier_a_command_with_receipt(...)` tager desuden `git_runner`, `control_plane_root`, `source_env`, `process_memory_bytes` og `active_process_limit`. Den senere boundary skal derfor pinne den trusted Git authority, bevise signed toolhost/control-plane identity, levere et reviewed/sanitized source environment og fastlåse native process limits. `executable_verifier` skal forblive `None`/ikke caller-valgt, i tråd med den eksisterende `LeasedCatalogMaterializer`-boundary.
+`RuntimeClosureVerifier` konstrueres med sin egen keyring og verifier budgets, mens `trusted_runtime_root` er en separat path authority. `trusted_runtime_root_sha256(...)` binder den canonical absolute root-path ind i runtime-closure manifestet. Derfor skal både verifieren og rooten resolves fra host-controlled configuration. Ellers kan en caller vælge en anden signer-godkendt closure/root-kombination uden at bryde closure-signaturen.
+
+`run_single_verified_tier_a_command_with_receipt(...)` tager desuden `git_runner`, `control_plane_root`, `source_env`, `process_memory_bytes` og `active_process_limit`. Den senere boundary skal derfor pinne den trusted Git authority, bevise signed toolhost/control-plane identity, bruge den host-ejede source environment gennem den eksisterende positive allowlist og resolve én canonical native process-limit policy. Caller må ikke levere `source_env`, memory-limit eller process-count. `executable_verifier` skal forblive `None`/ikke caller-valgt, i tråd med den eksisterende `LeasedCatalogMaterializer`-boundary.
 
 Disse krav giver ikke ADR-DC-034 process authority. De beskriver præcist, hvilke authority inputs en senere host-pinned materialization/executor boundary skal eje, før eksisterende Tier-A kode må kaldes.
 
@@ -145,7 +147,7 @@ Hvis en senere execution ønsker at materialisere en lokal commit efter successf
 
 ## Next boundary
 
-Næste sikre boundary er host-pinned materialization af ét exact executor plan/capability fra ADR-DC-034 requirements og den **samme live ADR-DC-033 receipt**. Materialization skal selv resolve pilot→DevelopmentTask mapping, exact isolation attestation og alle canonical trust roots/authority inputs ovenfor; caller må ikke levere verifiers, attestation, keyrings, roots, environment eller native process limits.
+Næste sikre boundary er host-pinned materialization af ét exact executor plan/capability fra ADR-DC-034 requirements og den **samme live ADR-DC-033 receipt**. Materialization skal selv resolve pilot→DevelopmentTask mapping, exact isolation attestation, exact signed runtime closure og alle canonical trust roots/authority inputs ovenfor; caller må ikke levere verifiers, attestation, closure, keyrings, roots, environment eller native process limits.
 
 Først når concrete task/catalog/toolchain/runtime/workspace/toolhost identities er verificeret mod den signed chain, kan en separat one-shot executor transaction kalde den eksisterende Tier-A runtime og udstede post-execution consumption evidence.
 
