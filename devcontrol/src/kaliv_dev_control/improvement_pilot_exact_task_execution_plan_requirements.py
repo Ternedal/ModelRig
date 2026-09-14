@@ -147,6 +147,11 @@ _REQUIRED_TRUE = (
     "live_admission_receipt_required",
     "exact_admission_receipt_identity_required",
     "one_shot_executor_consumption_required",
+    "durable_pre_launch_execution_consumption_reservation_required",
+    "execution_consumption_key_is_signed_nonce_required",
+    "concurrent_execution_replay_forbidden",
+    "uncertain_execution_consumption_reservation_fails_closed",
+    "post_execution_consumption_finalizes_reservation_required",
     "host_pinned_task_registry_required",
     "exact_development_task_required",
     "selected_pilot_task_mapping_required",
@@ -229,6 +234,11 @@ class PilotExactTaskExecutionPlanRequirements:
     live_admission_receipt_required: bool = True
     exact_admission_receipt_identity_required: bool = True
     one_shot_executor_consumption_required: bool = True
+    durable_pre_launch_execution_consumption_reservation_required: bool = True
+    execution_consumption_key_is_signed_nonce_required: bool = True
+    concurrent_execution_replay_forbidden: bool = True
+    uncertain_execution_consumption_reservation_fails_closed: bool = True
+    post_execution_consumption_finalizes_reservation_required: bool = True
     host_pinned_task_registry_required: bool = True
     exact_development_task_required: bool = True
     selected_pilot_task_mapping_required: bool = True
