@@ -5,6 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "start_receipt",
     "start_receipt_sha256",
     "authorization_proof_sha256",
     "fresh_authorization_proof_sha256",
@@ -56,6 +57,7 @@
     "schema"
   ],
   "properties": {
+    "start_receipt": {"$ref": "rsi-pilot-start-consumption-receipt-v1.schema.json"},
     "start_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "authorization_proof_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "fresh_authorization_proof_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
