@@ -531,3 +531,28 @@ ADR-DC-027 packet. Selv en senere green host-verification er ikke automatisk tas
 execution uden en særskilt execution-admission/executor boundary.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-027_RSI_PILOT_EXECUTION_ADMISSION_OBSERVATION.md`
+
+## ADR-DC-028 — Host-attested execution-admission verification without task execution authority
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Verificerer ét exact ADR-DC-027 observation packet med en host-pinned Ed25519
+verification-only trust-root. Det signerede claim indlejrer hele packetet, binder
+`packet_sha256` og `start_receipt_sha256` og indeholder præcis ét boolsk resultat
+for hvert af de 21 ADR-DC-026/027 checks.
+
+Et cryptographically valid proof kan kun sætte `host_attestation_verified=true`,
+`execution_admission_observed=true` og `execution_admission_satisfied=true` når
+alle 21 signerede resultater er true. Et gyldigt signeret failed check forbliver
+observed men unsatisfied.
+
+Selv et fuldt grønt proof holder `task_execution_authorized=false`,
+`integration_ready=false`, `product_pilot_started=false`, local commit og alle
+remote/publication/activation authorities false. Production afviser caller-valgt
+verifier og resolver kun canonical host-controlled verification state under
+elevated host operator.
+
+Næste separate led er explicit execution-admission/executor authority for præcis
+den valgte task; ADR-DC-028 udfører ingen command eller pilot-task.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-028_RSI_PILOT_EXECUTION_ADMISSION_ATTESTATION.md`
