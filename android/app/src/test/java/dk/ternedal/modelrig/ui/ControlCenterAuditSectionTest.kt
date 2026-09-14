@@ -52,4 +52,9 @@ class ControlCenterAuditSectionTest {
         )
         assertEquals("Audit kunne ikke hentes.", controlCenterAuditError(null))
     }
+    @Test
+    fun unknownAuditErrorsDoNotEchoRawDetails() {
+        val raw = "RuntimeException: /data/user/0/private.db Bearer device-token-123"
+        assertEquals("Audit kunne ikke hentes.", controlCenterAuditError(raw))
+    }
 }

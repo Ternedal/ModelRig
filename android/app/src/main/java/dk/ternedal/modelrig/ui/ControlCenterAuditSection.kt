@@ -72,7 +72,7 @@ internal fun controlCenterAuditError(raw: String?): String {
             message.contains("ConnectException") ->
             "Kan ikke nå riggen for audit."
         message.isBlank() -> "Audit kunne ikke hentes."
-        else -> message.take(300)
+        else -> "Audit kunne ikke hentes."
     }
 }
 
