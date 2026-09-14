@@ -162,7 +162,7 @@ admission. Production resolver runner-signature trust fra en fast host-admin-
 kontrolleret verification-only keyring; caller-valgt verifier er ikke authority.
 Den exact `TrustedGitRuntime` skal samtidig være host-admin-kontrolleret og køres
 direkte gennem den restricted read-only Git-reader — production kopierer ikke
-executable bytes til en same-user runtime-copy. Private underscored tests kan
+executable bytes til en same-user staging-root. Private underscored tests kan
 fortsat bruge injectable verifier + transaction-private runtime staging.
 
 Admission-lock og final receipt arver ADR-DC-009's original-publication
