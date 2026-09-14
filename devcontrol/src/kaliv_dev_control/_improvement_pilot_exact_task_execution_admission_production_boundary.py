@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ._improvement_physical_state_host_control import (
     PhysicalHostStateError,
@@ -76,6 +76,38 @@ def _snapshot_proof(
         ) from exc
 
 
+def _nondecreasing_admission_clock(implementation: Any) -> Callable[[], str]:
+    """Fail closed if wall time moves backwards during one durable admission.
+
+    ADR-DC-033 reads wall time once before the create-once nonce reservation and
+    again after that reservation, immediately before receipt publication.  Both
+    samples can individually be inside the signed freshness window while still
+    being temporally inconsistent if the host clock moves backwards between the
+    two reads.  Production therefore wraps the canonical clock with a
+    transaction-local non-decreasing check.  Equal seconds are allowed because
+    the canonical clock has one-second resolution.
+    """
+    last = None
+
+    def now() -> str:
+        nonlocal last
+        value = implementation._now_utc_seconds()
+        try:
+            current = implementation._utc(value, name="production admission clock")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise implementation.PilotExactTaskExecutionAdmissionError(
+                "production exact-task execution admission clock is invalid"
+            ) from exc
+        if last is not None and current < last:
+            raise implementation.PilotExactTaskExecutionAdmissionError(
+                "system clock moved backwards during exact-task execution admission"
+            )
+        last = current
+        return value
+
+    return now
+
+
 def install_pilot_exact_task_execution_admission_production_boundary(
     implementation: Any,
 ) -> None:
@@ -130,11 +162,12 @@ def install_pilot_exact_task_execution_admission_production_boundary(
         try:
             root = _canonical_ledger_root()
             ledger = implementation._PilotExactTaskExecutionAdmissionLedger(root)
+            guarded_now = _nondecreasing_admission_clock(implementation)
             return implementation._admit_verified_exact_task_execution(
                 supplied_proof=supplied,
                 fresh_proof=fresh,
                 ledger=ledger,
-                now_provider=implementation._now_utc_seconds,
+                now_provider=guarded_now,
             )
         except (
             PilotExactTaskExecutionAdmissionProductionBoundaryError,
