@@ -1,7 +1,7 @@
 """Replay-safe live admission for one exact DC-L16 pilot task.
 
 ADR-DC-029 may authorize exactly one selected task for a later executor, but it
-does not execute commands.  Admission is bound to a satisfied ADR-DC-028 proof,
+does not execute commands. Admission is bound to a satisfied ADR-DC-028 proof,
 one live ADR-DC-025 consumption transaction and a host-local create-once ledger.
 Serialized receipts retain historical admission evidence but lose live transaction
 provenance; a future executor must require the exact live receipt and consume it
@@ -15,20 +15,20 @@ import os
 import re
 import weakref
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from ._improvement_pilot_execution_admission_attestation_impl import (
+    PILOT_EXECUTION_ADMISSION_ATTESTATION_PROOF_AUTHORITY,
+    PilotExecutionAdmissionAttestationProof,
+)
 from ._improvement_pilot_start_consumption_impl import (
     _path_sha256,
     _read_bound_file,
     _safe_ledger_root,
 )
 from .durable_publication import DurablePublicationError, create_once_file, unlink_durable
-from ._improvement_pilot_execution_admission_attestation_impl import (
-    PILOT_EXECUTION_ADMISSION_ATTESTATION_PROOF_AUTHORITY,
-    PilotExecutionAdmissionAttestationProof,
-)
 
 PILOT_TASK_EXECUTION_ADMISSION_RECEIPT_SCHEMA = (
     "kaliv-rsi-dc-l16-pilot-task-execution-admission-receipt/v1"
@@ -230,10 +230,10 @@ def _scope(proof: PilotExecutionAdmissionAttestationProof) -> dict[str, Any]:
 
 
 def _admission_key(proof: PilotExecutionAdmissionAttestationProof) -> str:
+    """Return the stable one-shot identity independent of re-attestation."""
     scope = _scope(proof)
     material = _canonical(
         {
-            "attestation_sha256": proof.attestation_sha256,
             "start_receipt_sha256": proof.start_receipt_sha256,
             "start_nonce_sha256": scope["start_nonce_sha256"],
             "selected_pilot_task_id": scope["selected_pilot_task_id"],
