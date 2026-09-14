@@ -99,8 +99,31 @@ def _require_consumed_receipt(value: Any) -> PilotStartConsumptionReceipt:
     return value
 
 
+def _receipt_binding(receipt: PilotStartConsumptionReceipt) -> dict[str, Any]:
+    consumed = _require_consumed_receipt(receipt)
+    authorization = consumed.authorization_proof.authorization
+    return {
+        "start_receipt_sha256": consumed.sha256,
+        "authorization_proof_sha256": consumed.authorization_proof_sha256,
+        "fresh_authorization_proof_sha256": consumed.fresh_authorization_proof_sha256,
+        "authorization_signature_sha256": consumed.authorization_signature_sha256,
+        "preflight_signature_sha256": consumed.preflight_signature_sha256,
+        "start_nonce_sha256": consumed.start_nonce_sha256,
+        "ledger_root_path_sha256": consumed.ledger_root_path_sha256,
+        "repository": authorization.repository,
+        "base_sha": authorization.base_sha,
+        "requested_main_sha": authorization.requested_main_sha,
+        "trial_id": authorization.trial_id,
+        "operator_surface": authorization.operator_surface,
+        "selected_pilot_task_id": authorization.selected_pilot_task_id,
+        "workspace_root_path_sha256": authorization.workspace_root_path_sha256,
+        "local_commits_allowed_by_human_scope": authorization.local_commits_allowed,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class PilotExecutionAdmissionRequirements:
+    start_receipt: PilotStartConsumptionReceipt
     start_receipt_sha256: str
     authorization_proof_sha256: str
     fresh_authorization_proof_sha256: str
@@ -154,6 +177,7 @@ class PilotExecutionAdmissionRequirements:
     def __post_init__(self) -> None:
         if self.schema != PILOT_EXECUTION_ADMISSION_REQUIREMENTS_SCHEMA:
             raise PilotExecutionAdmissionRequirementsError("requirements schema unsupported")
+        receipt = _require_consumed_receipt(self.start_receipt)
         for name in (
             "start_receipt_sha256",
             "authorization_proof_sha256",
@@ -174,6 +198,15 @@ class PilotExecutionAdmissionRequirements:
         if type(self.local_commits_allowed_by_human_scope) is not bool:
             raise PilotExecutionAdmissionRequirementsError(
                 "local_commits_allowed_by_human_scope must be boolean"
+            )
+        expected = _receipt_binding(receipt)
+        mismatch = next(
+            (name for name, item in expected.items() if getattr(self, name) != item),
+            None,
+        )
+        if mismatch is not None:
+            raise PilotExecutionAdmissionRequirementsError(
+                f"execution-admission receipt binding mismatch: {mismatch}"
             )
         required_true = (
             "host_ledger_revalidation_required",
@@ -229,10 +262,27 @@ class PilotExecutionAdmissionRequirements:
         expected = set(cls.__dataclass_fields__)
         if set(value) != expected:
             raise PilotExecutionAdmissionRequirementsError("requirements fields mismatch")
-        return cls(**dict(value))
+        data = dict(value)
+        nested = data.get("start_receipt")
+        if not isinstance(nested, Mapping):
+            raise PilotExecutionAdmissionRequirementsError("start_receipt must be an object")
+        try:
+            data["start_receipt"] = PilotStartConsumptionReceipt.from_mapping(nested)
+        except Exception as exc:
+            raise PilotExecutionAdmissionRequirementsError(
+                "nested ADR-DC-025 receipt is invalid"
+            ) from exc
+        return cls(**data)
 
     def to_dict(self) -> dict[str, Any]:
-        return {name: getattr(self, name) for name in self.__dataclass_fields__}
+        return {
+            name: (
+                self.start_receipt.to_dict()
+                if name == "start_receipt"
+                else getattr(self, name)
+            )
+            for name in self.__dataclass_fields__
+        }
 
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
@@ -246,23 +296,9 @@ def build_pilot_execution_admission_requirements(
     receipt: PilotStartConsumptionReceipt,
 ) -> PilotExecutionAdmissionRequirements:
     consumed = _require_consumed_receipt(receipt)
-    authorization = consumed.authorization_proof.authorization
     return PilotExecutionAdmissionRequirements(
-        start_receipt_sha256=consumed.sha256,
-        authorization_proof_sha256=consumed.authorization_proof_sha256,
-        fresh_authorization_proof_sha256=consumed.fresh_authorization_proof_sha256,
-        authorization_signature_sha256=consumed.authorization_signature_sha256,
-        preflight_signature_sha256=consumed.preflight_signature_sha256,
-        start_nonce_sha256=consumed.start_nonce_sha256,
-        ledger_root_path_sha256=consumed.ledger_root_path_sha256,
-        repository=authorization.repository,
-        base_sha=authorization.base_sha,
-        requested_main_sha=authorization.requested_main_sha,
-        trial_id=authorization.trial_id,
-        operator_surface=authorization.operator_surface,
-        selected_pilot_task_id=authorization.selected_pilot_task_id,
-        workspace_root_path_sha256=authorization.workspace_root_path_sha256,
-        local_commits_allowed_by_human_scope=authorization.local_commits_allowed,
+        start_receipt=consumed,
+        **_receipt_binding(consumed),
     )
 
 
