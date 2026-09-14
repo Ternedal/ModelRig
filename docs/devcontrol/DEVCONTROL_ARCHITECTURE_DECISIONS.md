@@ -162,7 +162,7 @@ admission. Production resolver runner-signature trust fra en fast host-admin-
 kontrolleret verification-only keyring; caller-valgt verifier er ikke authority.
 Den exact `TrustedGitRuntime` skal samtidig være host-admin-kontrolleret og køres
 direkte gennem den restricted read-only Git-reader — production kopierer ikke
-executable bytes til en same-user staging-root. Private underscored tests kan
+executable bytes til en same-user runtime-copy. Private underscored tests kan
 fortsat bruge injectable verifier + transaction-private runtime staging.
 
 Admission-lock og final receipt arver ADR-DC-009's original-publication
@@ -316,3 +316,21 @@ reader, command registry, executor, network transport, publication eller
 production activation tilføjes.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-017_RSI_PILOT_PREFLIGHT_REQUIREMENTS.md`
+
+## ADR-DC-018 — Exact-source product integration inventory before surface selection
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Kortlægger tre eksisterende produktkandidater med exact Git blob-identitet:
+Desktop Control Center, Android Control Center og backendens lokale route-host
+mønster. Inventoryet dokumenterer eksisterende paired/Bearer og default-off
+precedents, men vælger ingen operator surface, feature flag, route, observer
+eller task registry.
+
+Alle kandidater forbliver `selected=false`; `integration_ready`, runtime/preflight
+claims, pilot-start og product-pilot-start forbliver false. Produktkilderne må
+fortsat ikke importere `kaliv_dev_control`, og slicen ændrer ingen produktkode.
+Ingen remote write/push/PR/merge/release/deploy eller production activation
+autoriseres.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-018_RSI_PILOT_PRODUCT_INTEGRATION_INVENTORY.md`
