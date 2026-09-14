@@ -399,3 +399,24 @@ Der oprettes ingen faktisk signed selection artifact og ingen product surface
 vælges i denne slice.
 
 Fuldtekst: `docs/devcontrol/ADR-DC-021_RSI_PILOT_PRODUCT_INTEGRATION_HUMAN_SELECTION.md`
+
+## ADR-DC-022 — Host-attested runtime preflight evidence without pilot-start authority
+
+**Dato 14/09-2026. Status: foreslået til beslutning.**
+
+Verificerer et separat host-attesteret Ed25519 runtime-preflight report mod exact
+ADR-DC-021 human selection proof og exact ADR-DC-017 requirements. Observationen
+binder exact selection/candidate/requirements/trial/source/design identities,
+observer host/actor, UTC time og runtime receipt.
+
+Observationen er kun en signable claim. Production accepterer ikke caller-valgt
+verifier og resolver kun en separat host-admin-kontrolleret verification-only
+public-key keyring. Et gyldigt signed report giver `preflight_observed=true`;
+`preflight_satisfied=true` kun hvis alle tolv ADR-DC-017 checks er true. Et
+signeret failed report bevares som audit-evidence med `preflight_satisfied=false`.
+
+Selv et satisfied proof holder `integration_ready`, pilot-start,
+product-pilot-start, remote write/push/PR/merge/release/deploy og production
+activation false.
+
+Fuldtekst: `docs/devcontrol/ADR-DC-022_RSI_PILOT_RUNTIME_PREFLIGHT_ATTESTATION.md`
