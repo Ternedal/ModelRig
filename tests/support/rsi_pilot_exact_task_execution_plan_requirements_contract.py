@@ -99,6 +99,14 @@ def run_contract() -> None:
             "reviewed_nonempty_command_catalog_required",
             "exact_toolchain_binding_required",
             "signed_runtime_closure_required",
+            "host_pinned_physical_verifier_required",
+            "host_pinned_runtime_closure_verifier_required",
+            "canonical_trusted_runtime_root_required",
+            "host_pinned_trusted_git_runner_required",
+            "control_plane_toolhost_binding_required",
+            "reviewed_source_environment_required",
+            "exact_native_process_limits_required",
+            "caller_selected_executable_verifier_forbidden",
             "trusted_git_runtime_required",
             "native_windows_tier_a_required",
             "network_deny_required",
@@ -165,7 +173,7 @@ def run_contract() -> None:
             )
         )
 
-        # Receipt/scope rebinding is rejected even though this layer executes no I/O.
+        # Every copied receipt/scope field is an exact binding, not caller input.
         for field, value in (
             ("admission_receipt_sha256", "1" * 64),
             ("admission_key_sha256", "2" * 64),
@@ -173,10 +181,17 @@ def run_contract() -> None:
             ("revalidation_attestation_proof_sha256", "4" * 64),
             ("execution_authorization_proof_sha256", "5" * 64),
             ("start_receipt_sha256", "6" * 64),
+            ("repository", "Other/Repository"),
             ("base_sha", "a" * 40),
             ("requested_main_sha", "b" * 40),
+            ("trial_id", "different.trial"),
+            ("operator_surface", "different.operator"),
             ("selected_pilot_task_id", "different.task"),
             ("workspace_root_path_sha256", "7" * 64),
+            (
+                "local_commits_allowed_by_human_scope",
+                not requirements.local_commits_allowed_by_human_scope,
+            ),
         ):
             _reject(
                 lambda field=field, value=value: plan_req.PilotExactTaskExecutionPlanRequirements.from_mapping(
