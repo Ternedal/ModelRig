@@ -250,6 +250,10 @@ class PilotStartConsumptionReceipt:
         ):
             _hex64(getattr(self, name), name=name)
         _identifier(self.ledger_id, name="ledger_id")
+        if self.ledger_id != PILOT_START_CONSUMPTION_LEDGER_ID:
+            raise PilotStartConsumptionError(
+                "pilot-start consumption receipt ledger ID is invalid"
+            )
         for name in ("trial_id", "operator_surface", "selected_pilot_task_id"):
             _identifier(getattr(self, name), name=name)
         if self.repository != "Ternedal/ModelRig":
@@ -373,6 +377,10 @@ class PilotStartConsumptionLedger:
             )
         self._root = candidate.resolve()
         self._ledger_id = _identifier(ledger_id, name="ledger_id")
+        if self._ledger_id != PILOT_START_CONSUMPTION_LEDGER_ID:
+            raise PilotStartConsumptionError(
+                "pilot-start consumption ledger ID is invalid"
+            )
 
     @property
     def ledger_id(self) -> str:
