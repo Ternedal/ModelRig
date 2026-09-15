@@ -290,6 +290,13 @@ def run_contract() -> None:
         for item in cleanup:
             item.cleanup()
 
+    # ADR-DC-069 freshly re-verifies reviewer intent and durably burns the exact
+    # reviewer-request nonce only; reviewer mutation remains a later boundary.
+    from rsi_pilot_exact_task_pr_reviewer_request_reservation_contract import (
+        run_contract as run_reviewer_request_reservation_contract,
+    )
+    run_reviewer_request_reservation_contract()
+
 
 if __name__ == "__main__":
     run_contract()
