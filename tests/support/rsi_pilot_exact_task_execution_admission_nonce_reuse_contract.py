@@ -257,6 +257,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_mutation_authorization_contract import (
         run_contract as run_pr_mutation_authorization_contract,
     )
+    # ADR-DC-055 freshly re-verifies the exact PR signature and durably burns the
+    # one-shot PR-mutation nonce. It still performs no GitHub read or mutation.
+    from rsi_pilot_exact_task_pr_mutation_reservation_contract import (
+        run_contract as run_pr_mutation_reservation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -282,6 +287,7 @@ def run_contract() -> None:
     run_remote_publication_credential_capability_contract()
     run_remote_publication_write_transaction_contract()
     run_pr_mutation_authorization_contract()
+    run_pr_mutation_reservation_contract()
 
 
 if __name__ == "__main__":
