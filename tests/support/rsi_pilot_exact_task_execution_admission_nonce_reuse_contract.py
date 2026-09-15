@@ -313,6 +313,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_release_readiness_evaluation_contract import (
         run_contract as run_release_readiness_evaluation_contract,
     )
+    # ADR-DC-064 freezes deterministic content-addressed version/tag/release
+    # intent around one fresh positive release-readiness evaluation. It performs
+    # no tag, GitHub Release, deployment or production mutation.
+    from rsi_pilot_exact_task_release_plan_contract import (
+        run_contract as run_release_plan_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -347,6 +353,7 @@ def run_contract() -> None:
     run_merge_recovery_contract()
     run_post_merge_attestation_contract()
     run_release_readiness_evaluation_contract()
+    run_release_plan_contract()
 
 
 if __name__ == "__main__":
