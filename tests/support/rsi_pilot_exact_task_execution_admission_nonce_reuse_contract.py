@@ -252,6 +252,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_write_transaction_contract import (
         run_contract as run_remote_publication_write_transaction_contract,
     )
+    # ADR-DC-054 derives one deterministic draft-PR plan and verifies human intent.
+    # It still performs no GitHub PR mutation and grants no reusable PR authority.
+    from rsi_pilot_exact_task_pr_mutation_authorization_contract import (
+        run_contract as run_pr_mutation_authorization_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -276,6 +281,7 @@ def run_contract() -> None:
     run_remote_publication_write_reservation_contract()
     run_remote_publication_credential_capability_contract()
     run_remote_publication_write_transaction_contract()
+    run_pr_mutation_authorization_contract()
 
 
 if __name__ == "__main__":
