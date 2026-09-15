@@ -232,6 +232,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_requirements_contract import (
         run_contract as run_remote_publication_requirements_contract,
     )
+    # ADR-DC-050 performs only a double read-only anonymous HTTPS remote-head
+    # observation; human authorization and all remote mutation remain forbidden.
+    from rsi_pilot_exact_task_remote_head_observation_contract import (
+        run_contract as run_remote_head_observation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -252,6 +257,7 @@ def run_contract() -> None:
     run_local_commit_object_write_contract()
     run_local_commit_ref_update_contract()
     run_remote_publication_requirements_contract()
+    run_remote_head_observation_contract()
 
 
 if __name__ == "__main__":
