@@ -295,6 +295,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_merge_transaction_contract import (
         run_contract as run_merge_transaction_contract,
     )
+    # ADR-DC-061 never retries an ambiguous merge. It may only finalize a remote
+    # exact squash merge already proven by GitHub under two new detached Ed25519
+    # approvals; an exact still-open lock-only PR remains manual/fail-closed.
+    from rsi_pilot_exact_task_merge_recovery_contract import (
+        run_contract as run_merge_recovery_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -326,6 +332,7 @@ def run_contract() -> None:
     run_merge_readiness_evaluation_contract()
     run_merge_authorization_contract()
     run_merge_transaction_contract()
+    run_merge_recovery_contract()
 
 
 if __name__ == "__main__":
