@@ -188,7 +188,8 @@ function Resume-Appliance {
 function Invoke-BackupModule {
     param(
         [object[]]$Arguments,
-        [string]$WorkingDirectory = $RepoRoot
+        [string]$WorkingDirectory = $RepoRoot,
+        [string]$Module = "app.backup"
     )
     $worker = Join-Path $RepoRoot "worker"
     $backupPy = Join-Path $worker "app\backup.py"
@@ -206,13 +207,13 @@ function Invoke-BackupModule {
     try {
         [Environment]::SetEnvironmentVariable("PYTHONPATH", $worker, "Process")
         # Relative path overrides in modelrig.env are relative to the appliance
-        # working directory. Running from RepoRoot would silently back up a
+        # working directory. Running from RepoRoot would silently operate on a
         # different ./modelrig-data.json or ./modelrig-rag.db.
         Push-Location $WorkingDirectory
         try {
-            & $PythonExe -m app.backup @Arguments
+            & $PythonExe -m $Module @Arguments
             if ($LASTEXITCODE -ne 0) {
-                throw "backup module failed with exit code $LASTEXITCODE"
+                throw "Python module '$Module' failed with exit code $LASTEXITCODE"
             }
         } finally {
             Pop-Location
@@ -365,6 +366,12 @@ try {
     $boundaryEstablished = $true
 
     if ($Action -eq "Export") {
+        Write-Step "Adopting legacy Agent3 pair authority under stopped migration boundary"
+        Invoke-BackupModule `
+            -Module "app.agent3.adopt_pair" `
+            -Arguments @("--offline-confirmed") `
+            -WorkingDirectory $resolvedRuntime
+
         Write-Step "Creating verified migration archive"
         New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
         $before = @(Get-ChildItem -LiteralPath $OutDir -Filter "kaliv-backup-*.tar.gz" -File -ErrorAction SilentlyContinue |
@@ -396,8 +403,11 @@ try {
     try {
         if ($boundaryEstablished) {
             if ($Action -eq "Export") {
-                # Export does not modify live state, so restore the old rig's
-                # previous running/stopped state even if archive creation failed.
+                # Export may add only schema-5 pair-provenance metadata to an
+                # otherwise unchanged legacy Agent3 authority pair. That
+                # transition is idempotent and startup-compatible, so restore
+                # the old rig's previous running/stopped state even if archive
+                # creation later fails.
                 Resume-Appliance
             } elseif ($Action -eq "Import" -and $restoreSucceeded) {
                 # A completed restore always starts through recovery-first

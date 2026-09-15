@@ -14,6 +14,7 @@ from .approval import (
     consume_agent3_approval,
     verify_agent3_approval,
 )
+from .authority_pair import ensure_live_pair
 
 
 def _build_code_identity() -> str:
@@ -512,6 +513,7 @@ def build_default_runtime() -> tuple[Agent3Orchestrator, V2ToolAdapter]:
         "./kaliv-agent3-read-reviews.db",
         env="KALIV_AGENT3_REVIEW_DB",
     )
+    ensure_live_pair(db_path)
     store = AgentRunStore(db_path)
     orchestrator = ReviewingAgent3Orchestrator(
         store=store,

@@ -343,6 +343,24 @@ class DesktopChatDb(
         }
     }
 
+    internal fun putRawSettingIfAbsent(key: String, value: String): Boolean =
+        conn.prepareStatement(
+            "INSERT OR IGNORE INTO setting(key, value) VALUES(?, ?)",
+        ).use { st ->
+            st.setString(1, key)
+            st.setString(2, value)
+            st.executeUpdate() == 1
+        }
+
+    internal fun removeRawSettingIfValue(key: String, expectedValue: String): Boolean =
+        conn.prepareStatement(
+            "DELETE FROM setting WHERE key=? AND value=?",
+        ).use { st ->
+            st.setString(1, key)
+            st.setString(2, expectedValue)
+            st.executeUpdate() == 1
+        }
+
     override fun close() {
         conn.close()
     }
