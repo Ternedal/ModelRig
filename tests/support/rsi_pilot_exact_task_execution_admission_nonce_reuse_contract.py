@@ -212,6 +212,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_local_commit_write_reservation_contract import (
         run_contract as run_local_commit_write_reservation_contract,
     )
+    # ADR-DC-046 consumes the live reservation into exact local Git objects plus
+    # one create-only host-pinned custom ref. Remote publication remains false.
+    from rsi_pilot_exact_task_local_commit_write_transaction_contract import (
+        run_contract as run_local_commit_write_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -228,6 +233,7 @@ def run_contract() -> None:
     run_local_commit_write_requirements_contract()
     run_local_commit_authorization_contract()
     run_local_commit_write_reservation_contract()
+    run_local_commit_write_transaction_contract()
 
 
 if __name__ == "__main__":
