@@ -67,10 +67,11 @@ class Agent3ReviewedStartDurableRecoveryTest {
     }
 
     @Test
-    fun reviewedStartTransportPreservesMachineReadableRefusalReason() {
+    fun reviewedStartTransportPreservesReasonWhileRedactingServerDetail() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val secret = "token=super-secret&path=/home/operator/private.log"
         server.createContext("/api/v1/experimental/agent3/plans/plan-1/start") { exchange ->
-            val body = "{\"detail\":\"reviewed Start is no longer recoverable\"}".toByteArray()
+            val body = "{\"detail\":\"$secret\"}".toByteArray()
             exchange.responseHeaders.add("Content-Type", "application/json")
             exchange.responseHeaders.add("X-ModelRig-Agent3-Reason", "reviewed_start_refused")
             exchange.sendResponseHeaders(409, body.size.toLong())
@@ -86,9 +87,22 @@ class Agent3ReviewedStartDurableRecoveryTest {
             failure as Agent3ReviewedStartHttpException
             assertEquals(409, failure.statusCode)
             assertEquals("reviewed_start_refused", failure.reasonCode)
-            assertTrue(failure.message.orEmpty().contains("reviewed Start is no longer recoverable"))
+            assertEquals("Agent 3.0 reviewed Start was refused by the server", failure.message)
+            assertFalse(failure.message.orEmpty().contains(secret))
         } finally {
             server.stop(0)
         }
+    }
+
+    @Test
+    fun unknownReviewedStartFailuresExposeOnlyBoundedStatusSemantics() {
+        val failure = Agent3ReviewedStartHttpException(
+            502,
+            "unexpected_server_reason_with_secret",
+            "raw body /home/operator/private token=secret",
+        )
+        assertEquals("Agent 3.0 reviewed Start failed (HTTP 502)", failure.message)
+        assertFalse(failure.message.orEmpty().contains("secret"))
+        assertFalse(failure.message.orEmpty().contains("unexpected_server_reason"))
     }
 }
