@@ -262,6 +262,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_push_credential_capability_contract import (
         run_contract as run_remote_push_credential_capability_contract,
     )
+    # ADR-DC-056 performs a fresh exact remote/local preflight and freezes the
+    # non-secret broker request; credential invocation and push remain forbidden.
+    from rsi_pilot_exact_task_remote_push_execution_preflight_contract import (
+        run_contract as run_remote_push_execution_preflight_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -288,6 +293,7 @@ def run_contract() -> None:
     run_remote_publication_write_consumption_contract()
     run_remote_push_capability_requirements_contract()
     run_remote_push_credential_capability_contract()
+    run_remote_push_execution_preflight_contract()
 
 
 if __name__ == "__main__":
