@@ -283,6 +283,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_merge_readiness_evaluation_contract import (
         run_contract as run_merge_readiness_evaluation_contract,
     )
+    # ADR-DC-059 durably reserves one exact squash-merge slot only after a fresh
+    # positive readiness evaluation plus two independent detached Ed25519 approvals.
+    # It performs no GitHub mutation; the actual merge remains a separate boundary.
+    from rsi_pilot_exact_task_merge_authorization_contract import (
+        run_contract as run_merge_authorization_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -312,6 +318,7 @@ def run_contract() -> None:
     run_post_lifecycle_attestation_contract()
     run_review_state_attestation_contract()
     run_merge_readiness_evaluation_contract()
+    run_merge_authorization_contract()
 
 
 if __name__ == "__main__":
