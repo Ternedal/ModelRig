@@ -278,6 +278,11 @@ def run_contract() -> None:
             "merge_pull_request(",
         ):
             assert forbidden not in source
+
+        from rsi_pilot_exact_task_pr_reviewer_requestability_preflight_contract import (
+            run_contract as run_reviewer_requestability_preflight_contract,
+        )
+        run_reviewer_requestability_preflight_contract()
     finally:
         broker_temp.cleanup()
         for item in cleanup:
