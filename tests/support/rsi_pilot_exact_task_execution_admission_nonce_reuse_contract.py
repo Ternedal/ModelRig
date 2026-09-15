@@ -331,6 +331,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_release_authorization_contract import (
         run_contract as run_release_authorization_contract,
     )
+    # ADR-DC-067 consumes exact release authority before any GitHub write,
+    # creates only the deterministic lightweight tag and draft/prerelease Release,
+    # and durably records lock/tag/release/final phases with no downstream authority.
+    from rsi_pilot_exact_task_release_transaction_contract import (
+        run_contract as run_release_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -368,6 +374,7 @@ def run_contract() -> None:
     run_release_plan_contract()
     run_release_state_observation_contract()
     run_release_authorization_contract()
+    run_release_transaction_contract()
 
 
 if __name__ == "__main__":
