@@ -277,6 +277,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_create_transaction_contract import (
         run_contract as run_pr_create_transaction_contract,
     )
+    # ADR-DC-059 freshly re-verifies the exact created draft and freezes one
+    # inert ready-for-review handoff plan. It performs no GitHub mutation.
+    from rsi_pilot_exact_task_pr_review_handoff_requirements_contract import (
+        run_contract as run_pr_review_handoff_requirements_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -306,6 +311,7 @@ def run_contract() -> None:
     run_pr_state_observation_contract()
     run_pr_credential_capability_contract()
     run_pr_create_transaction_contract()
+    run_pr_review_handoff_requirements_contract()
 
 
 if __name__ == "__main__":
