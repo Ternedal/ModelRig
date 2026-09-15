@@ -319,6 +319,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_release_plan_contract import (
         run_contract as run_release_plan_contract,
     )
+    # ADR-DC-065 double-observes the deterministic tag plus authenticated draft
+    # release inventory. Only clear or exact-existing state is acceptable; mixed
+    # partial state fails closed and no release mutation authority follows.
+    from rsi_pilot_exact_task_release_state_observation_contract import (
+        run_contract as run_release_state_observation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -354,6 +360,7 @@ def run_contract() -> None:
     run_post_merge_attestation_contract()
     run_release_readiness_evaluation_contract()
     run_release_plan_contract()
+    run_release_state_observation_contract()
 
 
 if __name__ == "__main__":
