@@ -98,6 +98,7 @@ jobs:
           jar_sha256=$hash
           "@ | Set-Content -Encoding utf8 "review-kit/REVIEW_AUTHORITY.txt"
           Copy-Item ".review-helper/review-tools/RECORD_UX_REVIEW.ps1" "review-kit/RECORD_UX_REVIEW.ps1"
+          Copy-Item ".review-helper/review-tools/VERIFY_PROMOTION_READY.ps1" "review-kit/VERIFY_PROMOTION_READY.ps1"
           Copy-Item ".review-helper/review-tools/REVIEW_CHECKLIST.md" "review-kit/REVIEW_CHECKLIST.md"
 
       - name: Upload exact-head review kit
