@@ -62,13 +62,14 @@ class Agent3ReviewedStartDurableRecoveryTest {
     }
 
     @Test
-    fun `reviewed Start transport preserves machine readable refusal reason`() {
+    fun `reviewed Start transport preserves reason while redacting server detail`() {
         val server = MockWebServer()
+        val secret = "token=super-secret&path=C:/private/operator.log"
         server.enqueue(
             MockResponse()
                 .setResponseCode(409)
                 .addHeader("X-ModelRig-Agent3-Reason", "reviewed_start_refused")
-                .setBody("{\"detail\":\"reviewed Start is no longer recoverable\"}")
+                .setBody("{\"detail\":\"$secret\"}")
         )
         server.start()
         try {
@@ -80,9 +81,22 @@ class Agent3ReviewedStartDurableRecoveryTest {
             failure as Agent3ReviewedStartHttpException
             assertEquals(409, failure.statusCode)
             assertEquals("reviewed_start_refused", failure.reasonCode)
-            assertTrue(failure.message.orEmpty().contains("reviewed Start is no longer recoverable"))
+            assertEquals("Agent 3.0 reviewed Start was refused by the server", failure.message)
+            assertFalse(failure.message.orEmpty().contains(secret))
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test
+    fun `unknown reviewed Start failures expose only bounded status semantics`() {
+        val failure = Agent3ReviewedStartHttpException(
+            502,
+            "unexpected_server_reason_with_secret",
+            "raw body /home/operator/private token=secret",
+        )
+        assertEquals("Agent 3.0 reviewed Start failed (HTTP 502)", failure.message)
+        assertFalse(failure.message.orEmpty().contains("secret"))
+        assertFalse(failure.message.orEmpty().contains("unexpected_server_reason"))
     }
 }
