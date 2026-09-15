@@ -1,9 +1,9 @@
-name: review-windows-pkt8-4a39edcf
+name: review-windows-pkt8-4a39edcf-v2
 
 on:
   push:
     branches:
-      - "helper/windows-review-4a39edcf"
+      - "helper/windows-review-4a39edcf-v2"
 
 permissions:
   contents: read
@@ -47,6 +47,12 @@ jobs:
         shell: bash
         run: ./gradlew :composeApp:packageUberJarForCurrentOS --no-daemon --console=plain
 
+      - name: Checkout exact review helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .review-helper
+
       - name: Assemble exact-head review kit
         shell: pwsh
         run: |
@@ -69,6 +75,7 @@ jobs:
           exact_candidate_sha=$sha
           exact_candidate_tree=$tree
           source_pr=#1370
+          source_issue=#779
           source_branch=candidate/pkt8-reviewed-start-refresh-71364cb
           ci_run=6195
           agent3_diagnostics_run=4214
@@ -89,17 +96,14 @@ jobs:
           release_authority=false
           merge_authority=false
           jar_sha256=$hash
-
-          This package is for the required human desktop UX review of the exact
-          ModelRig #1370 promotion candidate. It is not a release and does not
-          authorize merge, release, physical execution, or production activation.
-          Exact-head software qualification is a separate mandatory gate.
           "@ | Set-Content -Encoding utf8 "review-kit/REVIEW_AUTHORITY.txt"
+          Copy-Item ".review-helper/review-tools/RECORD_UX_REVIEW.ps1" "review-kit/RECORD_UX_REVIEW.ps1"
+          Copy-Item ".review-helper/review-tools/REVIEW_CHECKLIST.md" "review-kit/REVIEW_CHECKLIST.md"
 
       - name: Upload exact-head review kit
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: kaliv-windows-review-4a39edcfc857
+          name: kaliv-windows-review-4a39edcfc857-v2
           path: review-kit/*
           if-no-files-found: error
           retention-days: 14
