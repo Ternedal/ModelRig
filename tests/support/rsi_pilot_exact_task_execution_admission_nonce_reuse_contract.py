@@ -243,6 +243,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_transaction_contract import (
         run_contract as run_remote_publication_transaction_contract,
     )
+    # ADR-DC-051 recovers only an already-pushed exact publication lane under two
+    # independent Ed25519 approvals. Missing pushes remain manual/fail-closed.
+    from rsi_pilot_exact_task_remote_publication_recovery_contract import (
+        run_contract as run_remote_publication_recovery_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -264,6 +269,7 @@ def run_contract() -> None:
     run_remote_state_observation_contract()
     run_remote_publication_authorization_contract()
     run_remote_publication_transaction_contract()
+    run_remote_publication_recovery_contract()
 
 
 if __name__ == "__main__":
