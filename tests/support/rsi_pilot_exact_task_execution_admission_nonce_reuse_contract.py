@@ -325,6 +325,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_release_state_observation_contract import (
         run_contract as run_release_state_observation_contract,
     )
+    # ADR-DC-066 durably reserves one exact deterministic tag+draft-release slot
+    # only from a fresh clear ADR-DC-065 lane under two independent Ed25519
+    # approvals. It grants no deploy or production activation authority.
+    from rsi_pilot_exact_task_release_authorization_contract import (
+        run_contract as run_release_authorization_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -361,6 +367,7 @@ def run_contract() -> None:
     run_release_readiness_evaluation_contract()
     run_release_plan_contract()
     run_release_state_observation_contract()
+    run_release_authorization_contract()
 
 
 if __name__ == "__main__":
