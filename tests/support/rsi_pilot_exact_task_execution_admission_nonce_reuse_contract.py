@@ -227,6 +227,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_local_commit_ref_update_contract import (
         run_contract as run_local_commit_ref_update_contract,
     )
+    # ADR-DC-049 freezes exact remote-publication requirements from the local
+    # commit and origin config; it performs no network access or remote mutation.
+    from rsi_pilot_exact_task_remote_publication_requirements_contract import (
+        run_contract as run_remote_publication_requirements_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -246,6 +251,7 @@ def run_contract() -> None:
     run_local_commit_write_consumption_contract()
     run_local_commit_object_write_contract()
     run_local_commit_ref_update_contract()
+    run_remote_publication_requirements_contract()
 
 
 if __name__ == "__main__":
