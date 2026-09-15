@@ -225,6 +225,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_plan_contract import (
         run_contract as run_remote_publication_plan_contract,
     )
+    # ADR-DC-048 is the first network-observation boundary. It performs bounded
+    # unauthenticated GET-only GitHub reads, proves main is still the exact base,
+    # and requires both deterministic head branch and matching PR intent to be absent.
+    from rsi_pilot_exact_task_remote_state_observation_contract import (
+        run_contract as run_remote_state_observation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -243,6 +249,7 @@ def run_contract() -> None:
     run_post_commit_integration_evaluation_contract()
     run_integration_readiness_contract()
     run_remote_publication_plan_contract()
+    run_remote_state_observation_contract()
 
 
 if __name__ == "__main__":
