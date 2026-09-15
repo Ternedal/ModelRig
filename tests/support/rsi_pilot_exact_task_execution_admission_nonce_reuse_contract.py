@@ -182,6 +182,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_execution_transaction_contract import (
         run_contract as run_execution_transaction_contract,
     )
+    # ADR-DC-040 fresh-rechecks the successful frozen candidate and performs
+    # read-only mechanical scope/test evaluation. It grants no commit authority.
+    from rsi_pilot_exact_task_post_execution_evaluation_contract import (
+        run_contract as run_post_execution_evaluation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -192,6 +197,7 @@ def run_contract() -> None:
     run_execution_plan_contract()
     run_prelaunch_reservation_contract()
     run_execution_transaction_contract()
+    run_post_execution_evaluation_contract()
 
 
 if __name__ == "__main__":
