@@ -186,6 +186,13 @@ def run_contract() -> None:
         for item in cleanup:
             item.cleanup()
 
+    # ADR-DC-068 verifies human-signed intent over the exact host-pinned reviewer
+    # target only and remains mutation-free on the same locked Stage-B chain.
+    from rsi_pilot_exact_task_pr_reviewer_request_authorization_contract import (
+        run_contract as run_reviewer_request_authorization_contract,
+    )
+    run_reviewer_request_authorization_contract()
+
 
 if __name__ == "__main__":
     run_contract()
