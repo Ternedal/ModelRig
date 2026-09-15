@@ -258,6 +258,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_lifecycle_authorization_contract import (
         run_contract as run_pr_lifecycle_authorization_contract,
     )
+    # ADR-DC-054 consumes the exact lifecycle authority before its first PR write,
+    # performs only ready-for-review plus exact reviewer requests, then verifies both.
+    from rsi_pilot_exact_task_pr_lifecycle_transaction_contract import (
+        run_contract as run_pr_lifecycle_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -282,6 +287,7 @@ def run_contract() -> None:
     run_remote_publication_recovery_contract()
     run_post_publication_attestation_contract()
     run_pr_lifecycle_authorization_contract()
+    run_pr_lifecycle_transaction_contract()
 
 
 if __name__ == "__main__":
