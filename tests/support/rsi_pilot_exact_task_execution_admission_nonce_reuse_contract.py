@@ -292,6 +292,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_ready_for_review_reservation_contract import (
         run_contract as run_pr_ready_for_review_reservation_contract,
     )
+    # ADR-DC-062 freshly re-observes the exact signed draft after nonce burn and
+    # fails closed on any updated_at/head/base/metadata drift. No mutation occurs.
+    from rsi_pilot_exact_task_pr_ready_for_review_state_observation_contract import (
+        run_contract as run_pr_ready_for_review_state_observation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -324,6 +329,7 @@ def run_contract() -> None:
     run_pr_review_handoff_requirements_contract()
     run_pr_ready_for_review_authorization_contract()
     run_pr_ready_for_review_reservation_contract()
+    run_pr_ready_for_review_state_observation_contract()
 
 
 if __name__ == "__main__":
