@@ -257,6 +257,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_push_capability_requirements_contract import (
         run_contract as run_remote_push_capability_requirements_contract,
     )
+    # ADR-DC-055 binds one host-pinned opaque credential-provider slot to the
+    # exact push intent; secret export and all remote-write authority remain forbidden.
+    from rsi_pilot_exact_task_remote_push_credential_capability_contract import (
+        run_contract as run_remote_push_credential_capability_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -282,6 +287,7 @@ def run_contract() -> None:
     run_remote_publication_authorization_admission_contract()
     run_remote_publication_write_consumption_contract()
     run_remote_push_capability_requirements_contract()
+    run_remote_push_credential_capability_contract()
 
 
 if __name__ == "__main__":
