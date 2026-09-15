@@ -268,6 +268,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_lifecycle_recovery_contract import (
         run_contract as run_pr_lifecycle_recovery_contract,
     )
+    # ADR-DC-056 normalizes completed ADR-DC-054/055 lifecycle state into one fresh,
+    # double-observed read-only exact non-draft/reviewer attestation with no review authority.
+    from rsi_pilot_exact_task_post_lifecycle_attestation_contract import (
+        run_contract as run_post_lifecycle_attestation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -294,6 +299,7 @@ def run_contract() -> None:
     run_pr_lifecycle_authorization_contract()
     run_pr_lifecycle_transaction_contract()
     run_pr_lifecycle_recovery_contract()
+    run_post_lifecycle_attestation_contract()
 
 
 if __name__ == "__main__":
