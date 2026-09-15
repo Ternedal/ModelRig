@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-local-commit-authorization-proof-v1.schema.json",
+  "title": "ModelRig ADR-DC-044 exact local commit human authorization proof",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"type": "string", "const": "kaliv-rsi-dc-l16-exact-task-local-commit-human-authorization-proof/v1"},
+    "authorization_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"},
+    "issuer_actor_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@-]{1,127}$"},
+    "issuer_system_id": {"type": "string", "const": "kaliv-rsi-dc-l16-exact-local-commit-human-authority-v1"},
+    "authorization": {"$ref": "rsi-pilot-exact-task-local-commit-authorization-v1.schema.json"},
+    "local_commit_write_requirements_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "local_commit_object_identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "execution_nonce_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "local_write_nonce_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "predicted_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "verified_at_utc": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"},
+    "one_shot_local_write_required": {"type": "boolean", "const": true},
+    "local_write_authorization_consumed": {"type": "boolean", "const": false},
+    "human_local_commit_authorization_verified": {"type": "boolean", "const": true},
+    "git_object_write_authorized": {"type": "boolean", "const": false},
+    "local_ref_update_authorized": {"type": "boolean", "const": false},
+    "local_commit_authorized": {"type": "boolean", "const": false},
+    "local_commit_created": {"type": "boolean", "const": false},
+    "integration_ready": {"type": "boolean", "const": false},
+    "product_pilot_started": {"type": "boolean", "const": false},
+    "remote_write_authorized": {"type": "boolean", "const": false},
+    "push_authorized": {"type": "boolean", "const": false},
+    "pr_mutation_authorized": {"type": "boolean", "const": false},
+    "merge_authorized": {"type": "boolean", "const": false},
+    "release_authorized": {"type": "boolean", "const": false},
+    "deploy_authorized": {"type": "boolean", "const": false},
+    "production_activation_authorized": {"type": "boolean", "const": false},
+    "authority": {"type": "string", "const": "verified-human-dc-l16-exact-local-commit-authorization-only"}
+  },
+  "required": [
+    "schema", "authorization_sha256", "signature_sha256", "key_id", "issuer_actor_id", "issuer_system_id", "authorization", "local_commit_write_requirements_sha256", "local_commit_object_identity_sha256", "execution_nonce_sha256", "local_write_nonce_sha256", "predicted_commit_sha", "verified_at_utc", "one_shot_local_write_required", "local_write_authorization_consumed", "human_local_commit_authorization_verified", "git_object_write_authorized", "local_ref_update_authorized", "local_commit_authorized", "local_commit_created", "integration_ready", "product_pilot_started", "remote_write_authorized", "push_authorized", "pr_mutation_authorized", "merge_authorized", "release_authorized", "deploy_authorized", "production_activation_authorized", "authority"
+  ]
+}
