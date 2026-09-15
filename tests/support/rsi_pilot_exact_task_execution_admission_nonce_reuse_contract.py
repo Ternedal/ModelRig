@@ -237,6 +237,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_head_observation_contract import (
         run_contract as run_remote_head_observation_contract,
     )
+    # ADR-DC-051 verifies fresh human approval over the exact live ADR-DC-050
+    # observation, but does not consume the publication nonce or grant push authority.
+    from rsi_pilot_exact_task_remote_publication_human_authorization_contract import (
+        run_contract as run_remote_publication_human_authorization_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -258,6 +263,7 @@ def run_contract() -> None:
     run_local_commit_ref_update_contract()
     run_remote_publication_requirements_contract()
     run_remote_head_observation_contract()
+    run_remote_publication_human_authorization_contract()
 
 
 if __name__ == "__main__":
