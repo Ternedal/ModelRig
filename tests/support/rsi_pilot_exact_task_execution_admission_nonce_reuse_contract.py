@@ -247,6 +247,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_credential_capability_contract import (
         run_contract as run_remote_publication_credential_capability_contract,
     )
+    # ADR-DC-053 performs the one exact lease-guarded remote ref creation and
+    # verifies the resulting remote SHA. PR mutation remains separately authorized.
+    from rsi_pilot_exact_task_remote_publication_write_transaction_contract import (
+        run_contract as run_remote_publication_write_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -270,6 +275,7 @@ def run_contract() -> None:
     run_remote_publication_state_observation_contract()
     run_remote_publication_write_reservation_contract()
     run_remote_publication_credential_capability_contract()
+    run_remote_publication_write_transaction_contract()
 
 
 if __name__ == "__main__":
