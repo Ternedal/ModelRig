@@ -197,6 +197,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_local_commit_object_identity_contract import (
         run_contract as run_local_commit_object_identity_contract,
     )
+    # ADR-DC-043 freezes the human/host requirements for one exact local write.
+    # It performs no Git mutation and keeps all local/remote write authority false.
+    from rsi_pilot_exact_task_local_commit_write_requirements_contract import (
+        run_contract as run_local_commit_write_requirements_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -210,6 +215,7 @@ def run_contract() -> None:
     run_post_execution_evaluation_contract()
     run_local_commit_plan_contract()
     run_local_commit_object_identity_contract()
+    run_local_commit_write_requirements_contract()
 
 
 if __name__ == "__main__":
