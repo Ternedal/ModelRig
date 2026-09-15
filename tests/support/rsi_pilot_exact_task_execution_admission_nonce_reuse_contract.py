@@ -312,6 +312,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_ready_for_review_transaction_contract import (
         run_contract as run_pr_ready_for_review_transaction_contract,
     )
+    # ADR-DC-066 re-verifies the exact ready PR and freezes reviewer-handoff
+    # requirements only. It selects or requests no reviewer and grants no mutation.
+    from rsi_pilot_exact_task_pr_reviewer_handoff_requirements_contract import (
+        run_contract as run_pr_reviewer_handoff_requirements_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -348,6 +353,7 @@ def run_contract() -> None:
     run_pr_ready_for_review_credential_capability_contract()
     run_pr_ready_for_review_node_identity_contract()
     run_pr_ready_for_review_transaction_contract()
+    run_pr_reviewer_handoff_requirements_contract()
 
 
 if __name__ == "__main__":
