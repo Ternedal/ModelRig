@@ -1,0 +1,80 @@
+"""Public host-pinned facade for ADR-DC-074 reviewer-write capability."""
+from __future__ import annotations
+
+from . import _improvement_pilot_exact_task_pr_reviewer_write_credential_capability_impl as _implementation
+from ._improvement_pilot_exact_task_pr_reviewer_write_credential_capability_production_boundary import (
+    install_pilot_exact_task_pr_reviewer_write_credential_capability_production_boundary,
+)
+
+install_pilot_exact_task_pr_reviewer_write_credential_capability_production_boundary(
+    _implementation
+)
+
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_CAPABILITY_SCHEMA = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_CAPABILITY_SCHEMA
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_CAPABILITY_AUTHORITY = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_CAPABILITY_AUTHORITY
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_PROTOCOL = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_PROTOCOL
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_OPERATION = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_OPERATION
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_SECRET_SOURCE = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_SECRET_SOURCE
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_SECRET_TRANSPORT = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_SECRET_TRANSPORT
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_API_ORIGIN = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_API_ORIGIN
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_ACCOUNT = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_ACCOUNT
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_REQUEST_PATH_TEMPLATE = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_REQUEST_PATH_TEMPLATE
+)
+PILOT_EXACT_TASK_PR_REVIEWER_WRITE_MAX_PREFLIGHT_AGE_SECONDS = (
+    _implementation.PILOT_EXACT_TASK_PR_REVIEWER_WRITE_MAX_PREFLIGHT_AGE_SECONDS
+)
+PilotExactTaskPrReviewerWriteCredentialCapabilityError = (
+    _implementation.PilotExactTaskPrReviewerWriteCredentialCapabilityError
+)
+PilotExactTaskPrReviewerWriteCredentialCapability = (
+    _implementation.PilotExactTaskPrReviewerWriteCredentialCapability
+)
+materialize_pilot_exact_task_pr_reviewer_write_credential_capability = (
+    _implementation.materialize_pilot_exact_task_pr_reviewer_write_credential_capability
+)
+
+# Deterministic support seams only; production broker selection remains host-pinned.
+_require_live_preflight = _implementation._require_live_preflight
+_require_preflight_window = _implementation._require_preflight_window
+_descriptor = _implementation._descriptor
+_materialize_verified_pilot_exact_task_pr_reviewer_write_credential_capability = (
+    _implementation._materialize_verified_pilot_exact_task_pr_reviewer_write_credential_capability
+)
+_get_live_pr_reviewer_write_credential_capability_inputs = (
+    _implementation._get_live_pr_reviewer_write_credential_capability_inputs
+)
+
+__all__ = [
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_CAPABILITY_SCHEMA",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_CAPABILITY_AUTHORITY",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_PROTOCOL",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_OPERATION",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_SECRET_SOURCE",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_SECRET_TRANSPORT",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_API_ORIGIN",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_CREDENTIAL_ACCOUNT",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_REQUEST_PATH_TEMPLATE",
+    "PILOT_EXACT_TASK_PR_REVIEWER_WRITE_MAX_PREFLIGHT_AGE_SECONDS",
+    "PilotExactTaskPrReviewerWriteCredentialCapabilityError",
+    "PilotExactTaskPrReviewerWriteCredentialCapability",
+    "materialize_pilot_exact_task_pr_reviewer_write_credential_capability",
+]
+
+del install_pilot_exact_task_pr_reviewer_write_credential_capability_production_boundary
