@@ -1,0 +1,37 @@
+"""Public facade for ADR-DC-089 strict-synced review-thread read capability."""
+from __future__ import annotations
+
+from . import _improvement_pilot_exact_task_pr_strict_synced_review_thread_read_capability_impl as _implementation
+from ._improvement_pilot_exact_task_pr_strict_synced_review_thread_read_capability_production_boundary import (
+    install_pilot_exact_task_pr_strict_synced_review_thread_read_capability_production_boundary,
+)
+
+install_pilot_exact_task_pr_strict_synced_review_thread_read_capability_production_boundary(_implementation)
+
+SCHEMA = _implementation.SCHEMA
+AUTHORITY = _implementation.AUTHORITY
+PROTOCOL = _implementation.PROTOCOL
+SECRET_SOURCE = _implementation.SECRET_SOURCE
+SECRET_TRANSPORT = _implementation.SECRET_TRANSPORT
+GRAPHQL_ENDPOINT = _implementation.GRAPHQL_ENDPOINT
+CREDENTIAL_ACCOUNT = _implementation.CREDENTIAL_ACCOUNT
+MAX_SOURCE_AGE_SECONDS = _implementation.MAX_SOURCE_AGE_SECONDS
+PilotExactTaskPrStrictSyncedReviewThreadReadCapabilityError = _implementation.PilotExactTaskPrStrictSyncedReviewThreadReadCapabilityError
+PilotExactTaskPrStrictSyncedReviewThreadReadCapability = _implementation.PilotExactTaskPrStrictSyncedReviewThreadReadCapability
+materialize_pilot_exact_task_pr_strict_synced_review_thread_read_capability = _implementation.materialize_pilot_exact_task_pr_strict_synced_review_thread_read_capability
+
+_require_live_strict_sync = _implementation._require_live_strict_sync
+_require_source_window = _implementation._require_source_window
+_descriptor = _implementation._descriptor
+_materialize_verified_pilot_exact_task_pr_strict_synced_review_thread_read_capability = _implementation._materialize_verified_pilot_exact_task_pr_strict_synced_review_thread_read_capability
+_get_live_pr_strict_synced_review_thread_read_capability_inputs = _implementation._get_live_pr_strict_synced_review_thread_read_capability_inputs
+
+__all__ = [
+    "SCHEMA", "AUTHORITY", "PROTOCOL", "SECRET_SOURCE", "SECRET_TRANSPORT", "GRAPHQL_ENDPOINT",
+    "CREDENTIAL_ACCOUNT", "MAX_SOURCE_AGE_SECONDS",
+    "PilotExactTaskPrStrictSyncedReviewThreadReadCapabilityError",
+    "PilotExactTaskPrStrictSyncedReviewThreadReadCapability",
+    "materialize_pilot_exact_task_pr_strict_synced_review_thread_read_capability",
+]
+
+del install_pilot_exact_task_pr_strict_synced_review_thread_read_capability_production_boundary
