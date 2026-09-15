@@ -334,6 +334,13 @@ def run_contract() -> None:
         for temp in cleanup:
             temp.cleanup()
 
+    # ADR-DC-067 remains target-attestation-only but runs transitively through
+    # the same locked Stage-B reviewer handoff chain.
+    from rsi_pilot_exact_task_pr_reviewer_target_attestation_contract import (
+        run_contract as run_reviewer_target_attestation_contract,
+    )
+    run_reviewer_target_attestation_contract()
+
 
 if __name__ == "__main__":
     run_contract()
