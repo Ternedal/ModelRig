@@ -214,6 +214,13 @@ def run_contract() -> None:
         for item in cleanup:
             item.cleanup()
 
+    # ADR-DC-070 consumes only the live durable ADR-DC-069 reservation for
+    # credential-free reviewer identity and exact ready-PR state observation.
+    from rsi_pilot_exact_task_pr_reviewer_identity_state_observation_contract import (
+        run_contract as run_reviewer_identity_state_observation_contract,
+    )
+    run_reviewer_identity_state_observation_contract()
+
 
 if __name__ == "__main__":
     run_contract()
