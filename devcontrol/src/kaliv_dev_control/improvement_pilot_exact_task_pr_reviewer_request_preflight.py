@@ -177,7 +177,7 @@ def _require_live_precondition(
         )
     )
     identity = None if capability_inputs is None else capability_inputs.get(
-        "reviewer_identity_state_observation"
+        "reviewer_identity_observation"
     )
     identity_inputs = (
         None
