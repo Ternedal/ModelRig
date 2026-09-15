@@ -213,6 +213,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_post_commit_integration_evaluation_contract import (
         run_contract as run_post_commit_integration_evaluation_contract,
     )
+    # ADR-DC-046 requires every exact task acceptance criterion to be satisfied
+    # under externally signed Ed25519 review before integration_ready can become true.
+    # It still grants no Git or remote publication authority.
+    from rsi_pilot_exact_task_integration_readiness_contract import (
+        run_contract as run_integration_readiness_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -229,6 +235,7 @@ def run_contract() -> None:
     run_local_commit_write_authorization_contract()
     run_local_commit_transaction_contract()
     run_post_commit_integration_evaluation_contract()
+    run_integration_readiness_contract()
 
 
 if __name__ == "__main__":
