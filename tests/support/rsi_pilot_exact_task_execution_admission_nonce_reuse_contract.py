@@ -248,6 +248,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_recovery_contract import (
         run_contract as run_remote_publication_recovery_contract,
     )
+    # ADR-DC-052 normalizes completed ADR-DC-050/051 state into one fresh,
+    # double-observed read-only exact publication attestation with no lifecycle authority.
+    from rsi_pilot_exact_task_post_publication_attestation_contract import (
+        run_contract as run_post_publication_attestation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -270,6 +275,7 @@ def run_contract() -> None:
     run_remote_publication_authorization_contract()
     run_remote_publication_transaction_contract()
     run_remote_publication_recovery_contract()
+    run_post_publication_attestation_contract()
 
 
 if __name__ == "__main__":
