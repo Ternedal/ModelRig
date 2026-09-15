@@ -267,6 +267,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_state_observation_contract import (
         run_contract as run_pr_state_observation_contract,
     )
+    # ADR-DC-057 host-pins one PR credential broker without loading a secret,
+    # performing HTTP, or granting create/review/merge authority.
+    from rsi_pilot_exact_task_pr_credential_capability_contract import (
+        run_contract as run_pr_credential_capability_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -294,6 +299,7 @@ def run_contract() -> None:
     run_pr_mutation_authorization_contract()
     run_pr_mutation_reservation_contract()
     run_pr_state_observation_contract()
+    run_pr_credential_capability_contract()
 
 
 if __name__ == "__main__":
