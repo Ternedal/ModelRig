@@ -231,6 +231,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_state_observation_contract import (
         run_contract as run_remote_state_observation_contract,
     )
+    # ADR-DC-049 durably reserves one execution-nonce publication slot only after
+    # fresh local and remote revalidation. It authorizes only exact branch/push/
+    # draft-PR creation and still performs no remote mutation itself.
+    from rsi_pilot_exact_task_remote_publication_authorization_contract import (
+        run_contract as run_remote_publication_authorization_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -250,6 +256,7 @@ def run_contract() -> None:
     run_integration_readiness_contract()
     run_remote_publication_plan_contract()
     run_remote_state_observation_contract()
+    run_remote_publication_authorization_contract()
 
 
 if __name__ == "__main__":
