@@ -221,6 +221,13 @@ def run_contract() -> None:
     )
     run_reviewer_identity_state_observation_contract()
 
+    # ADR-DC-071 binds the live ADR-DC-070 result to one host-pinned,
+    # read-only reviewer-requestability credential-broker capability.
+    from rsi_pilot_exact_task_pr_reviewer_request_credential_capability_contract import (
+        run_contract as run_reviewer_request_credential_capability_contract,
+    )
+    run_reviewer_request_credential_capability_contract()
+
 
 if __name__ == "__main__":
     run_contract()
