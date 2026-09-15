@@ -1,0 +1,56 @@
+"""Public host-pinned facade for ADR-DC-052 remote-publication authorization admission."""
+from __future__ import annotations
+
+from . import _improvement_pilot_exact_task_remote_publication_authorization_admission_impl as _implementation
+from ._improvement_pilot_exact_task_remote_publication_authorization_admission_production_boundary import (
+    install_pilot_exact_task_remote_publication_authorization_admission_production_boundary,
+)
+
+install_pilot_exact_task_remote_publication_authorization_admission_production_boundary(
+    _implementation
+)
+
+PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_RECEIPT_SCHEMA = (
+    _implementation.PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_RECEIPT_SCHEMA
+)
+PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_AUTHORITY = (
+    _implementation.PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_AUTHORITY
+)
+PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_LEDGER_SCOPE = (
+    _implementation.PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_LEDGER_SCOPE
+)
+PilotExactTaskRemotePublicationAuthorizationAdmissionError = (
+    _implementation.PilotExactTaskRemotePublicationAuthorizationAdmissionError
+)
+PilotExactTaskRemotePublicationAuthorizationAdmissionReceipt = (
+    _implementation.PilotExactTaskRemotePublicationAuthorizationAdmissionReceipt
+)
+admit_pilot_exact_task_remote_publication_authorization = (
+    _implementation.admit_pilot_exact_task_remote_publication_authorization
+)
+
+# Deterministic test seams; production admission remains host-pinned above.
+require_fresh_remote_publication_authorization_proof_identity = (
+    _implementation.require_fresh_remote_publication_authorization_proof_identity
+)
+_admission_key = _implementation._admission_key
+_PilotExactTaskRemotePublicationAuthorizationAdmissionLedger = (
+    _implementation._PilotExactTaskRemotePublicationAuthorizationAdmissionLedger
+)
+_admit_verified_pilot_exact_task_remote_publication_authorization = (
+    _implementation._admit_verified_pilot_exact_task_remote_publication_authorization
+)
+_get_live_remote_publication_authorization_admission_inputs = (
+    _implementation._get_live_remote_publication_authorization_admission_inputs
+)
+
+__all__ = [
+    "PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_RECEIPT_SCHEMA",
+    "PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_AUTHORITY",
+    "PILOT_EXACT_TASK_REMOTE_PUBLICATION_AUTHORIZATION_ADMISSION_LEDGER_SCOPE",
+    "PilotExactTaskRemotePublicationAuthorizationAdmissionError",
+    "PilotExactTaskRemotePublicationAuthorizationAdmissionReceipt",
+    "admit_pilot_exact_task_remote_publication_authorization",
+]
+
+del install_pilot_exact_task_remote_publication_authorization_admission_production_boundary

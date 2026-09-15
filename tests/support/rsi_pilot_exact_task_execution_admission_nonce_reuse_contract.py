@@ -242,6 +242,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_human_authorization_contract import (
         run_contract as run_remote_publication_human_authorization_contract,
     )
+    # ADR-DC-052 durably admits the signed remote-publication nonce exactly once,
+    # but does not consume it for push or grant any remote-write authority.
+    from rsi_pilot_exact_task_remote_publication_authorization_admission_contract import (
+        run_contract as run_remote_publication_authorization_admission_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -264,6 +269,7 @@ def run_contract() -> None:
     run_remote_publication_requirements_contract()
     run_remote_head_observation_contract()
     run_remote_publication_human_authorization_contract()
+    run_remote_publication_authorization_admission_contract()
 
 
 if __name__ == "__main__":
