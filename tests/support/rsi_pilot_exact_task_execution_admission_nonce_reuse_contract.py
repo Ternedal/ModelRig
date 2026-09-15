@@ -297,6 +297,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_pr_ready_for_review_state_observation_contract import (
         run_contract as run_pr_ready_for_review_state_observation_contract,
     )
+    # ADR-DC-063 host-pins one GraphQL ready-for-review broker without loading
+    # a secret or granting ready/reviewer/label/merge authority.
+    from rsi_pilot_exact_task_pr_ready_for_review_credential_capability_contract import (
+        run_contract as run_pr_ready_for_review_credential_capability_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -330,6 +335,7 @@ def run_contract() -> None:
     run_pr_ready_for_review_authorization_contract()
     run_pr_ready_for_review_reservation_contract()
     run_pr_ready_for_review_state_observation_contract()
+    run_pr_ready_for_review_credential_capability_contract()
 
 
 if __name__ == "__main__":
