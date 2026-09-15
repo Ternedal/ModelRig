@@ -237,6 +237,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_authorization_contract import (
         run_contract as run_remote_publication_authorization_contract,
     )
+    # ADR-DC-050 consumes one exact ADR-DC-049 authority before any remote write,
+    # then performs only the exact leased branch push and deterministic draft-PR
+    # creation. Completed receipts retain no push/PR/merge authority.
+    from rsi_pilot_exact_task_remote_publication_transaction_contract import (
+        run_contract as run_remote_publication_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -257,6 +263,7 @@ def run_contract() -> None:
     run_remote_publication_plan_contract()
     run_remote_state_observation_contract()
     run_remote_publication_authorization_contract()
+    run_remote_publication_transaction_contract()
 
 
 if __name__ == "__main__":
