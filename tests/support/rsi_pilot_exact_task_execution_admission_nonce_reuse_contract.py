@@ -202,6 +202,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_local_commit_authorization_requirements_contract import (
         run_contract as run_local_commit_authorization_requirements_contract,
     )
+    # ADR-DC-044 verifies a fresh human signature over the exact ADR-DC-043
+    # requirements, but does not consume the nonce or grant Git write authority.
+    from rsi_pilot_exact_task_local_commit_human_authorization_contract import (
+        run_contract as run_local_commit_human_authorization_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -216,6 +221,7 @@ def run_contract() -> None:
     run_local_commit_plan_contract()
     run_local_commit_object_identity_contract()
     run_local_commit_authorization_requirements_contract()
+    run_local_commit_human_authorization_contract()
 
 
 if __name__ == "__main__":
