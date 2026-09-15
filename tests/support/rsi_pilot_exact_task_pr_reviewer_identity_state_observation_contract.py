@@ -352,6 +352,11 @@ def run_contract() -> None:
             assert forbidden not in source
         assert "reviewer_requestability_verified: bool = False" in source
         assert "reviewer_mutation_authorized: bool = False" in source
+
+        from rsi_pilot_exact_task_pr_reviewer_request_credential_capability_contract import (
+            run_contract as run_reviewer_request_credential_capability_contract,
+        )
+        run_reviewer_request_credential_capability_contract()
     finally:
         for item in cleanup:
             item.cleanup()
