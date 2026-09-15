@@ -289,6 +289,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_merge_authorization_contract import (
         run_contract as run_merge_authorization_contract,
     )
+    # ADR-DC-060 consumes exact merge authority before any GitHub write, fresh-
+    # revalidates review/readiness and remote PR state, executes one SHA-pinned
+    # squash merge, then double-verifies the exact merge commit/base parent.
+    from rsi_pilot_exact_task_merge_transaction_contract import (
+        run_contract as run_merge_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -319,6 +325,7 @@ def run_contract() -> None:
     run_review_state_attestation_contract()
     run_merge_readiness_evaluation_contract()
     run_merge_authorization_contract()
+    run_merge_transaction_contract()
 
 
 if __name__ == "__main__":
