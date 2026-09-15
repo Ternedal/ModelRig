@@ -214,6 +214,13 @@ def run_contract() -> None:
         for item in cleanup:
             item.cleanup()
 
+    # ADR-DC-070 remains a read-only post-reservation identity observation
+    # and runs transitively through the locked reviewer-request Stage-B chain.
+    from rsi_pilot_exact_task_pr_reviewer_identity_observation_contract import (
+        run_contract as run_reviewer_identity_observation_contract,
+    )
+    run_reviewer_identity_observation_contract()
+
 
 if __name__ == "__main__":
     run_contract()
