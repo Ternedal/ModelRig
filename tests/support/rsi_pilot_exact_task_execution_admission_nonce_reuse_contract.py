@@ -307,6 +307,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_post_merge_attestation_contract import (
         run_contract as run_post_merge_attestation_contract,
     )
+    # ADR-DC-063 evaluates one fresh exact post-merge attestation under the
+    # host-pinned release policy and fresh GET-only GitHub state. It may say
+    # release_ready, but grants no release/deploy/production authority.
+    from rsi_pilot_exact_task_release_readiness_evaluation_contract import (
+        run_contract as run_release_readiness_evaluation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -340,6 +346,7 @@ def run_contract() -> None:
     run_merge_transaction_contract()
     run_merge_recovery_contract()
     run_post_merge_attestation_contract()
+    run_release_readiness_evaluation_contract()
 
 
 if __name__ == "__main__":
