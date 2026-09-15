@@ -301,6 +301,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_merge_recovery_contract import (
         run_contract as run_merge_recovery_contract,
     )
+    # ADR-DC-062 normalizes completed ADR-DC-060/061 merge state into one fresh,
+    # double-observed read-only exact merged-state attestation. It grants no
+    # release, deploy or production activation authority.
+    from rsi_pilot_exact_task_post_merge_attestation_contract import (
+        run_contract as run_post_merge_attestation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -333,6 +339,7 @@ def run_contract() -> None:
     run_merge_authorization_contract()
     run_merge_transaction_contract()
     run_merge_recovery_contract()
+    run_post_merge_attestation_contract()
 
 
 if __name__ == "__main__":
