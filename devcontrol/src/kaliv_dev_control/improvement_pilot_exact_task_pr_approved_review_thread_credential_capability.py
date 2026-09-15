@@ -1,0 +1,80 @@
+"""Public host-pinned facade for ADR-DC-080 approved review-thread capability."""
+from __future__ import annotations
+
+from . import _improvement_pilot_exact_task_pr_approved_review_thread_credential_capability_impl as _implementation
+from ._improvement_pilot_exact_task_pr_approved_review_thread_credential_capability_production_boundary import (
+    install_pilot_exact_task_pr_approved_review_thread_credential_capability_production_boundary,
+)
+
+install_pilot_exact_task_pr_approved_review_thread_credential_capability_production_boundary(
+    _implementation
+)
+
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_CAPABILITY_SCHEMA = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_CAPABILITY_SCHEMA
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_CAPABILITY_AUTHORITY = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_CAPABILITY_AUTHORITY
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_PROTOCOL = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_PROTOCOL
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_OPERATION = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_OPERATION
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_SECRET_SOURCE = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_SECRET_SOURCE
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_SECRET_TRANSPORT = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_SECRET_TRANSPORT
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_ENDPOINT = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_ENDPOINT
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_ACCOUNT = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_ACCOUNT
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_MAX_DISPOSITION_AGE_SECONDS = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_MAX_DISPOSITION_AGE_SECONDS
+)
+PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_QUERY = (
+    _implementation.PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_QUERY
+)
+PilotExactTaskPrApprovedReviewThreadCredentialCapabilityError = (
+    _implementation.PilotExactTaskPrApprovedReviewThreadCredentialCapabilityError
+)
+PilotExactTaskPrApprovedReviewThreadCredentialCapability = (
+    _implementation.PilotExactTaskPrApprovedReviewThreadCredentialCapability
+)
+materialize_pilot_exact_task_pr_approved_review_thread_credential_capability = (
+    _implementation.materialize_pilot_exact_task_pr_approved_review_thread_credential_capability
+)
+
+# Deterministic support seams only; production broker selection remains host-pinned.
+_require_live_approved_disposition = _implementation._require_live_approved_disposition
+_require_disposition_window = _implementation._require_disposition_window
+_descriptor = _implementation._descriptor
+_materialize_verified_pilot_exact_task_pr_approved_review_thread_credential_capability = (
+    _implementation._materialize_verified_pilot_exact_task_pr_approved_review_thread_credential_capability
+)
+_get_live_pr_approved_review_thread_credential_capability_inputs = (
+    _implementation._get_live_pr_approved_review_thread_credential_capability_inputs
+)
+
+__all__ = [
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_CAPABILITY_SCHEMA",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_CAPABILITY_AUTHORITY",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_PROTOCOL",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_OPERATION",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_SECRET_SOURCE",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_SECRET_TRANSPORT",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_ENDPOINT",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_CREDENTIAL_ACCOUNT",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_MAX_DISPOSITION_AGE_SECONDS",
+    "PILOT_EXACT_TASK_PR_APPROVED_REVIEW_THREAD_GRAPHQL_QUERY",
+    "PilotExactTaskPrApprovedReviewThreadCredentialCapabilityError",
+    "PilotExactTaskPrApprovedReviewThreadCredentialCapability",
+    "materialize_pilot_exact_task_pr_approved_review_thread_credential_capability",
+]
+
+del install_pilot_exact_task_pr_approved_review_thread_credential_capability_production_boundary
