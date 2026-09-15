@@ -177,6 +177,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_prelaunch_reservation_contract import (
         run_contract as run_prelaunch_reservation_contract,
     )
+    # ADR-DC-039 permanently consumes the exact reservation before invoking the
+    # sole existing hardened Tier-A receipt path. No publication authority follows.
+    from rsi_pilot_exact_task_execution_transaction_contract import (
+        run_contract as run_execution_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -186,6 +191,7 @@ def run_contract() -> None:
     run_executor_capability_semantics_contract()
     run_execution_plan_contract()
     run_prelaunch_reservation_contract()
+    run_execution_transaction_contract()
 
 
 if __name__ == "__main__":
