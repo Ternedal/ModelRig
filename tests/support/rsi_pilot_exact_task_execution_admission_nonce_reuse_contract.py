@@ -192,6 +192,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_local_commit_plan_contract import (
         run_contract as run_local_commit_plan_contract,
     )
+    # ADR-DC-042 reconstructs the exact tree/commit object identities using only
+    # read-only TrustedGit evidence. It still grants no Git object/ref authority.
+    from rsi_pilot_exact_task_local_commit_object_identity_contract import (
+        run_contract as run_local_commit_object_identity_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -204,6 +209,7 @@ def run_contract() -> None:
     run_execution_transaction_contract()
     run_post_execution_evaluation_contract()
     run_local_commit_plan_contract()
+    run_local_commit_object_identity_contract()
 
 
 if __name__ == "__main__":
