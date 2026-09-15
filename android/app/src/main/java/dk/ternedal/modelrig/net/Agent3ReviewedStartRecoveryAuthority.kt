@@ -6,9 +6,21 @@ import org.json.JSONObject
 internal class Agent3ReviewedStartHttpException(
     val statusCode: Int?,
     val reasonCode: String?,
-    message: String,
+    _message: String,
     cause: Throwable? = null,
-) : RuntimeException(message, cause)
+) : RuntimeException(reviewedStartSafeMessage(statusCode, reasonCode), cause)
+
+private fun reviewedStartSafeMessage(statusCode: Int?, reasonCode: String?): String =
+    when (reasonCode) {
+        "reviewed_start_refused" -> "Agent 3.0 reviewed Start was refused by the server"
+        "reviewed_start_pending" -> "Agent 3.0 reviewed Start outcome is still pending"
+        "reviewed_start_executor_unavailable" -> "Agent 3.0 reviewed Start executor is unavailable"
+        else -> if (statusCode != null) {
+            "Agent 3.0 reviewed Start failed (HTTP $statusCode)"
+        } else {
+            "Agent 3.0 reviewed Start transport failed"
+        }
+    }
 
 /** Minimal operator-reviewed authority retained only while Start outcome is ambiguous. */
 internal data class Agent3ReviewedStartRecoveryAuthority(
