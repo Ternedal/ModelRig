@@ -111,7 +111,7 @@ dependencies {
     // org.json lives in the Android framework; the unit-test stub throws on
     // every call. StreamContract parses real NDJSON, so the tests need a real
     // implementation on the JVM test classpath.
-    testImplementation("org.json:json:20260719")
+    testImplementation("org.json:json:20260814")
     // Scheduler client contracts need a real HTTP boundary without relying on
     // JDK-only com.sun.net.httpserver, which is absent from AGP's test compiler.
     testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
