@@ -242,6 +242,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_remote_publication_write_reservation_contract import (
         run_contract as run_remote_publication_write_reservation_contract,
     )
+    # ADR-DC-052 host-pins a verified credential broker without loading a secret
+    # or granting push authority. The exact remote transaction remains later.
+    from rsi_pilot_exact_task_remote_publication_credential_capability_contract import (
+        run_contract as run_remote_publication_credential_capability_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -264,6 +269,7 @@ def run_contract() -> None:
     run_remote_publication_target_attestation_contract()
     run_remote_publication_state_observation_contract()
     run_remote_publication_write_reservation_contract()
+    run_remote_publication_credential_capability_contract()
 
 
 if __name__ == "__main__":
