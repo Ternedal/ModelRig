@@ -26,6 +26,20 @@ namespace ModelRig.BodyRig.UnityRenderer
             loader.VrmPath = Environment.GetEnvironmentVariable("BODYRIG_VRM_PATH");
             loader.LoadOnStart = true;
 
+            // Frame source: the rig's live stream when a rig is named, otherwise
+            // the deterministic fixture -- the physical proof runs unchanged
+            // with both env vars unset.
+            var rigUrl = Environment.GetEnvironmentVariable("BODYRIG_RIG_URL");
+            var rigToken = Environment.GetEnvironmentVariable("BODYRIG_RIG_TOKEN");
+            if (!string.IsNullOrWhiteSpace(rigUrl) && !string.IsNullOrWhiteSpace(rigToken))
+            {
+                var source = root.AddComponent<BodyRigFrameSource>();
+                source.Renderer = renderer;
+                source.BaseUrl = rigUrl;
+                source.Token = rigToken;
+                return;
+            }
+
             var player = root.AddComponent<BodyRigFixturePlayer>();
             player.Renderer = renderer;
             player.ResourceName = "bodyrig-demo";
