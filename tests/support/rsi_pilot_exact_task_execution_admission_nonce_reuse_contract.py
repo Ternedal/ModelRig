@@ -273,6 +273,11 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_post_lifecycle_attestation_contract import (
         run_contract as run_post_lifecycle_attestation_contract,
     )
+    # ADR-DC-057 double-observes exact submitted review and review-thread state
+    # read-only from one fresh live ADR-DC-056 attestation; no merge authority follows.
+    from rsi_pilot_exact_task_review_state_attestation_contract import (
+        run_contract as run_review_state_attestation_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -300,6 +305,7 @@ def run_contract() -> None:
     run_pr_lifecycle_transaction_contract()
     run_pr_lifecycle_recovery_contract()
     run_post_lifecycle_attestation_contract()
+    run_review_state_attestation_contract()
 
 
 if __name__ == "__main__":
