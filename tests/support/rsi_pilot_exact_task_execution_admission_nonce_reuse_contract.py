@@ -202,6 +202,12 @@ def run_contract() -> None:
     from rsi_pilot_exact_task_local_commit_write_authorization_contract import (
         run_contract as run_local_commit_write_authorization_contract,
     )
+    # ADR-DC-044 is the first local Git-write transaction. It consumes the exact
+    # live ADR-DC-043 authority, writes only the predicted tree/commit objects,
+    # compare-and-swap moves one bound local ref, and grants no remote authority.
+    from rsi_pilot_exact_task_local_commit_transaction_contract import (
+        run_contract as run_local_commit_transaction_contract,
+    )
 
     run_execution_plan_requirements_contract()
     run_development_task_binding_contract()
@@ -216,6 +222,7 @@ def run_contract() -> None:
     run_local_commit_plan_contract()
     run_local_commit_object_identity_contract()
     run_local_commit_write_authorization_contract()
+    run_local_commit_transaction_contract()
 
 
 if __name__ == "__main__":
