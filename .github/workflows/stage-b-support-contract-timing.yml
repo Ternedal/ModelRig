@@ -1,0 +1,77 @@
+name: stage-b-support-contract-timing
+
+on:
+  push:
+    branches:
+      - agent/stage-b-support-contract-timing-v1
+
+permissions:
+  contents: read
+
+jobs:
+  timing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install worker deps
+        run: pip install -r worker/requirements.txt --break-system-packages
+      - name: Time support contracts separately
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/stage-b-support-timing.log"
+          files=(
+            rsi_physical_campaign_admission_contract.py
+            rsi_physical_campaign_admission_provenance_contract.py
+            rsi_physical_campaign_production_boundary.py
+            rsi_physical_campaign_evidence_production_boundary.py
+            rsi_physical_campaign_execution_binding_production_boundary.py
+            rsi_physical_campaign_main_freeze_production_boundary.py
+            rsi_physical_campaign_independent_verdict_production_boundary.py
+            rsi_human_pilot_decision_production_boundary.py
+            rsi_pilot_trial_scope_contract.py
+            rsi_pilot_preflight_requirements_contract.py
+            rsi_pilot_product_integration_inventory_contract.py
+            rsi_pilot_runtime_preflight_attestation_proof_contract.py
+            rsi_pilot_start_authorization_contract.py
+            rsi_pilot_start_authorization_preflight_provenance_contract.py
+            rsi_pilot_start_consumption_contract.py
+            rsi_pilot_execution_admission_requirements_contract.py
+          )
+          : > "$log"
+          for file in "${files[@]}"; do
+            echo "START $file" | tee -a "$log"
+            if timeout 60s env FILE="$file" PYTHONPATH=devcontrol/src:tests/support python3 -u - <<'PY' 2>&1 | tee -a "$log"
+          import importlib.util
+          import os
+          import sys
+          from pathlib import Path
+          path = Path("tests/support") / os.environ["FILE"]
+          spec = importlib.util.spec_from_file_location(path.stem + "_timing", path)
+          assert spec and spec.loader
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          module.run_contract()
+          PY
+            then
+              echo "PASS $file" | tee -a "$log"
+            else
+              code=${PIPESTATUS[0]}
+              echo "FAIL_OR_TIMEOUT $file exit=$code" | tee -a "$log"
+              exit "$code"
+            fi
+          done
+      - name: Upload timing log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stage-b-support-timing
+          path: ${{ runner.temp }}/stage-b-support-timing.log
+          if-no-files-found: error
+          retention-days: 7
