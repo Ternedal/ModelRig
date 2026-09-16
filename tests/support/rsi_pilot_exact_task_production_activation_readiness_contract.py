@@ -192,7 +192,7 @@ def run_contract() -> None:
         assert expired.blocker_codes == ("staging-success-attestation-too-old",)
 
         _reject(lambda: _evaluate(source, policy, now="2026-09-15T09:51:49Z"))
-        _reject(lambda: _policy(source, repository="other/repo"))
+        _reject(lambda: _evaluate(source, _policy(source, repository="other/repo")))
         _reject(lambda: _policy(source, target_environment="staging"))
         _reject(lambda: _policy(source, require_exact_staging_success=False))
         _reject(lambda: _policy(source, require_runtime_build_identity_binding=False))
