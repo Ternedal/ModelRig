@@ -40,12 +40,17 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	if uptime < 0 {
 		uptime = 0
 	}
+	var build any
+	if identity, err := currentServerBuildIdentity(); err == nil {
+		build = identity
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"schema":         "kaliv-system-status/v1",
 		"os":             runtime.GOOS,
 		"uptime_seconds": int64(uptime),
 		"gpu":            collectGPUStatus(),
 		"cpu":            collectCPUStatus(),
+		"build":          build,
 	})
 }
 
