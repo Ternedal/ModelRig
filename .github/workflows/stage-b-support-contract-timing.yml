@@ -18,55 +18,89 @@ jobs:
           python-version: "3.12"
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
-      - name: Time support contracts separately
+      - name: Time support contracts in isolated process groups
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        shell: bash
         run: |
-          set -euo pipefail
-          log="$RUNNER_TEMP/stage-b-support-timing.log"
-          files=(
-            rsi_physical_campaign_admission_contract.py
-            rsi_physical_campaign_admission_provenance_contract.py
-            rsi_physical_campaign_production_boundary.py
-            rsi_physical_campaign_evidence_production_boundary.py
-            rsi_physical_campaign_execution_binding_production_boundary.py
-            rsi_physical_campaign_main_freeze_production_boundary.py
-            rsi_physical_campaign_independent_verdict_production_boundary.py
-            rsi_human_pilot_decision_production_boundary.py
-            rsi_pilot_trial_scope_contract.py
-            rsi_pilot_preflight_requirements_contract.py
-            rsi_pilot_product_integration_inventory_contract.py
-            rsi_pilot_runtime_preflight_attestation_proof_contract.py
-            rsi_pilot_start_authorization_contract.py
-            rsi_pilot_start_authorization_preflight_provenance_contract.py
-            rsi_pilot_start_consumption_contract.py
-            rsi_pilot_execution_admission_requirements_contract.py
-          )
-          : > "$log"
-          for file in "${files[@]}"; do
-            echo "START $file" | tee -a "$log"
-            if timeout 60s env FILE="$file" PYTHONPATH=devcontrol/src:tests/support python3 -u - <<'PY' 2>&1 | tee -a "$log"
-          import importlib.util
+          python3 -u - <<'PY'
           import os
+          import signal
+          import subprocess
           import sys
           from pathlib import Path
-          path = Path("tests/support") / os.environ["FILE"]
+
+          root = Path.cwd()
+          log_path = Path(os.environ["RUNNER_TEMP"]) / "stage-b-support-timing.log"
+          files = [
+              "rsi_physical_campaign_admission_contract.py",
+              "rsi_physical_campaign_admission_provenance_contract.py",
+              "rsi_physical_campaign_production_boundary.py",
+              "rsi_physical_campaign_evidence_production_boundary.py",
+              "rsi_physical_campaign_execution_binding_production_boundary.py",
+              "rsi_physical_campaign_main_freeze_production_boundary.py",
+              "rsi_physical_campaign_independent_verdict_production_boundary.py",
+              "rsi_human_pilot_decision_production_boundary.py",
+              "rsi_pilot_trial_scope_contract.py",
+              "rsi_pilot_preflight_requirements_contract.py",
+              "rsi_pilot_product_integration_inventory_contract.py",
+              "rsi_pilot_runtime_preflight_attestation_proof_contract.py",
+              "rsi_pilot_start_authorization_contract.py",
+              "rsi_pilot_start_authorization_preflight_provenance_contract.py",
+              "rsi_pilot_start_consumption_contract.py",
+              "rsi_pilot_execution_admission_requirements_contract.py",
+          ]
+          loader = r'''
+          import importlib.util
+          import sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
           spec = importlib.util.spec_from_file_location(path.stem + "_timing", path)
           assert spec and spec.loader
           module = importlib.util.module_from_spec(spec)
           sys.modules[spec.name] = module
           spec.loader.exec_module(module)
           module.run_contract()
+          '''
+          env = dict(os.environ)
+          env["PYTHONPATH"] = "devcontrol/src:tests/support"
+
+          def emit(text: str) -> None:
+              print(text, flush=True)
+              with log_path.open("a", encoding="utf-8") as handle:
+                  handle.write(text + "\n")
+
+          log_path.write_text("", encoding="utf-8")
+          for filename in files:
+              path = root / "tests" / "support" / filename
+              emit(f"START {filename}")
+              process = subprocess.Popen(
+                  [sys.executable, "-u", "-c", loader, str(path)],
+                  cwd=root,
+                  env=env,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+                  start_new_session=True,
+              )
+              try:
+                  output, _ = process.communicate(timeout=60)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  output, _ = process.communicate()
+                  if output:
+                      with log_path.open("a", encoding="utf-8") as handle:
+                          handle.write(output)
+                  emit(f"TIMEOUT {filename} after=60s")
+                  raise SystemExit(124)
+              if output:
+                  print(output, end="", flush=True)
+                  with log_path.open("a", encoding="utf-8") as handle:
+                      handle.write(output)
+              if process.returncode != 0:
+                  emit(f"FAIL {filename} exit={process.returncode}")
+                  raise SystemExit(process.returncode)
+              emit(f"PASS {filename}")
           PY
-            then
-              echo "PASS $file" | tee -a "$log"
-            else
-              code=${PIPESTATUS[0]}
-              echo "FAIL_OR_TIMEOUT $file exit=$code" | tee -a "$log"
-              exit "$code"
-            fi
-          done
       - name: Upload timing log
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
