@@ -1,4 +1,4 @@
-"""Locked Stage-B wrapper for ADR-DC-067 through ADR-DC-085."""
+"""Locked Stage-B wrapper for ADR-DC-067 through ADR-DC-086."""
 from __future__ import annotations
 
 from rsi_pilot_exact_task_release_transaction_contract_base import (
@@ -100,6 +100,11 @@ def run_contract() -> None:
     )
 
     run_staging_success_status_plan_contract()
+    from rsi_pilot_exact_task_staging_success_status_state_observation_contract import (
+        run_contract as run_staging_success_status_state_observation_contract,
+    )
+
+    run_staging_success_status_state_observation_contract()
 
 
 if __name__ == "__main__":
