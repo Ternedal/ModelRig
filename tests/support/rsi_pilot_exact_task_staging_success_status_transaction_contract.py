@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 if str(SUPPORT) not in sys.path:
     sys.path.insert(0, str(SUPPORT))
+from source_code import code_of  # noqa: E402
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
@@ -468,7 +469,7 @@ def run_contract() -> None:
     )
     assert list(signature.parameters) == ["success_status_authorization"]
 
-    source_text = SOURCE.read_text(encoding="utf-8")
+    source_text = code_of(SOURCE)
     assert source_text.count('method="POST"') == 1
     for forbidden in (
         'method="PUT"',

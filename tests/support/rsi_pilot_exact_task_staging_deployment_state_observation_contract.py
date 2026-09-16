@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 if str(SUPPORT) not in sys.path:
     sys.path.insert(0, str(SUPPORT))
+from source_code import code_of  # noqa: E402
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
@@ -310,7 +311,7 @@ def run_contract() -> None:
         )
         assert list(signature.parameters) == ["staging_deployment_plan"]
 
-        source_text = SOURCE.read_text(encoding="utf-8")
+        source_text = code_of(SOURCE)
         assert 'method="GET"' in source_text
         assert 'method="POST"' not in source_text
         assert 'method="PUT"' not in source_text
