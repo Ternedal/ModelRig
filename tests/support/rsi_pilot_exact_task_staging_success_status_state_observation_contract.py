@@ -14,6 +14,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_staging_success_status_state_observation as observation,
@@ -305,7 +306,7 @@ def run_contract() -> None:
     finally:
         plan_contract._cleanup(recovered_bundle)
 
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    schema = json.loads(code_of(SCHEMA))
     fields = set(
         observation.PilotExactTaskStagingSuccessStatusStateObservationReceipt.__dataclass_fields__
     )
@@ -318,7 +319,7 @@ def run_contract() -> None:
     )
     assert list(signature.parameters) == ["staging_success_status_plan"]
 
-    source_text = SOURCE.read_text(encoding="utf-8")
+    source_text = code_of(SOURCE)
     for forbidden in (
         'method="POST"',
         "method='POST'",

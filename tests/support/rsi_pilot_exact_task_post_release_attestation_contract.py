@@ -15,6 +15,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_post_release_attestation as post_release,
@@ -146,7 +147,7 @@ def run_contract() -> None:
         for field, value in (("durable_completion_verified", False), ("exact_remote_release_verified", False), ("exact_tag_target_verified", False), ("exact_draft_release_verified", False), ("double_observation_matched", False), ("post_release_verified", False), ("tag_write_authorized", True), ("release_mutation_authorized", True), ("release_authorized", True), ("remote_write_authorized", True), ("merge_authorized", True), ("push_authorized", True), ("pr_mutation_authorized", True), ("review_submission_authorized", True), ("review_thread_mutation_authorized", True), ("deploy_authorized", True), ("production_activation_authorized", True), ("product_pilot_started", True), ("nonce_reusable", True)):
             _reject(lambda field=field, value=value: post_release.PilotExactTaskPostReleaseAttestationReceipt.from_mapping({**receipt.to_dict(), field: value}))
 
-        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        schema = json.loads(code_of(SCHEMA))
         receipt_fields = set(post_release.PilotExactTaskPostReleaseAttestationReceipt.__dataclass_fields__)
         assert set(schema["properties"]) == receipt_fields
         assert set(schema["required"]) == receipt_fields
@@ -155,7 +156,7 @@ def run_contract() -> None:
         signature = inspect.signature(post_release.attest_pilot_exact_task_post_release)
         assert list(signature.parameters) == ["execution_nonce_sha256"]
 
-        source_text = SOURCE.read_text(encoding="utf-8")
+        source_text = code_of(SOURCE)
         assert 'method="POST"' not in source_text
         assert 'method="PUT"' not in source_text
         assert 'method="PATCH"' not in source_text

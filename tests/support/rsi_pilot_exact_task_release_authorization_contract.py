@@ -16,6 +16,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
@@ -505,7 +506,7 @@ def run_contract() -> None:
                 )
             )
 
-        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        schema = json.loads(code_of(SCHEMA))
         receipt_fields = set(
             release_auth.PilotExactTaskReleaseAuthorizationReceipt.__dataclass_fields__
         )
@@ -544,7 +545,7 @@ def run_contract() -> None:
             "reviewer_signature",
         ]
 
-        source_text = SOURCE.read_text(encoding="utf-8")
+        source_text = code_of(SOURCE)
         assert "requests" not in source_text
         assert "httpx" not in source_text
         assert "subprocess" not in source_text
