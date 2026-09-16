@@ -18,17 +18,78 @@ jobs:
           python-version: "3.12"
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
-      - name: Run physical gate unbuffered with bounded timeout
+      - name: Profile transitive physical-gate contract chain
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          set -o pipefail
-          timeout 300s env PYTHONPATH=devcontrol/src python3 -u tests/workflow_stage_b_physical_gate.py 2>&1 | tee "$RUNNER_TEMP/stage-b-physical-gate.log"
-      - name: Upload isolation log
+          python3 -u - <<'PY'
+          import os
+          import signal
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          log_path = Path(os.environ["RUNNER_TEMP"]) / "stage-b-physical-gate-profile.log"
+          child = r'''
+          import runpy
+          import sys
+          import time
+          from pathlib import Path
+
+          started = time.monotonic()
+
+          def profile(frame, event, arg):
+              if event not in ("call", "return"):
+                  return profile
+              filename = frame.f_code.co_filename.replace("\\", "/")
+              if frame.f_code.co_name == "run_contract" and "/tests/support/" in filename:
+                  elapsed = time.monotonic() - started
+                  print(
+                      f"PROFILE {event.upper()} {elapsed:.3f}s {Path(filename).name}",
+                      flush=True,
+                  )
+              return profile
+
+          sys.setprofile(profile)
+          try:
+              runpy.run_path("tests/workflow_stage_b_physical_gate.py", run_name="__main__")
+          finally:
+              sys.setprofile(None)
+          '''
+          env = dict(os.environ)
+          env["PYTHONPATH"] = "devcontrol/src"
+          process = subprocess.Popen(
+              [sys.executable, "-u", "-c", child],
+              env=env,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              text=True,
+              start_new_session=True,
+          )
+          timed_out = False
+          try:
+              output, _ = process.communicate(timeout=180)
+          except subprocess.TimeoutExpired:
+              timed_out = True
+              os.killpg(process.pid, signal.SIGKILL)
+              output, _ = process.communicate()
+          marker = (
+              "PROFILE_TIMEOUT after=180s\n"
+              if timed_out
+              else f"PROFILE_EXIT code={process.returncode}\n"
+          )
+          log_path.write_text((output or "") + marker, encoding="utf-8")
+          print(output or "", end="")
+          print(marker, end="")
+          if timed_out:
+              raise SystemExit(124)
+          raise SystemExit(process.returncode)
+          PY
+      - name: Upload profile log
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: stage-b-physical-gate-isolation
-          path: ${{ runner.temp }}/stage-b-physical-gate.log
+          name: stage-b-physical-gate-profile
+          path: ${{ runner.temp }}/stage-b-physical-gate-profile.log
           if-no-files-found: error
           retention-days: 7
