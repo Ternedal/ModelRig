@@ -14,6 +14,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_staging_runtime_build_identity as build_identity,
@@ -314,7 +315,7 @@ def run_contract() -> None:
     finally:
         runtime_contract._cleanup(recovered_bundle)
 
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    schema = json.loads(code_of(SCHEMA))
     fields = set(build_identity.PilotExactTaskStagingRuntimeBuildIdentityReceipt.__dataclass_fields__)
     assert set(schema["required"]) == fields
     assert set(schema["properties"]) == fields
@@ -323,7 +324,7 @@ def run_contract() -> None:
     signature = inspect.signature(build_identity.verify_pilot_exact_task_staging_runtime_build_identity)
     assert list(signature.parameters) == ["staging_runtime_verification"]
 
-    source_text = SOURCE.read_text(encoding="utf-8")
+    source_text = code_of(SOURCE)
     for forbidden in (
         'method="POST"', "method='POST'", 'method="PUT"', "method='PUT'",
         'method="PATCH"', "method='PATCH'", 'method="DELETE"', "method='DELETE'",
@@ -335,24 +336,24 @@ def run_contract() -> None:
     assert "success_deployment_status_ready: bool = True" in source_text
     assert "success_deployment_status_authorized: bool = False" in source_text
 
-    server_source = SERVER_BUILD_SOURCE.read_text(encoding="utf-8")
+    server_source = code_of(SERVER_BUILD_SOURCE)
     assert "debug.ReadBuildInfo()" in server_source
     assert "vcs.revision" in server_source
     assert "vcs.modified" in server_source
     assert "os.Executable()" in server_source
     assert "sha256.New()" in server_source
 
-    system_source = SYSTEM_STATUS_SOURCE.read_text(encoding="utf-8")
+    system_source = code_of(SYSTEM_STATUS_SOURCE)
     assert '"build":          build' in system_source
     assert "currentServerBuildIdentity()" in system_source
 
-    worker_source = WORKER_BUILD_SOURCE.read_text(encoding="utf-8")
+    worker_source = code_of(WORKER_BUILD_SOURCE)
     assert "COMMIT_SHA" in worker_source
     assert "artifact_fingerprint()" in worker_source
     assert '"commit_sha": commit_identity()' in worker_source
     assert '"artifact_sha256": artifact_fingerprint()' in worker_source
 
-    stamp_source = STAMP_SOURCE.read_text(encoding="utf-8")
+    stamp_source = code_of(STAMP_SOURCE)
     assert 'COMMIT_SHA = "{commit}"' in stamp_source
     assert '["git", "rev-parse", "HEAD"]' in stamp_source
 

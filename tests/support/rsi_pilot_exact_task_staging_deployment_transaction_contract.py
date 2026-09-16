@@ -15,6 +15,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_staging_deployment_authorization as deploy_auth,
@@ -288,7 +289,7 @@ def run_contract() -> None:
                 )
             )
 
-        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        schema = json.loads(code_of(SCHEMA))
         receipt_fields = set(deploy_tx.PilotExactTaskStagingDeploymentTransactionReceipt.__dataclass_fields__)
         assert set(schema["properties"]) == receipt_fields
         assert set(schema["required"]) == receipt_fields
@@ -297,7 +298,7 @@ def run_contract() -> None:
         execute_sig = inspect.signature(deploy_tx.execute_pilot_exact_task_staging_deployment)
         assert list(execute_sig.parameters) == ["deployment_authorization"]
 
-        source_text = SOURCE.read_text(encoding="utf-8")
+        source_text = code_of(SOURCE)
         assert source_text.count('method="POST"') == 1
         assert 'method="PUT"' not in source_text
         assert 'method="PATCH"' not in source_text

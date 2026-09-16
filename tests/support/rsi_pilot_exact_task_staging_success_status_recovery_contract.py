@@ -15,6 +15,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_staging_success_status_recovery as recovery,
@@ -393,7 +394,7 @@ def run_contract() -> None:
                 lambda raw=raw: recovery.PilotExactTaskStagingSuccessStatusRecoveryReceipt.from_mapping(raw)
             )
 
-        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        schema = json.loads(code_of(SCHEMA))
         receipt_fields = set(
             recovery.PilotExactTaskStagingSuccessStatusRecoveryReceipt.__dataclass_fields__
         )
@@ -428,7 +429,7 @@ def run_contract() -> None:
             "reviewer_signature",
         ]
 
-        source_text = SOURCE.read_text(encoding="utf-8")
+        source_text = code_of(SOURCE)
         assert 'method="GET"' in source_text
         for forbidden in (
             'method="POST"', "method='POST'",

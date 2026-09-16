@@ -14,6 +14,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_post_merge_attestation as post_merge,
@@ -375,7 +376,7 @@ def run_contract() -> None:
             )
         )
 
-        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        schema = json.loads(code_of(SCHEMA))
         receipt_fields = set(
             release.PilotExactTaskReleaseReadinessEvaluationReceipt.__dataclass_fields__
         )
@@ -391,7 +392,7 @@ def run_contract() -> None:
         )
         assert list(signature.parameters) == ["post_merge_attestation"]
 
-        source_text = SOURCE.read_text(encoding="utf-8")
+        source_text = code_of(SOURCE)
         assert 'method="POST"' not in source_text
         assert "method='POST'" not in source_text
         assert 'method="PUT"' not in source_text

@@ -14,6 +14,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_staging_completion_readiness as readiness,
@@ -313,7 +314,7 @@ def run_contract() -> None:
         recovery_temp.cleanup()
         post_contract.recovery_contract._cleanup(fixture)
 
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    schema = json.loads(code_of(SCHEMA))
     fields = set(readiness.PilotExactTaskStagingCompletionReadinessReceipt.__dataclass_fields__)
     assert set(schema["required"]) == fields
     assert set(schema["properties"]) == fields
@@ -324,7 +325,7 @@ def run_contract() -> None:
     )
     assert list(signature.parameters) == ["post_staging_success_status_attestation"]
 
-    source_text = SOURCE.read_text(encoding="utf-8")
+    source_text = code_of(SOURCE)
     assert "urllib.request" not in source_text
     assert "subprocess" not in source_text
     for forbidden in (

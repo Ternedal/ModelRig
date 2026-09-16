@@ -15,6 +15,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_staging_runtime_verification as runtime_verify,
@@ -287,7 +288,7 @@ def run_contract() -> None:
     finally:
         _cleanup(recovered_bundle)
 
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    schema = json.loads(code_of(SCHEMA))
     fields = set(runtime_verify.PilotExactTaskStagingRuntimeVerificationReceipt.__dataclass_fields__)
     assert set(schema["required"]) == fields
     assert set(schema["properties"]) == fields
@@ -296,7 +297,7 @@ def run_contract() -> None:
     signature = inspect.signature(runtime_verify.verify_pilot_exact_task_staging_runtime)
     assert list(signature.parameters) == ["post_staging_deployment_status_attestation"]
 
-    source_text = SOURCE.read_text(encoding="utf-8")
+    source_text = code_of(SOURCE)
     for forbidden in (
         'method="POST"', "method='POST'", 'method="PUT"', "method='PUT'",
         'method="PATCH"', "method='PATCH'", 'method="DELETE"', "method='DELETE'",

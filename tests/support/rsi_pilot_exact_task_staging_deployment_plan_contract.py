@@ -14,6 +14,7 @@ if str(SUPPORT) not in sys.path:
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
+from source_code import code_of  # noqa: E402
 
 from kaliv_dev_control import (  # noqa: E402
     improvement_pilot_exact_task_deploy_readiness_evaluation as deploy_ready,
@@ -240,7 +241,7 @@ def run_contract() -> None:
             )
         )
 
-        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        schema = json.loads(code_of(SCHEMA))
         receipt_fields = set(
             deploy_plan.PilotExactTaskStagingDeploymentPlanReceipt.__dataclass_fields__
         )
@@ -253,7 +254,7 @@ def run_contract() -> None:
         )
         assert list(signature.parameters) == ["deploy_readiness_evaluation"]
 
-        source_text = SOURCE.read_text(encoding="utf-8")
+        source_text = code_of(SOURCE)
         assert "urllib" not in source_text
         assert "subprocess" not in source_text
         assert 'method="POST"' not in source_text
