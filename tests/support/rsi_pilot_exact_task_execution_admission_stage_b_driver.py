@@ -1,15 +1,11 @@
 """Stage-B isolated-process driver for ADR-DC-030 through ADR-DC-033.
 
-ADR-DC-029 previously ran the authorization, revalidation, admission and focused
-nonce-reuse contracts serially in one process. The lighter ADR-DC-030..031
-standalone contracts qualify with at most two concurrent workers. The deeper
-ADR-DC-032..033 contracts then qualify one at a time: hosted-runner evidence showed
-ADR-DC-032 completing while ADR-DC-033 timed out when those two deep fixture chains
-overlapped. ADR-DC-033 uses a Stage-B-only driver that preserves the canonical
-contract while reusing its already-built upstream packet for one duplicated failed
-proof fixture. The nonce-reuse contract remains the single bridge into ADR-DC-034
-through ADR-DC-097 and runs only after the standalone phases, preventing nested
-worker oversubscription.
+ADR-DC-030..031 qualify as two shallow isolated contracts with at most two workers.
+ADR-DC-032 and ADR-DC-033 then qualify together in one isolated shared-provenance
+child: both canonical contracts execute in full, but the deterministic deep upstream
+material is built once and kept alive across the adjacent pair. The nonce-reuse
+contract remains the single bridge into ADR-DC-034 through ADR-DC-097 and runs only
+after the admission phases, preventing nested worker oversubscription.
 """
 from __future__ import annotations
 
@@ -23,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _DEFAULT_TIMEOUT_SECONDS = 1800
+_SHARED_DEEP_CHAIN_TIMEOUT_SECONDS = 2400
 _NONCE_CHAIN_TIMEOUT_SECONDS = 6600
 _MAX_SHALLOW_PARALLEL_CONTRACTS = 2
 
@@ -30,9 +27,8 @@ _SHALLOW_CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_authorization_contract.py",
     "rsi_pilot_exact_task_execution_revalidation_observation_contract.py",
 )
-_DEEP_CONTRACT_FILES = (
-    "rsi_pilot_exact_task_execution_revalidation_attestation_contract.py",
-    "rsi_pilot_exact_task_execution_admission_stage_b_contract_driver.py",
+_SHARED_DEEP_CHAIN_FILE = (
+    "rsi_pilot_exact_task_execution_revalidation_attestation_admission_stage_b_driver.py"
 )
 _NONCE_CHAIN_FILE = "rsi_pilot_exact_task_execution_admission_nonce_reuse_contract.py"
 
@@ -48,6 +44,8 @@ def _decode_timeout_output(value: str | bytes | None) -> str:
 def _timeout_for(filename: str) -> int:
     if filename == _NONCE_CHAIN_FILE:
         return _NONCE_CHAIN_TIMEOUT_SECONDS
+    if filename == _SHARED_DEEP_CHAIN_FILE:
+        return _SHARED_DEEP_CHAIN_TIMEOUT_SECONDS
     return _DEFAULT_TIMEOUT_SECONDS
 
 
@@ -135,34 +133,33 @@ def run_contract() -> None:
 
     _raise_failures("shallow standalone phase", _SHALLOW_CONTRACT_FILES, shallow_results)
 
-    # The ADR-DC-032 and ADR-DC-033 fixture chains are both deep. On three
-    # independent hosted runners, ADR-DC-032 completed under two-worker
-    # orchestration while ADR-DC-033 hit its 1800s child bound. Serialize this
-    # pair so they do not compete for the runner while preserving their exact
-    # child bounds and assertions. The ADR-DC-033 Stage-B driver only removes a
-    # duplicated upstream fixture rebuild inside the canonical contract.
+    # ADR-DC-032 and ADR-DC-033 share the same deterministic deep provenance.
+    # Running them as separate children rebuilt that provenance twice and made
+    # ADR-DC-033 exceed its 1800s bound even when fully serialized. This dedicated
+    # child keeps process isolation from the rest of Stage-B while executing both
+    # canonical contracts against one shared fixture lifetime.
     print(
         "Stage-B exact-task admission chain: phase 1b/2, "
-        f"{len(_DEEP_CONTRACT_FILES)} deep standalone contracts, serialized",
+        "ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
         flush=True,
     )
-    deep_results: dict[str, tuple[int, float, str]] = {}
-    for filename in _DEEP_CONTRACT_FILES:
-        print(
-            f"  START: {filename} ({_timeout_for(filename)}s bound)",
-            flush=True,
-        )
-        filename, returncode, elapsed, output = _run_contract_file(filename)
-        deep_results[filename] = (returncode, elapsed, output)
-        status = "PASS" if returncode == 0 else f"FAIL({returncode})"
-        print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
+    print(
+        f"  START: {_SHARED_DEEP_CHAIN_FILE} "
+        f"({_timeout_for(_SHARED_DEEP_CHAIN_FILE)}s aggregate bound)",
+        flush=True,
+    )
+    filename, returncode, elapsed, output = _run_contract_file(_SHARED_DEEP_CHAIN_FILE)
+    status = "PASS" if returncode == 0 else f"FAIL({returncode})"
+    print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
+    shared_results = {filename: (returncode, elapsed, output)}
+    _raise_failures(
+        "shared deep ADR-032/033 phase",
+        (_SHARED_DEEP_CHAIN_FILE,),
+        shared_results,
+    )
 
-    _raise_failures("deep standalone phase", _DEEP_CONTRACT_FILES, deep_results)
-
-    # Do not overlap the downstream bridge with the standalone phases. The bridge
-    # itself runs isolated workers for ADR-DC-034..066 and ADR-DC-067..097; running
-    # those workers under an already saturated outer executor caused deterministic
-    # CPU oversubscription and timeout cascades on hosted CI runners.
+    # Do not overlap the downstream bridge with the admission phases. The bridge
+    # itself runs isolated workers for ADR-DC-034..066 and ADR-DC-067..097.
     print(
         "Stage-B exact-task admission chain: phase 2/2, nonce/downstream bridge",
         flush=True,
