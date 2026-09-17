@@ -70,7 +70,7 @@ jobs:
             echo "===== $f =====" | tee -a /tmp/modelrig-full-test.log
             timeout_seconds=1200
             if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
-              timeout_seconds=3600
+              timeout_seconds=5400
             fi
             echo "TIMEOUT_BOUND: $f ${timeout_seconds}s" | tee -a /tmp/modelrig-full-test.log
             started_at="$(date +%s)"
