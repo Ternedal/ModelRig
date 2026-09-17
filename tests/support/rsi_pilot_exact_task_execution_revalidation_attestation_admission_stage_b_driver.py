@@ -14,6 +14,7 @@ remain unchanged.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -51,9 +52,16 @@ class _DeferredCleanup:
 def _shared_material_provider() -> tuple[Any, ...]:
     global _shared_material, _real_temp
     if _shared_material is None:
+        material_started = time.monotonic()
+        print("Stage-B shared deep pair: START shared upstream material", flush=True)
         material = _ORIGINAL_ADR032_MATERIAL()
         _real_temp = material[0]
         _shared_material = (_DeferredCleanup(_real_temp), *material[1:])
+        print(
+            "Stage-B shared deep pair: PASS shared upstream material "
+            f"({time.monotonic() - material_started:.1f}s)",
+            flush=True,
+        )
     return _shared_material
 
 
@@ -61,14 +69,27 @@ def run_contract() -> None:
     global _shared_material, _real_temp
     adr032._material = _shared_material_provider
     adr033._material = _shared_material_provider
+    pair_started = time.monotonic()
     try:
+        adr032_started = time.monotonic()
         print("Stage-B shared deep pair: START ADR-DC-032", flush=True)
         adr032.run_contract()
-        print("Stage-B shared deep pair: PASS ADR-DC-032", flush=True)
+        print(
+            f"Stage-B shared deep pair: PASS ADR-DC-032 ({time.monotonic() - adr032_started:.1f}s)",
+            flush=True,
+        )
 
+        adr033_started = time.monotonic()
         print("Stage-B shared deep pair: START ADR-DC-033", flush=True)
         adr033.run_contract()
-        print("Stage-B shared deep pair: PASS ADR-DC-033", flush=True)
+        print(
+            f"Stage-B shared deep pair: PASS ADR-DC-033 ({time.monotonic() - adr033_started:.1f}s)",
+            flush=True,
+        )
+        print(
+            f"Stage-B shared deep pair: PASS aggregate ({time.monotonic() - pair_started:.1f}s)",
+            flush=True,
+        )
     finally:
         adr032._material = _ORIGINAL_ADR032_MATERIAL
         adr033._material = _ORIGINAL_ADR033_MATERIAL
