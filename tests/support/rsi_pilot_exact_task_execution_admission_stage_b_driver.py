@@ -5,7 +5,9 @@ nonce-reuse contracts serially in one process. The lighter ADR-DC-030..031
 standalone contracts qualify with at most two concurrent workers. The deeper
 ADR-DC-032..033 contracts then qualify one at a time: hosted-runner evidence showed
 ADR-DC-032 completing while ADR-DC-033 timed out when those two deep fixture chains
-overlapped. The nonce-reuse contract remains the single bridge into ADR-DC-034
+overlapped. ADR-DC-033 uses a Stage-B-only driver that preserves the canonical
+contract while reusing its already-built upstream packet for one duplicated failed
+proof fixture. The nonce-reuse contract remains the single bridge into ADR-DC-034
 through ADR-DC-097 and runs only after the standalone phases, preventing nested
 worker oversubscription.
 """
@@ -30,7 +32,7 @@ _SHALLOW_CONTRACT_FILES = (
 )
 _DEEP_CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_revalidation_attestation_contract.py",
-    "rsi_pilot_exact_task_execution_admission_contract.py",
+    "rsi_pilot_exact_task_execution_admission_stage_b_contract_driver.py",
 )
 _NONCE_CHAIN_FILE = "rsi_pilot_exact_task_execution_admission_nonce_reuse_contract.py"
 
@@ -137,7 +139,8 @@ def run_contract() -> None:
     # independent hosted runners, ADR-DC-032 completed under two-worker
     # orchestration while ADR-DC-033 hit its 1800s child bound. Serialize this
     # pair so they do not compete for the runner while preserving their exact
-    # child bounds and assertions.
+    # child bounds and assertions. The ADR-DC-033 Stage-B driver only removes a
+    # duplicated upstream fixture rebuild inside the canonical contract.
     print(
         "Stage-B exact-task admission chain: phase 1b/2, "
         f"{len(_DEEP_CONTRACT_FILES)} deep standalone contracts, serialized",
