@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 if str(SUPPORT) not in sys.path:
     sys.path.insert(0, str(SUPPORT))
+from source_code import code_of  # noqa: E402
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
 if str(DEVCONTROL_SRC) not in sys.path:
     sys.path.insert(0, str(DEVCONTROL_SRC))
@@ -229,7 +230,7 @@ def run_contract() -> None:
     signature = inspect.signature(success_plan.plan_pilot_exact_task_staging_success_status)
     assert list(signature.parameters) == ["staging_runtime_build_identity"]
 
-    source_text = SOURCE.read_text(encoding="utf-8")
+    source_text = code_of(SOURCE)
     for forbidden in (
         "urllib.request",
         'method="POST"',
