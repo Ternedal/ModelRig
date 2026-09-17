@@ -2,9 +2,10 @@
 
 ADR-DC-029 previously ran the authorization, revalidation, admission and focused
 nonce-reuse contracts serially in one process. The four standalone ADR-DC-030..033
-contracts own independent fixtures and qualify concurrently. The nonce-reuse
-contract remains the single bridge into ADR-DC-034 through ADR-DC-097 and runs only
-after the standalone batch, preventing nested worker oversubscription.
+contracts own independent fixtures and qualify with at most two concurrent workers.
+The nonce-reuse contract remains the single bridge into ADR-DC-034 through
+ADR-DC-097 and runs only after the standalone batch, preventing nested worker
+oversubscription.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _DEFAULT_TIMEOUT_SECONDS = 1800
 _NONCE_CHAIN_TIMEOUT_SECONDS = 6600
-_MAX_PARALLEL_CONTRACTS = 4
+_MAX_PARALLEL_CONTRACTS = 2
 
 _STANDALONE_CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_authorization_contract.py",
