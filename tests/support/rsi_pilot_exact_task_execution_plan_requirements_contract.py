@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import kaliv_dev_control  # noqa: E402
 from kaliv_dev_control import catalog  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_admission as admission  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_plan_requirements as plan_req  # noqa: E402
+import kaliv_dev_control.improvement_pilot_exact_task_execution_revalidation_attestation as revalidation  # noqa: E402
 from rsi_pilot_exact_task_execution_admission_contract import _ledger, _proof  # noqa: E402
 
 SCHEMA = (
@@ -36,8 +38,34 @@ def _reject(fn) -> None:
     raise AssertionError("ADR-DC-034 unexpectedly accepted invalid input")
 
 
+class _DeferredSourceCleanup:
+    """No-op cleanup for a proof fixture owned by the parent Stage-B bridge."""
+
+    def cleanup(self) -> None:
+        return None
+
+
+def _cached_proofs():
+    cache_path = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    if not cache_path:
+        return None
+    payload = json.loads(Path(cache_path).read_text(encoding="utf-8"))
+    proof = revalidation.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping(
+        payload["proof"]
+    )
+    fresh = revalidation.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping(
+        payload["fresh"]
+    )
+    admission.require_fresh_revalidation_proof_identity(proof, fresh)
+    return _DeferredSourceCleanup(), proof, fresh
+
+
 def _live_receipt():
-    source_temp, proof, fresh, *_ = _proof()
+    cached = _cached_proofs()
+    if cached is None:
+        source_temp, proof, fresh, *_ = _proof()
+    else:
+        source_temp, proof, fresh = cached
     ledger_temp, ledger = _ledger("rsi-exact-task-plan-requirements-")
     times = iter(("2026-09-14T08:36:20Z", "2026-09-14T08:36:21Z"))
     receipt = admission._admit_verified_exact_task_execution(
