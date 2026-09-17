@@ -51,7 +51,7 @@ _CONTRACT_FILES = (
     "rsi_pilot_exact_task_post_staging_success_status_attestation_contract.py",
     "rsi_pilot_exact_task_production_activation_readiness_contract.py",
     "rsi_pilot_exact_task_production_activation_authorization_contract.py",
-    "rsi_pilot_exact_task_production_activation_transaction_contract.py",
+    "rsi_pilot_exact_task_production_activation_transaction_stage_b_driver.py",
     "rsi_pilot_exact_task_production_activation_recovery_contract.py",
     "rsi_pilot_exact_task_post_production_activation_attestation_contract.py",
     "rsi_pilot_exact_task_product_pilot_start_readiness_contract.py",
