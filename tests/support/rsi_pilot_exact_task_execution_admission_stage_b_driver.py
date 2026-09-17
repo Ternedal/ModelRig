@@ -1,11 +1,13 @@
 """Stage-B isolated-process driver for ADR-DC-030 through ADR-DC-033.
 
 ADR-DC-029 previously ran the authorization, revalidation, admission and focused
-nonce-reuse contracts serially in one process. The four standalone ADR-DC-030..033
-contracts own independent fixtures and qualify with at most two concurrent workers.
-The nonce-reuse contract remains the single bridge into ADR-DC-034 through
-ADR-DC-097 and runs only after the standalone batch, preventing nested worker
-oversubscription.
+nonce-reuse contracts serially in one process. The lighter ADR-DC-030..031
+standalone contracts qualify with at most two concurrent workers. The deeper
+ADR-DC-032..033 contracts then qualify one at a time: hosted-runner evidence showed
+ADR-DC-032 completing while ADR-DC-033 timed out when those two deep fixture chains
+overlapped. The nonce-reuse contract remains the single bridge into ADR-DC-034
+through ADR-DC-097 and runs only after the standalone phases, preventing nested
+worker oversubscription.
 """
 from __future__ import annotations
 
@@ -20,11 +22,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _DEFAULT_TIMEOUT_SECONDS = 1800
 _NONCE_CHAIN_TIMEOUT_SECONDS = 6600
-_MAX_PARALLEL_CONTRACTS = 2
+_MAX_SHALLOW_PARALLEL_CONTRACTS = 2
 
-_STANDALONE_CONTRACT_FILES = (
+_SHALLOW_CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_authorization_contract.py",
     "rsi_pilot_exact_task_execution_revalidation_observation_contract.py",
+)
+_DEEP_CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_revalidation_attestation_contract.py",
     "rsi_pilot_exact_task_execution_admission_contract.py",
 )
@@ -99,22 +103,22 @@ def _raise_failures(
 
 
 def run_contract() -> None:
-    worker_count = min(
-        _MAX_PARALLEL_CONTRACTS,
+    shallow_worker_count = min(
+        _MAX_SHALLOW_PARALLEL_CONTRACTS,
         max(1, os.cpu_count() or 1),
-        len(_STANDALONE_CONTRACT_FILES),
+        len(_SHALLOW_CONTRACT_FILES),
     )
     print(
-        "Stage-B exact-task admission chain: phase 1/2, "
-        f"{len(_STANDALONE_CONTRACT_FILES)} standalone contracts, "
-        f"{worker_count} isolated workers",
+        "Stage-B exact-task admission chain: phase 1a/2, "
+        f"{len(_SHALLOW_CONTRACT_FILES)} shallow standalone contracts, "
+        f"{shallow_worker_count} isolated workers",
         flush=True,
     )
 
-    standalone_results: dict[str, tuple[int, float, str]] = {}
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+    shallow_results: dict[str, tuple[int, float, str]] = {}
+    with ThreadPoolExecutor(max_workers=shallow_worker_count) as executor:
         futures = {}
-        for filename in _STANDALONE_CONTRACT_FILES:
+        for filename in _SHALLOW_CONTRACT_FILES:
             print(
                 f"  START: {filename} ({_timeout_for(filename)}s bound)",
                 flush=True,
@@ -123,13 +127,36 @@ def run_contract() -> None:
 
         for future in as_completed(futures):
             filename, returncode, elapsed, output = future.result()
-            standalone_results[filename] = (returncode, elapsed, output)
+            shallow_results[filename] = (returncode, elapsed, output)
             status = "PASS" if returncode == 0 else f"FAIL({returncode})"
             print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
 
-    _raise_failures("standalone phase", _STANDALONE_CONTRACT_FILES, standalone_results)
+    _raise_failures("shallow standalone phase", _SHALLOW_CONTRACT_FILES, shallow_results)
 
-    # Do not overlap the downstream bridge with the standalone batch. The bridge
+    # The ADR-DC-032 and ADR-DC-033 fixture chains are both deep. On three
+    # independent hosted runners, ADR-DC-032 completed under two-worker
+    # orchestration while ADR-DC-033 hit its 1800s child bound. Serialize this
+    # pair so they do not compete for the runner while preserving their exact
+    # child bounds and assertions.
+    print(
+        "Stage-B exact-task admission chain: phase 1b/2, "
+        f"{len(_DEEP_CONTRACT_FILES)} deep standalone contracts, serialized",
+        flush=True,
+    )
+    deep_results: dict[str, tuple[int, float, str]] = {}
+    for filename in _DEEP_CONTRACT_FILES:
+        print(
+            f"  START: {filename} ({_timeout_for(filename)}s bound)",
+            flush=True,
+        )
+        filename, returncode, elapsed, output = _run_contract_file(filename)
+        deep_results[filename] = (returncode, elapsed, output)
+        status = "PASS" if returncode == 0 else f"FAIL({returncode})"
+        print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
+
+    _raise_failures("deep standalone phase", _DEEP_CONTRACT_FILES, deep_results)
+
+    # Do not overlap the downstream bridge with the standalone phases. The bridge
     # itself runs isolated workers for ADR-DC-034..066 and ADR-DC-067..097; running
     # those workers under an already saturated outer executor caused deterministic
     # CPU oversubscription and timeout cascades on hosted CI runners.
