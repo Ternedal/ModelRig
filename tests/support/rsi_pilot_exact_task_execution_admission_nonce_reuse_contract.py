@@ -1,7 +1,10 @@
 """Focused replay contract: one ADR-DC-030 execution nonce gets one host slot."""
 from __future__ import annotations
 
+import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +39,21 @@ def _reject(fn) -> None:
 
 def run_contract() -> None:
     source_temp, proof, fresh, *_ = _proof()
+    proof_cache_temp = tempfile.TemporaryDirectory(
+        prefix="rsi-exact-task-admission-proof-cache-"
+    )
+    proof_cache_path = Path(proof_cache_temp.name) / "proofs.json"
+    proof_cache_path.write_text(
+        json.dumps(
+            {"proof": proof.to_dict(), "fresh": fresh.to_dict()},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    previous_proof_cache = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(proof_cache_path)
     ledger_temp, ledger = _ledger("rsi-exact-task-admission-nonce-reuse-")
     try:
         source_authorization = (
@@ -149,8 +167,15 @@ def run_contract() -> None:
         run_contract as run_release_transaction_contract,
     )
 
-    run_stage_b_midchain_contracts()
-    run_release_transaction_contract()
+    try:
+        run_stage_b_midchain_contracts()
+        run_release_transaction_contract()
+    finally:
+        if previous_proof_cache is None:
+            os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
+        else:
+            os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = previous_proof_cache
+        proof_cache_temp.cleanup()
 
 
 if __name__ == "__main__":
