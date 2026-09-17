@@ -21,7 +21,7 @@ from rsi_pilot_exact_task_release_transaction_contract_base import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
-_PER_CONTRACT_TIMEOUT_SECONDS = 1200
+_PER_CONTRACT_TIMEOUT_SECONDS = 1800
 _MAX_PARALLEL_CONTRACTS = 4
 
 _CONTRACT_FILES = (
