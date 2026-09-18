@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import sys
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +32,18 @@ from rsi_pilot_exact_task_post_execution_evaluation_contract import (  # noqa: E
 from rsi_pilot_exact_task_prelaunch_reservation_contract import (  # noqa: E402
     _drift_after_first_snapshot_reader,
 )
+
+_LIVE_EVALUATION_KEEPALIVES = {}
+
+
+def _retain_reservation(evaluation, reservation) -> None:
+    key = id(evaluation)
+
+    def cleanup(_):
+        _LIVE_EVALUATION_KEEPALIVES.pop(key, None)
+
+    _LIVE_EVALUATION_KEEPALIVES[key] = (weakref.ref(evaluation, cleanup), reservation)
+
 
 SCHEMA = (
     ROOT
@@ -75,6 +88,7 @@ def _live_evaluation():
             now_provider=lambda: "2026-09-15T05:20:00Z",
         )
     assert evaluation.evaluation_authenticated is True
+    _retain_reservation(evaluation, reservation)
     return (
         source_temp,
         admission_ledger_temp,
@@ -83,7 +97,6 @@ def _live_evaluation():
         execution_temp,
         evaluation,
         execution_receipt,
-        reservation,
         plan,
         task,
         fixture,
@@ -105,7 +118,6 @@ def run_contract() -> None:
         execution_temp,
         evaluation,
         execution_receipt,
-        reservation,
         execution_plan,
         task,
         fixture,
