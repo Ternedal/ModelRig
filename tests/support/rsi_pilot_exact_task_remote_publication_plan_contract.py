@@ -118,7 +118,14 @@ def _live_readiness():
         )
     assert calls
     assert ready.readiness_authenticated is True
-    _retain_mechanical(ready, mechanical)
+    # ADR-DC-046's live registry weakly references ADR-DC-045. Keep the full
+    # upstream fixture alive as long as readiness is live; retaining only the
+    # mechanical receipt is insufficient because ADR-045 itself authenticates
+    # through weak live provenance.
+    _retain_mechanical(
+        ready,
+        (mechanical, evaluation, execution_receipt, execution_plan, local_plan, authorization),
+    )
     return (
         source_temp,
         admission_ledger_temp,
