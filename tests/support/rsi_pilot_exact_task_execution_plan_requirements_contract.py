@@ -20,6 +20,8 @@ from kaliv_dev_control import catalog  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_admission as admission  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_plan_requirements as plan_req  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_revalidation_attestation as revalidation  # noqa: E402
+import kaliv_dev_control._improvement_pilot_exact_task_execution_admission_impl as admission_impl  # noqa: E402
+import kaliv_dev_control._improvement_pilot_exact_task_execution_revalidation_attestation_impl as revalidation_impl  # noqa: E402
 from rsi_pilot_exact_task_execution_admission_contract import _ledger, _proof  # noqa: E402
 
 SCHEMA = (
@@ -45,6 +47,30 @@ class _DeferredSourceCleanup:
         return None
 
 
+_CACHED_PROOF_MAPPINGS = []
+_VALIDATED_PROOFS = {}
+_ORIGINAL_REQUIRE_SATISFIED_PROOF = admission_impl._require_satisfied_revalidation_proof
+_ORIGINAL_PROOF_FROM_MAPPING = (
+    revalidation_impl.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping.__func__
+)
+
+
+def _memoized_require_satisfied_proof(value):
+    cached = _VALIDATED_PROOFS.get(id(value))
+    if cached is value:
+        return value
+    exact = _ORIGINAL_REQUIRE_SATISFIED_PROOF(value)
+    _VALIDATED_PROOFS[id(exact)] = exact
+    return exact
+
+
+def _memoized_proof_from_mapping(cls, value):
+    for mapping, proof in _CACHED_PROOF_MAPPINGS:
+        if value == mapping:
+            return proof
+    return _ORIGINAL_PROOF_FROM_MAPPING(cls, value)
+
+
 def _cached_proofs():
     cache_path = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
     if not cache_path:
@@ -57,6 +83,13 @@ def _cached_proofs():
         payload["fresh"]
     )
     admission.require_fresh_revalidation_proof_identity(proof, fresh)
+    _CACHED_PROOF_MAPPINGS[:] = [(proof.to_dict(), proof), (fresh.to_dict(), fresh)]
+    _VALIDATED_PROOFS[id(proof)] = proof
+    _VALIDATED_PROOFS[id(fresh)] = fresh
+    admission_impl._require_satisfied_revalidation_proof = _memoized_require_satisfied_proof
+    revalidation_impl.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping = classmethod(
+        _memoized_proof_from_mapping
+    )
     return _DeferredSourceCleanup(), proof, fresh
 
 
@@ -285,6 +318,12 @@ def run_contract() -> None:
     finally:
         ledger_temp.cleanup()
         source_temp.cleanup()
+        admission_impl._require_satisfied_revalidation_proof = _ORIGINAL_REQUIRE_SATISFIED_PROOF
+        revalidation_impl.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping = classmethod(
+            _ORIGINAL_PROOF_FROM_MAPPING
+        )
+        _CACHED_PROOF_MAPPINGS.clear()
+        _VALIDATED_PROOFS.clear()
 
 
 if __name__ == "__main__":
