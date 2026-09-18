@@ -88,7 +88,14 @@ def _live_evaluation():
             now_provider=lambda: "2026-09-15T05:20:00Z",
         )
     assert evaluation.evaluation_authenticated is True
-    _retain_reservation(evaluation, reservation)
+    # Keep the complete live ADR-038 -> ADR-040 provenance graph alive.
+    # Later helpers intentionally omit several intermediate live objects from
+    # their public fixture tuples; retaining only ADR-038 leaves weakref-backed
+    # authentication vulnerable to GC at those boundaries.
+    _retain_reservation(
+        evaluation,
+        (reservation, execution_receipt, plan, task, fixture),
+    )
     return (
         source_temp,
         admission_ledger_temp,
