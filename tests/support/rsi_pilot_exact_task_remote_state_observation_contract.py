@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import sys
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,6 +30,18 @@ from rsi_pilot_exact_task_remote_publication_plan_contract import (  # noqa: E40
     _live_readiness,
     _target,
 )
+
+_LIVE_PLAN_KEEPALIVES = {}
+
+
+def _retain_ready(plan, ready) -> None:
+    key = id(plan)
+
+    def cleanup(_):
+        _LIVE_PLAN_KEEPALIVES.pop(key, None)
+
+    _LIVE_PLAN_KEEPALIVES[key] = (weakref.ref(plan, cleanup), ready)
+
 
 SCHEMA = (
     ROOT
@@ -106,6 +119,7 @@ def _live_plan():
         )
     assert calls
     assert plan.plan_authenticated is True
+    _retain_ready(plan, ready)
     return (
         source_temp,
         admission_ledger_temp,
