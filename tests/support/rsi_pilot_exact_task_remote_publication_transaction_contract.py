@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,6 +34,21 @@ from rsi_pilot_exact_task_remote_publication_authorization_contract import (  # 
 from rsi_pilot_exact_task_remote_state_observation_contract import (  # noqa: E402
     _Observer,
 )
+
+_LIVE_AUTHORIZATION_KEEPALIVES = {}
+
+
+def _retain_observation(authorization, observation) -> None:
+    key = id(authorization)
+
+    def cleanup(_):
+        _LIVE_AUTHORIZATION_KEEPALIVES.pop(key, None)
+
+    _LIVE_AUTHORIZATION_KEEPALIVES[key] = (
+        weakref.ref(authorization, cleanup),
+        observation,
+    )
+
 
 SCHEMA = (
     ROOT
@@ -170,6 +186,9 @@ def _live_authorization():
         )
     assert calls
     assert authorization.authorization_authenticated is True
+    # ADR-DC-049 authenticates through a weak reference to ADR-DC-048.
+    # Keep the complete upstream live chain reachable while authorization lives.
+    _retain_observation(authorization, observation)
     return (
         source_temp,
         admission_ledger_temp,
