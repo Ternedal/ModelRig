@@ -252,20 +252,22 @@ def run_contract() -> None:
         )
 
         # Every copied receipt/scope field is an exact binding, not caller input.
+        # Use values that are guaranteed to differ from the live fixture; fixed
+        # hexadecimal sentinels can legitimately equal deterministic fixture data.
         for field, value in (
-            ("admission_receipt_sha256", "1" * 64),
-            ("admission_key_sha256", "2" * 64),
-            ("execution_nonce_sha256", "3" * 64),
-            ("revalidation_attestation_proof_sha256", "4" * 64),
-            ("execution_authorization_proof_sha256", "5" * 64),
-            ("start_receipt_sha256", "6" * 64),
+            ("admission_receipt_sha256", ("0" if requirements.admission_receipt_sha256[0] != "0" else "1") + requirements.admission_receipt_sha256[1:]),
+            ("admission_key_sha256", ("0" if requirements.admission_key_sha256[0] != "0" else "1") + requirements.admission_key_sha256[1:]),
+            ("execution_nonce_sha256", ("0" if requirements.execution_nonce_sha256[0] != "0" else "1") + requirements.execution_nonce_sha256[1:]),
+            ("revalidation_attestation_proof_sha256", ("0" if requirements.revalidation_attestation_proof_sha256[0] != "0" else "1") + requirements.revalidation_attestation_proof_sha256[1:]),
+            ("execution_authorization_proof_sha256", ("0" if requirements.execution_authorization_proof_sha256[0] != "0" else "1") + requirements.execution_authorization_proof_sha256[1:]),
+            ("start_receipt_sha256", ("0" if requirements.start_receipt_sha256[0] != "0" else "1") + requirements.start_receipt_sha256[1:]),
             ("repository", "Other/Repository"),
             ("base_sha", "a" * 40),
             ("requested_main_sha", "b" * 40),
             ("trial_id", "different.trial"),
             ("operator_surface", "different.operator"),
             ("selected_pilot_task_id", "different.task"),
-            ("workspace_root_path_sha256", "7" * 64),
+            ("workspace_root_path_sha256", ("0" if requirements.workspace_root_path_sha256[0] != "0" else "1") + requirements.workspace_root_path_sha256[1:]),
             (
                 "local_commits_allowed_by_human_scope",
                 not requirements.local_commits_allowed_by_human_scope,
