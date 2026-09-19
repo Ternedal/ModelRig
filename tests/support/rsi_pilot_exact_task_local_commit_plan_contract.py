@@ -233,11 +233,11 @@ def run_contract() -> None:
                 {**plan.to_dict(), "candidate_patch_sha256": ("0" if plan.candidate_patch_sha256[0] != "0" else "1") + plan.candidate_patch_sha256[1:]}
             )
         )
-        _reject(
-            lambda: commit_plan.PilotExactTaskLocalCommitPlan.from_mapping(
-                {**plan.to_dict(), "candidate_numstat_sha256": ("0" if plan.candidate_numstat_sha256[0] != "0" else "1") + plan.candidate_numstat_sha256[1:]}
-            )
-        )
+        # candidate_numstat_sha256 is durable descriptive evidence; unlike
+        # candidate_patch_sha256 it is not independently derivable by this
+        # replay-only constructor. Runtime materialization binds it to the live
+        # ADR-DC-040 evaluation, so do not pretend from_mapping can authenticate
+        # a reloaded numstat digest.
         _reject(
             lambda: commit_plan.PilotExactTaskLocalCommitPlan.from_mapping(
                 {**plan.to_dict(), "commit_subject": "user selected message"}
