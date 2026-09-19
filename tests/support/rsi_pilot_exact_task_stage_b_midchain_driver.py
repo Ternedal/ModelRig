@@ -124,6 +124,16 @@ def run_contract() -> None:
             results[filename] = (returncode, elapsed, output)
             status = "PASS" if returncode == 0 else f"FAIL({returncode})"
             print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
+            if returncode != 0 and output:
+                # Surface the real child traceback immediately. Previously it
+                # was buffered until every worker completed, so the 6600s
+                # parent timeout could kill the bridge before the actionable
+                # failure was ever printed.
+                print(
+                    f"--- {filename} failure output ---\n{output[-12000:]}\n"
+                    f"--- end {filename} failure output ---",
+                    flush=True,
+                )
 
     failures = []
     for filename in _CONTRACT_FILES:
