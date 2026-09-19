@@ -157,19 +157,13 @@ def run_contract() -> None:
         ledger_temp.cleanup()
         source_temp.cleanup()
 
-    # ADR-DC-034 through ADR-DC-066 are independent adversarial qualifications.
-    # Run them in isolated processes so Stage-B does not serialize the entire
-    # exact-task publication/lifecycle chain before ADR-DC-067.
-    from rsi_pilot_exact_task_stage_b_midchain_driver import (
-        run_contract as run_stage_b_midchain_contracts,
-    )
-    from rsi_pilot_exact_task_release_transaction_contract import (
-        run_contract as run_release_transaction_contract,
-    )
-
+    # This contract owns only the ADR-DC-033 nonce-reuse boundary.
+    # ADR-DC-034 through ADR-DC-066 are independent Stage-B qualifications and
+    # are executed by the Stage-B driver, not recursively from this focused
+    # nonce-reuse contract. Keeping the downstream suite here made the parent
+    # subprocess duplicate the full midchain and hit its 6600s safety bound.
     try:
-        run_stage_b_midchain_contracts()
-        run_release_transaction_contract()
+        pass
     finally:
         if previous_proof_cache is None:
             os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
