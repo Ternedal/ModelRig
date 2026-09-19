@@ -230,12 +230,12 @@ def run_contract() -> None:
 
         _reject(
             lambda: commit_plan.PilotExactTaskLocalCommitPlan.from_mapping(
-                {**plan.to_dict(), "candidate_patch_sha256": "a" * 64}
+                {**plan.to_dict(), "candidate_patch_sha256": ("0" if plan.candidate_patch_sha256[0] != "0" else "1") + plan.candidate_patch_sha256[1:]}
             )
         )
         _reject(
             lambda: commit_plan.PilotExactTaskLocalCommitPlan.from_mapping(
-                {**plan.to_dict(), "candidate_numstat_sha256": "b" * 64}
+                {**plan.to_dict(), "candidate_numstat_sha256": ("0" if plan.candidate_numstat_sha256[0] != "0" else "1") + plan.candidate_numstat_sha256[1:]}
             )
         )
         _reject(
