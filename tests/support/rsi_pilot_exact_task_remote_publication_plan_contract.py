@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import sys
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +35,18 @@ from rsi_pilot_exact_task_integration_readiness_contract import (  # noqa: E402
 from rsi_pilot_exact_task_post_commit_integration_evaluation_contract import (  # noqa: E402
     _evaluation_reader,
 )
+
+_LIVE_READINESS_KEEPALIVES = {}
+
+
+def _retain_mechanical(ready, mechanical) -> None:
+    key = id(ready)
+
+    def cleanup(_):
+        _LIVE_READINESS_KEEPALIVES.pop(key, None)
+
+    _LIVE_READINESS_KEEPALIVES[key] = (weakref.ref(ready, cleanup), mechanical)
+
 
 SCHEMA = (
     ROOT
@@ -105,6 +118,14 @@ def _live_readiness():
         )
     assert calls
     assert ready.readiness_authenticated is True
+    # ADR-DC-046's live registry weakly references ADR-DC-045. Keep the full
+    # upstream fixture alive as long as readiness is live; retaining only the
+    # mechanical receipt is insufficient because ADR-045 itself authenticates
+    # through weak live provenance.
+    _retain_mechanical(
+        ready,
+        (mechanical, evaluation, execution_receipt, execution_plan, local_plan, authorization),
+    )
     return (
         source_temp,
         admission_ledger_temp,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,9 @@ import kaliv_dev_control  # noqa: E402
 from kaliv_dev_control import catalog  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_admission as admission  # noqa: E402
 import kaliv_dev_control.improvement_pilot_exact_task_execution_plan_requirements as plan_req  # noqa: E402
+import kaliv_dev_control.improvement_pilot_exact_task_execution_revalidation_attestation as revalidation  # noqa: E402
+import kaliv_dev_control._improvement_pilot_exact_task_execution_admission_impl as admission_impl  # noqa: E402
+import kaliv_dev_control._improvement_pilot_exact_task_execution_revalidation_attestation_impl as revalidation_impl  # noqa: E402
 from rsi_pilot_exact_task_execution_admission_contract import _ledger, _proof  # noqa: E402
 
 SCHEMA = (
@@ -36,8 +40,65 @@ def _reject(fn) -> None:
     raise AssertionError("ADR-DC-034 unexpectedly accepted invalid input")
 
 
+class _DeferredSourceCleanup:
+    """No-op cleanup for a proof fixture owned by the parent Stage-B bridge."""
+
+    def cleanup(self) -> None:
+        return None
+
+
+_CACHED_PROOF_MAPPINGS = []
+_VALIDATED_PROOFS = {}
+_ORIGINAL_REQUIRE_SATISFIED_PROOF = admission_impl._require_satisfied_revalidation_proof
+_ORIGINAL_PROOF_FROM_MAPPING = (
+    revalidation_impl.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping.__func__
+)
+
+
+def _memoized_require_satisfied_proof(value):
+    cached = _VALIDATED_PROOFS.get(id(value))
+    if cached is value:
+        return value
+    exact = _ORIGINAL_REQUIRE_SATISFIED_PROOF(value)
+    _VALIDATED_PROOFS[id(exact)] = exact
+    return exact
+
+
+def _memoized_proof_from_mapping(cls, value):
+    for mapping, proof in _CACHED_PROOF_MAPPINGS:
+        if value == mapping:
+            return proof
+    return _ORIGINAL_PROOF_FROM_MAPPING(cls, value)
+
+
+def _cached_proofs():
+    cache_path = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    if not cache_path:
+        return None
+    payload = json.loads(Path(cache_path).read_text(encoding="utf-8"))
+    proof = revalidation.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping(
+        payload["proof"]
+    )
+    fresh = revalidation.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping(
+        payload["fresh"]
+    )
+    admission.require_fresh_revalidation_proof_identity(proof, fresh)
+    _CACHED_PROOF_MAPPINGS[:] = [(proof.to_dict(), proof), (fresh.to_dict(), fresh)]
+    _VALIDATED_PROOFS[id(proof)] = proof
+    _VALIDATED_PROOFS[id(fresh)] = fresh
+    admission_impl._require_satisfied_revalidation_proof = _memoized_require_satisfied_proof
+    revalidation_impl.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping = classmethod(
+        _memoized_proof_from_mapping
+    )
+    return _DeferredSourceCleanup(), proof, fresh
+
+
 def _live_receipt():
-    source_temp, proof, fresh, *_ = _proof()
+    cached = _cached_proofs()
+    if cached is None:
+        source_temp, proof, fresh, *_ = _proof()
+    else:
+        source_temp, proof, fresh = cached
     ledger_temp, ledger = _ledger("rsi-exact-task-plan-requirements-")
     times = iter(("2026-09-14T08:36:20Z", "2026-09-14T08:36:21Z"))
     receipt = admission._admit_verified_exact_task_execution(
@@ -191,20 +252,22 @@ def run_contract() -> None:
         )
 
         # Every copied receipt/scope field is an exact binding, not caller input.
+        # Use values that are guaranteed to differ from the live fixture; fixed
+        # hexadecimal sentinels can legitimately equal deterministic fixture data.
         for field, value in (
-            ("admission_receipt_sha256", "1" * 64),
-            ("admission_key_sha256", "2" * 64),
-            ("execution_nonce_sha256", "3" * 64),
-            ("revalidation_attestation_proof_sha256", "4" * 64),
-            ("execution_authorization_proof_sha256", "5" * 64),
-            ("start_receipt_sha256", "6" * 64),
+            ("admission_receipt_sha256", ("0" if requirements.admission_receipt_sha256[0] != "0" else "1") + requirements.admission_receipt_sha256[1:]),
+            ("admission_key_sha256", ("0" if requirements.admission_key_sha256[0] != "0" else "1") + requirements.admission_key_sha256[1:]),
+            ("execution_nonce_sha256", ("0" if requirements.execution_nonce_sha256[0] != "0" else "1") + requirements.execution_nonce_sha256[1:]),
+            ("revalidation_attestation_proof_sha256", ("0" if requirements.revalidation_attestation_proof_sha256[0] != "0" else "1") + requirements.revalidation_attestation_proof_sha256[1:]),
+            ("execution_authorization_proof_sha256", ("0" if requirements.execution_authorization_proof_sha256[0] != "0" else "1") + requirements.execution_authorization_proof_sha256[1:]),
+            ("start_receipt_sha256", ("0" if requirements.start_receipt_sha256[0] != "0" else "1") + requirements.start_receipt_sha256[1:]),
             ("repository", "Other/Repository"),
             ("base_sha", "a" * 40),
             ("requested_main_sha", "b" * 40),
             ("trial_id", "different.trial"),
             ("operator_surface", "different.operator"),
             ("selected_pilot_task_id", "different.task"),
-            ("workspace_root_path_sha256", "7" * 64),
+            ("workspace_root_path_sha256", ("0" if requirements.workspace_root_path_sha256[0] != "0" else "1") + requirements.workspace_root_path_sha256[1:]),
             (
                 "local_commits_allowed_by_human_scope",
                 not requirements.local_commits_allowed_by_human_scope,
@@ -257,6 +320,12 @@ def run_contract() -> None:
     finally:
         ledger_temp.cleanup()
         source_temp.cleanup()
+        admission_impl._require_satisfied_revalidation_proof = _ORIGINAL_REQUIRE_SATISFIED_PROOF
+        revalidation_impl.PilotExactTaskExecutionRevalidationAttestationProof.from_mapping = classmethod(
+            _ORIGINAL_PROOF_FROM_MAPPING
+        )
+        _CACHED_PROOF_MAPPINGS.clear()
+        _VALIDATED_PROOFS.clear()
 
 
 if __name__ == "__main__":

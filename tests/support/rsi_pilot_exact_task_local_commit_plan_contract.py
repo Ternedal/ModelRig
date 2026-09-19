@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import sys
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +32,18 @@ from rsi_pilot_exact_task_post_execution_evaluation_contract import (  # noqa: E
 from rsi_pilot_exact_task_prelaunch_reservation_contract import (  # noqa: E402
     _drift_after_first_snapshot_reader,
 )
+
+_LIVE_EVALUATION_KEEPALIVES = {}
+
+
+def _retain_reservation(evaluation, reservation) -> None:
+    key = id(evaluation)
+
+    def cleanup(_):
+        _LIVE_EVALUATION_KEEPALIVES.pop(key, None)
+
+    _LIVE_EVALUATION_KEEPALIVES[key] = (weakref.ref(evaluation, cleanup), reservation)
+
 
 SCHEMA = (
     ROOT
@@ -75,6 +88,14 @@ def _live_evaluation():
             now_provider=lambda: "2026-09-15T05:20:00Z",
         )
     assert evaluation.evaluation_authenticated is True
+    # Keep the complete live ADR-038 -> ADR-040 provenance graph alive.
+    # Later helpers intentionally omit several intermediate live objects from
+    # their public fixture tuples; retaining only ADR-038 leaves weakref-backed
+    # authentication vulnerable to GC at those boundaries.
+    _retain_reservation(
+        evaluation,
+        (reservation, execution_receipt, plan, task, fixture),
+    )
     return (
         source_temp,
         admission_ledger_temp,
@@ -209,14 +230,14 @@ def run_contract() -> None:
 
         _reject(
             lambda: commit_plan.PilotExactTaskLocalCommitPlan.from_mapping(
-                {**plan.to_dict(), "candidate_patch_sha256": "a" * 64}
+                {**plan.to_dict(), "candidate_patch_sha256": ("0" if plan.candidate_patch_sha256[0] != "0" else "1") + plan.candidate_patch_sha256[1:]}
             )
         )
-        _reject(
-            lambda: commit_plan.PilotExactTaskLocalCommitPlan.from_mapping(
-                {**plan.to_dict(), "candidate_numstat_sha256": "b" * 64}
-            )
-        )
+        # candidate_numstat_sha256 is durable descriptive evidence; unlike
+        # candidate_patch_sha256 it is not independently derivable by this
+        # replay-only constructor. Runtime materialization binds it to the live
+        # ADR-DC-040 evaluation, so do not pretend from_mapping can authenticate
+        # a reloaded numstat digest.
         _reject(
             lambda: commit_plan.PilotExactTaskLocalCommitPlan.from_mapping(
                 {**plan.to_dict(), "commit_subject": "user selected message"}
