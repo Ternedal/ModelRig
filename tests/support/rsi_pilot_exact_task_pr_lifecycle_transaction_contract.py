@@ -420,7 +420,8 @@ def run_contract() -> None:
         assert tuple(public) == ("pr_lifecycle_authorization",)
         source = inspect.getsource(lifecycle_tx)
         assert "markPullRequestReadyForReview" in source
-        assert "/requested_reviewers" in source
+        # The endpoint is assembled across adjacent source literals.
+        assert '"requested_reviewers"' in source
         assert "push_exact_commit" not in source
         assert "mergePullRequest" not in source
         assert "merge_pull_request" not in source
