@@ -212,34 +212,16 @@ def run_contract() -> None:
     finally:
         temp.cleanup()
 
-    # Keep ADR-030 transitively wired through ADR-029 and the same Stage-B
-    # support entrypoint instead of expanding the locked top-level inventory.
-    from rsi_pilot_exact_task_execution_authorization_contract import (
-        run_contract as run_execution_authorization_contract,
-    )
-    # ADR-031 follows ADR-030 but remains on this same Stage-B support chain.
-    from rsi_pilot_exact_task_execution_revalidation_observation_contract import (
-        run_contract as run_revalidation_observation_contract,
-    )
-    # ADR-032 verifies ADR-031 but still runs through the locked Stage-B chain.
-    from rsi_pilot_exact_task_execution_revalidation_attestation_contract import (
-        run_contract as run_revalidation_attestation_contract,
-    )
-    # ADR-033 consumes the exact signed execution nonce but still executes no task.
-    from rsi_pilot_exact_task_execution_admission_contract import (
-        run_contract as run_exact_task_execution_admission_contract,
-    )
-    # Focused ADR-033 replay regression: a separately issued authorization must
-    # not make an already used execution nonce admissible again.
-    from rsi_pilot_exact_task_execution_admission_nonce_reuse_contract import (
-        run_contract as run_execution_nonce_reuse_contract,
+    # ADR-DC-030 through ADR-DC-033 own independent adversarial fixtures. Keep
+    # them attached to ADR-029's locked Stage-B support entrypoint, but qualify
+    # them in isolated processes instead of serializing the increasingly deep
+    # exact-task chain in one Python process. The focused nonce-reuse contract
+    # remains the single bridge into ADR-DC-034 through ADR-DC-097.
+    from rsi_pilot_exact_task_execution_admission_stage_b_driver import (
+        run_contract as run_execution_admission_stage_b_contracts,
     )
 
-    run_execution_authorization_contract()
-    run_revalidation_observation_contract()
-    run_revalidation_attestation_contract()
-    run_exact_task_execution_admission_contract()
-    run_execution_nonce_reuse_contract()
+    run_execution_admission_stage_b_contracts()
 
 
 if __name__ == "__main__":

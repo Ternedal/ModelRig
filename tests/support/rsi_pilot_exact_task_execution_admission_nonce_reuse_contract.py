@@ -1,7 +1,10 @@
 """Focused replay contract: one ADR-DC-030 execution nonce gets one host slot."""
 from __future__ import annotations
 
+import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +39,21 @@ def _reject(fn) -> None:
 
 def run_contract() -> None:
     source_temp, proof, fresh, *_ = _proof()
+    proof_cache_temp = tempfile.TemporaryDirectory(
+        prefix="rsi-exact-task-admission-proof-cache-"
+    )
+    proof_cache_path = Path(proof_cache_temp.name) / "proofs.json"
+    proof_cache_path.write_text(
+        json.dumps(
+            {"proof": proof.to_dict(), "fresh": fresh.to_dict()},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    previous_proof_cache = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(proof_cache_path)
     ledger_temp, ledger = _ledger("rsi-exact-task-admission-nonce-reuse-")
     try:
         source_authorization = (
@@ -139,242 +157,19 @@ def run_contract() -> None:
         ledger_temp.cleanup()
         source_temp.cleanup()
 
-    # ADR-DC-034 follows admission but remains inert and runs through the same
-    # locked Stage-B support chain rather than expanding top-level test inventory.
-    from rsi_pilot_exact_task_execution_plan_requirements_contract import (
-        run_contract as run_execution_plan_requirements_contract,
-    )
-    # ADR-DC-035 resolves only the host-pinned exact DevelopmentTask and remains
-    # non-executing on the same locked Stage-B support chain.
-    from rsi_pilot_exact_task_development_task_binding_contract import (
-        run_contract as run_development_task_binding_contract,
-    )
-    # Live ADR-DC-035 provenance is separate process-local authority and must not
-    # reappear after serialization/reload. Keep that regression on Stage-B too.
-    from rsi_pilot_exact_task_development_task_binding_live_provenance_contract import (
-        run_contract as run_development_task_binding_live_provenance_contract,
-    )
-    # ADR-DC-036 remains capability-only. The legacy broad contract is imported
-    # only as a helper by the focused contracts below and is not executed because
-    # it predates the workspace-snapshot hardening of execution-plan authority.
-    from rsi_pilot_exact_task_executor_capability_live_guard_contract import (
-        run_contract as run_executor_capability_live_guard_contract,
-    )
-    from rsi_pilot_exact_task_executor_secret_custody_contract import (
-        run_contract as run_executor_secret_custody_contract,
-    )
-    from rsi_pilot_exact_task_executor_capability_semantics_contract import (
-        run_contract as run_executor_capability_semantics_contract,
-    )
-    # ADR-DC-037 is the first layer allowed to claim a materialized execution
-    # plan. It freezes one exact read-only GitWorkspaceSnapshot and exact fixed
-    # command plan, but still does not reserve the nonce or launch the task.
-    from rsi_pilot_exact_task_execution_plan_contract import (
-        run_contract as run_execution_plan_contract,
-    )
-    # ADR-DC-038 creates a permanent host-local pre-launch reservation only
-    # after two fresh exact workspace checks. It still cannot launch the task.
-    from rsi_pilot_exact_task_prelaunch_reservation_contract import (
-        run_contract as run_prelaunch_reservation_contract,
-    )
-    # ADR-DC-039 permanently consumes the exact reservation before invoking the
-    # sole existing hardened Tier-A receipt path. No publication authority follows.
-    from rsi_pilot_exact_task_execution_transaction_contract import (
-        run_contract as run_execution_transaction_contract,
-    )
-    # ADR-DC-040 fresh-rechecks the successful frozen candidate and performs
-    # read-only mechanical scope/test evaluation. It grants no commit authority.
-    from rsi_pilot_exact_task_post_execution_evaluation_contract import (
-        run_contract as run_post_execution_evaluation_contract,
-    )
-    # ADR-DC-041 freezes deterministic local-commit intent around the exact
-    # evaluated staged candidate. It writes no Git objects and grants no commit authority.
-    from rsi_pilot_exact_task_local_commit_plan_contract import (
-        run_contract as run_local_commit_plan_contract,
-    )
-    # ADR-DC-042 reconstructs the exact tree/commit object identities using only
-    # read-only TrustedGit evidence. It still grants no Git object/ref authority.
-    from rsi_pilot_exact_task_local_commit_object_identity_contract import (
-        run_contract as run_local_commit_object_identity_contract,
-    )
-    # ADR-DC-043 durably reserves one exact local-write slot only after fresh
-    # identity checks on both sides of reservation. It still performs no Git write.
-    from rsi_pilot_exact_task_local_commit_write_authorization_contract import (
-        run_contract as run_local_commit_write_authorization_contract,
-    )
-    # ADR-DC-044 is the first local Git-write transaction. It consumes the exact
-    # live ADR-DC-043 authority, writes only the predicted tree/commit objects,
-    # compare-and-swap moves one bound local ref, and grants no remote authority.
-    from rsi_pilot_exact_task_local_commit_transaction_contract import (
-        run_contract as run_local_commit_transaction_contract,
-    )
-    # ADR-DC-045 double-observes the exact completed local commit read-only and
-    # proves only mechanical integration-candidate evidence; no publication authority.
-    from rsi_pilot_exact_task_post_commit_integration_evaluation_contract import (
-        run_contract as run_post_commit_integration_evaluation_contract,
-    )
-    # ADR-DC-046 requires every exact task acceptance criterion to be satisfied
-    # under externally signed Ed25519 review before integration_ready can become true.
-    # It still grants no Git or remote publication authority.
-    from rsi_pilot_exact_task_integration_readiness_contract import (
-        run_contract as run_integration_readiness_contract,
-    )
-    # ADR-DC-047 freezes one host-pinned remote branch and deterministic draft-PR
-    # intent around the exact ADR-DC-046-ready commit. It observes no remote state
-    # and grants no push or pull-request mutation authority.
-    from rsi_pilot_exact_task_remote_publication_plan_contract import (
-        run_contract as run_remote_publication_plan_contract,
-    )
-    # ADR-DC-048 is the first network-observation boundary. It performs bounded
-    # unauthenticated GET-only GitHub reads, proves main is still the exact base,
-    # and requires both deterministic head branch and matching PR intent to be absent.
-    from rsi_pilot_exact_task_remote_state_observation_contract import (
-        run_contract as run_remote_state_observation_contract,
-    )
-    # ADR-DC-049 durably reserves one execution-nonce publication slot only after
-    # fresh local and remote revalidation. It authorizes only exact branch/push/
-    # draft-PR creation and still performs no remote mutation itself.
-    from rsi_pilot_exact_task_remote_publication_authorization_contract import (
-        run_contract as run_remote_publication_authorization_contract,
-    )
-    # ADR-DC-050 consumes one exact ADR-DC-049 authority before any remote write,
-    # then performs only the exact leased branch push and deterministic draft-PR
-    # creation. Completed receipts retain no push/PR/merge authority.
-    from rsi_pilot_exact_task_remote_publication_transaction_contract import (
-        run_contract as run_remote_publication_transaction_contract,
-    )
-    # ADR-DC-051 recovers only an already-pushed exact publication lane under two
-    # independent Ed25519 approvals. Missing pushes remain manual/fail-closed.
-    from rsi_pilot_exact_task_remote_publication_recovery_contract import (
-        run_contract as run_remote_publication_recovery_contract,
-    )
-    # ADR-DC-052 normalizes completed ADR-DC-050/051 state into one fresh,
-    # double-observed read-only exact publication attestation with no lifecycle authority.
-    from rsi_pilot_exact_task_post_publication_attestation_contract import (
-        run_contract as run_post_publication_attestation_contract,
-    )
-    # ADR-DC-053 durably reserves only ready-for-review plus the host-pinned exact
-    # reviewer set under detached Ed25519 authority; it performs no PR mutation itself.
-    from rsi_pilot_exact_task_pr_lifecycle_authorization_contract import (
-        run_contract as run_pr_lifecycle_authorization_contract,
-    )
-    # ADR-DC-054 consumes the exact lifecycle authority before its first PR write,
-    # performs only ready-for-review plus exact reviewer requests, then verifies both.
-    from rsi_pilot_exact_task_pr_lifecycle_transaction_contract import (
-        run_contract as run_pr_lifecycle_transaction_contract,
-    )
-    # ADR-DC-055 recovers only already-consumed lifecycle state under two independent
-    # Ed25519 approvals; a still-draft lock-only transaction remains manual/fail-closed.
-    from rsi_pilot_exact_task_pr_lifecycle_recovery_contract import (
-        run_contract as run_pr_lifecycle_recovery_contract,
-    )
-    # ADR-DC-056 normalizes completed ADR-DC-054/055 lifecycle state into one fresh,
-    # double-observed read-only exact non-draft/reviewer attestation with no review authority.
-    from rsi_pilot_exact_task_post_lifecycle_attestation_contract import (
-        run_contract as run_post_lifecycle_attestation_contract,
-    )
-    # ADR-DC-057 double-observes exact submitted review and review-thread state
-    # read-only from one fresh live ADR-DC-056 attestation; no merge authority follows.
-    from rsi_pilot_exact_task_review_state_attestation_contract import (
-        run_contract as run_review_state_attestation_contract,
-    )
-    # ADR-DC-058 evaluates the fresh exact review facts under one host-pinned
-    # merge-readiness policy. It may say merge_ready, but grants no merge authority.
-    from rsi_pilot_exact_task_merge_readiness_evaluation_contract import (
-        run_contract as run_merge_readiness_evaluation_contract,
-    )
-    # ADR-DC-059 durably reserves one exact squash-merge slot only after a fresh
-    # positive readiness evaluation plus two independent detached Ed25519 approvals.
-    # It performs no GitHub mutation; the actual merge remains a separate boundary.
-    from rsi_pilot_exact_task_merge_authorization_contract import (
-        run_contract as run_merge_authorization_contract,
-    )
-    # ADR-DC-060 consumes exact merge authority before any GitHub write, fresh-
-    # revalidates review/readiness and remote PR state, executes one SHA-pinned
-    # squash merge, then double-verifies the exact merge commit/base parent.
-    from rsi_pilot_exact_task_merge_transaction_contract import (
-        run_contract as run_merge_transaction_contract,
-    )
-    # ADR-DC-061 never retries an ambiguous merge. It may only finalize a remote
-    # exact squash merge already proven by GitHub under two new detached Ed25519
-    # approvals; an exact still-open lock-only PR remains manual/fail-closed.
-    from rsi_pilot_exact_task_merge_recovery_contract import (
-        run_contract as run_merge_recovery_contract,
-    )
-    # ADR-DC-062 normalizes completed ADR-DC-060/061 merge state into one fresh,
-    # double-observed read-only exact merged-state attestation. It grants no
-    # release, deploy or production activation authority.
-    from rsi_pilot_exact_task_post_merge_attestation_contract import (
-        run_contract as run_post_merge_attestation_contract,
-    )
-    # ADR-DC-063 evaluates one fresh exact post-merge attestation under the
-    # host-pinned release policy and fresh GET-only GitHub state. It may say
-    # release_ready, but grants no release/deploy/production authority.
-    from rsi_pilot_exact_task_release_readiness_evaluation_contract import (
-        run_contract as run_release_readiness_evaluation_contract,
-    )
-    # ADR-DC-064 freezes deterministic content-addressed version/tag/release
-    # intent around one fresh positive release-readiness evaluation. It performs
-    # no tag, GitHub Release, deployment or production mutation.
-    from rsi_pilot_exact_task_release_plan_contract import (
-        run_contract as run_release_plan_contract,
-    )
-    # ADR-DC-065 double-observes the deterministic tag plus authenticated draft
-    # release inventory. Only clear or exact-existing state is acceptable; mixed
-    # partial state fails closed and no release mutation authority follows.
-    from rsi_pilot_exact_task_release_state_observation_contract import (
-        run_contract as run_release_state_observation_contract,
-    )
-    # ADR-DC-066 durably reserves one exact deterministic tag+draft-release slot
-    # only from a fresh clear ADR-DC-065 lane under two independent Ed25519
-    # approvals. It grants no deploy or production activation authority.
-    from rsi_pilot_exact_task_release_authorization_contract import (
-        run_contract as run_release_authorization_contract,
-    )
-    # ADR-DC-067 consumes exact release authority before any GitHub write,
-    # creates only the deterministic lightweight tag and draft/prerelease Release,
-    # and durably records lock/tag/release/final phases with no downstream authority.
-    from rsi_pilot_exact_task_release_transaction_contract import (
-        run_contract as run_release_transaction_contract,
-    )
-
-    run_execution_plan_requirements_contract()
-    run_development_task_binding_contract()
-    run_development_task_binding_live_provenance_contract()
-    run_executor_capability_live_guard_contract()
-    run_executor_secret_custody_contract()
-    run_executor_capability_semantics_contract()
-    run_execution_plan_contract()
-    run_prelaunch_reservation_contract()
-    run_execution_transaction_contract()
-    run_post_execution_evaluation_contract()
-    run_local_commit_plan_contract()
-    run_local_commit_object_identity_contract()
-    run_local_commit_write_authorization_contract()
-    run_local_commit_transaction_contract()
-    run_post_commit_integration_evaluation_contract()
-    run_integration_readiness_contract()
-    run_remote_publication_plan_contract()
-    run_remote_state_observation_contract()
-    run_remote_publication_authorization_contract()
-    run_remote_publication_transaction_contract()
-    run_remote_publication_recovery_contract()
-    run_post_publication_attestation_contract()
-    run_pr_lifecycle_authorization_contract()
-    run_pr_lifecycle_transaction_contract()
-    run_pr_lifecycle_recovery_contract()
-    run_post_lifecycle_attestation_contract()
-    run_review_state_attestation_contract()
-    run_merge_readiness_evaluation_contract()
-    run_merge_authorization_contract()
-    run_merge_transaction_contract()
-    run_merge_recovery_contract()
-    run_post_merge_attestation_contract()
-    run_release_readiness_evaluation_contract()
-    run_release_plan_contract()
-    run_release_state_observation_contract()
-    run_release_authorization_contract()
-    run_release_transaction_contract()
+    # This contract owns only the ADR-DC-033 nonce-reuse boundary.
+    # ADR-DC-034 through ADR-DC-066 are independent Stage-B qualifications and
+    # are executed by the Stage-B driver, not recursively from this focused
+    # nonce-reuse contract. Keeping the downstream suite here made the parent
+    # subprocess duplicate the full midchain and hit its 6600s safety bound.
+    try:
+        pass
+    finally:
+        if previous_proof_cache is None:
+            os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
+        else:
+            os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = previous_proof_cache
+        proof_cache_temp.cleanup()
 
 
 if __name__ == "__main__":

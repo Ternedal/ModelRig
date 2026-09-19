@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import weakref
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +32,18 @@ from rsi_pilot_exact_task_remote_state_observation_contract import (  # noqa: E4
     _live_plan,
     _snapshot,
 )
+
+_LIVE_OBSERVATION_KEEPALIVES = {}
+
+
+def _retain_plan(receipt, plan) -> None:
+    key = id(receipt)
+
+    def cleanup(_):
+        _LIVE_OBSERVATION_KEEPALIVES.pop(key, None)
+
+    _LIVE_OBSERVATION_KEEPALIVES[key] = (weakref.ref(receipt, cleanup), plan)
+
 
 SCHEMA = (
     ROOT
@@ -93,6 +106,9 @@ def _live_observation():
         )
     assert calls
     assert receipt.observation_authenticated is True
+    # ADR-DC-048 authenticates through a weak reference to ADR-DC-047.
+    # Bind the plan lifetime to the observation without changing fixture shape.
+    _retain_plan(receipt, plan)
     return (
         source_temp,
         admission_ledger_temp,
