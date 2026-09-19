@@ -18,7 +18,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
-_MAX_PARALLEL_CONTRACTS = 4
+# These contracts are CPU-heavy nested provenance qualifications. Four concurrent
+# copies make the deep ADR-049/050 paths ~3-4x slower on the hosted runner and
+# push otherwise-passing contracts into the 1800s safety timeout. Two workers
+# preserve process isolation/parallelism without oversubscribing the runner.
+_MAX_PARALLEL_CONTRACTS = 2
 
 _CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_plan_requirements_contract.py",
