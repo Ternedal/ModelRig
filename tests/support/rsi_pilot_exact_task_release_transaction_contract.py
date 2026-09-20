@@ -1,4 +1,4 @@
-"""Locked Stage-B wrapper for ADR-DC-067 through ADR-DC-097.
+"""Locked Stage-B wrapper for ADR-DC-067 onward product-pilot pre-start qualification.
 
 The contracts are independent adversarial qualifications: each creates and cleans
 up its own fixture. Run them in isolated Python processes so the exact-head gate
@@ -57,6 +57,7 @@ _CONTRACT_FILES = (
     "rsi_pilot_exact_task_production_activation_transaction_stage_b_driver.py",
     "rsi_pilot_exact_task_production_activation_recovery_contract.py",
     "rsi_pilot_exact_task_post_production_activation_attestation_contract.py",
+    "rsi_pilot_exact_task_product_pilot_start_requirements_contract.py",
     "rsi_pilot_exact_task_product_pilot_start_readiness_contract.py",
     "rsi_pilot_exact_task_product_pilot_start_authorization_contract.py",
 )
