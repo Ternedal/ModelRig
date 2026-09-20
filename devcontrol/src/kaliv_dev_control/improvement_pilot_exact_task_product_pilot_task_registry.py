@@ -4,8 +4,10 @@ Consumes one live authenticated ADR-DC-098 lineage attestation and one freshly
 host-verified human GO. It narrows the human allowlist to the single task already
 bound into the exact DC-L16 lineage.
 
-This boundary registers no executable command, invokes no task, performs no I/O,
-starts no pilot and grants no Git, GitHub, deployment or production authority.
+This boundary registers no executable command and invokes no task. The public
+production entrypoint reads the already-existing host-admin-controlled ADR-DC-035
+DevelopmentTask registry, but performs no network I/O, subprocess execution,
+durable write, pilot start, Git/GitHub mutation, deployment or production action.
 """
 from __future__ import annotations
 
@@ -19,6 +21,8 @@ import weakref
 from typing import Any, Callable, Mapping
 
 from . import improvement_human_pilot_decision as human_boundary
+from . import improvement_pilot_exact_task_development_task_binding as task_binding_boundary
+from . import _improvement_pilot_exact_task_development_task_binding_production_boundary as task_registry_host_boundary
 from . import improvement_pilot_exact_task_product_pilot_lineage_attestation as lineage_boundary
 
 PILOT_EXACT_TASK_PRODUCT_PILOT_TASK_REGISTRY_SCHEMA = (
@@ -147,6 +151,10 @@ class PilotExactTaskProductPilotTaskRegistryReceipt:
     operator_surface: str
     selected_pilot_task_id: str
     registered_task_ids: tuple[str, ...]
+    host_development_task_registry_sha256: str
+    development_task_id: str
+    development_task_sha256: str
+    fixed_command_id: str
     workspace_root_path_sha256: str
     feature_flag_name: str
     product_route: str
@@ -161,6 +169,7 @@ class PilotExactTaskProductPilotTaskRegistryReceipt:
     fresh_human_go_verified: bool = True
     exact_scope_binding_verified: bool = True
     historical_preflight_satisfied: bool = True
+    host_development_task_registry_verified: bool = True
     task_registry_ready: bool = True
     executor_wired: bool = False
     runtime_preflight_satisfied: bool = False
@@ -196,6 +205,8 @@ class PilotExactTaskProductPilotTaskRegistryReceipt:
             "fresh_human_decision_proof_sha256",
             "human_selection_proof_sha256",
             "preflight_proof_sha256",
+            "host_development_task_registry_sha256",
+            "development_task_sha256",
             "workspace_root_path_sha256",
         ):
             _hex64(getattr(self, name), name=name)
@@ -207,6 +218,8 @@ class PilotExactTaskProductPilotTaskRegistryReceipt:
             "selected_pilot_task_id",
             "feature_flag_name",
             "task_registry_id",
+            "development_task_id",
+            "fixed_command_id",
             "decision_id",
             "decision_maker_actor_id",
         ):
@@ -241,6 +254,7 @@ class PilotExactTaskProductPilotTaskRegistryReceipt:
             "fresh_human_go_verified",
             "exact_scope_binding_verified",
             "historical_preflight_satisfied",
+            "host_development_task_registry_verified",
             "task_registry_ready",
             "next_boundary_authorization_required",
         )
@@ -310,6 +324,8 @@ def _live_registry():
         *,
         lineage: lineage_boundary.PilotExactTaskProductPilotLineageAttestationReceipt,
         human_go: human_boundary.HumanPilotDecisionProof,
+        development_task: Any,
+        host_registry_sha256: str,
     ) -> None:
         key = id(receipt)
 
@@ -322,13 +338,15 @@ def _live_registry():
             weakref.ref(receipt, cleanup),
             lineage,
             human_go,
+            development_task,
+            host_registry_sha256,
         )
 
     def get(receipt: Any) -> Mapping[str, Any] | None:
         entry = records.get(id(receipt))
         if entry is None:
             return None
-        pid, digest, receipt_ref, lineage, human_go = entry
+        pid, digest, receipt_ref, lineage, human_go, development_task, host_registry_sha256 = entry
         if (
             pid != os.getpid()
             or receipt_ref() is not receipt
@@ -336,9 +354,19 @@ def _live_registry():
             or lineage.attestation_authenticated is not True
             or lineage.sha256 != receipt.lineage_attestation_sha256
             or human_go.sha256 != receipt.fresh_human_decision_proof_sha256
+            or host_registry_sha256 != receipt.host_development_task_registry_sha256
+            or task_binding_boundary._task_sha256(development_task)
+            != receipt.development_task_sha256
+            or development_task.task_id != receipt.development_task_id
+            or development_task.allowed_command_ids != (receipt.fixed_command_id,)
         ):
             return None
-        return {"lineage_attestation": lineage, "fresh_human_go": human_go}
+        return {
+            "lineage_attestation": lineage,
+            "fresh_human_go": human_go,
+            "development_task": development_task,
+            "host_development_task_registry_sha256": host_registry_sha256,
+        }
 
     if hasattr(os, "register_at_fork"):
         os.register_at_fork(after_in_child=records.clear)
@@ -355,10 +383,19 @@ def _build_verified_product_pilot_task_registry(
     *,
     lineage_attestation: lineage_boundary.PilotExactTaskProductPilotLineageAttestationReceipt,
     fresh_human_decision_proof: human_boundary.HumanPilotDecisionProof,
+    registry_payload: bytes,
     now_provider: Callable[[], str],
 ) -> PilotExactTaskProductPilotTaskRegistryReceipt:
     lineage, live = _require_live_lineage(lineage_attestation)
     human_go = _require_verified_human_go(fresh_human_decision_proof)
+    try:
+        host_registry_sha256, host_registry_entries = (
+            task_binding_boundary._parse_registry_payload(registry_payload)
+        )
+    except Exception as exc:
+        raise PilotExactTaskProductPilotTaskRegistryError(
+            "existing ADR-DC-035 host DevelopmentTask registry is invalid"
+        ) from exc
 
     preflight = live["preflight"]
     candidate = live["candidate"]
@@ -400,6 +437,24 @@ def _build_verified_product_pilot_task_registry(
             "selected pilot task is outside fresh human allowlist or exact lineage"
         )
 
+    try:
+        development_task = host_registry_entries[lineage.selected_pilot_task_id]
+    except KeyError as exc:
+        raise PilotExactTaskProductPilotTaskRegistryError(
+            "selected pilot task is absent from the existing ADR-DC-035 host registry"
+        ) from exc
+    if (
+        development_task.repository != lineage.repository
+        or development_task.base_sha != requirements.base_sha
+        or len(development_task.allowed_command_ids) != 1
+        or development_task.required_tests != development_task.allowed_command_ids
+    ):
+        raise PilotExactTaskProductPilotTaskRegistryError(
+            "ADR-DC-035 host registry task does not match exact pilot scope"
+        )
+    development_task_sha256 = task_binding_boundary._task_sha256(development_task)
+    fixed_command_id = development_task.allowed_command_ids[0]
+
     evaluated_at = now_provider()
     evaluated = _utc(evaluated_at, name="evaluated_at_utc")
     decided = _utc(human_go.decided_at_utc, name="decided_at_utc")
@@ -429,6 +484,10 @@ def _build_verified_product_pilot_task_registry(
         operator_surface=lineage.operator_surface,
         selected_pilot_task_id=lineage.selected_pilot_task_id,
         registered_task_ids=(lineage.selected_pilot_task_id,),
+        host_development_task_registry_sha256=host_registry_sha256,
+        development_task_id=development_task.task_id,
+        development_task_sha256=development_task_sha256,
+        fixed_command_id=fixed_command_id,
         workspace_root_path_sha256=lineage.workspace_root_path_sha256,
         feature_flag_name=lineage.feature_flag_name,
         product_route=lineage.product_route,
@@ -444,6 +503,8 @@ def _build_verified_product_pilot_task_registry(
         receipt,
         lineage=lineage,
         human_go=human_go,
+        development_task=development_task,
+        host_registry_sha256=host_registry_sha256,
     )
     if receipt.registry_authenticated is not True:
         raise PilotExactTaskProductPilotTaskRegistryError(
@@ -466,9 +527,16 @@ def build_pilot_exact_task_product_pilot_task_registry(
         signature=human_pilot_decision_signature,
         verifier=None,
     )
+    try:
+        registry_payload = task_registry_host_boundary._read_host_controlled_registry()
+    except Exception as exc:
+        raise PilotExactTaskProductPilotTaskRegistryError(
+            "canonical ADR-DC-035 host DevelopmentTask registry is unavailable"
+        ) from exc
     return _build_verified_product_pilot_task_registry(
         lineage_attestation=lineage_attestation,
         fresh_human_decision_proof=fresh_go,
+        registry_payload=registry_payload,
         now_provider=_now_utc_seconds,
     )
 

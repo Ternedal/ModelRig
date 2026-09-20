@@ -46,6 +46,22 @@
       },
       "uniqueItems": true
     },
+    "host_development_task_registry_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "development_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fixed_command_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "workspace_root_path_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
@@ -97,6 +113,9 @@
       "const": true
     },
     "historical_preflight_satisfied": {
+      "const": true
+    },
+    "host_development_task_registry_verified": {
       "const": true
     },
     "task_registry_ready": {
@@ -170,6 +189,10 @@
     "operator_surface",
     "selected_pilot_task_id",
     "registered_task_ids",
+    "host_development_task_registry_sha256",
+    "development_task_id",
+    "development_task_sha256",
+    "fixed_command_id",
     "workspace_root_path_sha256",
     "feature_flag_name",
     "product_route",
@@ -184,6 +207,7 @@
     "fresh_human_go_verified",
     "exact_scope_binding_verified",
     "historical_preflight_satisfied",
+    "host_development_task_registry_verified",
     "task_registry_ready",
     "executor_wired",
     "runtime_preflight_satisfied",
