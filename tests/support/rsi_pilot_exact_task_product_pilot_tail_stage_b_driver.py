@@ -1,9 +1,9 @@
-"""Shared-provenance Stage-B driver for ADR-DC-098 and ADR-DC-099.
+"""Shared-provenance Stage-B driver for ADR-DC-098 through ADR-DC-100.
 
 The canonical contracts remain independently runnable and unchanged in authority
 semantics. This Stage-B-only driver builds their expensive immutable upstream
-fixture once, keeps it live while both full adversarial contracts execute, and
-cleans it up only after both finish.
+fixture once, keeps it live while all three full adversarial contracts execute,
+and cleans it up only after all finish.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ if str(SUPPORT) not in sys.path:
 
 import rsi_pilot_exact_task_product_pilot_lineage_attestation_contract as lineage_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_task_registry_contract as registry_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_runtime_preflight_contract as runtime_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -29,7 +30,7 @@ def run_contract() -> None:
     fixture = lineage_contract._build_fixture()
     built = time.monotonic()
     print(
-        f"ADR-DC-098/099 shared provenance built in {built - started:.1f}s",
+        f"ADR-DC-098/099/100 shared provenance built in {built - started:.1f}s",
         flush=True,
     )
     try:
@@ -43,6 +44,12 @@ def run_contract() -> None:
         registry_done = time.monotonic()
         print(
             f"ADR-DC-099 canonical contract completed in {registry_done - lineage_done:.1f}s",
+            flush=True,
+        )
+        runtime_contract.run_contract(shared_fixture=fixture)
+        runtime_done = time.monotonic()
+        print(
+            f"ADR-DC-100 canonical contract completed in {runtime_done - registry_done:.1f}s",
             flush=True,
         )
     finally:
