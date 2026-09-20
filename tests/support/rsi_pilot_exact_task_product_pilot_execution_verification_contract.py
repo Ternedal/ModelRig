@@ -238,6 +238,7 @@ def run_contract(*, shared_fixture=None) -> None:
         assert verified.production_activation_authorized is False
         assert verified.nonce_reusable is False
         assert verified.next_boundary_stack_consolidation_required is True
+        assert verified.verification_authenticated is True
 
         reloaded = (
             verification.PilotExactTaskProductPilotExecutionVerificationReceipt.from_mapping(
@@ -246,6 +247,7 @@ def run_contract(*, shared_fixture=None) -> None:
         )
         assert reloaded == verified
         assert reloaded.sha256 == verified.sha256
+        assert reloaded.verification_authenticated is False
 
         runtime_raw = passing_command.git_runtime.to_dict()
         runtime_raw["version"] = "git version adr-dc-109-drift"
