@@ -102,6 +102,11 @@ def _require_live_execution(value: Any):
         or value.task_execution_completed is not True
         or value.local_commit_authorized is not False
         or value.remote_write_authorized is not False
+        or value.push_authorized is not False
+        or value.pr_mutation_authorized is not False
+        or value.merge_authorized is not False
+        or value.release_authorized is not False
+        or value.deploy_authorized is not False
         or value.production_activation_authorized is not False
         or value.nonce_reusable is not False
         or value.next_boundary_execution_verification_required is not True
@@ -374,6 +379,10 @@ def verify_pilot_exact_task_product_pilot_execution(
     if fresh.sha256 != expected.sha256:
         raise PilotExactTaskProductPilotExecutionVerificationError(
             "current workspace no longer matches the Tier-A post-execution evidence"
+        )
+    if git_runtime_sha != command.git_runtime.sha256:
+        raise PilotExactTaskProductPilotExecutionVerificationError(
+            "current Trusted-Git evidence no longer matches the execution receipt"
         )
     if source.task_execution_passed:
         if (
