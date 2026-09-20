@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import stat
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -292,7 +294,7 @@ def _observe(
     )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class PilotExactTaskProductPilotExecutionRecoveryReceipt:
     recovery_observation_sha256: str
     execution_nonce_sha256: str
@@ -449,6 +451,10 @@ class PilotExactTaskProductPilotExecutionRecoveryReceipt:
             self.canonical_json().encode("utf-8")
         ).hexdigest()
 
+    @property
+    def recovery_authenticated(self) -> bool:
+        return _get_live_execution_recovery_inputs(self) is not None
+
     def to_dict(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in self.__dataclass_fields__}
 
@@ -462,6 +468,94 @@ class PilotExactTaskProductPilotExecutionRecoveryReceipt:
 
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
+
+
+def _live_recovery_registry():
+    records: dict[int, tuple[Any, ...]] = {}
+
+    def mark(
+        receipt: PilotExactTaskProductPilotExecutionRecoveryReceipt,
+        *,
+        ledger: execution_boundary._PilotExactTaskProductPilotExecutionLedger,
+    ) -> None:
+        key = id(receipt)
+
+        def cleanup(_: weakref.ReferenceType[Any]) -> None:
+            records.pop(key, None)
+
+        records[key] = (
+            os.getpid(),
+            receipt.sha256,
+            weakref.ref(receipt, cleanup),
+            ledger,
+        )
+
+    def get(receipt: Any) -> Mapping[str, Any] | None:
+        entry = records.get(id(receipt))
+        if entry is None:
+            return None
+        pid, digest, receipt_ref, ledger = entry
+        if (
+            pid != os.getpid()
+            or receipt_ref() is not receipt
+            or receipt.sha256 != digest
+            or type(ledger)
+            is not execution_boundary._PilotExactTaskProductPilotExecutionLedger
+            or ledger.root_sha256 != receipt.execution_ledger_root_path_sha256
+        ):
+            return None
+        try:
+            first = _observe(
+                execution_nonce_sha256=receipt.execution_nonce_sha256,
+                ledger=ledger,
+            )
+            second = _observe(
+                execution_nonce_sha256=receipt.execution_nonce_sha256,
+                ledger=ledger,
+            )
+        except Exception:
+            return None
+        if first != second or first.sha256 != second.sha256:
+            return None
+        checks = (
+            (first.sha256, receipt.recovery_observation_sha256),
+            (first.execution_nonce_sha256, receipt.execution_nonce_sha256),
+            (first.ledger_root_path_sha256, receipt.execution_ledger_root_path_sha256),
+            (first.lock_sha256, receipt.execution_lock_sha256),
+            (first.execution_plan_sha256, receipt.execution_plan_sha256),
+            (
+                first.workspace_snapshot_receipt_sha256,
+                receipt.workspace_snapshot_receipt_sha256,
+            ),
+            (first.executor_capability_sha256, receipt.executor_capability_sha256),
+            (first.execution_admission_sha256, receipt.execution_admission_sha256),
+            (first.development_task_sha256, receipt.development_task_sha256),
+            (first.workspace_snapshot_sha256, receipt.workspace_snapshot_sha256),
+            (first.fixed_command_id, receipt.fixed_command_id),
+            (first.recovery_state_class, receipt.recovery_state_class),
+            (
+                first.recovered_execution_receipt_sha256,
+                receipt.recovered_execution_receipt_sha256,
+            ),
+            (first.final_receipt_verified, receipt.final_receipt_verified),
+            (first.pending_receipt_verified, receipt.pending_receipt_verified),
+        )
+        if any(left != right for left, right in checks):
+            return None
+        return {
+            "ledger": ledger,
+            "observation": first,
+        }
+
+    if hasattr(os, "register_at_fork"):
+        os.register_at_fork(after_in_child=records.clear)
+    return mark, get
+
+
+(
+    _mark_execution_recovery_authenticated,
+    _get_live_execution_recovery_inputs,
+) = _live_recovery_registry()
 
 
 def _classify_verified_execution_recovery(
@@ -485,7 +579,7 @@ def _classify_verified_execution_recovery(
         raise PilotExactTaskProductPilotExecutionRecoveryError(
             "ADR-DC-108 durable state changed between recovery observations"
         )
-    return PilotExactTaskProductPilotExecutionRecoveryReceipt(
+    receipt = PilotExactTaskProductPilotExecutionRecoveryReceipt(
         recovery_observation_sha256=first.sha256,
         execution_nonce_sha256=first.execution_nonce_sha256,
         execution_ledger_root_path_sha256=first.ledger_root_path_sha256,
@@ -504,6 +598,15 @@ def _classify_verified_execution_recovery(
         final_receipt_verified=first.final_receipt_verified,
         pending_receipt_verified=first.pending_receipt_verified,
     )
+    _mark_execution_recovery_authenticated(
+        receipt,
+        ledger=ledger,
+    )
+    if receipt.recovery_authenticated is not True:
+        raise PilotExactTaskProductPilotExecutionRecoveryError(
+            "execution recovery lost live durable ledger provenance"
+        )
+    return receipt
 
 
 def recover_pilot_exact_task_product_pilot_execution(
