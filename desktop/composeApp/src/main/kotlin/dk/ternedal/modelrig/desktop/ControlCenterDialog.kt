@@ -333,6 +333,12 @@ fun DesktopControlCenterDialog(
                     }
                 }
 
+                DevControlPilotStatusSection(
+                    baseUrl = baseUrl,
+                    token = token,
+                    refreshGeneration = refreshGeneration,
+                )
+
                 DesktopControlCenterScheduleHistorySection(
                     baseUrl = baseUrl,
                     token = token,
