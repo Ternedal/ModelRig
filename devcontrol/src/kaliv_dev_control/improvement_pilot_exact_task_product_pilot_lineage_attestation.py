@@ -34,6 +34,9 @@ _attest_verified_pilot_exact_task_product_pilot_lineage = (
     _implementation._attest_verified_pilot_exact_task_product_pilot_lineage
 )
 _historical_chain = _implementation._historical_chain
+_get_live_product_pilot_lineage_inputs = (
+    _implementation._get_live_product_pilot_lineage_inputs
+)
 
 __all__ = [
     "PILOT_EXACT_TASK_PRODUCT_PILOT_LINEAGE_ATTESTATION_SCHEMA",

@@ -428,6 +428,11 @@ def run_contract() -> None:
         historical = fixture["historical"]
         candidate = historical["candidate"]
         receipt = _attest(fixture)
+        assert receipt.attestation_authenticated is True
+        live_inputs = lineage._get_live_product_pilot_lineage_inputs(receipt)
+        assert live_inputs is not None
+        assert live_inputs["candidate"] is candidate
+        assert live_inputs["preflight"] is historical["preflight"]
 
         assert (
             receipt.schema
@@ -515,6 +520,8 @@ def run_contract() -> None:
         )
         assert serialized == receipt
         assert serialized.sha256 == receipt.sha256
+        assert serialized.attestation_authenticated is False
+        assert lineage._get_live_product_pilot_lineage_inputs(serialized) is None
 
         wrong = "f" * 64
         if wrong == candidate.decision_proof_sha256:

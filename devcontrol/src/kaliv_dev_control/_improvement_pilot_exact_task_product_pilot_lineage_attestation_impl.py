@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import re
+import weakref
 from typing import Any, Mapping
 
 from ._improvement_pilot_start_consumption_impl import PilotStartConsumptionReceipt
@@ -158,7 +160,7 @@ def _historical_chain(
     }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class PilotExactTaskProductPilotLineageAttestationReceipt:
     human_decision_proof_sha256: str
     human_selection_proof_sha256: str
@@ -293,6 +295,10 @@ class PilotExactTaskProductPilotLineageAttestationReceipt:
     def sha256(self) -> str:
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
+    @property
+    def attestation_authenticated(self) -> bool:
+        return _get_live_product_pilot_lineage_inputs(self) is not None
+
     def to_dict(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in self.__dataclass_fields__}
 
@@ -311,6 +317,89 @@ class PilotExactTaskProductPilotLineageAttestationReceipt:
 
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
+
+
+def _live_registry():
+    records: dict[int, tuple[Any, ...]] = {}
+
+    def mark(
+        receipt: PilotExactTaskProductPilotLineageAttestationReceipt,
+        *,
+        execution_receipt: PilotExactTaskExecutionAdmissionReceipt,
+        start_receipt: PilotStartConsumptionReceipt,
+        runtime: PilotExactTaskStagingRuntimeBuildIdentityReceipt,
+        readiness: PilotExactTaskProductionActivationReadinessReceipt,
+        post_production: PilotExactTaskPostProductionActivationAttestationReceipt,
+        historical: Mapping[str, Any],
+    ) -> None:
+        key = id(receipt)
+
+        def cleanup(_: weakref.ReferenceType[Any]) -> None:
+            records.pop(key, None)
+
+        records[key] = (
+            os.getpid(),
+            receipt.sha256,
+            weakref.ref(receipt, cleanup),
+            {
+                "execution_receipt": execution_receipt,
+                "start_receipt": start_receipt,
+                "staging_runtime_build_identity": runtime,
+                "production_activation_readiness": readiness,
+                "post_production_activation_attestation": post_production,
+                "revalidation": historical["revalidation"],
+                "preflight": historical["preflight"],
+                "selection": historical["selection"],
+                "candidate": historical["candidate"],
+            },
+        )
+
+    def get(receipt: Any) -> Mapping[str, Any] | None:
+        entry = records.get(id(receipt))
+        if entry is None:
+            return None
+        pid, digest, receipt_ref, inputs = entry
+        if (
+            pid != os.getpid()
+            or receipt_ref() is not receipt
+            or receipt.sha256 != digest
+        ):
+            return None
+
+        execution_receipt = inputs["execution_receipt"]
+        start_receipt = inputs["start_receipt"]
+        runtime = inputs["staging_runtime_build_identity"]
+        readiness = inputs["production_activation_readiness"]
+        post_production = inputs["post_production_activation_attestation"]
+        preflight = inputs["preflight"]
+        selection = inputs["selection"]
+        candidate = inputs["candidate"]
+        if (
+            execution_receipt.sha256 != receipt.execution_admission_receipt_sha256
+            or start_receipt.sha256 != receipt.start_receipt_sha256
+            or runtime.sha256 != receipt.staging_runtime_build_identity_sha256
+            or readiness.sha256 != receipt.production_activation_readiness_sha256
+            or post_production.sha256
+            != receipt.post_production_activation_attestation_sha256
+            or preflight.sha256 != receipt.preflight_proof_sha256
+            or selection.sha256 != receipt.human_selection_proof_sha256
+            or candidate.decision_proof_sha256 != receipt.human_decision_proof_sha256
+            or runtime.verification_authenticated is not True
+            or readiness.evaluation_authenticated is not True
+            or post_production.attestation_authenticated is not True
+        ):
+            return None
+        return dict(inputs)
+
+    if hasattr(os, "register_at_fork"):
+        os.register_at_fork(after_in_child=records.clear)
+    return mark, get
+
+
+(
+    _mark_product_pilot_lineage_authenticated,
+    _get_live_product_pilot_lineage_inputs,
+) = _live_registry()
 
 
 def _attest_verified_pilot_exact_task_product_pilot_lineage(
@@ -493,7 +582,7 @@ def _attest_verified_pilot_exact_task_product_pilot_lineage(
             "lineage attestation predates post-production observation"
         )
 
-    return PilotExactTaskProductPilotLineageAttestationReceipt(
+    receipt = PilotExactTaskProductPilotLineageAttestationReceipt(
         human_decision_proof_sha256=human_decision_sha,
         human_selection_proof_sha256=human_selection_sha,
         preflight_proof_sha256=preflight_sha,
@@ -516,6 +605,20 @@ def _attest_verified_pilot_exact_task_product_pilot_lineage(
         product_route=candidate.product_route,
         attested_at_utc=attested_at,
     )
+    _mark_product_pilot_lineage_authenticated(
+        receipt,
+        execution_receipt=execution_receipt,
+        start_receipt=start_receipt,
+        runtime=runtime,
+        readiness=readiness,
+        post_production=post_production,
+        historical=chain,
+    )
+    if receipt.attestation_authenticated is not True:
+        raise PilotExactTaskProductPilotLineageAttestationError(
+            "product-pilot lineage attestation lost live provenance"
+        )
+    return receipt
 
 
 def attest_pilot_exact_task_product_pilot_lineage(**kwargs):
