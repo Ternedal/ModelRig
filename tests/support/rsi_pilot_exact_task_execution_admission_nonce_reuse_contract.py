@@ -157,21 +157,11 @@ def run_contract() -> None:
         ledger_temp.cleanup()
         source_temp.cleanup()
 
-    # This focused contract owns the ADR-DC-033 nonce-reuse boundary. Restore
-    # the single downstream bridge explicitly through the isolated Stage-B
-    # drivers: ADR-DC-034..066 first, then ADR-DC-067..097. The previous
-    # optimization removed the old recursive calls but accidentally left these
-    # replacement drivers unreachable from the locked Stage-B entrypoint.
+    # This focused contract owns only the ADR-DC-033 nonce-reuse boundary.
+    # ADR-DC-034 onward are sibling Stage-B phases owned by the admission driver;
+    # never recursively launch their internally parallel workers from this guard.
     try:
-        from rsi_pilot_exact_task_stage_b_midchain_driver import (
-            run_contract as run_midchain_stage_b_contracts,
-        )
-        from rsi_pilot_exact_task_release_transaction_contract import (
-            run_contract as run_downstream_stage_b_contracts,
-        )
-
-        run_midchain_stage_b_contracts()
-        run_downstream_stage_b_contracts()
+        pass
     finally:
         if previous_proof_cache is None:
             os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
