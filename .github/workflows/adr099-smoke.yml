@@ -1,0 +1,63 @@
+name: adr099-smoke
+
+on:
+  push:
+    branches:
+      - agent/rsi-product-pilot-qualified-readiness-qa
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install exact smoke dependencies
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages
+          pip install --quiet ruff
+      - name: Syntax compile ADR-099
+        run: |
+          python -m py_compile \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_start_qualified_readiness_impl.py \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_start_qualified_readiness_production_boundary.py \
+            devcontrol/src/kaliv_dev_control/improvement_pilot_exact_task_product_pilot_start_qualified_readiness.py \
+            tests/support/rsi_pilot_exact_task_product_pilot_start_qualified_readiness_contract.py \
+            tests/support/rsi_pilot_exact_task_release_transaction_contract.py
+      - name: Undefined-name lint ADR-099
+        run: |
+          ruff check --select E9,F63,F7,F82 \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_start_qualified_readiness_impl.py \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_start_qualified_readiness_production_boundary.py \
+            devcontrol/src/kaliv_dev_control/improvement_pilot_exact_task_product_pilot_start_qualified_readiness.py \
+            tests/support/rsi_pilot_exact_task_product_pilot_start_qualified_readiness_contract.py
+      - name: Import and schema parity
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          PYTHONPATH=devcontrol/src python - <<'PY'
+          import inspect
+          import json
+          from pathlib import Path
+          from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_start_qualified_readiness as q
+          schema = json.loads(Path("devcontrol/schemas/rsi-pilot-exact-task-product-pilot-start-qualified-readiness-v1.schema.json").read_text())
+          fields = set(q.PilotExactTaskProductPilotStartQualifiedReadinessReceipt.__dataclass_fields__)
+          assert set(schema["properties"]) == fields
+          assert set(schema["required"]) == fields
+          assert schema["additionalProperties"] is False
+          assert tuple(inspect.signature(q.evaluate_pilot_exact_task_product_pilot_start_qualified_readiness).parameters) == (
+              "fresh_human_go_completion_proof",
+              "fresh_human_go_proof",
+              "fresh_human_go_signature",
+              "product_pilot_lineage_attestation",
+              "post_production_activation_attestation",
+          )
+          print("ADR-099 smoke: PASS")
+          PY
