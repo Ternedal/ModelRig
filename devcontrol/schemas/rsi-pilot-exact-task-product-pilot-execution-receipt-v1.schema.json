@@ -1,10 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-product-pilot-execution-receipt-v1.schema.json",
-  "title": "ModelRig product-pilot one-shot Tier-A execution receipt",
+  "title": "ModelRig crash-safe product-pilot one-shot Tier-A execution receipt",
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "ledger_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "consumption_key_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "execution_plan_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
@@ -118,10 +126,28 @@
         "passed"
       ]
     },
+    "prepared_at_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "started_at_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "completed_at_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
     "product_pilot_started": {
       "const": true
     },
     "execution_plan_authenticated_at_launch": {
+      "const": true
+    },
+    "host_replay_guard_committed": {
+      "const": true
+    },
+    "execution_receipt_durably_published": {
       "const": true
     },
     "task_execution_consumed": {
@@ -184,14 +210,19 @@
     "next_boundary_execution_verification_required": {
       "const": true
     },
+    "ledger_scope": {
+      "const": "canonical-host-local-v1"
+    },
     "authority": {
-      "const": "consumed-product-pilot-one-shot-tier-a-execution-evidence-only"
+      "const": "host-consumed-product-pilot-one-shot-tier-a-execution-evidence-only"
     },
     "schema": {
       "const": "kaliv-rsi-dc-l16-exact-task-product-pilot-execution-receipt/v1"
     }
   },
   "required": [
+    "ledger_root_path_sha256",
+    "consumption_key_sha256",
     "execution_plan_sha256",
     "workspace_snapshot_receipt_sha256",
     "executor_capability_sha256",
@@ -204,8 +235,13 @@
     "workspace_snapshot_sha256",
     "tier_a_command_receipt_sha256",
     "tier_a_command_receipt",
+    "prepared_at_utc",
+    "started_at_utc",
+    "completed_at_utc",
     "product_pilot_started",
     "execution_plan_authenticated_at_launch",
+    "host_replay_guard_committed",
+    "execution_receipt_durably_published",
     "task_execution_consumed",
     "one_shot_execution_enforced",
     "exact_pre_execution_snapshot_verified",
@@ -226,6 +262,7 @@
     "production_activation_authorized",
     "nonce_reusable",
     "next_boundary_execution_verification_required",
+    "ledger_scope",
     "authority",
     "schema"
   ]
