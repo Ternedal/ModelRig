@@ -33,6 +33,7 @@ from .runtime_closure_model import SignedRuntimeClosureManifest
 from .runtime_closure_verify import RuntimeClosureVerifier
 from .tier_a_authority import tier_a_toolhost_sha256, workspace_root_authority_sha256
 from .trusted_git_runtime_runner import TrustedGitRunner
+from . import _improvement_pilot_exact_task_tier_a_substrate as tier_a_substrate
 from .improvement_pilot_exact_task_development_task_binding import (
     PILOT_EXACT_TASK_DEVELOPMENT_TASK_BINDING_AUTHORITY,
     PilotExactTaskDevelopmentTaskBinding,
@@ -516,143 +517,42 @@ def _materialize_verified_executor_capability(
     binding = _require_binding(task_binding)
     live_receipt = _require_live_receipt(binding, admission_receipt)
     task = _snapshot_task(binding)
-
-    if type(catalog) is not ModelRigCommandCatalog:
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor capability requires an exact reviewed ModelRigCommandCatalog"
-        )
-    catalog_snapshot = catalog.snapshot()
-    if catalog_snapshot.command_ids != (binding.fixed_command_id,):
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor catalog must contain exactly the bound fixed command"
-        )
-    if type(toolchain) is not Toolchain:
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor capability requires an exact Toolchain"
-        )
-    toolchain_snapshot = toolchain.snapshot()
-    specification = catalog_snapshot.resolve(binding.fixed_command_id)
-    toolchain_snapshot.resolve(specification.tool_id)
-
-    if type(isolation_attestation) is not IsolationAttestation:
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor capability requires the exact host-resolved isolation attestation"
-        )
-    attestation_snapshot = IsolationAttestation.from_mapping(
-        isolation_attestation.to_dict()
-    )
-    if type(physical_verifier) is not WindowsPhysicalIsolationVerifier:
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor capability requires the fixed Windows physical verifier"
-        )
     try:
-        leased = LeasedCatalogMaterializer(
-            catalog_snapshot,
-            physical_verifier,
-        ).materialize(task, toolchain_snapshot, attestation_snapshot)
-    except Exception as exc:
-        raise PilotExactTaskExecutorCapabilityError(
-            "exact Tier-A physical lease materialization failed"
-        ) from exc
-    if type(leased) is not LeasedCommandRegistry:
-        raise PilotExactTaskExecutorCapabilityError(
-            "Tier-A materializer returned an invalid leased registry"
+        substrate = tier_a_substrate.materialize_verified_tier_a_substrate(
+            task=task,
+            fixed_command_id=binding.fixed_command_id,
+            workspace_root_path_sha256=binding.workspace_root_path_sha256,
+            catalog=catalog,
+            toolchain=toolchain,
+            isolation_attestation=isolation_attestation,
+            physical_verifier=physical_verifier,
+            signed_runtime_closure=signed_runtime_closure,
+            runtime_closure_verifier=runtime_closure_verifier,
+            trusted_runtime_root=trusted_runtime_root,
+            git_runner=git_runner,
+            workspace_root=workspace_root,
+            control_plane_root=control_plane_root,
+            path_sha256=_path_sha256,
         )
+    except tier_a_substrate.PilotExactTaskTierASubstrateError as exc:
+        raise PilotExactTaskExecutorCapabilityError(str(exc)) from exc
 
-    if type(signed_runtime_closure) is not SignedRuntimeClosureManifest:
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor capability requires one exact signed runtime closure"
-        )
-    signed_closure_snapshot = SignedRuntimeClosureManifest.from_mapping(
-        signed_runtime_closure.to_dict()
-    )
-    if type(runtime_closure_verifier) is not RuntimeClosureVerifier:
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor capability requires the fixed runtime-closure verifier"
-        )
-    try:
-        verified_runtime_root, _ = runtime_closure_verifier.verify(
-            signed_closure_snapshot,
-            leased,
-            task,
-            binding.fixed_command_id,
-            trusted_runtime_root=Path(trusted_runtime_root),
-        )
-    except Exception as exc:
-        raise PilotExactTaskExecutorCapabilityError(
-            "signed runtime closure verification failed"
-        ) from exc
-
-    raw_workspace = Path(workspace_root)
-    if not raw_workspace.is_absolute() or raw_workspace.resolve() != raw_workspace:
-        raise PilotExactTaskExecutorCapabilityError(
-            "workspace root must be an exact canonical absolute path"
-        )
-    workspace_path_sha = _path_sha256(raw_workspace)
-    if workspace_path_sha != binding.workspace_root_path_sha256:
-        raise PilotExactTaskExecutorCapabilityError(
-            "workspace root path does not match the signed pilot scope"
-        )
-    workspace_authority_sha = workspace_root_authority_sha256(raw_workspace)
-    if leased.lease.workspace_root_sha256 != workspace_authority_sha:
-        raise PilotExactTaskExecutorCapabilityError(
-            "physical execution lease does not name the exact workspace"
-        )
-
-    if type(git_runner) is not TrustedGitRunner:
-        raise PilotExactTaskExecutorCapabilityError(
-            "executor capability requires the host-pinned TrustedGitRunner"
-        )
-    try:
-        git_runner.runtime.verify()
-    except Exception as exc:
-        raise PilotExactTaskExecutorCapabilityError(
-            "staged trusted Git runtime verification failed"
-        ) from exc
-    git_receipt = git_runner.runtime.receipt
-    raw_operation_root = Path(git_runner.operation_root)
-    if not raw_operation_root.is_absolute() or raw_operation_root.resolve() != raw_operation_root:
-        raise PilotExactTaskExecutorCapabilityError(
-            "trusted Git operation root is not canonical"
-        )
-
-    raw_control_plane = Path(control_plane_root)
-    if not raw_control_plane.is_absolute() or raw_control_plane.resolve() != raw_control_plane:
-        raise PilotExactTaskExecutorCapabilityError(
-            "control-plane root must be an exact canonical absolute path"
-        )
-    try:
-        toolhost_sha = tier_a_toolhost_sha256(raw_control_plane)
-    except Exception as exc:
-        raise PilotExactTaskExecutorCapabilityError(
-            "Tier-A toolhost identity could not be verified"
-        ) from exc
-    if leased.lease.toolhost_sha256 != toolhost_sha:
-        raise PilotExactTaskExecutorCapabilityError(
-            "physical execution lease does not name the exact Tier-A toolhost"
-        )
-
+    task_snapshot = substrate["task"]
+    catalog_snapshot = substrate["catalog"]
+    toolchain_snapshot = substrate["toolchain"]
+    attestation_snapshot = substrate["isolation_attestation"]
+    leased = substrate["leased_registry"]
+    signed_closure_snapshot = substrate["signed_runtime_closure"]
     manifest = signed_closure_snapshot.manifest
-    if (
-        manifest.task_id != task.task_id
-        or manifest.task_sha256 != _task_sha256(task)
-        or manifest.command_id != binding.fixed_command_id
-        or manifest.catalog_sha256 != catalog_snapshot.sha256
-        or manifest.toolchain_sha256 != toolchain_snapshot.sha256
-        or manifest.lease_sha256 != leased.lease.sha256
-        or manifest.workspace_root_sha256 != workspace_authority_sha
-    ):
-        raise PilotExactTaskExecutorCapabilityError(
-            "runtime closure authority does not match the exact executor capability"
-        )
+    git_receipt = substrate["trusted_git_runtime_receipt"]
 
     capability = PilotExactTaskExecutorCapability(
         task_binding=binding,
         task_binding_sha256=binding.sha256,
         admission_receipt_sha256=live_receipt.sha256,
         execution_nonce_sha256=live_receipt.execution_nonce_sha256,
-        development_task_id=task.task_id,
-        development_task_sha256=_task_sha256(task),
+        development_task_id=task_snapshot.task_id,
+        development_task_sha256=substrate["task_sha256"],
         fixed_command_id=binding.fixed_command_id,
         catalog_sha256=catalog_snapshot.sha256,
         toolchain_sha256=toolchain_snapshot.sha256,
@@ -664,11 +564,13 @@ def _materialize_verified_executor_capability(
         trusted_runtime_root_sha256=manifest.trusted_runtime_root_sha256,
         trusted_git_runtime_receipt_sha256=git_receipt.sha256,
         trusted_git_runtime_manifest_sha256=git_receipt.manifest.sha256,
-        trusted_git_operation_root_path_sha256=_path_sha256(raw_operation_root),
-        workspace_root_path_sha256=workspace_path_sha,
-        workspace_root_authority_sha256=workspace_authority_sha,
-        toolhost_sha256=toolhost_sha,
-        source_environment_sha256=_source_environment_sha256(),
+        trusted_git_operation_root_path_sha256=_path_sha256(
+            substrate["trusted_git_operation_root"]
+        ),
+        workspace_root_path_sha256=substrate["workspace_root_path_sha256"],
+        workspace_root_authority_sha256=substrate["workspace_root_authority_sha256"],
+        toolhost_sha256=substrate["toolhost_sha256"],
+        source_environment_sha256=substrate["source_environment_sha256"],
         process_memory_bytes=PILOT_EXACT_TASK_EXECUTOR_PROCESS_MEMORY_BYTES,
         active_process_limit=PILOT_EXACT_TASK_EXECUTOR_ACTIVE_PROCESS_LIMIT,
     )
@@ -677,19 +579,19 @@ def _materialize_verified_executor_capability(
         {
             "task_binding": binding,
             "admission_receipt": live_receipt,
-            "task": task,
+            "task": task_snapshot,
             "catalog": catalog_snapshot,
             "toolchain": toolchain_snapshot,
             "isolation_attestation": attestation_snapshot,
-            "physical_verifier": physical_verifier,
+            "physical_verifier": substrate["physical_verifier"],
             "leased_registry": leased,
             "signed_runtime_closure": signed_closure_snapshot,
-            "runtime_closure_verifier": runtime_closure_verifier,
-            "trusted_runtime_root": verified_runtime_root,
-            "git_runner": git_runner,
-            "workspace_root": raw_workspace,
-            "control_plane_root": raw_control_plane,
-            "source_env": dict(TIER_A_APPLICATION_ENVIRONMENT),
+            "runtime_closure_verifier": substrate["runtime_closure_verifier"],
+            "trusted_runtime_root": substrate["trusted_runtime_root"],
+            "git_runner": substrate["git_runner"],
+            "workspace_root": substrate["workspace_root"],
+            "control_plane_root": substrate["control_plane_root"],
+            "source_env": dict(substrate["source_env"]),
             "process_memory_bytes": PILOT_EXACT_TASK_EXECUTOR_PROCESS_MEMORY_BYTES,
             "active_process_limit": PILOT_EXACT_TASK_EXECUTOR_ACTIVE_PROCESS_LIMIT,
         },

@@ -341,6 +341,60 @@ def _parse_profile(payload: bytes) -> dict[str, Any]:
     }
 
 
+def _resolve_host_executor_materialization_inputs(
+    *,
+    development_task_sha256: str,
+) -> dict[str, Any]:
+    """Resolve the one canonical Windows Tier-A profile for an exact task hash."""
+    _require_windows_host()
+    profile = _parse_profile(
+        _read_host_controlled(_WINDOWS_PROFILE, maximum=_MAX_PROFILE_BYTES)
+    )
+    if profile["development_task_sha256"] != development_task_sha256:
+        raise PilotExactTaskExecutorCapabilityProductionBoundaryError(
+            "executor profile is not pinned to the exact DevelopmentTask"
+        )
+    physical_keys = _parse_hmac_keyring(
+        _read_host_controlled(
+            _WINDOWS_PHYSICAL_KEYRING,
+            maximum=_MAX_KEYRING_BYTES,
+        ),
+        expected_domain=_PHYSICAL_DOMAIN,
+    )
+    runtime_keys = _parse_hmac_keyring(
+        _read_host_controlled(
+            _WINDOWS_RUNTIME_KEYRING,
+            maximum=_MAX_KEYRING_BYTES,
+        ),
+        expected_domain=_RUNTIME_DOMAIN,
+    )
+    physical_verifier = WindowsPhysicalIsolationVerifier(
+        profile["physical_evidence_root"],
+        physical_keys,
+        max_age=timedelta(days=30),
+    )
+    runtime_verifier = RuntimeClosureVerifier(runtime_keys)
+    trusted_git_runtime = TrustedGitRuntime(
+        profile["trusted_git_transaction_root"]
+    )
+    git_runner = TrustedGitRunner(
+        trusted_git_runtime,
+        operation_root=profile["trusted_git_operation_root"],
+    )
+    return {
+        "catalog": profile["catalog"],
+        "toolchain": profile["toolchain"],
+        "isolation_attestation": profile["attestation"],
+        "physical_verifier": physical_verifier,
+        "signed_runtime_closure": profile["signed_closure"],
+        "runtime_closure_verifier": runtime_verifier,
+        "trusted_runtime_root": profile["trusted_runtime_root"],
+        "git_runner": git_runner,
+        "workspace_root": profile["workspace_root"],
+        "control_plane_root": profile["control_plane_root"],
+    }
+
+
 def install_pilot_exact_task_executor_capability_production_boundary(
     implementation: Any,
 ) -> None:
@@ -358,54 +412,13 @@ def install_pilot_exact_task_executor_capability_production_boundary(
         admission_receipt: Any,
     ) -> Any:
         try:
-            _require_windows_host()
-            profile = _parse_profile(
-                _read_host_controlled(_WINDOWS_PROFILE, maximum=_MAX_PROFILE_BYTES)
-            )
-            if profile["development_task_sha256"] != task_binding.development_task_sha256:
-                raise PilotExactTaskExecutorCapabilityProductionBoundaryError(
-                    "executor profile is not pinned to the exact DevelopmentTask"
-                )
-            physical_keys = _parse_hmac_keyring(
-                _read_host_controlled(
-                    _WINDOWS_PHYSICAL_KEYRING,
-                    maximum=_MAX_KEYRING_BYTES,
-                ),
-                expected_domain=_PHYSICAL_DOMAIN,
-            )
-            runtime_keys = _parse_hmac_keyring(
-                _read_host_controlled(
-                    _WINDOWS_RUNTIME_KEYRING,
-                    maximum=_MAX_KEYRING_BYTES,
-                ),
-                expected_domain=_RUNTIME_DOMAIN,
-            )
-            physical_verifier = WindowsPhysicalIsolationVerifier(
-                profile["physical_evidence_root"],
-                physical_keys,
-                max_age=timedelta(days=30),
-            )
-            runtime_verifier = RuntimeClosureVerifier(runtime_keys)
-            trusted_git_runtime = TrustedGitRuntime(
-                profile["trusted_git_transaction_root"]
-            )
-            git_runner = TrustedGitRunner(
-                trusted_git_runtime,
-                operation_root=profile["trusted_git_operation_root"],
+            substrate_inputs = _resolve_host_executor_materialization_inputs(
+                development_task_sha256=task_binding.development_task_sha256,
             )
             return implementation._materialize_verified_executor_capability(
                 task_binding=task_binding,
                 admission_receipt=admission_receipt,
-                catalog=profile["catalog"],
-                toolchain=profile["toolchain"],
-                isolation_attestation=profile["attestation"],
-                physical_verifier=physical_verifier,
-                signed_runtime_closure=profile["signed_closure"],
-                runtime_closure_verifier=runtime_verifier,
-                trusted_runtime_root=profile["trusted_runtime_root"],
-                git_runner=git_runner,
-                workspace_root=profile["workspace_root"],
-                control_plane_root=profile["control_plane_root"],
+                **substrate_inputs,
             )
         except implementation.PilotExactTaskExecutorCapabilityError:
             raise
