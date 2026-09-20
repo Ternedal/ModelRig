@@ -15,11 +15,13 @@ import json
 import os
 import re
 import threading
+import weakref
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .contract import DevelopmentTask
 from . import improvement_pilot_exact_task_product_pilot_execution_plan as plan_boundary
+from . import improvement_pilot_exact_task_product_pilot_executor_capability as capability_boundary
 from . import tier_a_command_receipt as command_receipt_boundary
 from .tier_a_command_receipt import TierACommandReceipt
 
@@ -161,7 +163,7 @@ def _execution_consumption_registry():
 ) = _execution_consumption_registry()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class PilotExactTaskProductPilotExecutionReceipt:
     execution_plan_sha256: str
     workspace_snapshot_receipt_sha256: str
@@ -326,6 +328,10 @@ class PilotExactTaskProductPilotExecutionReceipt:
     def sha256(self) -> str:
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
+    @property
+    def execution_authenticated(self) -> bool:
+        return _get_live_product_pilot_execution_inputs(self) is not None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             name: (
@@ -356,6 +362,70 @@ class PilotExactTaskProductPilotExecutionReceipt:
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
 
+
+
+def _live_execution_registry():
+    records: dict[int, tuple[Any, ...]] = {}
+
+    def mark(
+        receipt: PilotExactTaskProductPilotExecutionReceipt,
+        *,
+        executor_capability: capability_boundary.PilotExactTaskProductPilotExecutorCapabilityReceipt,
+    ) -> None:
+        key = id(receipt)
+
+        def cleanup(_: weakref.ReferenceType[Any]) -> None:
+            records.pop(key, None)
+
+        records[key] = (
+            os.getpid(),
+            receipt.sha256,
+            weakref.ref(receipt, cleanup),
+            executor_capability,
+        )
+
+    def get(receipt: Any) -> Mapping[str, Any] | None:
+        entry = records.get(id(receipt))
+        if entry is None:
+            return None
+        pid, digest, receipt_ref, executor_capability = entry
+        if (
+            pid != os.getpid()
+            or receipt_ref() is not receipt
+            or receipt.sha256 != digest
+            or executor_capability.sha256 != receipt.executor_capability_sha256
+            or executor_capability.execution_nonce_sha256
+            != receipt.execution_nonce_sha256
+        ):
+            return None
+        fresh = capability_boundary._get_live_product_pilot_executor_capability_inputs(
+            executor_capability
+        )
+        if fresh is None:
+            return None
+        task = fresh.get("task")
+        if (
+            type(task) is not DevelopmentTask
+            or task.task_id != receipt.development_task_id
+            or _task_sha256(task) != receipt.development_task_sha256
+            or task.base_sha != receipt.development_task_base_sha
+            or task.allowed_command_ids != (receipt.fixed_command_id,)
+            or task.required_tests != task.allowed_command_ids
+        ):
+            return None
+        live = dict(fresh)
+        live["executor_capability"] = executor_capability
+        return live
+
+    if hasattr(os, "register_at_fork"):
+        os.register_at_fork(after_in_child=records.clear)
+    return mark, get
+
+
+(
+    _mark_product_pilot_execution_authenticated,
+    _get_live_product_pilot_execution_inputs,
+) = _live_execution_registry()
 
 def execute_pilot_exact_task_product_pilot_plan(
     execution_plan: plan_boundary.PilotExactTaskProductPilotExecutionPlanReceipt,
@@ -428,6 +498,22 @@ def execute_pilot_exact_task_product_pilot_plan(
         workspace_reset_performed=command.workspace_reset_performed,
         recovery_required=not command.passed,
     )
+    executor_capability = live.get("executor_capability")
+    if (
+        type(executor_capability)
+        is not capability_boundary.PilotExactTaskProductPilotExecutorCapabilityReceipt
+    ):
+        raise PilotExactTaskProductPilotExecutionError(
+            "live product-pilot executor capability disappeared after execution"
+        )
+    _mark_product_pilot_execution_authenticated(
+        receipt,
+        executor_capability=executor_capability,
+    )
+    if receipt.execution_authenticated is not True:
+        raise PilotExactTaskProductPilotExecutionError(
+            "product-pilot execution receipt lost live verification substrate"
+        )
     return receipt
 
 
