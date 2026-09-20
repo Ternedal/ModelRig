@@ -163,18 +163,35 @@ def run_contract() -> None:
         "phase 1b/3, ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
         _SHARED_DEEP_CHAIN_FILE,
     )
-    _run_serial_phase(
-        "phase 2a/3, focused ADR-DC-033 nonce-reuse guard",
-        _NONCE_REUSE_FILE,
+    proof_cache_temp = tempfile.TemporaryDirectory(
+        prefix="rsi-exact-task-stage-b-proof-cache-"
     )
-    _run_serial_phase(
-        "phase 2b/3, ADR-DC-034 through ADR-DC-066 isolated midchain",
-        _MIDCHAIN_DRIVER_FILE,
-    )
-    _run_serial_phase(
-        "phase 3/3, ADR-DC-067 through ADR-DC-097 isolated downstream chain",
-        _DOWNSTREAM_DRIVER_FILE,
-    )
+    proof_cache_path = Path(proof_cache_temp.name) / "proofs.json"
+    previous_proof_cache = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(proof_cache_path)
+    try:
+        _run_serial_phase(
+            "phase 2a/3, focused ADR-DC-033 nonce-reuse guard",
+            _NONCE_REUSE_FILE,
+        )
+        if not proof_cache_path.is_file():
+            raise AssertionError(
+                "Stage-B ADR-033 nonce guard did not publish the shared proof cache"
+            )
+        _run_serial_phase(
+            "phase 2b/3, ADR-DC-034 through ADR-DC-066 isolated midchain",
+            _MIDCHAIN_DRIVER_FILE,
+        )
+        _run_serial_phase(
+            "phase 3/3, ADR-DC-067 through ADR-DC-097 isolated downstream chain",
+            _DOWNSTREAM_DRIVER_FILE,
+        )
+    finally:
+        if previous_proof_cache is None:
+            os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
+        else:
+            os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = previous_proof_cache
+        proof_cache_temp.cleanup()
 
 
 if __name__ == "__main__":
