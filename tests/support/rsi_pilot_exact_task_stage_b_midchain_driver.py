@@ -18,10 +18,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
-# These contracts are CPU-heavy nested provenance qualifications. Four concurrent
-# copies make the deep ADR-049/050 paths ~3-4x slower on the hosted runner and
-# push otherwise-passing contracts into the 1800s safety timeout. Two workers
-# preserve process isolation/parallelism without oversubscribing the runner.
+_DEEP_SHARD_TIMEOUT_SECONDS = 2400
+# These contracts are CPU-heavy nested provenance qualifications. Two workers are
+# useful for the ordinary shards, but shard 2/3 contains the publication/merge
+# tail where each contract recursively rebuilds most of ADR-034+. Running two of
+# those tails together oversubscribes the hosted runner and turns otherwise-valid
+# contracts into exact 1800s timeout failures. Keep process isolation, but run
+# that specific deep shard serially. The outer Stage-B job still runs the three
+# shards in parallel.
 _MAX_PARALLEL_CONTRACTS = 2
 
 _CONTRACT_FILES = (
@@ -98,12 +102,33 @@ def _decode_timeout_output(value: str | bytes | None) -> str:
     return value
 
 
+def _contract_timeout_seconds() -> int:
+    shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
+    return (
+        _DEEP_SHARD_TIMEOUT_SECONDS
+        if shard == "2/3"
+        else _PER_CONTRACT_TIMEOUT_SECONDS
+    )
+
+
+def _worker_count(contract_count: int) -> int:
+    shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
+    if shard == "2/3":
+        return 1
+    return min(
+        _MAX_PARALLEL_CONTRACTS,
+        max(1, os.cpu_count() or 1),
+        contract_count,
+    )
+
+
 def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
     path = SUPPORT / filename
     started = time.monotonic()
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
+    timeout_seconds = _contract_timeout_seconds()
     try:
         completed = subprocess.run(
             [sys.executable, "-u", str(path)],
@@ -112,7 +137,7 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=_PER_CONTRACT_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
             check=False,
         )
         return (
@@ -133,15 +158,12 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
 def run_contract() -> None:
     contract_files = _selected_contract_files()
     shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip() or "all"
-    worker_count = min(
-        _MAX_PARALLEL_CONTRACTS,
-        max(1, os.cpu_count() or 1),
-        len(contract_files),
-    )
+    worker_count = _worker_count(len(contract_files))
+    timeout_seconds = _contract_timeout_seconds()
     print(
         f"Stage-B exact-task midchain: {len(_CONTRACT_FILES)} contracts, "
-        f"{worker_count} isolated workers, "
-        f"{_PER_CONTRACT_TIMEOUT_SECONDS}s per-contract bound",
+        f"shard {shard}, {worker_count} isolated worker(s), "
+        f"{timeout_seconds}s per-contract bound",
         flush=True,
     )
 
