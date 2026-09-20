@@ -247,6 +247,18 @@ def run_contract(*, shared_fixture=None) -> None:
         assert reloaded == verified
         assert reloaded.sha256 == verified.sha256
 
+        runtime_raw = passing_command.git_runtime.to_dict()
+        runtime_raw["version"] = "git version adr-dc-109-drift"
+        drifted_runtime = type(passing_command.git_runtime).from_mapping(runtime_raw)
+        with patch.object(
+            authority["git_runner"], "evidence", return_value=drifted_runtime
+        ):
+            _reject(
+                lambda: verification.verify_pilot_exact_task_product_pilot_execution(
+                    passing_execution
+                )
+            )
+
         # Verify the recovery branch separately: a failed command may close only
         # when the canonical Tier-A receipt proves an exact-base reset and the
         # fresh current workspace equals that reset snapshot.
