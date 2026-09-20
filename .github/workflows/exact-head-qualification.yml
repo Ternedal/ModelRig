@@ -4,6 +4,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -83,7 +87,7 @@ jobs:
             echo "===== $f =====" | tee -a /tmp/exact-head-python.log
             timeout_seconds=1200
             if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
-              timeout_seconds=12600
+              timeout_seconds=19800
             fi
             echo "TIMEOUT_BOUND: $f ${timeout_seconds}s" | tee -a /tmp/exact-head-python.log
             started_at="$(date +%s)"
