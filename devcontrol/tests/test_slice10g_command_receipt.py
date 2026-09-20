@@ -15,6 +15,7 @@ from kaliv_dev_control.runtime_closure import (
     RuntimeClosureManifest,
 )
 from kaliv_dev_control.tier_a_command_receipt import (
+    GitWorkspaceSnapshot,
     TierACommandReceipt,
     TierACommandReceiptError,
     run_single_verified_tier_a_command_with_receipt,
@@ -199,7 +200,7 @@ def result(task: DevelopmentTask, *, returncode: int = 0, timed_out: bool = Fals
     )
 
 
-def run_receipt(task, workspace, signed, *, git_runner=None):
+def run_receipt(task, workspace, signed, *, git_runner=None, expected_snapshot=None):
     return run_single_verified_tier_a_command_with_receipt(
         task,
         object(),
@@ -212,6 +213,7 @@ def run_receipt(task, workspace, signed, *, git_runner=None):
         trusted_runtime_root=workspace.parent / "trusted",
         workspace_root=workspace,
         control_plane_root=workspace.parent / "control",
+        expected_workspace_snapshot=expected_snapshot,
     )
 
 
@@ -351,6 +353,36 @@ class TierACommandReceiptTests(unittest.TestCase):
                         ):
                             run_receipt(task, workspace, signed)
                     mocked.assert_not_called()
+
+    def test_rejects_changed_expected_snapshot_before_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace, base_sha = make_repo(Path(directory))
+            task = make_task(base_sha)
+            signed = make_closure(task)
+            expected = GitWorkspaceSnapshot(
+                head_sha=base_sha,
+                staged_patch_sha256="0" * 64,
+                staged_patch_bytes=0,
+                unstaged_patch_sha256="0" * 64,
+                unstaged_patch_bytes=0,
+                untracked_paths_sha256="0" * 64,
+                untracked_path_count=0,
+            )
+
+            with patch(
+                "kaliv_dev_control.tier_a_command_receipt.run_verified_tier_a_command"
+            ) as mocked:
+                with self.assertRaisesRegex(
+                    TierACommandReceiptError,
+                    "exact expected pre-execution snapshot",
+                ):
+                    run_receipt(
+                        task,
+                        workspace,
+                        signed,
+                        expected_snapshot=expected,
+                    )
+            mocked.assert_not_called()
 
     def test_execution_error_still_resets_observed_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
