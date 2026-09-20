@@ -244,6 +244,30 @@ def run_contract(*, shared_fixture=None) -> None:
         assert lock_only.nonce_reusable is False
         assert lock_only.manual_intervention_required is True
 
+        lock_final, lock_pending, lock_path = lock_only_ledger._paths(
+            execution_plan.execution_nonce_sha256
+        )
+        assert not lock_final.exists()
+        assert not lock_pending.exists()
+        original_lock = lock_path.read_bytes()
+        tampered_lock = json.loads(original_lock.decode("utf-8"))
+        tampered_lock["fixed_command_id"] = "modelrig.other.check"
+        lock_path.write_bytes(
+            json.dumps(
+                tampered_lock,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        _reject(
+            lambda: recovery._classify_verified_execution_recovery(
+                execution_nonce_sha256=execution_plan.execution_nonce_sha256,
+                ledger=lock_only_ledger,
+            )
+        )
+        lock_path.write_bytes(original_lock)
+
         # Final+pending coexistence is not normalized or guessed by recovery.
         coexist_temp = tempfile.TemporaryDirectory(
             prefix="rsi-product-pilot-recovery-coexist-"
