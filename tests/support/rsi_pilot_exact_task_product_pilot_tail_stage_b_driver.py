@@ -27,6 +27,7 @@ import rsi_pilot_exact_task_product_pilot_start_transaction_contract as start_tr
 import rsi_pilot_exact_task_product_pilot_start_recovery_contract as start_recovery_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_execution_admission_contract as execution_admission_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_executor_capability_contract as product_capability_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_execution_plan_contract as product_plan_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -93,6 +94,12 @@ def run_contract() -> None:
         capability_done = time.monotonic()
         print(
             f"ADR-DC-105 product-capability contract completed in {capability_done - admission_done:.1f}s",
+            flush=True,
+        )
+        product_plan_contract.run_contract(shared_fixture=fixture)
+        plan_done = time.monotonic()
+        print(
+            f"ADR-DC-106 execution-plan contract completed in {plan_done - capability_done:.1f}s",
             flush=True,
         )
     finally:
