@@ -1,0 +1,75 @@
+name: adr099-fresh-go-smoke
+
+on:
+  push:
+    branches:
+      - agent/rsi-product-pilot-fresh-go-qa
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install smoke dependencies
+        run: |
+          pip install -r worker/requirements.txt --break-system-packages
+          pip install --quiet ruff
+      - name: Syntax compile ADR-099
+        run: |
+          python -m py_compile \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_fresh_go_impl.py \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_fresh_go_production_boundary.py \
+            devcontrol/src/kaliv_dev_control/improvement_pilot_exact_task_product_pilot_fresh_go.py \
+            tests/support/rsi_pilot_exact_task_product_pilot_fresh_go_contract.py \
+            tests/support/rsi_pilot_exact_task_release_transaction_contract.py
+      - name: Undefined-name lint ADR-099
+        run: |
+          ruff check --select E9,F63,F7,F82 \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_fresh_go_impl.py \
+            devcontrol/src/kaliv_dev_control/_improvement_pilot_exact_task_product_pilot_fresh_go_production_boundary.py \
+            devcontrol/src/kaliv_dev_control/improvement_pilot_exact_task_product_pilot_fresh_go.py \
+            tests/support/rsi_pilot_exact_task_product_pilot_fresh_go_contract.py
+      - name: Import, schemas and public API
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          PYTHONPATH=devcontrol/src python - <<'PY'
+          import inspect
+          import json
+          from pathlib import Path
+          from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_fresh_go as g
+          claim_schema=json.loads(Path("devcontrol/schemas/rsi-pilot-exact-task-product-pilot-fresh-go-claim-v1.schema.json").read_text())
+          proof_schema=json.loads(Path("devcontrol/schemas/rsi-pilot-exact-task-product-pilot-fresh-go-proof-v1.schema.json").read_text())
+          claim_fields=set(g.PilotExactTaskProductPilotFreshGoClaim.__dataclass_fields__)
+          proof_fields=set(g.PilotExactTaskProductPilotFreshGoProof.__dataclass_fields__)
+          assert set(claim_schema["properties"]) == claim_fields
+          assert set(claim_schema["required"]) == claim_fields
+          assert set(proof_schema["properties"]) == proof_fields
+          assert set(proof_schema["required"]) == proof_fields
+          assert set(proof_schema["properties"]["claim"]["properties"]) == claim_fields
+          assert tuple(inspect.signature(g.build_pilot_exact_task_product_pilot_fresh_go_claim).parameters) == (
+              "product_pilot_lineage_attestation",
+              "post_production_activation_attestation",
+              "decision_id",
+              "decision_maker_actor_id",
+              "decided_at_utc",
+              "expires_at_utc",
+          )
+          assert tuple(inspect.signature(g.verify_pilot_exact_task_product_pilot_fresh_go).parameters) == (
+              "claim",
+              "signature",
+              "product_pilot_lineage_attestation",
+              "post_production_activation_attestation",
+              "verifier",
+          )
+          print("ADR-099 fresh GO smoke: PASS")
+          PY
