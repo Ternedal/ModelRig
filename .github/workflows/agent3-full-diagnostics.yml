@@ -1,5 +1,9 @@
 name: agent3-full-diagnostics
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # candidate_freeze_check.py requires this exact-head gate too. Run it on every
 # PR and every push to main so the merged SHA gets automatic freeze provenance;
 # keep workflow_dispatch as recovery for an already-existing head.

@@ -1,5 +1,9 @@
 name: agent3-diagnostics
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # candidate_freeze_check.py kraever dette workflow GROENT paa kandidatens
 # eksakte head. Et path-filter gjorde det kravet uopfyldeligt: enhver landing
 # der ikke roerte agent3-stier efterlod en head uden koersel. Koer derfor paa

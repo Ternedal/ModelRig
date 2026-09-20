@@ -1,5 +1,9 @@
 name: ci
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Runs the shared test suite (_tests.yml) on every push to main and on pull
 # requests, so a regression or version drift is caught before a release tag is
 # cut. The test list lives in _tests.yml, shared with build-and-release.yml --

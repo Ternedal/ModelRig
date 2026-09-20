@@ -1,5 +1,9 @@
 name: control-center-a11y
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # T-044 automated UI/accessibility evidence. Compose Accessibility Test
 # Framework checks require API 34+ and do not run on Robolectric, so this gate
 # boots a real headless Android emulator and executes the Control Center

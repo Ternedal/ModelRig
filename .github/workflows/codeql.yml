@@ -3,6 +3,10 @@
 # absent -- CodeQL's JVM analysis needs a full build config, and the clients
 # are already compile- and unit-test-gated; revisit after the Agent 3 merge.
 name: codeql
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 on:
   push:
     branches: [main]
