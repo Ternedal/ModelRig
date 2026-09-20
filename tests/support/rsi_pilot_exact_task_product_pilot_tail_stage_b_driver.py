@@ -1,10 +1,9 @@
-"""Shared-provenance Stage-B driver for ADR-DC-098 through execution admission.
+"""Shared-provenance Stage-B driver for ADR-DC-098 through workspace snapshot.
 
 The canonical contracts remain independently runnable and unchanged in authority
 semantics. This Stage-B-only driver builds their expensive immutable upstream
-fixture once, keeps it live while the full ADR-DC-098/099/100, repaired
-start-readiness, start transaction/recovery and execution-admission contracts
-execute, then cleans up.
+fixture once, keeps it live while the full product-pilot start/admission,
+executor-capability and workspace-snapshot contracts execute, then cleans up.
 """
 from __future__ import annotations
 
@@ -27,6 +26,7 @@ import rsi_pilot_exact_task_product_pilot_start_transaction_contract as start_tr
 import rsi_pilot_exact_task_product_pilot_start_recovery_contract as start_recovery_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_execution_admission_contract as execution_admission_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_executor_capability_contract as product_capability_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_workspace_snapshot_contract as workspace_snapshot_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -93,6 +93,12 @@ def run_contract() -> None:
         capability_done = time.monotonic()
         print(
             f"ADR-DC-105 product-capability contract completed in {capability_done - admission_done:.1f}s",
+            flush=True,
+        )
+        workspace_snapshot_contract.run_contract(shared_fixture=fixture)
+        snapshot_done = time.monotonic()
+        print(
+            f"ADR-DC-106 workspace-snapshot contract completed in {snapshot_done - capability_done:.1f}s",
             flush=True,
         )
     finally:
