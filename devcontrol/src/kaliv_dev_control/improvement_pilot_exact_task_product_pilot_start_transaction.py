@@ -551,7 +551,7 @@ def _execute_verified_pilot_exact_task_product_pilot_start(
     now_provider: Callable[[], str],
 ) -> PilotExactTaskProductPilotStartTransactionReceipt:
     authorization, readiness = _require_live_authorization(authorization_receipt)
-    reserved_at = _now = now_provider()
+    reserved_at = now_provider()
     reserved = _utc(reserved_at, name="start_reserved_at_utc")
     expires = _utc(authorization.expires_at_utc, name="authorization_expires_at_utc")
     auth_reserved = _utc(

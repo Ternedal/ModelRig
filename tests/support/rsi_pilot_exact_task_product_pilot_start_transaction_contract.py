@@ -166,7 +166,7 @@ def run_contract(*, shared_fixture=None) -> None:
                 lambda: _execute(
                     authorization,
                     stale_ledger,
-                    iter(("2026-09-15T09:58:42Z",)).__next__,
+                    iter(("2026-09-15T09:58:42Z",)),
                 )
             )
             assert tuple(stale_ledger.root.iterdir()) == ()
