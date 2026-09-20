@@ -21,7 +21,7 @@ from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_start_a
 from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_start_readiness as readiness  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_start_readiness_contract as readiness_contract  # noqa: E402
 import rsi_pilot_exact_task_staging_deployment_authorization_contract as deploy_auth_contract  # noqa: E402
-import rsi_pilot_exact_task_production_activation_transaction_contract as tx_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_lineage_attestation_contract as lineage_contract  # noqa: E402
 
 SCHEMA = (
     ROOT
@@ -48,12 +48,23 @@ def _reject(fn) -> None:
     )
 
 
-def _ready():
-    fixture, source = readiness_contract._source()
-    receipt = readiness_contract._evaluate(source, "2026-09-15T09:54:21Z")
+def _ready(shared_fixture=None):
+    owns_fixture = shared_fixture is None
+    fixture = (
+        lineage_contract._build_fixture()
+        if owns_fixture
+        else shared_fixture
+    )
+    receipt = readiness_contract._ready_from_fixture(
+        fixture,
+        "2026-09-15T09:54:40Z",
+    )
     assert receipt.readiness_authenticated is True
     assert receipt.product_pilot_start_ready is True
-    return fixture, receipt
+    assert receipt.pre_authorization_requirements_satisfied is True
+    assert receipt.runtime_preflight_reverified is True
+    assert receipt.allowlisted_task_registry_verified is True
+    return fixture, receipt, owns_fixture
 
 
 def _config(receipt, **overrides):
@@ -69,8 +80,8 @@ def _payload(
     receipt,
     config,
     *,
-    requested="2026-09-15T09:54:22Z",
-    expires="2026-09-15T09:58:22Z",
+    requested="2026-09-15T09:54:41Z",
+    expires="2026-09-15T09:58:41Z",
 ):
     return start_auth._build_authorization_payload(
         product_pilot_start_readiness=receipt,
@@ -86,7 +97,7 @@ def _payload(
     )
 
 
-def _dual(payload, *, same_key=False, signed_at="2026-09-15T09:54:23Z"):
+def _dual(payload, *, same_key=False, signed_at="2026-09-15T09:54:42Z"):
     return deploy_auth_contract._dual_authority(
         payload,
         same_key=same_key,
@@ -113,7 +124,7 @@ def _authorize(
     moments=None,
 ):
     if moments is None:
-        moments = iter(("2026-09-15T09:54:30Z", "2026-09-15T09:54:31Z"))
+        moments = iter(("2026-09-15T09:54:45Z", "2026-09-15T09:54:46Z"))
     return start_auth._authorize_verified_pilot_exact_task_product_pilot_start(
         product_pilot_start_readiness=receipt,
         authorization_config=config,
@@ -149,11 +160,11 @@ def _assert_authority(receipt) -> None:
     assert receipt.nonce_reusable is False
 
 
-def run_contract() -> None:
+def run_contract(*, shared_fixture=None) -> None:
     if os.name == "nt":
         return
 
-    fixture, ready = _ready()
+    fixture, ready, owns_fixture = _ready(shared_fixture)
     temp, ledger = _ledger("rsi-product-pilot-start-auth-")
     try:
         config = _config(ready)
@@ -298,7 +309,7 @@ def run_contract() -> None:
         )
         try:
             moments = iter(
-                ("2026-09-15T09:58:23Z", "2026-09-15T09:58:24Z")
+                ("2026-09-15T09:58:42Z", "2026-09-15T09:58:43Z")
             )
             _reject(
                 lambda: _authorize(
@@ -318,14 +329,14 @@ def run_contract() -> None:
         late_payload = _payload(
             ready,
             config,
-            requested="2026-09-15T09:54:22Z",
+            requested="2026-09-15T09:54:41Z",
             expires="2026-09-15T09:55:30Z",
         )
         late_verifier, late_op, late_review = _dual(late_payload)
         late_temp, late_ledger = _ledger(
             "rsi-product-pilot-start-auth-post-lock-expiry-"
         )
-        moments = iter(("2026-09-15T09:54:30Z", "2026-09-15T09:55:31Z"))
+        moments = iter(("2026-09-15T09:54:45Z", "2026-09-15T09:55:31Z"))
         try:
             _reject(
                 lambda: _authorize(
@@ -370,7 +381,8 @@ def run_contract() -> None:
             )
     finally:
         temp.cleanup()
-        tx_contract._cleanup(fixture)
+        if owns_fixture:
+            lineage_contract._cleanup(fixture)
 
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     fields = set(

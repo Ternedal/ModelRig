@@ -1,9 +1,9 @@
-"""Shared-provenance Stage-B driver for ADR-DC-098 through ADR-DC-100.
+"""Shared-provenance Stage-B driver for ADR-DC-098 through start authorization.
 
 The canonical contracts remain independently runnable and unchanged in authority
 semantics. This Stage-B-only driver builds their expensive immutable upstream
-fixture once, keeps it live while all three full adversarial contracts execute,
-and cleans it up only after all finish.
+fixture once, keeps it live while the full ADR-DC-098/099/100, repaired
+start-readiness and ADR-DC-097 authorization contracts execute, then cleans up.
 """
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ if str(SUPPORT) not in sys.path:
 import rsi_pilot_exact_task_product_pilot_lineage_attestation_contract as lineage_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_task_registry_contract as registry_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_runtime_preflight_contract as runtime_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_start_readiness_contract as readiness_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_start_authorization_contract as authorization_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -30,7 +32,7 @@ def run_contract() -> None:
     fixture = lineage_contract._build_fixture()
     built = time.monotonic()
     print(
-        f"ADR-DC-098/099/100 shared provenance built in {built - started:.1f}s",
+        f"product-pilot tail shared provenance built in {built - started:.1f}s",
         flush=True,
     )
     try:
@@ -50,6 +52,18 @@ def run_contract() -> None:
         runtime_done = time.monotonic()
         print(
             f"ADR-DC-100 canonical contract completed in {runtime_done - registry_done:.1f}s",
+            flush=True,
+        )
+        readiness_contract.run_contract(shared_fixture=fixture)
+        readiness_done = time.monotonic()
+        print(
+            f"readiness-v2 canonical contract completed in {readiness_done - runtime_done:.1f}s",
+            flush=True,
+        )
+        authorization_contract.run_contract(shared_fixture=fixture)
+        authorization_done = time.monotonic()
+        print(
+            f"ADR-DC-097 authorization contract completed in {authorization_done - readiness_done:.1f}s",
             flush=True,
         )
     finally:
