@@ -21,6 +21,7 @@ from source_code import code_of  # noqa: E402
 from kaliv_dev_control import improvement_human_pilot_decision as human  # noqa: E402
 from kaliv_dev_control import improvement_pilot_exact_task_development_task_binding as task_binding  # noqa: E402
 from kaliv_dev_control.contract import DevelopmentTask  # noqa: E402
+from kaliv_dev_control.runtime_closure_builder import VERSION_CHECK_COMMAND_ID  # noqa: E402
 from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_lineage_attestation as lineage  # noqa: E402
 from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_task_registry as registry  # noqa: E402
 import rsi_human_pilot_decision_production_boundary as human_contract  # noqa: E402
@@ -102,16 +103,16 @@ def _host_registry(lineage_receipt):
     task = DevelopmentTask.from_mapping(
         {
             "schema": "kaliv-development-task/v1",
-            "task_id": "PILOT_PLAN_001",
+            "task_id": "PILOT_VERSION_CHECK_001",
             "repository": requirements.repository,
             "base_sha": requirements.base_sha,
-            "goal": "Run the first exact local product-pilot plan task.",
-            "acceptance_criteria": ["Produce the fixed plan-task receipt."],
+            "goal": "Run the first exact local read-only ModelRig version-check pilot.",
+            "acceptance_criteria": ["Produce the fixed version-check receipt without mutation."],
             "risk": "low",
-            "allowed_paths": ["README.md"],
+            "allowed_paths": ["VERSION"],
             "protected_paths": [".github/workflows/**"],
-            "allowed_command_ids": ["pytest.pilot_plan"],
-            "required_tests": ["pytest.pilot_plan"],
+            "allowed_command_ids": [VERSION_CHECK_COMMAND_ID],
+            "required_tests": [VERSION_CHECK_COMMAND_ID],
             "budget": {
                 "max_changed_files": 1,
                 "max_added_lines": 1,
@@ -180,7 +181,7 @@ def run_contract(*, shared_fixture=None) -> None:
         assert receipt.host_development_task_registry_sha256 == hashlib.sha256(registry_payload).hexdigest()
         assert receipt.development_task_id == development_task.task_id
         assert receipt.development_task_sha256 == development_task_sha
-        assert receipt.fixed_command_id == "pytest.pilot_plan"
+        assert receipt.fixed_command_id == VERSION_CHECK_COMMAND_ID
         assert receipt.task_registry_ready is True
         assert receipt.executor_wired is False
         assert receipt.runtime_preflight_satisfied is False
