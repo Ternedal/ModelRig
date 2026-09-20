@@ -513,6 +513,7 @@ def run_single_verified_tier_a_command_with_receipt(
     control_plane_root: Path,
     source_env: Mapping[str, str] | None = None,
     executable_verifier: Any | None = None,
+    expected_workspace_snapshot: GitWorkspaceSnapshot | None = None,
     process_memory_bytes: int = 512 * 1024 * 1024,
     active_process_limit: int = 8,
 ) -> TierACommandReceipt:
@@ -526,6 +527,15 @@ def run_single_verified_tier_a_command_with_receipt(
     git_runtime_before = git_runner.evidence()
     evidence = _GitWorkspaceEvidence(Path(workspace_root), task, git_runner)
     before = evidence.snapshot()
+    if expected_workspace_snapshot is not None:
+        if type(expected_workspace_snapshot) is not GitWorkspaceSnapshot:
+            raise TierACommandReceiptError(
+                "expected workspace snapshot must be canonical Git evidence"
+            )
+        if before.sha256 != expected_workspace_snapshot.sha256:
+            raise TierACommandReceiptError(
+                "workspace no longer matches the exact expected pre-execution snapshot"
+            )
     if before.head_sha != task.base_sha:
         raise TierACommandReceiptError(
             "workspace HEAD does not match the exact task base"
