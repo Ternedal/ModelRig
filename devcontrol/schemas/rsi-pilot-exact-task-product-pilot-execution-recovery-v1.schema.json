@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-product-pilot-execution-recovery-v1.schema.json",
+  "title": "ModelRig read-only product-pilot execution recovery classification",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "recovery_observation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_nonce_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_ledger_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_lock_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workspace_snapshot_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "executor_capability_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_admission_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workspace_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fixed_command_id": {
+      "const": "modelrig.version.check"
+    },
+    "recovery_state_class": {
+      "enum": [
+        "completed_verified",
+        "receipt_publication_uncertain",
+        "consumed_uncertain"
+      ]
+    },
+    "recovered_execution_receipt_sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "final_receipt_verified": {
+      "type": "boolean"
+    },
+    "pending_receipt_verified": {
+      "type": "boolean"
+    },
+    "double_observation_matched": {
+      "const": true
+    },
+    "execution_nonce_consumed": {
+      "const": true
+    },
+    "retry_authorized": {
+      "const": false
+    },
+    "task_execution_authorized": {
+      "const": false
+    },
+    "local_commit_authorized": {
+      "const": false
+    },
+    "remote_write_authorized": {
+      "const": false
+    },
+    "push_authorized": {
+      "const": false
+    },
+    "pr_mutation_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "deploy_authorized": {
+      "const": false
+    },
+    "production_activation_authorized": {
+      "const": false
+    },
+    "nonce_reusable": {
+      "const": false
+    },
+    "manual_intervention_required": {
+      "const": true
+    },
+    "next_boundary_recovery_resolution_required": {
+      "const": true
+    },
+    "recovery_scope": {
+      "const": "durable-adr-dc-108-state-classification-no-retry-v1"
+    },
+    "authority": {
+      "const": "read-only-product-pilot-execution-ledger-classification-only"
+    },
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-exact-task-product-pilot-execution-recovery/v1"
+    }
+  },
+  "required": [
+    "recovery_observation_sha256",
+    "execution_nonce_sha256",
+    "execution_ledger_root_path_sha256",
+    "execution_lock_sha256",
+    "execution_plan_sha256",
+    "workspace_snapshot_receipt_sha256",
+    "executor_capability_sha256",
+    "execution_admission_sha256",
+    "development_task_sha256",
+    "workspace_snapshot_sha256",
+    "fixed_command_id",
+    "recovery_state_class",
+    "recovered_execution_receipt_sha256",
+    "final_receipt_verified",
+    "pending_receipt_verified",
+    "double_observation_matched",
+    "execution_nonce_consumed",
+    "retry_authorized",
+    "task_execution_authorized",
+    "local_commit_authorized",
+    "remote_write_authorized",
+    "push_authorized",
+    "pr_mutation_authorized",
+    "merge_authorized",
+    "release_authorized",
+    "deploy_authorized",
+    "production_activation_authorized",
+    "nonce_reusable",
+    "manual_intervention_required",
+    "next_boundary_recovery_resolution_required",
+    "recovery_scope",
+    "authority",
+    "schema"
+  ]
+}
