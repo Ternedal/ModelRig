@@ -6,9 +6,11 @@ ADR-DC-109 closes the first product-pilot task only after a fresh Trusted-Git
 snapshot proves that the repository is in the exact state recorded by ADR-DC-108
 and its canonical Tier-A command receipt.
 
-The boundary consumes a **live** ADR-DC-108 receipt so the retained ADR-DC-105
-Tier-A substrate can be revalidated. It then performs read-only Git evidence
-capture.
+The boundary consumes a **live, durably published** ADR-DC-108 receipt whose
+host-local replay guard is still intact, so the retained ADR-DC-105 Tier-A
+substrate can be revalidated. Live provenance therefore depends on both the
+create-once execution lock and the durable final ADR-DC-108 receipt bytes
+remaining exactly unchanged. It then performs read-only Git evidence capture.
 
 ADR-DC-109 never invokes the product command and never resets, cleans, stages or
 commits Git.
@@ -61,6 +63,7 @@ authority is granted. The execution nonce remains non-reusable.
 
 Only the receipt returned by the live ADR-DC-109 verification call receives
 process-local `verification_authenticated` provenance. Serialization/reload is
-audit evidence only and cannot recreate live verification authority. The fresh
-Trusted-Git evidence must also match the exact Git-runtime evidence embedded in
-the ADR-DC-108 Tier-A command receipt.
+audit evidence only and cannot recreate live verification authority. Tampering
+with either the durable ADR-DC-108 final receipt or its permanent nonce lock
+revokes that live provenance. The fresh Trusted-Git evidence must also match the
+exact Git-runtime evidence embedded in the ADR-DC-108 Tier-A command receipt.
