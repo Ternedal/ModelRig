@@ -115,6 +115,11 @@ def _fixture():
         _ReadinessTransport(post_merge),
     )
     plan = _plan(readiness, _config(readiness))
+    # ADR-DC-063 and ADR-DC-064 use weakref-backed live-provenance registries.
+    # Keep the exact ADR-DC-062 source alive inside the opaque cleanup case so
+    # callers can return this fixture without silently invalidating readiness
+    # and plan authority. _cleanup_case() intentionally accepts trailing items.
+    case = (*case, post_merge)
     return case, readiness, plan
 
 
@@ -132,6 +137,8 @@ def run_contract() -> None:
 
     case, readiness, plan = _fixture()
     try:
+        assert readiness.evaluation_authenticated is True
+        assert plan.plan_authenticated is True
         clear_transport = _Transport(plan, readiness)
         clear = _observe(plan, clear_transport)
         assert clear_transport.calls == ["observe", "observe"]
