@@ -29,6 +29,7 @@ _SHARDED_PHASE_TIMEOUT_SECONDS = 9000
 _MAX_SHALLOW_PARALLEL_CONTRACTS = 2
 _STAGE_B_SLICE_ENV = "MODELRIG_STAGE_B_SLICE"
 _CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
+_CACHE_ROOT_ENV = "MODELRIG_STAGE_B_CACHE_ROOT"
 _SUPPORTED_STAGE_B_SLICES = ("all", "admission", "midchain", "downstream")
 
 _SHALLOW_CONTRACT_FILES = (
@@ -183,11 +184,96 @@ def _run_admission_prefix() -> None:
     )
 
 
-def _run_cached_slice(stage_b_slice: str) -> None:
-    proof_cache_temp = tempfile.TemporaryDirectory(
-        prefix="rsi-exact-task-stage-b-proof-cache-"
+def _external_cache_root(stage_b_slice: str) -> Path | None:
+    raw = os.environ.get(_CACHE_ROOT_ENV, "").strip()
+    if not raw:
+        return None
+    if stage_b_slice == "all":
+        raise AssertionError("Stage-B all slice cannot consume an external cache root")
+
+    root = Path(raw)
+    if not root.is_absolute() or root.is_symlink():
+        raise AssertionError("Stage-B cache root must be absolute and not a symlink")
+    if not root.parent.is_dir() or root.parent.is_symlink():
+        raise AssertionError("Stage-B cache root parent must be a real directory")
+
+    if stage_b_slice == "admission":
+        if root.exists():
+            if not root.is_dir() or any(root.iterdir()):
+                raise AssertionError(
+                    "Stage-B admission cache root must be absent or an empty directory"
+                )
+        else:
+            root.mkdir()
+        return root.resolve()
+
+    if not root.is_dir():
+        raise AssertionError("Stage-B preloaded cache root must already exist")
+    proof_cache_path = root / "proofs.json"
+    start_ledger_root = root / "start-ledger"
+    if (
+        proof_cache_path.is_symlink()
+        or not proof_cache_path.is_file()
+        or start_ledger_root.is_symlink()
+        or not start_ledger_root.is_dir()
+    ):
+        raise AssertionError(
+            "Stage-B preloaded cache root must contain proofs.json and start-ledger/"
+        )
+    return root.resolve()
+
+
+def _restore_env(name: str, previous: str | None) -> None:
+    if previous is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = previous
+
+
+def _run_preloaded_slice(stage_b_slice: str, cache_root: Path) -> None:
+    previous_proof_cache = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    previous_start_ledger = os.environ.get("MODELRIG_STAGE_B_START_LEDGER_ROOT")
+    os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(
+        cache_root / "proofs.json"
     )
-    proof_cache_root = Path(proof_cache_temp.name).resolve()
+    os.environ["MODELRIG_STAGE_B_START_LEDGER_ROOT"] = str(
+        cache_root / "start-ledger"
+    )
+    try:
+        if stage_b_slice == "midchain":
+            _run_serial_phase(
+                "phase 2b/3, ADR-DC-034 through ADR-DC-066 isolated midchain",
+                _MIDCHAIN_DRIVER_FILE,
+            )
+        elif stage_b_slice == "downstream":
+            _run_serial_phase(
+                "phase 3/3, ADR-DC-067 onward isolated downstream chain",
+                _DOWNSTREAM_DRIVER_FILE,
+            )
+        else:
+            raise AssertionError(
+                f"Stage-B preloaded cache is not valid for slice {stage_b_slice!r}"
+            )
+    finally:
+        _restore_env("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", previous_proof_cache)
+        _restore_env("MODELRIG_STAGE_B_START_LEDGER_ROOT", previous_start_ledger)
+
+
+def _run_cached_slice(stage_b_slice: str) -> None:
+    external_root = _external_cache_root(stage_b_slice)
+    if stage_b_slice in ("midchain", "downstream") and external_root is not None:
+        _run_preloaded_slice(stage_b_slice, external_root)
+        return
+
+    proof_cache_temp = None
+    if external_root is None:
+        proof_cache_temp = tempfile.TemporaryDirectory(
+            prefix="rsi-exact-task-stage-b-proof-cache-"
+        )
+        proof_cache_root = Path(proof_cache_temp.name).resolve()
+    else:
+        proof_cache_root = external_root
+
     proof_cache_path = proof_cache_root / "proofs.json"
     start_ledger_root = proof_cache_root / "start-ledger"
     start_ledger_root.mkdir()
@@ -215,15 +301,10 @@ def _run_cached_slice(stage_b_slice: str) -> None:
                 _DOWNSTREAM_DRIVER_FILE,
             )
     finally:
-        if previous_proof_cache is None:
-            os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
-        else:
-            os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = previous_proof_cache
-        if previous_start_ledger is None:
-            os.environ.pop("MODELRIG_STAGE_B_START_LEDGER_ROOT", None)
-        else:
-            os.environ["MODELRIG_STAGE_B_START_LEDGER_ROOT"] = previous_start_ledger
-        proof_cache_temp.cleanup()
+        _restore_env("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", previous_proof_cache)
+        _restore_env("MODELRIG_STAGE_B_START_LEDGER_ROOT", previous_start_ledger)
+        if proof_cache_temp is not None:
+            proof_cache_temp.cleanup()
 
 
 def run_contract() -> None:

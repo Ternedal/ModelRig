@@ -96,13 +96,21 @@ for label, caller in (
     )
 
 expected_stage_b_names = (
-    "admission",
     "midchain-1",
     "midchain-2",
     "midchain-3",
     "downstream-1",
     "downstream-2",
     "downstream-3",
+)
+check(
+    "stage-b-admission:" in stage_b_workflow
+    and "name: stage-b-admission" in stage_b_workflow,
+    "Stage-B reusable workflow owns one admission/bootstrap authority job",
+)
+check(
+    "needs: stage-b-admission" in stage_b_workflow,
+    "all Stage-B contract shards require successful admission/bootstrap",
 )
 for name in expected_stage_b_names:
     check(
@@ -115,24 +123,50 @@ for shard in ("1/3", "2/3", "3/3"):
         f"Stage-B reusable workflow retains shard {shard}",
     )
 check(
-    "timeout-minutes: 355" in stage_b_workflow,
-    "each Stage-B shard stays below the GitHub-hosted six-hour job ceiling",
+    stage_b_workflow.count("timeout-minutes: 355") == 2,
+    "admission and shard jobs stay below the GitHub-hosted six-hour job ceiling",
 )
 check(
-    "run: PYTHONPATH=worker python3 -u tests/workflow_stage_b_physical_gate.py"
-    in stage_b_workflow,
-    "every Stage-B shard enters through the locked physical-gate test",
+    stage_b_workflow.count(
+        "run: PYTHONPATH=worker python3 -u tests/workflow_stage_b_physical_gate.py"
+    )
+    == 2,
+    "admission and shards both enter through the locked physical-gate test",
 )
 check(
-    'MODELRIG_STAGE_B_SLICE: ${{ matrix.slice }}' in stage_b_workflow
+    'MODELRIG_STAGE_B_SLICE: admission' in stage_b_workflow
+    and 'MODELRIG_STAGE_B_SLICE: ${{ matrix.slice }}' in stage_b_workflow
     and 'MODELRIG_STAGE_B_CONTRACT_SHARD: ${{ matrix.shard }}'
     in stage_b_workflow,
-    "Stage-B matrix passes explicit slice and shard authority",
+    "Stage-B workflow passes explicit admission, slice and shard authority",
+)
+check(
+    stage_b_workflow.count(
+        'MODELRIG_STAGE_B_CACHE_ROOT: ${{ runner.temp }}/modelrig-stage-b-cache'
+    )
+    == 2,
+    "admission and shards bind one canonical cache-root location per hosted job",
+)
+check(
+    'name: stage-b-cache-${{ inputs.head_sha }}' in stage_b_workflow
+    and "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+    in stage_b_workflow
+    and "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
+    in stage_b_workflow,
+    "Stage-B cache handoff is exact-head named and uses pinned artifact actions",
 )
 check(
     '_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "midchain", "downstream")'
-    in stage_b_driver,
-    "Stage-B driver fails closed to the four qualified slice modes",
+    in stage_b_driver
+    and '_CACHE_ROOT_ENV = "MODELRIG_STAGE_B_CACHE_ROOT"' in stage_b_driver
+    and "_NONCE_REUSE_TIMEOUT_SECONDS = 7200" in stage_b_driver,
+    "Stage-B driver locks slice modes, cache-root authority and bounded nonce bootstrap",
+)
+check(
+    "Stage-B preloaded cache root must contain proofs.json and start-ledger/"
+    in stage_b_driver
+    and 'stage_b_slice in ("midchain", "downstream")' in stage_b_driver,
+    "midchain/downstream consume only a validated preloaded proof+ledger root",
 )
 for label, source in (
     ("midchain", midchain_driver),
