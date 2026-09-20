@@ -54,6 +54,7 @@ def run_contract(*, shared_fixture=None) -> None:
     tx_temp = None
     capability_temp = None
     drift_path = None
+    git_run_patch = None
     try:
         auth_temp, tx_temp, admitted, task = capability_contract._admission(fixture)
         assert admitted.fixed_command_id == VERSION_CHECK_COMMAND_ID
@@ -85,16 +86,14 @@ def run_contract(*, shared_fixture=None) -> None:
         )
         assert executor_capability.capability_authenticated is True
 
-        drift_path = authority["workspace"] / "adr-dc-106-untracked-drift.tmp"
-        drift_path.write_text("unsafe\n", encoding="utf-8")
-        _reject(
-            lambda: workspace_snapshot.materialize_pilot_exact_task_product_pilot_workspace_snapshot(
-                executor_capability
-            )
-        )
-        drift_path.unlink()
-        drift_path = None
-
+        # The shared Tier-A fixture deliberately stages a tiny synthetic Git
+        # runtime which only proves runtime pinning; it is not a full Git CLI.
+        # For this contract, emulate the bounded read-only Git evidence surface
+        # while keeping TrustedGitRunner, its runtime receipt and operation root
+        # real. This makes the contract test ADR-DC-106 semantics rather than the
+        # unrelated synthetic executable's command coverage.
+        workspace = authority["workspace"]
+        (workspace / ".git").mkdir()
         original_git_run = authority["git_runner"].run
         observed: list[tuple[str, ...]] = []
         forbidden = {
@@ -121,14 +120,42 @@ def run_contract(*, shared_fixture=None) -> None:
             assert args
             assert args[0] not in forbidden
             observed.append(args)
+            if args == ("rev-parse", "--show-toplevel"):
+                return (os.fspath(workspace) + "\n").encode("utf-8")
+            if args == ("rev-parse", "HEAD"):
+                return (task.base_sha + "\n").encode("ascii")
+            if args[0] == "diff":
+                return b""
+            if args == ("ls-files", "--others", "--exclude-standard", "-z"):
+                paths = sorted(
+                    path.relative_to(workspace).as_posix()
+                    for path in workspace.rglob("*")
+                    if path.is_file() and ".git" not in path.relative_to(workspace).parts
+                )
+                return b"".join(
+                    item.encode("utf-8") + b"\0"
+                    for item in paths
+                )
             return original_git_run(args, **kwargs)
 
-        with patch.object(
+        git_run_patch = patch.object(
             authority["git_runner"], "run", side_effect=audited_git_run
-        ):
-            receipt = workspace_snapshot.materialize_pilot_exact_task_product_pilot_workspace_snapshot(
+        )
+        git_run_patch.start()
+
+        drift_path = workspace / "adr-dc-106-untracked-drift.tmp"
+        drift_path.write_text("unsafe\n", encoding="utf-8")
+        _reject(
+            lambda: workspace_snapshot.materialize_pilot_exact_task_product_pilot_workspace_snapshot(
                 executor_capability
             )
+        )
+        drift_path.unlink()
+        drift_path = None
+
+        receipt = workspace_snapshot.materialize_pilot_exact_task_product_pilot_workspace_snapshot(
+            executor_capability
+        )
 
         assert observed
         assert {args[0] for args in observed} <= {"rev-parse", "diff", "ls-files"}
@@ -224,6 +251,8 @@ def run_contract(*, shared_fixture=None) -> None:
             )
         )
     finally:
+        if git_run_patch is not None:
+            git_run_patch.stop()
         if drift_path is not None and drift_path.exists():
             drift_path.unlink()
         if capability_temp is not None:
