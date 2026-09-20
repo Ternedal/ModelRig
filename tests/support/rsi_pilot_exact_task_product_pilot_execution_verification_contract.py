@@ -24,6 +24,7 @@ from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_workspa
 from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_execution_plan as plan  # noqa: E402
 from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_execution as execution  # noqa: E402
 from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_execution_verification as verification  # noqa: E402
+from kaliv_dev_control import tier_a_command_receipt as command_receipt_boundary  # noqa: E402
 from kaliv_dev_control.runtime_closure_builder import VERSION_CHECK_COMMAND_ID  # noqa: E402
 from kaliv_dev_control.tier_a_command_receipt import GitWorkspaceSnapshot, TierACommandReceipt  # noqa: E402
 from kaliv_dev_control.tier_a_result import TierAExecutionResult, TierAOutputStream  # noqa: E402
@@ -44,7 +45,7 @@ SOURCE = (
 def _reject(fn) -> None:
     try:
         fn()
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, RuntimeError):
         return
     raise AssertionError("ADR-DC-109 unexpectedly accepted unsafe closure state")
 
@@ -76,40 +77,6 @@ def _result(task, execution_plan, *, returncode: int) -> TierAExecutionResult:
     )
 
 
-def _execution_receipt(
-    *,
-    execution_plan,
-    command: TierACommandReceipt,
-    passed: bool,
-):
-    return execution.PilotExactTaskProductPilotExecutionReceipt(
-        execution_plan_sha256=execution_plan.sha256,
-        workspace_snapshot_receipt_sha256=execution_plan.workspace_snapshot_receipt_sha256,
-        executor_capability_sha256=execution_plan.executor_capability_sha256,
-        execution_admission_sha256=execution_plan.execution_admission_sha256,
-        execution_nonce_sha256=execution_plan.execution_nonce_sha256,
-        development_task_id=execution_plan.development_task_id,
-        development_task_sha256=execution_plan.development_task_sha256,
-        development_task_base_sha=execution_plan.development_task_base_sha,
-        fixed_command_id=execution_plan.fixed_command_id,
-        workspace_snapshot_sha256=execution_plan.workspace_snapshot_sha256,
-        tier_a_command_receipt_sha256=command.sha256,
-        tier_a_command_receipt=command,
-        product_pilot_started=True,
-        execution_plan_authenticated_at_launch=True,
-        task_execution_consumed=True,
-        one_shot_execution_enforced=True,
-        exact_pre_execution_snapshot_verified=True,
-        tier_a_command_receipt_verified=True,
-        task_execution_started=True,
-        task_execution_completed=True,
-        task_execution_passed=passed,
-        workspace_unchanged=command.workspace_unchanged,
-        workspace_reset_performed=command.workspace_reset_performed,
-        recovery_required=not passed,
-    )
-
-
 def run_contract(*, shared_fixture=None) -> None:
     if os.name == "nt":
         return
@@ -119,6 +86,8 @@ def run_contract(*, shared_fixture=None) -> None:
     auth_temp = None
     tx_temp = None
     capability_temp = None
+    passing_ledger_temp = None
+    failed_ledger_temp = None
     git_run_patch = None
     drift_path = None
     try:
@@ -159,7 +128,7 @@ def run_contract(*, shared_fixture=None) -> None:
             assert args
             observed.append(args)
             if args == ("--version",):
-                return b"git version adr-dc-109-fixture\\n"
+                return b"git version adr-dc-109-fixture\n"
             if args == ("rev-parse", "--show-toplevel"):
                 return (os.fspath(workspace) + "\n").encode("utf-8")
             if args == ("rev-parse", "HEAD"):
@@ -199,22 +168,47 @@ def run_contract(*, shared_fixture=None) -> None:
             after=clean,
             reset=None,
         )
-        passing_execution = _execution_receipt(
-            execution_plan=execution_plan,
-            command=passing_command,
-            passed=True,
+        assert passing_command.passed is True
+
+        passing_ledger_temp = tempfile.TemporaryDirectory(
+            prefix="rsi-product-pilot-verification-pass-ledger-"
         )
-        execution._mark_product_pilot_execution_authenticated(
-            passing_execution,
-            executor_capability=executor_capability,
+        passing_ledger = execution._PilotExactTaskProductPilotExecutionLedger(
+            Path(passing_ledger_temp.name).resolve()
         )
+        pass_times = iter(
+            (
+                "2026-09-20T20:00:00Z",
+                "2026-09-20T20:00:01Z",
+                "2026-09-20T20:00:02Z",
+            )
+        )
+        with patch.object(
+            command_receipt_boundary,
+            "run_single_verified_tier_a_command_with_receipt",
+            return_value=passing_command,
+        ):
+            passing_execution = (
+                execution._execute_verified_pilot_exact_task_product_pilot_plan(
+                    execution_plan=execution_plan,
+                    ledger=passing_ledger,
+                    now_provider=lambda: next(pass_times),
+                )
+            )
         assert passing_execution.execution_authenticated is True
+        assert passing_execution.host_replay_guard_committed is True
+        assert passing_execution.execution_receipt_durably_published is True
 
         verified = verification.verify_pilot_exact_task_product_pilot_execution(
             passing_execution
         )
         assert observed
-        assert {args[0] for args in observed} <= {"--version", "rev-parse", "diff", "ls-files"}
+        assert {args[0] for args in observed} <= {
+            "--version",
+            "rev-parse",
+            "diff",
+            "ls-files",
+        }
         assert verified.execution_receipt_sha256 == passing_execution.sha256
         assert verified.execution_plan_sha256 == execution_plan.sha256
         assert verified.execution_nonce_sha256 == execution_plan.execution_nonce_sha256
@@ -261,9 +255,9 @@ def run_contract(*, shared_fixture=None) -> None:
                 )
             )
 
-        # Verify the recovery branch separately: a failed command may close only
-        # when the canonical Tier-A receipt proves an exact-base reset and the
-        # fresh current workspace equals that reset snapshot.
+        # Recovery branch: a failed Tier-A receipt that documented mutation plus
+        # exact-base reset must close only after current Trusted-Git state equals
+        # that exact reset snapshot.
         mutated = GitWorkspaceSnapshot(
             head_sha=task.base_sha,
             staged_patch_sha256="1" * 64,
@@ -281,15 +275,36 @@ def run_contract(*, shared_fixture=None) -> None:
             after=mutated,
             reset=clean,
         )
-        failed_execution = _execution_receipt(
-            execution_plan=execution_plan,
-            command=failed_command,
-            passed=False,
+        assert failed_command.passed is False
+
+        failed_ledger_temp = tempfile.TemporaryDirectory(
+            prefix="rsi-product-pilot-verification-failed-ledger-"
         )
-        execution._mark_product_pilot_execution_authenticated(
-            failed_execution,
-            executor_capability=executor_capability,
+        failed_ledger = execution._PilotExactTaskProductPilotExecutionLedger(
+            Path(failed_ledger_temp.name).resolve()
         )
+        failed_times = iter(
+            (
+                "2026-09-20T21:00:00Z",
+                "2026-09-20T21:00:01Z",
+                "2026-09-20T21:00:02Z",
+            )
+        )
+        with patch.object(
+            command_receipt_boundary,
+            "run_single_verified_tier_a_command_with_receipt",
+            return_value=failed_command,
+        ):
+            failed_execution = (
+                execution._execute_verified_pilot_exact_task_product_pilot_plan(
+                    execution_plan=execution_plan,
+                    ledger=failed_ledger,
+                    now_provider=lambda: next(failed_times),
+                )
+            )
+        assert failed_execution.execution_authenticated is True
+        assert failed_execution.task_execution_passed is False
+        assert failed_execution.recovery_required is True
         recovered = verification.verify_pilot_exact_task_product_pilot_execution(
             failed_execution
         )
@@ -309,6 +324,19 @@ def run_contract(*, shared_fixture=None) -> None:
         )
         drift_path.unlink()
         drift_path = None
+
+        # If durable ADR-108 provenance changes after verification, both the
+        # execution receipt and live ADR-109 verification authority fail closed.
+        pass_final, _, _ = passing_ledger._paths(
+            passing_execution.execution_nonce_sha256
+        )
+        pass_payload = pass_final.read_bytes()
+        pass_final.write_bytes(b"{}")
+        assert passing_execution.execution_authenticated is False
+        assert verified.verification_authenticated is False
+        pass_final.write_bytes(pass_payload)
+        assert passing_execution.execution_authenticated is True
+        assert verified.verification_authenticated is True
 
         for field, value in (
             ("execution_receipt_authenticated", False),
@@ -339,6 +367,10 @@ def run_contract(*, shared_fixture=None) -> None:
             git_run_patch.stop()
         if drift_path is not None and drift_path.exists():
             drift_path.unlink()
+        if failed_ledger_temp is not None:
+            failed_ledger_temp.cleanup()
+        if passing_ledger_temp is not None:
+            passing_ledger_temp.cleanup()
         if capability_temp is not None:
             capability_temp.cleanup()
         if tx_temp is not None:
