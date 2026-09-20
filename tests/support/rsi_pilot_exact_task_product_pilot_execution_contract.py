@@ -108,6 +108,8 @@ def run_contract(*, shared_fixture=None) -> None:
             assert isinstance(args, tuple)
             assert args
             observed.append(args)
+            if args == ("--version",):
+                return b"git version adr-dc-108-fixture\n"
             if args == ("rev-parse", "--show-toplevel"):
                 return (os.fspath(workspace) + "\n").encode("utf-8")
             if args == ("rev-parse", "HEAD"):
