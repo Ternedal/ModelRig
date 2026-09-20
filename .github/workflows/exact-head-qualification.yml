@@ -83,12 +83,13 @@ jobs:
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
+            if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
+              echo "DELEGATED: $f -> _stage_b_slices.yml"
+              continue
+            fi
             echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/exact-head-python.log
             timeout_seconds=1200
-            if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
-              timeout_seconds=19800
-            fi
             echo "TIMEOUT_BOUND: $f ${timeout_seconds}s" | tee -a /tmp/exact-head-python.log
             started_at="$(date +%s)"
             set +e
@@ -124,6 +125,11 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
         run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
+
+  stage-b-slices:
+    uses: ./.github/workflows/_stage_b_slices.yml
+    with:
+      head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   # _tests.yml is shared with the release workflow and historically checks out
   # GitHub's pull-request merge ref. Until that large reusable workflow is

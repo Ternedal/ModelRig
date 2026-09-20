@@ -61,6 +61,32 @@ _CONTRACT_FILES = (
     "rsi_pilot_exact_task_product_pilot_start_authorization_contract.py",
 )
 
+_CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
+_REQUIRED_SHARD_COUNT = 3
+
+
+def _selected_contract_files() -> tuple[str, ...]:
+    raw = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
+    if not raw:
+        return _CONTRACT_FILES
+    try:
+        index_text, total_text = raw.split("/", 1)
+        index = int(index_text)
+        total = int(total_text)
+    except (ValueError, TypeError) as exc:
+        raise AssertionError(
+            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+        ) from exc
+    if total != _REQUIRED_SHARD_COUNT or not 1 <= index <= total:
+        raise AssertionError(
+            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+        )
+    selected = _CONTRACT_FILES[index - 1 :: total]
+    if not selected:
+        raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
+    return selected
+
+
 
 def _decode_timeout_output(value: str | bytes | None) -> str:
     if value is None:
@@ -95,10 +121,12 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
 
 
 def run_contract() -> None:
+    contract_files = _selected_contract_files()
+    shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip() or "all"
     worker_count = min(
         _MAX_PARALLEL_CONTRACTS,
         max(1, os.cpu_count() or 1),
-        len(_CONTRACT_FILES),
+        len(contract_files),
     )
     print(
         f"Stage-B exact-task contracts: {len(_CONTRACT_FILES)} contracts, "
@@ -111,7 +139,7 @@ def run_contract() -> None:
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
             executor.submit(_run_contract_file, filename): filename
-            for filename in _CONTRACT_FILES
+            for filename in contract_files
         }
         for future in as_completed(futures):
             filename, returncode, elapsed, output = future.result()
@@ -120,7 +148,7 @@ def run_contract() -> None:
             print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
 
     failures = []
-    for filename in _CONTRACT_FILES:
+    for filename in contract_files:
         returncode, elapsed, output = results[filename]
         if returncode == 0:
             continue

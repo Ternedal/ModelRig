@@ -17,6 +17,18 @@ from source_code import code_of  # noqa: E402
 
 root = Path(__file__).resolve().parents[1]
 workflow = code_of(root / ".github/workflows/_tests.yml")
+stage_b_workflow = code_of(root / ".github/workflows/_stage_b_slices.yml")
+exact_head_workflow = code_of(root / ".github/workflows/exact-head-qualification.yml")
+agent3_full_workflow = code_of(root / ".github/workflows/agent3-full-diagnostics.yml")
+stage_b_driver = code_of(
+    root / "tests/support/rsi_pilot_exact_task_execution_admission_stage_b_driver.py"
+)
+midchain_driver = code_of(
+    root / "tests/support/rsi_pilot_exact_task_stage_b_midchain_driver.py"
+)
+downstream_driver = code_of(
+    root / "tests/support/rsi_pilot_exact_task_release_transaction_contract.py"
+)
 sys.path.insert(0, str(root / "devcontrol/src"))
 
 from kaliv_dev_control.catalog import (
@@ -67,6 +79,70 @@ self_test_missed = [
     if not any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 ]
 check(self_test_missed == ["tests/agent_smoke.py"], "coverage self-test detects a file outside CI globs")
+
+delegation_guard = 'if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then'
+for label, caller in (
+    ("shared CI", workflow),
+    ("exact-head", exact_head_workflow),
+    ("Agent 3 full diagnostics", agent3_full_workflow),
+):
+    check(
+        delegation_guard in caller,
+        f"{label} delegates the monolithic Stage-B file to bounded shard jobs",
+    )
+    check(
+        "uses: ./.github/workflows/_stage_b_slices.yml" in caller,
+        f"{label} includes the reusable Stage-B shard workflow",
+    )
+
+expected_stage_b_names = (
+    "admission",
+    "midchain-1",
+    "midchain-2",
+    "midchain-3",
+    "downstream-1",
+    "downstream-2",
+    "downstream-3",
+)
+for name in expected_stage_b_names:
+    check(
+        f"- name: {name}" in stage_b_workflow,
+        f"Stage-B reusable workflow retains {name} qualification",
+    )
+for shard in ("1/3", "2/3", "3/3"):
+    check(
+        f'shard: "{shard}"' in stage_b_workflow,
+        f"Stage-B reusable workflow retains shard {shard}",
+    )
+check(
+    "timeout-minutes: 355" in stage_b_workflow,
+    "each Stage-B shard stays below the GitHub-hosted six-hour job ceiling",
+)
+check(
+    "run: PYTHONPATH=worker python3 -u tests/workflow_stage_b_physical_gate.py"
+    in stage_b_workflow,
+    "every Stage-B shard enters through the locked physical-gate test",
+)
+check(
+    'MODELRIG_STAGE_B_SLICE: ${{ matrix.slice }}' in stage_b_workflow
+    and 'MODELRIG_STAGE_B_CONTRACT_SHARD: ${{ matrix.shard }}'
+    in stage_b_workflow,
+    "Stage-B matrix passes explicit slice and shard authority",
+)
+check(
+    '_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "midchain", "downstream")'
+    in stage_b_driver,
+    "Stage-B driver fails closed to the four qualified slice modes",
+)
+for label, source in (
+    ("midchain", midchain_driver),
+    ("downstream", downstream_driver),
+):
+    check(
+        "_REQUIRED_SHARD_COUNT = 3" in source
+        and "_CONTRACT_FILES[index - 1 :: total]" in source,
+        f"{label} uses the locked three-way strided shard partition",
+    )
 
 command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "

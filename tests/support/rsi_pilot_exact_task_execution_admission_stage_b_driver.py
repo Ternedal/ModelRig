@@ -24,9 +24,12 @@ SUPPORT = ROOT / "tests" / "support"
 _DEFAULT_TIMEOUT_SECONDS = 1800
 _SHARED_DEEP_CHAIN_TIMEOUT_SECONDS = 3000
 _NONCE_REUSE_TIMEOUT_SECONDS = 1800
-_MIDCHAIN_TIMEOUT_SECONDS = 7200
-_DOWNSTREAM_TIMEOUT_SECONDS = 9000
+_FULL_PHASE_TIMEOUT_SECONDS = 33000
+_SHARDED_PHASE_TIMEOUT_SECONDS = 11400
 _MAX_SHALLOW_PARALLEL_CONTRACTS = 2
+_STAGE_B_SLICE_ENV = "MODELRIG_STAGE_B_SLICE"
+_CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
+_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "midchain", "downstream")
 
 _SHALLOW_CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_authorization_contract.py",
@@ -48,15 +51,29 @@ def _decode_timeout_output(value: str | bytes | None) -> str:
     return value
 
 
+def _stage_b_slice() -> str:
+    value = os.environ.get(_STAGE_B_SLICE_ENV, "all").strip() or "all"
+    if value not in _SUPPORTED_STAGE_B_SLICES:
+        raise AssertionError(
+            f"unsupported Stage-B slice {value!r}; expected one of "
+            f"{', '.join(_SUPPORTED_STAGE_B_SLICES)}"
+        )
+    return value
+
+
+def _contract_shard_is_active() -> bool:
+    return bool(os.environ.get(_CONTRACT_SHARD_ENV, "").strip())
+
+
 def _timeout_for(filename: str) -> int:
     if filename == _SHARED_DEEP_CHAIN_FILE:
         return _SHARED_DEEP_CHAIN_TIMEOUT_SECONDS
     if filename == _NONCE_REUSE_FILE:
         return _NONCE_REUSE_TIMEOUT_SECONDS
-    if filename == _MIDCHAIN_DRIVER_FILE:
-        return _MIDCHAIN_TIMEOUT_SECONDS
-    if filename == _DOWNSTREAM_DRIVER_FILE:
-        return _DOWNSTREAM_TIMEOUT_SECONDS
+    if filename in (_MIDCHAIN_DRIVER_FILE, _DOWNSTREAM_DRIVER_FILE):
+        if _contract_shard_is_active():
+            return _SHARDED_PHASE_TIMEOUT_SECONDS
+        return _FULL_PHASE_TIMEOUT_SECONDS
     return _DEFAULT_TIMEOUT_SECONDS
 
 
@@ -129,7 +146,7 @@ def _run_serial_phase(phase: str, filename: str) -> None:
     )
 
 
-def run_contract() -> None:
+def _run_admission_prefix() -> None:
     shallow_worker_count = min(
         _MAX_SHALLOW_PARALLEL_CONTRACTS,
         max(1, os.cpu_count() or 1),
@@ -164,6 +181,9 @@ def run_contract() -> None:
         "phase 1b/3, ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
         _SHARED_DEEP_CHAIN_FILE,
     )
+
+
+def _run_cached_slice(stage_b_slice: str) -> None:
     proof_cache_temp = tempfile.TemporaryDirectory(
         prefix="rsi-exact-task-stage-b-proof-cache-"
     )
@@ -184,14 +204,16 @@ def run_contract() -> None:
             raise AssertionError(
                 "Stage-B ADR-033 nonce guard did not publish the shared proof cache"
             )
-        _run_serial_phase(
-            "phase 2b/3, ADR-DC-034 through ADR-DC-066 isolated midchain",
-            _MIDCHAIN_DRIVER_FILE,
-        )
-        _run_serial_phase(
-            "phase 3/3, ADR-DC-067 through ADR-DC-097 isolated downstream chain",
-            _DOWNSTREAM_DRIVER_FILE,
-        )
+        if stage_b_slice in ("all", "midchain"):
+            _run_serial_phase(
+                "phase 2b/3, ADR-DC-034 through ADR-DC-066 isolated midchain",
+                _MIDCHAIN_DRIVER_FILE,
+            )
+        if stage_b_slice in ("all", "downstream"):
+            _run_serial_phase(
+                "phase 3/3, ADR-DC-067 onward isolated downstream chain",
+                _DOWNSTREAM_DRIVER_FILE,
+            )
     finally:
         if previous_proof_cache is None:
             os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
@@ -202,6 +224,21 @@ def run_contract() -> None:
         else:
             os.environ["MODELRIG_STAGE_B_START_LEDGER_ROOT"] = previous_start_ledger
         proof_cache_temp.cleanup()
+
+
+def run_contract() -> None:
+    stage_b_slice = _stage_b_slice()
+    if stage_b_slice in ("all", "admission") and _contract_shard_is_active():
+        raise AssertionError(
+            "Stage-B admission/all slice cannot be combined with a contract shard"
+        )
+    print(
+        f"Stage-B exact-task admission chain selected slice: {stage_b_slice}",
+        flush=True,
+    )
+    if stage_b_slice in ("all", "admission"):
+        _run_admission_prefix()
+    _run_cached_slice(stage_b_slice)
 
 
 if __name__ == "__main__":
