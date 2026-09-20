@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from . import improvement_pilot_exact_task_post_production_activation_attestation as attestation_boundary
+from . import improvement_pilot_exact_task_development_task_binding as task_binding_boundary
 from . import improvement_pilot_exact_task_product_pilot_start_requirements as requirements_boundary
 from . import improvement_pilot_exact_task_product_pilot_lineage_attestation as lineage_boundary
 from . import improvement_pilot_exact_task_product_pilot_task_registry as registry_boundary
@@ -676,7 +677,7 @@ def _evaluate_verified_pilot_exact_task_product_pilot_start_readiness(
         or task_registry.development_task_sha256
         != runtime_preflight.development_task_sha256
         or task_registry.development_task_sha256
-        != registry_boundary.task_binding_boundary._task_sha256(development_task)
+        != task_binding_boundary._task_sha256(development_task)
         or task_registry.operator_surface != runtime_preflight.operator_surface
         or task_registry.selected_pilot_task_id
         != runtime_preflight.selected_pilot_task_id
