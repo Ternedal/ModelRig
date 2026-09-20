@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from . import improvement_pilot_exact_task_product_pilot_execution as execution_boundary
+from .runtime_closure_builder import VERSION_CHECK_COMMAND_ID
 
 PILOT_EXACT_TASK_PRODUCT_PILOT_EXECUTION_RECOVERY_SCHEMA = (
     "kaliv-rsi-dc-l16-exact-task-product-pilot-execution-recovery/v1"
@@ -217,6 +218,7 @@ def _observe(
         or lock.get("ledger_root_path_sha256") != ledger.root_sha256
         or lock.get("consumption_key_sha256") != nonce
         or lock.get("execution_nonce_sha256") != nonce
+        or lock.get("fixed_command_id") != VERSION_CHECK_COMMAND_ID
     ):
         raise PilotExactTaskProductPilotExecutionRecoveryError(
             "ADR-DC-108 execution lock is not exact"
@@ -350,13 +352,9 @@ class PilotExactTaskProductPilotExecutionRecoveryReceipt:
             "workspace_snapshot_sha256",
         ):
             _hex64(getattr(self, field), name=field)
-        if (
-            not isinstance(self.fixed_command_id, str)
-            or not self.fixed_command_id
-            or "\x00" in self.fixed_command_id
-        ):
+        if self.fixed_command_id != VERSION_CHECK_COMMAND_ID:
             raise PilotExactTaskProductPilotExecutionRecoveryError(
-                "fixed command id is invalid"
+                "execution recovery command is not the reviewed product-pilot command"
             )
         if self.recovery_state_class == "completed_verified":
             if (
