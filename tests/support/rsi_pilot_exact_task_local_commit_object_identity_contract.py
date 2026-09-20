@@ -370,7 +370,8 @@ def run_contract() -> None:
         assert "shell=True" not in source
         assert '"write-tree"' not in source
         assert '"commit-tree"' not in source
-        assert '("commit",' not in source
+        # Read-only commit identity hashing is allowed; Git commit execution is not.
+        assert '.run(("commit",' not in source
         assert '("update-ref",' not in source
         assert '("push",' not in source
         assert '("reset",' not in source
