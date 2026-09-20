@@ -1,0 +1,50 @@
+"""Public host-pinned facade for ADR-DC-099 product-pilot qualified readiness."""
+from __future__ import annotations
+
+from . import _improvement_pilot_exact_task_product_pilot_start_qualified_readiness_impl as _implementation
+from ._improvement_pilot_exact_task_product_pilot_start_qualified_readiness_production_boundary import (
+    install_pilot_exact_task_product_pilot_start_qualified_readiness_production_boundary,
+)
+
+install_pilot_exact_task_product_pilot_start_qualified_readiness_production_boundary(
+    _implementation
+)
+
+PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_SCHEMA = (
+    _implementation.PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_SCHEMA
+)
+PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_AUTHORITY = (
+    _implementation.PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_AUTHORITY
+)
+PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_SCOPE = (
+    _implementation.PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_SCOPE
+)
+PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_MAX_HUMAN_GO_AGE_SECONDS = (
+    _implementation.PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_MAX_HUMAN_GO_AGE_SECONDS
+)
+PilotExactTaskProductPilotStartQualifiedReadinessError = (
+    _implementation.PilotExactTaskProductPilotStartQualifiedReadinessError
+)
+PilotExactTaskProductPilotStartQualifiedReadinessReceipt = (
+    _implementation.PilotExactTaskProductPilotStartQualifiedReadinessReceipt
+)
+evaluate_pilot_exact_task_product_pilot_start_qualified_readiness = (
+    _implementation.evaluate_pilot_exact_task_product_pilot_start_qualified_readiness
+)
+
+# Deterministic contract seam only; production human signature verification is host-pinned above.
+_evaluate_verified_pilot_exact_task_product_pilot_start_qualified_readiness = (
+    _implementation._evaluate_verified_pilot_exact_task_product_pilot_start_qualified_readiness
+)
+
+__all__ = [
+    "PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_SCHEMA",
+    "PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_AUTHORITY",
+    "PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_SCOPE",
+    "PILOT_EXACT_TASK_PRODUCT_PILOT_START_QUALIFIED_READINESS_MAX_HUMAN_GO_AGE_SECONDS",
+    "PilotExactTaskProductPilotStartQualifiedReadinessError",
+    "PilotExactTaskProductPilotStartQualifiedReadinessReceipt",
+    "evaluate_pilot_exact_task_product_pilot_start_qualified_readiness",
+]
+
+del install_pilot_exact_task_product_pilot_start_qualified_readiness_production_boundary
