@@ -192,6 +192,22 @@ def run_contract(*, shared_fixture=None) -> None:
         assert completed.task_execution_authorized is False
         assert completed.manual_intervention_required is True
         assert completed.nonce_reusable is False
+        assert completed.recovery_authenticated is True
+
+        completed_final, _, completed_lock = completed_ledger._paths(
+            execution_plan.execution_nonce_sha256
+        )
+        completed_final_payload = completed_final.read_bytes()
+        completed_final.write_bytes(b"{}")
+        assert completed.recovery_authenticated is False
+        completed_final.write_bytes(completed_final_payload)
+        assert completed.recovery_authenticated is True
+
+        completed_lock_payload = completed_lock.read_bytes()
+        completed_lock.write_bytes(b"{}")
+        assert completed.recovery_authenticated is False
+        completed_lock.write_bytes(completed_lock_payload)
+        assert completed.recovery_authenticated is True
 
         # Pending-only state: exact canonical ADR-DC-108 receipt exists in the
         # pending slot but final publication did not complete.
@@ -222,6 +238,7 @@ def run_contract(*, shared_fixture=None) -> None:
         assert pending.pending_receipt_verified is True
         assert pending.retry_authorized is False
         assert pending.manual_intervention_required is True
+        assert pending.recovery_authenticated is True
 
         # Lock-only state: durable consumption happened, but there is no receipt
         # evidence proving whether the process launched or completed.
@@ -243,6 +260,7 @@ def run_contract(*, shared_fixture=None) -> None:
         assert lock_only.retry_authorized is False
         assert lock_only.nonce_reusable is False
         assert lock_only.manual_intervention_required is True
+        assert lock_only.recovery_authenticated is True
 
         lock_final, lock_pending, lock_path = lock_only_ledger._paths(
             execution_plan.execution_nonce_sha256
@@ -317,6 +335,7 @@ def run_contract(*, shared_fixture=None) -> None:
         )
         assert reloaded == completed
         assert reloaded.sha256 == completed.sha256
+        assert reloaded.recovery_authenticated is False
 
         for field, value in (
             ("double_observation_matched", False),
