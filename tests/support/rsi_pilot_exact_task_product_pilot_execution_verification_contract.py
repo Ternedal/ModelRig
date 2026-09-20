@@ -158,6 +158,8 @@ def run_contract(*, shared_fixture=None) -> None:
             assert isinstance(args, tuple)
             assert args
             observed.append(args)
+            if args == ("--version",):
+                return b"git version adr-dc-109-fixture\\n"
             if args == ("rev-parse", "--show-toplevel"):
                 return (os.fspath(workspace) + "\n").encode("utf-8")
             if args == ("rev-parse", "HEAD"):
@@ -212,7 +214,7 @@ def run_contract(*, shared_fixture=None) -> None:
             passing_execution
         )
         assert observed
-        assert {args[0] for args in observed} <= {"rev-parse", "diff", "ls-files"}
+        assert {args[0] for args in observed} <= {"--version", "rev-parse", "diff", "ls-files"}
         assert verified.execution_receipt_sha256 == passing_execution.sha256
         assert verified.execution_plan_sha256 == execution_plan.sha256
         assert verified.execution_nonce_sha256 == execution_plan.execution_nonce_sha256
