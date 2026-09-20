@@ -96,6 +96,8 @@ def _require_live_execution(value: Any):
         or value.execution_authenticated is not True
         or value.product_pilot_started is not True
         or value.execution_plan_authenticated_at_launch is not True
+        or value.host_replay_guard_committed is not True
+        or value.execution_receipt_durably_published is not True
         or value.task_execution_consumed is not True
         or value.one_shot_execution_enforced is not True
         or value.exact_pre_execution_snapshot_verified is not True
