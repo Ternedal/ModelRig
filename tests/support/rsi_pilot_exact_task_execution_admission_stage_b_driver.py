@@ -1,11 +1,13 @@
-"""Stage-B isolated-process driver for ADR-DC-030 through ADR-DC-033.
+"""Stage-B isolated-process driver for ADR-DC-030 through ADR-DC-097.
 
 ADR-DC-030..031 qualify as two shallow isolated contracts with at most two workers.
 ADR-DC-032 and ADR-DC-033 then qualify together in one isolated shared-provenance
-child: both canonical contracts execute in full, but the deterministic deep upstream
-material is built once and kept alive across the adjacent pair. The nonce-reuse
-contract remains the single bridge into ADR-DC-034 through ADR-DC-097 and runs only
-after the admission phases, preventing nested worker oversubscription.
+child. The focused ADR-DC-033 nonce-reuse guard, ADR-DC-034..066 midchain, and
+ADR-DC-067..097 downstream chain run as sibling phases afterwards.
+
+Keeping the downstream drivers outside the nonce guard preserves the locked
+transitive Stage-B entrypoint without recursively nesting their internally
+parallel workers or forcing both chains through one aggregate subprocess timeout.
 """
 from __future__ import annotations
 
@@ -20,7 +22,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _DEFAULT_TIMEOUT_SECONDS = 1800
 _SHARED_DEEP_CHAIN_TIMEOUT_SECONDS = 3000
-_NONCE_CHAIN_TIMEOUT_SECONDS = 6600
+_NONCE_REUSE_TIMEOUT_SECONDS = 1800
+_MIDCHAIN_TIMEOUT_SECONDS = 4000
+_DOWNSTREAM_TIMEOUT_SECONDS = 4000
 _MAX_SHALLOW_PARALLEL_CONTRACTS = 2
 
 _SHALLOW_CONTRACT_FILES = (
@@ -30,7 +34,9 @@ _SHALLOW_CONTRACT_FILES = (
 _SHARED_DEEP_CHAIN_FILE = (
     "rsi_pilot_exact_task_execution_revalidation_attestation_admission_stage_b_driver.py"
 )
-_NONCE_CHAIN_FILE = "rsi_pilot_exact_task_execution_admission_nonce_reuse_contract.py"
+_NONCE_REUSE_FILE = "rsi_pilot_exact_task_execution_admission_nonce_reuse_contract.py"
+_MIDCHAIN_DRIVER_FILE = "rsi_pilot_exact_task_stage_b_midchain_driver.py"
+_DOWNSTREAM_DRIVER_FILE = "rsi_pilot_exact_task_release_transaction_contract.py"
 
 
 def _decode_timeout_output(value: str | bytes | None) -> str:
@@ -42,10 +48,14 @@ def _decode_timeout_output(value: str | bytes | None) -> str:
 
 
 def _timeout_for(filename: str) -> int:
-    if filename == _NONCE_CHAIN_FILE:
-        return _NONCE_CHAIN_TIMEOUT_SECONDS
     if filename == _SHARED_DEEP_CHAIN_FILE:
         return _SHARED_DEEP_CHAIN_TIMEOUT_SECONDS
+    if filename == _NONCE_REUSE_FILE:
+        return _NONCE_REUSE_TIMEOUT_SECONDS
+    if filename == _MIDCHAIN_DRIVER_FILE:
+        return _MIDCHAIN_TIMEOUT_SECONDS
+    if filename == _DOWNSTREAM_DRIVER_FILE:
+        return _DOWNSTREAM_TIMEOUT_SECONDS
     return _DEFAULT_TIMEOUT_SECONDS
 
 
@@ -102,6 +112,22 @@ def _raise_failures(
         )
 
 
+def _run_serial_phase(phase: str, filename: str) -> None:
+    print(f"Stage-B exact-task admission chain: {phase}", flush=True)
+    print(
+        f"  START: {filename} ({_timeout_for(filename)}s bound)",
+        flush=True,
+    )
+    result_name, returncode, elapsed, output = _run_contract_file(filename)
+    status = "PASS" if returncode == 0 else f"FAIL({returncode})"
+    print(f"  {status}: {result_name} ({elapsed:.1f}s)", flush=True)
+    _raise_failures(
+        phase,
+        (filename,),
+        {result_name: (returncode, elapsed, output)},
+    )
+
+
 def run_contract() -> None:
     shallow_worker_count = min(
         _MAX_SHALLOW_PARALLEL_CONTRACTS,
@@ -109,7 +135,7 @@ def run_contract() -> None:
         len(_SHALLOW_CONTRACT_FILES),
     )
     print(
-        "Stage-B exact-task admission chain: phase 1a/2, "
+        "Stage-B exact-task admission chain: phase 1a/3, "
         f"{len(_SHALLOW_CONTRACT_FILES)} shallow standalone contracts, "
         f"{shallow_worker_count} isolated workers",
         flush=True,
@@ -133,45 +159,22 @@ def run_contract() -> None:
 
     _raise_failures("shallow standalone phase", _SHALLOW_CONTRACT_FILES, shallow_results)
 
-    # Two independent hosted runners showed the shared fixture working: ADR-DC-032
-    # completed fully and ADR-DC-033 started before the original 2400s aggregate
-    # bound expired. Widen only the aggregate diagnostic bound to 3000s and retain
-    # internal per-contract timing so the next run measures the remaining cost.
-    print(
-        "Stage-B exact-task admission chain: phase 1b/2, "
-        "ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
-        flush=True,
+    _run_serial_phase(
+        "phase 1b/3, ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
+        _SHARED_DEEP_CHAIN_FILE,
     )
-    print(
-        f"  START: {_SHARED_DEEP_CHAIN_FILE} "
-        f"({_timeout_for(_SHARED_DEEP_CHAIN_FILE)}s aggregate bound)",
-        flush=True,
+    _run_serial_phase(
+        "phase 2a/3, focused ADR-DC-033 nonce-reuse guard",
+        _NONCE_REUSE_FILE,
     )
-    filename, returncode, elapsed, output = _run_contract_file(_SHARED_DEEP_CHAIN_FILE)
-    status = "PASS" if returncode == 0 else f"FAIL({returncode})"
-    print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
-    shared_results = {filename: (returncode, elapsed, output)}
-    _raise_failures(
-        "shared deep ADR-032/033 phase",
-        (_SHARED_DEEP_CHAIN_FILE,),
-        shared_results,
+    _run_serial_phase(
+        "phase 2b/3, ADR-DC-034 through ADR-DC-066 isolated midchain",
+        _MIDCHAIN_DRIVER_FILE,
     )
-
-    # Do not overlap the downstream bridge with the admission phases. The bridge
-    # itself runs isolated workers for ADR-DC-034..066 and ADR-DC-067..097.
-    print(
-        "Stage-B exact-task admission chain: phase 2/2, nonce/downstream bridge",
-        flush=True,
+    _run_serial_phase(
+        "phase 3/3, ADR-DC-067 through ADR-DC-097 isolated downstream chain",
+        _DOWNSTREAM_DRIVER_FILE,
     )
-    print(
-        f"  START: {_NONCE_CHAIN_FILE} ({_timeout_for(_NONCE_CHAIN_FILE)}s bound)",
-        flush=True,
-    )
-    filename, returncode, elapsed, output = _run_contract_file(_NONCE_CHAIN_FILE)
-    status = "PASS" if returncode == 0 else f"FAIL({returncode})"
-    print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
-    bridge_results = {filename: (returncode, elapsed, output)}
-    _raise_failures("nonce/downstream phase", (_NONCE_CHAIN_FILE,), bridge_results)
 
 
 if __name__ == "__main__":
