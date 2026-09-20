@@ -327,7 +327,7 @@ def run_contract(*, shared_fixture=None) -> None:
 
         # If durable ADR-108 provenance changes after verification, both the
         # execution receipt and live ADR-109 verification authority fail closed.
-        pass_final, _, _ = passing_ledger._paths(
+        pass_final, _, pass_lock = passing_ledger._paths(
             passing_execution.execution_nonce_sha256
         )
         pass_payload = pass_final.read_bytes()
@@ -335,6 +335,14 @@ def run_contract(*, shared_fixture=None) -> None:
         assert passing_execution.execution_authenticated is False
         assert verified.verification_authenticated is False
         pass_final.write_bytes(pass_payload)
+        assert passing_execution.execution_authenticated is True
+        assert verified.verification_authenticated is True
+
+        lock_payload = pass_lock.read_bytes()
+        pass_lock.write_bytes(b"{}")
+        assert passing_execution.execution_authenticated is False
+        assert verified.verification_authenticated is False
+        pass_lock.write_bytes(lock_payload)
         assert passing_execution.execution_authenticated is True
         assert verified.verification_authenticated is True
 
