@@ -10,6 +10,9 @@ SUPPORT = ROOT / "tests" / "support"
 if str(SUPPORT) not in sys.path:
     sys.path.insert(0, str(SUPPORT))
 
+from rsi_pilot_product_ui_observer_handoff_contract import (  # noqa: E402
+    run_contract as run_ui_handoff_contract,
+)
 from source_code import code_of  # noqa: E402
 
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
@@ -20,6 +23,7 @@ from kaliv_dev_control import catalog  # noqa: E402
 
 HANDOFF = ROOT / "docs/devcontrol/dc-l16/product-integration-implementation-handoff.json"
 SCHEMA = ROOT / "devcontrol/schemas/rsi-pilot-product-integration-implementation-handoff-v1.schema.json"
+UI_HANDOFF = ROOT / "docs/devcontrol/dc-l16/product-ui-observer-handoff.json"
 DESKTOP = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
 ANDROID = ROOT / "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
 SERVER = ROOT / "backend/internal/httpapi/server.go"
@@ -40,6 +44,7 @@ def _git_blob_sha(path: Path) -> str:
 def run_contract() -> None:
     handoff = _load(HANDOFF)
     schema = _load(SCHEMA)
+    ui_handoff = _load(UI_HANDOFF) if UI_HANDOFF.is_file() else None
 
     assert handoff["schema"] == "kaliv-rsi-dc-l16-product-integration-implementation-handoff/v1"
     assert handoff["repository"] == "Ternedal/ModelRig"
@@ -79,9 +84,21 @@ def run_contract() -> None:
     assert _git_blob_sha(PILOT) == new_files[0]["git_blob_sha"]
     assert _git_blob_sha(PILOT_TEST) == new_files[1]["git_blob_sha"]
 
-    # Non-selected/untouched candidate surfaces remain exactly at ADR-DC-018.
-    assert _git_blob_sha(DESKTOP) == "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
+    # Android remains untouched at ADR-DC-018. Desktop may move only through
+    # the separately pinned successor observer handoff.
     assert _git_blob_sha(ANDROID) == "82643d7cefe9a9c249e8e7cc8b480d9989b38606"
+    if ui_handoff is None:
+        assert _git_blob_sha(DESKTOP) == "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
+    else:
+        assert ui_handoff["source_product_status_head_sha"] == "b7acd3db6e88a4316375923d4cf1f5be2cde51a8"
+        ui_transition = ui_handoff["tracked_source_transition"]
+        assert ui_transition["path"] == "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
+        assert ui_transition["from_git_blob_sha"] == "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
+        assert _git_blob_sha(DESKTOP) == ui_transition["to_git_blob_sha"]
+        assert ui_handoff["implementation_choice"]["human_pilot_go_verified"] is False
+        assert ui_handoff["implementation_choice"]["executor_wired"] is False
+        assert ui_handoff["implementation_choice"]["start_control_present"] is False
+        run_ui_handoff_contract()
 
     server = code_of(SERVER)
     pilot = code_of(PILOT)
