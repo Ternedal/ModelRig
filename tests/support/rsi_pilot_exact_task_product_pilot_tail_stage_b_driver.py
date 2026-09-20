@@ -22,6 +22,7 @@ import rsi_pilot_exact_task_product_pilot_task_registry_contract as registry_con
 import rsi_pilot_exact_task_product_pilot_runtime_preflight_contract as runtime_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_start_readiness_contract as readiness_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_start_authorization_contract as authorization_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_start_transaction_contract as start_transaction_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -64,6 +65,12 @@ def run_contract() -> None:
         authorization_done = time.monotonic()
         print(
             f"ADR-DC-097 authorization contract completed in {authorization_done - readiness_done:.1f}s",
+            flush=True,
+        )
+        start_transaction_contract.run_contract(shared_fixture=fixture)
+        transaction_done = time.monotonic()
+        print(
+            f"ADR-DC-102 start-transaction contract completed in {transaction_done - authorization_done:.1f}s",
             flush=True,
         )
     finally:
