@@ -1,9 +1,10 @@
-"""Shared-provenance Stage-B driver for ADR-DC-098 through start authorization.
+"""Shared-provenance Stage-B driver for ADR-DC-098 through execution admission.
 
 The canonical contracts remain independently runnable and unchanged in authority
 semantics. This Stage-B-only driver builds their expensive immutable upstream
 fixture once, keeps it live while the full ADR-DC-098/099/100, repaired
-start-readiness and ADR-DC-097 authorization contracts execute, then cleans up.
+start-readiness, start transaction/recovery and execution-admission contracts
+execute, then cleans up.
 """
 from __future__ import annotations
 

@@ -71,6 +71,7 @@ def _start(fixture):
         tx_temp,
         tx_ledger,
         start,
+        authorization,
         ready,
         payload,
         development_task,
@@ -92,6 +93,7 @@ def run_contract(*, shared_fixture=None) -> None:
             tx_temp,
             tx_ledger,
             start,
+            authorization,
             ready,
             registry_payload,
             development_task,
@@ -132,6 +134,8 @@ def run_contract(*, shared_fixture=None) -> None:
         assert live["start_state"] is start
         assert live["start_transaction"] is start
         assert live["development_task"] == development_task
+        assert live["product_pilot_start_authorization"] is authorization
+        assert live["product_pilot_start_readiness"] is ready
 
         serialized = admission.PilotExactTaskProductPilotExecutionAdmissionReceipt.from_mapping(
             receipt.to_dict()

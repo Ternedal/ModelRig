@@ -155,7 +155,16 @@ def _require_completed_start_source(value: Any):
             raise PilotExactTaskProductPilotExecutionAdmissionError(
                 "ADR-DC-102 no longer retains live readiness-v2 provenance"
             )
-        return "start_transaction", value, value, value.started_at_utc
+        return (
+            "start_transaction",
+            value,
+            value,
+            value.started_at_utc,
+            {
+                "product_pilot_start_authorization": authorization,
+                "product_pilot_start_readiness": readiness,
+            },
+        )
 
     if type(value) is start_recovery_boundary.PilotExactTaskProductPilotStartRecoveryReceipt:
         if (
@@ -187,7 +196,13 @@ def _require_completed_start_source(value: Any):
             raise PilotExactTaskProductPilotExecutionAdmissionError(
                 "ADR-DC-103 recovered start receipt is unavailable or inconsistent"
             )
-        return "completed_recovery", value, start_receipt, value.recovered_at_utc
+        return (
+            "completed_recovery",
+            value,
+            start_receipt,
+            value.recovered_at_utc,
+            {"product_pilot_start_recovery": value},
+        )
 
     raise PilotExactTaskProductPilotExecutionAdmissionError(
         "exact live ADR-DC-102 start or completed ADR-DC-103 recovery is required"
@@ -383,6 +398,7 @@ def _live_registry():
         start_transaction: start_transaction_boundary.PilotExactTaskProductPilotStartTransactionReceipt,
         development_task: Any,
         registry_payload_sha256: str,
+        retained_upstream: Mapping[str, Any],
     ) -> None:
         key = id(receipt)
 
@@ -397,6 +413,7 @@ def _live_registry():
             start_transaction,
             development_task,
             registry_payload_sha256,
+            dict(retained_upstream),
         )
 
     def get(receipt: Any) -> Mapping[str, Any] | None:
@@ -411,12 +428,13 @@ def _live_registry():
             start_transaction,
             development_task,
             registry_payload_sha256,
+            retained_upstream,
         ) = entry
         if pid != os.getpid() or receipt_ref() is not receipt or receipt.sha256 != digest:
             return None
         try:
-            source_type, source_again, tx_again, _source_time = _require_completed_start_source(
-                start_state
+            source_type, source_again, tx_again, _source_time, upstream_again = (
+                _require_completed_start_source(start_state)
             )
             if (
                 source_again is not start_state
@@ -428,6 +446,11 @@ def _live_registry():
                 or development_task.task_id != receipt.development_task_id
                 or development_task.base_sha != receipt.development_task_base_sha
                 or development_task.allowed_command_ids != (receipt.fixed_command_id,)
+                or set(retained_upstream) != set(upstream_again)
+                or any(
+                    retained_upstream[name] is not upstream_again[name]
+                    for name in retained_upstream
+                )
             ):
                 return None
         except Exception:
@@ -437,6 +460,7 @@ def _live_registry():
             "start_transaction": start_transaction,
             "development_task": development_task,
             "host_development_task_registry_sha256": registry_payload_sha256,
+            **retained_upstream,
         }
 
     if hasattr(os, "register_at_fork"):
@@ -453,9 +477,13 @@ def _build_verified_product_pilot_execution_admission(
     registry_payload: bytes,
     now_provider: Callable[[], str],
 ) -> PilotExactTaskProductPilotExecutionAdmissionReceipt:
-    source_type, source, start_transaction, source_completed_at = (
-        _require_completed_start_source(start_state)
-    )
+    (
+        source_type,
+        source,
+        start_transaction,
+        source_completed_at,
+        retained_upstream,
+    ) = _require_completed_start_source(start_state)
     try:
         registry_sha256, entries = task_binding_boundary._parse_registry_payload(
             registry_payload
@@ -548,6 +576,7 @@ def _build_verified_product_pilot_execution_admission(
         start_transaction=start_transaction,
         development_task=development_task,
         registry_payload_sha256=registry_sha256,
+        retained_upstream=retained_upstream,
     )
     if receipt.admission_authenticated is not True:
         raise PilotExactTaskProductPilotExecutionAdmissionError(
