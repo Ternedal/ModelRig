@@ -1,9 +1,10 @@
 """Locked Stage-B wrapper through authoritative DC-L16 product-pilot pre-start qualification.
 
-The contracts are independent adversarial qualifications: each creates and cleans
-up its own fixture. Run them in isolated Python processes so the exact-head gate
-does not serialize the increasingly deep fixture chain. This changes orchestration
-only; every contract still executes in full and retains its own assertions.
+Most contracts are independent adversarial qualifications and run in isolated
+Python processes. The product-pilot tail is the deliberate exception: its
+ADR-098/099/100, readiness-v2 and ADR-097 contracts share one immutable deep
+fixture inside a dedicated driver while each canonical contract still executes
+in full. This changes orchestration only, not authority semantics.
 """
 from __future__ import annotations
 
