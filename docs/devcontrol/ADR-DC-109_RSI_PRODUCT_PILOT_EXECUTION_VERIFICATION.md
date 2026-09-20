@@ -55,3 +55,12 @@ A valid verification receipt sets:
 
 No commit, remote write, push, PR mutation, merge, release, deploy or production
 authority is granted. The execution nonce remains non-reusable.
+
+
+## Live provenance
+
+Only the receipt returned by the live ADR-DC-109 verification call receives
+process-local `verification_authenticated` provenance. Serialization/reload is
+audit evidence only and cannot recreate live verification authority. The fresh
+Trusted-Git evidence must also match the exact Git-runtime evidence embedded in
+the ADR-DC-108 Tier-A command receipt.
