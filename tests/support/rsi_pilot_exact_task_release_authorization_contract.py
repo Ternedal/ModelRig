@@ -77,6 +77,10 @@ def _live_clear_observation():
     assert observation.observation_authenticated is True
     assert observation.remote_state_class == "clear"
     assert observation.release_lane_clear is True
+    # ADR-DC-064..066 chain liveness is intentionally weakref-backed. Preserve
+    # the exact live receipts in the opaque cleanup case so transaction and
+    # downstream fixtures do not invalidate authority merely by returning.
+    case = (*case, readiness, plan, observation)
     return case, readiness, plan, observation
 
 
