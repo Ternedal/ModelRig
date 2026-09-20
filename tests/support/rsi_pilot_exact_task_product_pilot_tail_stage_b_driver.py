@@ -1,4 +1,4 @@
-"""Shared-provenance Stage-B driver for ADR-DC-098 through execution recovery.
+"""Shared-provenance Stage-B driver for ADR-DC-098 through recovery resolution.
 
 The canonical contracts remain independently runnable and unchanged in authority
 semantics. This Stage-B-only driver builds their expensive immutable upstream
@@ -32,6 +32,7 @@ import rsi_pilot_exact_task_product_pilot_execution_contract as execution_contra
 import rsi_pilot_exact_task_product_pilot_execution_verification_contract as execution_verification_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_execution_session_contract as execution_session_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_execution_recovery_contract as execution_recovery_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_execution_recovery_resolution_contract as execution_recovery_resolution_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -134,6 +135,12 @@ def run_contract() -> None:
         recovery_done = time.monotonic()
         print(
             f"ADR-DC-110 execution-recovery contract completed in {recovery_done - session_done:.1f}s",
+            flush=True,
+        )
+        execution_recovery_resolution_contract.run_contract(shared_fixture=fixture)
+        resolution_done = time.monotonic()
+        print(
+            f"ADR-DC-111 recovery-resolution contract completed in {resolution_done - recovery_done:.1f}s",
             flush=True,
         )
     finally:
