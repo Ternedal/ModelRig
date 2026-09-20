@@ -15,7 +15,6 @@ import json
 import os
 import re
 import threading
-import weakref
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -130,49 +129,29 @@ def _require_live_plan(value: Any):
 
 
 def _execution_consumption_registry():
-    records: dict[int, tuple[int, str, weakref.ReferenceType[Any]]] = {}
+    consumed_nonces: dict[str, tuple[int, str]] = {}
     lock = threading.Lock()
 
     def consume(plan: plan_boundary.PilotExactTaskProductPilotExecutionPlanReceipt) -> None:
-        key = id(plan)
-
-        def cleanup(_: weakref.ReferenceType[Any]) -> None:
-            with lock:
-                records.pop(key, None)
-
+        nonce = plan.execution_nonce_sha256
         with lock:
-            existing = records.get(key)
-            if existing is not None:
-                pid, digest, plan_ref = existing
-                if (
-                    pid == os.getpid()
-                    and plan_ref() is plan
-                    and digest == plan.sha256
-                ):
-                    raise PilotExactTaskProductPilotExecutionError(
-                        "ADR-DC-107 execution plan has already been consumed"
-                    )
-                records.pop(key, None)
-            records[key] = (
-                os.getpid(),
-                plan.sha256,
-                weakref.ref(plan, cleanup),
-            )
+            existing = consumed_nonces.get(nonce)
+            if existing is not None and existing[0] == os.getpid():
+                raise PilotExactTaskProductPilotExecutionError(
+                    "product-pilot execution nonce has already been consumed"
+                )
+            consumed_nonces[nonce] = (os.getpid(), plan.sha256)
 
     def consumed(plan: Any) -> bool:
+        nonce = getattr(plan, "execution_nonce_sha256", None)
+        if not isinstance(nonce, str):
+            return False
         with lock:
-            entry = records.get(id(plan))
-            if entry is None:
-                return False
-            pid, digest, plan_ref = entry
-            return (
-                pid == os.getpid()
-                and plan_ref() is plan
-                and digest == getattr(plan, "sha256", None)
-            )
+            existing = consumed_nonces.get(nonce)
+            return existing is not None and existing[0] == os.getpid()
 
     if hasattr(os, "register_at_fork"):
-        os.register_at_fork(after_in_child=records.clear)
+        os.register_at_fork(after_in_child=consumed_nonces.clear)
     return consume, consumed
 
 
