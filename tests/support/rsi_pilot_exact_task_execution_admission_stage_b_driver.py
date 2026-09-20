@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -166,9 +167,14 @@ def run_contract() -> None:
     proof_cache_temp = tempfile.TemporaryDirectory(
         prefix="rsi-exact-task-stage-b-proof-cache-"
     )
-    proof_cache_path = Path(proof_cache_temp.name) / "proofs.json"
+    proof_cache_root = Path(proof_cache_temp.name).resolve()
+    proof_cache_path = proof_cache_root / "proofs.json"
+    start_ledger_root = proof_cache_root / "start-ledger"
+    start_ledger_root.mkdir()
     previous_proof_cache = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    previous_start_ledger = os.environ.get("MODELRIG_STAGE_B_START_LEDGER_ROOT")
     os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(proof_cache_path)
+    os.environ["MODELRIG_STAGE_B_START_LEDGER_ROOT"] = str(start_ledger_root)
     try:
         _run_serial_phase(
             "phase 2a/3, focused ADR-DC-033 nonce-reuse guard",
@@ -191,6 +197,10 @@ def run_contract() -> None:
             os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
         else:
             os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = previous_proof_cache
+        if previous_start_ledger is None:
+            os.environ.pop("MODELRIG_STAGE_B_START_LEDGER_ROOT", None)
+        else:
+            os.environ["MODELRIG_STAGE_B_START_LEDGER_ROOT"] = previous_start_ledger
         proof_cache_temp.cleanup()
 
 
