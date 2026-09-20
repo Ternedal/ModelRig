@@ -27,6 +27,7 @@ import rsi_pilot_exact_task_product_pilot_start_recovery_contract as start_recov
 import rsi_pilot_exact_task_product_pilot_execution_admission_contract as execution_admission_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_executor_capability_contract as product_capability_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_workspace_snapshot_contract as workspace_snapshot_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_execution_plan_contract as execution_plan_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -99,6 +100,12 @@ def run_contract() -> None:
         snapshot_done = time.monotonic()
         print(
             f"ADR-DC-106 workspace-snapshot contract completed in {snapshot_done - capability_done:.1f}s",
+            flush=True,
+        )
+        execution_plan_contract.run_contract(shared_fixture=fixture)
+        plan_done = time.monotonic()
+        print(
+            f"ADR-DC-107 execution-plan contract completed in {plan_done - snapshot_done:.1f}s",
             flush=True,
         )
     finally:
