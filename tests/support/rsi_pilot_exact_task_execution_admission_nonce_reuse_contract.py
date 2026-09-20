@@ -39,10 +39,23 @@ def _reject(fn) -> None:
 
 def run_contract() -> None:
     source_temp, proof, fresh, *_ = _proof()
-    proof_cache_temp = tempfile.TemporaryDirectory(
-        prefix="rsi-exact-task-admission-proof-cache-"
-    )
-    proof_cache_path = Path(proof_cache_temp.name) / "proofs.json"
+    previous_proof_cache = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
+    proof_cache_temp = None
+    if previous_proof_cache:
+        proof_cache_path = Path(previous_proof_cache)
+        if (
+            not proof_cache_path.is_absolute()
+            or not proof_cache_path.parent.is_dir()
+            or proof_cache_path.exists()
+            or proof_cache_path.is_symlink()
+        ):
+            raise AssertionError("Stage-B parent proof-cache target is unsafe")
+    else:
+        proof_cache_temp = tempfile.TemporaryDirectory(
+            prefix="rsi-exact-task-admission-proof-cache-"
+        )
+        proof_cache_path = Path(proof_cache_temp.name) / "proofs.json"
+        os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(proof_cache_path)
     proof_cache_path.write_text(
         json.dumps(
             {"proof": proof.to_dict(), "fresh": fresh.to_dict()},
@@ -52,8 +65,6 @@ def run_contract() -> None:
         ),
         encoding="utf-8",
     )
-    previous_proof_cache = os.environ.get("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE")
-    os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(proof_cache_path)
     ledger_temp, ledger = _ledger("rsi-exact-task-admission-nonce-reuse-")
     try:
         source_authorization = (
@@ -163,11 +174,12 @@ def run_contract() -> None:
     try:
         pass
     finally:
-        if previous_proof_cache is None:
-            os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
-        else:
-            os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = previous_proof_cache
-        proof_cache_temp.cleanup()
+        if proof_cache_temp is not None:
+            if previous_proof_cache is None:
+                os.environ.pop("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", None)
+            else:
+                os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = previous_proof_cache
+            proof_cache_temp.cleanup()
 
 
 if __name__ == "__main__":
