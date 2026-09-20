@@ -46,3 +46,18 @@ The state is observed twice. Any change between observations fails closed.
 The recovery receipt is classification evidence only. It grants no Git,
 commit, remote, PR, merge, release, deploy or production authority. Every
 classification requires an explicit later recovery-resolution/manual decision.
+
+
+## Live recovery provenance
+
+The receipt returned by the live ADR-DC-110 classification call carries
+process-local `recovery_authenticated` provenance bound to the exact canonical
+ADR-DC-108 ledger state that was double-observed.
+
+That live provenance is revalidated against the ledger on access. If the
+execution lock, final receipt, pending receipt, state class, or any bound
+identity changes, `recovery_authenticated` becomes false. Serialization and
+reload preserve audit evidence only and cannot recreate live recovery authority.
+
+This does not make retry possible. The execution nonce remains spent in every
+state.
