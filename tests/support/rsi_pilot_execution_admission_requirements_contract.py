@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -37,10 +38,30 @@ def _reject(fn) -> None:
     raise AssertionError("ADR-DC-026 unexpectedly accepted invalid input")
 
 
+class _BorrowedStageBStartLedger:
+    """No-op owner for the parent Stage-B durable ADR-DC-025 ledger root."""
+
+    def cleanup(self) -> None:
+        return None
+
+
 def _receipt():
     supplied, fresh, preflight_signature, _authorization_signature = _chain()
-    temp = tempfile.TemporaryDirectory(prefix="rsi-pilot-admission-req-")
-    root = Path(temp.name).resolve()
+    shared_root = os.environ.get("MODELRIG_STAGE_B_START_LEDGER_ROOT")
+    if shared_root is None:
+        temp = tempfile.TemporaryDirectory(prefix="rsi-pilot-admission-req-")
+        root = Path(temp.name).resolve()
+    else:
+        root = Path(shared_root)
+        if (
+            not root.is_absolute()
+            or not root.is_dir()
+            or root.is_symlink()
+            or any(root.iterdir())
+        ):
+            raise AssertionError("Stage-B parent ADR-DC-025 ledger root is unsafe")
+        root = root.resolve()
+        temp = _BorrowedStageBStartLedger()
     ledger = consume._PilotStartConsumptionLedger(root)
     receipt = consume._consume_verified_pilot_start_authorization(
         supplied_proof=supplied,
