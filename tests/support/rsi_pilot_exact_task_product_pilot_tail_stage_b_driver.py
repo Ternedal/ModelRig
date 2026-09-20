@@ -1,4 +1,4 @@
-"""Shared-provenance Stage-B driver for ADR-DC-098 through execution verification.
+"""Shared-provenance Stage-B driver for ADR-DC-098 through execution-session closure.
 
 The canonical contracts remain independently runnable and unchanged in authority
 semantics. This Stage-B-only driver builds their expensive immutable upstream
@@ -30,6 +30,7 @@ import rsi_pilot_exact_task_product_pilot_workspace_snapshot_contract as workspa
 import rsi_pilot_exact_task_product_pilot_execution_plan_contract as execution_plan_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_execution_contract as execution_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_execution_verification_contract as execution_verification_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_execution_session_contract as execution_session_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -120,6 +121,12 @@ def run_contract() -> None:
         verification_done = time.monotonic()
         print(
             f"ADR-DC-109 execution-verification contract completed in {verification_done - execution_done:.1f}s",
+            flush=True,
+        )
+        execution_session_contract.run_contract(shared_fixture=fixture)
+        session_done = time.monotonic()
+        print(
+            f"product-pilot execution-session facade contract completed in {session_done - verification_done:.1f}s",
             flush=True,
         )
     finally:
