@@ -295,6 +295,12 @@ def run_contract(*, shared_fixture=None) -> None:
         final_path.write_bytes(original_final)
         assert receipt.execution_authenticated is True
 
+        original_lock = lock_path.read_bytes()
+        lock_path.write_bytes(b"{}")
+        assert receipt.execution_authenticated is False
+        lock_path.write_bytes(original_lock)
+        assert receipt.execution_authenticated is True
+
         # Crash/launch failure after durable nonce reservation must leave the
         # lock behind and make a retry impossible before the executor is called.
         failure_ledger_temp = tempfile.TemporaryDirectory(
