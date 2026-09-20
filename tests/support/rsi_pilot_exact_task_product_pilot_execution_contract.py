@@ -211,6 +211,7 @@ def run_contract(*, shared_fixture=None) -> None:
             assert len(launch_calls) == 1
 
         assert execution._product_pilot_execution_plan_consumed(execution_plan) is True
+        assert receipt.execution_authenticated is True
         assert receipt.execution_plan_sha256 == execution_plan.sha256
         assert receipt.workspace_snapshot_receipt_sha256 == frozen.sha256
         assert receipt.executor_capability_sha256 == frozen.executor_capability_sha256
@@ -251,6 +252,7 @@ def run_contract(*, shared_fixture=None) -> None:
         )
         assert reloaded == receipt
         assert reloaded.sha256 == receipt.sha256
+        assert reloaded.execution_authenticated is False
 
         for field, value in (
             ("product_pilot_started", False),
