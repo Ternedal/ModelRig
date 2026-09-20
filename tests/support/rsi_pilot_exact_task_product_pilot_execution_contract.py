@@ -1,4 +1,4 @@
-"""Adversarial contract for ADR-DC-108 one-shot product-pilot execution."""
+"""Adversarial contract for ADR-DC-108 crash-safe one-shot product-pilot execution."""
 from __future__ import annotations
 
 import hashlib
@@ -44,7 +44,7 @@ SOURCE = (
 def _reject(fn) -> None:
     try:
         fn()
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, RuntimeError):
         return
     raise AssertionError("ADR-DC-108 unexpectedly accepted unsafe execution state")
 
@@ -60,8 +60,6 @@ def _stream(payload: bytes) -> TierAOutputStream:
 
 def run_contract(*, shared_fixture=None) -> None:
     if os.name == "nt":
-        # The portable contract patches only the final Tier-A launch. Native
-        # Windows launch coverage remains in the dedicated isolation workflow.
         return
 
     owns_fixture = shared_fixture is None
@@ -69,6 +67,8 @@ def run_contract(*, shared_fixture=None) -> None:
     auth_temp = None
     tx_temp = None
     capability_temp = None
+    execution_ledger_temp = None
+    failure_ledger_temp = None
     git_run_patch = None
     try:
         auth_temp, tx_temp, admitted, task = capability_contract._admission(fixture)
@@ -182,38 +182,62 @@ def run_contract(*, shared_fixture=None) -> None:
             assert kwargs["active_process_limit"] == execution_plan.active_process_limit
             return tier_a_receipt
 
+        execution_ledger_temp = tempfile.TemporaryDirectory(
+            prefix="rsi-product-pilot-execution-ledger-"
+        )
+        ledger = execution._PilotExactTaskProductPilotExecutionLedger(
+            Path(execution_ledger_temp.name).resolve()
+        )
+        times = iter(
+            (
+                "2026-09-20T18:00:00Z",
+                "2026-09-20T18:00:01Z",
+                "2026-09-20T18:00:02Z",
+            )
+        )
+
         with patch.object(
             command_receipt_boundary,
             "run_single_verified_tier_a_command_with_receipt",
             side_effect=fake_launch,
         ):
-            receipt = execution.execute_pilot_exact_task_product_pilot_plan(
-                execution_plan
+            receipt = execution._execute_verified_pilot_exact_task_product_pilot_plan(
+                execution_plan=execution_plan,
+                ledger=ledger,
+                now_provider=lambda: next(times),
             )
             assert len(launch_calls) == 1
 
-            # A separately materialized plan with the same signed execution nonce
-            # must still be spent. One-shot authority is nonce-scoped, not tied
-            # merely to Python object identity.
             second_plan = plan.materialize_pilot_exact_task_product_pilot_execution_plan(
                 frozen
             )
             assert second_plan is not execution_plan
             assert second_plan.execution_nonce_sha256 == execution_plan.execution_nonce_sha256
             _reject(
-                lambda: execution.execute_pilot_exact_task_product_pilot_plan(
-                    second_plan
+                lambda: execution._execute_verified_pilot_exact_task_product_pilot_plan(
+                    execution_plan=second_plan,
+                    ledger=ledger,
+                    now_provider=lambda: "2026-09-20T18:00:03Z",
                 )
             )
             _reject(
-                lambda: execution.execute_pilot_exact_task_product_pilot_plan(
-                    execution_plan
+                lambda: execution._execute_verified_pilot_exact_task_product_pilot_plan(
+                    execution_plan=execution_plan,
+                    ledger=ledger,
+                    now_provider=lambda: "2026-09-20T18:00:03Z",
                 )
             )
             assert len(launch_calls) == 1
 
-        assert execution._product_pilot_execution_plan_consumed(execution_plan) is True
+        final_path, pending_path, lock_path = ledger._paths(
+            execution_plan.execution_nonce_sha256
+        )
+        assert final_path.is_file()
+        assert lock_path.is_file()
+        assert not pending_path.exists()
         assert receipt.execution_authenticated is True
+        assert receipt.ledger_root_path_sha256 == ledger.root_sha256
+        assert receipt.consumption_key_sha256 == execution_plan.execution_nonce_sha256
         assert receipt.execution_plan_sha256 == execution_plan.sha256
         assert receipt.workspace_snapshot_receipt_sha256 == frozen.sha256
         assert receipt.executor_capability_sha256 == frozen.executor_capability_sha256
@@ -224,10 +248,15 @@ def run_contract(*, shared_fixture=None) -> None:
         assert receipt.development_task_base_sha == task.base_sha
         assert receipt.fixed_command_id == VERSION_CHECK_COMMAND_ID
         assert receipt.workspace_snapshot_sha256 == frozen.workspace_snapshot_sha256
-        assert receipt.tier_a_command_receipt is tier_a_receipt
+        assert receipt.tier_a_command_receipt == tier_a_receipt
         assert receipt.tier_a_command_receipt_sha256 == tier_a_receipt.sha256
+        assert receipt.prepared_at_utc == "2026-09-20T18:00:00Z"
+        assert receipt.started_at_utc == "2026-09-20T18:00:01Z"
+        assert receipt.completed_at_utc == "2026-09-20T18:00:02Z"
         assert receipt.product_pilot_started is True
         assert receipt.execution_plan_authenticated_at_launch is True
+        assert receipt.host_replay_guard_committed is True
+        assert receipt.execution_receipt_durably_published is True
         assert receipt.task_execution_consumed is True
         assert receipt.one_shot_execution_enforced is True
         assert receipt.exact_pre_execution_snapshot_verified is True
@@ -248,6 +277,10 @@ def run_contract(*, shared_fixture=None) -> None:
         assert receipt.production_activation_authorized is False
         assert receipt.nonce_reusable is False
         assert receipt.next_boundary_execution_verification_required is True
+        assert (
+            receipt.ledger_scope
+            == execution.PILOT_EXACT_TASK_PRODUCT_PILOT_EXECUTION_LEDGER_SCOPE
+        )
 
         reloaded = execution.PilotExactTaskProductPilotExecutionReceipt.from_mapping(
             receipt.to_dict()
@@ -256,9 +289,65 @@ def run_contract(*, shared_fixture=None) -> None:
         assert reloaded.sha256 == receipt.sha256
         assert reloaded.execution_authenticated is False
 
+        original_final = final_path.read_bytes()
+        final_path.write_bytes(b"{}")
+        assert receipt.execution_authenticated is False
+        final_path.write_bytes(original_final)
+        assert receipt.execution_authenticated is True
+
+        # Crash/launch failure after durable nonce reservation must leave the
+        # lock behind and make a retry impossible before the executor is called.
+        failure_ledger_temp = tempfile.TemporaryDirectory(
+            prefix="rsi-product-pilot-execution-failure-ledger-"
+        )
+        failure_ledger = execution._PilotExactTaskProductPilotExecutionLedger(
+            Path(failure_ledger_temp.name).resolve()
+        )
+        failure_calls = []
+
+        def failing_launch(*args, **kwargs):
+            failure_calls.append((args, kwargs))
+            raise RuntimeError("simulated launch failure after durable reservation")
+
+        failure_times = iter(
+            (
+                "2026-09-20T19:00:00Z",
+                "2026-09-20T19:00:01Z",
+            )
+        )
+        with patch.object(
+            command_receipt_boundary,
+            "run_single_verified_tier_a_command_with_receipt",
+            side_effect=failing_launch,
+        ):
+            _reject(
+                lambda: execution._execute_verified_pilot_exact_task_product_pilot_plan(
+                    execution_plan=execution_plan,
+                    ledger=failure_ledger,
+                    now_provider=lambda: next(failure_times),
+                )
+            )
+            assert len(failure_calls) == 1
+            failure_final, failure_pending, failure_lock = failure_ledger._paths(
+                execution_plan.execution_nonce_sha256
+            )
+            assert failure_lock.is_file()
+            assert not failure_final.exists()
+            assert not failure_pending.exists()
+            _reject(
+                lambda: execution._execute_verified_pilot_exact_task_product_pilot_plan(
+                    execution_plan=execution_plan,
+                    ledger=failure_ledger,
+                    now_provider=lambda: "2026-09-20T19:00:02Z",
+                )
+            )
+            assert len(failure_calls) == 1
+
         for field, value in (
             ("product_pilot_started", False),
             ("execution_plan_authenticated_at_launch", False),
+            ("host_replay_guard_committed", False),
+            ("execution_receipt_durably_published", False),
             ("task_execution_consumed", False),
             ("one_shot_execution_enforced", False),
             ("exact_pre_execution_snapshot_verified", False),
@@ -289,6 +378,13 @@ def run_contract(*, shared_fixture=None) -> None:
             )
 
         raw = receipt.to_dict()
+        raw["consumption_key_sha256"] = "f" * 64
+        _reject(
+            lambda: execution.PilotExactTaskProductPilotExecutionReceipt.from_mapping(
+                raw
+            )
+        )
+        raw = receipt.to_dict()
         raw["tier_a_command_receipt"] = dict(raw["tier_a_command_receipt"])
         raw["tier_a_command_receipt"]["command_id"] = "modelrig.other.check"
         _reject(
@@ -299,6 +395,10 @@ def run_contract(*, shared_fixture=None) -> None:
     finally:
         if git_run_patch is not None:
             git_run_patch.stop()
+        if failure_ledger_temp is not None:
+            failure_ledger_temp.cleanup()
+        if execution_ledger_temp is not None:
+            execution_ledger_temp.cleanup()
         if capability_temp is not None:
             capability_temp.cleanup()
         if tx_temp is not None:
@@ -325,6 +425,8 @@ def run_contract(*, shared_fixture=None) -> None:
 
     source = code_of(SOURCE)
     lowered = source.lower()
+    assert "create_once_file" in source
+    assert "_require_host_controlled_ledger_root" in source
     assert "run_single_verified_tier_a_command_with_receipt" in source
     assert "expected_workspace_snapshot=plan.workspace_snapshot" in source
     for forbidden_text in (
@@ -335,8 +437,6 @@ def run_contract(*, shared_fixture=None) -> None:
         "git push",
         "create_pull_request",
         "merge_pull_request",
-        "write_text(",
-        "write_bytes(",
     ):
         assert forbidden_text not in lowered
 
