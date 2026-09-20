@@ -108,7 +108,8 @@ def run_contract() -> None:
         return
 
     # Normal ADR-DC-088 durable completion.
-    bundle, plan, auth_temp, authorization = tx_contract._authorization()
+    bundle, plan, observation, auth_temp, authorization = tx_contract._authorization()
+    assert observation.observation_authenticated is True
     tx_temp, tx_ledger = tx_contract._ledger("rsi-post-success-attestation-tx-")
     recovery_temp, recovery_root = _empty_recovery_ledger(
         "rsi-post-success-attestation-recovery-empty-"
@@ -314,12 +315,14 @@ def run_contract() -> None:
         (
             _bundle,
             _plan,
+            observation,
             authorization,
             _auth_temp,
             auth_ledger,
             _tx_temp,
             tx_ledger,
         ) = fixture
+        assert observation.observation_authenticated is True
         state, durable_authorization = recovery_contract._inspect(
             authorization,
             auth_ledger,

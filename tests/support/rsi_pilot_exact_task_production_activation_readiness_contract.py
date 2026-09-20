@@ -57,7 +57,8 @@ def _evaluate(source, policy, *, now="2026-09-15T09:52:00Z"):
 
 
 def _normal_source():
-    bundle, plan, auth_temp, authorization = tx_contract._authorization()
+    bundle, plan, observation, auth_temp, authorization = tx_contract._authorization()
+    assert observation.observation_authenticated is True
     tx_temp, tx_ledger = tx_contract._ledger("rsi-production-ready-tx-")
     recovery_temp, recovery_root = attestation_contract._empty_recovery_ledger("rsi-production-ready-empty-recovery-")
     status_id = authorization.current_deployment_status_id + 1
@@ -91,7 +92,17 @@ def _cleanup_normal(fixture) -> None:
 def _recovered_source():
     fixture = recovery_contract._auth_fixture()
     recovery_temp, recovery_ledger = recovery_contract._recovery_ledger("rsi-production-ready-recovery-")
-    (_bundle, _plan, authorization, _auth_temp, auth_ledger, _tx_temp, tx_ledger) = fixture
+    (
+        _bundle,
+        _plan,
+        observation,
+        authorization,
+        _auth_temp,
+        auth_ledger,
+        _tx_temp,
+        tx_ledger,
+    ) = fixture
+    assert observation.observation_authenticated is True
     state, durable_authorization = recovery_contract._inspect(
         authorization,
         auth_ledger,

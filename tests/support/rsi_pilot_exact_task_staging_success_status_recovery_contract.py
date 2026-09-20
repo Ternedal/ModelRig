@@ -119,11 +119,31 @@ def _auth_fixture(*, recovered=False):
     tx_ledger = success_tx._PilotExactTaskStagingSuccessStatusTransactionLedger(tx_root)
     lock_payload = tx_ledger.acquire(authorization=authorization)
     assert lock_payload
-    return bundle, plan, authorization, auth_temp, auth_ledger, tx_temp, tx_ledger
+    # Keep ADR-DC-086 alive because the durable ADR-DC-087 authority registry
+    # intentionally holds only a weak reference to that exact observation.
+    return (
+        bundle,
+        plan,
+        observation,
+        authorization,
+        auth_temp,
+        auth_ledger,
+        tx_temp,
+        tx_ledger,
+    )
 
 
 def _cleanup(fixture):
-    bundle, _plan, _authorization, auth_temp, _auth_ledger, tx_temp, _tx_ledger = fixture
+    (
+        bundle,
+        _plan,
+        _observation,
+        _authorization,
+        auth_temp,
+        _auth_ledger,
+        tx_temp,
+        _tx_ledger,
+    ) = fixture
     tx_temp.cleanup()
     auth_temp.cleanup()
     auth_contract.state_contract.plan_contract._cleanup(bundle)
@@ -183,7 +203,8 @@ def run_contract() -> None:
     fixture = _auth_fixture()
     recovery_temp, recovery_ledger = _recovery_ledger("rsi-staging-success-recovery-")
     try:
-        _, _, authorization, _, auth_ledger, _, tx_ledger = fixture
+        _, _, observation, authorization, _, auth_ledger, _, tx_ledger = fixture
+        assert observation.observation_authenticated is True
 
         inspect_transport = _Transport(authorization)
         state, durable_authorization = _inspect(
@@ -445,7 +466,17 @@ def run_contract() -> None:
 
         final_exists_fixture = _auth_fixture()
         try:
-            _, _, final_auth, _, final_auth_ledger, _, final_tx_ledger = final_exists_fixture
+            (
+                _,
+                _,
+                final_observation,
+                final_auth,
+                _,
+                final_auth_ledger,
+                _,
+                final_tx_ledger,
+            ) = final_exists_fixture
+            assert final_observation.observation_authenticated is True
             final_path, _lock_path = final_tx_ledger._paths(
                 final_auth.success_deployment_status_intent_sha256
             )
@@ -469,7 +500,17 @@ def run_contract() -> None:
         "rsi-staging-success-recovery-upstream-recovered-"
     )
     try:
-        _, _, authorization, _, auth_ledger, _, tx_ledger = recovered_fixture
+        (
+            _,
+            _,
+            recovered_observation,
+            authorization,
+            _,
+            auth_ledger,
+            _,
+            tx_ledger,
+        ) = recovered_fixture
+        assert recovered_observation.observation_authenticated is True
         state, _ = _inspect(
             authorization, auth_ledger, tx_ledger, _Transport(authorization)
         )

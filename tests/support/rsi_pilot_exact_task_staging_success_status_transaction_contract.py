@@ -65,7 +65,10 @@ def _authorization(*, recovered=False):
         state_contract._Transport(plan),
     )
     assert authorization.authorization_authenticated is True
-    return bundle, plan, auth_temp, authorization
+    # ADR-DC-087 weakref-binds both the exact ADR-DC-086 observation and
+    # ADR-DC-085 plan. Return the observation explicitly so ADR-DC-088 keeps
+    # the complete live authority chain alive for the transaction duration.
+    return bundle, plan, observation, auth_temp, authorization
 
 
 def _cleanup(bundle, auth_temp) -> None:
@@ -144,7 +147,8 @@ def run_contract() -> None:
     if os.name == "nt":
         return
 
-    bundle, plan, auth_temp, authorization = _authorization()
+    bundle, plan, observation, auth_temp, authorization = _authorization()
+    assert observation.observation_authenticated is True
     tx_temp, ledger = _ledger("rsi-staging-success-status-tx-")
     try:
         status_id = authorization.current_deployment_status_id + 1
@@ -433,9 +437,14 @@ def run_contract() -> None:
         tx_temp.cleanup()
         _cleanup(bundle, auth_temp)
 
-    recovered_bundle, recovered_plan, recovered_auth_temp, recovered_auth = (
-        _authorization(recovered=True)
-    )
+    (
+        recovered_bundle,
+        recovered_plan,
+        recovered_observation,
+        recovered_auth_temp,
+        recovered_auth,
+    ) = _authorization(recovered=True)
+    assert recovered_observation.observation_authenticated is True
     recovered_tx_temp, recovered_ledger = _ledger(
         "rsi-staging-success-status-tx-recovered-"
     )
