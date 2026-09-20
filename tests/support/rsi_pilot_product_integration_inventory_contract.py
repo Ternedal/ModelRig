@@ -21,9 +21,15 @@ from kaliv_dev_control import catalog  # noqa: E402
 from rsi_pilot_integration_selection_candidate_contract import (  # noqa: E402
     run_contract as run_selection_candidate_contract,
 )
+from rsi_pilot_product_integration_selection_proposal_contract import (  # noqa: E402
+    run_contract as run_selection_proposal_contract,
+)
 
 INVENTORY_PATH = ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-inventory.json"
 SCHEMA_PATH = ROOT / "devcontrol" / "schemas" / "rsi-pilot-product-integration-inventory-v1.schema.json"
+HANDOFF_PATH = (
+    ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-implementation-handoff.json"
+)
 SELECTION_REQUIREMENTS_PATH = (
     ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-selection-requirements.json"
 )
@@ -168,11 +174,18 @@ def _assert_selection_requirements() -> None:
 def run_contract() -> None:
     inventory = _load(INVENTORY_PATH)
     schema = _load(SCHEMA_PATH)
+    handoff = _load(HANDOFF_PATH) if HANDOFF_PATH.is_file() else None
 
     assert inventory["schema"] == "kaliv-rsi-dc-l16-product-integration-inventory/v1"
     assert inventory["repository"] == "Ternedal/ModelRig"
     assert inventory["source_parent_sha"] == "7cc350fc50baad9f48fae88f76b6ad17b3a3817f"
     assert schema["properties"]["source_parent_sha"]["const"] == inventory["source_parent_sha"]
+
+    transition = handoff["tracked_source_transition"] if handoff is not None else None
+    if handoff is not None:
+        assert handoff["source_inventory_head_sha"] == "30be16b320acd6655c07ab1476cceaead547e3e3"
+        assert transition["path"] == "backend/internal/httpapi/server.go"
+        assert transition["from_git_blob_sha"] == "6085d525ff86a3d2b5c7cdece20bcaeace896e85"
 
     candidates = inventory["candidate_surfaces"]
     assert len(candidates) == len(EXPECTED) == 3
@@ -183,7 +196,13 @@ def run_contract() -> None:
         assert item["selected"] is False
         path = ROOT / relative_path
         assert path.is_file(), relative_path
-        assert _git_blob_sha(path) == expected_sha, f"source drift: {relative_path}"
+        if transition is not None and relative_path == transition["path"]:
+            assert transition["from_git_blob_sha"] == expected_sha
+            assert _git_blob_sha(path) == transition["to_git_blob_sha"], (
+                f"unbound selected-source drift: {relative_path}"
+            )
+        else:
+            assert _git_blob_sha(path) == expected_sha, f"source drift: {relative_path}"
 
     desktop = code_of(ROOT / EXPECTED[0][1])
     android = code_of(ROOT / EXPECTED[1][1])
@@ -205,10 +224,15 @@ def run_contract() -> None:
     for source in (desktop, android, backend):
         assert "kaliv_dev_control" not in source
 
-    backend_lower = backend.lower()
-    assert "kaliv_devcontrol" not in backend_lower
-    assert "kalivdev" not in backend_lower
-    assert "/devcontrol" not in backend_lower
+    if handoff is None:
+        backend_lower = backend.lower()
+        assert "kaliv_devcontrol" not in backend_lower
+        assert "kalivdev" not in backend_lower
+        assert "/devcontrol" not in backend_lower
+    else:
+        assert handoff["implementation_choice"]["human_pilot_go_verified"] is False
+        assert 'GET /api/v1/experimental/devcontrol-pilot/status' in backend
+        assert 'POST /api/v1/experimental/devcontrol-pilot' not in backend
 
     patterns = inventory["verified_existing_patterns"]
     assert all(value is True for value in patterns.values())
@@ -264,6 +288,7 @@ def run_contract() -> None:
 
     _assert_selection_requirements()
     run_selection_candidate_contract()
+    run_selection_proposal_contract()
 
 
 if __name__ == "__main__":

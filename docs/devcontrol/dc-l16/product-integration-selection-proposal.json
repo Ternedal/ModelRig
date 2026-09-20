@@ -1,0 +1,46 @@
+{
+  "schema": "kaliv-rsi-dc-l16-product-integration-selection-proposal/v1",
+  "repository": "Ternedal/ModelRig",
+  "source_inventory_head_sha": "30be16b320acd6655c07ab1476cceaead547e3e3",
+  "proposal": {
+    "operator_surface": "desktop.control-center",
+    "route_host_pattern": "backend.local-api-host-pattern",
+    "feature_flag": "KALIV_DEVCONTROL_PILOT",
+    "route_prefix": "/api/v1/experimental/devcontrol-pilot",
+    "runtime_observer": "desktop-manual-refresh-only",
+    "task_registry_policy": "explicit-allowlist-empty-until-human-go",
+    "workspace_policy": "canonical-explicit-root-loopback-host-only",
+    "local_commit_policy": "forbidden-until-human-go",
+    "automatic_polling": false,
+    "unattended_cadence": false,
+    "remote_transport": false
+  },
+  "decision_state": {
+    "human_selection_accepted": false,
+    "operator_surface_selected": false,
+    "feature_flag_selected": false,
+    "product_route_selected": false,
+    "runtime_observer_selected": false,
+    "task_registry_selected": false,
+    "feature_flag_implemented": false,
+    "product_route_implemented": false,
+    "product_ui_implemented": false,
+    "runtime_observer_implemented": false
+  },
+  "authority_state": {
+    "integration_ready": false,
+    "preflight_observed": false,
+    "preflight_satisfied": false,
+    "pilot_start_authorized": false,
+    "product_pilot_started": false,
+    "local_commit_authorized": false,
+    "remote_write_authorized": false,
+    "push_authorized": false,
+    "pr_mutation_authorized": false,
+    "merge_authorized": false,
+    "release_authorized": false,
+    "deploy_authorized": false,
+    "production_activation_authorized": false,
+    "authority": "dc-l16-product-integration-selection-proposal-only"
+  }
+}

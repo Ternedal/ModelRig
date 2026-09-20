@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kaliv-rsi-dc-l16-product-integration-selection-proposal/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "source_inventory_head_sha",
+    "proposal",
+    "decision_state",
+    "authority_state"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-dc-l16-product-integration-selection-proposal/v1"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "source_inventory_head_sha": {"const": "30be16b320acd6655c07ab1476cceaead547e3e3"},
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator_surface",
+        "route_host_pattern",
+        "feature_flag",
+        "route_prefix",
+        "runtime_observer",
+        "task_registry_policy",
+        "workspace_policy",
+        "local_commit_policy",
+        "automatic_polling",
+        "unattended_cadence",
+        "remote_transport"
+      ],
+      "properties": {
+        "operator_surface": {"const": "desktop.control-center"},
+        "route_host_pattern": {"const": "backend.local-api-host-pattern"},
+        "feature_flag": {"const": "KALIV_DEVCONTROL_PILOT"},
+        "route_prefix": {"const": "/api/v1/experimental/devcontrol-pilot"},
+        "runtime_observer": {"const": "desktop-manual-refresh-only"},
+        "task_registry_policy": {"const": "explicit-allowlist-empty-until-human-go"},
+        "workspace_policy": {"const": "canonical-explicit-root-loopback-host-only"},
+        "local_commit_policy": {"const": "forbidden-until-human-go"},
+        "automatic_polling": {"const": false},
+        "unattended_cadence": {"const": false},
+        "remote_transport": {"const": false}
+      }
+    },
+    "decision_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "human_selection_accepted",
+        "operator_surface_selected",
+        "feature_flag_selected",
+        "product_route_selected",
+        "runtime_observer_selected",
+        "task_registry_selected",
+        "feature_flag_implemented",
+        "product_route_implemented",
+        "product_ui_implemented",
+        "runtime_observer_implemented"
+      ],
+      "properties": {
+        "human_selection_accepted": {"const": false},
+        "operator_surface_selected": {"const": false},
+        "feature_flag_selected": {"const": false},
+        "product_route_selected": {"const": false},
+        "runtime_observer_selected": {"const": false},
+        "task_registry_selected": {"const": false},
+        "feature_flag_implemented": {"const": false},
+        "product_route_implemented": {"const": false},
+        "product_ui_implemented": {"const": false},
+        "runtime_observer_implemented": {"const": false}
+      }
+    },
+    "authority_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "integration_ready",
+        "preflight_observed",
+        "preflight_satisfied",
+        "pilot_start_authorized",
+        "product_pilot_started",
+        "local_commit_authorized",
+        "remote_write_authorized",
+        "push_authorized",
+        "pr_mutation_authorized",
+        "merge_authorized",
+        "release_authorized",
+        "deploy_authorized",
+        "production_activation_authorized",
+        "authority"
+      ],
+      "properties": {
+        "integration_ready": {"const": false},
+        "preflight_observed": {"const": false},
+        "preflight_satisfied": {"const": false},
+        "pilot_start_authorized": {"const": false},
+        "product_pilot_started": {"const": false},
+        "local_commit_authorized": {"const": false},
+        "remote_write_authorized": {"const": false},
+        "push_authorized": {"const": false},
+        "pr_mutation_authorized": {"const": false},
+        "merge_authorized": {"const": false},
+        "release_authorized": {"const": false},
+        "deploy_authorized": {"const": false},
+        "production_activation_authorized": {"const": false},
+        "authority": {"const": "dc-l16-product-integration-selection-proposal-only"}
+      }
+    }
+  }
+}
