@@ -419,11 +419,12 @@ def _attest(value, **overrides):
     )
 
 
-def run_contract() -> None:
+def run_contract(*, shared_fixture=None) -> None:
     if os.name == "nt":
         return
 
-    fixture = _build_fixture()
+    owns_fixture = shared_fixture is None
+    fixture = _build_fixture() if owns_fixture else shared_fixture
     try:
         historical = fixture["historical"]
         candidate = historical["candidate"]
@@ -588,7 +589,8 @@ def run_contract() -> None:
             )
         )
     finally:
-        _cleanup(fixture)
+        if owns_fixture:
+            _cleanup(fixture)
 
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     fields = set(

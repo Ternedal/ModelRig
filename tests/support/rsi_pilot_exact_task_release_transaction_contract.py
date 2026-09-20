@@ -60,8 +60,7 @@ _CONTRACT_FILES = (
     "rsi_pilot_exact_task_product_pilot_start_requirements_contract.py",
     "rsi_pilot_exact_task_product_pilot_start_readiness_contract.py",
     "rsi_pilot_exact_task_product_pilot_start_authorization_contract.py",
-    "rsi_pilot_exact_task_product_pilot_lineage_attestation_contract.py",
-    "rsi_pilot_exact_task_product_pilot_task_registry_contract.py",
+    "rsi_pilot_exact_task_product_pilot_tail_stage_b_driver.py",
 )
 
 _CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"

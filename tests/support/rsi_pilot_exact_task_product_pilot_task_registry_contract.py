@@ -153,11 +153,16 @@ def _build(lineage_receipt, proof, registry_payload, when="2026-09-15T09:54:20Z"
     )
 
 
-def run_contract() -> None:
+def run_contract(*, shared_fixture=None) -> None:
     if os.name == "nt":
         return
 
-    fixture = lineage_contract._build_fixture()
+    owns_fixture = shared_fixture is None
+    fixture = (
+        lineage_contract._build_fixture()
+        if owns_fixture
+        else shared_fixture
+    )
     try:
         lineage_receipt = lineage_contract._attest(fixture)
         assert lineage_receipt.attestation_authenticated is True
@@ -243,7 +248,8 @@ def run_contract() -> None:
             raw[field] = True
             _reject(lambda raw=raw: registry.PilotExactTaskProductPilotTaskRegistryReceipt.from_mapping(raw))
     finally:
-        lineage_contract._cleanup(fixture)
+        if owns_fixture:
+            lineage_contract._cleanup(fixture)
 
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     fields = set(registry.PilotExactTaskProductPilotTaskRegistryReceipt.__dataclass_fields__)
