@@ -24,6 +24,7 @@ import rsi_pilot_exact_task_product_pilot_start_readiness_contract as readiness_
 import rsi_pilot_exact_task_product_pilot_start_authorization_contract as authorization_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_start_transaction_contract as start_transaction_contract  # noqa: E402
 import rsi_pilot_exact_task_product_pilot_start_recovery_contract as start_recovery_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_execution_admission_contract as execution_admission_contract  # noqa: E402
 
 
 def run_contract() -> None:
@@ -78,6 +79,12 @@ def run_contract() -> None:
         recovery_done = time.monotonic()
         print(
             f"ADR-DC-103 start-recovery contract completed in {recovery_done - transaction_done:.1f}s",
+            flush=True,
+        )
+        execution_admission_contract.run_contract(shared_fixture=fixture)
+        admission_done = time.monotonic()
+        print(
+            f"ADR-DC-104 execution-admission contract completed in {admission_done - recovery_done:.1f}s",
             flush=True,
         )
     finally:
