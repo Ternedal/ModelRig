@@ -639,9 +639,13 @@ def _verify_pilot_exact_task_product_pilot_runtime_preflight(
         raise PilotExactTaskProductPilotRuntimePreflightError(
             "runtime-preflight attestation replay identity mismatch"
         )
+    lineage = _live["lineage_attestation"]
     expected = {
         "task_registry_receipt_sha256": registry_receipt.sha256,
         "lineage_attestation_sha256": registry_receipt.lineage_attestation_sha256,
+        "post_production_activation_attestation_sha256": (
+            lineage.post_production_activation_attestation_sha256
+        ),
         "host_development_task_registry_sha256": registry_receipt.host_development_task_registry_sha256,
         "development_task_sha256": registry_receipt.development_task_sha256,
         "repository": registry_receipt.repository,
