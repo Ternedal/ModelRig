@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import weakref
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -168,7 +170,7 @@ def _capture_verified_post_execution_snapshot(
     return snapshot, runtime_before.sha256
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class PilotExactTaskProductPilotExecutionVerificationReceipt:
     execution_receipt_sha256: str
     execution_plan_sha256: str
@@ -326,6 +328,10 @@ class PilotExactTaskProductPilotExecutionVerificationReceipt:
     def sha256(self) -> str:
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
+    @property
+    def verification_authenticated(self) -> bool:
+        return _get_live_product_pilot_execution_verification_inputs(self) is not None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             name: (
@@ -355,6 +361,59 @@ class PilotExactTaskProductPilotExecutionVerificationReceipt:
 
     def canonical_json(self) -> str:
         return _canonical(self.to_dict())
+
+
+def _live_verification_registry():
+    records: dict[int, tuple[Any, ...]] = {}
+
+    def mark(
+        receipt: PilotExactTaskProductPilotExecutionVerificationReceipt,
+        *,
+        execution_receipt: execution_boundary.PilotExactTaskProductPilotExecutionReceipt,
+    ) -> None:
+        key = id(receipt)
+
+        def cleanup(_: weakref.ReferenceType[Any]) -> None:
+            records.pop(key, None)
+
+        records[key] = (
+            os.getpid(),
+            receipt.sha256,
+            weakref.ref(receipt, cleanup),
+            execution_receipt,
+        )
+
+    def get(receipt: Any) -> Mapping[str, Any] | None:
+        entry = records.get(id(receipt))
+        if entry is None:
+            return None
+        pid, digest, receipt_ref, execution_receipt = entry
+        if (
+            pid != os.getpid()
+            or receipt_ref() is not receipt
+            or receipt.sha256 != digest
+            or execution_receipt.sha256 != receipt.execution_receipt_sha256
+            or execution_receipt.execution_authenticated is not True
+        ):
+            return None
+        live = execution_boundary._get_live_product_pilot_execution_inputs(
+            execution_receipt
+        )
+        if live is None:
+            return None
+        result = dict(live)
+        result["execution_receipt"] = execution_receipt
+        return result
+
+    if hasattr(os, "register_at_fork"):
+        os.register_at_fork(after_in_child=records.clear)
+    return mark, get
+
+
+(
+    _mark_product_pilot_execution_verification_authenticated,
+    _get_live_product_pilot_execution_verification_inputs,
+) = _live_verification_registry()
 
 
 def verify_pilot_exact_task_product_pilot_execution(
@@ -417,7 +476,7 @@ def verify_pilot_exact_task_product_pilot_execution(
             )
         recovery_verified = True
 
-    return PilotExactTaskProductPilotExecutionVerificationReceipt(
+    receipt = PilotExactTaskProductPilotExecutionVerificationReceipt(
         execution_receipt_sha256=source.sha256,
         execution_plan_sha256=source.execution_plan_sha256,
         execution_nonce_sha256=source.execution_nonce_sha256,
@@ -435,6 +494,15 @@ def verify_pilot_exact_task_product_pilot_execution(
         recovery_required=source.recovery_required,
         recovery_verified=recovery_verified,
     )
+    _mark_product_pilot_execution_verification_authenticated(
+        receipt,
+        execution_receipt=source,
+    )
+    if receipt.verification_authenticated is not True:
+        raise PilotExactTaskProductPilotExecutionVerificationError(
+            "product-pilot execution verification lost live provenance"
+        )
+    return receipt
 
 
 __all__ = [
