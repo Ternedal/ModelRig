@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -11,6 +12,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "stage_b_physical_gate.py"
+
+_STAGE_B_SLICE = os.environ.get("MODELRIG_STAGE_B_SLICE", "all").strip() or "all"
+if _STAGE_B_SLICE not in {"all", "admission", "midchain", "downstream"}:
+    raise AssertionError(f"unsupported Stage-B slice: {_STAGE_B_SLICE!r}")
+
+
+def _run_exact_task_stage_b_router() -> None:
+    path = (
+        ROOT / "tests" / "support"
+        / "rsi_pilot_exact_task_execution_admission_stage_b_driver.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "rsi_pilot_exact_task_execution_admission_stage_b_driver",
+        path,
+    )
+    assert spec is not None and spec.loader is not None
+    driver = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = driver
+    spec.loader.exec_module(driver)
+    driver.run_contract()
+
+
+# Midchain/downstream jobs consume the admission cache and must not replay the
+# legacy physical/pilot-prefix contracts. The exact-task router owns shard
+# selection, cache validation and isolated contract execution for these slices.
+if _STAGE_B_SLICE in {"midchain", "downstream"}:
+    print(
+        f"Stage B top-level dispatcher: {_STAGE_B_SLICE} slice -> exact-task router",
+        flush=True,
+    )
+    _run_exact_task_stage_b_router()
+    raise SystemExit(0)
 
 
 def load_module():
@@ -329,3 +362,9 @@ _run_support_contract(
     "rsi_pilot_execution_admission_requirements_contract",
 )
 print("RSI DC-L16 ADR-DC-026 execution-admission requirements contract: PASS")
+
+print(
+    f"Stage B top-level dispatcher: {_STAGE_B_SLICE} slice -> exact-task router",
+    flush=True,
+)
+_run_exact_task_stage_b_router()
