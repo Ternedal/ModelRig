@@ -1,9 +1,9 @@
-"""Shared-provenance Stage-B driver for ADR-DC-098 through workspace snapshot.
+"""Shared-provenance Stage-B driver for ADR-DC-098 through execution plan.
 
 The canonical contracts remain independently runnable and unchanged in authority
 semantics. This Stage-B-only driver builds their expensive immutable upstream
 fixture once, keeps it live while the full product-pilot start/admission,
-executor-capability and workspace-snapshot contracts execute, then cleans up.
+executor-capability, workspace-snapshot and execution-plan contracts execute, then cleans up.
 """
 from __future__ import annotations
 
