@@ -284,7 +284,7 @@ def run_contract(*, shared_fixture=None) -> None:
         "http.client",
         "socket.",
         "execute_pilot_exact_task_product_pilot_start(",
-        "ledger.commit(",
+        "transaction_ledger.commit(",
         "unlink(",
         "rename(",
     ):
