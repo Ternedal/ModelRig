@@ -25,7 +25,9 @@ def _ready(recovered: bool):
 
 
 def _cleanup_ready(value) -> None:
-    if value is _shared_normal:
+    # contract._ready() returns (upstream, receipt), while _cleanup_ready()
+    # receives only the upstream element stored by each fixture.
+    if _shared_normal is not None and value is _shared_normal[0]:
         return
     _original_cleanup_ready(value)
 
@@ -38,7 +40,7 @@ def run_contract() -> None:
         contract.run_contract()
     finally:
         if _shared_normal is not None:
-            _original_cleanup_ready(_shared_normal)
+            _original_cleanup_ready(_shared_normal[0])
             _shared_normal = None
         contract._ready = _original_ready
         contract._cleanup_ready = _original_cleanup_ready

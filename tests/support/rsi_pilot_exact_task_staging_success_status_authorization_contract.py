@@ -244,8 +244,12 @@ def run_contract() -> None:
         finally:
             stale_temp.cleanup()
 
+        # Repository syntax is a config-local invariant; binding to the observed
+        # repository is enforced when the authorization payload is built.
+        foreign_repository = _config(observation, repository="other/repo")
+        _reject(lambda: _payload(observation, foreign_repository))
+
         for bad in (
-            dict(repository="other/repo"),
             dict(deployment_environment="production"),
             dict(required_remote_state_class="exact-existing"),
             dict(deployment_status_state="in_progress"),
