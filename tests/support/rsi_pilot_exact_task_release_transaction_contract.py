@@ -26,8 +26,8 @@ _PER_CONTRACT_TIMEOUT_SECONDS = 2400
 _TARGETED_RECOVERY_TIMEOUT_SECONDS = 3600
 _TARGETED_RECOVERY_TIMEOUT_CONTRACTS = frozenset(
     {
-        "rsi_pilot_exact_task_staging_deployment_recovery_contract.py",
-        "rsi_pilot_exact_task_staging_deployment_status_recovery_contract.py",
+        "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py",
+        "rsi_pilot_exact_task_staging_deployment_status_recovery_stage_b_driver.py",
     }
 )
 # Deep downstream contracts rebuild increasingly nested provenance; four concurrent
