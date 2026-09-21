@@ -26,15 +26,16 @@ _PER_CONTRACT_TIMEOUT_SECONDS = 2400
 _TARGETED_DEEP_TIMEOUT_SECONDS = 3600
 _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
     {
-        "rsi_pilot_exact_task_release_recovery_contract.py",
+        "rsi_pilot_exact_task_release_recovery_stage_b_driver.py",
         "rsi_pilot_exact_task_post_release_attestation_contract.py",
-        "rsi_pilot_exact_task_staging_deployment_transaction_contract.py",
+        "rsi_pilot_exact_task_staging_deployment_transaction_stage_b_driver.py",
         "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py",
         "rsi_pilot_exact_task_post_staging_deployment_attestation_contract.py",
         "rsi_pilot_exact_task_staging_deployment_status_recovery_stage_b_driver.py",
         "rsi_pilot_exact_task_post_staging_deployment_status_attestation_contract.py",
         "rsi_pilot_exact_task_staging_success_status_recovery_contract.py",
         "rsi_pilot_exact_task_production_activation_recovery_contract.py",
+        "rsi_pilot_exact_task_post_production_activation_attestation_contract.py",
     }
 )
 # Deep downstream contracts rebuild increasingly nested provenance; four concurrent
@@ -45,13 +46,13 @@ _MAX_SHARDED_PARALLEL_CONTRACTS = 2
 
 _CONTRACT_FILES = (
     "rsi_pilot_exact_task_release_transaction_contract_base.py",
-    "rsi_pilot_exact_task_release_recovery_contract.py",
+    "rsi_pilot_exact_task_release_recovery_stage_b_driver.py",
     "rsi_pilot_exact_task_post_release_attestation_contract.py",
     "rsi_pilot_exact_task_deploy_readiness_evaluation_contract.py",
     "rsi_pilot_exact_task_staging_deployment_plan_contract.py",
     "rsi_pilot_exact_task_staging_deployment_state_observation_contract.py",
     "rsi_pilot_exact_task_staging_deployment_authorization_contract.py",
-    "rsi_pilot_exact_task_staging_deployment_transaction_contract.py",
+    "rsi_pilot_exact_task_staging_deployment_transaction_stage_b_driver.py",
     "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py",
     "rsi_pilot_exact_task_post_staging_deployment_attestation_contract.py",
     "rsi_pilot_exact_task_staging_deployment_status_plan_contract.py",
