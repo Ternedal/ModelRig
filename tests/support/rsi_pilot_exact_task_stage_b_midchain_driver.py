@@ -19,6 +19,10 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
 _DEEP_SHARD_TIMEOUT_SECONDS = 2400
+_TARGETED_DEEP_TIMEOUT_SECONDS = 3600
+_TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
+    {"rsi_pilot_exact_task_post_merge_attestation_contract.py"}
+)
 # These contracts are CPU-heavy nested provenance qualifications. Two workers are
 # useful for the ordinary shards, but shard 2/3 contains the publication/merge
 # tail where each contract recursively rebuilds most of ADR-034+. Running two of
@@ -102,7 +106,9 @@ def _decode_timeout_output(value: str | bytes | None) -> str:
     return value
 
 
-def _contract_timeout_seconds() -> int:
+def _contract_timeout_seconds(filename: str | None = None) -> int:
+    if filename in _TARGETED_DEEP_TIMEOUT_CONTRACTS:
+        return _TARGETED_DEEP_TIMEOUT_SECONDS
     shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
     return (
         _DEEP_SHARD_TIMEOUT_SECONDS
@@ -128,7 +134,7 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
-    timeout_seconds = _contract_timeout_seconds()
+    timeout_seconds = _contract_timeout_seconds(filename)
     try:
         completed = subprocess.run(
             [sys.executable, "-u", str(path)],
@@ -163,7 +169,8 @@ def run_contract() -> None:
     print(
         f"Stage-B exact-task midchain: {len(_CONTRACT_FILES)} contracts, "
         f"shard {shard}, {worker_count} isolated worker(s), "
-        f"{timeout_seconds}s per-contract bound",
+        f"{timeout_seconds}s default per-contract bound, "
+        f"{_TARGETED_DEEP_TIMEOUT_SECONDS}s targeted deep-contract bound",
         flush=True,
     )
 

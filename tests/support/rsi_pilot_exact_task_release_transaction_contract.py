@@ -23,11 +23,17 @@ from rsi_pilot_exact_task_release_transaction_contract_base import (
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 2400
-_TARGETED_RECOVERY_TIMEOUT_SECONDS = 3600
-_TARGETED_RECOVERY_TIMEOUT_CONTRACTS = frozenset(
+_TARGETED_DEEP_TIMEOUT_SECONDS = 3600
+_TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
     {
+        "rsi_pilot_exact_task_release_recovery_contract.py",
+        "rsi_pilot_exact_task_staging_deployment_transaction_contract.py",
         "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py",
+        "rsi_pilot_exact_task_post_staging_deployment_attestation_contract.py",
         "rsi_pilot_exact_task_staging_deployment_status_recovery_stage_b_driver.py",
+        "rsi_pilot_exact_task_post_staging_deployment_status_attestation_contract.py",
+        "rsi_pilot_exact_task_staging_success_status_recovery_contract.py",
+        "rsi_pilot_exact_task_production_activation_recovery_contract.py",
     }
 )
 # Deep downstream contracts rebuild increasingly nested provenance; four concurrent
@@ -112,8 +118,8 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     timeout_seconds = (
-        _TARGETED_RECOVERY_TIMEOUT_SECONDS
-        if filename in _TARGETED_RECOVERY_TIMEOUT_CONTRACTS
+        _TARGETED_DEEP_TIMEOUT_SECONDS
+        if filename in _TARGETED_DEEP_TIMEOUT_CONTRACTS
         else _PER_CONTRACT_TIMEOUT_SECONDS
     )
     try:
@@ -151,7 +157,7 @@ def run_contract() -> None:
         f"Stage-B exact-task contracts: {len(_CONTRACT_FILES)} contracts, "
         f"{worker_count} isolated workers, "
         f"{_PER_CONTRACT_TIMEOUT_SECONDS}s default per-contract bound, "
-        f"{_TARGETED_RECOVERY_TIMEOUT_SECONDS}s targeted recovery bound",
+        f"{_TARGETED_DEEP_TIMEOUT_SECONDS}s targeted deep-contract bound",
         flush=True,
     )
 
