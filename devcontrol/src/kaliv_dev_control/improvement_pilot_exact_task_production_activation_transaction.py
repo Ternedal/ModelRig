@@ -886,7 +886,6 @@ class _PowerShellProductionActivationExecutor:
 @dataclass(frozen=True, slots=True)
 class _MachineActivationEvidence:
     production_preflight_sha256: str
-    pre_activation_evidence_sha256: str
     machine_production_receipt_sha256: str
     environment_after_sha256: str
     promotion_git_sha: str
@@ -900,7 +899,6 @@ class _MachineActivationEvidence:
     def __post_init__(self) -> None:
         for name in (
             "production_preflight_sha256",
-            "pre_activation_evidence_sha256",
             "machine_production_receipt_sha256",
             "environment_after_sha256",
             "worker_code_sha256",
