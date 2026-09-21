@@ -62,7 +62,7 @@ jobs:
           retention-days: 1
           compression-level: 6
           overwrite: false
-          include-hidden-files: false
+          include-hidden-files: true
 
   stage-b-shard:
     needs: stage-b-admission
