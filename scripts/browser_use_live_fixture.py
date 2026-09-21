@@ -33,6 +33,8 @@ REPORT = Path(
     )
 )
 TITLE = "ModelRig controlled browser fixture"
+_BROWSER_START_TIMEOUT_SECONDS = 60
+
 BODY = (
     b"<!doctype html><html><head><title>"
     + TITLE.encode("utf-8")
@@ -176,7 +178,13 @@ async def run_fixture() -> dict[str, Any]:
         )
         check(profile.permissions == [], "no browser permissions are granted", results)
 
-        await asyncio.wait_for(network_guard.install(), timeout=30)
+        # Hosted runners can occasionally spend >30s inside BrowserSession.start()
+        # before CDP is ready. This only extends launch headroom; the guard must still
+        # install successfully before any navigation or network assertion runs.
+        await asyncio.wait_for(
+            network_guard.install(),
+            timeout=_BROWSER_START_TIMEOUT_SECONDS,
+        )
         guard_installed = True
         check(session.is_cdp_connected, "Chromium starts and CDP connects", results)
 
