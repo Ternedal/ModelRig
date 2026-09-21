@@ -53,7 +53,10 @@ def _ready():
     receipt = readiness_contract._evaluate(source, "2026-09-15T09:54:21Z")
     assert receipt.readiness_authenticated is True
     assert receipt.product_pilot_start_ready is True
-    return fixture, receipt
+    # ADR-DC-096 weakref-binds the exact live ADR-DC-095 attestation source.
+    # Preserve that source in the opaque fixture context until ADR-DC-097 has
+    # consumed the readiness receipt.
+    return (fixture, source), receipt
 
 
 def _config(receipt, **overrides):
@@ -370,7 +373,8 @@ def run_contract() -> None:
             )
     finally:
         temp.cleanup()
-        tx_contract._cleanup(fixture)
+        upstream_fixture, _source = fixture
+        tx_contract._cleanup(upstream_fixture)
 
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     fields = set(
