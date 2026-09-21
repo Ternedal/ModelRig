@@ -27,6 +27,7 @@ _TARGETED_DEEP_TIMEOUT_SECONDS = 3600
 _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
     {
         "rsi_pilot_exact_task_release_recovery_contract.py",
+        "rsi_pilot_exact_task_post_release_attestation_contract.py",
         "rsi_pilot_exact_task_staging_deployment_transaction_contract.py",
         "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py",
         "rsi_pilot_exact_task_post_staging_deployment_attestation_contract.py",
