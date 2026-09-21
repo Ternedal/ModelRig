@@ -564,9 +564,12 @@ class PilotExactTaskReleaseRecoveryState:
 
     @property
     def fingerprint_sha256(self) -> str:
-        return hashlib.sha256(
-            _canonical(self.to_dict()).encode("utf-8")
-        ).hexdigest()
+        # Observation time is audit metadata, not part of the state identity.
+        # This lets a signed inspection remain valid while recover() freshly
+        # reobserves the same durable/remote state inside the signature window.
+        values = self.to_dict()
+        values.pop("observed_at_utc")
+        return hashlib.sha256(_canonical(values).encode("utf-8")).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in self.__dataclass_fields__}

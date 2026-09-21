@@ -141,6 +141,15 @@ def run_contract() -> None:
         state = _inspect(authority, auth_temp, tx_temp, transport)
         assert state.durable_phase == "lock_only"
         assert state.action_required == "create_missing_release"
+        later_state = _inspect(
+            authority,
+            auth_temp,
+            tx_temp,
+            transport,
+            now="2026-09-15T09:45:05Z",
+        )
+        assert later_state.observed_at_utc != state.observed_at_utc
+        assert later_state.fingerprint_sha256 == state.fingerprint_sha256
         payload = _payload(state)
         verifier, op_sig, review_sig = _dual_authority(payload, signed_at="2026-09-15T09:45:10Z")
         receipt = _recover(authority, auth_temp, tx_temp, transport, rec_ledger, payload, verifier, op_sig, review_sig)
