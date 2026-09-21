@@ -20,6 +20,7 @@ if str(DEVCONTROL_SRC) not in sys.path:
 from kaliv_dev_control import improvement_pilot_exact_task_product_pilot_start_requirements as requirements  # noqa: E402
 from kaliv_dev_control import improvement_pilot_exact_task_post_production_activation_attestation as attestation  # noqa: E402
 import rsi_pilot_exact_task_post_production_activation_attestation_contract as attestation_contract  # noqa: E402
+import rsi_pilot_exact_task_product_pilot_lineage_attestation_contract as lineage_contract  # noqa: E402
 import rsi_pilot_exact_task_production_activation_recovery_contract as recovery_contract  # noqa: E402
 import rsi_pilot_exact_task_production_activation_transaction_contract as tx_contract  # noqa: E402
 
@@ -122,12 +123,11 @@ def run_contract() -> None:
     if os.name == "nt":
         return
 
-    fixture = tx_contract._fixture()
+    # Use the canonical deep lineage fixture so ADR-DC-096 consumes the same
+    # live post-production attestation topology as readiness-v2 and ADR-DC-097.
+    fixture = lineage_contract._build_fixture()
     try:
-        transaction = tx_contract._execute(fixture)
-        tx_contract._assert_consumed(transaction)
-        recovery_ledger = attestation_contract._empty_recovery_ledger(fixture)
-        source = attestation_contract._attest(fixture, recovery_ledger)
+        source = fixture["post_production"]
         assert source.attestation_authenticated is True
 
         manifest = (
@@ -219,7 +219,7 @@ def run_contract() -> None:
             )
         )
     finally:
-        tx_contract._cleanup(fixture)
+        lineage_contract._cleanup(fixture)
 
     recovered = recovery_contract._make_exact_activated_lock()
     try:

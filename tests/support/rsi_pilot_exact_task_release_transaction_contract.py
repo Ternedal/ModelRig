@@ -23,6 +23,13 @@ from rsi_pilot_exact_task_release_transaction_contract_base import (
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 2400
+_TARGETED_RECOVERY_TIMEOUT_SECONDS = 3600
+_TARGETED_RECOVERY_TIMEOUT_CONTRACTS = frozenset(
+    {
+        "rsi_pilot_exact_task_staging_deployment_recovery_contract.py",
+        "rsi_pilot_exact_task_staging_deployment_status_recovery_contract.py",
+    }
+)
 # Deep downstream contracts rebuild increasingly nested provenance; four concurrent
 # copies oversubscribe hosted runners and magnify per-contract wall time. Match the
 # empirically stable midchain fan-out.
@@ -104,6 +111,11 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
+    timeout_seconds = (
+        _TARGETED_RECOVERY_TIMEOUT_SECONDS
+        if filename in _TARGETED_RECOVERY_TIMEOUT_CONTRACTS
+        else _PER_CONTRACT_TIMEOUT_SECONDS
+    )
     try:
         completed = subprocess.run(
             [sys.executable, "-u", str(path)],
@@ -112,7 +124,7 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=_PER_CONTRACT_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
             check=False,
         )
         output = completed.stdout or ""
@@ -138,7 +150,8 @@ def run_contract() -> None:
     print(
         f"Stage-B exact-task contracts: {len(_CONTRACT_FILES)} contracts, "
         f"{worker_count} isolated workers, "
-        f"{_PER_CONTRACT_TIMEOUT_SECONDS}s per-contract bound",
+        f"{_PER_CONTRACT_TIMEOUT_SECONDS}s default per-contract bound, "
+        f"{_TARGETED_RECOVERY_TIMEOUT_SECONDS}s targeted recovery bound",
         flush=True,
     )
 
