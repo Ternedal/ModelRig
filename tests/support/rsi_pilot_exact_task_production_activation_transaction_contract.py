@@ -382,6 +382,14 @@ def run_contract() -> None:
         assert receipt.bodyrig_package_sha256 == PACKAGE
         assert receipt.pre_lock_checkout_state_sha256 == receipt.post_lock_checkout_state_sha256
         assert receipt.environment_before_sha256 != receipt.environment_after_sha256
+        _final_path, lock_path = fixture["ledger"]._paths(
+            receipt.production_activation_candidate_sha256
+        )
+        lock_raw = json.loads(lock_path.read_text(encoding="utf-8"))
+        assert (
+            receipt.pre_activation_evidence_sha256
+            == lock_raw["pre_activation_evidence_sha256"]
+        )
 
         serialized = tx.PilotExactTaskProductionActivationTransactionReceipt.from_mapping(receipt.to_dict())
         assert serialized == receipt
@@ -531,7 +539,7 @@ def run_contract() -> None:
     fields = set(tx.PilotExactTaskProductionActivationTransactionReceipt.__dataclass_fields__)
     assert set(schema["required"]) == fields
     assert set(schema["properties"]) == fields
-    assert len(fields) == 94
+    assert len(fields) == 95
 
     signature = inspect.signature(tx.execute_pilot_exact_task_production_activation)
     assert list(signature.parameters) == [

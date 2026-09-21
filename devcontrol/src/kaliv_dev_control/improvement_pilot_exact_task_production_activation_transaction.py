@@ -886,6 +886,7 @@ class _PowerShellProductionActivationExecutor:
 @dataclass(frozen=True, slots=True)
 class _MachineActivationEvidence:
     production_preflight_sha256: str
+    pre_activation_evidence_sha256: str
     machine_production_receipt_sha256: str
     environment_after_sha256: str
     promotion_git_sha: str
@@ -899,6 +900,7 @@ class _MachineActivationEvidence:
     def __post_init__(self) -> None:
         for name in (
             "production_preflight_sha256",
+            "pre_activation_evidence_sha256",
             "machine_production_receipt_sha256",
             "environment_after_sha256",
             "worker_code_sha256",
@@ -1683,6 +1685,7 @@ def _execute_verified_pilot_exact_task_production_activation(
         agent3_report_sha256=pre.agent3_report_sha256,
         agent3_report_path_sha256=pre.agent3_report_path_sha256,
         production_preflight_sha256=machine.production_preflight_sha256,
+        pre_activation_evidence_sha256=pre.sha256,
         machine_production_receipt_sha256=machine.machine_production_receipt_sha256,
         environment_before_sha256=pre.environment_before_sha256,
         environment_after_sha256=machine.environment_after_sha256,
