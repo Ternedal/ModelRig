@@ -1123,6 +1123,7 @@ class PilotExactTaskProductionActivationTransactionReceipt:
     agent3_report_sha256: str
     agent3_report_path_sha256: str
     production_preflight_sha256: str
+    pre_activation_evidence_sha256: str
     machine_production_receipt_sha256: str
     environment_before_sha256: str
     environment_after_sha256: str
@@ -1228,6 +1229,7 @@ class PilotExactTaskProductionActivationTransactionReceipt:
             "agent3_report_sha256",
             "agent3_report_path_sha256",
             "production_preflight_sha256",
+            "pre_activation_evidence_sha256",
             "machine_production_receipt_sha256",
             "environment_before_sha256",
             "environment_after_sha256",
