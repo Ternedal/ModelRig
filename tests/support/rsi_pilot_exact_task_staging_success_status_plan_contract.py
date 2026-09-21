@@ -48,11 +48,15 @@ def _live_build_identity(*, recovered=False):
     )
     receipt = build_contract._verify(runtime, build_contract._BuildProbe(runtime))
     assert receipt.verification_authenticated is True
-    return bundle, receipt
+    # ADR-DC-084 intentionally weakref-binds its exact live ADR-DC-083 source,
+    # and ADR-DC-085 in turn weakref-binds ADR-DC-084. Preserve both live
+    # receipts inside the opaque fixture context for every downstream consumer.
+    return (bundle, runtime, receipt), receipt
 
 
 def _cleanup(bundle) -> None:
-    build_contract.runtime_contract._cleanup(bundle)
+    upstream_bundle, _runtime, _build_identity = bundle
+    build_contract.runtime_contract._cleanup(upstream_bundle)
 
 
 def _config(source):

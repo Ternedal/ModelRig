@@ -22,6 +22,7 @@ from rsi_pilot_exact_task_release_transaction_contract_base import (
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
+_DEEP_SHARD_TIMEOUT_SECONDS = 2400
 # Deep downstream contracts rebuild increasingly nested provenance; four concurrent
 # copies oversubscribe hosted runners and magnify per-contract wall time. Match the
 # empirically stable midchain fan-out.
@@ -96,12 +97,23 @@ def _decode_timeout_output(value: str | bytes | None) -> str:
     return value
 
 
+def _contract_timeout_seconds() -> int:
+    # Hosted evidence shows shard 2/3 contains the deepest deployment/runtime
+    # rebuilds and can cross 1800s under the retained two-worker fan-out.
+    return (
+        _DEEP_SHARD_TIMEOUT_SECONDS
+        if os.environ.get(_CONTRACT_SHARD_ENV, "").strip() == "2/3"
+        else _PER_CONTRACT_TIMEOUT_SECONDS
+    )
+
+
 def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
     path = SUPPORT / filename
     started = time.monotonic()
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
+    timeout_seconds = _contract_timeout_seconds()
     try:
         completed = subprocess.run(
             [sys.executable, "-u", str(path)],
@@ -110,7 +122,7 @@ def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=_PER_CONTRACT_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
             check=False,
         )
         output = completed.stdout or ""
@@ -128,10 +140,11 @@ def run_contract() -> None:
         max(1, os.cpu_count() or 1),
         len(contract_files),
     )
+    timeout_seconds = _contract_timeout_seconds()
     print(
         f"Stage-B exact-task contracts: {len(_CONTRACT_FILES)} contracts, "
-        f"{worker_count} isolated workers, "
-        f"{_PER_CONTRACT_TIMEOUT_SECONDS}s per-contract bound",
+        f"shard {shard}, {worker_count} isolated workers, "
+        f"{timeout_seconds}s per-contract bound",
         flush=True,
     )
 
