@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-product-pilot-task-registry-v1.schema.json",
+  "title": "ModelRig RSI exact-task product-pilot task registry receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "lineage_attestation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fresh_human_decision_proof_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "human_selection_proof_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "preflight_proof_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "repository": {
+      "const": "Ternedal/ModelRig"
+    },
+    "merge_commit_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "operator_surface": {
+      "type": "string",
+      "minLength": 1
+    },
+    "selected_pilot_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "registered_task_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "host_development_task_registry_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "development_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fixed_command_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workspace_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "feature_flag_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "product_route": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "task_registry_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_maker_actor_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decided_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "verified_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "evaluated_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "human_go_age_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60
+    },
+    "lineage_authenticated": {
+      "const": true
+    },
+    "fresh_human_go_verified": {
+      "const": true
+    },
+    "exact_scope_binding_verified": {
+      "const": true
+    },
+    "historical_preflight_satisfied": {
+      "const": true
+    },
+    "host_development_task_registry_verified": {
+      "const": true
+    },
+    "task_registry_ready": {
+      "const": true
+    },
+    "executor_wired": {
+      "const": false
+    },
+    "runtime_preflight_satisfied": {
+      "const": false
+    },
+    "product_pilot_start_ready": {
+      "const": false
+    },
+    "product_pilot_start_authorized": {
+      "const": false
+    },
+    "product_pilot_started": {
+      "const": false
+    },
+    "task_execution_authorized": {
+      "const": false
+    },
+    "local_commit_authorized": {
+      "const": false
+    },
+    "remote_write_authorized": {
+      "const": false
+    },
+    "push_authorized": {
+      "const": false
+    },
+    "pr_mutation_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "deploy_authorized": {
+      "const": false
+    },
+    "production_activation_authorized": {
+      "const": false
+    },
+    "nonce_reusable": {
+      "const": false
+    },
+    "next_boundary_authorization_required": {
+      "const": true
+    },
+    "registry_scope": {
+      "const": "single-human-allowlisted-local-task-registry-only-v1"
+    },
+    "authority": {
+      "const": "host-verified-one-dc-l16-product-pilot-task-registry-only"
+    },
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-exact-task-product-pilot-task-registry-receipt/v1"
+    }
+  },
+  "required": [
+    "lineage_attestation_sha256",
+    "fresh_human_decision_proof_sha256",
+    "human_selection_proof_sha256",
+    "preflight_proof_sha256",
+    "repository",
+    "merge_commit_sha",
+    "operator_surface",
+    "selected_pilot_task_id",
+    "registered_task_ids",
+    "host_development_task_registry_sha256",
+    "development_task_id",
+    "development_task_sha256",
+    "fixed_command_id",
+    "workspace_root_path_sha256",
+    "feature_flag_name",
+    "product_route",
+    "task_registry_id",
+    "decision_id",
+    "decision_maker_actor_id",
+    "decided_at_utc",
+    "verified_at_utc",
+    "evaluated_at_utc",
+    "human_go_age_seconds",
+    "lineage_authenticated",
+    "fresh_human_go_verified",
+    "exact_scope_binding_verified",
+    "historical_preflight_satisfied",
+    "host_development_task_registry_verified",
+    "task_registry_ready",
+    "executor_wired",
+    "runtime_preflight_satisfied",
+    "product_pilot_start_ready",
+    "product_pilot_start_authorized",
+    "product_pilot_started",
+    "task_execution_authorized",
+    "local_commit_authorized",
+    "remote_write_authorized",
+    "push_authorized",
+    "pr_mutation_authorized",
+    "merge_authorized",
+    "release_authorized",
+    "deploy_authorized",
+    "production_activation_authorized",
+    "nonce_reusable",
+    "next_boundary_authorization_required",
+    "registry_scope",
+    "authority",
+    "schema"
+  ]
+}

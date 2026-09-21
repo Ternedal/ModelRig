@@ -4,6 +4,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -71,6 +75,7 @@ jobs:
       - name: Full repository Python suite on exact head
         env:
           MODELRIG_BIN: /tmp/modelrig-server
+          PYTHONUNBUFFERED: "1"
         shell: bash
         run: |
           set -o pipefail
@@ -78,14 +83,30 @@ jobs:
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
+            if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
+              echo "DELEGATED: $f -> _stage_b_slices.yml"
+              continue
+            fi
             echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/exact-head-python.log
-            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/exact-head-python.log || {
-              status=${PIPESTATUS[0]}
+            timeout_seconds=1200
+            echo "TIMEOUT_BOUND: $f ${timeout_seconds}s" | tee -a /tmp/exact-head-python.log
+            started_at="$(date +%s)"
+            set +e
+            timeout --signal=TERM --kill-after=30s "${timeout_seconds}s" env PYTHONPATH=worker PYTHONUNBUFFERED=1 python3 -u "$f" 2>&1 | tee -a /tmp/exact-head-python.log
+            test_status=${PIPESTATUS[0]}
+            set -e
+            elapsed=$(( $(date +%s) - started_at ))
+            echo "TIMING: $f ${elapsed}s (exit $test_status)" | tee -a /tmp/exact-head-python.log
+            if [ "$test_status" -ne 0 ]; then
+              status=$test_status
+              if [ "$test_status" -eq 124 ] || [ "$test_status" -eq 137 ]; then
+                echo "TIMEOUT: $f exceeded ${timeout_seconds}s per-file bound" | tee -a /tmp/exact-head-python.log
+              fi
               echo "FAILED: $f (exit $status)" | tee -a /tmp/exact-head-python.log
               echo "::endgroup::"
               break
-            }
+            fi
             echo "::endgroup::"
           done
           exit "$status"
@@ -104,6 +125,11 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         shell: bash
         run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
+
+  stage-b-slices:
+    uses: ./.github/workflows/_stage_b_slices.yml
+    with:
+      head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   # _tests.yml is shared with the release workflow and historically checks out
   # GitHub's pull-request merge ref. Until that large reusable workflow is

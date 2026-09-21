@@ -9,6 +9,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -66,14 +70,28 @@ jobs:
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
+            if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
+              echo "DELEGATED: $f -> _stage_b_slices.yml"
+              continue
+            fi
             echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/modelrig-full-test.log
-            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-full-test.log || {
-              status=${PIPESTATUS[0]}
+            timeout_seconds=1200
+            echo "TIMEOUT_BOUND: $f ${timeout_seconds}s" | tee -a /tmp/modelrig-full-test.log
+            started_at="$(date +%s)"
+            timeout --signal=TERM --kill-after=30s "${timeout_seconds}s" env PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-full-test.log
+            test_status=${PIPESTATUS[0]}
+            elapsed=$(( $(date +%s) - started_at ))
+            echo "TIMING: $f ${elapsed}s (exit $test_status)" | tee -a /tmp/modelrig-full-test.log
+            if [ "$test_status" -ne 0 ]; then
+              status=$test_status
+              if [ "$test_status" -eq 124 ] || [ "$test_status" -eq 137 ]; then
+                echo "TIMEOUT: $f exceeded ${timeout_seconds}s per-file bound" | tee -a /tmp/modelrig-full-test.log
+              fi
               echo "FAILED: $f (exit $status)" | tee -a /tmp/modelrig-full-test.log
               echo "::endgroup::"
               break
-            }
+            fi
             echo "::endgroup::"
           done
           exit "$status"
@@ -86,3 +104,8 @@ jobs:
           path: /tmp/modelrig-full-test.log
           if-no-files-found: error
           retention-days: 7
+
+  stage-b-slices:
+    uses: ./.github/workflows/_stage_b_slices.yml
+    with:
+      head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

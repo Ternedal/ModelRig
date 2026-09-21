@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-pilot-trial-scope-proof-v1.schema.json",
+  "title": "ModelRig RSI DC-L16 inert single-trial scope proof v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "authority",
+    "base_sha",
+    "campaign_id",
+    "conditional_go",
+    "decision",
+    "decision_id",
+    "decision_maker_actor_id",
+    "decision_notes",
+    "decision_proof_sha256",
+    "decision_sha256",
+    "deploy_authorized",
+    "feature_flag_default_off",
+    "feature_flag_off_observed",
+    "human_pilot_go_verified",
+    "kill_switch_required",
+    "local_commits_allowed",
+    "local_only_scope_confirmed",
+    "merge_authorized",
+    "operator_surface",
+    "pilot_runtime_verified",
+    "pilot_scope_verified",
+    "pilot_start_authorized",
+    "pr_mutation_authorized",
+    "product_pilot_started",
+    "production_activation_authorized",
+    "push_authorized",
+    "release_authorized",
+    "remote_write_authorized",
+    "repository",
+    "requested_main_sha",
+    "restart_revoke_required",
+    "schema",
+    "selected_pilot_task_id",
+    "signature_sha256",
+    "source_task_id",
+    "source_task_sha256",
+    "trial_id",
+    "unattended_cadence_allowed",
+    "workspace_root_path_sha256"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "go_with_conditions"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "then": {
+        "properties": {
+          "decision_notes": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-single-trial-scope-proof/v1"
+    },
+    "decision_proof_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "decision_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signature_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "source_task_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "source_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "repository": {
+      "const": "Ternedal/ModelRig"
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "requested_main_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "decision_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "decision_maker_actor_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "decision": {
+      "enum": [
+        "go",
+        "go_with_conditions"
+      ]
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "operator_surface": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "selected_pilot_task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "workspace_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "local_commits_allowed": {
+      "type": "boolean"
+    },
+    "decision_notes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    },
+    "human_pilot_go_verified": {
+      "const": true
+    },
+    "conditional_go": {
+      "type": "boolean"
+    },
+    "feature_flag_default_off": {
+      "const": true
+    },
+    "local_only_scope_confirmed": {
+      "const": true
+    },
+    "kill_switch_required": {
+      "const": true
+    },
+    "restart_revoke_required": {
+      "const": true
+    },
+    "unattended_cadence_allowed": {
+      "const": false
+    },
+    "remote_write_authorized": {
+      "const": false
+    },
+    "push_authorized": {
+      "const": false
+    },
+    "pr_mutation_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "deploy_authorized": {
+      "const": false
+    },
+    "production_activation_authorized": {
+      "const": false
+    },
+    "pilot_scope_verified": {
+      "const": true
+    },
+    "pilot_runtime_verified": {
+      "const": false
+    },
+    "feature_flag_off_observed": {
+      "const": false
+    },
+    "pilot_start_authorized": {
+      "const": false
+    },
+    "product_pilot_started": {
+      "const": false
+    },
+    "authority": {
+      "const": "verified-dc-l16-single-trial-scope-only"
+    }
+  }
+}

@@ -17,6 +17,18 @@ from source_code import code_of  # noqa: E402
 
 root = Path(__file__).resolve().parents[1]
 workflow = code_of(root / ".github/workflows/_tests.yml")
+stage_b_workflow = code_of(root / ".github/workflows/_stage_b_slices.yml")
+exact_head_workflow = code_of(root / ".github/workflows/exact-head-qualification.yml")
+agent3_full_workflow = code_of(root / ".github/workflows/agent3-full-diagnostics.yml")
+stage_b_driver = code_of(
+    root / "tests/support/rsi_pilot_exact_task_execution_admission_stage_b_driver.py"
+)
+midchain_driver = code_of(
+    root / "tests/support/rsi_pilot_exact_task_stage_b_midchain_driver.py"
+)
+downstream_driver = code_of(
+    root / "tests/support/rsi_pilot_exact_task_release_transaction_contract.py"
+)
 sys.path.insert(0, str(root / "devcontrol/src"))
 
 from kaliv_dev_control.catalog import (
@@ -67,6 +79,104 @@ self_test_missed = [
     if not any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 ]
 check(self_test_missed == ["tests/agent_smoke.py"], "coverage self-test detects a file outside CI globs")
+
+delegation_guard = 'if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then'
+for label, caller in (
+    ("shared CI", workflow),
+    ("exact-head", exact_head_workflow),
+    ("Agent 3 full diagnostics", agent3_full_workflow),
+):
+    check(
+        delegation_guard in caller,
+        f"{label} delegates the monolithic Stage-B file to bounded shard jobs",
+    )
+    check(
+        "uses: ./.github/workflows/_stage_b_slices.yml" in caller,
+        f"{label} includes the reusable Stage-B shard workflow",
+    )
+
+expected_stage_b_names = (
+    "midchain-1",
+    "midchain-2",
+    "midchain-3",
+    "downstream-1",
+    "downstream-2",
+    "downstream-3",
+)
+check(
+    "stage-b-admission:" in stage_b_workflow
+    and "name: stage-b-admission" in stage_b_workflow,
+    "Stage-B reusable workflow owns one admission/bootstrap authority job",
+)
+check(
+    "needs: stage-b-admission" in stage_b_workflow,
+    "all Stage-B contract shards require successful admission/bootstrap",
+)
+for name in expected_stage_b_names:
+    check(
+        f"- name: {name}" in stage_b_workflow,
+        f"Stage-B reusable workflow retains {name} qualification",
+    )
+for shard in ("1/3", "2/3", "3/3"):
+    check(
+        f'shard: "{shard}"' in stage_b_workflow,
+        f"Stage-B reusable workflow retains shard {shard}",
+    )
+check(
+    stage_b_workflow.count("timeout-minutes: 355") == 2,
+    "admission and shard jobs stay below the GitHub-hosted six-hour job ceiling",
+)
+check(
+    stage_b_workflow.count(
+        "run: PYTHONPATH=worker python3 -u tests/workflow_stage_b_physical_gate.py"
+    )
+    == 2,
+    "admission and shards both enter through the locked physical-gate test",
+)
+check(
+    'MODELRIG_STAGE_B_SLICE: admission' in stage_b_workflow
+    and 'MODELRIG_STAGE_B_SLICE: ${{ matrix.slice }}' in stage_b_workflow
+    and 'MODELRIG_STAGE_B_CONTRACT_SHARD: ${{ matrix.shard }}'
+    in stage_b_workflow,
+    "Stage-B workflow passes explicit admission, slice and shard authority",
+)
+check(
+    stage_b_workflow.count(
+        'MODELRIG_STAGE_B_CACHE_ROOT: ${{ runner.temp }}/modelrig-stage-b-cache'
+    )
+    == 2,
+    "admission and shards bind one canonical cache-root location per hosted job",
+)
+check(
+    'name: stage-b-cache-${{ inputs.head_sha }}' in stage_b_workflow
+    and "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    in stage_b_workflow
+    and "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    in stage_b_workflow,
+    "Stage-B cache handoff is exact-head named and uses pinned artifact actions",
+)
+check(
+    '_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "midchain", "downstream")'
+    in stage_b_driver
+    and '_CACHE_ROOT_ENV = "MODELRIG_STAGE_B_CACHE_ROOT"' in stage_b_driver
+    and "_NONCE_REUSE_TIMEOUT_SECONDS = 7200" in stage_b_driver,
+    "Stage-B driver locks slice modes, cache-root authority and bounded nonce bootstrap",
+)
+check(
+    "Stage-B preloaded cache root must contain proofs.json and start-ledger/"
+    in stage_b_driver
+    and 'stage_b_slice in ("midchain", "downstream")' in stage_b_driver,
+    "midchain/downstream consume only a validated preloaded proof+ledger root",
+)
+for label, source in (
+    ("midchain", midchain_driver),
+    ("downstream", downstream_driver),
+):
+    check(
+        "_REQUIRED_SHARD_COUNT = 3" in source
+        and "_CONTRACT_FILES[index - 1 :: total]" in source,
+        f"{label} uses the locked three-way strided shard partition",
+    )
 
 command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "

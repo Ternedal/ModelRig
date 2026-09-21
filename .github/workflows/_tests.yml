@@ -62,6 +62,10 @@ jobs:
           status=0
           for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
+            if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
+              echo "DELEGATED: $f -> _stage_b_slices.yml"
+              continue
+            fi
             echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/modelrig-ci-test.log
             PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-ci-test.log || {
@@ -827,3 +831,8 @@ jobs:
           )
           '@ | python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  stage-b-slices:
+    uses: ./.github/workflows/_stage_b_slices.yml
+    with:
+      head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

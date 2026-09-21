@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-improvement-proposal-v1.schema.json",
+  "title": "ModelRig RSI improvement proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "proposal_id",
+    "repository",
+    "base_sha",
+    "source_schema",
+    "evidence_sha256",
+    "finding_ids",
+    "title",
+    "problem",
+    "hypothesis",
+    "expected_gain",
+    "implementation_strategy",
+    "suggested_paths",
+    "suggested_tests",
+    "acceptance_criteria",
+    "required_evals",
+    "risk",
+    "authority",
+    "merge_authority"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-rsi-improvement-proposal/v1"
+    },
+    "proposal_id": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_-]{2,63}$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$",
+      "maxLength": 200
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source_schema": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "evidence_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "finding_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "problem": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "hypothesis": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "expected_gain": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "implementation_strategy": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "suggested_paths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "not": {
+          "pattern": "^(?:/|[A-Za-z]:|.*(?:^|/)\\.\\.(?:/|$))"
+        }
+      }
+    },
+    "suggested_tests": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "required_evals": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      }
+    },
+    "risk": {
+      "enum": ["trivial", "low", "medium", "high"]
+    },
+    "authority": {
+      "const": "proposal-only"
+    },
+    "merge_authority": {
+      "const": "human"
+    }
+  }
+}

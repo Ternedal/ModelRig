@@ -1,0 +1,40 @@
+"""Public verification facade for ADR-DC-014 independent human verdicts."""
+from __future__ import annotations
+
+from . import _improvement_physical_campaign_independent_verdict_impl as _implementation
+from ._improvement_physical_campaign_independent_verdict_production_boundary import (
+    install_physical_campaign_independent_verdict_production_boundary,
+)
+
+install_physical_campaign_independent_verdict_production_boundary(_implementation)
+
+INDEPENDENT_VERDICT_SCHEMA = _implementation.INDEPENDENT_VERDICT_SCHEMA
+INDEPENDENT_VERDICT_PROOF_SCHEMA = _implementation.INDEPENDENT_VERDICT_PROOF_SCHEMA
+INDEPENDENT_VERDICT_AUTHORITY = _implementation.INDEPENDENT_VERDICT_AUTHORITY
+INDEPENDENT_VERDICT_PROOF_AUTHORITY = _implementation.INDEPENDENT_VERDICT_PROOF_AUTHORITY
+INDEPENDENT_VERDICT_ISSUER_SYSTEM_ID = _implementation.INDEPENDENT_VERDICT_ISSUER_SYSTEM_ID
+REMAINING_COMPLETION_GATES = _implementation.REMAINING_COMPLETION_GATES
+PhysicalCampaignIndependentHumanVerdictError = _implementation.PhysicalCampaignIndependentHumanVerdictError
+PhysicalCampaignIndependentHumanVerdict = _implementation.PhysicalCampaignIndependentHumanVerdict
+PhysicalCampaignIndependentHumanVerdictProof = _implementation.PhysicalCampaignIndependentHumanVerdictProof
+build_physical_campaign_independent_human_verdict = _implementation.build_physical_campaign_independent_human_verdict
+verify_physical_campaign_independent_human_verdict = _implementation.verify_physical_campaign_independent_human_verdict
+
+# Explicit deterministic test seam; not production authority.
+_verify_physical_campaign_independent_human_verdict = _implementation._verify_physical_campaign_independent_human_verdict
+
+__all__ = [
+    "INDEPENDENT_VERDICT_SCHEMA",
+    "INDEPENDENT_VERDICT_PROOF_SCHEMA",
+    "INDEPENDENT_VERDICT_AUTHORITY",
+    "INDEPENDENT_VERDICT_PROOF_AUTHORITY",
+    "INDEPENDENT_VERDICT_ISSUER_SYSTEM_ID",
+    "REMAINING_COMPLETION_GATES",
+    "PhysicalCampaignIndependentHumanVerdictError",
+    "PhysicalCampaignIndependentHumanVerdict",
+    "PhysicalCampaignIndependentHumanVerdictProof",
+    "build_physical_campaign_independent_human_verdict",
+    "verify_physical_campaign_independent_human_verdict",
+]
+
+del install_physical_campaign_independent_verdict_production_boundary

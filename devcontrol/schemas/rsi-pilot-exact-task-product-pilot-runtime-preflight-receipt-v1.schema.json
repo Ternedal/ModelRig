@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-product-pilot-runtime-preflight-receipt-v1.schema.json",
+  "title": "ModelRig RSI product-pilot fresh runtime-preflight receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "attestation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signature_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "key_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "issuer_actor_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "issuer_system_id": {
+      "const": "kaliv-rsi-dc-l16-runtime-preflight-attestor-v1"
+    },
+    "task_registry_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "lineage_attestation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "post_production_activation_attestation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "host_development_task_registry_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "repository": {
+      "const": "Ternedal/ModelRig"
+    },
+    "merge_commit_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "operator_surface": {
+      "type": "string",
+      "minLength": 1
+    },
+    "selected_pilot_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workspace_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "feature_flag_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "product_route": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "fixed_command_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observer_actor_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observer_host_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observed_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "verified_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "attestation_age_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60
+    },
+    "product_integration_selection_reverified": {
+      "const": true
+    },
+    "task_registry_reverified": {
+      "const": true
+    },
+    "canonical_workspace_revalidated": {
+      "const": true
+    },
+    "feature_flag_default_off_verified": {
+      "const": true
+    },
+    "local_only_scope_verified": {
+      "const": true
+    },
+    "manual_operator_invocation_verified": {
+      "const": true
+    },
+    "kill_switch_armed": {
+      "const": true
+    },
+    "revoke_not_asserted": {
+      "const": true
+    },
+    "restart_recovery_verified": {
+      "const": true
+    },
+    "network_writes_blocked_verified": {
+      "const": true
+    },
+    "credentials_absent_verified": {
+      "const": true
+    },
+    "unattended_cadence_forbidden_verified": {
+      "const": true
+    },
+    "general_shell_forbidden_verified": {
+      "const": true
+    },
+    "model_defined_commands_forbidden_verified": {
+      "const": true
+    },
+    "exact_source_binding_verified": {
+      "const": true
+    },
+    "exact_toolchain_binding_verified": {
+      "const": true
+    },
+    "runtime_preflight_satisfied": {
+      "const": true
+    },
+    "next_boundary_authorization_required": {
+      "const": true
+    },
+    "product_pilot_start_ready": {
+      "const": false
+    },
+    "product_pilot_start_authorized": {
+      "const": false
+    },
+    "product_pilot_started": {
+      "const": false
+    },
+    "task_execution_authorized": {
+      "const": false
+    },
+    "local_commit_authorized": {
+      "const": false
+    },
+    "remote_write_authorized": {
+      "const": false
+    },
+    "push_authorized": {
+      "const": false
+    },
+    "pr_mutation_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "deploy_authorized": {
+      "const": false
+    },
+    "production_activation_authorized": {
+      "const": false
+    },
+    "nonce_reusable": {
+      "const": false
+    },
+    "authority": {
+      "const": "verified-dc-l16-product-pilot-runtime-preflight-only"
+    },
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-exact-task-product-pilot-runtime-preflight-receipt/v1"
+    }
+  },
+  "required": [
+    "attestation_sha256",
+    "signature_sha256",
+    "key_id",
+    "issuer_actor_id",
+    "issuer_system_id",
+    "task_registry_receipt_sha256",
+    "lineage_attestation_sha256",
+    "post_production_activation_attestation_sha256",
+    "host_development_task_registry_sha256",
+    "development_task_sha256",
+    "repository",
+    "merge_commit_sha",
+    "operator_surface",
+    "selected_pilot_task_id",
+    "workspace_root_path_sha256",
+    "feature_flag_name",
+    "product_route",
+    "fixed_command_id",
+    "observer_actor_id",
+    "observer_host_id",
+    "observed_at_utc",
+    "verified_at_utc",
+    "attestation_age_seconds",
+    "product_integration_selection_reverified",
+    "task_registry_reverified",
+    "canonical_workspace_revalidated",
+    "feature_flag_default_off_verified",
+    "local_only_scope_verified",
+    "manual_operator_invocation_verified",
+    "kill_switch_armed",
+    "revoke_not_asserted",
+    "restart_recovery_verified",
+    "network_writes_blocked_verified",
+    "credentials_absent_verified",
+    "unattended_cadence_forbidden_verified",
+    "general_shell_forbidden_verified",
+    "model_defined_commands_forbidden_verified",
+    "exact_source_binding_verified",
+    "exact_toolchain_binding_verified",
+    "runtime_preflight_satisfied",
+    "next_boundary_authorization_required",
+    "product_pilot_start_ready",
+    "product_pilot_start_authorized",
+    "product_pilot_started",
+    "task_execution_authorized",
+    "local_commit_authorized",
+    "remote_write_authorized",
+    "push_authorized",
+    "pr_mutation_authorized",
+    "merge_authorized",
+    "release_authorized",
+    "deploy_authorized",
+    "production_activation_authorized",
+    "nonce_reusable",
+    "authority",
+    "schema"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "schema": "kaliv-rsi-dc-l16-product-ui-observer-handoff/v1",
+  "repository": "Ternedal/ModelRig",
+  "source_product_status_head_sha": "b7acd3db6e88a4316375923d4cf1f5be2cde51a8",
+  "implementation_choice": {
+    "operator_surface": "desktop.control-center",
+    "route": "GET /api/v1/experimental/devcontrol-pilot/status",
+    "ui_observer_implemented": true,
+    "default_off_hidden_on_404": true,
+    "manual_refresh_only": true,
+    "executor_wired": false,
+    "start_control_present": false,
+    "human_pilot_go_verified": false
+  },
+  "tracked_source_transition": {
+    "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt",
+    "from_git_blob_sha": "0a9498ac0fe61ea742a47c1d6be1cf7886992321",
+    "to_git_blob_sha": "e8589c42a6d6625b76eb75bd74c5411db3923fa3"
+  },
+  "new_product_files": [
+    {
+      "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClient.kt",
+      "git_blob_sha": "0e9b16b565cad721de7532d681abd89e7850a4f1"
+    },
+    {
+      "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSection.kt",
+      "git_blob_sha": "a3389801f3c7217b3d72bf85e2e87996d6f0a0b5"
+    },
+    {
+      "path": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClientTest.kt",
+      "git_blob_sha": "343eec567da69e4deaa09826c4e97aa795dbfcba"
+    },
+    {
+      "path": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSectionTest.kt",
+      "git_blob_sha": "cf6389262d25fcfd89ac15df2ce3f2169b8e28f0"
+    }
+  ],
+  "authority_state": {
+    "runtime_preflight_satisfied": false,
+    "task_registry_ready": false,
+    "pilot_start_authorized": false,
+    "product_pilot_started": false,
+    "local_commit_authorized": false,
+    "remote_transport_available": false,
+    "remote_write_authorized": false,
+    "push_authorized": false,
+    "pr_mutation_authorized": false,
+    "merge_authorized": false,
+    "release_authorized": false,
+    "deploy_authorized": false,
+    "production_activation_authorized": false,
+    "authority": "dc-l16-product-ui-observer-handoff-only"
+  }
+}

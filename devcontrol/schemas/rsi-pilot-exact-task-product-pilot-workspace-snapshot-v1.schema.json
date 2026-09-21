@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-product-pilot-workspace-snapshot-v1.schema.json",
+  "title": "ModelRig product-pilot exact Git workspace snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "executor_capability_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_admission_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_nonce_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "development_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "fixed_command_id": {
+      "const": "modelrig.version.check"
+    },
+    "workspace_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workspace_root_authority_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "catalog_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "toolchain_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "lease_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signed_runtime_closure_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "trusted_git_runtime_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "trusted_git_runtime_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "toolhost_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_environment_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workspace_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workspace_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "staged_patch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "staged_patch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        },
+        "unstaged_patch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "unstaged_patch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        },
+        "untracked_paths_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "untracked_path_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "schema": {
+          "const": "kaliv-development-git-workspace-snapshot/v1"
+        }
+      },
+      "required": [
+        "head_sha",
+        "staged_patch_sha256",
+        "staged_patch_bytes",
+        "unstaged_patch_sha256",
+        "unstaged_patch_bytes",
+        "untracked_paths_sha256",
+        "untracked_path_count",
+        "schema"
+      ]
+    },
+    "product_pilot_started": {
+      "const": true
+    },
+    "executor_capability_authenticated": {
+      "const": true
+    },
+    "fresh_substrate_revalidated": {
+      "const": true
+    },
+    "workspace_snapshot_materialized": {
+      "const": true
+    },
+    "workspace_head_matches_task_base": {
+      "const": true
+    },
+    "workspace_has_unstaged_or_untracked": {
+      "const": false
+    },
+    "execution_plan_materialization_authorized": {
+      "const": true
+    },
+    "execution_plan_materialized": {
+      "const": false
+    },
+    "task_execution_authorized": {
+      "const": false
+    },
+    "task_execution_started": {
+      "const": false
+    },
+    "task_execution_completed": {
+      "const": false
+    },
+    "local_commit_authorized": {
+      "const": false
+    },
+    "remote_write_authorized": {
+      "const": false
+    },
+    "push_authorized": {
+      "const": false
+    },
+    "pr_mutation_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "deploy_authorized": {
+      "const": false
+    },
+    "production_activation_authorized": {
+      "const": false
+    },
+    "nonce_reusable": {
+      "const": false
+    },
+    "next_boundary_execution_plan_required": {
+      "const": true
+    },
+    "snapshot_scope": {
+      "const": "started-product-pilot-reviewed-version-check-workspace-snapshot-only-v1"
+    },
+    "authority": {
+      "const": "live-product-pilot-fresh-tier-a-git-workspace-snapshot-only"
+    },
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-exact-task-product-pilot-workspace-snapshot/v1"
+    }
+  },
+  "required": [
+    "executor_capability_sha256",
+    "execution_admission_sha256",
+    "execution_nonce_sha256",
+    "development_task_id",
+    "development_task_sha256",
+    "development_task_base_sha",
+    "fixed_command_id",
+    "workspace_root_path_sha256",
+    "workspace_root_authority_sha256",
+    "catalog_sha256",
+    "toolchain_sha256",
+    "lease_sha256",
+    "signed_runtime_closure_sha256",
+    "trusted_git_runtime_receipt_sha256",
+    "trusted_git_runtime_manifest_sha256",
+    "toolhost_sha256",
+    "source_environment_sha256",
+    "workspace_snapshot_sha256",
+    "workspace_snapshot",
+    "product_pilot_started",
+    "executor_capability_authenticated",
+    "fresh_substrate_revalidated",
+    "workspace_snapshot_materialized",
+    "workspace_head_matches_task_base",
+    "workspace_has_unstaged_or_untracked",
+    "execution_plan_materialization_authorized",
+    "execution_plan_materialized",
+    "task_execution_authorized",
+    "task_execution_started",
+    "task_execution_completed",
+    "local_commit_authorized",
+    "remote_write_authorized",
+    "push_authorized",
+    "pr_mutation_authorized",
+    "merge_authorized",
+    "release_authorized",
+    "deploy_authorized",
+    "production_activation_authorized",
+    "nonce_reusable",
+    "next_boundary_execution_plan_required",
+    "snapshot_scope",
+    "authority",
+    "schema"
+  ]
+}

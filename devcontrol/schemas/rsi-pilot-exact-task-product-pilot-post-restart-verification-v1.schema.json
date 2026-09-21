@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-product-pilot-post-restart-verification-v1.schema.json",
+  "title": "ModelRig product-pilot post-restart execution verification",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "recovery_resolution_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recovery_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_nonce_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "development_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "fixed_command_id": {
+      "const": "modelrig.version.check"
+    },
+    "tier_a_command_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signed_report_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "lease_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "workspace_authority_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "toolhost_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "git_runtime_evidence_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "expected_post_execution_workspace_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "post_restart_workspace_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "post_restart_workspace_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "staged_patch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "staged_patch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        },
+        "unstaged_patch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "unstaged_patch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        },
+        "untracked_paths_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "untracked_path_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "schema": {
+          "const": "kaliv-development-git-workspace-snapshot/v1"
+        }
+      },
+      "required": [
+        "head_sha",
+        "staged_patch_sha256",
+        "staged_patch_bytes",
+        "unstaged_patch_sha256",
+        "unstaged_patch_bytes",
+        "untracked_paths_sha256",
+        "untracked_path_count",
+        "schema"
+      ]
+    },
+    "execution_outcome_passed": {
+      "type": "boolean"
+    },
+    "recovery_verified": {
+      "type": "boolean"
+    },
+    "recovery_resolution_authenticated": {
+      "const": true
+    },
+    "durable_execution_receipt_verified": {
+      "const": true
+    },
+    "host_executor_profile_revalidated": {
+      "const": true
+    },
+    "physical_report_revalidated": {
+      "const": true
+    },
+    "tier_a_lease_revalidated": {
+      "const": true
+    },
+    "workspace_authority_revalidated": {
+      "const": true
+    },
+    "control_plane_toolhost_revalidated": {
+      "const": true
+    },
+    "trusted_git_runtime_revalidated": {
+      "const": true
+    },
+    "post_restart_workspace_verified": {
+      "const": true
+    },
+    "execution_nonce_consumed": {
+      "const": true
+    },
+    "product_pilot_execution_closed": {
+      "const": true
+    },
+    "first_product_pilot_task_closed": {
+      "const": true
+    },
+    "manual_intervention_required": {
+      "const": false
+    },
+    "retry_authorized": {
+      "const": false
+    },
+    "task_execution_authorized": {
+      "const": false
+    },
+    "local_commit_authorized": {
+      "const": false
+    },
+    "remote_write_authorized": {
+      "const": false
+    },
+    "push_authorized": {
+      "const": false
+    },
+    "pr_mutation_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "deploy_authorized": {
+      "const": false
+    },
+    "production_activation_authorized": {
+      "const": false
+    },
+    "nonce_reusable": {
+      "const": false
+    },
+    "next_boundary_stack_consolidation_required": {
+      "const": true
+    },
+    "verification_scope": {
+      "const": "completed-durable-execution-fresh-host-verification-v1"
+    },
+    "authority": {
+      "const": "fresh-host-post-restart-execution-verification-only"
+    },
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-exact-task-product-pilot-post-restart-verification/v1"
+    }
+  },
+  "required": [
+    "recovery_resolution_sha256",
+    "recovery_receipt_sha256",
+    "execution_receipt_sha256",
+    "execution_nonce_sha256",
+    "execution_plan_sha256",
+    "development_task_id",
+    "development_task_sha256",
+    "development_task_base_sha",
+    "fixed_command_id",
+    "tier_a_command_receipt_sha256",
+    "signed_report_sha256",
+    "lease_sha256",
+    "workspace_authority_sha256",
+    "toolhost_sha256",
+    "git_runtime_evidence_sha256",
+    "expected_post_execution_workspace_snapshot_sha256",
+    "post_restart_workspace_snapshot_sha256",
+    "post_restart_workspace_snapshot",
+    "execution_outcome_passed",
+    "recovery_verified",
+    "recovery_resolution_authenticated",
+    "durable_execution_receipt_verified",
+    "host_executor_profile_revalidated",
+    "physical_report_revalidated",
+    "tier_a_lease_revalidated",
+    "workspace_authority_revalidated",
+    "control_plane_toolhost_revalidated",
+    "trusted_git_runtime_revalidated",
+    "post_restart_workspace_verified",
+    "execution_nonce_consumed",
+    "product_pilot_execution_closed",
+    "first_product_pilot_task_closed",
+    "manual_intervention_required",
+    "retry_authorized",
+    "task_execution_authorized",
+    "local_commit_authorized",
+    "remote_write_authorized",
+    "push_authorized",
+    "pr_mutation_authorized",
+    "merge_authorized",
+    "release_authorized",
+    "deploy_authorized",
+    "production_activation_authorized",
+    "nonce_reusable",
+    "next_boundary_stack_consolidation_required",
+    "verification_scope",
+    "authority",
+    "schema"
+  ]
+}

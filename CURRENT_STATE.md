@@ -282,6 +282,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_research_sharing_execution.py`
 - `tests/worker_research_sharing_execution_async_contract.py`
 - `tests/worker_riggate_v1_contract.py`
+- `tests/worker_rsi_improvement.py`
 - `tests/worker_schedule_admin_persistence_time.py`
 - `tests/worker_schedule_admin_preview_time.py`
 - `tests/worker_schedule_api.py`
@@ -391,6 +392,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_mrbody_cross_repo_contract.py`
 - `tests/workflow_pairing_link_parity.py`
 - `tests/workflow_person_create.py`
+- `tests/workflow_physical_reservation_authority_races.py`
+- `tests/workflow_physical_reservation_directory_history.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`

@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/schemas/rsi-pilot-exact-task-product-pilot-execution-verification-v1.schema.json",
+  "title": "ModelRig product-pilot execution verification and recovery closure",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "execution_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_nonce_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "development_task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "development_task_base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "fixed_command_id": {
+      "const": "modelrig.version.check"
+    },
+    "tier_a_command_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "pre_execution_workspace_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "expected_post_execution_workspace_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "post_execution_workspace_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "post_execution_workspace_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "staged_patch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "staged_patch_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        },
+        "unstaged_patch_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "unstaged_patch_bytes": {
+          "const": 0
+        },
+        "untracked_paths_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "untracked_path_count": {
+          "const": 0
+        },
+        "schema": {
+          "const": "kaliv-development-git-workspace-snapshot/v1"
+        }
+      },
+      "required": [
+        "head_sha",
+        "staged_patch_sha256",
+        "staged_patch_bytes",
+        "unstaged_patch_sha256",
+        "unstaged_patch_bytes",
+        "untracked_paths_sha256",
+        "untracked_path_count",
+        "schema"
+      ]
+    },
+    "git_runtime_evidence_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_outcome_passed": {
+      "type": "boolean"
+    },
+    "recovery_required": {
+      "type": "boolean"
+    },
+    "recovery_verified": {
+      "type": "boolean"
+    },
+    "execution_receipt_authenticated": {
+      "const": true
+    },
+    "tier_a_execution_verified": {
+      "const": true
+    },
+    "post_execution_workspace_verified": {
+      "const": true
+    },
+    "product_pilot_execution_closed": {
+      "const": true
+    },
+    "first_product_pilot_task_closed": {
+      "const": true
+    },
+    "local_commit_authorized": {
+      "const": false
+    },
+    "remote_write_authorized": {
+      "const": false
+    },
+    "push_authorized": {
+      "const": false
+    },
+    "pr_mutation_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "release_authorized": {
+      "const": false
+    },
+    "deploy_authorized": {
+      "const": false
+    },
+    "production_activation_authorized": {
+      "const": false
+    },
+    "nonce_reusable": {
+      "const": false
+    },
+    "next_boundary_stack_consolidation_required": {
+      "const": true
+    },
+    "authority": {
+      "const": "verified-product-pilot-execution-closure-evidence-only"
+    },
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-exact-task-product-pilot-execution-verification/v1"
+    }
+  },
+  "required": [
+    "execution_receipt_sha256",
+    "execution_plan_sha256",
+    "execution_nonce_sha256",
+    "development_task_id",
+    "development_task_sha256",
+    "development_task_base_sha",
+    "fixed_command_id",
+    "tier_a_command_receipt_sha256",
+    "pre_execution_workspace_snapshot_sha256",
+    "expected_post_execution_workspace_snapshot_sha256",
+    "post_execution_workspace_snapshot_sha256",
+    "post_execution_workspace_snapshot",
+    "git_runtime_evidence_sha256",
+    "execution_outcome_passed",
+    "recovery_required",
+    "recovery_verified",
+    "execution_receipt_authenticated",
+    "tier_a_execution_verified",
+    "post_execution_workspace_verified",
+    "product_pilot_execution_closed",
+    "first_product_pilot_task_closed",
+    "local_commit_authorized",
+    "remote_write_authorized",
+    "push_authorized",
+    "pr_mutation_authorized",
+    "merge_authorized",
+    "release_authorized",
+    "deploy_authorized",
+    "production_activation_authorized",
+    "nonce_reusable",
+    "next_boundary_stack_consolidation_required",
+    "authority",
+    "schema"
+  ]
+}

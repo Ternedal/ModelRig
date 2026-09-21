@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.invalid/schemas/rsi-physical-campaign-main-freeze-proof-v1.schema.json",
+  "title": "ModelRig RSI continuous physical campaign main-freeze proof v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "admission_sha256",
+    "execution_proof_sha256",
+    "evidence_snapshot_sha256",
+    "campaign_id",
+    "task_id",
+    "task_sha256",
+    "repository",
+    "base_sha",
+    "requested_main_sha",
+    "freeze_started_at_utc",
+    "freeze_finalized_at_utc",
+    "start_observation_sha256",
+    "end_observation_sha256",
+    "start_observed_main_sha",
+    "end_observed_main_sha",
+    "repository_root_path_sha256",
+    "git_runtime_manifest_sha256",
+    "git_executable_sha256",
+    "watch_backend",
+    "watch_scope",
+    "exact_main_ref_history_monitored",
+    "loose_main_ref_mutation_absent",
+    "packed_refs_mutation_absent",
+    "watcher_loss_absent",
+    "main_sha_stable",
+    "runner_execution_binding_proven",
+    "continuous_main_freeze_proven",
+    "physical_campaign_completed",
+    "dc_l15_complete",
+    "dc_l14_independent_human_verdict_required",
+    "human_pilot_go_required",
+    "pilot_go_authorized",
+    "activation_authorized",
+    "remote_publication_authorized",
+    "remaining_completion_gates",
+    "authority"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-rsi-physical-campaign-main-freeze-proof/v1"
+    },
+    "admission_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_proof_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidence_snapshot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "repository": {
+      "const": "Ternedal/ModelRig"
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "requested_main_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "freeze_started_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "freeze_finalized_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "start_observation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "end_observation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "start_observed_main_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "end_observed_main_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "repository_root_path_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "git_runtime_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "git_executable_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "watch_backend": {
+      "enum": [
+        "inotify",
+        "ReadDirectoryChangesW"
+      ]
+    },
+    "watch_scope": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "exact_main_ref_history_monitored": {
+      "const": true
+    },
+    "loose_main_ref_mutation_absent": {
+      "const": true
+    },
+    "packed_refs_mutation_absent": {
+      "const": true
+    },
+    "watcher_loss_absent": {
+      "const": true
+    },
+    "main_sha_stable": {
+      "const": true
+    },
+    "runner_execution_binding_proven": {
+      "const": true
+    },
+    "continuous_main_freeze_proven": {
+      "const": true
+    },
+    "physical_campaign_completed": {
+      "const": false
+    },
+    "dc_l15_complete": {
+      "const": false
+    },
+    "dc_l14_independent_human_verdict_required": {
+      "const": true
+    },
+    "human_pilot_go_required": {
+      "const": true
+    },
+    "pilot_go_authorized": {
+      "const": false
+    },
+    "activation_authorized": {
+      "const": false
+    },
+    "remote_publication_authorized": {
+      "const": false
+    },
+    "remaining_completion_gates": {
+      "const": [
+        "dc_l14_independent_human_verdict",
+        "human_pilot_go_decision"
+      ]
+    },
+    "authority": {
+      "const": "verified-continuous-main-freeze-only"
+    }
+  }
+}

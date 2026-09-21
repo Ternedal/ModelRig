@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -11,6 +12,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "stage_b_physical_gate.py"
+
+_STAGE_B_SLICE = os.environ.get("MODELRIG_STAGE_B_SLICE", "all").strip() or "all"
+if _STAGE_B_SLICE not in {"all", "admission", "midchain", "downstream"}:
+    raise AssertionError(f"unsupported Stage-B slice: {_STAGE_B_SLICE!r}")
+
+
+def _run_exact_task_stage_b_router() -> None:
+    path = (
+        ROOT / "tests" / "support"
+        / "rsi_pilot_exact_task_execution_admission_stage_b_driver.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "rsi_pilot_exact_task_execution_admission_stage_b_driver",
+        path,
+    )
+    assert spec is not None and spec.loader is not None
+    driver = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = driver
+    spec.loader.exec_module(driver)
+    driver.run_contract()
+
+
+# Midchain/downstream jobs consume the admission cache and must not replay the
+# legacy physical/pilot-prefix contracts. The exact-task router owns shard
+# selection, cache validation and isolated contract execution for these slices.
+if _STAGE_B_SLICE in {"midchain", "downstream"}:
+    print(
+        f"Stage B top-level dispatcher: {_STAGE_B_SLICE} slice -> exact-task router",
+        flush=True,
+    )
+    _run_exact_task_stage_b_router()
+    raise SystemExit(0)
 
 
 def load_module():
@@ -220,3 +253,122 @@ for forbidden in (
 print(f"Stage B final-gate contracts: {passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)
+
+# Proposed RSI/DC-L16 contracts live under tests/support and are explicitly
+# attached to this already-discovered physical gate rather than extending the
+# locked top-level test inventory.
+def _run_support_contract(filename: str, module_name: str) -> None:
+    path = ROOT / "tests" / "support" / filename
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    contract = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = contract
+    spec.loader.exec_module(contract)
+    contract.run_contract()
+
+
+_run_support_contract(
+    "rsi_physical_campaign_admission_contract.py",
+    "rsi_physical_campaign_admission_contract",
+)
+print("RSI physical campaign admission adversarial contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_admission_provenance_contract.py",
+    "rsi_physical_campaign_admission_provenance_contract",
+)
+print("RSI physical campaign admission provenance contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_production_boundary.py",
+    "rsi_physical_campaign_production_boundary",
+)
+print("RSI physical campaign production boundary contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_evidence_production_boundary.py",
+    "rsi_physical_campaign_evidence_production_boundary",
+)
+print("RSI physical campaign evidence production boundary contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_execution_binding_production_boundary.py",
+    "rsi_physical_campaign_execution_binding_production_boundary",
+)
+print("RSI physical campaign exact-runner execution-binding contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_main_freeze_production_boundary.py",
+    "rsi_physical_campaign_main_freeze_production_boundary",
+)
+print("RSI physical campaign continuous-main-freeze contract: PASS")
+
+_run_support_contract(
+    "rsi_physical_campaign_independent_verdict_production_boundary.py",
+    "rsi_physical_campaign_independent_verdict_production_boundary",
+)
+print("RSI physical campaign independent-human-verdict contract: PASS")
+
+_run_support_contract(
+    "rsi_human_pilot_decision_production_boundary.py",
+    "rsi_human_pilot_decision_production_boundary",
+)
+print("RSI human pilot GO/NO-GO decision contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_trial_scope_contract.py",
+    "rsi_pilot_trial_scope_contract",
+)
+print("RSI DC-L16 inert single-trial scope contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_preflight_requirements_contract.py",
+    "rsi_pilot_preflight_requirements_contract",
+)
+print("RSI DC-L16 pilot preflight requirements contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_product_integration_inventory_contract.py",
+    "rsi_pilot_product_integration_inventory_contract",
+)
+print("RSI DC-L16 exact-source product integration inventory contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_runtime_preflight_attestation_proof_contract.py",
+    "rsi_pilot_runtime_preflight_attestation_proof_contract",
+)
+print("RSI DC-L16 ADR-DC-023 host-attested preflight packet contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_start_authorization_contract.py",
+    "rsi_pilot_start_authorization_contract",
+)
+print("RSI DC-L16 ADR-DC-024 human pilot-start authorization contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_start_authorization_preflight_provenance_contract.py",
+    "rsi_pilot_start_authorization_preflight_provenance_contract",
+)
+print("RSI DC-L16 ADR-DC-024 fresh preflight provenance contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_start_consumption_contract.py",
+    "rsi_pilot_start_consumption_contract",
+)
+print("RSI DC-L16 ADR-DC-025 one-shot start consumption contract: PASS")
+
+_run_support_contract(
+    "rsi_pilot_execution_admission_requirements_contract.py",
+    "rsi_pilot_execution_admission_requirements_contract",
+)
+print("RSI DC-L16 ADR-DC-026 execution-admission requirements contract: PASS")
+
+# For admission/all, ADR-DC-026 transitively owns ADR-027 -> ADR-028 ->
+# ADR-DC-029 and the exact-task Stage-B router. Re-running the router here would
+# replay the admission slice against its freshly published cache root and fail
+# closed by design. Midchain/downstream are dispatched early above.
+print(
+    f"Stage B top-level dispatcher: {_STAGE_B_SLICE} slice already qualified "
+    "through the ADR-DC-026 transitive exact-task chain",
+    flush=True,
+)

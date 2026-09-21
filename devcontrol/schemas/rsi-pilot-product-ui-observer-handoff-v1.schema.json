@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kaliv-rsi-dc-l16-product-ui-observer-handoff/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "source_product_status_head_sha",
+    "implementation_choice",
+    "tracked_source_transition",
+    "new_product_files",
+    "authority_state"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-dc-l16-product-ui-observer-handoff/v1"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "source_product_status_head_sha": {"const": "b7acd3db6e88a4316375923d4cf1f5be2cde51a8"},
+    "implementation_choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator_surface",
+        "route",
+        "ui_observer_implemented",
+        "default_off_hidden_on_404",
+        "manual_refresh_only",
+        "executor_wired",
+        "start_control_present",
+        "human_pilot_go_verified"
+      ],
+      "properties": {
+        "operator_surface": {"const": "desktop.control-center"},
+        "route": {"const": "GET /api/v1/experimental/devcontrol-pilot/status"},
+        "ui_observer_implemented": {"const": true},
+        "default_off_hidden_on_404": {"const": true},
+        "manual_refresh_only": {"const": true},
+        "executor_wired": {"const": false},
+        "start_control_present": {"const": false},
+        "human_pilot_go_verified": {"const": false}
+      }
+    },
+    "tracked_source_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "from_git_blob_sha", "to_git_blob_sha"],
+      "properties": {
+        "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"},
+        "from_git_blob_sha": {"const": "0a9498ac0fe61ea742a47c1d6be1cf7886992321"},
+        "to_git_blob_sha": {"const": "e8589c42a6d6625b76eb75bd74c5411db3923fa3"}
+      }
+    },
+    "new_product_files": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "git_blob_sha"],
+          "properties": {
+            "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClient.kt"},
+            "git_blob_sha": {"const": "0e9b16b565cad721de7532d681abd89e7850a4f1"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "git_blob_sha"],
+          "properties": {
+            "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSection.kt"},
+            "git_blob_sha": {"const": "a3389801f3c7217b3d72bf85e2e87996d6f0a0b5"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "git_blob_sha"],
+          "properties": {
+            "path": {"const": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClientTest.kt"},
+            "git_blob_sha": {"const": "343eec567da69e4deaa09826c4e97aa795dbfcba"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "git_blob_sha"],
+          "properties": {
+            "path": {"const": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSectionTest.kt"},
+            "git_blob_sha": {"const": "cf6389262d25fcfd89ac15df2ce3f2169b8e28f0"}
+          }
+        }
+      ]
+    },
+    "authority_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_preflight_satisfied",
+        "task_registry_ready",
+        "pilot_start_authorized",
+        "product_pilot_started",
+        "local_commit_authorized",
+        "remote_transport_available",
+        "remote_write_authorized",
+        "push_authorized",
+        "pr_mutation_authorized",
+        "merge_authorized",
+        "release_authorized",
+        "deploy_authorized",
+        "production_activation_authorized",
+        "authority"
+      ],
+      "properties": {
+        "runtime_preflight_satisfied": {"const": false},
+        "task_registry_ready": {"const": false},
+        "pilot_start_authorized": {"const": false},
+        "product_pilot_started": {"const": false},
+        "local_commit_authorized": {"const": false},
+        "remote_transport_available": {"const": false},
+        "remote_write_authorized": {"const": false},
+        "push_authorized": {"const": false},
+        "pr_mutation_authorized": {"const": false},
+        "merge_authorized": {"const": false},
+        "release_authorized": {"const": false},
+        "deploy_authorized": {"const": false},
+        "production_activation_authorized": {"const": false},
+        "authority": {"const": "dc-l16-product-ui-observer-handoff-only"}
+      }
+    }
+  }
+}

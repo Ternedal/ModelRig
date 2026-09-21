@@ -128,3 +128,16 @@ This boundary still does not provide streaming output capture, crash recovery,
 asymmetric signing, Git remote configuration, network writes, push, pull-request
 mutation, reviewer requests, ready conversion, merge, release, settings,
 deployment or unattended activation.
+
+
+## Exact expected pre-execution snapshot
+
+A caller that already holds a separately authenticated Git snapshot may pass it as
+`expected_workspace_snapshot`. The orchestrator compares the freshly captured
+pre-execution `GitWorkspaceSnapshot.sha256` with that exact expected snapshot
+**before** invoking the Tier-A executor.
+
+A mismatch fails closed before process launch. This is used by the product-pilot
+ADR-DC-108 boundary so a different staged patch cannot be substituted after the
+execution plan was approved. Omitting the optional argument preserves the
+existing Slice 10G behavior.
