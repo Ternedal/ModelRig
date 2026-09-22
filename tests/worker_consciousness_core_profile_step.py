@@ -231,10 +231,10 @@ class ProfileBackedStepTests(unittest.TestCase):
                 self.assertFalse(profile_step_enabled(), value)
 
             app = FastAPI()
-            before = [getattr(route, "path", None) for route in app.router.routes]
+            before_count = len(app.router.routes)
             os.environ.pop(CONSCIOUSNESS_STEP_FLAG, None)
             self.assertFalse(mount_consciousness_profile_step(app))
-            self.assertEqual(before, [getattr(route, "path", None) for route in app.router.routes])
+            self.assertEqual(len(app.router.routes), before_count)
 
             os.environ[CONSCIOUSNESS_STEP_FLAG] = "1"
             self.assertTrue(profile_step_enabled())
@@ -245,11 +245,14 @@ class ProfileBackedStepTests(unittest.TestCase):
                     loopback_allowed=lambda _request: True,
                 )
             )
-            paths = [getattr(route, "path", None) for route in app.router.routes]
-            self.assertEqual(paths.count(COGNITION_STEP_PREFIX + "/step"), 1)
+            mounted_count = len(app.router.routes)
+            self.assertGreater(mounted_count, before_count)
+
+            response = TestClient(app).post(COGNITION_STEP_PREFIX + "/step")
+            self.assertEqual(response.status_code, 503)
+
             self.assertTrue(mount_consciousness_profile_step(app))
-            paths = [getattr(route, "path", None) for route in app.router.routes]
-            self.assertEqual(paths.count(COGNITION_STEP_PREFIX + "/step"), 1)
+            self.assertEqual(len(app.router.routes), mounted_count)
         finally:
             if old is None:
                 os.environ.pop(CONSCIOUSNESS_STEP_FLAG, None)
