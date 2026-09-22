@@ -165,6 +165,14 @@ from .sleep import (
     prepare_sleep,
     wake_from_sleep,
 )
+from .step_admission import (
+    CONSCIOUSNESS_STEP_FLAG,
+    CONSCIOUSNESS_STEP_PREFIX,
+    CognitiveStepReceipt,
+    build_consciousness_step_router,
+    consciousness_step_enabled,
+    mount_consciousness_step,
+)
 from .supervisor import (
     CognitionEvent,
     CognitionSupervisorKernel,
@@ -237,6 +245,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "mount_consciousness_step",
+    "consciousness_step_enabled",
+    "build_consciousness_step_router",
+    "CognitiveStepReceipt",
+    "CONSCIOUSNESS_STEP_PREFIX",
+    "CONSCIOUSNESS_STEP_FLAG",
     "load_cognitive_profile",
     "cognitive_profile_config_path",
     "build_cognitive_profile",
