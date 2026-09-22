@@ -387,6 +387,23 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(wait.wait_remaining_ms, 300)
         self.assertEqual(wait.thought_engine_calls_authorized, 0)
 
+    def test_pre_first_cycle_clock_cannot_predate_bootstrap(self) -> None:
+        sup = self.supervisor()
+        sup = queue_cognition_event(
+            sup,
+            self.event("a", salience=0.9, sequence=1),
+        )
+        with self.assertRaises(SupervisorContractError):
+            plan_supervisor_step(
+                state=sup,
+                clock_sample=self.clock(
+                    marker="0",
+                    monotonic_ms=900,
+                    sequence=1,
+                ),
+                policy=self.policy(),
+            )
+
     def test_stale_clock_and_epoch_change_fail_closed(self) -> None:
         state, world, workspace, personality = self.context()
         sup = self.supervisor()
