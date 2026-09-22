@@ -231,6 +231,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_capability_schema_v2.py`
 - `tests/worker_confirm_outbound_reads.py`
 - `tests/worker_confirmation_impact.py`
+- `tests/worker_consciousness_core_autonomous_trigger_policy.py`
 - `tests/worker_consciousness_core_c13b_wiring.py`
 - `tests/worker_consciousness_core_consolidation.py`
 - `tests/worker_consciousness_core_cycle.py`
