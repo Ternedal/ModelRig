@@ -79,8 +79,10 @@ jobs:
             timeout_seconds=1200
             echo "TIMEOUT_BOUND: $f ${timeout_seconds}s" | tee -a /tmp/modelrig-full-test.log
             started_at="$(date +%s)"
+            set +e
             timeout --signal=TERM --kill-after=30s "${timeout_seconds}s" env PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-full-test.log
             test_status=${PIPESTATUS[0]}
+            set -e
             elapsed=$(( $(date +%s) - started_at ))
             echo "TIMING: $f ${elapsed}s (exit $test_status)" | tee -a /tmp/modelrig-full-test.log
             if [ "$test_status" -ne 0 ]; then

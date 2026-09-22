@@ -7,6 +7,7 @@ import importlib.util
 import inspect
 import json
 import os
+import shutil
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -341,31 +342,8 @@ def _expect_reservation_error(fragment: str, fn) -> None:
         )
 
 
-_TRUSTED_GIT_SCRIPT = b'''#!/bin/sh
-while [ "$#" -ge 2 ] && [ "$1" = "-c" ]; do
-    shift 2
-done
-case "$1" in
-    --version)
-        printf 'git version modelrig-rsi-test-1\n'
-        ;;
-    rev-parse)
-        if [ "$2" = "--verify" ]; then
-            IFS= read -r main_sha < .modelrig-main-sha || exit 7
-            printf '%s\n' "$main_sha"
-        else
-            exit 8
-        fi
-        ;;
-    *)
-        exit 9
-        ;;
-esac
-'''
-
-_TRUSTED_GIT_HELPER = b'''#!/bin/sh
-exit 0
-'''
+_TRUSTED_GIT_SCRIPT_PATH = ROOT / "tests" / "fixtures" / "physical_validation_trusted_git.sh"
+_TRUSTED_GIT_HELPER_PATH = ROOT / "tests" / "fixtures" / "physical_validation_trusted_git_helper.sh"
 
 
 def _trusted_git_fixture(root: Path, main_sha: str, *, runtime_marker: bytes = b"rsi-test-runtime"):
@@ -377,8 +355,8 @@ def _trusted_git_fixture(root: Path, main_sha: str, *, runtime_marker: bytes = b
     (source / "lib").mkdir(parents=True)
     executable = source / "bin" / "git"
     helper = source / "libexec" / "git-core" / "git-helper"
-    executable.write_bytes(_TRUSTED_GIT_SCRIPT)
-    helper.write_bytes(_TRUSTED_GIT_HELPER)
+    shutil.copyfile(_TRUSTED_GIT_SCRIPT_PATH, executable)
+    shutil.copyfile(_TRUSTED_GIT_HELPER_PATH, helper)
     (source / "lib" / "runtime.so").write_bytes(runtime_marker)
     executable.chmod(0o755)
     helper.chmod(0o755)
