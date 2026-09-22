@@ -198,7 +198,7 @@ class SleepLifecycleTests(unittest.TestCase):
             store_factory=lambda: _RecordingStore(events),
         )
         wrapped = compose_sleep_lifecycle_lifespan(inner, lambda app: runtime)
-        self.assertIs(wrapped.__wrapped__, inner)
+        self.assertIs(wrapped.__wrapped__, getattr(inner, "__wrapped__", inner))
 
         app = SimpleNamespace(state=SimpleNamespace())
 
