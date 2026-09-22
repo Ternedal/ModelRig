@@ -96,6 +96,12 @@ from .metacognition import (
     prediction_from_proposal,
     resolve_prediction,
 )
+from .response_guidance import (
+    ResponseGuidanceEnvelope,
+    ResponseGuidanceError,
+    build_response_guidance,
+    response_guidance_ref,
+)
 from .reducer import (
     CognitiveTransitionReceipt,
     PostCycleReductionError,
@@ -254,6 +260,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "response_guidance_ref",
+    "build_response_guidance",
+    "ResponseGuidanceError",
+    "ResponseGuidanceEnvelope",
     "mount_consciousness_exact_event_step",
     "exact_event_step_enabled",
     "build_consciousness_exact_event_step_router",
