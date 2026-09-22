@@ -21,7 +21,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..person_api import registry_path
 from ..person_registry import PersonRegistry
 from .contracts import CognitiveProfile, PersonalitySnapshot
-from .cycle import CognitiveWorkspace, RuntimeWorldState, workspace_ref, world_state_ref
+from .cycle import (
+    CognitiveWorkspace,
+    RuntimeWorldState,
+    self_state_ref,
+    workspace_ref,
+    world_state_ref,
+)
 from .self_state import PersistentSelfState, SelfStateStore
 from .session_bootstrap import (
     RuntimeSessionContext,
@@ -200,7 +206,9 @@ class ProductionCognitiveSession:
         self._bridge = supervisor_bridge
         self._live = live_state_from_bootstrap(bootstrap_context)
         self._closed = False
-        self._user_turn_sequences: dict[str, int] = {}
+        # Bounded process-local replay ledger. Values are:
+        # (observed_sequence, canonical evidence ref, observation id).
+        self._user_turn_ledger: dict[str, tuple[int, str, str]] = {}
         self._next_user_turn_sequence = 1
 
     @property
@@ -351,10 +359,10 @@ class ProductionCognitiveSession:
         ):
             raise CognitiveSessionLifecycleError("invalid user turn source ref")
 
-        existing_sequence = self._user_turn_sequences.get(turn_id)
+        existing = self._user_turn_ledger.get(turn_id)
         observed_sequence = (
-            existing_sequence
-            if existing_sequence is not None
+            existing[0]
+            if existing is not None
             else self._next_user_turn_sequence
         )
         evidence = WorldEvidenceEvent(
@@ -368,18 +376,75 @@ class ProductionCognitiveSession:
             observed_sequence=observed_sequence,
             production_activation=False,
         )
+        evidence_ref = world_evidence_event_ref(evidence)
+
+        if existing is not None:
+            existing_sequence, existing_ref, observation_id = existing
+            if existing_ref != evidence_ref:
+                raise CognitiveSessionLifecycleError(
+                    "user turn id reused with conflicting payload"
+                )
+            current_world_ref = world_state_ref(self._live.world)
+            current_self_ref = self_state_ref(self._live.state)
+            replay_receipt = WorldTransitionReceipt(
+                schema="kaliv-consciousness-core/world-transition-receipt/v1",
+                event_id=evidence.event_id,
+                observation_id=observation_id,
+                previous_world_state_ref=current_world_ref,
+                next_world_state_ref=current_world_ref,
+                previous_self_state_ref=current_self_ref,
+                next_self_state_ref=current_self_ref,
+                world_revision_before=self._live.world.revision,
+                world_revision_after=self._live.world.revision,
+                self_revision_before=self._live.state.revision,
+                self_revision_after=self._live.state.revision,
+                world_changed=False,
+                idempotent_replay=True,
+                evicted_observation_ids=[],
+                identity_unchanged=True,
+                workspace_binding_unchanged=True,
+                personality_binding_unchanged=True,
+                goal_bindings_unchanged=True,
+                intention_bindings_unchanged=True,
+                affect_unchanged=True,
+                durable_memory_binding_unchanged=True,
+                model_calls=0,
+                self_state_store_write_applied=False,
+                durable_memory_write_authority=False,
+                execution_authority=False,
+                scheduling_authority=False,
+                production_activation=False,
+            )
+            return WorldEvidenceAdmissionResult(
+                schema="kaliv-consciousness-core/world-evidence-admission/v1",
+                evidence_ref=existing_ref,
+                world_transition=replay_receipt,
+                cognition_event=None,
+                cognition_event_queued=False,
+                observed_sequence=existing_sequence,
+                live_state=self._live,
+                model_calls=0,
+                self_state_store_write_applied=False,
+                durable_memory_write_authority=False,
+                execution_authority=False,
+                scheduling_authority=False,
+                production_activation=False,
+            )
+
         result = self._submit_world_evidence_with_kind(
             evidence,
             attention_salience=1.0,
             cognition_kind="user_turn",
         )
-
-        if existing_sequence is None:
-            self._user_turn_sequences[turn_id] = observed_sequence
-            self._next_user_turn_sequence = observed_sequence + 1
-            if len(self._user_turn_sequences) > 1024:
-                oldest = next(iter(self._user_turn_sequences))
-                del self._user_turn_sequences[oldest]
+        self._user_turn_ledger[turn_id] = (
+            observed_sequence,
+            evidence_ref,
+            result.world_transition.observation_id,
+        )
+        self._next_user_turn_sequence = observed_sequence + 1
+        if len(self._user_turn_ledger) > 1024:
+            oldest = next(iter(self._user_turn_ledger))
+            del self._user_turn_ledger[oldest]
         return result
 
     async def step(
