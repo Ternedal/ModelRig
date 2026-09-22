@@ -338,6 +338,7 @@ def _live_registry():
         *,
         admission: admission_boundary.PilotExactTaskProductPilotExecutionAdmissionReceipt,
         substrate: Mapping[str, Any],
+        live_authority: Mapping[str, Any],
         path_sha256: Callable[[Path], str],
     ) -> None:
         key = id(receipt)
@@ -351,6 +352,7 @@ def _live_registry():
             weakref.ref(receipt, cleanup),
             admission,
             dict(substrate),
+            dict(live_authority),
             path_sha256,
         )
 
@@ -358,7 +360,15 @@ def _live_registry():
         entry = records.get(id(receipt))
         if entry is None:
             return None
-        pid, digest, receipt_ref, admission, substrate, path_sha256 = entry
+        (
+            pid,
+            digest,
+            receipt_ref,
+            admission,
+            substrate,
+            live_authority,
+            path_sha256,
+        ) = entry
         if (
             pid != os.getpid()
             or receipt_ref() is not receipt
@@ -376,16 +386,16 @@ def _live_registry():
                 task=task,
                 fixed_command_id=receipt.fixed_command_id,
                 workspace_root_path_sha256=receipt.workspace_root_path_sha256,
-                catalog=substrate["catalog"],
-                toolchain=substrate["toolchain"],
-                isolation_attestation=substrate["isolation_attestation"],
-                physical_verifier=substrate["physical_verifier"],
-                signed_runtime_closure=substrate["signed_runtime_closure"],
-                runtime_closure_verifier=substrate["runtime_closure_verifier"],
-                trusted_runtime_root=substrate["trusted_runtime_root"],
-                git_runner=substrate["git_runner"],
-                workspace_root=substrate["workspace_root"],
-                control_plane_root=substrate["control_plane_root"],
+                catalog=live_authority["catalog"],
+                toolchain=live_authority["toolchain"],
+                isolation_attestation=live_authority["isolation_attestation"],
+                physical_verifier=live_authority["physical_verifier"],
+                signed_runtime_closure=live_authority["signed_runtime_closure"],
+                runtime_closure_verifier=live_authority["runtime_closure_verifier"],
+                trusted_runtime_root=live_authority["trusted_runtime_root"],
+                git_runner=live_authority["git_runner"],
+                workspace_root=live_authority["workspace_root"],
+                control_plane_root=live_authority["control_plane_root"],
                 path_sha256=path_sha256,
             )
         except Exception:
@@ -442,12 +452,13 @@ def _live_registry():
         if any(left != right for left, right in checks):
             return None
         frozen = dict(fresh)
-        # The Tier-A substrate intentionally snapshots DevelopmentTask while
-        # validating it. Downstream product-pilot boundaries, however, must
-        # retain the exact live task object authenticated by the admission
-        # registry so repeated provenance checks cannot manufacture a new
-        # object identity across the durable nonce boundary.
+        # Tier-A verification intentionally snapshots serializable authority
+        # objects. The product-pilot execution boundary must nevertheless retain
+        # the exact already-authenticated process-local authority objects across
+        # repeated provenance checks. Re-materialization above verifies their
+        # current content before these live identities are restored.
         frozen["task"] = task
+        frozen.update(live_authority)
         frozen["execution_admission"] = admission
         return frozen
 
@@ -542,6 +553,18 @@ def _materialize_verified_product_pilot_executor_capability(
         receipt,
         admission=admission,
         substrate=substrate,
+        live_authority={
+            "catalog": catalog,
+            "toolchain": toolchain,
+            "isolation_attestation": isolation_attestation,
+            "physical_verifier": physical_verifier,
+            "signed_runtime_closure": signed_runtime_closure,
+            "runtime_closure_verifier": runtime_closure_verifier,
+            "trusted_runtime_root": trusted_runtime_root,
+            "git_runner": git_runner,
+            "workspace_root": workspace_root,
+            "control_plane_root": control_plane_root,
+        },
         path_sha256=path_sha256,
     )
     if receipt.capability_authenticated is not True:
