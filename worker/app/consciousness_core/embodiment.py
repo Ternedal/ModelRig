@@ -358,7 +358,7 @@ class MockEmbodimentObserver:
                 observed_values={
                     "status": "ok",
                     "performed": True,
-                    "intent_label": intent.intent,
+                    "intent_ref": intent.intent_id,
                 },
                 confidence=1.0,
                 source_refs=[
