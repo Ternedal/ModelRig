@@ -23,7 +23,6 @@ from .autonomous_trigger_policy import (
     AutomaticCognitionAccounting,
     AutonomousTriggerDecision,
     AutonomousTriggerPolicy,
-    AutonomousTriggerPolicyError,
     evaluate_autonomous_trigger,
     new_automatic_cognition_accounting,
     record_automatic_cognition,
@@ -339,16 +338,14 @@ class AutonomousCognitionTickAdapter:
                 "autonomous cognitive profile unavailable"
             )
 
-        try:
-            step = await self._session.step(
-                profile=loaded.profile,
-                required_event_id=selected_event.event_id,
-                allowed_event_ids=allowed_event_ids,
-            )
-        except (AutonomousTriggerPolicyError, Exception):
-            # Accounting is intentionally unchanged. The exception is left
-            # visible to the explicit caller; C25-C owns production isolation.
-            raise
+        # Any session/provider failure propagates to the explicit caller.
+        # Accounting remains unchanged because recording occurs only after a
+        # verified RUN below. C25-C owns production scheduler failure isolation.
+        step = await self._session.step(
+            profile=loaded.profile,
+            required_event_id=selected_event.event_id,
+            allowed_event_ids=allowed_event_ids,
+        )
 
         plan = step.supervisor_step.plan
         if plan.decision == "WAIT":
