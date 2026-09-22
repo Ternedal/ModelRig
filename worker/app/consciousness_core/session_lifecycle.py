@@ -488,6 +488,7 @@ class ProductionCognitiveSession:
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
         required_event_id: str | None = None,
+        allowed_event_ids: list[str] | None = None,
     ) -> CognitiveSessionStep:
         """Run at most one explicit supervisor step against owned live context."""
         self._require_open()
@@ -508,6 +509,7 @@ class ProductionCognitiveSession:
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
             required_event_id=required_event_id,
+            allowed_event_ids=allowed_event_ids,
         )
 
         if bridge_step.cycle_result is None:
