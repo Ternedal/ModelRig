@@ -124,6 +124,12 @@ from .self_state import (
     rebind_person_revision,
     verify_active_person,
 )
+from .state_commit import (
+    LockedSelfStateCommitter,
+    StateCommitError,
+    StateCommitJournalRecord,
+    StateCommitRecoveryReceipt,
+)
 from .supervisor import (
     CognitiveSupervisorError,
     SupervisorBudget,
@@ -181,6 +187,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "StateCommitRecoveryReceipt",
+    "StateCommitJournalRecord",
+    "StateCommitError",
+    "LockedSelfStateCommitter",
     "supervisor_directive_ref",
     "run_single_cognitive_step",
     "StateTransitionCommitter",
