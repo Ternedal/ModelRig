@@ -48,6 +48,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_PROFILE_PATH` | `./consciousness-profile.json` |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
@@ -227,6 +228,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_confirm_outbound_reads.py`
 - `tests/worker_confirmation_impact.py`
 - `tests/worker_consciousness_core_c13b_wiring.py`
+- `tests/worker_consciousness_core_cognition_step_api.py`
 - `tests/worker_consciousness_core_consolidation.py`
 - `tests/worker_consciousness_core_cycle.py`
 - `tests/worker_consciousness_core_embodiment.py`
