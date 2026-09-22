@@ -421,9 +421,9 @@ def _build_fixture():
         "success_auth_temp": success_auth_temp,
         "success_tx_temp": success_tx_temp,
         "post_success_recovery_temp": post_success_recovery_temp,
-        # ADR-DC-091 live authentication keeps only a weak reference to its
-        # ADR-DC-090 source. Retain that source for the lifetime of this shared
-        # Stage-B fixture so readiness evidence cannot be invalidated by GC.
+        # ADR-DC-091 live provenance weak-references its ADR-DC-090 source.
+        # Keep the authenticated post-success receipt strongly reachable for the
+        # lifetime of the shared product-pilot fixture.
         "post_success": post_success,
         "production_auth_temp": production_auth_temp,
         "production_temp": production_temp,
