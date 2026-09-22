@@ -35,6 +35,7 @@ from .consciousness_core.supervisor_lifecycle import (
 )
 from .consciousness_core.exact_event_step_api import mount_consciousness_exact_event_step
 from .consciousness_core.profile_step_api import mount_consciousness_profile_step
+from .consciousness_core.response_guidance_api import mount_consciousness_guidance
 from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
@@ -104,6 +105,11 @@ mount_consciousness_profile_step(fastapi_app)
 # Its only caller-selected value is one pending CognitionEvent id; event presence
 # and canonical selection are verified before ThoughtEngine invocation.
 mount_consciousness_exact_event_step(fastapi_app)
+
+# Consciousness Core C23-B is a separately gated loopback-only one-shot
+# response-guidance consume surface. It exposes only the already-isolated
+# response_intent projection and performs no model call.
+mount_consciousness_guidance(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete

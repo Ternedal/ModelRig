@@ -96,6 +96,15 @@ from .metacognition import (
     prediction_from_proposal,
     resolve_prediction,
 )
+from .response_guidance_api import (
+    CONSCIOUSNESS_GUIDANCE_FLAG,
+    CONSCIOUSNESS_GUIDANCE_PREFIX,
+    ResponseGuidanceConsumeBody,
+    ResponseGuidanceConsumeReceipt,
+    build_consciousness_guidance_router,
+    consciousness_guidance_enabled,
+    mount_consciousness_guidance,
+)
 from .response_guidance import (
     ResponseGuidanceEnvelope,
     ResponseGuidanceError,
@@ -260,6 +269,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "mount_consciousness_guidance",
+    "consciousness_guidance_enabled",
+    "build_consciousness_guidance_router",
+    "ResponseGuidanceConsumeReceipt",
+    "ResponseGuidanceConsumeBody",
+    "CONSCIOUSNESS_GUIDANCE_PREFIX",
+    "CONSCIOUSNESS_GUIDANCE_FLAG",
     "response_guidance_ref",
     "build_response_guidance",
     "ResponseGuidanceError",
