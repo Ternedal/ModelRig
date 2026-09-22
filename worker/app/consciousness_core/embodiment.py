@@ -78,6 +78,7 @@ class PerformedBodyStateRef(StrictModel):
     """Reference to BodyRig-authoritative performed state."""
 
     schema: Literal["kaliv-consciousness-core/performed-body-state-ref/v1"]
+    cycle_id: Annotated[str, Field(pattern=r"^cycle-[a-f0-9]{32}$")]
     person_id: Annotated[str, Field(pattern=r"^person-[a-f0-9]{32}$")]
     person_revision: Annotated[str, Field(pattern=r"^person-r[0-9]{4,}$")]
     body_revision: Annotated[str, Field(pattern=r"^body-r[0-9]{4,}$")]
@@ -207,6 +208,8 @@ def normalize_embodiment_state(
         seen_ids.add(item.observation_id)
         seen_sequences.add(item.observed_sequence)
 
+        if item.cycle_id != perf.cycle_id:
+            raise EmbodimentContractError("observation cognitive cycle mismatch")
         if item.person_id != perf.person_id:
             raise EmbodimentContractError("observation belongs to another person")
         if item.person_revision != perf.person_revision:
@@ -254,7 +257,7 @@ def normalize_embodiment_state(
     return EmbodimentState(
         schema="kaliv-consciousness-core/embodiment-state/v1",
         state_id="estate-" + _digest(seed)[:32],
-        cycle_id=(ordered[-1].cycle_id if ordered else "cycle-" + "0" * 32),
+        cycle_id=perf.cycle_id,
         person_id=perf.person_id,
         person_revision=perf.person_revision,
         body_revision=perf.body_revision,
@@ -327,6 +330,8 @@ class MockEmbodimentObserver:
         *,
         renderer_ref: str = "mock-renderer:c8-a",
     ) -> list[EmbodimentObservation]:
+        if intent.cycle_id != performed.cycle_id:
+            raise EmbodimentContractError("intent/performed cognitive cycle mismatch")
         if intent.person_id != performed.person_id:
             raise EmbodimentContractError("intent/performed person mismatch")
         if intent.person_revision != performed.person_revision:
