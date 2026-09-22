@@ -44,8 +44,8 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_COMPUTER_USE` | `0` |
-| `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
