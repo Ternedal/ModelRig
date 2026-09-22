@@ -373,14 +373,34 @@ class ConsciousnessCoreContractTests(unittest.TestCase):
         self.assertIn("ThoughtEngine", combined)
         self.assertIn("KALIV_CONSCIOUSNESS_CORE_ENABLED=0", architecture)
 
-    def test_current_slice_contains_no_runtime_python_package(self) -> None:
-        forbidden_roots = (
-            ROOT / "worker" / "app" / "consciousness_core",
-            ROOT / "backend" / "consciousness_core",
-            ROOT / "consciousness_core",
-        )
-        for path in forbidden_roots:
-            self.assertFalse(path.exists(), f"C0-C3 must remain runtime-isolated: {path}")
+    def test_runtime_boundary_matches_declared_phase(self) -> None:
+        worker_runtime = ROOT / "worker" / "app" / "consciousness_core"
+        backend_runtime = ROOT / "backend" / "consciousness_core"
+        root_runtime = ROOT / "consciousness_core"
+        c4_marker = DOCS / "C4_RUNTIME.md"
+
+        # C0-C3 is contracts/docs/experiments only. C4 is the first reviewed
+        # slice allowed to introduce a worker-side runtime package. Keep this
+        # inherited contract useful on later stacked slices instead of making
+        # the deliberate C4 transition look like a regression.
+        if not c4_marker.exists():
+            self.assertFalse(
+                worker_runtime.exists(),
+                f"C0-C3 must remain runtime-isolated: {worker_runtime}",
+            )
+        else:
+            self.assertTrue(
+                worker_runtime.is_dir(),
+                "C4+ declaration requires the reviewed worker runtime package",
+            )
+
+        # Consciousness Core remains one worker-side boundary; introducing C4
+        # must not create competing backend/root implementations.
+        for path in (backend_runtime, root_runtime):
+            self.assertFalse(
+                path.exists(),
+                f"Consciousness Core runtime authority must not be duplicated: {path}",
+            )
 
 
 if __name__ == "__main__":
