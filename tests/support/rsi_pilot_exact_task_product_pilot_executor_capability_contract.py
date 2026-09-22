@@ -70,7 +70,15 @@ def _admission(fixture):
         now_provider=lambda: "2026-09-15T09:55:00Z",
     )
     assert admitted.admission_authenticated is True
-    return auth_temp, tx_temp, admitted, task
+    live = admission._get_live_execution_admission_inputs(admitted)
+    assert live is not None
+    live_task = live["development_task"]
+    # The admission boundary reparses the canonical registry payload and binds
+    # that exact DevelopmentTask instance as live provenance. Downstream
+    # capability/plan/execution contracts must keep that identity, not the
+    # semantically-equal pre-parse fixture object returned by _start().
+    assert live_task == task
+    return auth_temp, tx_temp, admitted, live_task
 
 
 def run_contract(*, shared_fixture=None) -> None:
