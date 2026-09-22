@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/consciousness-core/model-swap-evaluation-v1.schema.json",
+  "title": "Kaliv Consciousness Core model-swap evaluation receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "evaluation_id",
+    "self_before_sha256",
+    "self_after_sha256",
+    "identity_unchanged",
+    "cognition_changed",
+    "authority_preserved",
+    "weak_profile",
+    "strong_profile",
+    "weak_proposal",
+    "strong_proposal",
+    "weak_uncertainty",
+    "strong_uncertainty",
+    "production_activation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-consciousness-core/model-swap-evaluation/v1"
+    },
+    "evaluation_id": {
+      "type": "string",
+      "pattern": "^cceval-[a-f0-9]{32}$"
+    },
+    "self_before_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "self_after_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "identity_unchanged": {
+      "const": true
+    },
+    "cognition_changed": {
+      "const": true
+    },
+    "authority_preserved": {
+      "const": true
+    },
+    "weak_profile": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "strong_profile": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "weak_proposal": {
+      "type": "string",
+      "pattern": "^thinkprop-[a-f0-9]{32}$"
+    },
+    "strong_proposal": {
+      "type": "string",
+      "pattern": "^thinkprop-[a-f0-9]{32}$"
+    },
+    "weak_uncertainty": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "strong_uncertainty": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "production_activation": {
+      "const": false
+    }
+  }
+}\n

@@ -5,7 +5,7 @@ Consciousness Core contracts before any product integration exists.
 
 Current content:
 
-- `mock_thought_engine.py` — deterministic C3 ThoughtEngine reference.
+- `mock_thought_engine.py` — deterministic C3 ThoughtEngine reference.\n- `model_swap_eval.py` — reproducible receipt proving same SelfState across a weak/strong engine swap.
 
 Rules:
 

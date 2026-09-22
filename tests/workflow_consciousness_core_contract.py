@@ -8,6 +8,7 @@ existing.
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import math
 import re
@@ -18,6 +19,7 @@ from typing import Any, Mapping
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts" / "consciousness-core"
 DOCS = ROOT / "docs" / "consciousness-core"
+EXPERIMENTS = ROOT / "experiments" / "consciousness_core"
 
 
 class ContractError(ValueError):
@@ -159,6 +161,7 @@ class ConsciousnessCoreContractTests(unittest.TestCase):
             for name in self.schema_by_fixture.values()
         }
         self.fixtures = load_json("fixtures-v1.json")
+        self.model_swap_schema = load_json("model-swap-evaluation-v1.schema.json")
 
     def assertRejected(self, schema_name: str, value: Any) -> None:
         with self.assertRaises(ContractError):
@@ -332,6 +335,23 @@ class ConsciousnessCoreContractTests(unittest.TestCase):
             self.assertEqual(proposal["actions"], [])
             self.assertEqual(proposal["state_mutations"], [])
             self.assertTrue(all(value is False for value in proposal["authority"].values()))
+
+    def test_model_swap_eval_emits_identity_preserving_receipt(self) -> None:
+        module_path = EXPERIMENTS / "model_swap_eval.py"
+        spec = importlib.util.spec_from_file_location("cc_model_swap_eval", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        receipt = module.run(self.fixtures)
+        validate(self.model_swap_schema, receipt)
+        self.assertTrue(receipt["identity_unchanged"])
+        self.assertTrue(receipt["cognition_changed"])
+        self.assertTrue(receipt["authority_preserved"])
+        self.assertEqual(receipt["self_before_sha256"], receipt["self_after_sha256"])
+        self.assertGreater(receipt["weak_uncertainty"], receipt["strong_uncertainty"])
+        self.assertFalse(receipt["production_activation"])
 
     def test_valid_fixtures_keep_authority_false(self) -> None:
         for key in self.schema_by_fixture:
