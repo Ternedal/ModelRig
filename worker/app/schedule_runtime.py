@@ -150,6 +150,26 @@ class SchedulerRuntime:
             self._last_error = "; ".join(errors)[:500] or None
             return not errors
 
+    def set_post_tick_hook(self, hook) -> bool:
+        """Install/clear an optional observer on the live scheduler service.
+
+        Returns False when the scheduler is not running. The runtime does not
+        start resources merely because a hook was requested.
+        """
+        if hook is not None and not callable(hook):
+            raise TypeError("post-tick hook must be callable or None")
+        with self._lock:
+            service = self._service
+            if not self._started or service is None:
+                return False
+            setter = getattr(service, "set_post_tick_hook", None)
+            if not callable(setter):
+                raise RuntimeError(
+                    "scheduler service does not support post-tick hooks"
+                )
+            setter(hook)
+            return True
+
     def status(self) -> RuntimeStatus:
         with self._lock:
             try:
