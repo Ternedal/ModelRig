@@ -23,6 +23,7 @@ from .memory.write_mount import (
     compose_memory4_write_lifespan,
     mount_memory4_write,
 )
+from .consciousness_core.cognition_step_api import mount_consciousness_cognition_step
 from .consciousness_core.production_lifecycle import production_sleep_runtime_factory
 from .consciousness_core.session_lifecycle import (
     compose_cognitive_session_lifespan,
@@ -91,6 +92,11 @@ mount_memory4_write(fastapi_app)
 # it only admits reported user-turn evidence into an already-live C19/C20
 # session, and the route is absent unless its own exact opt-in is set.
 mount_consciousness_user_turn(fastapi_app)
+
+# C22-C is a stronger capability than turn admission: it may invoke the
+# replaceable ThoughtEngine exactly once for a required pending event. It has
+# its own exact opt-in and remains loopback-only.
+mount_consciousness_cognition_step(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
