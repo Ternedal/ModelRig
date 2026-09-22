@@ -146,10 +146,30 @@ func (s *server) handleConsciousnessChat(w http.ResponseWriter, r *http.Request)
 		!receipt.Replayed &&
 		receipt.CognitionEventQueued &&
 		receipt.CognitionEventID != nil {
+		eventID := *receipt.CognitionEventID
 		// Explicit opt-in only. The exact event id is obtained from the already
 		// validated C21 receipt; no caller prompt/model/profile crosses this seam.
-		// Failure is intentionally isolated from the existing normal-chat owner.
-		_ = s.requestConsciousnessExactEventStep(r, *receipt.CognitionEventID)
+		step, stepErr := s.requestConsciousnessExactEventStep(r, eventID)
+		if stepErr == nil &&
+			consciousnessReplyGuidanceEnabled() &&
+			step.Decision == "RUN" &&
+			step.RequiredEventSelected &&
+			containsConsciousnessEventID(step.SelectedEventIDs, eventID) {
+			guidance, guidanceErr := s.requestConsciousnessGuidance(r, eventID)
+			if guidanceErr == nil {
+				guidedBody, injectErr := injectConsciousnessResponseGuidance(
+					probe,
+					guidance.Text,
+				)
+				if injectErr == nil {
+					r.Body = io.NopCloser(bytes.NewReader(guidedBody))
+					r.ContentLength = int64(len(guidedBody))
+					r.Header.Del("Content-Length")
+					s.handleMemory4Chat(w, r)
+					return
+				}
+			}
+		}
 	}
 	s.handleMemory4Chat(w, r)
 }
@@ -269,15 +289,16 @@ func (s *server) requestConsciousnessUserTurn(
 func (s *server) requestConsciousnessExactEventStep(
 	r *http.Request,
 	requiredEventID string,
-) error {
+) (consciousnessExactEventStepReceipt, error) {
+	var zero consciousnessExactEventStepReceipt
 	if !validConsciousnessEventID(requiredEventID) {
-		return errors.New("consciousness exact-event id is invalid")
+		return zero, errors.New("consciousness exact-event id is invalid")
 	}
 	body, err := json.Marshal(consciousnessExactEventStepRequest{
 		RequiredEventID: requiredEventID,
 	})
 	if err != nil {
-		return err
+		return zero, err
 	}
 	req, err := http.NewRequestWithContext(
 		r.Context(),
@@ -286,7 +307,7 @@ func (s *server) requestConsciousnessExactEventStep(
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if traceID := strings.TrimSpace(r.Header.Get("X-Request-ID")); traceID != "" {
@@ -295,35 +316,38 @@ func (s *server) requestConsciousnessExactEventStep(
 
 	resp, err := memory4WorkerHTTPClient(consciousnessCognitionTimeout).Do(req)
 	if err != nil {
-		return err
+		return zero, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return errors.New("consciousness exact-event worker refused request")
+		return zero, errors.New("consciousness exact-event worker refused request")
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, consciousnessMaxWorkerResponseBytes+1))
 	if err != nil {
-		return err
+		return zero, err
 	}
 	if len(raw) > consciousnessMaxWorkerResponseBytes {
-		return errors.New("consciousness exact-event response exceeds bound")
+		return zero, errors.New("consciousness exact-event response exceeds bound")
 	}
 	if err := requireConsciousnessExactEventReceiptFields(raw); err != nil {
-		return err
+		return zero, err
 	}
 
 	var receipt consciousnessExactEventStepReceipt
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&receipt); err != nil {
-		return err
+		return zero, err
 	}
 	if err := ensureMemory4JSONEOF(dec); err != nil {
-		return err
+		return zero, err
 	}
-	return validateConsciousnessExactEventReceipt(receipt, requiredEventID)
+	if err := validateConsciousnessExactEventReceipt(receipt, requiredEventID); err != nil {
+		return zero, err
+	}
+	return receipt, nil
 }
 
 func requireConsciousnessExactEventReceiptFields(raw []byte) error {
