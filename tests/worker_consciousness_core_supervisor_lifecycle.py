@@ -341,7 +341,7 @@ try:
         "C18-B grants no execution authority",
     )
 
-    # A fresh bridge with a larger pacing interval returns WAIT with zero model calls.
+    # First event may run immediately. Pacing applies BETWEEN completed cycles.
     wait_engine = Engine()
     wait_bridge = ProductionSupervisorBridge(
         runtime=ConsciousnessCoreRuntime(wait_engine),
@@ -358,14 +358,14 @@ try:
             schema="kaliv-consciousness-core/cognition-event/v1",
             event_id="cevt-" + "3" * 32,
             kind="world_change",
-            source_ref="event:wait-test",
-            summary="Event should wait for the minimum cycle interval.",
+            source_ref="event:first-cycle",
+            summary="First event may trigger the first explicit cognitive cycle.",
             salience=0.8,
             observed_sequence=3,
             production_activation=False,
         )
     )
-    wait_step = run(
+    first_wait_cycle = run(
         wait_bridge.step(
             current_state=state,
             current_world=world,
@@ -374,9 +374,35 @@ try:
             profile=profile,
         )
     )
-    check(wait_step.plan.decision == "WAIT", "pacing can return WAIT")
-    check(not wait_step.thought_engine_invoked, "WAIT invokes no ThoughtEngine")
-    check(wait_engine.calls == 0, "WAIT leaves model call count at zero")
+    check(
+        first_wait_cycle.plan.decision == "RUN" and wait_engine.calls == 1,
+        "first pending event may run immediately after supervisor bootstrap",
+    )
+    wait_bridge.submit(
+        CognitionEvent(
+            schema="kaliv-consciousness-core/cognition-event/v1",
+            event_id="cevt-" + "8" * 32,
+            kind="world_change",
+            source_ref="event:wait-test",
+            summary="Second event must respect the minimum inter-cycle interval.",
+            salience=0.8,
+            observed_sequence=4,
+            production_activation=False,
+        )
+    )
+    first_reduction = first_wait_cycle.cycle_result.reduction
+    wait_step = run(
+        wait_bridge.step(
+            current_state=first_reduction.next_self_state,
+            current_world=world,
+            current_workspace=first_reduction.next_workspace,
+            personality_snapshot=personality,
+            profile=profile,
+        )
+    )
+    check(wait_step.plan.decision == "WAIT", "inter-cycle pacing can return WAIT")
+    check(not wait_step.thought_engine_invoked, "WAIT invokes no additional ThoughtEngine")
+    check(wait_engine.calls == 1, "WAIT preserves the prior model call count")
 
     # Concurrent submit during an awaited model call fails closed instead of
     # silently losing the newly queued event.
