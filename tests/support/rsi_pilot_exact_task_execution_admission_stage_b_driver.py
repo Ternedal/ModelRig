@@ -18,6 +18,7 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Mapping
 
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
@@ -78,10 +79,16 @@ def _timeout_for(filename: str) -> int:
     return _DEFAULT_TIMEOUT_SECONDS
 
 
-def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
+def _run_contract_file(
+    filename: str,
+    *,
+    env_overrides: Mapping[str, str] | None = None,
+) -> tuple[str, int, float, str]:
     path = SUPPORT / filename
     started = time.monotonic()
     env = os.environ.copy()
+    if env_overrides is not None:
+        env.update(env_overrides)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     timeout = _timeout_for(filename)
@@ -147,7 +154,7 @@ def _run_serial_phase(phase: str, filename: str) -> None:
     )
 
 
-def _run_admission_prefix() -> None:
+def _run_shallow_admission_contracts() -> None:
     shallow_worker_count = min(
         _MAX_SHALLOW_PARALLEL_CONTRACTS,
         max(1, os.cpu_count() or 1),
@@ -178,6 +185,9 @@ def _run_admission_prefix() -> None:
 
     _raise_failures("shallow standalone phase", _SHALLOW_CONTRACT_FILES, shallow_results)
 
+
+def _run_admission_prefix() -> None:
+    _run_shallow_admission_contracts()
     _run_serial_phase(
         "phase 1b/3, ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
         _SHARED_DEEP_CHAIN_FILE,
@@ -221,6 +231,81 @@ def _external_cache_root(stage_b_slice: str) -> Path | None:
             "Stage-B preloaded cache root must contain proofs.json and start-ledger/"
         )
     return root.resolve()
+
+
+def _run_parallel_admission_slice() -> None:
+    """Qualify admission with the deep pair and nonce guard in sibling processes.
+
+    The two processes are authority-independent.  Only the nonce-reuse guard gets
+    the canonical cache/start-ledger overrides it must publish for downstream
+    shards; the ADR-032/033 shared-provenance child keeps its normal isolated
+    temporary ledgers.  This preserves the exact contract semantics while
+    removing a purely sequential duplicate deep-provenance wall-time penalty.
+    """
+    external_root = _external_cache_root("admission")
+    proof_cache_temp = None
+    if external_root is None:
+        proof_cache_temp = tempfile.TemporaryDirectory(
+            prefix="rsi-exact-task-stage-b-proof-cache-"
+        )
+        proof_cache_root = Path(proof_cache_temp.name).resolve()
+    else:
+        proof_cache_root = external_root
+
+    proof_cache_path = proof_cache_root / "proofs.json"
+    start_ledger_root = proof_cache_root / "start-ledger"
+    start_ledger_root.mkdir()
+    nonce_env = {
+        "MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE": str(proof_cache_path),
+        "MODELRIG_STAGE_B_START_LEDGER_ROOT": str(start_ledger_root),
+    }
+
+    try:
+        _run_shallow_admission_contracts()
+        files = (_SHARED_DEEP_CHAIN_FILE, _NONCE_REUSE_FILE)
+        results: dict[str, tuple[int, float, str]] = {}
+        print(
+            "Stage-B exact-task admission chain: phase 1b+2a/3, "
+            "shared deep pair and nonce-reuse guard in 2 isolated workers",
+            flush=True,
+        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {}
+            print(
+                f"  START: {_SHARED_DEEP_CHAIN_FILE} "
+                f"({_timeout_for(_SHARED_DEEP_CHAIN_FILE)}s bound)",
+                flush=True,
+            )
+            futures[
+                executor.submit(_run_contract_file, _SHARED_DEEP_CHAIN_FILE)
+            ] = _SHARED_DEEP_CHAIN_FILE
+            print(
+                f"  START: {_NONCE_REUSE_FILE} "
+                f"({_timeout_for(_NONCE_REUSE_FILE)}s bound)",
+                flush=True,
+            )
+            futures[
+                executor.submit(
+                    _run_contract_file,
+                    _NONCE_REUSE_FILE,
+                    env_overrides=nonce_env,
+                )
+            ] = _NONCE_REUSE_FILE
+
+            for future in as_completed(futures):
+                filename, returncode, elapsed, output = future.result()
+                results[filename] = (returncode, elapsed, output)
+                status = "PASS" if returncode == 0 else f"FAIL({returncode})"
+                print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
+
+        _raise_failures("parallel deep admission phase", files, results)
+        if not proof_cache_path.is_file():
+            raise AssertionError(
+                "Stage-B ADR-033 nonce guard did not publish the shared proof cache"
+            )
+    finally:
+        if proof_cache_temp is not None:
+            proof_cache_temp.cleanup()
 
 
 def _restore_env(name: str, previous: str | None) -> None:
@@ -317,7 +402,10 @@ def run_contract() -> None:
         f"Stage-B exact-task admission chain selected slice: {stage_b_slice}",
         flush=True,
     )
-    if stage_b_slice in ("all", "admission"):
+    if stage_b_slice == "admission":
+        _run_parallel_admission_slice()
+        return
+    if stage_b_slice == "all":
         _run_admission_prefix()
     _run_cached_slice(stage_b_slice)
 
