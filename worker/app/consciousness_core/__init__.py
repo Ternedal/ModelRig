@@ -263,6 +263,13 @@ from .temporal import (
     relate_anchors,
     temporal_experience_state,
 )
+from .wake_followup import (
+    WAKE_FOLLOWUP_SALIENCE,
+    WakeFollowupAdmissionError,
+    build_wake_followup_event,
+    wake_followup_event_id,
+    wake_receipt_ref,
+)
 from .world_reducer import (
     WorldEvidenceEvent,
     WorldReducerError,
@@ -297,6 +304,11 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "wake_receipt_ref",
+    "wake_followup_event_id",
+    "build_wake_followup_event",
+    "WakeFollowupAdmissionError",
+    "WAKE_FOLLOWUP_SALIENCE",
     "production_autonomous_scheduler_bridge_factory",
     "compose_autonomous_scheduler_lifespan",
     "autonomous_scheduler_enabled",
