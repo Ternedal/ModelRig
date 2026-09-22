@@ -179,6 +179,7 @@ class ProductionSupervisorBridge:
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
         required_event_id: str | None = None,
+        allowed_event_ids: list[str] | None = None,
     ) -> SupervisorBridgeStep:
         """Evaluate one supervisor step; never loops or retries automatically."""
         self._require_available()
@@ -212,6 +213,38 @@ class ProductionSupervisorBridge:
                 ):
                     raise SupervisorLifecycleError(
                         "required cognition event is not selected by canonical plan"
+                    )
+
+            if allowed_event_ids is not None:
+                if not isinstance(allowed_event_ids, list):
+                    raise SupervisorLifecycleError(
+                        "allowed_event_ids must be a list when supplied"
+                    )
+                if len(allowed_event_ids) > 64 or len(allowed_event_ids) != len(
+                    set(allowed_event_ids)
+                ):
+                    raise SupervisorLifecycleError(
+                        "allowed cognition event set is invalid"
+                    )
+                for event_id in allowed_event_ids:
+                    if (
+                        not isinstance(event_id, str)
+                        or re.fullmatch(r"cevt-[a-f0-9]{32}", event_id) is None
+                    ):
+                        raise SupervisorLifecycleError(
+                            "allowed cognition event id is invalid"
+                        )
+                allowed = set(allowed_event_ids)
+                if required_event_id is not None and required_event_id not in allowed:
+                    raise SupervisorLifecycleError(
+                        "required cognition event is outside allowed event set"
+                    )
+                if plan.decision == "RUN" and any(
+                    event_id not in allowed
+                    for event_id in plan.selected_event_ids
+                ):
+                    raise SupervisorLifecycleError(
+                        "canonical plan selected an event outside allowed set"
                     )
 
             if plan.decision != "RUN":
