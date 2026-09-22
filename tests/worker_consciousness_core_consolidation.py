@@ -233,6 +233,39 @@ class ConsciousnessCoreConsolidationTests(unittest.TestCase):
         self.assertNotIn("actions", fields)
         self.assertNotIn("schedule", fields)
 
+    def test_long_horizon_eval_preserves_self_across_swaps_restarts_and_conflict(self) -> None:
+        path = (
+            ROOT
+            / "experiments"
+            / "consciousness_core"
+            / "long_horizon_continuity_eval.py"
+        )
+        spec = importlib.util.spec_from_file_location("cc_c10_long_horizon_eval", path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        receipt = module.run(cycles=120)
+        self.assertEqual(receipt["schema"], "kaliv-consciousness-core/long-horizon-eval/v1")
+        self.assertEqual(receipt["cycles"], 120)
+        self.assertEqual(receipt["model_swaps"], 3)
+        self.assertEqual(receipt["restart_roundtrips"], 2)
+        self.assertTrue(receipt["identity_unchanged"])
+        self.assertEqual(
+            receipt["self_before_sha256"],
+            receipt["self_after_sha256"],
+        )
+        self.assertTrue(receipt["review_only_candidates"])
+        self.assertTrue(receipt["world_conflict_visible"])
+        self.assertEqual(receipt["ignored_model_evidence_count"], 4)
+        self.assertFalse(receipt["raw_chain_of_thought_persisted"])
+        self.assertFalse(receipt["production_activation"])
+        self.assertEqual(
+            receipt["candidate_types"],
+            ["PERSONALITY_REVISION", "RELATIONSHIP_MODEL", "SELF_MODEL_DELTA"],
+        )
+
     def test_c10_has_no_store_executor_scheduler_or_person_registry_import(self) -> None:
         source = (
             ROOT / "worker" / "app" / "consciousness_core" / "consolidation.py"

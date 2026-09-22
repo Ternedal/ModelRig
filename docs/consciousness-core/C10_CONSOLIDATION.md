@@ -66,3 +66,17 @@ confirmations, schedule background consolidation, persist raw private
 chain-of-thought, or claim phenomenal consciousness.
 
 production_activation=false.
+
+## Long-horizon continuity evaluation
+
+The experiments-only long_horizon_continuity_eval.py executes at least 120
+deterministic cognitive cycles with four transient ThoughtEngine identities,
+two serialization/restart roundtrips, repeated personality evidence, transient
+affect, goal/prediction evidence, Memory 4 and experience references, and one
+explicit world-model contradiction.
+
+Its receipt must prove that the same Self/Person binding survives, model identity
+evidence is ignored, long-term outputs remain review-only, and contradictory
+world evidence remains visible.
+
+This is a functional continuity test, not a claim of subjective consciousness.
