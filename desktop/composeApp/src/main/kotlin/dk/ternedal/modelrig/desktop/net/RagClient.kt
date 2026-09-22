@@ -88,7 +88,7 @@ internal object RagStreamParser {
          * doer midt i et svar (`main_impl.py`, /rag/chat). Uden dette tilfaelde
          * saa brugeren et afbrudt svar uden aarsag.
          */
-        data class Failure(val message: String) : Event
+        data object Failure : Event
 
         data object Ignored : Event
     }
@@ -104,7 +104,7 @@ internal object RagStreamParser {
         val error = runCatching {
             json.decodeFromString(RagErrorLine.serializer(), line).error
         }.getOrDefault("")
-        if (error.isNotEmpty()) return Event.Failure(error)
+        if (error.isNotEmpty()) return Event.Failure
         val phase = runCatching {
             json.decodeFromString(RagPhaseLine.serializer(), line).phase
         }.getOrDefault("")
@@ -240,7 +240,7 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
                     }
                     sawDone = true
                 }
-                is RagStreamParser.Event.Failure ->
+                RagStreamParser.Event.Failure ->
                     throw OllamaException(RagClientErrors.worker("rag chat"))
                 RagStreamParser.Event.Ignored -> Unit
             }
