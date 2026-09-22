@@ -25,6 +25,10 @@ from .memory.write_mount import (
 )
 from .consciousness_core.production_lifecycle import production_sleep_runtime_factory
 from .consciousness_core.sleep_lifecycle import compose_sleep_lifecycle_lifespan
+from .consciousness_core.supervisor_lifecycle import (
+    compose_supervisor_lifecycle_lifespan,
+    production_supervisor_bridge_factory,
+)
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
@@ -110,10 +114,13 @@ mount_file_capabilities(fastapi_app)
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
 # around the existing scheduler lifespan so process shutdown deterministically
 # closes both optional substrates without transferring lifecycle ownership.
-fastapi_app.router.lifespan_context = compose_sleep_lifecycle_lifespan(
-    compose_memory4_write_lifespan(
-        compose_memory4_context_lifespan(scheduler_lifespan)
+fastapi_app.router.lifespan_context = compose_supervisor_lifecycle_lifespan(
+    compose_sleep_lifecycle_lifespan(
+        compose_memory4_write_lifespan(
+            compose_memory4_context_lifespan(scheduler_lifespan)
+        ),
+        production_sleep_runtime_factory,
     ),
-    production_sleep_runtime_factory,
+    production_supervisor_bridge_factory,
 )
 app = harden(fastapi_app)
