@@ -124,6 +124,7 @@ class ProductionSupervisorBridge:
             clock_sample=bootstrap_clock,
         )
         self._closed = False
+        self._in_step = False
 
     @property
     def state(self) -> SupervisorState:
@@ -141,16 +142,23 @@ class ProductionSupervisorBridge:
         if self._closed:
             raise SupervisorLifecycleError("supervisor bridge is closed")
 
+    def _require_available(self) -> None:
+        self._require_open()
+        if self._in_step:
+            raise SupervisorLifecycleError(
+                "supervisor bridge step already in progress"
+            )
+
     def submit(
         self,
         event: CognitionEvent | Mapping[str, Any],
     ) -> SupervisorState:
-        self._require_open()
+        self._require_available()
         self._state = queue_cognition_event(self._state, event)
         return self._state
 
     def plan(self) -> tuple[ClockSample, SupervisorPlan]:
-        self._require_open()
+        self._require_available()
         clock = self._clock.sample()
         plan = plan_supervisor_step(
             state=self._state,
@@ -171,45 +179,59 @@ class ProductionSupervisorBridge:
         embodiment_state_ref: str | None = None,
     ) -> SupervisorBridgeStep:
         """Evaluate one supervisor step; never loops or retries automatically."""
-        self._require_open()
-        clock, plan = self.plan()
+        self._require_available()
+        self._in_step = True
+        try:
+            clock = self._clock.sample()
+            plan = plan_supervisor_step(
+                state=self._state,
+                clock_sample=clock,
+                policy=self._policy,
+            )
 
-        if plan.decision != "RUN":
+            if plan.decision != "RUN":
+                return SupervisorBridgeStep(
+                    clock_sample=clock,
+                    plan=plan,
+                    cycle_result=None,
+                    thought_engine_invoked=False,
+                    internal_thread_created=False,
+                    internal_timer_created=False,
+                    automatic_repeat=False,
+                    production_activation=False,
+                )
+
+            state_before = self._state
+            result = await self._kernel.run_once(
+                supervisor_state=state_before,
+                plan=plan,
+                clock_sample=clock,
+                policy=self._policy,
+                current_state=current_state,
+                current_world=current_world,
+                current_workspace=current_workspace,
+                personality_snapshot=personality_snapshot,
+                profile=profile,
+                relevant_memory_refs=relevant_memory_refs,
+                embodiment_state_ref=embodiment_state_ref,
+            )
+            if self._state is not state_before:
+                raise SupervisorLifecycleError(
+                    "supervisor state changed during single-flight step"
+                )
+            self._state = result.next_supervisor_state
             return SupervisorBridgeStep(
                 clock_sample=clock,
                 plan=plan,
-                cycle_result=None,
-                thought_engine_invoked=False,
+                cycle_result=result,
+                thought_engine_invoked=True,
                 internal_thread_created=False,
                 internal_timer_created=False,
                 automatic_repeat=False,
                 production_activation=False,
             )
-
-        result = await self._kernel.run_once(
-            supervisor_state=self._state,
-            plan=plan,
-            clock_sample=clock,
-            policy=self._policy,
-            current_state=current_state,
-            current_world=current_world,
-            current_workspace=current_workspace,
-            personality_snapshot=personality_snapshot,
-            profile=profile,
-            relevant_memory_refs=relevant_memory_refs,
-            embodiment_state_ref=embodiment_state_ref,
-        )
-        self._state = result.next_supervisor_state
-        return SupervisorBridgeStep(
-            clock_sample=clock,
-            plan=plan,
-            cycle_result=result,
-            thought_engine_invoked=True,
-            internal_thread_created=False,
-            internal_timer_created=False,
-            automatic_repeat=False,
-            production_activation=False,
-        )
+        finally:
+            self._in_step = False
 
     def close(self) -> None:
         # No durable state is written. Closing only blocks future in-process use.
