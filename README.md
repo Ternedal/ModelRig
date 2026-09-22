@@ -1,7 +1,7 @@
 # ModelRig
 
 A local-first AI platform: run models on your own hardware via Ollama, reach them
-from a desktop app (**Kaliv** on Windows) and an Android phone (**Kaliv**), with
+from a desktop app (**Kaliv** on Windows), an Android phone (**Kaliv**), and the **Kaliv VR** OpenXR client, with
 Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document ingest
 (pdf/docx/pptx/html/photos), a confirmation-gated tool layer, and an optional
 Ollama Cloud brain for when local isn't enough. The backend keeps the ModelRig
@@ -188,6 +188,7 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
   model or dimension **fails closed with a named error** instead of returning
   nothing — silence that looks like "no relevant sources" is the one answer a
   disconnected index must never give.
+- **vr/** — Kaliv VR (Unity/OpenXR, Quest). First-party ModelRig client using the same pairing/bearer/chat contracts as Android/Desktop, with reusable XR/media mechanics supplied by `Ternedal/SkyPlayer-Engine`.
 - **desktop/** — Compose Desktop (JVM). **Streaming** chat with local-first +
   Ollama Cloud fallback, model picker, branded UI.
 - **android/** — Compose Android V1. Talk to your **rig** (backend → local models
@@ -322,6 +323,7 @@ sh tests/run_tests.sh
 | backend  | Go server: pairing, tokens, reverse proxy — plus its own `/api/v1/system/status` and `/api/v1/models/unload` (stdlib only, fail-soft) | ✅ `go build` + `go test` (config, httpapi) in CI |
 | worker   | FastAPI: RAG, voice, tools, jobs, isolation   | ✅ full suite in CI — `tests/worker_*.py` + `tests/workflow_*.py`, auto-globbed (live counts in the CI log; this file does not keep score) |
 | android  | Kaliv APK (minSdk 26)                         | ✅ built in CI, `kaliv-latest.apk` on every release |
+| vr       | Kaliv VR Unity/OpenXR client                   | 🚧 bootstrap branch; Quest build/device qualification pending |
 | desktop  | Kaliv Windows JAR (Compose JVM)               | ✅ built in CI, `Kaliv-windows-x64-X.Y.Z.jar` |
 | exes     | server + worker Windows executables           | ✅ built in CI, attached to every release |
 

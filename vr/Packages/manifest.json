@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "dk.ternedal.skyplayer.engine": "https://github.com/Ternedal/SkyPlayer-Engine.git#a6c0087624fff26472a8804e7efd4e8e7347c3d7",
+    "com.unity.inputsystem": "1.19.0",
+    "com.unity.ugui": "2.0.0",
+    "com.unity.xr.core-utils": "2.6.0",
+    "com.unity.xr.management": "4.5.2",
+    "com.unity.xr.openxr": "1.16.1",
+    "com.unity.modules.androidjni": "1.0.0",
+    "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0",
+    "com.unity.modules.xr": "1.0.0",
+    "com.vrmc.gltf": "https://github.com/vrm-c/UniVRM.git?path=/Packages/UniGLTF#v0.131.2",
+    "com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.2"
+  }
+}

@@ -94,12 +94,24 @@ class BodyAssetTests(unittest.TestCase):
         self.assertEqual(manifest["source"], "current")
         self.assertEqual(manifest["name"], "Kaliv body")
         self.assertEqual(manifest["motions"], {})  # fixture carries no motions
+        self.assertEqual(manifest["motion_names"], [])
+        self.assertEqual(manifest["bodyprint"], "/body/active/bodyprint.json")
         avatar = self.c.get("/body/active/avatar.vrm")
         self.assertEqual(avatar.status_code, 200)
         self.assertEqual(avatar.headers["content-type"].split(";")[0], "model/gltf-binary")
         self.assertEqual(avatar.content, vrm_fixture("kaliv"))
         self.assertEqual(avatar.headers["X-BodyRig-Body-ID"], self.body_id)
         self.assertEqual(avatar.headers["X-BodyRig-Member-SHA256"], hashlib.sha256(avatar.content).hexdigest())
+        bodyprint = self.c.get("/body/active/bodyprint.json")
+        self.assertEqual(bodyprint.status_code, 200)
+        self.assertEqual(bodyprint.headers["content-type"].split(";")[0], "application/json")
+        self.assertEqual(bodyprint.headers["X-BodyRig-Body-ID"], self.body_id)
+        self.assertEqual(
+            bodyprint.headers["X-BodyRig-Member-SHA256"],
+            hashlib.sha256(bodyprint.content).hexdigest(),
+        )
+        self.assertEqual(bodyprint.json()["format"], "modelrig-bodyprint")
+        self.assertEqual(bodyprint.json()["version"], 1)
         thumb = self.c.get("/body/active/thumbnail.png")
         self.assertEqual(thumb.status_code, 200)
         self.assertEqual(thumb.content, png_fixture())

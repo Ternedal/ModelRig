@@ -30,6 +30,10 @@ func (s *server) handleBodyAvatar(w http.ResponseWriter, r *http.Request) {
 	s.forwardBody(w, r, "/body/active/avatar.vrm")
 }
 
+func (s *server) handleBodyBodyprint(w http.ResponseWriter, r *http.Request) {
+	s.forwardBody(w, r, "/body/active/bodyprint.json")
+}
+
 func (s *server) handleBodyThumbnail(w http.ResponseWriter, r *http.Request) {
 	s.forwardBody(w, r, "/body/active/thumbnail.png")
 }
