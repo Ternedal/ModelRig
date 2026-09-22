@@ -189,30 +189,7 @@ def build_consciousness_user_turn_router(
             cognition_event_queued=result.cognition_event_queued,
             epistemic_status="reported",
             confidence=1.0,
-            observed_sequence=(
-                event.observed_sequence
-                if event is not None
-                else next(
-                    item.observed_sequence
-                    for item in session.supervisor_state.pending_events
-                    if item.source_ref == result.evidence_ref
-                )
-                if any(
-                    item.source_ref == result.evidence_ref
-                    for item in session.supervisor_state.pending_events
-                )
-                else next(
-                    (
-                        obs_index
-                        for obs_index, obs in enumerate(
-                            session.live_state.world.observations,
-                            start=1,
-                        )
-                        if result.evidence_ref in obs.source_refs
-                    ),
-                    0,
-                )
-            ),
+            observed_sequence=result.observed_sequence,
             model_calls=0,
             self_state_store_write_applied=False,
             durable_memory_write_authority=False,
