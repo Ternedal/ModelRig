@@ -75,6 +75,13 @@ from .runtime import (
     compose_runtime,
     enabled,
 )
+from .sleep import (
+    SleepContractError,
+    SleepRecord,
+    WakeReceipt,
+    prepare_sleep,
+    wake_from_sleep,
+)
 from .temporal import (
     ClockSample,
     DeadlineState,
@@ -97,6 +104,11 @@ from .thought_engine import (
 
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
+    "wake_from_sleep",
+    "prepare_sleep",
+    "WakeReceipt",
+    "SleepRecord",
+    "SleepContractError",
     "temporal_experience_state",
     "relate_anchors",
     "deadline_state",
