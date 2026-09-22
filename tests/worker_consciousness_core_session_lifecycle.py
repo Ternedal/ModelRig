@@ -342,6 +342,18 @@ class SessionLifecycleTests(unittest.TestCase):
             self.assertEqual(event.kind, "wake_followup")
             self.assertEqual(event.event_id, wake_followup_event_id(wake))
             self.assertEqual(event.source_ref, wake_receipt_ref(wake))
+            self.assertTrue(
+                any(
+                    event.source_ref in observation.source_refs
+                    for observation in session.live_state.world.observations
+                )
+            )
+            self.assertTrue(
+                any(
+                    candidate.source_ref == event.source_ref
+                    for candidate in session.live_state.workspace.candidates
+                )
+            )
 
             # Exact duplicate admission remains idempotent in C18.
             before_revision = session.supervisor_state.revision
