@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/consciousness-core/workspace-v1.schema.json",
+  "title": "Kaliv Consciousness Core Cognitive Workspace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "cycle_id",
+    "candidates",
+    "selected_candidate_ids",
+    "max_active",
+    "production_activation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-consciousness-core/workspace/v1"
+    },
+    "cycle_id": {
+      "type": "string",
+      "pattern": "^cycle-[a-f0-9]{32}$"
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "kind",
+          "salience",
+          "summary",
+          "source_ref"
+        ],
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "pattern": "^wc-[a-f0-9]{32}$"
+          },
+          "kind": {
+            "enum": [
+              "perception",
+              "memory",
+              "goal",
+              "body",
+              "voice",
+              "tool_result",
+              "prediction_error",
+              "thought_result"
+            ]
+          },
+          "salience": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "source_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "selected_candidate_ids": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^wc-[a-f0-9]{32}$"
+      }
+    },
+    "max_active": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16
+    },
+    "production_activation": {
+      "const": false
+    }
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/consciousness-core/self-state-v1.schema.json",
+  "title": "Kaliv Consciousness Core SelfState v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "self_id",
+    "revision",
+    "person_id",
+    "person_revision",
+    "personality_state_ref",
+    "world_state_ref",
+    "workspace_ref",
+    "active_goal_refs",
+    "active_intention_refs",
+    "affect",
+    "known_uncertainties",
+    "last_experience_ref",
+    "production_activation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-consciousness-core/self-state/v1"
+    },
+    "self_id": {
+      "type": "string",
+      "pattern": "^self-[a-f0-9]{32}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "person_id": {
+      "type": "string",
+      "pattern": "^person-[a-f0-9]{32}$"
+    },
+    "person_revision": {
+      "type": "string",
+      "pattern": "^person-r[0-9]{4,}$"
+    },
+    "personality_state_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "world_state_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "workspace_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "active_goal_refs": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "active_intention_refs": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "affect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "labels",
+        "valence",
+        "arousal",
+        "confidence",
+        "source_refs"
+      ],
+      "properties": {
+        "labels": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "valence": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "arousal": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "known_uncertainties": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "confidence",
+          "source_refs"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "source_refs": {
+            "type": "array",
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        }
+      }
+    },
+    "last_experience_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "production_activation": {
+      "const": false
+    }
+  }
+}
