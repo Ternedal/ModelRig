@@ -212,7 +212,11 @@ def build_consciousness_step_router(
             completed_cycles_before=before.completed_cycles,
             completed_cycles_after=after.completed_cycles,
             context_updated=result.context_updated,
-            transition_receipt_ref=after.last_transition_receipt_ref,
+            transition_receipt_ref=(
+                after.last_transition_receipt_ref
+                if result.context_updated
+                else None
+            ),
             model_output_exposed=False,
             raw_chain_of_thought_exposed=False,
             self_state_store_write_applied=False,
