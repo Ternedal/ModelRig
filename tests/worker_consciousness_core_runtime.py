@@ -243,16 +243,25 @@ class ConsciousnessCoreRuntimeTests(unittest.TestCase):
         main_impl = (
             ROOT / "worker" / "app" / "main_impl.py"
         ).read_text(encoding="utf-8")
-        self.assertNotIn("consciousness_core", entrypoint)
-        self.assertNotIn("consciousness_core", main_impl)
-        self.assertNotIn("KALIV_CONSCIOUSNESS_CORE_ENABLED", entrypoint)
-        self.assertNotIn("KALIV_CONSCIOUSNESS_CORE_ENABLED", main_impl)
+
+        # Later reviewed slices may compose route-less lifecycle/state support
+        # from the consciousness_core package. C4 itself must still never be
+        # mounted as a chat/API runtime or activated through the worker entrypoint.
+        for source in (entrypoint, main_impl):
+            self.assertNotIn("KALIV_CONSCIOUSNESS_CORE_ENABLED", source)
+            self.assertNotIn("compose_runtime(", source)
+            self.assertNotIn("ConsciousnessCoreRuntime(", source)
+            self.assertNotIn("OllamaThoughtEngine(", source)
 
     def test_c4_package_has_no_persistence_or_executor_imports(self) -> None:
         package = ROOT / "worker" / "app" / "consciousness_core"
+
+        # Scope the C4 isolation invariant to the C4 execution boundary itself.
+        # C13/C14 are separately reviewed persistence/lifecycle slices and are
+        # intentionally allowed to import their own narrowly-scoped authorities.
         combined = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted(package.glob("*.py"))
+            (package / name).read_text(encoding="utf-8")
+            for name in ("contracts.py", "runtime.py", "thought_engine.py")
         )
         for forbidden in (
             "import sqlite3",
@@ -262,6 +271,8 @@ class ConsciousnessCoreRuntimeTests(unittest.TestCase):
             "PersonRegistry",
             "body_session",
             "schedule_service",
+            "SelfStateStore",
+            "SleepStateStore",
         ):
             self.assertNotIn(forbidden, combined)
 
