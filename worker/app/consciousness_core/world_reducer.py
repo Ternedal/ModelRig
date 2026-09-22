@@ -53,7 +53,9 @@ class WorldEvidenceEvent(StrictModel):
     proposition: BoundedText
     confidence: UnitInterval
     epistemic_status: EpistemicStatus
-    source_refs: Annotated[list[NonEmptyRef], Field(min_length=1, max_length=32)]
+    # One slot is reserved for the canonical WorldEvidenceEvent ref that the
+    # reducer appends to each admitted observation.
+    source_refs: Annotated[list[NonEmptyRef], Field(min_length=1, max_length=31)]
     observed_sequence: Annotated[int, Field(ge=0, strict=True)]
     production_activation: Literal[False]
 
@@ -140,6 +142,20 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
+def world_evidence_event_ref(
+    evidence: WorldEvidenceEvent | Mapping[str, Any],
+) -> str:
+    try:
+        event = (
+            evidence
+            if isinstance(evidence, WorldEvidenceEvent)
+            else WorldEvidenceEvent.model_validate(evidence)
+        )
+    except ValidationError as exc:
+        raise WorldReducerError("invalid WorldEvidenceEvent") from exc
+    return f"world-evidence-event:{_digest(event)}"
+
+
 def _observation_id(event_id: str) -> str:
     return "obs-" + _digest(
         {"world_evidence_event_id": event_id}
@@ -153,7 +169,7 @@ def _to_observation(event: WorldEvidenceEvent) -> WorldObservation:
         proposition=event.proposition,
         confidence=event.confidence,
         epistemic_status=event.epistemic_status,
-        source_refs=event.source_refs,
+        source_refs=[*event.source_refs, world_evidence_event_ref(event)],
     )
 
 
