@@ -82,8 +82,8 @@ def supervisor_lifecycle_enabled(
 ) -> bool:
     """Fail closed: only the exact string '1' enables C18-B."""
     if env is None:
-        return os.getenv(SUPERVISOR_LIFECYCLE_FLAG, "0") == "1"
-    return env.get(SUPERVISOR_LIFECYCLE_FLAG, "0") == "1"
+        return os.getenv("KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED", "0") == "1"
+    return env.get("KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED", "0") == "1"
 
 
 def _supervisor_id(runtime_epoch_id: str) -> str:
