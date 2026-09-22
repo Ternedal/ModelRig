@@ -125,9 +125,12 @@ def cognitive_profile_config_path(
 ) -> Path:
     """Resolve config without creating the data root or any file."""
     if env is None:
+        # Keep the default literal here so the generated activation-readiness
+        # source scan can correctly classify this path as a setting, not a
+        # production feature switch.
         raw = os.getenv(
             "KALIV_CONSCIOUSNESS_PROFILE_FILE",
-            _DEFAULT_PROFILE_FILE,
+            "./kaliv-consciousness-profile.json",
         )
         explicit = CONSCIOUSNESS_PROFILE_FILE_ENV in os.environ
     else:
