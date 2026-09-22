@@ -5,6 +5,13 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, ThoughtProposal, ThoughtRequest
+from .consolidation import (
+    ConsolidationCandidate,
+    ConsolidationContractError,
+    ConsolidationEvidence,
+    ConsolidationResult,
+    consolidate,
+)
 from .goals import (
     Agent3IntentHandoff,
     GoalAdmissionEvidence,
@@ -76,6 +83,10 @@ from .thought_engine import (
 
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
+    "ConsolidationCandidate",
+    "ConsolidationContractError",
+    "ConsolidationEvidence",
+    "ConsolidationResult",
     "CognitiveProfile",
     "EmbodimentContractError",
     "EmbodimentObservation",
@@ -117,6 +128,7 @@ __all__ = [
     "ThoughtProposal",
     "ThoughtRequest",
     "compose_runtime",
+    "consolidate",
     "admit_goal",
     "apply_resolution",
     "build_agent3_handoff",

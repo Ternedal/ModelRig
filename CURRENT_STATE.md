@@ -224,6 +224,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_confirm_outbound_reads.py`
 - `tests/worker_confirmation_impact.py`
 - `tests/worker_consciousness_core_embodiment.py`
+- `tests/worker_consciousness_core_consolidation.py`
 - `tests/worker_consciousness_core_goals.py`
 - `tests/worker_consciousness_core_memory4.py`
 - `tests/worker_consciousness_core_metacognition.py`
