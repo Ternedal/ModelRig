@@ -70,7 +70,8 @@ The reducer verifies that these remain unchanged:
 
 ## Replay semantics
 
-Replaying the exact same event id with exact same evidence is idempotent:
+While its canonical observation remains inside the bounded live WorldState,
+replaying the exact same event id with exact same evidence is idempotent:
 
 ```text
 world_changed=false
@@ -80,10 +81,19 @@ SelfState revision unchanged
 no eviction
 ```
 
-Reusing the same event id with different evidence fails closed.
+Reusing the same event id with different evidence fails closed. Because the
+canonical complete evidence ref is stored in observation provenance, changing
+even metadata such as observed sequence, confidence or epistemic status is a
+conflict.
 
-This prevents a source from rewriting history under a previously accepted event
-identity.
+This prevents a source from rewriting a retained observation under a previously
+accepted event identity.
+
+C20-A does **not** claim unbounded replay memory. Once an observation has been
+evicted by the 512-item live-world bound, this transient reducer no longer has
+the old event identity available. Durable long-horizon deduplication requires a
+separately reviewed evidence ledger rather than pretending transient WorldState
+is permanent history.
 
 ## Model-derived evidence
 
