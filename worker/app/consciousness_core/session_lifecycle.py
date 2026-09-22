@@ -153,9 +153,15 @@ def transition_receipt_ref(receipt: BaseModel) -> str:
     return _ref("cognitive-transition-receipt", receipt)
 
 
-def _world_attention_event_id(evidence_ref: str) -> str:
+def _world_attention_event_id(evidence_ref: str, kind: str) -> str:
     return "cevt-" + hashlib.sha256(
-        ("world-evidence-attention|" + evidence_ref).encode("utf-8")
+        ("world-evidence-attention|" + kind + "|" + evidence_ref).encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def _reported_user_turn_evidence_id(turn_id: str) -> str:
+    return "wevt-" + hashlib.sha256(
+        ("reported-user-turn|" + turn_id).encode("utf-8")
     ).hexdigest()[:32]
 
 
@@ -193,6 +199,8 @@ class ProductionCognitiveSession:
         self._bridge = supervisor_bridge
         self._live = live_state_from_bootstrap(bootstrap_context)
         self._closed = False
+        self._user_turn_sequences: dict[str, int] = {}
+        self._next_user_turn_sequence = 1
 
     @property
     def live_state(self) -> LiveCognitiveSessionState:
@@ -218,13 +226,14 @@ class ProductionCognitiveSession:
         self._require_open()
         return self._bridge.plan()
 
-    def submit_world_evidence(
+    def _submit_world_evidence_with_kind(
         self,
         evidence: WorldEvidenceEvent,
         *,
         attention_salience: UnitInterval,
+        cognition_kind: Literal["world_change", "user_turn"],
     ) -> WorldEvidenceAdmissionResult:
-        """Atomically update live epistemic state and queue bounded attention."""
+        """Atomically reduce evidence and queue exactly one typed attention event."""
         self._require_open()
         if not isinstance(evidence, WorldEvidenceEvent):
             raise TypeError("evidence must be WorldEvidenceEvent")
@@ -255,8 +264,8 @@ class ProductionCognitiveSession:
 
         event = CognitionEvent(
             schema="kaliv-consciousness-core/cognition-event/v1",
-            event_id=_world_attention_event_id(evidence_ref),
-            kind="world_change",
+            event_id=_world_attention_event_id(evidence_ref, cognition_kind),
+            kind=cognition_kind,
             source_ref=evidence_ref,
             summary=evidence.proposition,
             salience=attention_salience,
@@ -293,6 +302,82 @@ class ProductionCognitiveSession:
             scheduling_authority=False,
             production_activation=False,
         )
+
+    def submit_world_evidence(
+        self,
+        evidence: WorldEvidenceEvent,
+        *,
+        attention_salience: UnitInterval,
+    ) -> WorldEvidenceAdmissionResult:
+        """Admit a generic world change as bounded epistemic attention."""
+        return self._submit_world_evidence_with_kind(
+            evidence,
+            attention_salience=attention_salience,
+            cognition_kind="world_change",
+        )
+
+    def submit_reported_user_turn(
+        self,
+        *,
+        turn_id: str,
+        user_text: str,
+        source_ref: str,
+    ) -> WorldEvidenceAdmissionResult:
+        """Admit one canonical authenticated user turn as reported evidence.
+
+        A stable process-local sequence is allocated only after successful
+        admission. Replays of the same turn id reuse the original sequence.
+        """
+        self._require_open()
+        if (
+            not isinstance(turn_id, str)
+            or not turn_id.strip()
+            or len(turn_id) > 128
+        ):
+            raise CognitiveSessionLifecycleError("invalid user turn id")
+        if (
+            not isinstance(user_text, str)
+            or not user_text.strip()
+            or len(user_text) > 2048
+        ):
+            raise CognitiveSessionLifecycleError("invalid user turn text")
+        if (
+            not isinstance(source_ref, str)
+            or not source_ref.strip()
+            or len(source_ref) > 256
+        ):
+            raise CognitiveSessionLifecycleError("invalid user turn source ref")
+
+        existing_sequence = self._user_turn_sequences.get(turn_id)
+        observed_sequence = (
+            existing_sequence
+            if existing_sequence is not None
+            else self._next_user_turn_sequence
+        )
+        evidence = WorldEvidenceEvent(
+            schema="kaliv-consciousness-core/world-evidence-event/v1",
+            event_id=_reported_user_turn_evidence_id(turn_id),
+            subject_ref="actor:user",
+            proposition=user_text,
+            confidence=1.0,
+            epistemic_status="reported",
+            source_refs=[source_ref],
+            observed_sequence=observed_sequence,
+            production_activation=False,
+        )
+        result = self._submit_world_evidence_with_kind(
+            evidence,
+            attention_salience=1.0,
+            cognition_kind="user_turn",
+        )
+
+        if existing_sequence is None:
+            self._user_turn_sequences[turn_id] = observed_sequence
+            self._next_user_turn_sequence = observed_sequence + 1
+            if len(self._user_turn_sequences) > 1024:
+                oldest = next(iter(self._user_turn_sequences))
+                del self._user_turn_sequences[oldest]
+        return result
 
     async def step(
         self,
