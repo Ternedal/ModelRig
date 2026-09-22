@@ -81,7 +81,9 @@ type consciousnessGuidanceReceipt struct {
 }
 
 func consciousnessReplyGuidanceEnabled() bool {
-	return os.Getenv(consciousnessReplyGuidanceFlag) == "1"
+	// Literal getenv is intentional: scripts/activation_readiness.py discovers
+	// Go feature switches from this exact fail-closed form.
+	return os.Getenv("KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED") == "1"
 }
 
 func (s *server) requestConsciousnessUserTurnReceipt(
