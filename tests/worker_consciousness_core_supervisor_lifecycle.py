@@ -33,7 +33,10 @@ from app.consciousness_core import (  # noqa: E402
     workspace_ref,
     world_state_ref,
 )
-from app.consciousness_core.supervisor import CognitionEvent  # noqa: E402
+from app.consciousness_core.supervisor import (  # noqa: E402
+    CognitionEvent,
+    SupervisorPolicy,
+)
 from app.consciousness_core.supervisor_lifecycle import (  # noqa: E402
     SUPERVISOR_LIFECYCLE_FLAG,
     ProductionSupervisorBridge,
@@ -343,10 +346,7 @@ try:
     wait_bridge = ProductionSupervisorBridge(
         runtime=ConsciousnessCoreRuntime(wait_engine),
         clock=clock_factory(),
-        policy=__import__(
-            "app.consciousness_core.supervisor",
-            fromlist=["SupervisorPolicy"],
-        ).SupervisorPolicy(
+        policy=SupervisorPolicy(
             schema="kaliv-consciousness-core/supervisor-policy/v1",
             min_cycle_interval_ms=1500,
             max_events_per_cycle=4,
