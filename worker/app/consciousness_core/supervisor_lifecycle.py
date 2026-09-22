@@ -136,6 +136,11 @@ class ProductionSupervisorBridge:
         return self._policy
 
     @property
+    def trusted_clock(self) -> TrustedRuntimeClock:
+        """Expose the owned trusted clock without sampling or new authority."""
+        return self._clock
+
+    @property
     def closed(self) -> bool:
         return self._closed
 
