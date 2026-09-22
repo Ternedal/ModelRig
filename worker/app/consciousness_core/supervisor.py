@@ -50,7 +50,7 @@ class StrictModel(BaseModel):
 
 
 class SupervisorBudget(StrictModel):
-    schema: Literal["kaliv-consciousness-core/supervisor-budget/v1"]
+    schema: Literal["kaliv-consciousness-core/supervisor-budget/v1"] = "kaliv-consciousness-core/supervisor-budget/v1"
     max_cycles: Annotated[int, Field(ge=1, le=32, strict=True)] = 4
     max_verify_cycles: Annotated[int, Field(ge=0, le=16, strict=True)] = 2
     max_requery_cycles: Annotated[int, Field(ge=0, le=16, strict=True)] = 1
