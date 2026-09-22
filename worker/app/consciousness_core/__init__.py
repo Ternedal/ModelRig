@@ -135,6 +135,15 @@ from .supervisor import (
     plan_supervisor_step,
     supervisor_budget_ref,
 )
+from .single_step import (
+    CognitiveSingleStepError,
+    CognitiveSingleStepReceipt,
+    CognitiveSingleStepResult,
+    StateTransitionCommitReceipt,
+    StateTransitionCommitter,
+    run_single_cognitive_step,
+    supervisor_directive_ref,
+)
 from .sleep_lifecycle import (
     SLEEP_LIFECYCLE_FLAG,
     SleepBinding,
@@ -172,6 +181,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "supervisor_directive_ref",
+    "run_single_cognitive_step",
+    "StateTransitionCommitter",
+    "StateTransitionCommitReceipt",
+    "CognitiveSingleStepResult",
+    "CognitiveSingleStepReceipt",
+    "CognitiveSingleStepError",
     "supervisor_budget_ref",
     "plan_supervisor_step",
     "initial_supervisor_progress",
