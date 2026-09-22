@@ -60,7 +60,7 @@ class StrictModel(BaseModel):
 class ExecutivePolicy(StrictModel):
     """Model-independent deterministic policy for one C16 adjudication."""
 
-    schema: Literal["kaliv-consciousness-core/executive-policy/v1"]
+    schema: Literal["kaliv-consciousness-core/executive-policy/v1"] = "kaliv-consciousness-core/executive-policy/v1"
     hold_uncertainty_threshold: UnitInterval = 0.85
     verify_uncertainty_threshold: UnitInterval = 0.45
     verify_task_uncertainty_threshold: UnitInterval = 0.60
