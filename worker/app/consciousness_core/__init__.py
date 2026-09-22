@@ -5,6 +5,15 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, PersonalitySnapshot, ThoughtProposal, ThoughtRequest
+from .autonomous_scheduler import (
+    AUTONOMOUS_SCHEDULER_FLAG,
+    AutonomousSchedulerBridgeError,
+    AutonomousSchedulerBridgeStatus,
+    ScheduledAutonomousCognitionBridge,
+    autonomous_scheduler_enabled,
+    compose_autonomous_scheduler_lifespan,
+    production_autonomous_scheduler_bridge_factory,
+)
 from .autonomous_tick import (
     AUTONOMOUS_COGNITION_FLAG,
     AutonomousCognitionTickAdapter,
@@ -288,6 +297,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "production_autonomous_scheduler_bridge_factory",
+    "compose_autonomous_scheduler_lifespan",
+    "autonomous_scheduler_enabled",
+    "ScheduledAutonomousCognitionBridge",
+    "AutonomousSchedulerBridgeStatus",
+    "AutonomousSchedulerBridgeError",
+    "AUTONOMOUS_SCHEDULER_FLAG",
     "autonomous_cognition_enabled",
     "AutonomousCognitionTickReceipt",
     "AutonomousCognitionTickError",
