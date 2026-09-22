@@ -25,10 +25,13 @@ from app.consciousness_core import (  # noqa: E402
     ActivePersonBindingSnapshot,
     CognitiveProfile,
     ConsciousnessCoreRuntime,
+    LiveCognitiveSessionState,
     PersistentSelfState,
     ProductionCognitiveSession,
     SelfAffect,
+    advance_self_state,
     bootstrap_runtime_session,
+    world_state_ref,
 )
 from app.consciousness_core.production_lifecycle import TrustedRuntimeClock  # noqa: E402
 from app.consciousness_core.session_lifecycle import CognitiveSessionLifecycleError  # noqa: E402
@@ -41,7 +44,6 @@ from app.consciousness_core.user_turn_admission import (  # noqa: E402
     consciousness_chat_enabled,
     mount_consciousness_user_turn,
 )
-from app.consciousness_core.world_reducer import WorldReducerError  # noqa: E402
 
 
 FIXTURES = json.loads(
@@ -292,6 +294,53 @@ class UserTurnAdmissionTests(unittest.TestCase):
         self.assertEqual(session.live_state, live)
         self.assertEqual(session.supervisor_state.pending_events, pending)
 
+    def test_replay_guard_survives_world_observation_eviction(self):
+        session, _ = self.session()
+        first = session.submit_reported_user_turn(
+            turn_id="req-evicted",
+            user_text="Denne tur bliver senere evicted fra WorldState.",
+            source_ref="backend-chat:req-evicted",
+        )
+        live = session.live_state
+        stripped_world = live.world.model_copy(
+            update={
+                "revision": live.world.revision + 1,
+                "observations": [
+                    item
+                    for item in live.world.observations
+                    if first.evidence_ref not in item.source_refs
+                ],
+            }
+        )
+        stripped_state = advance_self_state(
+            live.state,
+            world_state_ref=world_state_ref(stripped_world),
+        )
+        session._live = LiveCognitiveSessionState(
+            schema="kaliv-consciousness-core/live-session-state/v1",
+            state=stripped_state,
+            world=stripped_world,
+            workspace=live.workspace,
+            personality_snapshot=live.personality_snapshot,
+            bootstrap_receipt_ref=live.bootstrap_receipt_ref,
+            completed_cycles=live.completed_cycles,
+            last_transition_receipt_ref=live.last_transition_receipt_ref,
+            production_activation=False,
+        )
+        before_replay = session.live_state
+        pending_before = list(session.supervisor_state.pending_events)
+
+        replay = session.submit_reported_user_turn(
+            turn_id="req-evicted",
+            user_text="Denne tur bliver senere evicted fra WorldState.",
+            source_ref="backend-chat:req-evicted",
+        )
+        self.assertTrue(replay.world_transition.idempotent_replay)
+        self.assertFalse(replay.cognition_event_queued)
+        self.assertEqual(replay.observed_sequence, first.observed_sequence)
+        self.assertEqual(session.live_state, before_replay)
+        self.assertEqual(session.supervisor_state.pending_events, pending_before)
+
     def test_same_turn_id_changed_text_fails_closed(self):
         session, _ = self.session()
         session.submit_reported_user_turn(
@@ -301,7 +350,7 @@ class UserTurnAdmissionTests(unittest.TestCase):
         )
         live = session.live_state
         pending = list(session.supervisor_state.pending_events)
-        with self.assertRaises(WorldReducerError):
+        with self.assertRaises(CognitiveSessionLifecycleError):
             session.submit_reported_user_turn(
                 turn_id="req-conflict",
                 user_text="Ændret besked",
@@ -317,7 +366,7 @@ class UserTurnAdmissionTests(unittest.TestCase):
             user_text="Samme tekst",
             source_ref="backend-chat:source-a",
         )
-        with self.assertRaises(WorldReducerError):
+        with self.assertRaises(CognitiveSessionLifecycleError):
             session.submit_reported_user_turn(
                 turn_id="req-source",
                 user_text="Samme tekst",
