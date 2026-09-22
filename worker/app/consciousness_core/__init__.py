@@ -124,6 +124,12 @@ from .session_bootstrap import (
     bootstrap_runtime_session,
     personality_snapshot_ref,
 )
+from .response_guidance import (
+    ResponseGuidanceEnvelope,
+    ResponseGuidanceError,
+    build_response_guidance,
+    response_guidance_ref,
+)
 from .self_state import (
     PersistentSelfState,
     PersonRevisionRebindAuthority,
@@ -245,6 +251,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "response_guidance_ref",
+    "build_response_guidance",
+    "ResponseGuidanceError",
+    "ResponseGuidanceEnvelope",
     "mount_consciousness_step",
     "consciousness_step_enabled",
     "build_consciousness_step_router",
