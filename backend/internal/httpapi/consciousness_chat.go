@@ -91,11 +91,13 @@ func (s *server) handleConsciousnessChat(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	turnID, ok := consciousnessTurnID(r)
-	if !ok || s.Worker == nil || !scheduleWorkerIsLoopback(s.Worker.BaseURL) {
+	requestID, ok := consciousnessRequestID(r)
+	deviceID, deviceOK := scheduleDeviceID(r)
+	if !ok || !deviceOK || s.Worker == nil || !scheduleWorkerIsLoopback(s.Worker.BaseURL) {
 		s.handleMemory4Chat(w, r)
 		return
 	}
+	turnID := consciousnessBoundTurnID(deviceID, requestID)
 
 	// Secondary best-effort observation. There is deliberately no retry,
 	// goroutine, queue or response mutation on failure.
@@ -137,7 +139,7 @@ func consciousnessUserForTurn(raw []byte) (string, bool) {
 	return content, true
 }
 
-func consciousnessTurnID(r *http.Request) (string, bool) {
+func consciousnessRequestID(r *http.Request) (string, bool) {
 	value := strings.TrimSpace(r.Header.Get("X-Request-ID"))
 	if value == "" || utf8.RuneCountInString(value) > consciousnessMaxRequestIDCharacters {
 		return "", false
@@ -148,6 +150,11 @@ func consciousnessTurnID(r *http.Request) (string, bool) {
 		}
 	}
 	return value, true
+}
+
+func consciousnessBoundTurnID(deviceID, requestID string) string {
+	sum := sha256.Sum256([]byte(deviceID + "\x00" + requestID))
+	return "chat-" + hex.EncodeToString(sum[:])
 }
 
 func consciousnessTurnRef(turnID string) string {
@@ -173,7 +180,9 @@ func (s *server) requestConsciousnessUserTurn(
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", payload.TurnID)
+	if traceID := strings.TrimSpace(r.Header.Get("X-Request-ID")); traceID != "" {
+		req.Header.Set("X-Request-ID", traceID)
+	}
 
 	resp, err := memory4WorkerHTTPClient(consciousnessAdmissionTimeout).Do(req)
 	if err != nil {
