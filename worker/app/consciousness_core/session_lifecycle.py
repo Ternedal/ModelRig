@@ -225,6 +225,11 @@ class ProductionCognitiveSession:
         return self._bridge.state
 
     @property
+    def trusted_clock(self) -> TrustedRuntimeClock:
+        """Borrow C18's trusted runtime clock without creating a second epoch."""
+        return self._bridge.trusted_clock
+
+    @property
     def closed(self) -> bool:
         return self._closed
 
