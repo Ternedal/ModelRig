@@ -63,8 +63,9 @@ type consciousnessUserTurnReceipt struct {
 
 // handleConsciousnessChat is an additive pre-turn observer around the existing
 // normal-chat owner. Flag-off delegates immediately without touching the body or
-// worker. Flag-on may submit one bounded final user message to C21-A, then always
-// restores the original body and delegates model/memory semantics unchanged.
+// worker. C21 admission alone remains observation-only. A separate C24-A opt-in
+// may synchronously run one bounded cognitive step and attach one exact-event
+// outward response-guidance message before the existing Memory 4/model owner.
 func (s *server) handleConsciousnessChat(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv(consciousnessChatFlag) != "1" {
 		s.handleMemory4Chat(w, r)
@@ -99,13 +100,51 @@ func (s *server) handleConsciousnessChat(w http.ResponseWriter, r *http.Request)
 	}
 	turnID := consciousnessBoundTurnID(deviceID, requestID)
 
-	// Secondary best-effort observation. There is deliberately no retry,
-	// goroutine, queue or response mutation on failure.
-	_ = s.requestConsciousnessUserTurn(r, consciousnessUserTurnRequest{
+	payload := consciousnessUserTurnRequest{
 		TurnID:    turnID,
 		UserText:  userText,
 		SourceRef: consciousnessBackendSourceRefPrefix + turnID,
-	})
+	}
+
+	// C21 observer-only behaviour remains byte-for-byte the default even when
+	// normal chat admission is enabled. C24-A is a separate exact opt-in because
+	// it can add one ThoughtEngine call and intentionally shape the response
+	// model prompt.
+	if !consciousnessReplyGuidanceEnabled() {
+		_ = s.requestConsciousnessUserTurn(r, payload)
+		s.handleMemory4Chat(w, r)
+		return
+	}
+
+	admission, err := s.requestConsciousnessUserTurnReceipt(r, payload)
+	if err != nil || admission.Replayed || admission.CognitionEventID == nil {
+		s.handleMemory4Chat(w, r)
+		return
+	}
+	eventID := *admission.CognitionEventID
+
+	step, err := s.requestConsciousnessStep(r)
+	if err != nil ||
+		step.Decision != "RUN" ||
+		!containsConsciousnessEvent(step.SelectedEventIDs, eventID) {
+		s.handleMemory4Chat(w, r)
+		return
+	}
+
+	guidance, err := s.requestConsciousnessGuidance(r, eventID)
+	if err != nil {
+		s.handleMemory4Chat(w, r)
+		return
+	}
+	guidedBody, err := injectConsciousnessResponseGuidance(probe, guidance.Text)
+	if err != nil {
+		s.handleMemory4Chat(w, r)
+		return
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(guidedBody))
+	r.ContentLength = int64(len(guidedBody))
+	r.Header.Del("Content-Length")
 	s.handleMemory4Chat(w, r)
 }
 
