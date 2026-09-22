@@ -2,6 +2,7 @@
 """C10 consolidation / anti-drift tests for Consciousness Core."""
 from __future__ import annotations
 
+import importlib.util
 import inspect
 import sys
 import unittest
