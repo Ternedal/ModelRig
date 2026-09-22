@@ -45,6 +45,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_COMPUTER_USE` | `0` |
 | `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
@@ -237,6 +238,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_sleep.py`
 - `tests/worker_consciousness_core_sleep_lifecycle.py`
 - `tests/worker_consciousness_core_supervisor.py`
+- `tests/worker_consciousness_core_supervisor_lifecycle.py`
 - `tests/worker_consciousness_core_temporal.py`
 - `tests/worker_consciousness_core_wake_cycle.py`
 - `tests/worker_control_center_api.py`
