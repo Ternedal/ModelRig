@@ -17,7 +17,7 @@ import hashlib
 import os
 from contextlib import asynccontextmanager
 from functools import wraps
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -64,15 +64,17 @@ class _StrictModel(BaseModel):
 
 
 class SupervisorBridgeStep(_StrictModel):
-    schema: str = "kaliv-consciousness-core/supervisor-bridge-step/v1"
+    schema: Literal["kaliv-consciousness-core/supervisor-bridge-step/v1"] = (
+        "kaliv-consciousness-core/supervisor-bridge-step/v1"
+    )
     clock_sample: ClockSample
     plan: SupervisorPlan
     cycle_result: SupervisorCycleResult | None
     thought_engine_invoked: bool
-    internal_thread_created: bool = False
-    internal_timer_created: bool = False
-    automatic_repeat: bool = False
-    production_activation: bool = False
+    internal_thread_created: Literal[False] = False
+    internal_timer_created: Literal[False] = False
+    automatic_repeat: Literal[False] = False
+    production_activation: Literal[False] = False
 
 
 def supervisor_lifecycle_enabled(
