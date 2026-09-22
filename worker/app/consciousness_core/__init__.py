@@ -133,6 +133,21 @@ from .sleep import (
     prepare_sleep,
     wake_from_sleep,
 )
+from .supervisor import (
+    CognitionEvent,
+    CognitionSupervisorKernel,
+    SupervisorContractError,
+    SupervisorCycleReceipt,
+    SupervisorCycleResult,
+    SupervisorPlan,
+    SupervisorPolicy,
+    SupervisorState,
+    bootstrap_supervisor,
+    clock_sample_ref,
+    plan_supervisor_step,
+    queue_cognition_event,
+    supervisor_policy_ref,
+)
 from .temporal import (
     ClockSample,
     DeadlineState,
@@ -164,6 +179,19 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "supervisor_policy_ref",
+    "queue_cognition_event",
+    "plan_supervisor_step",
+    "clock_sample_ref",
+    "bootstrap_supervisor",
+    "SupervisorState",
+    "SupervisorPolicy",
+    "SupervisorPlan",
+    "SupervisorCycleResult",
+    "SupervisorCycleReceipt",
+    "SupervisorContractError",
+    "CognitionSupervisorKernel",
+    "CognitionEvent",
     "wake_receipt_ref",
     "build_wake_orientation",
     "WakeOrientationResult",
