@@ -276,7 +276,7 @@ func TestConsciousnessChatBothFlagsRunRequiredStepBeforeNormalResponse(t *testin
 	t.Setenv(memory4ChatWriteFlag, "0")
 
 	const turnID = "req-c22d-run"
-	const eventID = "cevt-" + "a" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	eventID := "cevt-" + strings.Repeat("a", 32)
 	var userTurnHits atomic.Int32
 	var stepHits atomic.Int32
 	var stepDone atomic.Bool
@@ -388,7 +388,7 @@ func TestConsciousnessChatAcceptsWaitWithoutBlockingNormalResponse(t *testing.T)
 	t.Setenv(memory4ChatWriteFlag, "0")
 
 	const turnID = "req-c22d-wait"
-	const eventID = "cevt-" + "b" + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	eventID := "cevt-" + strings.Repeat("b", 32)
 	var stepHits atomic.Int32
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -431,7 +431,7 @@ func TestConsciousnessChatCognitionFailureIsSecondaryToNormalResponse(t *testing
 	t.Setenv(memory4ChatWriteFlag, "0")
 
 	const turnID = "req-c22d-step-failure"
-	const eventID = "cevt-" + "c" + "ccccccccccccccccccccccccccccccc"
+	eventID := "cevt-" + strings.Repeat("c", 32)
 	var stepHits atomic.Int32
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -474,7 +474,7 @@ func TestConsciousnessChatTamperedCognitionReceiptIsSecondary(t *testing.T) {
 	t.Setenv(memory4ChatWriteFlag, "0")
 
 	const turnID = "req-c22d-tampered-step"
-	const eventID = "cevt-" + "d" + "ddddddddddddddddddddddddddddddd"
+	eventID := "cevt-" + strings.Repeat("d", 32)
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case consciousnessUserTurnPath:
