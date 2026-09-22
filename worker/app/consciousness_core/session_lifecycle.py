@@ -34,9 +34,19 @@ from .supervisor_lifecycle import (
     ProductionSupervisorBridge,
     SupervisorBridgeStep,
 )
+from .world_reducer import (
+    WorldEvidenceEvent,
+    WorldTransitionReceipt,
+    reduce_world_evidence,
+    world_evidence_event_ref,
+)
 
 
 NonEmptyRef = Annotated[str, Field(min_length=1, max_length=256)]
+UnitInterval = Annotated[
+    float,
+    Field(ge=0.0, le=1.0, strict=True, allow_inf_nan=False),
+]
 
 
 class CognitiveSessionLifecycleError(RuntimeError):
@@ -79,6 +89,33 @@ class LiveCognitiveSessionState(StrictModel):
         return self
 
 
+class WorldEvidenceAdmissionResult(StrictModel):
+    schema: Literal["kaliv-consciousness-core/world-evidence-admission/v1"]
+    evidence_ref: NonEmptyRef
+    world_transition: WorldTransitionReceipt
+    cognition_event: CognitionEvent | None
+    cognition_event_queued: bool
+    live_state: LiveCognitiveSessionState
+    model_calls: Literal[0]
+    self_state_store_write_applied: Literal[False]
+    durable_memory_write_authority: Literal[False]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def admission_shape(self) -> "WorldEvidenceAdmissionResult":
+        if self.world_transition.idempotent_replay:
+            if self.cognition_event is not None or self.cognition_event_queued:
+                raise ValueError(
+                    "idempotent world replay cannot queue cognition again"
+                )
+        else:
+            if self.cognition_event is None or not self.cognition_event_queued:
+                raise ValueError("new world evidence must queue one cognition event")
+        return self
+
+
 class CognitiveSessionStep(StrictModel):
     schema: Literal["kaliv-consciousness-core/session-step/v1"]
     supervisor_step: SupervisorBridgeStep
@@ -114,6 +151,12 @@ def session_bootstrap_receipt_ref(receipt: SessionBootstrapReceipt) -> str:
 
 def transition_receipt_ref(receipt: BaseModel) -> str:
     return _ref("cognitive-transition-receipt", receipt)
+
+
+def _world_attention_event_id(evidence_ref: str) -> str:
+    return "cevt-" + hashlib.sha256(
+        ("world-evidence-attention|" + evidence_ref).encode("utf-8")
+    ).hexdigest()[:32]
 
 
 def live_state_from_bootstrap(
@@ -174,6 +217,82 @@ class ProductionCognitiveSession:
     def plan(self) -> tuple[Any, SupervisorPlan]:
         self._require_open()
         return self._bridge.plan()
+
+    def submit_world_evidence(
+        self,
+        evidence: WorldEvidenceEvent,
+        *,
+        attention_salience: UnitInterval,
+    ) -> WorldEvidenceAdmissionResult:
+        """Atomically update live epistemic state and queue bounded attention."""
+        self._require_open()
+        if not isinstance(evidence, WorldEvidenceEvent):
+            raise TypeError("evidence must be WorldEvidenceEvent")
+
+        before = self._live
+        reduction = reduce_world_evidence(
+            state=before.state,
+            world=before.world,
+            evidence=evidence,
+        )
+        evidence_ref = world_evidence_event_ref(evidence)
+
+        if reduction.receipt.idempotent_replay:
+            return WorldEvidenceAdmissionResult(
+                schema="kaliv-consciousness-core/world-evidence-admission/v1",
+                evidence_ref=evidence_ref,
+                world_transition=reduction.receipt,
+                cognition_event=None,
+                cognition_event_queued=False,
+                live_state=before,
+                model_calls=0,
+                self_state_store_write_applied=False,
+                durable_memory_write_authority=False,
+                execution_authority=False,
+                scheduling_authority=False,
+                production_activation=False,
+            )
+
+        event = CognitionEvent(
+            schema="kaliv-consciousness-core/cognition-event/v1",
+            event_id=_world_attention_event_id(evidence_ref),
+            kind="world_change",
+            source_ref=evidence_ref,
+            summary=evidence.proposition,
+            salience=attention_salience,
+            observed_sequence=evidence.observed_sequence,
+            production_activation=False,
+        )
+        prospective = LiveCognitiveSessionState(
+            schema="kaliv-consciousness-core/live-session-state/v1",
+            state=reduction.state,
+            world=reduction.world,
+            workspace=before.workspace,
+            personality_snapshot=before.personality_snapshot,
+            bootstrap_receipt_ref=before.bootstrap_receipt_ref,
+            completed_cycles=before.completed_cycles,
+            last_transition_receipt_ref=before.last_transition_receipt_ref,
+            production_activation=False,
+        )
+
+        # Bridge admission is the only side effect. If it rejects (for example
+        # because cognition is in flight), the live world is not adopted.
+        self._bridge.submit(event)
+        self._live = prospective
+        return WorldEvidenceAdmissionResult(
+            schema="kaliv-consciousness-core/world-evidence-admission/v1",
+            evidence_ref=evidence_ref,
+            world_transition=reduction.receipt,
+            cognition_event=event,
+            cognition_event_queued=True,
+            live_state=self._live,
+            model_calls=0,
+            self_state_store_write_applied=False,
+            durable_memory_write_authority=False,
+            execution_authority=False,
+            scheduling_authority=False,
+            production_activation=False,
+        )
 
     async def step(
         self,
