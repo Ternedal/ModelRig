@@ -115,15 +115,23 @@ Therefore:
 Each new successfully admitted user turn receives a process-local monotonically
 increasing `observed_sequence`.
 
-The session retains a bounded mapping of recent turn ids to their assigned
-sequence, so replay uses the exact original sequence.
+The session retains a bounded replay ledger for recent turn ids. Each ledger
+entry binds:
+
+- the original observed sequence;
+- the canonical complete evidence ref;
+- the deterministic observation id.
+
+Therefore replay remains a no-op even after the corresponding observation has
+been evicted from C20's 512-item live WorldState. Reusing the same retained turn
+id with changed text or source provenance fails closed before world reduction.
 
 A failed admission—for example while another cognitive step is in flight—does
-not consume a sequence number.
+not consume a sequence number and does not create a ledger entry.
 
-The sequence map is bounded to 1024 user turns. This is intentionally larger
-than C20's 512-observation live WorldState window; C21-A does not claim durable
-cross-restart replay memory.
+The replay ledger is bounded to 1024 user turns. After an entry itself has been
+evicted, C21-A no longer claims process-local replay memory for that old id.
+There is still no durable cross-restart replay ledger in this slice.
 
 ## Receipt privacy
 
