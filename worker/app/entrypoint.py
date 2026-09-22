@@ -28,6 +28,7 @@ from .consciousness_core.session_lifecycle import (
     compose_cognitive_session_lifespan,
     production_cognitive_session_factory,
 )
+from .consciousness_core.response_guidance_api import mount_consciousness_guidance
 from .consciousness_core.sleep_lifecycle import compose_sleep_lifecycle_lifespan
 from .consciousness_core.supervisor_lifecycle import (
     compose_supervisor_lifecycle_lifespan,
@@ -96,6 +97,10 @@ mount_consciousness_user_turn(fastapi_app)
 # C22-B is a separate exact opt-in because this surface can invoke the external
 # ThoughtEngine once. It remains loopback-only and has no request payload.
 mount_consciousness_step(fastapi_app)
+
+# C23-B exposes only one-shot outward response guidance and is independently
+# default-off because it crosses the process boundary back to the backend.
+mount_consciousness_guidance(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
