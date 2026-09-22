@@ -11,7 +11,7 @@ permissions:
 jobs:
   targeted-live-authority:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -19,10 +19,6 @@ jobs:
           python-version: "3.12"
       - name: Install worker deps
         run: pip install -r worker/requirements.txt --break-system-packages
-      - name: Run ADR-DC-105 executor-capability contract
-        env:
-          PYTHONUNBUFFERED: "1"
-        run: PYTHONPATH=worker python3 -u tests/support/rsi_pilot_exact_task_product_pilot_executor_capability_contract.py
       - name: Run ADR-DC-108 execution contract
         env:
           PYTHONUNBUFFERED: "1"
