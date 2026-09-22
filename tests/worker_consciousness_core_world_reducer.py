@@ -25,6 +25,7 @@ from app.consciousness_core.world_reducer import (  # noqa: E402
     WorldEvidenceEvent,
     WorldReducerError,
     reduce_world_evidence,
+    world_evidence_event_ref,
 )
 
 
@@ -204,6 +205,25 @@ class WorldReducerTests(unittest.TestCase):
                 evidence=conflict,
             )
 
+    def test_same_event_id_with_changed_sequence_fails_closed(self):
+        world = self.world()
+        state = self.state(world)
+        event = self.evidence()
+        first = reduce_world_evidence(
+            state=state,
+            world=world,
+            evidence=event,
+        )
+        changed = event.model_copy(
+            update={"observed_sequence": event.observed_sequence + 1}
+        )
+        with self.assertRaises(WorldReducerError):
+            reduce_world_evidence(
+                state=first.state,
+                world=first.world,
+                evidence=changed,
+            )
+
     def test_stale_self_world_binding_fails_closed(self):
         world = self.world()
         state = self.state(world).model_copy(
@@ -277,7 +297,10 @@ class WorldReducerTests(unittest.TestCase):
         self.assertEqual(observation.confidence, 0.4)
         self.assertEqual(
             observation.source_refs,
-            ["thought-proposal:bounded-ref"],
+            [
+                "thought-proposal:bounded-ref",
+                world_evidence_event_ref(event),
+            ],
         )
 
 
