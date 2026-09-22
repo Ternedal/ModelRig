@@ -23,6 +23,15 @@ from .cycle import (
     workspace_ref,
     world_state_ref,
 )
+from .cognition_step_api import (
+    COGNITION_STEP_PREFIX,
+    TURN_COGNITION_FLAG,
+    CognitionStepBody,
+    CognitionStepReceipt,
+    build_consciousness_cognition_step_router,
+    mount_consciousness_cognition_step,
+    turn_cognition_enabled,
+)
 from .consolidation import (
     ConsolidationCandidate,
     ConsolidationContractError,
@@ -237,6 +246,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "turn_cognition_enabled",
+    "mount_consciousness_cognition_step",
+    "build_consciousness_cognition_step_router",
+    "CognitionStepReceipt",
+    "CognitionStepBody",
+    "TURN_COGNITION_FLAG",
+    "COGNITION_STEP_PREFIX",
     "resolve_production_cognitive_profile",
     "production_cognitive_profile_path",
     "ProductionCognitiveProfileResolution",
