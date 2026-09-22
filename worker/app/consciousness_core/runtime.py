@@ -40,6 +40,8 @@ class ConsciousnessCoreRuntime:
         self,
         request: ThoughtRequest | Mapping[str, Any],
         cognitive_profile: CognitiveProfile | Mapping[str, Any],
+        *,
+        context: Mapping[str, Any] | None = None,
     ) -> ThoughtProposal:
         try:
             req = (
@@ -57,7 +59,12 @@ class ConsciousnessCoreRuntime:
                 "invalid Consciousness Core thought input"
             ) from exc
 
-        proposal_raw = await self._engine.think(req, profile)
+        if context is None:
+            proposal_raw = await self._engine.think(req, profile)
+        else:
+            if not isinstance(context, Mapping):
+                raise ThoughtEngineContractError("thought context must be a mapping")
+            proposal_raw = await self._engine.think(req, profile, context=context)
         try:
             proposal = (
                 proposal_raw
