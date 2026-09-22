@@ -95,6 +95,7 @@ class WorldEvidenceAdmissionResult(StrictModel):
     world_transition: WorldTransitionReceipt
     cognition_event: CognitionEvent | None
     cognition_event_queued: bool
+    observed_sequence: Annotated[int, Field(ge=0, strict=True)]
     live_state: LiveCognitiveSessionState
     model_calls: Literal[0]
     self_state_store_write_applied: Literal[False]
@@ -253,6 +254,7 @@ class ProductionCognitiveSession:
                 world_transition=reduction.receipt,
                 cognition_event=None,
                 cognition_event_queued=False,
+                observed_sequence=evidence.observed_sequence,
                 live_state=before,
                 model_calls=0,
                 self_state_store_write_applied=False,
@@ -294,6 +296,7 @@ class ProductionCognitiveSession:
             world_transition=reduction.receipt,
             cognition_event=event,
             cognition_event_queued=True,
+            observed_sequence=evidence.observed_sequence,
             live_state=self._live,
             model_calls=0,
             self_state_store_write_applied=False,
