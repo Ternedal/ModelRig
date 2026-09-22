@@ -161,8 +161,12 @@ def _validate_transition(
         raise CognitiveSingleStepError(
             "transition SelfState is not bound to the next workspace"
         )
-    if transition.from_self_state_ref != directive.transition.from_self_state_ref:
-        raise CognitiveSingleStepError("transition source SelfState binding mismatch")
+    if transition.from_cycle_id != directive.cycle_id:
+        raise CognitiveSingleStepError("transition source cycle binding mismatch")
+    if transition.decision_ref != directive.adjudication_ref:
+        raise CognitiveSingleStepError("transition adjudication binding mismatch")
+    if directive.progress_if_executed.last_cycle_id != transition.next_cycle_id:
+        raise CognitiveSingleStepError("directive progress does not bind the next cycle")
     if transition.model_invoked:
         raise CognitiveSingleStepError("C17 transition already claims a model call")
     if transition.persistence_committed:
