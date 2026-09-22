@@ -151,9 +151,43 @@ internal object RagStreamParser {
  * worker's `/rag/chat` takes one `query` string, not a message list, so prior
  * conversation turns aren't fed back in as context.
  */
+internal object RagClientErrors {
+    fun transport(operation: String): String = "$operation unavailable"
+    fun invalidEndpoint(operation: String): String = "$operation failed (invalid endpoint)"
+    fun http(operation: String, status: Int): String = "$operation failed ($status)"
+    fun worker(operation: String): String = "$operation failed (worker error)"
+    fun invalidResponse(operation: String): String = "$operation failed (invalid response)"
+}
+
 class RagClient(private val baseUrl: String, private val bearer: String?) {
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
     private val json = Json { ignoreUnknownKeys = true }
+
+    private fun endpoint(path: String, operation: String): URI = try {
+        URI.create(baseUrl.trimEnd('/') + path)
+    } catch (_: IllegalArgumentException) {
+        throw OllamaException(RagClientErrors.invalidEndpoint(operation))
+    }
+
+    private fun sendLines(request: HttpRequest, operation: String): HttpResponse<java.util.stream.Stream<String>> =
+        try {
+            http.send(request, HttpResponse.BodyHandlers.ofLines())
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw OllamaException(RagClientErrors.transport(operation))
+        } catch (_: Exception) {
+            throw OllamaException(RagClientErrors.transport(operation))
+        }
+
+    private fun sendText(request: HttpRequest, operation: String): HttpResponse<String> =
+        try {
+            http.send(request, HttpResponse.BodyHandlers.ofString())
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw OllamaException(RagClientErrors.transport(operation))
+        } catch (_: Exception) {
+            throw OllamaException(RagClientErrors.transport(operation))
+        }
 
     fun chatStream(
         query: String,
@@ -171,19 +205,15 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
             RagChatRequest(query = query, model = model, source = sourceFilter),
         )
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + "/api/v1/rag/chat"))
+            .uri(endpoint("/api/v1/rag/chat", "rag chat"))
             .timeout(Duration.ofSeconds(120))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(payload))
         bearer?.let { builder.header("Authorization", "Bearer $it") }
 
-        val resp = try {
-            http.send(builder.build(), HttpResponse.BodyHandlers.ofLines())
-        } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
-        }
+        val resp = sendLines(builder.build(), "rag chat")
         if (resp.statusCode() !in 200..299) {
-            throw OllamaException("rag chat failed (${resp.statusCode()})")
+            throw OllamaException(RagClientErrors.http("rag chat", resp.statusCode()))
         }
         // Fail-closed, som OllamaClient.chatStream (F-005) og som Androids
         // ragChatStream: EOF er ikke succes. Et droppet socket eller en
@@ -211,7 +241,7 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
                     sawDone = true
                 }
                 is RagStreamParser.Event.Failure ->
-                    throw OllamaException("rag chat: ${event.message}")
+                    throw OllamaException(RagClientErrors.worker("rag chat"))
                 RagStreamParser.Event.Ignored -> Unit
             }
         }
@@ -221,19 +251,19 @@ class RagClient(private val baseUrl: String, private val bearer: String?) {
     /** Lists ingested RAG source names, for the source-filter picker. */
     fun listSources(): List<String> {
         val builder = HttpRequest.newBuilder()
-            .uri(URI.create(baseUrl.trimEnd('/') + "/api/v1/rag/sources"))
+            .uri(endpoint("/api/v1/rag/sources", "rag sources"))
             .timeout(Duration.ofSeconds(10))
             .GET()
         bearer?.let { builder.header("Authorization", "Bearer $it") }
-        val resp = try {
-            http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
-        } catch (e: Exception) {
-            throw OllamaException("cannot reach $baseUrl: ${e.message}")
-        }
+        val resp = sendText(builder.build(), "rag sources")
         if (resp.statusCode() !in 200..299) {
-            throw OllamaException("rag sources failed (${resp.statusCode()})")
+            throw OllamaException(RagClientErrors.http("rag sources", resp.statusCode()))
         }
-        return json.decodeFromString(RagSourceListResponse.serializer(), resp.body())
-            .sources.map { it.source }.filter { it.isNotEmpty() }
+        return runCatching {
+            json.decodeFromString(RagSourceListResponse.serializer(), resp.body())
+                .sources.map { it.source }.filter { it.isNotEmpty() }
+        }.getOrElse {
+            throw OllamaException(RagClientErrors.invalidResponse("rag sources"))
+        }
     }
 }
