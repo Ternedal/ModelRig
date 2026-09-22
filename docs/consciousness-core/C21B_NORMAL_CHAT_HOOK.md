@@ -63,7 +63,10 @@ bounded body probe
 exact final string user message
         |
         v
-stable X-Request-ID
+stable X-Request-ID + authenticated device id
+        |
+        v
+server-bound SHA-256 turn id
         |
         v
 loopback POST /experimental/consciousness/user-turn
@@ -87,17 +90,25 @@ bytes.
 ## Stable turn identity
 
 The backend logging middleware already assigns or accepts one
-`X-Request-ID` per authenticated request.
+`X-Request-ID` per authenticated request, while auth middleware has already
+bound the request to one concrete paired device.
 
-C21-B uses that bounded ID as:
+C21-B derives the stable Core turn id as:
+
+```text
+chat-<sha256(authenticated_device_id + NUL + X-Request-ID)>
+```
+
+The raw `X-Request-ID` remains the downstream trace header. The derived
+device-bound turn id is used as:
 
 - C21-A `turn_id`;
-- downstream `X-Request-ID`;
-- source-ref suffix.
+- source-ref suffix;
+- the basis of the worker's hashed turn ref and evidence identity.
 
-The worker derives its own hashed turn ref and evidence identity.
-
-C21-B does not mint a second independent chat-turn identity.
+This preserves retry identity for the same paired device while preventing two
+different devices that happen to reuse the same client-supplied request id from
+colliding in Consciousness Core.
 
 ## What is admitted
 
@@ -107,7 +118,8 @@ Only the final message is eligible, and only when:
 - content is a JSON string;
 - content is non-blank;
 - content is at most 2048 Unicode code points;
-- request id is non-blank, control-character free and at most 128 code points.
+- request id is non-blank, control-character free and at most 128 code points;
+- authenticated device id is present from the existing Bearer boundary.
 
 Unsupported shapes are not rejected by C21-B. They simply bypass
 Consciousness admission and continue through the existing chat implementation.
@@ -132,9 +144,9 @@ It sends:
 
 ```json
 {
-  "turn_id": "<X-Request-ID>",
+  "turn_id": "chat-<device/request hash>",
   "user_text": "<exact final user string>",
-  "source_ref": "backend-chat:<X-Request-ID>"
+  "source_ref": "backend-chat:chat-<device/request hash>"
 }
 ```
 
