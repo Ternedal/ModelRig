@@ -92,7 +92,7 @@ func TestConsciousnessChatEnabledSubmitsExactFinalUserAndPreservesModelBody(t *t
 	t.Setenv(memory4ChatWriteFlag, "0")
 
 	const requestID = "req-c21b-exact"
-	const turnID = consciousnessBoundTurnID("memory4-device", requestID)
+	turnID := consciousnessBoundTurnID("memory4-device", requestID)
 	const userText = "  Jeg siger præcis dette.  "
 	var workerHits atomic.Int32
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +155,8 @@ func TestConsciousnessChatRestoresOriginalTurnBeforeMemory4Context(t *testing.T)
 	t.Setenv(memory4ChatFlag, "1")
 	t.Setenv(memory4ChatWriteFlag, "0")
 
-	const turnID = "req-c21b-memory4"
+	const requestID = "req-c21b-memory4"
+	turnID := consciousnessBoundTurnID("memory4-device", requestID)
 	const userText = " what do I like? "
 	var consciousnessHits atomic.Int32
 	var contextHits atomic.Int32
@@ -287,7 +288,7 @@ func TestConsciousnessChatTamperedReceiptDoesNotRewriteChat(t *testing.T) {
 	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
 	raw := `{"model":"qwen","messages":[{"role":"user","content":"hello"}],"stream":true}`
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, requestID))
 	if rec.Code != http.StatusOK || modelHits.Load() != 1 {
 		t.Fatalf("tampered secondary receipt changed chat: status=%d modelHits=%d body=%s", rec.Code, modelHits.Load(), rec.Body.String())
 	}
