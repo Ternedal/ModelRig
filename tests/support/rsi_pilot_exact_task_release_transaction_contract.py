@@ -34,8 +34,8 @@ _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
         "rsi_pilot_exact_task_staging_deployment_status_recovery_stage_b_driver.py",
         "rsi_pilot_exact_task_post_staging_deployment_status_attestation_contract.py",
         "rsi_pilot_exact_task_staging_success_status_recovery_contract.py",
-        "rsi_pilot_exact_task_production_activation_recovery_contract.py",
-        "rsi_pilot_exact_task_post_production_activation_attestation_contract.py",
+        "rsi_pilot_exact_task_production_activation_recovery_stage_b_driver.py",
+        "rsi_pilot_exact_task_post_production_activation_attestation_stage_b_driver.py",
     }
 )
 # Deep downstream contracts rebuild increasingly nested provenance; four concurrent
@@ -72,8 +72,8 @@ _CONTRACT_FILES = (
     "rsi_pilot_exact_task_production_activation_readiness_contract.py",
     "rsi_pilot_exact_task_production_activation_authorization_contract.py",
     "rsi_pilot_exact_task_production_activation_transaction_stage_b_driver.py",
-    "rsi_pilot_exact_task_production_activation_recovery_contract.py",
-    "rsi_pilot_exact_task_post_production_activation_attestation_contract.py",
+    "rsi_pilot_exact_task_production_activation_recovery_stage_b_driver.py",
+    "rsi_pilot_exact_task_post_production_activation_attestation_stage_b_driver.py",
     "rsi_pilot_exact_task_product_pilot_start_requirements_contract.py",
     "rsi_pilot_exact_task_product_pilot_tail_stage_b_driver.py",
 )
