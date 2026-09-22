@@ -28,6 +28,10 @@ from .cycle import (
     workspace_ref,
     world_state_ref,
 )
+from .response_guidance import (
+    ResponseGuidanceEnvelope,
+    build_response_guidance,
+)
 from .self_state import PersistentSelfState, SelfStateStore
 from .session_bootstrap import (
     RuntimeSessionContext,
@@ -210,6 +214,7 @@ class ProductionCognitiveSession:
         # (observed_sequence, canonical evidence ref, observation id).
         self._user_turn_ledger: dict[str, tuple[int, str, str]] = {}
         self._next_user_turn_sequence = 1
+        self._pending_response_guidance: ResponseGuidanceEnvelope | None = None
 
     @property
     def live_state(self) -> LiveCognitiveSessionState:
@@ -222,6 +227,35 @@ class ProductionCognitiveSession:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def pending_response_guidance(self) -> ResponseGuidanceEnvelope | None:
+        return self._pending_response_guidance
+
+    def consume_response_guidance(
+        self,
+        *,
+        user_turn_event_id: str,
+    ) -> ResponseGuidanceEnvelope | None:
+        """Consume the one-shot outward guidance for one exact user-turn event."""
+        self._require_open()
+        if (
+            not isinstance(user_turn_event_id, str)
+            or not user_turn_event_id.startswith("cevt-")
+            or len(user_turn_event_id) != len("cevt-") + 32
+        ):
+            raise CognitiveSessionLifecycleError(
+                "invalid user-turn event id for response guidance"
+            )
+        guidance = self._pending_response_guidance
+        if guidance is None:
+            return None
+        if guidance.user_turn_event_id != user_turn_event_id:
+            raise CognitiveSessionLifecycleError(
+                "response guidance belongs to another user turn"
+            )
+        self._pending_response_guidance = None
+        return guidance
 
     def _require_open(self) -> None:
         if self._closed:
@@ -460,6 +494,10 @@ class ProductionCognitiveSession:
             raise TypeError("profile must be CognitiveProfile")
 
         before = self._live
+        pending_events_before = {
+            event.event_id: event
+            for event in self._bridge.state.pending_events
+        }
         bridge_step = await self._bridge.step(
             current_state=before.state,
             current_world=before.world,
@@ -483,9 +521,30 @@ class ProductionCognitiveSession:
                 production_activation=False,
             )
 
-        reduction = bridge_step.cycle_result.reduction
+        cycle_result = bridge_step.cycle_result
+        reduction = cycle_result.reduction
         next_state = reduction.next_self_state
         next_workspace = reduction.next_workspace
+
+        selected_events: list[CognitionEvent] = []
+        for event_id in cycle_result.receipt.selected_event_ids:
+            event = pending_events_before.get(event_id)
+            if event is None:
+                raise CognitiveSessionLifecycleError(
+                    "selected cognition event missing from pre-step state"
+                )
+            selected_events.append(event)
+
+        next_guidance = build_response_guidance(
+            proposal=cycle_result.cognitive_cycle.proposal,
+            selected_events=selected_events,
+            cycle_id=cycle_result.cognitive_cycle.request.cycle_id,
+            cognitive_profile_ref=(
+                cycle_result.cognitive_cycle.request.cognitive_profile_ref
+            ),
+            person_revision=next_state.person_revision,
+            self_revision=next_state.revision,
+        )
 
         # C18-A/C16 must preserve world/personality authority. C19-B refuses to
         # adopt a transition that claims otherwise.
@@ -515,6 +574,10 @@ class ProductionCognitiveSession:
             ),
             production_activation=False,
         )
+        # A successful RUN advances the cognitive moment. Any older unconsumed
+        # guidance is therefore replaced, including by None when the new cycle
+        # has no unambiguous outward response intent.
+        self._pending_response_guidance = next_guidance
         return CognitiveSessionStep(
             schema="kaliv-consciousness-core/session-step/v1",
             supervisor_step=bridge_step,
@@ -528,6 +591,9 @@ class ProductionCognitiveSession:
         )
 
     def close(self) -> None:
+        # Response guidance is transient and must not survive the session
+        # lifecycle boundary.
+        self._pending_response_guidance = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
