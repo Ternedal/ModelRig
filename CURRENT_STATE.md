@@ -373,6 +373,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_client_capability_gates.py`
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
+- `tests/workflow_consciousness_core_contract.py`
 - `tests/workflow_contract_adapter.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_data_sharing_decision.py`
