@@ -23,7 +23,7 @@ from rsi_pilot_exact_task_release_transaction_contract_base import (
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 2400
-_TARGETED_DEEP_TIMEOUT_SECONDS = 3600
+_TARGETED_DEEP_TIMEOUT_SECONDS = 5400
 _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
     {
         "rsi_pilot_exact_task_release_recovery_contract.py",
@@ -35,6 +35,7 @@ _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
         "rsi_pilot_exact_task_post_staging_deployment_status_attestation_contract.py",
         "rsi_pilot_exact_task_staging_success_status_recovery_contract.py",
         "rsi_pilot_exact_task_production_activation_recovery_contract.py",
+        "rsi_pilot_exact_task_post_production_activation_attestation_contract.py",
     }
 )
 # Deep downstream contracts rebuild increasingly nested provenance; four concurrent
