@@ -81,8 +81,8 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
 | `KALIV_COMPUTER_USE` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | slukket |
 | `KALIV_EGRESS_GATE` | `(tom)` | slukket |
