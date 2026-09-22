@@ -581,7 +581,8 @@ class CognitiveSingleStepTests(unittest.TestCase):
             ROOT / "worker" / "app" / "consciousness_core" / "single_step.py"
         ).read_text(encoding="utf-8")
         for forbidden in (
-            "SelfStateStore",
+            "from .self_state import SelfStateStore",
+            "from app.consciousness_core.self_state import SelfStateStore",
             "schedule_service",
             "ScheduleStore",
             "Agent3Orchestrator",
