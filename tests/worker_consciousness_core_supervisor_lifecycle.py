@@ -82,6 +82,25 @@ class Engine:
         return payload
 
 
+class BlockingEngine(Engine):
+    def __init__(self):
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def think(self, request, cognitive_profile, *, context=None):
+        self.calls += 1
+        self.entered.set()
+        await self.release.wait()
+        payload = copy.deepcopy(FIXTURES["thought_proposal"])
+        payload["request_id"] = request.request_id
+        payload["proposal_id"] = "thinkprop-" + "6" * 32
+        payload["interpretation"] = "Single-flight supervisor step completed."
+        payload["attention_suggestions"] = []
+        payload["uncertainty"] = 0.15
+        return payload
+
+
 def clock_factory():
     wall_values = iter(
         [
@@ -319,6 +338,122 @@ try:
         "C18-B grants no execution authority",
     )
 
+    # A fresh bridge with a larger pacing interval returns WAIT with zero model calls.
+    wait_engine = Engine()
+    wait_bridge = ProductionSupervisorBridge(
+        runtime=ConsciousnessCoreRuntime(wait_engine),
+        clock=clock_factory(),
+        policy=__import__(
+            "app.consciousness_core.supervisor",
+            fromlist=["SupervisorPolicy"],
+        ).SupervisorPolicy(
+            schema="kaliv-consciousness-core/supervisor-policy/v1",
+            min_cycle_interval_ms=1500,
+            max_events_per_cycle=4,
+            production_activation=False,
+        ),
+    )
+    wait_bridge.submit(
+        CognitionEvent(
+            schema="kaliv-consciousness-core/cognition-event/v1",
+            event_id="cevt-" + "3" * 32,
+            kind="world_change",
+            source_ref="event:wait-test",
+            summary="Event should wait for the minimum cycle interval.",
+            salience=0.8,
+            observed_sequence=3,
+            production_activation=False,
+        )
+    )
+    wait_step = run(
+        wait_bridge.step(
+            current_state=state,
+            current_world=world,
+            current_workspace=workspace,
+            personality_snapshot=personality,
+            profile=profile,
+        )
+    )
+    check(wait_step.plan.decision == "WAIT", "pacing can return WAIT")
+    check(not wait_step.thought_engine_invoked, "WAIT invokes no ThoughtEngine")
+    check(wait_engine.calls == 0, "WAIT leaves model call count at zero")
+
+    # Concurrent submit during an awaited model call fails closed instead of
+    # silently losing the newly queued event.
+    async def exercise_single_flight():
+        blocking_engine = BlockingEngine()
+        concurrent_bridge = ProductionSupervisorBridge(
+            runtime=ConsciousnessCoreRuntime(blocking_engine),
+            clock=clock_factory(),
+        )
+        concurrent_bridge.submit(
+            CognitionEvent(
+                schema="kaliv-consciousness-core/cognition-event/v1",
+                event_id="cevt-" + "4" * 32,
+                kind="user_turn",
+                source_ref="event:single-flight",
+                summary="Start one explicit cognitive step.",
+                salience=1.0,
+                observed_sequence=4,
+                production_activation=False,
+            )
+        )
+        task = asyncio.create_task(
+            concurrent_bridge.step(
+                current_state=state,
+                current_world=world,
+                current_workspace=workspace,
+                personality_snapshot=personality,
+                profile=profile,
+            )
+        )
+        await blocking_engine.entered.wait()
+        submit_rejected = False
+        try:
+            concurrent_bridge.submit(
+                CognitionEvent(
+                    schema="kaliv-consciousness-core/cognition-event/v1",
+                    event_id="cevt-" + "5" * 32,
+                    kind="world_change",
+                    source_ref="event:during-step",
+                    summary="Must not race the in-flight cognitive transition.",
+                    salience=0.6,
+                    observed_sequence=5,
+                    production_activation=False,
+                )
+            )
+        except Exception:
+            submit_rejected = True
+
+        second_step_rejected = False
+        try:
+            await concurrent_bridge.step(
+                current_state=state,
+                current_world=world,
+                current_workspace=workspace,
+                personality_snapshot=personality,
+                profile=profile,
+            )
+        except Exception:
+            second_step_rejected = True
+
+        blocking_engine.release.set()
+        result = await task
+        return submit_rejected, second_step_rejected, result, blocking_engine.calls
+
+    submit_rejected, second_rejected, concurrent_result, concurrent_calls = run(
+        exercise_single_flight()
+    )
+    check(
+        submit_rejected,
+        "submit during in-flight cognition fails closed instead of losing an event",
+    )
+    check(second_rejected, "a second concurrent step is rejected")
+    check(
+        concurrent_result.thought_engine_invoked and concurrent_calls == 1,
+        "single-flight path still completes exactly one model call",
+    )
+
     bridge.close()
     check(bridge.closed, "bridge close marks in-process seam closed")
     try:
@@ -419,6 +554,18 @@ try:
             return True
 
     check(run(exercise_wrong()), "invalid lifecycle bridge factory fails closed")
+
+    # Real production composition remains rooted in scheduler ownership.
+    os.environ.pop(SUPERVISOR_LIFECYCLE_FLAG, None)
+    os.environ.pop("KALIV_CONSCIOUSNESS_CORE_ENABLED", None)
+    from app import entrypoint  # noqa: E402
+    from app.schedule_runtime import scheduler_lifespan  # noqa: E402
+
+    production_lifespan = entrypoint.fastapi_app.router.lifespan_context
+    check(
+        getattr(production_lifespan, "__wrapped__", None) is scheduler_lifespan,
+        "C18-B production wrapper preserves scheduler as lifespan authority owner",
+    )
 
 finally:
     for key, value in old_env.items():
