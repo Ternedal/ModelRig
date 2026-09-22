@@ -5,6 +5,17 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, ThoughtProposal, ThoughtRequest
+from .metacognition import (
+    MetacognitionContractError,
+    MetacognitiveState,
+    OutcomeObservation,
+    PredictionRecord,
+    PredictionResolution,
+    apply_resolution,
+    initial_metacognitive_state,
+    prediction_from_proposal,
+    resolve_prediction,
+)
 from .runtime import (
     CONSCIOUSNESS_CORE_FLAG,
     ConsciousnessCoreRuntime,
@@ -20,6 +31,11 @@ from .thought_engine import (
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
     "CognitiveProfile",
+    "MetacognitionContractError",
+    "MetacognitiveState",
+    "OutcomeObservation",
+    "PredictionRecord",
+    "PredictionResolution",
     "ConsciousnessCoreRuntime",
     "OllamaThoughtEngine",
     "ThoughtEngine",
@@ -27,5 +43,9 @@ __all__ = [
     "ThoughtProposal",
     "ThoughtRequest",
     "compose_runtime",
+    "apply_resolution",
     "enabled",
+    "initial_metacognitive_state",
+    "prediction_from_proposal",
+    "resolve_prediction",
 ]
