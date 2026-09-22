@@ -50,6 +50,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_PROFILE_FILE` | `./kaliv-consciousness-profile.json` |
 | `KALIV_CONSCIOUSNESS_STEP_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
