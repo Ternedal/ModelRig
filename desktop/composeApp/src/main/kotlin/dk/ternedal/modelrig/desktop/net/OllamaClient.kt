@@ -294,7 +294,7 @@ class OllamaClient(
         val modelsPath = if (pullPath.startsWith("/api/v1/")) "/api/v1/models" else "/api/tags"
         val installed = try {
             listModels(modelsPath)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             throw OllamaException(
                 "pull reported success, but installed-model verification failed"
             )
