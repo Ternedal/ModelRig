@@ -654,10 +654,14 @@ def _execute_verified_pilot_exact_task_product_pilot_plan(
     marker = ledger.acquire(plan=plan)
 
     plan_again, live_again, task_again = _require_live_plan(plan)
-    if plan_again is not plan or task_again != task:
+    if plan_again is not plan or task_again is not task:
         raise PilotExactTaskProductPilotExecutionError(
             "product-pilot execution authority changed after durable nonce reservation"
         )
+    # Launch with the task object revalidated after the durable reservation.
+    # This keeps the Tier-A identity boundary tied to the exact live authority
+    # returned by the second provenance check rather than an earlier alias.
+    task = task_again
     live = live_again
     started_at = now_provider()
     started_time = _utc(started_at, name="started_at_utc")
