@@ -84,6 +84,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_PROFILE_FILE` | `./kaliv-consciousness-profile.json` | indstilling |
 | `KALIV_CONSCIOUSNESS_STEP_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` | slukket |
