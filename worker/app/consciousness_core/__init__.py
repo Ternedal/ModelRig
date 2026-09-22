@@ -198,6 +198,7 @@ from .world_reducer import (
     WorldTransitionReceipt,
     WorldTransitionResult,
     reduce_world_evidence,
+    world_evidence_event_ref,
 )
 from .wake_cycle import (
     WakeCycleError,
@@ -216,6 +217,7 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "world_evidence_event_ref",
     "reduce_world_evidence",
     "WorldTransitionResult",
     "WorldTransitionReceipt",
