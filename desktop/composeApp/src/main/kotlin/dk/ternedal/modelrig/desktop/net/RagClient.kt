@@ -134,6 +134,13 @@ internal object RagStreamParser {
     }
 }
 
+internal object RagClientErrors {
+    fun transport(operation: String): String = "$operation unavailable"
+    fun invalidEndpoint(operation: String): String = "$operation failed (invalid endpoint)"
+    fun http(operation: String, status: Int): String = "$operation failed ($status)"
+    fun worker(operation: String): String = "$operation failed (worker error)"
+    fun invalidResponse(operation: String): String = "$operation failed (invalid response)"
+}
 /**
  * Client for the ModelRig backend's RAG endpoints (`/api/v1/rag/chat`,
  * `/api/v1/rag/sources`). Deliberately separate from `OllamaClient`/
@@ -151,13 +158,6 @@ internal object RagStreamParser {
  * worker's `/rag/chat` takes one `query` string, not a message list, so prior
  * conversation turns aren't fed back in as context.
  */
-internal object RagClientErrors {
-    fun transport(operation: String): String = "$operation unavailable"
-    fun invalidEndpoint(operation: String): String = "$operation failed (invalid endpoint)"
-    fun http(operation: String, status: Int): String = "$operation failed ($status)"
-    fun worker(operation: String): String = "$operation failed (worker error)"
-    fun invalidResponse(operation: String): String = "$operation failed (invalid response)"
-}
 
 class RagClient(private val baseUrl: String, private val bearer: String?) {
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
