@@ -4,7 +4,7 @@ C4 is deliberately dormant and route-less. Importing this package grants no
 model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
-from .contracts import CognitiveProfile, ThoughtProposal, ThoughtRequest
+from .contracts import CognitiveProfile, PersonalitySnapshot, ThoughtProposal, ThoughtRequest
 from .cycle import (
     CognitiveContextPacket,
     CognitiveCycleCoordinator,
@@ -164,6 +164,7 @@ __all__ = [
     "CognitiveCycleError",
     "CognitiveCycleCoordinator",
     "CognitiveContextPacket",
+    "PersonalitySnapshot",
     "production_sleep_runtime_factory",
     "authoritative_sleep_binding",
     "TrustedRuntimeClock",
