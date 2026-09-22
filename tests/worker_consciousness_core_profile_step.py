@@ -231,10 +231,10 @@ class ProfileBackedStepTests(unittest.TestCase):
                 self.assertFalse(profile_step_enabled(), value)
 
             app = FastAPI()
-            before = [route.path for route in app.router.routes]
+            before = [getattr(route, "path", None) for route in app.router.routes]
             os.environ.pop(CONSCIOUSNESS_STEP_FLAG, None)
             self.assertFalse(mount_consciousness_profile_step(app))
-            self.assertEqual(before, [route.path for route in app.router.routes])
+            self.assertEqual(before, [getattr(route, "path", None) for route in app.router.routes])
 
             os.environ[CONSCIOUSNESS_STEP_FLAG] = "1"
             self.assertTrue(profile_step_enabled())
@@ -245,10 +245,10 @@ class ProfileBackedStepTests(unittest.TestCase):
                     loopback_allowed=lambda _request: True,
                 )
             )
-            paths = [route.path for route in app.router.routes]
+            paths = [getattr(route, "path", None) for route in app.router.routes]
             self.assertEqual(paths.count(COGNITION_STEP_PREFIX + "/step"), 1)
             self.assertTrue(mount_consciousness_profile_step(app))
-            paths = [route.path for route in app.router.routes]
+            paths = [getattr(route, "path", None) for route in app.router.routes]
             self.assertEqual(paths.count(COGNITION_STEP_PREFIX + "/step"), 1)
         finally:
             if old is None:
