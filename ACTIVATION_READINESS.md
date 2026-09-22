@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 22 feature-switches er tændt som default.** (14 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 23 feature-switches er tændt som default.** (14 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
