@@ -158,8 +158,17 @@ def run_contract(*, shared_fixture=None) -> None:
         live = capability._get_live_product_pilot_executor_capability_inputs(receipt)
         assert live is not None
         assert live["execution_admission"] is admitted
+        assert live["task"] is task
+        assert live["catalog"] is authority["catalog"]
+        assert live["toolchain"] is authority["toolchain"]
+        assert live["isolation_attestation"] is authority["attestation"]
+        assert live["physical_verifier"] is authority["physical_verifier"]
+        assert live["signed_runtime_closure"] is authority["signed_closure"]
+        assert live["runtime_closure_verifier"] is authority["runtime_verifier"]
         assert live["git_runner"] is authority["git_runner"]
-        assert live["task"] == task
+        assert live["trusted_runtime_root"] == authority["trusted"]
+        assert live["workspace_root"] == authority["workspace"]
+        assert live["control_plane_root"] == authority["control"]
 
         serialized = capability.PilotExactTaskProductPilotExecutorCapabilityReceipt.from_mapping(
             receipt.to_dict()
