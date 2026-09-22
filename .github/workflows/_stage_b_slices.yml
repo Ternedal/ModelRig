@@ -15,6 +15,9 @@ jobs:
     name: stage-b-admission
     runs-on: ubuntu-latest
     timeout-minutes: 355
+    concurrency:
+      group: modelrig-stage-b-admission-${{ inputs.head_sha }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,21 +33,32 @@ jobs:
             exit 1
           }
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.23"
-
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
+      - name: Restore exact-head Stage-B shared cache
+        id: stage_b_shared_cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/modelrig-stage-b-cache
+          key: modelrig-stage-b-admission-v1-${{ inputs.head_sha }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.stage_b_shared_cache.outputs.cache-hit != 'true'
+        with:
+          go-version: "1.23"
+
       - name: Install worker deps
+        if: steps.stage_b_shared_cache.outputs.cache-hit != 'true'
         run: pip install -r worker/requirements.txt --break-system-packages
 
       - name: Build backend
+        if: steps.stage_b_shared_cache.outputs.cache-hit != 'true'
         run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
 
       - name: Run Stage-B admission and publish canonical cache root
+        if: steps.stage_b_shared_cache.outputs.cache-hit != 'true'
         env:
           MODELRIG_BIN: /tmp/modelrig-server
           MODELRIG_STAGE_B_SLICE: admission
@@ -52,6 +66,21 @@ jobs:
           PYTHONUNBUFFERED: "1"
         shell: bash
         run: PYTHONPATH=worker python3 -u tests/workflow_stage_b_physical_gate.py
+
+      - name: Seal exact-head Stage-B shared cache
+        if: steps.stage_b_shared_cache.outputs.cache-hit != 'true'
+        env:
+          EXPECTED_SHA: ${{ inputs.head_sha }}
+          CACHE_ROOT: ${{ runner.temp }}/modelrig-stage-b-cache
+        shell: bash
+        run: python3 scripts/stage_b_cache_manifest.py create --root "$CACHE_ROOT" --head-sha "$EXPECTED_SHA"
+
+      - name: Verify exact-head Stage-B shared cache
+        env:
+          EXPECTED_SHA: ${{ inputs.head_sha }}
+          CACHE_ROOT: ${{ runner.temp }}/modelrig-stage-b-cache
+        shell: bash
+        run: python3 scripts/stage_b_cache_manifest.py verify --root "$CACHE_ROOT" --head-sha "$EXPECTED_SHA"
 
       - name: Upload exact-head Stage-B cache
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -106,25 +135,32 @@ jobs:
             exit 1
           }
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.23"
-
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-
-      - name: Install worker deps
-        run: pip install -r worker/requirements.txt --break-system-packages
-
-      - name: Build backend
-        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
 
       - name: Download exact-head Stage-B cache
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: stage-b-cache-${{ inputs.head_sha }}
           path: ${{ runner.temp }}/modelrig-stage-b-cache
+
+      - name: Verify exact-head Stage-B cache
+        env:
+          EXPECTED_SHA: ${{ inputs.head_sha }}
+          CACHE_ROOT: ${{ runner.temp }}/modelrig-stage-b-cache
+        shell: bash
+        run: python3 scripts/stage_b_cache_manifest.py verify --root "$CACHE_ROOT" --head-sha "$EXPECTED_SHA"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.23"
+
+      - name: Install worker deps
+        run: pip install -r worker/requirements.txt --break-system-packages
+
+      - name: Build backend
+        run: cd backend && go build -o /tmp/modelrig-server ./cmd/modelrig-server
 
       - name: Run bounded Stage-B shard
         env:
