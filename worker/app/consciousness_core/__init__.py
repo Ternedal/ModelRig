@@ -75,6 +75,15 @@ from .runtime import (
     compose_runtime,
     enabled,
 )
+from .sleep_lifecycle import (
+    SLEEP_LIFECYCLE_FLAG,
+    SleepBinding,
+    SleepLifecycleError,
+    SleepLifecycleRuntime,
+    SleepStateStore,
+    compose_sleep_lifecycle_lifespan,
+    sleep_lifecycle_enabled,
+)
 from .sleep import (
     SleepContractError,
     SleepRecord,
@@ -104,6 +113,13 @@ from .thought_engine import (
 
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
+    "sleep_lifecycle_enabled",
+    "compose_sleep_lifecycle_lifespan",
+    "SleepStateStore",
+    "SleepLifecycleRuntime",
+    "SleepLifecycleError",
+    "SleepBinding",
+    "SLEEP_LIFECYCLE_FLAG",
     "wake_from_sleep",
     "prepare_sleep",
     "WakeReceipt",
