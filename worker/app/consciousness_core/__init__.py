@@ -75,6 +75,11 @@ from .runtime import (
     compose_runtime,
     enabled,
 )
+from .production_lifecycle import (
+    TrustedRuntimeClock,
+    authoritative_sleep_binding,
+    production_sleep_runtime_factory,
+)
 from .self_state import (
     PersistentSelfState,
     PersonRevisionRebindAuthority,
@@ -125,6 +130,9 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "production_sleep_runtime_factory",
+    "authoritative_sleep_binding",
+    "TrustedRuntimeClock",
     "CONSCIOUSNESS_CORE_FLAG",
     "verify_active_person",
     "rebind_person_revision",
