@@ -122,6 +122,21 @@ def run(*, cycles: int = 120) -> dict[str, object]:
                 )
             )
 
+        if cycle % 6 == 0:
+            evidence.append(
+                _evidence(
+                    seed=f"bodyrig-{cycle}",
+                    scope="personality",
+                    field="expressiveness",
+                    value="high",
+                    source_kind="bodyrig_mannerism",
+                    source_ref=f"bodyrig:mannerism:{cycle}",
+                    lineage_seed="bodyrig:expressiveness:root",
+                    sequence=cycle,
+                    confidence=0.84,
+                )
+            )
+
         # Session affect is intentionally noisy and cannot consolidate.
         if cycle % 4 == 0:
             evidence.append(
