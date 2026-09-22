@@ -155,14 +155,25 @@ def wake_from_sleep(
         raise SleepContractError("sleep record belongs to another Person Revision")
 
     duration=None; confidence=0.0; known=False
-    try:
-        relation=relate_anchors(entry,wake)
-        if relation.relation in {"AFTER","SAME_WINDOW"} and relation.elapsed_ms is not None:
-            duration=relation.elapsed_ms
-            confidence=relation.confidence
-            known=True
-    except TemporalContractError:
-        pass
+    # Offline sleep normally crosses runtime epochs, so elapsed duration must
+    # bridge through trusted wall-clock evidence. A backwards wall clock is
+    # never accepted as a tiny "same window" sleep: keep duration unknown
+    # rather than inventing time that did not progress.
+    wall_clock_rolled_back = (
+        entry.runtime_epoch_id != wake.runtime_epoch_id
+        and entry.wall_time_unix_ms is not None
+        and wake.wall_time_unix_ms is not None
+        and wake.wall_time_unix_ms < entry.wall_time_unix_ms
+    )
+    if not wall_clock_rolled_back:
+        try:
+            relation=relate_anchors(entry,wake)
+            if relation.relation in {"AFTER","SAME_WINDOW"} and relation.elapsed_ms is not None:
+                duration=relation.elapsed_ms
+                confidence=relation.confidence
+                known=True
+        except TemporalContractError:
+            pass
 
     seed={"self_id":self_id,"person_revision":person_revision,"wake":wake.anchor_id,"sleep_id":sleep_id,"kind":kind}
     return WakeReceipt(
