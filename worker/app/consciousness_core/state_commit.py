@@ -275,14 +275,16 @@ def _exclusive_kernel_lock(path: Path) -> Iterator[None]:
         _validate_open_lock(descriptor, path)
         yield
     finally:
-        if locked:
-            if os.name == "posix":
-                import fcntl
+        try:
+            if locked:
+                if os.name == "posix":
+                    import fcntl
 
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            elif os.name == "nt":
-                _unlock_windows(descriptor, overlapped)
-        os.close(descriptor)
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                elif os.name == "nt":
+                    _unlock_windows(descriptor, overlapped)
+        finally:
+            os.close(descriptor)
 
 
 def _transition_expected_id(transition: SupervisorTransitionCandidate) -> str:
@@ -328,9 +330,10 @@ class LockedSelfStateCommitter:
 
     def _read_journal(self) -> StateCommitJournalRecord | None:
         try:
-            raw = _read_bounded(self.journal_path, _JOURNAL_MAX)
+            self.journal_path.lstat()
         except FileNotFoundError:
             return None
+        raw = _read_bounded(self.journal_path, _JOURNAL_MAX)
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
