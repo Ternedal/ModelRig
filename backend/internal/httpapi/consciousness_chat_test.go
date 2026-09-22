@@ -39,6 +39,45 @@ func consciousnessValidReceipt(turnID string, replayed bool) map[string]any {
 	}
 }
 
+func consciousnessValidStepReceipt(eventID, decision string) map[string]any {
+	var transition any = nil
+	selected := []string{}
+	thought := false
+	modelCalls := 0
+	contextUpdated := false
+	completedCycles := 0
+	if decision == "RUN" {
+		transition = "cognitive-transition-receipt:" + strings.Repeat("f", 64)
+		selected = []string{eventID}
+		thought = true
+		modelCalls = 1
+		contextUpdated = true
+		completedCycles = 1
+	}
+	return map[string]any{
+		"schema":                         consciousnessStepReceiptSchema,
+		"required_event_id":              eventID,
+		"decision":                       decision,
+		"selected_event_ids":             selected,
+		"thought_engine_invoked":         thought,
+		"model_calls":                    modelCalls,
+		"profile_ref":                    "cognitive-profile:" + strings.Repeat("1", 64),
+		"profile_config_ref":             "cognitive-profile-config:" + strings.Repeat("2", 64),
+		"self_state_ref":                 "self-state:" + strings.Repeat("3", 64),
+		"world_state_ref":                "world-state:" + strings.Repeat("4", 64),
+		"workspace_ref":                  "workspace:" + strings.Repeat("5", 64),
+		"transition_receipt_ref":         transition,
+		"completed_cycles":               completedCycles,
+		"context_updated":                contextUpdated,
+		"automatic_repeat":               false,
+		"self_state_store_write_applied": false,
+		"durable_memory_write_authority": false,
+		"execution_authority":            false,
+		"scheduling_authority":           false,
+		"production_activation":          false,
+	}
+}
+
 func consciousnessRouteRequest(raw, requestID string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
@@ -88,6 +127,7 @@ func TestConsciousnessChatFlagOffPreservesBaselineAndSkipsWorker(t *testing.T) {
 
 func TestConsciousnessChatEnabledSubmitsExactFinalUserAndPreservesModelBody(t *testing.T) {
 	t.Setenv(consciousnessChatFlag, "1")
+	t.Setenv(consciousnessTurnCognitionFlag, "0")
 	t.Setenv(memory4ChatFlag, "0")
 	t.Setenv(memory4ChatWriteFlag, "0")
 
@@ -151,6 +191,7 @@ func TestConsciousnessChatEnabledSubmitsExactFinalUserAndPreservesModelBody(t *t
 
 func TestConsciousnessChatRestoresOriginalTurnBeforeMemory4Context(t *testing.T) {
 	t.Setenv(consciousnessChatFlag, "1")
+	t.Setenv(consciousnessTurnCognitionFlag, "0")
 	t.Setenv(memory4ChatFlag, "1")
 	t.Setenv(memory4ChatWriteFlag, "0")
 
@@ -225,6 +266,275 @@ func TestConsciousnessChatRestoresOriginalTurnBeforeMemory4Context(t *testing.T)
 	if !strings.Contains(got.Messages[1].Content, "espresso") ||
 		!strings.Contains(got.Messages[1].Content, "what do I like?") {
 		t.Fatalf("Memory 4 did not receive/restorably wrap original user turn: %q", got.Messages[1].Content)
+	}
+}
+
+func TestConsciousnessChatBothFlagsRunRequiredStepBeforeNormalResponse(t *testing.T) {
+	t.Setenv(consciousnessChatFlag, "1")
+	t.Setenv(consciousnessTurnCognitionFlag, "1")
+	t.Setenv(memory4ChatFlag, "0")
+	t.Setenv(memory4ChatWriteFlag, "0")
+
+	const turnID = "req-c22d-run"
+	const eventID = "cevt-" + "a" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	var userTurnHits atomic.Int32
+	var stepHits atomic.Int32
+	var stepDone atomic.Bool
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("client bearer leaked to consciousness worker: %q", got)
+		}
+		switch r.URL.Path {
+		case consciousnessUserTurnPath:
+			userTurnHits.Add(1)
+			receipt := consciousnessValidReceipt(turnID, false)
+			receipt["cognition_event_id"] = eventID
+			writeJSON(w, http.StatusOK, receipt)
+		case consciousnessStepPath:
+			stepHits.Add(1)
+			var got consciousnessStepRequest
+			dec := json.NewDecoder(r.Body)
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&got); err != nil {
+				t.Errorf("decode cognition step: %v", err)
+				return
+			}
+			if got.RequiredEventID != eventID {
+				t.Errorf("step event=%q want %q", got.RequiredEventID, eventID)
+			}
+			if gotID := r.Header.Get("X-Request-ID"); gotID != turnID {
+				t.Errorf("step request id=%q want %q", gotID, turnID)
+			}
+			stepDone.Store(true)
+			writeJSON(w, http.StatusOK, consciousnessValidStepReceipt(eventID, "RUN"))
+		default:
+			t.Errorf("unexpected worker path=%q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer worker.Close()
+
+	var modelHits atomic.Int32
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		modelHits.Add(1)
+		if !stepDone.Load() {
+			t.Error("normal chat model started before required cognition step completed")
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte("{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":true}\n"))
+	}))
+	defer ollama.Close()
+
+	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
+	raw := `{"model":"qwen","messages":[{"role":"user","content":"think then answer"}],"stream":true}`
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if userTurnHits.Load() != 1 || stepHits.Load() != 1 || modelHits.Load() != 1 {
+		t.Fatalf("hits user=%d step=%d model=%d want 1/1/1",
+			userTurnHits.Load(), stepHits.Load(), modelHits.Load())
+	}
+}
+
+func TestConsciousnessChatReplayDoesNotRunCognitionAgain(t *testing.T) {
+	t.Setenv(consciousnessChatFlag, "1")
+	t.Setenv(consciousnessTurnCognitionFlag, "1")
+	t.Setenv(memory4ChatFlag, "0")
+	t.Setenv(memory4ChatWriteFlag, "0")
+
+	const turnID = "req-c22d-replay"
+	var userTurnHits atomic.Int32
+	var stepHits atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case consciousnessUserTurnPath:
+			userTurnHits.Add(1)
+			writeJSON(w, http.StatusOK, consciousnessValidReceipt(turnID, true))
+		case consciousnessStepPath:
+			stepHits.Add(1)
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer worker.Close()
+
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte("{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":true}\n"))
+	}))
+	defer ollama.Close()
+
+	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
+	raw := `{"model":"qwen","messages":[{"role":"user","content":"same turn"}],"stream":true}`
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if userTurnHits.Load() != 1 || stepHits.Load() != 0 {
+		t.Fatalf("hits user=%d step=%d want 1/0", userTurnHits.Load(), stepHits.Load())
+	}
+}
+
+func TestConsciousnessChatAcceptsWaitWithoutBlockingNormalResponse(t *testing.T) {
+	t.Setenv(consciousnessChatFlag, "1")
+	t.Setenv(consciousnessTurnCognitionFlag, "1")
+	t.Setenv(memory4ChatFlag, "0")
+	t.Setenv(memory4ChatWriteFlag, "0")
+
+	const turnID = "req-c22d-wait"
+	const eventID = "cevt-" + "b" + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	var stepHits atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case consciousnessUserTurnPath:
+			receipt := consciousnessValidReceipt(turnID, false)
+			receipt["cognition_event_id"] = eventID
+			writeJSON(w, http.StatusOK, receipt)
+		case consciousnessStepPath:
+			stepHits.Add(1)
+			writeJSON(w, http.StatusOK, consciousnessValidStepReceipt(eventID, "WAIT"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer worker.Close()
+
+	var modelHits atomic.Int32
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		modelHits.Add(1)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte("{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":true}\n"))
+	}))
+	defer ollama.Close()
+
+	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
+	rec := httptest.NewRecorder()
+	raw := `{"model":"qwen","messages":[{"role":"user","content":"paced turn"}],"stream":true}`
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+
+	if rec.Code != http.StatusOK || stepHits.Load() != 1 || modelHits.Load() != 1 {
+		t.Fatalf("WAIT changed normal chat: status=%d step=%d model=%d body=%s",
+			rec.Code, stepHits.Load(), modelHits.Load(), rec.Body.String())
+	}
+}
+
+func TestConsciousnessChatCognitionFailureIsSecondaryToNormalResponse(t *testing.T) {
+	t.Setenv(consciousnessChatFlag, "1")
+	t.Setenv(consciousnessTurnCognitionFlag, "1")
+	t.Setenv(memory4ChatFlag, "0")
+	t.Setenv(memory4ChatWriteFlag, "0")
+
+	const turnID = "req-c22d-step-failure"
+	const eventID = "cevt-" + "c" + "ccccccccccccccccccccccccccccccc"
+	var stepHits atomic.Int32
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case consciousnessUserTurnPath:
+			receipt := consciousnessValidReceipt(turnID, false)
+			receipt["cognition_event_id"] = eventID
+			writeJSON(w, http.StatusOK, receipt)
+		case consciousnessStepPath:
+			stepHits.Add(1)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"detail": "profile unavailable"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer worker.Close()
+
+	var modelHits atomic.Int32
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		modelHits.Add(1)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte("{\"message\":{\"role\":\"assistant\",\"content\":\"normal response\"},\"done\":true}\n"))
+	}))
+	defer ollama.Close()
+
+	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
+	rec := httptest.NewRecorder()
+	raw := `{"model":"qwen","messages":[{"role":"user","content":"still answer me"}],"stream":true}`
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+
+	if rec.Code != http.StatusOK || stepHits.Load() != 1 || modelHits.Load() != 1 {
+		t.Fatalf("cognition failure changed normal chat: status=%d step=%d model=%d body=%s",
+			rec.Code, stepHits.Load(), modelHits.Load(), rec.Body.String())
+	}
+}
+
+func TestConsciousnessChatTamperedCognitionReceiptIsSecondary(t *testing.T) {
+	t.Setenv(consciousnessChatFlag, "1")
+	t.Setenv(consciousnessTurnCognitionFlag, "1")
+	t.Setenv(memory4ChatFlag, "0")
+	t.Setenv(memory4ChatWriteFlag, "0")
+
+	const turnID = "req-c22d-tampered-step"
+	const eventID = "cevt-" + "d" + "ddddddddddddddddddddddddddddddd"
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case consciousnessUserTurnPath:
+			receipt := consciousnessValidReceipt(turnID, false)
+			receipt["cognition_event_id"] = eventID
+			writeJSON(w, http.StatusOK, receipt)
+		case consciousnessStepPath:
+			bad := consciousnessValidStepReceipt(eventID, "RUN")
+			bad["execution_authority"] = true
+			writeJSON(w, http.StatusOK, bad)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer worker.Close()
+
+	var modelHits atomic.Int32
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		modelHits.Add(1)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte("{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":true}\n"))
+	}))
+	defer ollama.Close()
+
+	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
+	rec := httptest.NewRecorder()
+	raw := `{"model":"qwen","messages":[{"role":"user","content":"tampered step"}],"stream":true}`
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+	if rec.Code != http.StatusOK || modelHits.Load() != 1 {
+		t.Fatalf("tampered cognition receipt changed normal chat: status=%d model=%d body=%s",
+			rec.Code, modelHits.Load(), rec.Body.String())
+	}
+}
+
+func TestValidateConsciousnessStepReceiptShapes(t *testing.T) {
+	eventID := "cevt-" + strings.Repeat("e", 32)
+	for _, decision := range []string{"WAIT", "RUN"} {
+		raw, err := json.Marshal(consciousnessValidStepReceipt(eventID, decision))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := requireConsciousnessStepReceiptFields(raw); err != nil {
+			t.Fatalf("%s required fields: %v", decision, err)
+		}
+		var receipt consciousnessStepReceipt
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateConsciousnessStepReceipt(receipt, eventID); err != nil {
+			t.Fatalf("valid %s receipt rejected: %v", decision, err)
+		}
+	}
+
+	bad := consciousnessValidStepReceipt(eventID, "RUN")
+	bad["selected_event_ids"] = []string{"cevt-" + strings.Repeat("f", 32)}
+	raw, _ := json.Marshal(bad)
+	var receipt consciousnessStepReceipt
+	_ = json.Unmarshal(raw, &receipt)
+	if err := validateConsciousnessStepReceipt(receipt, eventID); err == nil {
+		t.Fatal("RUN receipt omitting required event was accepted")
 	}
 }
 
