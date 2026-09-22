@@ -99,6 +99,16 @@ from .runtime import (
     compose_runtime,
     enabled,
 )
+from .production_profile import (
+    CONSCIOUSNESS_PROFILE_PATH_DEFAULT,
+    CONSCIOUSNESS_PROFILE_PATH_ENV,
+    ProductionCognitiveProfileConfig,
+    ProductionCognitiveProfileError,
+    ProductionCognitiveProfileReceipt,
+    ProductionCognitiveProfileResolution,
+    production_cognitive_profile_path,
+    resolve_production_cognitive_profile,
+)
 from .production_lifecycle import (
     TrustedRuntimeClock,
     authoritative_sleep_binding,
@@ -227,6 +237,14 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "resolve_production_cognitive_profile",
+    "production_cognitive_profile_path",
+    "ProductionCognitiveProfileResolution",
+    "ProductionCognitiveProfileReceipt",
+    "ProductionCognitiveProfileError",
+    "ProductionCognitiveProfileConfig",
+    "CONSCIOUSNESS_PROFILE_PATH_ENV",
+    "CONSCIOUSNESS_PROFILE_PATH_DEFAULT",
     "mount_consciousness_user_turn",
     "consciousness_chat_enabled",
     "build_consciousness_user_turn_router",
