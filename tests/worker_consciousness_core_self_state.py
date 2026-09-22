@@ -87,6 +87,24 @@ class PersistentSelfStateTests(unittest.TestCase):
         for forbidden in ("model","provider","llm","thought_engine","engine_instance_id"):
             self.assertFalse(any(forbidden in name.lower() for name in PersistentSelfState.model_fields))
 
+    def test_runtime_state_fields_match_c1_contract_exactly(self):
+        schema=json.loads(
+            (
+                ROOT
+                / "contracts"
+                / "consciousness-core"
+                / "self-state-v1.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(PersistentSelfState.model_fields),
+            set(schema["properties"]),
+        )
+        self.assertEqual(
+            set(schema["required"]),
+            set(PersistentSelfState.model_fields),
+        )
+
     def test_store_bootstrap_once_and_restart_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             store=SelfStateStore(Path(tmp)/"self.json")
