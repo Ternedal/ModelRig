@@ -91,7 +91,8 @@ func TestConsciousnessChatEnabledSubmitsExactFinalUserAndPreservesModelBody(t *t
 	t.Setenv(memory4ChatFlag, "0")
 	t.Setenv(memory4ChatWriteFlag, "0")
 
-	const turnID = "req-c21b-exact"
+	const requestID = "req-c21b-exact"
+	const turnID = consciousnessBoundTurnID("memory4-device", requestID)
 	const userText = "  Jeg siger præcis dette.  "
 	var workerHits atomic.Int32
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -102,8 +103,8 @@ func TestConsciousnessChatEnabledSubmitsExactFinalUserAndPreservesModelBody(t *t
 		if got := r.Header.Get("Authorization"); got != "" {
 			t.Errorf("client bearer leaked to worker: %q", got)
 		}
-		if got := r.Header.Get("X-Request-ID"); got != turnID {
-			t.Errorf("worker request id=%q want %q", got, turnID)
+		if got := r.Header.Get("X-Request-ID"); got != requestID {
+			t.Errorf("worker request id=%q want %q", got, requestID)
 		}
 		var got consciousnessUserTurnRequest
 		dec := json.NewDecoder(r.Body)
@@ -136,7 +137,7 @@ func TestConsciousnessChatEnabledSubmitsExactFinalUserAndPreservesModelBody(t *t
 	raw := `{"model":"qwen","messages":[{"role":"system","content":"be concise"},{"role":"user","content":"  Jeg siger præcis dette.  "}],"stream":true}`
 	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, requestID))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -201,7 +202,7 @@ func TestConsciousnessChatRestoresOriginalTurnBeforeMemory4Context(t *testing.T)
 	raw := `{"model":"qwen","messages":[{"role":"system","content":"be concise"},{"role":"user","content":" what do I like? "}],"stream":true}`
 	handler := memory4RouteHandler(t, worker.URL, ollama.URL)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, turnID))
+	handler.ServeHTTP(rec, consciousnessRouteRequest(raw, requestID))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -266,7 +267,8 @@ func TestConsciousnessChatTamperedReceiptDoesNotRewriteChat(t *testing.T) {
 	t.Setenv(memory4ChatFlag, "0")
 	t.Setenv(memory4ChatWriteFlag, "0")
 
-	const turnID = "req-c21b-tampered"
+	const requestID = "req-c21b-tampered"
+	turnID := consciousnessBoundTurnID("memory4-device", requestID)
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bad := consciousnessValidReceipt(turnID, false)
 		bad["execution_authority"] = true
@@ -391,8 +393,25 @@ func TestConsciousnessChatSkipsUnsupportedTurnShapesAndUnboundedRequestID(t *tes
 	}
 }
 
+func TestConsciousnessBoundTurnIDSeparatesDevicesAndPreservesRetryIdentity(t *testing.T) {
+	const requestID = "req-shared-client-id"
+	a1 := consciousnessBoundTurnID("device-a", requestID)
+	a2 := consciousnessBoundTurnID("device-a", requestID)
+	b := consciousnessBoundTurnID("device-b", requestID)
+	if a1 != a2 {
+		t.Fatal("same authenticated device/request pair did not produce stable turn id")
+	}
+	if a1 == b {
+		t.Fatal("different authenticated devices collided on the same turn id")
+	}
+	if !strings.HasPrefix(a1, "chat-") || len(a1) != len("chat-")+64 {
+		t.Fatalf("unexpected bound turn id shape: %q", a1)
+	}
+}
+
 func TestValidateConsciousnessReplayReceipt(t *testing.T) {
-	const turnID = "req-c21b-replay"
+	const requestID = "req-c21b-replay"
+	turnID := consciousnessBoundTurnID("memory4-device", requestID)
 	raw, err := json.Marshal(consciousnessValidReceipt(turnID, true))
 	if err != nil {
 		t.Fatal(err)
