@@ -200,13 +200,25 @@ def rebind_person_revision(
     if auth.to_person_revision == auth.from_person_revision:
         raise SelfStateError("Person Revision rebind must change revision")
 
-    return state.model_copy(
-        update={
-            "revision": state.revision + 1,
-            "person_revision": auth.to_person_revision,
-            "personality_state_ref": personality_state_ref,
-        }
-    )
+    try:
+        return PersistentSelfState(
+            schema=state.schema,
+            self_id=state.self_id,
+            revision=state.revision + 1,
+            person_id=state.person_id,
+            person_revision=auth.to_person_revision,
+            personality_state_ref=personality_state_ref,
+            world_state_ref=state.world_state_ref,
+            workspace_ref=state.workspace_ref,
+            active_goal_refs=state.active_goal_refs,
+            active_intention_refs=state.active_intention_refs,
+            affect=state.affect,
+            known_uncertainties=state.known_uncertainties,
+            last_experience_ref=state.last_experience_ref,
+            production_activation=False,
+        )
+    except ValidationError as exc:
+        raise SelfStateError("invalid rebound SelfState") from exc
 
 
 def verify_active_person(
