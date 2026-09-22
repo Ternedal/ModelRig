@@ -254,10 +254,10 @@ class ExactEventStepTests(unittest.TestCase):
                 self.assertFalse(exact_event_step_enabled(), value)
 
             app = FastAPI()
-            before = [route.path for route in app.router.routes]
+            before_count = len(app.router.routes)
             os.environ.pop(EVENT_STEP_FLAG, None)
             self.assertFalse(mount_consciousness_exact_event_step(app))
-            self.assertEqual(before, [route.path for route in app.router.routes])
+            self.assertEqual(len(app.router.routes), before_count)
 
             os.environ[EVENT_STEP_FLAG] = "1"
             self.assertTrue(exact_event_step_enabled())
@@ -268,19 +268,17 @@ class ExactEventStepTests(unittest.TestCase):
                     loopback_allowed=lambda _request: True,
                 )
             )
-            paths = [
-                getattr(route, "path", None)
-                for route in app.router.routes
-            ]
-            self.assertEqual(paths.count(EVENT_STEP_PREFIX + "/step-event"), 1)
-            self.assertTrue(mount_consciousness_exact_event_step(app))
-            self.assertEqual(
-                [
-                    getattr(route, "path", None)
-                    for route in app.router.routes
-                ].count(EVENT_STEP_PREFIX + "/step-event"),
-                1,
+            mounted_count = len(app.router.routes)
+            self.assertGreater(mounted_count, before_count)
+
+            response = TestClient(app).post(
+                EVENT_STEP_PREFIX + "/step-event",
+                json={"required_event_id": "cevt-" + "1" * 32},
             )
+            self.assertEqual(response.status_code, 503)
+
+            self.assertTrue(mount_consciousness_exact_event_step(app))
+            self.assertEqual(len(app.router.routes), mounted_count)
         finally:
             if old is None:
                 os.environ.pop(EVENT_STEP_FLAG, None)
