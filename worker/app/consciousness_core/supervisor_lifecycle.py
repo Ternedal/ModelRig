@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from contextlib import asynccontextmanager
 from functools import wraps
 from typing import Any, Literal, Mapping
@@ -177,6 +178,7 @@ class ProductionSupervisorBridge:
         profile: CognitiveProfile | Mapping[str, Any],
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
+        required_event_id: str | None = None,
     ) -> SupervisorBridgeStep:
         """Evaluate one supervisor step; never loops or retries automatically."""
         self._require_available()
@@ -188,6 +190,29 @@ class ProductionSupervisorBridge:
                 clock_sample=clock,
                 policy=self._policy,
             )
+
+            if required_event_id is not None:
+                if (
+                    not isinstance(required_event_id, str)
+                    or re.fullmatch(r"cevt-[a-f0-9]{32}", required_event_id) is None
+                ):
+                    raise SupervisorLifecycleError(
+                        "required_event_id is not a valid CognitionEvent id"
+                    )
+                if not any(
+                    event.event_id == required_event_id
+                    for event in self._state.pending_events
+                ):
+                    raise SupervisorLifecycleError(
+                        "required cognition event is not pending"
+                    )
+                if (
+                    plan.decision == "RUN"
+                    and required_event_id not in plan.selected_event_ids
+                ):
+                    raise SupervisorLifecycleError(
+                        "required cognition event is not selected by canonical plan"
+                    )
 
             if plan.decision != "RUN":
                 return SupervisorBridgeStep(
