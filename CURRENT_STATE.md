@@ -44,6 +44,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_COMPUTER_USE` | `0` |
+| `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
@@ -222,6 +223,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_capability_schema_v2.py`
 - `tests/worker_confirm_outbound_reads.py`
 - `tests/worker_confirmation_impact.py`
+- `tests/worker_consciousness_core_runtime.py`
 - `tests/worker_control_center_api.py`
 - `tests/worker_control_center_status.py`
 - `tests/worker_d4_auto_routing.py`
