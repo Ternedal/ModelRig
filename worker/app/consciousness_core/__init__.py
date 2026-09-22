@@ -124,6 +124,17 @@ from .self_state import (
     rebind_person_revision,
     verify_active_person,
 )
+from .supervisor import (
+    CognitiveSupervisorError,
+    SupervisorBudget,
+    SupervisorDirective,
+    SupervisorProgress,
+    SupervisorTransitionCandidate,
+    adjudication_ref,
+    initial_supervisor_progress,
+    plan_supervisor_step,
+    supervisor_budget_ref,
+)
 from .sleep_lifecycle import (
     SLEEP_LIFECYCLE_FLAG,
     SleepBinding,
@@ -161,6 +172,15 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "supervisor_budget_ref",
+    "plan_supervisor_step",
+    "initial_supervisor_progress",
+    "adjudication_ref",
+    "SupervisorTransitionCandidate",
+    "SupervisorProgress",
+    "SupervisorDirective",
+    "SupervisorBudget",
+    "CognitiveSupervisorError",
     "metacognitive_state_ref",
     "executive_policy_ref",
     "adjudicate_cycle",
