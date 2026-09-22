@@ -48,6 +48,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_PROFILE_FILE` | `./kaliv-consciousness-profile.json` |
+| `KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_STEP_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
