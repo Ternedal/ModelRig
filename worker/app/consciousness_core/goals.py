@@ -262,11 +262,20 @@ def transition_goal(
         raise GoalContractError("goal transition sequence moved backwards")
     if not evidence_refs:
         raise GoalContractError("goal transition requires evidence")
-    if new_status == "completed" and not current.success_conditions:
-        raise GoalContractError("goal completion requires declared success conditions")
+    if new_status == "completed":
+        if not current.success_conditions:
+            raise GoalContractError("goal completion requires declared success conditions")
+        if all(
+            ref.startswith("thought-proposal:") or ref.startswith("thought-engine:")
+            for ref in evidence_refs
+        ):
+            raise GoalContractError(
+                "model assertion alone cannot prove goal completion"
+            )
 
-    return current.model_copy(
-        update={
+    payload = current.model_dump(mode="python")
+    payload.update(
+        {
             "status": new_status,
             "last_review_sequence": sequence,
             "transition_evidence_refs": list(
@@ -274,9 +283,17 @@ def transition_goal(
             )[-64:],
         }
     )
+    try:
+        return GoalRecord.model_validate(payload)
+    except ValidationError as exc:
+        raise GoalContractError("invalid goal transition evidence") from exc
 
 
-def select_next_goal(goals: list[GoalRecord | Mapping[str, Any]]) -> GoalRecord | None:
+def select_next_goal(
+    goals: list[GoalRecord | Mapping[str, Any]],
+    *,
+    current_sequence: int,
+) -> GoalRecord | None:
     """Deterministic arbitration; no model/provider input."""
     parsed: list[GoalRecord] = []
     try:
@@ -287,13 +304,18 @@ def select_next_goal(goals: list[GoalRecord | Mapping[str, Any]]) -> GoalRecord 
     except ValidationError as exc:
         raise GoalContractError("invalid goal arbitration input") from exc
 
+    if isinstance(current_sequence, bool) or not isinstance(current_sequence, int):
+        raise GoalContractError("goal arbitration sequence must be integer")
+    if current_sequence < 0:
+        raise GoalContractError("goal arbitration sequence must be non-negative")
+
     eligible = [
         item
         for item in parsed
         if item.status == "active"
         and (
             item.expiry_sequence is None
-            or item.last_review_sequence <= item.expiry_sequence
+            or current_sequence <= item.expiry_sequence
         )
     ]
     if not eligible:
