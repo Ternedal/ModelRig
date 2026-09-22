@@ -104,6 +104,16 @@ from .production_lifecycle import (
     authoritative_sleep_binding,
     production_sleep_runtime_factory,
 )
+from .session_bootstrap import (
+    ActivePersonBindingSnapshot,
+    RuntimeSessionContext,
+    SessionBootstrapError,
+    SessionBootstrapReceipt,
+    active_person_binding_from_registry,
+    active_person_binding_ref,
+    bootstrap_runtime_session,
+    personality_snapshot_ref,
+)
 from .self_state import (
     PersistentSelfState,
     PersonRevisionRebindAuthority,
@@ -188,6 +198,14 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "personality_snapshot_ref",
+    "bootstrap_runtime_session",
+    "active_person_binding_ref",
+    "active_person_binding_from_registry",
+    "SessionBootstrapReceipt",
+    "SessionBootstrapError",
+    "RuntimeSessionContext",
+    "ActivePersonBindingSnapshot",
     "supervisor_lifecycle_enabled",
     "production_supervisor_bridge_factory",
     "compose_supervisor_lifecycle_lifespan",
