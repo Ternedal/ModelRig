@@ -268,13 +268,17 @@ class ExactEventStepTests(unittest.TestCase):
                     loopback_allowed=lambda _request: True,
                 )
             )
-            paths = [route.path for route in app.router.routes]
+            paths = [
+                getattr(route, "path", None)
+                for route in app.router.routes
+            ]
             self.assertEqual(paths.count(EVENT_STEP_PREFIX + "/step-event"), 1)
             self.assertTrue(mount_consciousness_exact_event_step(app))
             self.assertEqual(
-                [route.path for route in app.router.routes].count(
-                    EVENT_STEP_PREFIX + "/step-event"
-                ),
+                [
+                    getattr(route, "path", None)
+                    for route in app.router.routes
+                ].count(EVENT_STEP_PREFIX + "/step-event"),
                 1,
             )
         finally:
