@@ -30,6 +30,19 @@ from .consolidation import (
     ConsolidationResult,
     consolidate,
 )
+from .executive import (
+    AdjudicationReceipt,
+    CognitiveExecutiveError,
+    CognitiveExecutiveResult,
+    ExecutiveHypothesisCandidate,
+    ExecutiveIntentionCandidate,
+    ExecutiveMemoryQueryCandidate,
+    ExecutivePolicy,
+    ExecutiveSemanticIntentCandidate,
+    adjudicate_cycle,
+    executive_policy_ref,
+    metacognitive_state_ref,
+)
 from .goals import (
     Agent3IntentHandoff,
     GoalAdmissionEvidence,
@@ -148,6 +161,17 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "metacognitive_state_ref",
+    "executive_policy_ref",
+    "adjudicate_cycle",
+    "ExecutiveSemanticIntentCandidate",
+    "ExecutivePolicy",
+    "ExecutiveMemoryQueryCandidate",
+    "ExecutiveIntentionCandidate",
+    "ExecutiveHypothesisCandidate",
+    "CognitiveExecutiveResult",
+    "CognitiveExecutiveError",
+    "AdjudicationReceipt",
     "world_state_ref",
     "workspace_ref",
     "self_state_ref",
