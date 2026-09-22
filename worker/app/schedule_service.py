@@ -64,6 +64,7 @@ class SchedulerService:
         *,
         poll_s: float | None = None,
         clock: Callable[[], float] = time.time,
+        post_tick_hook: Callable[[TickResult], None] | None = None,
     ) -> None:
         interval = poll_seconds() if poll_s is None else float(poll_s)
         if not math.isfinite(interval) or interval <= 0:
@@ -71,6 +72,9 @@ class SchedulerService:
         self.runner = runner
         self.poll_s = interval
         self.clock = clock
+        if post_tick_hook is not None and not callable(post_tick_hook):
+            raise TypeError("post_tick_hook must be callable or None")
+        self._post_tick_hook = post_tick_hook
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
@@ -204,6 +208,34 @@ class SchedulerService:
                 self._stopped_at = self.clock()
         return stopped
 
+    def set_post_tick_hook(
+        self,
+        hook: Callable[[TickResult], None] | None,
+    ) -> None:
+        """Install/clear one inert post-successful-tick callback.
+
+        The callback executes on the already-existing scheduler thread. No
+        additional thread, timer or cadence is created here.
+        """
+        if hook is not None and not callable(hook):
+            raise TypeError("post-tick hook must be callable or None")
+        with self._lock:
+            self._post_tick_hook = hook
+
+    def _notify_post_tick(self, result: TickResult) -> None:
+        with self._lock:
+            hook = self._post_tick_hook
+        if hook is None:
+            return
+        try:
+            hook(result)
+        except Exception:
+            # The schedule runner tick has already completed. Optional observers
+            # cannot retroactively convert it into a scheduler failure.
+            logging.getLogger(__name__).exception(
+                "scheduler: post-tick hook failed"
+            )
+
     def status(self) -> ServiceStatus:
         with self._lock:
             thread = self._thread
@@ -239,6 +271,7 @@ class SchedulerService:
                     self._last_tick_at = tick_at
                     self._last_result = result
                     self._last_error = None
+                self._notify_post_tick(result)
 
             # Event.wait(), not sleep(): shutdown must interrupt a 60-minute
             # interval immediately rather than making process exit wait for it.
