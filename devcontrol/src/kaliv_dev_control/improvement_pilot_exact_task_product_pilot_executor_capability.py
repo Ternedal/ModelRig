@@ -442,6 +442,12 @@ def _live_registry():
         if any(left != right for left, right in checks):
             return None
         frozen = dict(fresh)
+        # The Tier-A substrate intentionally snapshots DevelopmentTask while
+        # validating it. Downstream product-pilot boundaries, however, must
+        # retain the exact live task object authenticated by the admission
+        # registry so repeated provenance checks cannot manufacture a new
+        # object identity across the durable nonce boundary.
+        frozen["task"] = task
         frozen["execution_admission"] = admission
         return frozen
 
