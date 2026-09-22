@@ -130,6 +130,7 @@ from .self_state import (
 from .session_lifecycle import (
     CognitiveSessionLifecycleError,
     CognitiveSessionStep,
+    WorldEvidenceAdmissionResult,
     LiveCognitiveSessionState,
     ProductionCognitiveSession,
     compose_cognitive_session_lifespan,
@@ -217,6 +218,7 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "WorldEvidenceAdmissionResult",
     "world_evidence_event_ref",
     "reduce_world_evidence",
     "WorldTransitionResult",
