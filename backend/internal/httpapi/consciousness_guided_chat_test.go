@@ -118,6 +118,19 @@ func c24Worker(t *testing.T, guidance string, mutateStep func(map[string]any), m
 	return worker, &turnHits, &stepHits, &guidanceHits
 }
 
+func TestC24ReplyGuidanceFlagRequiresExactOne(t *testing.T) {
+	for _, value := range []string{"", "0", "true", "on", "yes", "01", " 1 "} {
+		t.Setenv(consciousnessReplyGuidanceFlag, value)
+		if consciousnessReplyGuidanceEnabled() {
+			t.Fatalf("value %q unexpectedly enabled C24", value)
+		}
+	}
+	t.Setenv(consciousnessReplyGuidanceFlag, "1")
+	if !consciousnessReplyGuidanceEnabled() {
+		t.Fatal("exact value 1 did not enable C24")
+	}
+}
+
 func TestC24FlagOffKeepsC21ObserverOnlyAndOriginalModelBody(t *testing.T) {
 	t.Setenv(consciousnessChatFlag, "1")
 	t.Setenv(consciousnessReplyGuidanceFlag, "0")
