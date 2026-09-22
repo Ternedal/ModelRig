@@ -293,6 +293,46 @@ class ConsciousnessCoreContractTests(unittest.TestCase):
         for key in ("self_id", "person_id", "person_revision", "personality_state_ref"):
             self.assertEqual(before[key], after[key])
 
+    def test_mock_thought_engine_proves_external_replaceable_cognition(self) -> None:
+        module_path = EXPERIMENTS / "mock_thought_engine.py"
+        spec = importlib.util.spec_from_file_location("cc_mock_thought_engine", module_path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        engine = module.MockThoughtEngine()
+        request = copy.deepcopy(self.fixtures["thought_request"])
+        workspace = copy.deepcopy(self.fixtures["workspace"])
+        self_state_before = copy.deepcopy(self.fixtures["self_state"])
+
+        weaker = copy.deepcopy(self.fixtures["cognitive_profile"])
+        weaker["engine_instance_id"] = "engine:weak:1"
+        weaker["model"] = "mock-weak"
+        weaker["reasoning_depth"] = 0.2
+        weaker["planning_capacity"] = 0.2
+
+        stronger = copy.deepcopy(self.fixtures["cognitive_profile"])
+        stronger["engine_instance_id"] = "engine:strong:1"
+        stronger["model"] = "mock-strong"
+        stronger["reasoning_depth"] = 0.95
+        stronger["planning_capacity"] = 0.95
+
+        weak_proposal = engine.think(request, weaker, workspace)
+        strong_proposal = engine.think(request, stronger, workspace)
+
+        validate(self.schemas["thought-proposal-v1.schema.json"], weak_proposal)
+        validate(self.schemas["thought-proposal-v1.schema.json"], strong_proposal)
+        self.assertNotEqual(weak_proposal["proposal_id"], strong_proposal["proposal_id"])
+        self.assertNotEqual(weak_proposal["interpretation"], strong_proposal["interpretation"])
+        self.assertGreater(weak_proposal["uncertainty"], strong_proposal["uncertainty"])
+        self.assertEqual(self.fixtures["self_state"], self_state_before)
+
+        for proposal in (weak_proposal, strong_proposal):
+            self.assertEqual(proposal["actions"], [])
+            self.assertEqual(proposal["state_mutations"], [])
+            self.assertTrue(all(value is False for value in proposal["authority"].values()))
+
     def test_valid_fixtures_keep_authority_false(self) -> None:
         for key in self.schema_by_fixture:
             self.assertIs(self.fixtures[key]["production_activation"], False)

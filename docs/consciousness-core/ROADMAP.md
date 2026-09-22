@@ -56,7 +56,7 @@ Deliver:
 Acceptance:
 - swapping CognitiveProfile/engine leaves SelfState identity fields untouched;
 - proposal schema has empty action/state-mutation surfaces;
-- engine authority flags are all false.
+- engine authority flags are all false;\n- weak/strong mock engine profiles may change cognitive output/uncertainty while\n  SelfState remains byte-for-byte unchanged.
 
 ## Later slices
 
