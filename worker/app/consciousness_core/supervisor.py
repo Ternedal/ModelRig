@@ -92,6 +92,8 @@ class SupervisorState(StrictModel):
     revision: Annotated[int, Field(ge=1, strict=True)]
     runtime_epoch_id: Annotated[str, Field(pattern=r"^epoch-[a-f0-9]{32}$")]
     pending_events: Annotated[list[CognitionEvent], Field(max_length=64)]
+    epoch_started_monotonic_ms: Annotated[int, Field(ge=0, strict=True)]
+    epoch_started_clock_sequence: Annotated[int, Field(ge=0, strict=True)]
     last_cycle_id: CycleId | None
     last_cycle_monotonic_ms: Annotated[int | None, Field(ge=0, strict=True)]
     last_cycle_clock_sequence: Annotated[int | None, Field(ge=0, strict=True)]
@@ -238,6 +240,8 @@ def bootstrap_supervisor(
             revision=1,
             runtime_epoch_id=clock.runtime_epoch_id,
             pending_events=[],
+            epoch_started_monotonic_ms=clock.monotonic_ms,
+            epoch_started_clock_sequence=clock.sampled_sequence,
             last_cycle_id=None,
             last_cycle_monotonic_ms=None,
             last_cycle_clock_sequence=None,
@@ -312,15 +316,19 @@ def plan_supervisor_step(
         raise SupervisorContractError(
             "supervisor cannot cross runtime epochs; wake/bootstrap is required"
         )
-    if (
-        current.last_cycle_clock_sequence is not None
-        and clock.sampled_sequence <= current.last_cycle_clock_sequence
-    ):
+    sequence_floor = (
+        current.last_cycle_clock_sequence
+        if current.last_cycle_clock_sequence is not None
+        else current.epoch_started_clock_sequence
+    )
+    monotonic_floor = (
+        current.last_cycle_monotonic_ms
+        if current.last_cycle_monotonic_ms is not None
+        else current.epoch_started_monotonic_ms
+    )
+    if clock.sampled_sequence <= sequence_floor:
         raise SupervisorContractError("stale supervisor ClockSample")
-    if (
-        current.last_cycle_monotonic_ms is not None
-        and clock.monotonic_ms < current.last_cycle_monotonic_ms
-    ):
+    if clock.monotonic_ms < monotonic_floor:
         raise SupervisorContractError("supervisor monotonic clock moved backwards")
 
     clock_ref = clock_sample_ref(clock)
