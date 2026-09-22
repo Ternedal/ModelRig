@@ -5,6 +5,24 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, ThoughtProposal, ThoughtRequest
+from .cycle import (
+    CognitiveContextPacket,
+    CognitiveCycleCoordinator,
+    CognitiveCycleError,
+    CognitiveCycleReceipt,
+    CognitiveCycleResult,
+    CognitiveWorkspace,
+    RuntimeWorldState,
+    WorkspaceCandidate,
+    WorldObservation,
+    assemble_thought_request,
+    build_workspace,
+    cognitive_profile_ref,
+    proposal_ref,
+    self_state_ref,
+    workspace_ref,
+    world_state_ref,
+)
 from .consolidation import (
     ConsolidationCandidate,
     ConsolidationContractError,
@@ -130,6 +148,22 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "world_state_ref",
+    "workspace_ref",
+    "self_state_ref",
+    "proposal_ref",
+    "cognitive_profile_ref",
+    "build_workspace",
+    "assemble_thought_request",
+    "WorldObservation",
+    "WorkspaceCandidate",
+    "RuntimeWorldState",
+    "CognitiveWorkspace",
+    "CognitiveCycleResult",
+    "CognitiveCycleReceipt",
+    "CognitiveCycleError",
+    "CognitiveCycleCoordinator",
+    "CognitiveContextPacket",
     "production_sleep_runtime_factory",
     "authoritative_sleep_binding",
     "TrustedRuntimeClock",
