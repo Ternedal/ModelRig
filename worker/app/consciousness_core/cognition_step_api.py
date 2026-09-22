@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ..netguard import is_loopback
 from .cycle import cognitive_profile_ref, self_state_ref, workspace_ref, world_state_ref
@@ -72,6 +72,22 @@ class CognitionStepReceipt(StrictModel):
     execution_authority: Literal[False]
     scheduling_authority: Literal[False]
     production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def exact_step_shape(self) -> "CognitionStepReceipt":
+        if self.decision == "WAIT":
+            if self.thought_engine_invoked or self.model_calls != 0:
+                raise ValueError("WAIT receipt cannot report a model call")
+            if self.context_updated or self.transition_receipt_ref is not None:
+                raise ValueError("WAIT receipt cannot report a context transition")
+        else:
+            if not self.thought_engine_invoked or self.model_calls != 1:
+                raise ValueError("RUN receipt must report exactly one model call")
+            if not self.context_updated or self.transition_receipt_ref is None:
+                raise ValueError("RUN receipt must report one context transition")
+            if self.required_event_id not in self.selected_event_ids:
+                raise ValueError("RUN receipt is not bound to required event")
+        return self
 
 
 def turn_cognition_enabled() -> bool:
