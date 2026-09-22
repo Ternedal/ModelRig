@@ -98,7 +98,7 @@ class ProfileBackedStepReceipt(StrictModel):
 
 def profile_step_enabled(env: dict[str, str] | None = None) -> bool:
     if env is None:
-        return os.getenv(CONSCIOUSNESS_STEP_FLAG, "0") == "1"
+        return os.getenv("KALIV_CONSCIOUSNESS_STEP_ENABLED", "0") == "1"
     return env.get(CONSCIOUSNESS_STEP_FLAG, "0") == "1"
 
 
