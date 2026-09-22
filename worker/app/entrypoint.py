@@ -33,6 +33,7 @@ from .consciousness_core.supervisor_lifecycle import (
     compose_supervisor_lifecycle_lifespan,
     production_supervisor_bridge_factory,
 )
+from .consciousness_core.step_admission import mount_consciousness_step
 from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
@@ -91,6 +92,10 @@ mount_memory4_write(fastapi_app)
 # it only admits reported user-turn evidence into an already-live C19/C20
 # session, and the route is absent unless its own exact opt-in is set.
 mount_consciousness_user_turn(fastapi_app)
+
+# C22-B is a separate exact opt-in because this surface can invoke the external
+# ThoughtEngine once. It remains loopback-only and has no request payload.
+mount_consciousness_step(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
