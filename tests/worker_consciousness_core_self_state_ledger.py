@@ -356,6 +356,50 @@ class SelfStateLedgerTests(unittest.TestCase):
             self.assertEqual(plan.revision_after, after.revision)
             self.assertEqual(plan.transition_count, 1)
 
+    def test_session_acknowledges_exact_checkpoint_and_reanchors(self):
+        auth, durable = self.durable()
+        context = self.context(durable)
+        engine = Engine()
+        session = ProductionCognitiveSession(
+            supervisor_bridge=ProductionSupervisorBridge(
+                runtime=ConsciousnessCoreRuntime(engine),
+                clock=deterministic_clock(),
+            ),
+            bootstrap_context=context,
+            durable_anchor_state=durable,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            store = SelfStateStore(Path(td) / "self.json")
+            store.bootstrap(durable, auth)
+            receipt = store.write_chain(
+                session.pending_self_state_checkpoint_states()
+            )
+            session.mark_self_state_checkpointed(receipt)
+
+            self.assertIsNone(session.self_state_checkpoint_plan)
+            self.assertEqual(
+                session.pending_self_state_checkpoint_states(),
+                [],
+            )
+
+            session.submit_world_evidence(
+                self.world_evidence(sequence=20),
+                attention_salience=1.0,
+            )
+            plan = session.self_state_checkpoint_plan
+            self.assertIsNotNone(plan)
+            self.assertEqual(
+                plan.revision_before,
+                context.state.revision,
+            )
+            self.assertEqual(plan.transition_count, 1)
+            self.assertEqual(
+                [item.kind for item in plan.transitions],
+                ["world_evidence"],
+            )
+            self.assertEqual(engine.calls, 0)
+
     def test_capacity_fails_before_overflow(self):
         _auth, durable = self.durable()
         context = self.context(durable)
