@@ -138,7 +138,13 @@ def consciousness_chat_enabled() -> bool:
 
 def turn_checkpoint_enabled() -> bool:
     """Only exact string 1 couples C21-A to the C27-G service."""
-    return (\n        os.getenv(\n            "KALIV_CONSCIOUSNESS_TURN_CHECKPOINT_ENABLED",\n            "0",\n        )\n        == "1"\n    )
+    return (
+        os.getenv(
+            "KALIV_CONSCIOUSNESS_TURN_CHECKPOINT_ENABLED",
+            "0",
+        )
+        == "1"
+    )
 
 
 def _turn_ref(turn_id: str) -> str:
