@@ -37,34 +37,29 @@ class StrictModel(BaseModel):
     )
 
 
-class PredictionOutcomeAdmissionResult(StrictModel):
+class PredictionOutcomePlan(StrictModel):
     schema: Literal[
-        "kaliv-consciousness-core/prediction-outcome-admission/v1"
+        "kaliv-consciousness-core/prediction-outcome-plan/v1"
     ]
     resolution: PredictionResolution
     resolution_ref: NonEmptyRef
     outcome_ref: NonEmptyRef
     cognition_event: CognitionEvent | None
-    cognition_event_queued: bool
     observed_sequence: Annotated[int, Field(ge=0, strict=True)]
     model_calls: Literal[0]
-    self_state_store_write_applied: Literal[False]
-    durable_memory_write_authority: Literal[False]
-    execution_authority: Literal[False]
-    scheduling_authority: Literal[False]
     production_activation: Literal[False]
 
     @model_validator(mode="after")
-    def exact_shape(self) -> "PredictionOutcomeAdmissionResult":
-        should_queue = self.resolution.result == "mismatch"
-        if should_queue:
+    def exact_shape(self) -> "PredictionOutcomePlan":
+        should_admit = self.resolution.result == "mismatch"
+        if should_admit:
             if self.resolution.error_score != 1.0:
                 raise ValueError(
                     "mismatch attention requires exact error_score=1.0"
                 )
-            if self.cognition_event is None or not self.cognition_event_queued:
+            if self.cognition_event is None:
                 raise ValueError(
-                    "mismatch prediction must queue one cognition event"
+                    "mismatch prediction requires one cognition event"
                 )
             if self.cognition_event.kind != "prediction_error":
                 raise ValueError(
@@ -74,11 +69,45 @@ class PredictionOutcomeAdmissionResult(StrictModel):
                 raise ValueError(
                     "prediction-error event sequence mismatch"
                 )
-        else:
-            if self.cognition_event is not None or self.cognition_event_queued:
+        elif self.cognition_event is not None:
+            raise ValueError(
+                "non-mismatch prediction outcome cannot create cognition event"
+            )
+        return self
+
+
+class PredictionOutcomeAdmissionResult(StrictModel):
+    schema: Literal[
+        "kaliv-consciousness-core/prediction-outcome-admission/v1"
+    ]
+    plan: PredictionOutcomePlan
+    cognition_event_admitted: bool
+    supervisor_revision_before: Annotated[int, Field(ge=1, strict=True)]
+    supervisor_revision_after: Annotated[int, Field(ge=1, strict=True)]
+    model_calls: Literal[0]
+    self_state_store_write_applied: Literal[False]
+    durable_memory_write_authority: Literal[False]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def admission_shape(self) -> "PredictionOutcomeAdmissionResult":
+        has_event = self.plan.cognition_event is not None
+        if self.cognition_event_admitted != has_event:
+            raise ValueError(
+                "prediction outcome admission/event presence mismatch"
+            )
+        delta = self.supervisor_revision_after - self.supervisor_revision_before
+        if has_event:
+            if delta not in {0, 1}:
                 raise ValueError(
-                    "non-mismatch prediction outcome cannot queue cognition"
+                    "event admission may be idempotent or advance one revision"
                 )
+        elif delta != 0:
+            raise ValueError(
+                "non-event outcome cannot change supervisor revision"
+            )
         return self
 
 
@@ -183,11 +212,11 @@ def _prediction_error_event(
     )
 
 
-def admit_prediction_outcome(
+def plan_prediction_outcome(
     *,
     prediction: PredictionRecord | Mapping[str, Any],
     outcome: OutcomeObservation | Mapping[str, Any],
-) -> PredictionOutcomeAdmissionResult:
+) -> PredictionOutcomePlan:
     """Resolve one structured outcome and optionally project mismatch attention."""
     try:
         pred = (
@@ -218,21 +247,16 @@ def admit_prediction_outcome(
         else None
     )
 
-    return PredictionOutcomeAdmissionResult(
+    return PredictionOutcomePlan(
         schema=(
             "kaliv-consciousness-core/"
-            "prediction-outcome-admission/v1"
+            "prediction-outcome-plan/v1"
         ),
         resolution=resolution,
         resolution_ref=resolution_reference,
         outcome_ref=outcome_reference,
         cognition_event=event,
-        cognition_event_queued=event is not None,
         observed_sequence=obs.observed_sequence,
         model_calls=0,
-        self_state_store_write_applied=False,
-        durable_memory_write_authority=False,
-        execution_authority=False,
-        scheduling_authority=False,
         production_activation=False,
     )
