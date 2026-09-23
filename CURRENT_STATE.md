@@ -273,6 +273,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_session_lifecycle.py`
 - `tests/worker_consciousness_core_sleep.py`
 - `tests/worker_consciousness_core_sleep_lifecycle.py`
+- `tests/worker_consciousness_core_sleep_self_state_binding.py`
 - `tests/worker_consciousness_core_supervisor.py`
 - `tests/worker_consciousness_core_supervisor_lifecycle.py`
 - `tests/worker_consciousness_core_temporal.py`
