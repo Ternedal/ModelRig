@@ -71,6 +71,14 @@ from .goals import (
     select_next_goal,
     transition_goal,
 )
+from .embodiment_attention import (
+    EmbodimentAttentionAdmissionResult,
+    EmbodimentAttentionError,
+    EmbodimentAttentionPlan,
+    embodiment_inference_ref,
+    embodiment_state_ref,
+    plan_embodiment_attention,
+)
 from .embodiment import (
     EmbodimentContractError,
     EmbodimentObservation,
@@ -322,6 +330,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "plan_embodiment_attention",
+    "embodiment_state_ref",
+    "embodiment_inference_ref",
+    "EmbodimentAttentionPlan",
+    "EmbodimentAttentionError",
+    "EmbodimentAttentionAdmissionResult",
     "plan_memory_recall",
     "memory_recall_snapshot_has_items",
     "memory_context_snapshot_ref",
