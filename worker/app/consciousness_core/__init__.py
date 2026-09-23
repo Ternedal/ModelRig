@@ -201,6 +201,15 @@ from .world_reducer import (
     reduce_world_evidence,
     world_evidence_event_ref,
 )
+from .user_turn_admission import (
+    CONSCIOUSNESS_CHAT_FLAG,
+    CONSCIOUSNESS_TURN_PREFIX,
+    UserTurnAdmissionBody,
+    UserTurnAdmissionReceipt,
+    build_consciousness_user_turn_router,
+    consciousness_chat_enabled,
+    mount_consciousness_user_turn,
+)
 from .wake_cycle import (
     WakeCycleError,
     WakeFirstCycleCoordinator,
@@ -218,6 +227,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "mount_consciousness_user_turn",
+    "consciousness_chat_enabled",
+    "build_consciousness_user_turn_router",
+    "UserTurnAdmissionReceipt",
+    "UserTurnAdmissionBody",
+    "CONSCIOUSNESS_TURN_PREFIX",
+    "CONSCIOUSNESS_CHAT_FLAG",
     "WorldEvidenceAdmissionResult",
     "world_evidence_event_ref",
     "reduce_world_evidence",
