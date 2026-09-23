@@ -1,5 +1,10 @@
 # ModelRig / Kaliv — Roadmap
 
+> **Produktdefinition:** [`docs/KALIV_SYSTEM_DEFINITION.md`](docs/KALIV_SYSTEM_DEFINITION.md)
+> er den kanoniske definition af hele Kaliv-systemet og dets authority boundaries.
+> Roadmappen beskriver rækkefølge/retning og må ikke bruges som current-state
+> eller som en konkurrerende arkitekturdefinition.
+>
 > ## Tilstand står IKKE her
 >
 > **Aktuel tilstand: [`CURRENT_STATE.md`](CURRENT_STATE.md) og
@@ -66,10 +71,14 @@ bliver afsluttet stabilt af Kaliv**. Den fulde, prioriterede nedbrydning ligger 
 ---
 ## Vision
 
-Lokal AI-platform der giver en Claude-lignende oplevelse med lokale open source-modeller
-via Ollama. **Backend er eneste gateway** — klienter taler aldrig direkte med en
-model-runtime. Slutbilledet er et **apparat**, ikke et evigt projekt: Kaliv starter,
-overvåges og gendanner sig selv, og featuretoget stopper bevidst.
+Kaliv udvikles mod den samlede definition i `docs/KALIV_SYSTEM_DEFINITION.md`:
+en local-first embodied AI-platform med udskiftelig model-reasoning, persistent
+state/memory, voice, tools og en source-derived digital krop på desktop, mobil og
+VR. **Backend er control plane** for rig-vejen; eksplicit dokumenterede direkte
+cloud-veje er separate produktveje og må ikke forveksles med backend-gated tools.
+Slutbilledet er et **apparat**, ikke et evigt projekt: Kaliv starter, overvåges og
+gendanner sig selv, og nye capability-spor må ikke flytte målstregen uden en ny
+bevidst produktbeslutning.
 
 ## Produktprincipper / invarianter
 
