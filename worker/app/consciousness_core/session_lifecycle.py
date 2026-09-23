@@ -429,6 +429,61 @@ class ProductionCognitiveSession:
         if self._closed:
             raise CognitiveSessionLifecycleError("cognitive session is closed")
 
+    def _prospective_episode_for_event(
+        self,
+        *,
+        kind: str,
+        source_ref: str,
+        salience: float,
+        clock_sample,
+        state: PersistentSelfState,
+        participant_refs: list[str] | None = None,
+    ) -> ExperienceEpisodeState:
+        """Build an event-driven episode update without publishing side effects."""
+        event_anchor = anchor_from_clock(
+            clock_sample,
+            event_ref=source_ref,
+        )
+        episode = self._experience_episode
+        if episode is None:
+            if (
+                self._continuity_orientation is not None
+                and self._continuity_orientation.phase == "REORIENTING"
+            ):
+                open_reason = "WAKE_REORIENTATION"
+            elif (
+                self._continuity_orientation is not None
+                and self._continuity_orientation.phase == "ORIENTED"
+            ):
+                open_reason = "POST_WAKE_RECOVERY"
+            else:
+                open_reason = "SESSION_START"
+            episode = open_experience_episode(
+                self_id=state.self_id,
+                person_revision=state.person_revision,
+                opening_anchor=event_anchor,
+                reason=open_reason,
+            )
+        if episode.self_id != state.self_id:
+            raise CognitiveSessionLifecycleError(
+                "experience episode belongs to another self"
+            )
+        if episode.person_revision != state.person_revision:
+            raise CognitiveSessionLifecycleError(
+                "experience episode belongs to another Person Revision"
+            )
+        return append_episode_moment(
+            episode,
+            build_episode_moment(
+                kind=kind,
+                source_ref=source_ref,
+                anchor=event_anchor,
+                salience=salience,
+                active_goal_refs=list(state.active_goal_refs),
+                participant_refs=participant_refs or [],
+            ),
+        )
+
     def submit(self, event: CognitionEvent) -> None:
         self._require_open()
         self._bridge.submit(event)
@@ -630,6 +685,23 @@ class ProductionCognitiveSession:
             last_transition_receipt_ref=before.last_transition_receipt_ref,
             production_activation=False,
         )
+        episode_clock = self.trusted_clock.sample()
+        prospective_episode = self._prospective_episode_for_event(
+            kind=(
+                "USER_TURN"
+                if cognition_kind == "user_turn"
+                else "WORLD_EVIDENCE"
+            ),
+            source_ref=evidence_ref,
+            salience=attention_salience,
+            clock_sample=episode_clock,
+            state=reduction.state,
+            participant_refs=(
+                ["actor:user"]
+                if cognition_kind == "user_turn"
+                else []
+            ),
+        )
 
         ledger_transition = None
         if self._self_state_ledger is not None:
@@ -656,6 +728,7 @@ class ProductionCognitiveSession:
                 transition=ledger_transition,
             )
         self._live = prospective
+        self._experience_episode = prospective_episode
         return WorldEvidenceAdmissionResult(
             schema="kaliv-consciousness-core/world-evidence-admission/v1",
             evidence_ref=evidence_ref,
