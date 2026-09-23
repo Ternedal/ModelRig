@@ -114,11 +114,14 @@ _go_env_rows = {
     name: (default, kind)
     for name, default, kind in AR._go_env_reads(
         """
+const singleFlag = "KALIV_TEST_GO_SINGLE_ENABLED"
 const (
     featureFlag = "KALIV_TEST_GO_ENABLED"
     dataRoot = "KALIV_TEST_GO_DATA_ROOT"
     apiSecret = "KALIV_TEST_GO_API_SECRET"
 )
+if os.Getenv(singleFlag) == "1" {
+}
 if os.Getenv(featureFlag) != "1" {
 }
 _ = os.Getenv(dataRoot)
@@ -129,6 +132,10 @@ _ = os.Getenv(apiSecret)
 check(
     _go_env_rows["KALIV_TEST_GO_ENABLED"] == ("0", "slukket"),
     "constant-backed Go boolean gates are discovered as switches",
+)
+check(
+    _go_env_rows["KALIV_TEST_GO_SINGLE_ENABLED"] == ("0", "slukket"),
+    "single-line Go const-backed boolean gates are discovered as switches",
 )
 check(
     _go_env_rows["KALIV_TEST_GO_DATA_ROOT"][1] == "indstilling",
