@@ -245,6 +245,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_memory4.py`
 - `tests/worker_consciousness_core_metacognition.py`
 - `tests/worker_consciousness_core_personality.py`
+- `tests/worker_consciousness_core_prediction_attention.py`
 - `tests/worker_consciousness_core_profile_source.py`
 - `tests/worker_consciousness_core_profile_step.py`
 - `tests/worker_consciousness_core_reducer.py`
