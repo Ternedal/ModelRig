@@ -29,6 +29,11 @@ from .cycle import (
     world_state_ref,
 )
 from .metacognition import OutcomeObservation, PredictionRecord
+from .embodiment import EmbodimentState, InferredEmbodimentState
+from .embodiment_attention import (
+    EmbodimentAttentionAdmissionResult,
+    plan_embodiment_attention,
+)
 from .experience import MemoryContextSnapshot
 from .memory_recall_attention import (
     MemoryRecallAdmissionResult,
@@ -291,6 +296,54 @@ class ProductionCognitiveSession:
     def plan(self) -> tuple[Any, SupervisorPlan]:
         self._require_open()
         return self._bridge.plan()
+
+    def submit_embodiment_inference(
+        self,
+        *,
+        state: EmbodimentState,
+        inference: InferredEmbodimentState,
+    ) -> EmbodimentAttentionAdmissionResult:
+        """Admit one evidence-bound semantic embodiment inference."""
+        self._require_open()
+        if not isinstance(state, EmbodimentState):
+            raise TypeError("state must be EmbodimentState")
+        if not isinstance(inference, InferredEmbodimentState):
+            raise TypeError("inference must be InferredEmbodimentState")
+        if state.person_id != self._live.state.person_id:
+            raise CognitiveSessionLifecycleError(
+                "EmbodimentState belongs to another person"
+            )
+        if state.person_revision != self._live.state.person_revision:
+            raise CognitiveSessionLifecycleError(
+                "EmbodimentState belongs to another Person Revision"
+            )
+
+        plan = plan_embodiment_attention(
+            state=state,
+            inference=inference,
+        )
+        before_revision = self._bridge.state.revision
+        if plan.cognition_event is not None:
+            self._bridge.submit(plan.cognition_event)
+        after_revision = self._bridge.state.revision
+
+        return EmbodimentAttentionAdmissionResult(
+            schema=(
+                "kaliv-consciousness-core/"
+                "embodiment-attention-admission/v1"
+            ),
+            plan=plan,
+            cognition_event_admitted=plan.cognition_event is not None,
+            supervisor_revision_before=before_revision,
+            supervisor_revision_after=after_revision,
+            model_calls=0,
+            self_state_store_write_applied=False,
+            durable_memory_write_authority=False,
+            execution_authority=False,
+            scheduling_authority=False,
+            body_mutation_authority=False,
+            production_activation=False,
+        )
 
     def submit_memory_recall(
         self,
