@@ -44,6 +44,22 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_COMPUTER_USE` | `0` |
+| `KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_PROFILE_FILE` | `./kaliv-consciousness-profile.json` |
+| `KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_SELF_STATE_CHECKPOINT_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_STEP_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_TURN_CHECKPOINT_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
@@ -222,6 +238,54 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_capability_schema_v2.py`
 - `tests/worker_confirm_outbound_reads.py`
 - `tests/worker_confirmation_impact.py`
+- `tests/worker_consciousness_core_autonomous_checkpoint.py`
+- `tests/worker_consciousness_core_autonomous_scheduler.py`
+- `tests/worker_consciousness_core_autonomous_tick.py`
+- `tests/worker_consciousness_core_autonomous_trigger_policy.py`
+- `tests/worker_consciousness_core_c13b_wiring.py`
+- `tests/worker_consciousness_core_checkpoint_lifecycle.py`
+- `tests/worker_consciousness_core_checkpoint_liveness.py`
+- `tests/worker_consciousness_core_checkpoint_pressure.py`
+- `tests/worker_consciousness_core_checkpoint_runtime.py`
+- `tests/worker_consciousness_core_consolidation.py`
+- `tests/worker_consciousness_core_cycle.py`
+- `tests/worker_consciousness_core_embodiment.py`
+- `tests/worker_consciousness_core_embodiment_attention.py`
+- `tests/worker_consciousness_core_exact_event_checkpoint.py`
+- `tests/worker_consciousness_core_exact_event_step.py`
+- `tests/worker_consciousness_core_goals.py`
+- `tests/worker_consciousness_core_liveness.py`
+- `tests/worker_consciousness_core_memory4.py`
+- `tests/worker_consciousness_core_memory_recall_attention.py`
+- `tests/worker_consciousness_core_metacognition.py`
+- `tests/worker_consciousness_core_personality.py`
+- `tests/worker_consciousness_core_policy_checkpoint.py`
+- `tests/worker_consciousness_core_policy_checkpoint_lifecycle.py`
+- `tests/worker_consciousness_core_prediction_attention.py`
+- `tests/worker_consciousness_core_profile_source.py`
+- `tests/worker_consciousness_core_profile_step.py`
+- `tests/worker_consciousness_core_reducer.py`
+- `tests/worker_consciousness_core_response_guidance.py`
+- `tests/worker_consciousness_core_response_guidance_api.py`
+- `tests/worker_consciousness_core_runtime.py`
+- `tests/worker_consciousness_core_self_state.py`
+- `tests/worker_consciousness_core_self_state_checkpoint.py`
+- `tests/worker_consciousness_core_self_state_ledger.py`
+- `tests/worker_consciousness_core_session_bootstrap.py`
+- `tests/worker_consciousness_core_session_lifecycle.py`
+- `tests/worker_consciousness_core_sleep.py`
+- `tests/worker_consciousness_core_sleep_lifecycle.py`
+- `tests/worker_consciousness_core_sleep_self_state_binding.py`
+- `tests/worker_consciousness_core_supervisor.py`
+- `tests/worker_consciousness_core_supervisor_lifecycle.py`
+- `tests/worker_consciousness_core_temporal.py`
+- `tests/worker_consciousness_core_turn_checkpoint.py`
+- `tests/worker_consciousness_core_unplanned_dormancy.py`
+- `tests/worker_consciousness_core_user_turn_admission.py`
+- `tests/worker_consciousness_core_wake_ack.py`
+- `tests/worker_consciousness_core_wake_cycle.py`
+- `tests/worker_consciousness_core_world_reducer.py`
+- `tests/worker_consciousness_core_world_session.py`
 - `tests/worker_control_center_api.py`
 - `tests/worker_control_center_status.py`
 - `tests/worker_d4_auto_routing.py`
@@ -282,7 +346,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_research_sharing_execution.py`
 - `tests/worker_research_sharing_execution_async_contract.py`
 - `tests/worker_riggate_v1_contract.py`
-- `tests/worker_rsi_improvement.py`
 - `tests/worker_schedule_admin_persistence_time.py`
 - `tests/worker_schedule_admin_preview_time.py`
 - `tests/worker_schedule_api.py`
@@ -374,6 +437,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_client_capability_gates.py`
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
+- `tests/workflow_consciousness_core_contract.py`
 - `tests/workflow_contract_adapter.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_data_sharing_decision.py`
@@ -387,14 +451,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_gates_read_code.py`
 - `tests/workflow_kaliv_env_parser.py`
-- `tests/workflow_kaliv_vr_renderer.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
 - `tests/workflow_mrbody_cross_repo_contract.py`
 - `tests/workflow_pairing_link_parity.py`
 - `tests/workflow_person_create.py`
-- `tests/workflow_physical_reservation_authority_races.py`
-- `tests/workflow_physical_reservation_directory_history.py`
 - `tests/workflow_physical_validation_campaign.py`
 - `tests/workflow_physical_validation_campaign_task_ui.py`
 - `tests/workflow_physical_validation_final_gate.py`
@@ -429,7 +490,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_a_scheduler_finalize.py`
 - `tests/workflow_stage_a_scheduler_publish.py`
 - `tests/workflow_stage_a_voice_test.py`
-- `tests/workflow_stage_b_cache_manifest.py`
 - `tests/workflow_stage_b_one_click.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_staged_promotion_runbook.py`

@@ -1,0 +1,170 @@
+{
+  "schema": "kaliv-consciousness-core/fixtures/v1",
+  "self_state": {
+    "schema": "kaliv-consciousness-core/self-state/v1",
+    "self_id": "self-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": 1,
+    "person_id": "person-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "person_revision": "person-r0007",
+    "personality_state_ref": "personality-state:person-r0007:42",
+    "world_state_ref": "world-state:1",
+    "workspace_ref": "workspace:cycle-1",
+    "active_goal_refs": [
+      "goal:modelrig-continuity"
+    ],
+    "active_intention_refs": [
+      "intent:inspect-state"
+    ],
+    "affect": {
+      "labels": [
+        "curious"
+      ],
+      "valence": 0.25,
+      "arousal": 0.35,
+      "confidence": 0.8,
+      "source_refs": [
+        "event:user-turn:1"
+      ]
+    },
+    "known_uncertainties": [
+      {
+        "topic": "current CI completion state",
+        "confidence": 0.45,
+        "source_refs": [
+          "workspace:cycle-1"
+        ]
+      }
+    ],
+    "last_experience_ref": null,
+    "production_activation": false
+  },
+  "world_state": {
+    "schema": "kaliv-consciousness-core/world-state/v1",
+    "world_id": "world-cccccccccccccccccccccccccccccccc",
+    "revision": 1,
+    "observations": [
+      {
+        "observation_id": "obs-dddddddddddddddddddddddddddddddd",
+        "subject_ref": "project:modelrig",
+        "proposition": "A qualification run may still be active.",
+        "confidence": 0.6,
+        "epistemic_status": "inferred",
+        "source_refs": [
+          "github:pr:1610"
+        ]
+      }
+    ],
+    "production_activation": false
+  },
+  "workspace": {
+    "schema": "kaliv-consciousness-core/workspace/v1",
+    "cycle_id": "cycle-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "candidates": [
+      {
+        "candidate_id": "wc-11111111111111111111111111111111",
+        "kind": "perception",
+        "salience": 0.95,
+        "summary": "User asked to continue the side-track.",
+        "source_ref": "event:user-turn:1"
+      },
+      {
+        "candidate_id": "wc-22222222222222222222222222222222",
+        "kind": "memory",
+        "salience": 0.7,
+        "summary": "Consciousness Core must remain isolated from active runtime.",
+        "source_ref": "docs:consciousness-core:authority"
+      }
+    ],
+    "selected_candidate_ids": [
+      "wc-11111111111111111111111111111111",
+      "wc-22222222222222222222222222222222"
+    ],
+    "max_active": 8,
+    "production_activation": false
+  },
+  "cognitive_profile": {
+    "schema": "kaliv-consciousness-core/cognitive-profile/v1",
+    "profile_id": "cog-ffffffffffffffffffffffffffffffff",
+    "engine_instance_id": "engine:test:1",
+    "provider": "mock",
+    "model": "deterministic-v1",
+    "reasoning_depth": 0.5,
+    "planning_capacity": 0.5,
+    "context_capacity_tokens": 4096,
+    "multimodal_capacity": 0,
+    "tool_reasoning": 0,
+    "uncertainty_calibration": 1,
+    "ephemeral": true,
+    "identity_authority": false,
+    "persistent_state_authority": false,
+    "action_authority": false,
+    "production_activation": false
+  },
+  "thought_request": {
+    "schema": "kaliv-consciousness-core/thought-request/v1",
+    "request_id": "thinkreq-33333333333333333333333333333333",
+    "cycle_id": "cycle-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "self_state_ref": "self-state:1",
+    "world_state_ref": "world-state:1",
+    "workspace_ref": "workspace:cycle-1",
+    "personality_snapshot": {
+      "person_revision": "person-r0007",
+      "personality_revision": "personality-r0005",
+      "personality_state_ref": "personality-state:person-r0007:42",
+      "source_refs": [
+        "person-profile:person-r0007",
+        "bodyrig:movement-identity:active",
+        "voicerig:voice:active"
+      ]
+    },
+    "relevant_memory_refs": [
+      "memory4:record:1"
+    ],
+    "embodiment_state_ref": null,
+    "cognitive_profile_ref": "cognitive-profile:test:1",
+    "requested_reasoning_mode": "verify",
+    "production_activation": false
+  },
+  "thought_proposal": {
+    "schema": "kaliv-consciousness-core/thought-proposal/v1",
+    "proposal_id": "thinkprop-44444444444444444444444444444444",
+    "request_id": "thinkreq-33333333333333333333333333333333",
+    "interpretation": "The side-track can proceed without touching active runtime.",
+    "hypotheses": [
+      {
+        "summary": "Contract-only changes are isolated from product behavior.",
+        "confidence": 0.98
+      }
+    ],
+    "candidate_intentions": [
+      {
+        "summary": "Validate contracts and keep runtime unchanged.",
+        "confidence": 0.99,
+        "required_authority": "none"
+      }
+    ],
+    "predicted_outcomes": [
+      {
+        "summary": "Existing runtime behavior remains unchanged.",
+        "confidence": 0.95
+      }
+    ],
+    "questions": [],
+    "memory_queries": [],
+    "attention_suggestions": [
+      "wc-11111111111111111111111111111111"
+    ],
+    "response_intent": null,
+    "body_intent": null,
+    "uncertainty": 0.05,
+    "state_mutations": [],
+    "actions": [],
+    "authority": {
+      "identity": false,
+      "persistent_state": false,
+      "durable_memory": false,
+      "action": false
+    },
+    "production_activation": false
+  }
+}

@@ -1,0 +1,481 @@
+"""C13-A persisted sleep boundary and inert lifecycle seam.
+
+Default-off, route-less and scheduler-less. Persistence happens only after an
+explicit enable check AND an authoritative Self/Person binding.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import tempfile
+from collections.abc import Callable
+from contextlib import asynccontextmanager
+from functools import wraps
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .. import paths as _paths
+from .sleep import (
+    SleepRecord,
+    WakeReceipt,
+    prepare_sleep,
+    wake_from_sleep,
+    wake_from_unplanned_restart,
+)
+from .temporal import TemporalAnchor
+
+SLEEP_LIFECYCLE_FLAG = "KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED"
+SLEEP_STATE_ENV = "KALIV_CONSCIOUSNESS_SLEEP_STATE"
+_SLEEP_STATE_DEFAULT = "./kaliv-consciousness-sleep.json"
+
+NonEmptyRef = Annotated[str, Field(min_length=1, max_length=256)]
+
+
+class SleepLifecycleError(RuntimeError):
+    pass
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+
+class SleepBinding(StrictModel):
+    schema: Literal["kaliv-consciousness-core/sleep-binding/v1"]
+    self_id: Annotated[str, Field(pattern=r"^self-[a-f0-9]{32}$")]
+    person_revision: Annotated[str, Field(pattern=r"^person-r[0-9]{4,}$")]
+    durable_self_state_ref: NonEmptyRef | None = None
+    durable_self_state_revision: Annotated[int, Field(ge=1, strict=True)] | None = None
+    open_goal_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
+    open_loop_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
+    pending_review_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
+    production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def exact_self_state_binding(self) -> "SleepBinding":
+        if (
+            self.durable_self_state_ref is None
+        ) != (
+            self.durable_self_state_revision is None
+        ):
+            raise ValueError(
+                "sleep binding SelfState ref/revision must be both present or absent"
+            )
+        return self
+
+
+class SleepWakeAcknowledgement(StrictModel):
+    schema: Literal["kaliv-consciousness-core/sleep-wake-ack/v1"]
+    sleep_id: Annotated[str, Field(pattern=r"^sleep-[a-f0-9]{32}$")]
+    wake_id: Annotated[str, Field(pattern=r"^wake-[a-f0-9]{32}$")]
+    self_id: Annotated[str, Field(pattern=r"^self-[a-f0-9]{32}$")]
+    person_revision: Annotated[str, Field(pattern=r"^person-r[0-9]{4,}$")]
+    durable_self_state_ref: NonEmptyRef | None = None
+    durable_self_state_revision: Annotated[int, Field(ge=1, strict=True)] | None = None
+    planned_sleep_consumed: Literal[True]
+    production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def exact_self_state_binding(self) -> "SleepWakeAcknowledgement":
+        if (
+            self.durable_self_state_ref is None
+        ) != (
+            self.durable_self_state_revision is None
+        ):
+            raise ValueError(
+                "wake acknowledgement SelfState ref/revision must be both present or absent"
+            )
+        return self
+
+
+def sleep_lifecycle_enabled() -> bool:
+    return os.getenv(SLEEP_LIFECYCLE_FLAG, "").strip() == "1"
+
+
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(_canonical_json(value)).hexdigest()
+
+
+class SleepStateStore:
+    """One bounded atomic lifecycle payload; not autobiographical memory."""
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        resolved = (
+            str(path)
+            if path is not None
+            else _paths.resolve(_SLEEP_STATE_DEFAULT, env=SLEEP_STATE_ENV)
+        )
+        self.path = Path(resolved)
+
+    def _read_payload(
+        self,
+    ) -> SleepRecord | SleepWakeAcknowledgement | None:
+        try:
+            raw = self.path.read_bytes()
+        except FileNotFoundError:
+            return None
+        if len(raw) > 512 * 1024:
+            raise SleepLifecycleError("sleep state exceeds bounded size")
+        try:
+            envelope = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SleepLifecycleError("malformed sleep state") from exc
+        if not isinstance(envelope, dict):
+            raise SleepLifecycleError("sleep state envelope must be an object")
+        if envelope.get("schema") != "kaliv-consciousness-core/sleep-envelope/v1":
+            raise SleepLifecycleError("unsupported sleep state schema")
+        payload = envelope.get("payload")
+        digest = envelope.get("payload_sha256")
+        if not isinstance(payload, dict) or not isinstance(digest, str):
+            raise SleepLifecycleError("incomplete sleep state envelope")
+        if _digest(payload) != digest:
+            raise SleepLifecycleError("sleep state digest mismatch")
+
+        schema = payload.get("schema")
+        try:
+            if schema == "kaliv-consciousness-core/sleep-record/v1":
+                return SleepRecord.model_validate(payload)
+            if schema == "kaliv-consciousness-core/sleep-wake-ack/v1":
+                return SleepWakeAcknowledgement.model_validate(payload)
+        except Exception as exc:
+            raise SleepLifecycleError("invalid sleep state payload") from exc
+        raise SleepLifecycleError("unsupported sleep state payload schema")
+
+    def read(self) -> SleepRecord | None:
+        """Return only an unconsumed planned SleepRecord."""
+        payload = self._read_payload()
+        return payload if isinstance(payload, SleepRecord) else None
+
+    def read_acknowledgement(self) -> SleepWakeAcknowledgement | None:
+        payload = self._read_payload()
+        return (
+            payload
+            if isinstance(payload, SleepWakeAcknowledgement)
+            else None
+        )
+
+    def _write_payload(
+        self,
+        payload_model: SleepRecord | SleepWakeAcknowledgement,
+    ) -> None:
+        payload = payload_model.model_dump(mode="json")
+        envelope = {
+            "schema": "kaliv-consciousness-core/sleep-envelope/v1",
+            "payload": payload,
+            "payload_sha256": _digest(payload),
+        }
+        encoded = _canonical_json(envelope) + b"\n"
+        if len(encoded) > 512 * 1024:
+            raise SleepLifecycleError("sleep state exceeds bounded size")
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=self.path.name + ".",
+            suffix=".tmp",
+            dir=str(self.path.parent),
+        )
+        try:
+            with os.fdopen(fd, "wb", closefd=True) as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, self.path)
+        except Exception:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
+            raise
+
+    def write(self, record: SleepRecord) -> None:
+        if not isinstance(record, SleepRecord):
+            raise SleepLifecycleError("write requires SleepRecord")
+        self._write_payload(record)
+
+    def acknowledge_wake(
+        self,
+        wake: WakeReceipt,
+    ) -> SleepWakeAcknowledgement:
+        if not isinstance(wake, WakeReceipt):
+            raise SleepLifecycleError(
+                "wake acknowledgement requires WakeReceipt"
+            )
+        if wake.sleep_id is None:
+            raise SleepLifecycleError(
+                "unplanned dormancy has no planned SleepRecord to acknowledge"
+            )
+
+        current = self._read_payload()
+        if isinstance(current, SleepWakeAcknowledgement):
+            if (
+                current.sleep_id == wake.sleep_id
+                and current.wake_id == wake.wake_id
+                and current.self_id == wake.self_id
+                and current.person_revision == wake.person_revision
+                and current.durable_self_state_ref
+                == wake.durable_self_state_ref
+                and current.durable_self_state_revision
+                == wake.durable_self_state_revision
+            ):
+                return current
+            raise SleepLifecycleError(
+                "sleep state already acknowledged by another wake"
+            )
+        if not isinstance(current, SleepRecord):
+            raise SleepLifecycleError(
+                "planned SleepRecord is unavailable for acknowledgement"
+            )
+        if current.sleep_id != wake.sleep_id:
+            raise SleepLifecycleError(
+                "wake does not match pending SleepRecord"
+            )
+        if (
+            current.self_id != wake.self_id
+            or current.person_revision != wake.person_revision
+        ):
+            raise SleepLifecycleError(
+                "wake identity does not match pending SleepRecord"
+            )
+        if (
+            current.durable_self_state_ref
+            != wake.durable_self_state_ref
+            or current.durable_self_state_revision
+            != wake.durable_self_state_revision
+        ):
+            raise SleepLifecycleError(
+                "wake SelfState binding does not match pending SleepRecord"
+            )
+
+        acknowledgement = SleepWakeAcknowledgement(
+            schema="kaliv-consciousness-core/sleep-wake-ack/v1",
+            sleep_id=current.sleep_id,
+            wake_id=wake.wake_id,
+            self_id=wake.self_id,
+            person_revision=wake.person_revision,
+            durable_self_state_ref=wake.durable_self_state_ref,
+            durable_self_state_revision=wake.durable_self_state_revision,
+            planned_sleep_consumed=True,
+            production_activation=False,
+        )
+        self._write_payload(acknowledgement)
+        return acknowledgement
+
+
+BindingProvider = Callable[[], SleepBinding | None]
+AnchorProvider = Callable[[str], TemporalAnchor]
+StoreFactory = Callable[[], SleepStateStore]
+
+
+class SleepLifecycleRuntime:
+    """Default-off startup/shutdown seam around C12 contracts."""
+
+    def __init__(
+        self,
+        *,
+        enabled_fn: Callable[[], bool] = sleep_lifecycle_enabled,
+        binding_provider: BindingProvider,
+        anchor_provider: AnchorProvider,
+        store_factory: StoreFactory = SleepStateStore,
+    ) -> None:
+        self._enabled_fn = enabled_fn
+        self._binding_provider = binding_provider
+        self._anchor_provider = anchor_provider
+        self._store_factory = store_factory
+        self._store: SleepStateStore | None = None
+        self.wake_receipt: WakeReceipt | None = None
+        self.wake_acknowledgement: SleepWakeAcknowledgement | None = None
+        self.last_error: str | None = None
+        self.configured = False
+
+    def acknowledge_wake(
+        self,
+        wake: WakeReceipt | None = None,
+    ) -> bool:
+        """Consume only this runtime's exact planned wake receipt once."""
+        candidate = self.wake_receipt if wake is None else wake
+        if candidate is None:
+            return False
+        if not isinstance(candidate, WakeReceipt):
+            raise SleepLifecycleError(
+                "runtime wake acknowledgement requires WakeReceipt"
+            )
+        if (
+            self.wake_receipt is not None
+            and candidate != self.wake_receipt
+        ):
+            raise SleepLifecycleError(
+                "wake receipt does not match this sleep runtime"
+            )
+
+        # C28-C unplanned dormancy has no pending planned SleepRecord.
+        # Its acknowledgement marker must survive until the next clean
+        # shutdown writes a new SleepRecord.
+        if candidate.sleep_id is None:
+            self.last_error = None
+            return False
+
+        if not self.configured or self._store is None:
+            raise SleepLifecycleError(
+                "sleep runtime is not started for wake acknowledgement"
+            )
+
+        acknowledgement = self._store.acknowledge_wake(candidate)
+        self.wake_acknowledgement = acknowledgement
+        self.last_error = None
+        return True
+
+    def start(self) -> bool:
+        try:
+            enabled = bool(self._enabled_fn())
+        except Exception as exc:
+            self.last_error = f"feature flag check failed: {type(exc).__name__}: {exc}"[:500]
+            return False
+        if not enabled:
+            self.configured = False
+            self.last_error = None
+            return False
+
+        binding = self._binding_provider()
+        if binding is None:
+            # Never read an old record when we cannot authenticate its identity.
+            self.configured = True
+            self.last_error = None
+            return False
+        if not isinstance(binding, SleepBinding):
+            raise SleepLifecycleError("binding provider must return SleepBinding or None")
+
+        store = self._store_factory()
+        prior = store.read()
+        acknowledgement = store.read_acknowledgement()
+        self._store = store
+        self.configured = True
+        self.last_error = None
+        if prior is None:
+            if acknowledgement is None:
+                self.wake_receipt = None
+                return True
+            if (
+                acknowledgement.self_id != binding.self_id
+                or acknowledgement.person_revision
+                != binding.person_revision
+            ):
+                raise SleepLifecycleError(
+                    "wake acknowledgement belongs to another Self/Person binding"
+                )
+            wake_anchor = self._anchor_provider("wake")
+            self.wake_receipt = wake_from_unplanned_restart(
+                wake_anchor=wake_anchor,
+                self_id=binding.self_id,
+                person_revision=binding.person_revision,
+                source_ref=(
+                    "sleep-wake-ack:"
+                    + _digest(
+                        acknowledgement.model_dump(mode="json")
+                    )
+                ),
+            )
+            return True
+
+        wake_anchor = self._anchor_provider("wake")
+        self.wake_receipt = wake_from_sleep(
+            wake_anchor=wake_anchor,
+            sleep_record=prior,
+            expected_self_id=binding.self_id,
+            expected_person_revision=binding.person_revision,
+        )
+        return True
+
+    def close(self, *, reason: Literal["app_closed", "host_shutdown", "suspend"] = "app_closed") -> bool:
+        try:
+            enabled = bool(self._enabled_fn())
+        except Exception as exc:
+            self.last_error = f"feature flag check failed: {type(exc).__name__}: {exc}"[:500]
+            return False
+        if not enabled:
+            return False
+
+        binding = self._binding_provider()
+        if binding is None:
+            # Shutdown must never fabricate a self/person binding.
+            return False
+        if not isinstance(binding, SleepBinding):
+            raise SleepLifecycleError("binding provider must return SleepBinding or None")
+
+        try:
+            entry_anchor = self._anchor_provider("sleep")
+            record = prepare_sleep(
+                self_id=binding.self_id,
+                person_revision=binding.person_revision,
+                entry_anchor=entry_anchor,
+                reason=reason,
+                durable_self_state_ref=binding.durable_self_state_ref,
+                durable_self_state_revision=binding.durable_self_state_revision,
+                open_goal_refs=binding.open_goal_refs,
+                open_loop_refs=binding.open_loop_refs,
+                pending_review_refs=binding.pending_review_refs,
+            )
+            store = self._store or self._store_factory()
+            store.write(record)
+            self._store = store
+            self.last_error = None
+            return True
+        except Exception as exc:
+            self.last_error = f"sleep boundary write failed: {type(exc).__name__}: {exc}"[:500]
+            return False
+
+
+def compose_sleep_lifecycle_lifespan(inner_lifespan, runtime_factory):
+    """Compose C13 without transferring the existing production lifespan owner."""
+    if not callable(inner_lifespan):
+        raise TypeError("inner lifespan must be callable")
+    if not callable(runtime_factory):
+        raise TypeError("runtime_factory must be callable")
+    authority_owner = getattr(inner_lifespan, "__wrapped__", inner_lifespan)
+
+    @wraps(inner_lifespan)
+    @asynccontextmanager
+    async def composed(app):
+        async with inner_lifespan(app):
+            runtime = runtime_factory(app)
+            if not isinstance(runtime, SleepLifecycleRuntime):
+                raise TypeError("runtime_factory must return SleepLifecycleRuntime")
+            started = runtime.start()
+            if started:
+                app.state.consciousness_sleep_runtime = runtime
+                if runtime.wake_receipt is not None:
+                    app.state.consciousness_sleep_wake_receipt = (
+                        runtime.wake_receipt
+                    )
+            try:
+                yield
+            finally:
+                runtime.close()
+                if started:
+                    try:
+                        delattr(
+                            app.state,
+                            "consciousness_sleep_wake_receipt",
+                        )
+                    except AttributeError:
+                        pass
+                    try:
+                        delattr(
+                            app.state,
+                            "consciousness_sleep_runtime",
+                        )
+                    except AttributeError:
+                        pass
+
+    composed.__wrapped__ = authority_owner
+    return composed
