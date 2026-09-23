@@ -264,6 +264,11 @@ from .self_state_checkpoint_runtime import (
     runtime_checkpoint_plan_ref,
     self_state_checkpoint_receipt_ref,
 )
+from .policy_checkpoint import (
+    PolicyDrivenCheckpointError,
+    PolicyDrivenCheckpointResult,
+    PolicyDrivenSelfStateCheckpointAdapter,
+)
 from .sleep_lifecycle import (
     SLEEP_LIFECYCLE_FLAG,
     SleepBinding,
@@ -359,6 +364,9 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "PolicyDrivenSelfStateCheckpointAdapter",
+    "PolicyDrivenCheckpointResult",
+    "PolicyDrivenCheckpointError",
     "evaluate_checkpoint_pressure",
     "checkpoint_pressure_policy_ref",
     "CheckpointPressurePolicyError",
