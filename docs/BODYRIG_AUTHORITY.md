@@ -6,7 +6,11 @@ Issue: #1052
 
 ## Context
 
-ModelRig and standalone BodyRig describe one conceptual boundary:
+ModelRig and standalone BodyRig describe one conceptual boundary. The whole-system
+context is defined in `KALIV_SYSTEM_DEFINITION.md`; this ADR remains the authority
+for the body-domain boundary specifically. Consciousness Core, LLM selection and
+agent runtimes are upstream of ModelRig's semantic-intent boundary and do not gain
+BodyRig contract authority by influencing a BodyCue.
 
 - ModelRig owns reasoning and semantic assistant intent;
 - VoiceRig owns speech/audio and timing;
@@ -21,6 +25,8 @@ This ADR resolves authorship. It does not move runtime code and it does not weak
 
 ```mermaid
 flowchart LR
+    CC["Consciousness Core\nupstream cognitive-state architecture\nDRAFT until landed/qualified"]
+    LLM["Replaceable LLM\nreasoning capability, not body authority"]
     MR["Ternedal/ModelRig\nAUTHORITY\nreasoning + semantic intent\nBodyRig-facing cue production"]
     VR["VoiceRig\nAUTHORITY\naudio + utterance/viseme timing"]
     BR["Ternedal/BodyRig\nAUTHORITY\n.mrbody · BodyPrint\nMovement Identity · Motor State\nbuild/selection/realization semantics"]
@@ -28,6 +34,8 @@ flowchart LR
     KR["Kaliv / VR / renderer\nCONSUMER\npresentation + engine realization"]
     MIR["Mirrored schemas/constants\nCOMPATIBILITY SNAPSHOTS\nnever authorship"]
 
+    CC -.-> MR
+    LLM --> MR
     MR -->|BodyCue / semantic request| BR
     VR -->|utterance-bound timing| BR
     BR -->|performed embodiment / Motor State| KR
@@ -39,7 +47,7 @@ flowchart LR
     classDef authority stroke-width:3px;
     class MR,VR,BR authority;
     classDef mirror stroke-dasharray:5 3;
-    class MIR,AD mirror;
+    class MIR,AD,CC mirror;
 ```
 
 The important direction is authorship: a parser, mirror or adapter can consume a BodyRig contract without becoming its owner.
