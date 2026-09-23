@@ -95,7 +95,13 @@ def autonomous_scheduler_enabled() -> bool:
 
 def autonomous_checkpoint_enabled() -> bool:
     """Only exact string 1 couples C25-C to the C27-G service."""
-    return (\n        os.getenv(\n            "KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED",\n            "0",\n        )\n        == "1"\n    )
+    return (
+        os.getenv(
+            "KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED",
+            "0",
+        )
+        == "1"
+    )
 
 
 @dataclass(frozen=True)
