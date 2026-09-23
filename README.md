@@ -27,10 +27,17 @@ flowchart LR
     LLM["Replaceable LLM\nlocal / explicit cloud"] <--> MR
     MR -->|BodyCue| BR["BodyRig\nbody identity · Motor State\ndigital-twin authority"]
     MR <--> VR["VoiceRig\nvoice/audio + timing authority"]
-    MR --> K["Kaliv\nAndroid · Desktop · VR"]
-    BR --> K
-    VR --> K
-    SP["SkyPlayer-Engine\nXR/media primitives"] --> K
+    subgraph K["Kaliv product surfaces"]
+        KA["Kaliv Android"]
+        KD["Kaliv Desktop"]
+        KVR["Kaliv VR"]
+    end
+    MR --> KA
+    MR --> KD
+    MR --> KVR
+    BR --> KVR
+    VR --> KVR
+    SP["SkyPlayer-Engine\nXR/media primitives"] --> KVR
 ```
 
 See **[docs/KALIV_SYSTEM_DEFINITION.md](docs/KALIV_SYSTEM_DEFINITION.md)** for
@@ -76,7 +83,9 @@ writes.
 ```mermaid
 flowchart TB
     Desktop["Kaliv Desktop<br/>Compose JVM · Windows<br/>draws the pairing QR (code is minted, not claimed)"]
-    Kaliv["Kaliv (Android)<br/>chat · streaming voice · tools · RAG · foto→RAG<br/>QR pairing · share-in · answer citations<br/>offline queue (never auto-sends) · in-app updates"]
+    Kaliv["Kaliv Android<br/>chat · streaming voice · tools · RAG · foto→RAG<br/>QR pairing · share-in · answer citations<br/>offline queue (never auto-sends) · in-app updates"]
+    KalivVR["Kaliv VR<br/>Unity · OpenXR · Quest<br/>first-party embodied client<br/>pairing/bearer/chat + BodyRig embodiment"]
+    Sky["Ternedal/SkyPlayer-Engine<br/>reusable OpenXR · passthrough · media mechanics"]
 
     subgraph Appliance["Appliance layer — the rig stays up without a person watching"]
         Sup["modelrig-supervisor<br/>starts worker, then server<br/>supplies MODELRIG_HOST=0.0.0.0<br/>restarts either on exit or hang"]
@@ -110,6 +119,9 @@ flowchart TB
 
     Desktop -- "local-first, cloud fallback" --> Go
     Kaliv -- "pair + bearer token" --> Go
+    KalivVR -- "pair + bearer token" --> Go
+    BodyRig -- "accepted body / Motor State" --> KalivVR
+    Sky -- "XR + media primitives" --> KalivVR
     Kaliv -. "direct cloud chat: rig not involved,<br/>NO tools exist on this road" .-> Cloud
     Kaliv -. "in-app update: reads the releases/latest redirect,<br/>fetches kaliv-latest.apk — rig not involved" .-> GH
     Go -- "/api/chat · /api/tags" --> Ollama
@@ -125,7 +137,7 @@ flowchart TB
     Human -. "separate L15/L16 GO gates" .-> Dev
 
     classDef ext stroke-dasharray: 6 4;
-    class Cloud,GH,BodyRig ext;
+    class Cloud,GH,BodyRig,Sky ext;
     classDef dormant stroke-dasharray: 4 3;
     class A3,A4,CU,Dev dormant;
 ```
