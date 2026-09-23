@@ -1,0 +1,201 @@
+"""C12 sleep/dormancy lifecycle for Consciousness Core.
+
+A powered-off process performs no cognition. This module represents the boundary
+before shutdown and the continuity receipt after startup. It owns no scheduler,
+tool execution, durable memory store, or background compute.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Annotated, Any, Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from .temporal import TemporalAnchor, TemporalContractError, relate_anchors
+
+NonEmptyRef=Annotated[str,Field(min_length=1,max_length=256)]
+NonNegativeInt=Annotated[int,Field(ge=0,strict=True)]
+UnitInterval=Annotated[float,Field(ge=0.0,le=1.0,strict=True,allow_inf_nan=False)]
+
+SleepReason=Literal["app_closed","host_shutdown","suspend"]
+DormancyKind=Literal["PLANNED_SLEEP","UNPLANNED_DORMANCY"]
+WakeState=Literal["WAKING"]
+
+
+class SleepContractError(RuntimeError): pass
+
+
+class StrictModel(BaseModel):
+    model_config=ConfigDict(extra="forbid",strict=True,allow_inf_nan=False,frozen=True)
+
+
+class SleepRecord(StrictModel):
+    schema: Literal["kaliv-consciousness-core/sleep-record/v1"]
+    sleep_id: Annotated[str,Field(pattern=r"^sleep-[a-f0-9]{32}$")]
+    self_id: Annotated[str,Field(pattern=r"^self-[a-f0-9]{32}$")]
+    person_revision: Annotated[str,Field(pattern=r"^person-r[0-9]{4,}$")]
+    reason: SleepReason
+    entry_anchor: TemporalAnchor
+    open_goal_refs: Annotated[list[NonEmptyRef],Field(max_length=64)]
+    open_loop_refs: Annotated[list[NonEmptyRef],Field(max_length=64)]
+    pending_review_refs: Annotated[list[NonEmptyRef],Field(max_length=64)]
+    clean_shutdown: Literal[True]
+    cognition_continues: Literal[False]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    durable_memory_write_authority: Literal[False]
+    production_activation: Literal[False]
+
+
+class WakeReceipt(StrictModel):
+    schema: Literal["kaliv-consciousness-core/wake-receipt/v1"]
+    wake_id: Annotated[str,Field(pattern=r"^wake-[a-f0-9]{32}$")]
+    self_id: Annotated[str,Field(pattern=r"^self-[a-f0-9]{32}$")]
+    person_revision: Annotated[str,Field(pattern=r"^person-r[0-9]{4,}$")]
+    sleep_id: Annotated[str,Field(pattern=r"^sleep-[a-f0-9]{32}$")]|None
+    dormancy_kind: DormancyKind
+    entry_anchor_ref: NonEmptyRef|None
+    wake_anchor: TemporalAnchor
+    offline_duration_ms: NonNegativeInt|None
+    duration_confidence: UnitInterval
+    duration_known: bool
+    continuity_preserved: Literal[True]
+    cognition_during_gap: Literal[False]
+    wake_state: WakeState
+    resume_goal_refs: Annotated[list[NonEmptyRef],Field(max_length=64)]
+    resume_open_loop_refs: Annotated[list[NonEmptyRef],Field(max_length=64)]
+    pending_review_refs: Annotated[list[NonEmptyRef],Field(max_length=64)]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    durable_memory_write_authority: Literal[False]
+    production_activation: Literal[False]
+
+
+def _digest(payload:Mapping[str,Any])->str:
+    raw=json.dumps(payload,sort_keys=True,separators=(",",":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def prepare_sleep(
+    *,
+    self_id:str,
+    person_revision:str,
+    entry_anchor:TemporalAnchor|Mapping[str,Any],
+    reason:SleepReason,
+    open_goal_refs:list[str]|None=None,
+    open_loop_refs:list[str]|None=None,
+    pending_review_refs:list[str]|None=None,
+)->SleepRecord:
+    """Create the clean shutdown boundary before the process actually exits."""
+    try:
+        anchor=entry_anchor if isinstance(entry_anchor,TemporalAnchor) else TemporalAnchor.model_validate(entry_anchor)
+    except ValidationError as exc:
+        raise SleepContractError("invalid sleep entry anchor") from exc
+    seed={"self_id":self_id,"person_revision":person_revision,"anchor":anchor.anchor_id,"reason":reason}
+    return SleepRecord(
+        schema="kaliv-consciousness-core/sleep-record/v1",
+        sleep_id="sleep-"+_digest(seed)[:32],
+        self_id=self_id,
+        person_revision=person_revision,
+        reason=reason,
+        entry_anchor=anchor,
+        open_goal_refs=list(dict.fromkeys(open_goal_refs or []))[:64],
+        open_loop_refs=list(dict.fromkeys(open_loop_refs or []))[:64],
+        pending_review_refs=list(dict.fromkeys(pending_review_refs or []))[:64],
+        clean_shutdown=True,
+        cognition_continues=False,
+        execution_authority=False,
+        scheduling_authority=False,
+        durable_memory_write_authority=False,
+        production_activation=False,
+    )
+
+
+def wake_from_sleep(
+    *,
+    wake_anchor:TemporalAnchor|Mapping[str,Any],
+    sleep_record:SleepRecord|Mapping[str,Any]|None=None,
+    last_known_anchor:TemporalAnchor|Mapping[str,Any]|None=None,
+    expected_self_id:str|None=None,
+    expected_person_revision:str|None=None,
+)->WakeReceipt:
+    """Re-orient after startup without pretending cognition happened offline."""
+    try:
+        wake=wake_anchor if isinstance(wake_anchor,TemporalAnchor) else TemporalAnchor.model_validate(wake_anchor)
+        sleep=None if sleep_record is None else sleep_record if isinstance(sleep_record,SleepRecord) else SleepRecord.model_validate(sleep_record)
+        last=None if last_known_anchor is None else last_known_anchor if isinstance(last_known_anchor,TemporalAnchor) else TemporalAnchor.model_validate(last_known_anchor)
+    except ValidationError as exc:
+        raise SleepContractError("invalid wake input") from exc
+
+    if sleep is None and last is None:
+        raise SleepContractError("wake requires SleepRecord or prior anchor")
+
+    if sleep is not None:
+        self_id=sleep.self_id
+        person_revision=sleep.person_revision
+        entry=sleep.entry_anchor
+        kind:DormancyKind="PLANNED_SLEEP"
+        goal_refs=sleep.open_goal_refs
+        loop_refs=sleep.open_loop_refs
+        review_refs=sleep.pending_review_refs
+        sleep_id=sleep.sleep_id
+    else:
+        if expected_self_id is None or expected_person_revision is None:
+            raise SleepContractError("unplanned dormancy requires expected identity binding")
+        self_id=expected_self_id
+        person_revision=expected_person_revision
+        entry=last
+        kind="UNPLANNED_DORMANCY"
+        goal_refs=[]; loop_refs=[]; review_refs=[]; sleep_id=None
+
+    if expected_self_id is not None and self_id!=expected_self_id:
+        raise SleepContractError("sleep record belongs to another self")
+    if expected_person_revision is not None and person_revision!=expected_person_revision:
+        raise SleepContractError("sleep record belongs to another Person Revision")
+
+    duration=None; confidence=0.0; known=False
+    # Offline sleep normally crosses runtime epochs, so elapsed duration must
+    # bridge through trusted wall-clock evidence. A backwards wall clock is
+    # never accepted as a tiny "same window" sleep: keep duration unknown
+    # rather than inventing time that did not progress.
+    wall_clock_rolled_back = (
+        entry.runtime_epoch_id != wake.runtime_epoch_id
+        and entry.wall_time_unix_ms is not None
+        and wake.wall_time_unix_ms is not None
+        and wake.wall_time_unix_ms < entry.wall_time_unix_ms
+    )
+    if not wall_clock_rolled_back:
+        try:
+            relation=relate_anchors(entry,wake)
+            if relation.relation in {"AFTER","SAME_WINDOW"} and relation.elapsed_ms is not None:
+                duration=relation.elapsed_ms
+                confidence=relation.confidence
+                known=True
+        except TemporalContractError:
+            pass
+
+    seed={"self_id":self_id,"person_revision":person_revision,"wake":wake.anchor_id,"sleep_id":sleep_id,"kind":kind}
+    return WakeReceipt(
+        schema="kaliv-consciousness-core/wake-receipt/v1",
+        wake_id="wake-"+_digest(seed)[:32],
+        self_id=self_id,
+        person_revision=person_revision,
+        sleep_id=sleep_id,
+        dormancy_kind=kind,
+        entry_anchor_ref=f"temporal-anchor:{entry.anchor_id}",
+        wake_anchor=wake,
+        offline_duration_ms=duration,
+        duration_confidence=confidence,
+        duration_known=known,
+        continuity_preserved=True,
+        cognition_during_gap=False,
+        wake_state="WAKING",
+        resume_goal_refs=goal_refs,
+        resume_open_loop_refs=loop_refs,
+        pending_review_refs=review_refs,
+        execution_authority=False,
+        scheduling_authority=False,
+        durable_memory_write_authority=False,
+        production_activation=False,
+    )
