@@ -27,7 +27,13 @@ class PolicyCheckpointServiceError(RuntimeError):
 
 def policy_checkpoint_service_enabled() -> bool:
     """Only exact string 1 enables the production C27-F service."""
-    return (\n        os.getenv(\n            "KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED",\n            "0",\n        )\n        == "1"\n    )
+    return (
+        os.getenv(
+            "KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED",
+            "0",
+        )
+        == "1"
+    )
 
 
 def production_policy_checkpoint_service_factory(
