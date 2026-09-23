@@ -276,7 +276,10 @@ class ProductionCognitiveSession:
     def self_state_checkpoint_plan(
         self,
     ) -> RuntimeSelfStateCheckpointPlan | None:
-        if self._self_state_ledger is None:
+        if (
+            self._self_state_ledger is None
+            or self._self_state_ledger.pending_count == 0
+        ):
             return None
         return self._self_state_ledger.plan()
 
