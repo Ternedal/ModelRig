@@ -90,10 +90,10 @@ PY_GETENV_RE = re.compile(
     r""")\s*(?:,\s*(?P<default>["'][^"'\n]*["']|None|[0-9]+))?\s*\)"""
 )
 GO_ENV_CONST_RE = re.compile(
-    r"""(?m)^[ \t]*(?:(?:const|var)[ \t]+)?"""
-    r"""(?P<ident>[A-Za-z_][A-Za-z0-9_]*)"""
-    r"""(?:[ \t]+[A-Za-z_][A-Za-z0-9_.]*)?[ \t]*(?::=|=)[ \t]*"""
-    r""""(?P<env>(?:KALIV|MODELRIG)_[A-Z0-9_]+)""""
+    r'(?m)^[ \\t]*(?:(?:const|var)[ \\t]+)?'
+    r'(?P<ident>[A-Za-z_][A-Za-z0-9_]*)'
+    r'(?:[ \\t]+[A-Za-z_][A-Za-z0-9_.]*)?[ \\t]*(?::=|=)[ \\t]*'
+    r'"(?P<env>(?:KALIV|MODELRIG)_[A-Z0-9_]+)"'
 )
 GO_GETENV_RE = re.compile(
     r"""os\.Getenv\(\s*(?P<arg>"""
