@@ -83,14 +83,14 @@ class ExperientialEpisodeTests(unittest.TestCase):
         first = build_episode_moment(
             kind="USER_TURN",
             source_ref="world-evidence:" + "b" * 64,
-            anchor=anchor("2", seq=2, mono=2000),
+            anchor=anchor("2", seq=1, mono=1000),
             salience=1.0,
             participant_refs=["actor:user"],
         )
         second = build_episode_moment(
             kind="COGNITIVE_RUN",
             source_ref="cycle-receipt:" + "c" * 64,
-            anchor=anchor("3", seq=3, mono=3000),
+            anchor=anchor("3", seq=2, mono=2000),
             salience=0.8,
             active_goal_refs=["goal-" + "d" * 32],
         )
@@ -104,7 +104,7 @@ class ExperientialEpisodeTests(unittest.TestCase):
         )
         self.assertEqual(
             [item.anchor.sequence for item in episode.moments],
-            [2, 3],
+            [1, 2],
         )
         self.assertFalse(first.raw_text_persisted)
         self.assertFalse(first.raw_chain_of_thought_persisted)
@@ -123,7 +123,7 @@ class ExperientialEpisodeTests(unittest.TestCase):
         moment = build_episode_moment(
             kind="WORLD_EVIDENCE",
             source_ref="world-evidence:" + "b" * 64,
-            anchor=anchor("2", seq=1, mono=2000),
+            anchor=anchor("2", seq=0, mono=500),
             salience=0.5,
         )
 
