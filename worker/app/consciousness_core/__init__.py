@@ -53,6 +53,11 @@ from .cycle import (
     workspace_ref,
     world_state_ref,
 )
+from .checkpoint_liveness import (
+    CheckpointLivenessError,
+    CommittedCheckpointLivenessReceipt,
+    CommittedCheckpointLivenessRecorder,
+)
 from .checkpoint_pressure import (
     DEFAULT_CHECKPOINT_PRESSURE_POLICY,
     CheckpointPressureDecision,
@@ -387,6 +392,9 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "CommittedCheckpointLivenessRecorder",
+    "CommittedCheckpointLivenessReceipt",
+    "CheckpointLivenessError",
     "runtime_liveness_witness_ref",
     "build_runtime_liveness_witness",
     "RuntimeLivenessWriteReceipt",
