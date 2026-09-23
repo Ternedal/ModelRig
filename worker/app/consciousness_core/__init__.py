@@ -5,6 +5,17 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, ThoughtProposal, ThoughtRequest
+from .embodiment import (
+    EmbodimentContractError,
+    EmbodimentObservation,
+    EmbodimentState,
+    InferredEmbodimentState,
+    MockEmbodimentObserver,
+    PerformedBodyStateRef,
+    SemanticBodyIntent,
+    infer_embodiment_state,
+    normalize_embodiment_state,
+)
 from .experience import (
     ExperienceCandidate,
     ExperienceMemoryError,
@@ -53,7 +64,14 @@ from .thought_engine import (
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
     "CognitiveProfile",
+    "EmbodimentContractError",
+    "EmbodimentObservation",
+    "EmbodimentState",
     "ExperienceCandidate",
+    "InferredEmbodimentState",
+    "MockEmbodimentObserver",
+    "PerformedBodyStateRef",
+    "SemanticBodyIntent",
     "ExperienceMemoryError",
     "IdentityTrait",
     "Memory4ExperienceBridge",
@@ -82,7 +100,9 @@ __all__ = [
     "compose_runtime",
     "apply_resolution",
     "enabled",
+    "infer_embodiment_state",
     "initial_metacognitive_state",
+    "normalize_embodiment_state",
     "plan_memory_handoff",
     "prediction_from_proposal",
     "resolve_personality_model",
