@@ -21,6 +21,8 @@ class ThoughtEngine(Protocol):
         self,
         request: ThoughtRequest,
         cognitive_profile: CognitiveProfile,
+        *,
+        context: Mapping[str, Any] | None = None,
     ) -> ThoughtProposal | Mapping[str, Any]: ...
 
 
@@ -66,6 +68,8 @@ class OllamaThoughtEngine:
         self,
         request: ThoughtRequest,
         cognitive_profile: CognitiveProfile,
+        *,
+        context: Mapping[str, Any] | None = None,
     ) -> ThoughtProposal:
         system = (
             "You are an external replaceable ThoughtEngine used by Kaliv Consciousness Core. "
