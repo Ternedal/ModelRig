@@ -85,6 +85,11 @@ from .continuity_recovery import (
     build_continuity_recovery_completion,
     continuity_recovery_completion_ref,
 )
+from .continuity_status import (
+    ContinuityStatusError,
+    ContinuityStatusSnapshot,
+    build_continuity_status_snapshot,
+)
 from .continuity_reorientation import (
     DEFAULT_CONTINUITY_REORIENTATION_POLICY,
     ContinuityReorientationDecision,
@@ -438,6 +443,9 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_continuity_status_snapshot",
+    "ContinuityStatusSnapshot",
+    "ContinuityStatusError",
     "continuity_orientation_state_ref",
     "complete_continuity_orientation",
     "open_continuity_orientation",
