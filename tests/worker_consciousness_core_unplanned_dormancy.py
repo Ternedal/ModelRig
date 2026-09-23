@@ -195,6 +195,33 @@ class UnplannedDormancyTests(unittest.TestCase):
             self.assertFalse(wake.cognition_during_gap)
             self.assertIsNotNone(store.read_acknowledgement())
 
+    def test_unplanned_wake_acknowledgement_is_explicit_noop(self):
+        _authority, state = self.durable()
+        with tempfile.TemporaryDirectory() as td:
+            store = self.acknowledged_store(
+                Path(td) / "sleep.json",
+                state,
+            )
+            marker_before = store.read_acknowledgement()
+            runtime = SleepLifecycleRuntime(
+                enabled_fn=lambda: True,
+                binding_provider=lambda: self.binding(state),
+                anchor_provider=lambda _kind: self.crash_restart_anchor(),
+                store_factory=lambda: store,
+            )
+            self.assertTrue(runtime.start())
+            wake = runtime.wake_receipt
+            self.assertIsNotNone(wake)
+            self.assertIsNone(wake.sleep_id)
+
+            self.assertFalse(runtime.acknowledge_wake(wake))
+            self.assertEqual(
+                store.read_acknowledgement(),
+                marker_before,
+            )
+            self.assertIsNone(store.read())
+            self.assertIsNone(runtime.wake_acknowledgement)
+
     def test_ack_marker_identity_mismatch_fails_closed(self):
         _authority, state = self.durable()
         with tempfile.TemporaryDirectory() as td:
