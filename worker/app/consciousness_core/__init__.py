@@ -215,6 +215,7 @@ from .self_state import (
     PersonRevisionRebindAuthority,
     SelfAffect,
     SelfBootstrapAuthority,
+    SelfStateCheckpointReceipt,
     SelfStateError,
     SelfStateStore,
     SelfUncertainty,
@@ -330,6 +331,7 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "SelfStateCheckpointReceipt",
     "plan_embodiment_attention",
     "embodiment_state_ref",
     "embodiment_inference_ref",
