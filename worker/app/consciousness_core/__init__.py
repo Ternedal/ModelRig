@@ -66,6 +66,12 @@ from .checkpoint_pressure import (
     checkpoint_pressure_policy_ref,
     evaluate_checkpoint_pressure,
 )
+from .continuity_horizon import (
+    ContinuityHorizonError,
+    ContinuityReorientationWindow,
+    consume_continuity_reorientation_window,
+    open_continuity_reorientation_window,
+)
 from .continuity_reorientation import (
     DEFAULT_CONTINUITY_REORIENTATION_POLICY,
     ContinuityReorientationDecision,
@@ -419,6 +425,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "consume_continuity_reorientation_window",
+    "open_continuity_reorientation_window",
+    "ContinuityReorientationWindow",
+    "ContinuityHorizonError",
     "evaluate_continuity_reorientation",
     "ContinuityReorientationPolicy",
     "ContinuityReorientationError",
