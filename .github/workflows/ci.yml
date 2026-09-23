@@ -13,13 +13,19 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
   test:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     uses: ./.github/workflows/_tests.yml
 
   # The optional browser runtime stays out of worker/requirements.txt. This job
@@ -29,6 +35,7 @@ jobs:
   # creates no model client, contacts no public destination and activates no
   # BrowserHost or ToolGate route.
   browser-use-runtime-contract:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -126,6 +133,7 @@ jobs:
   # without a physical device belongs in these jobs; hardware behavior still
   # needs the separate on-device validation matrix.
   android-compile:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -141,8 +149,8 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
-      with:
-        packages: platform-tools
+        with:
+          packages: platform-tools
       - name: Install platform + build-tools
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Compile Android Kotlin and run unit tests
@@ -154,6 +162,7 @@ jobs:
           ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest -Proborazzi.test.verify=true --no-daemon --console=plain
 
   desktop-compile:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,6 +182,7 @@ jobs:
         run: ./gradlew :composeApp:test --no-daemon --console=plain
 
   desktop-dpapi-windows:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -194,6 +204,7 @@ jobs:
         run: .\gradlew.bat :composeApp:test --no-daemon --console=plain
 
   agent3-memory-dpapi-windows:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
