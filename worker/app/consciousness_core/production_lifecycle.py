@@ -18,6 +18,7 @@ from typing import Callable
 
 from ..person_api import registry_path
 from ..person_registry import PersonRegistry
+from .cycle import self_state_ref
 from .self_state import SelfStateStore, verify_active_person
 from .sleep_lifecycle import SleepBinding, SleepLifecycleRuntime
 from .temporal import ClockSample, TemporalAnchor, anchor_from_clock
@@ -120,6 +121,8 @@ def authoritative_sleep_binding() -> SleepBinding | None:
         schema="kaliv-consciousness-core/sleep-binding/v1",
         self_id=verified.self_id,
         person_revision=verified.person_revision,
+        durable_self_state_ref=self_state_ref(verified),
+        durable_self_state_revision=verified.revision,
         open_goal_refs=list(verified.active_goal_refs),
         open_loop_refs=list(verified.active_intention_refs),
         pending_review_refs=[],
