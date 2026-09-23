@@ -264,6 +264,13 @@ from .self_state_checkpoint_runtime import (
     runtime_checkpoint_plan_ref,
     self_state_checkpoint_receipt_ref,
 )
+from .policy_checkpoint_lifecycle import (
+    POLICY_CHECKPOINT_SERVICE_FLAG,
+    PolicyCheckpointServiceError,
+    compose_policy_checkpoint_service_lifespan,
+    policy_checkpoint_service_enabled,
+    production_policy_checkpoint_service_factory,
+)
 from .policy_checkpoint import (
     PolicyDrivenCheckpointError,
     PolicyDrivenCheckpointResult,
@@ -364,6 +371,11 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "production_policy_checkpoint_service_factory",
+    "policy_checkpoint_service_enabled",
+    "compose_policy_checkpoint_service_lifespan",
+    "PolicyCheckpointServiceError",
+    "POLICY_CHECKPOINT_SERVICE_FLAG",
     "PolicyDrivenSelfStateCheckpointAdapter",
     "PolicyDrivenCheckpointResult",
     "PolicyDrivenCheckpointError",
