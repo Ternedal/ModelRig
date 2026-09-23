@@ -148,6 +148,15 @@ from .supervisor import (
     queue_cognition_event,
     supervisor_policy_ref,
 )
+from .supervisor_lifecycle import (
+    SUPERVISOR_LIFECYCLE_FLAG,
+    ProductionSupervisorBridge,
+    SupervisorBridgeStep,
+    SupervisorLifecycleError,
+    compose_supervisor_lifecycle_lifespan,
+    production_supervisor_bridge_factory,
+    supervisor_lifecycle_enabled,
+)
 from .temporal import (
     ClockSample,
     DeadlineState,
@@ -179,6 +188,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "supervisor_lifecycle_enabled",
+    "production_supervisor_bridge_factory",
+    "compose_supervisor_lifecycle_lifespan",
+    "SupervisorLifecycleError",
+    "SupervisorBridgeStep",
+    "ProductionSupervisorBridge",
+    "SUPERVISOR_LIFECYCLE_FLAG",
     "supervisor_policy_ref",
     "queue_cognition_event",
     "plan_supervisor_step",
