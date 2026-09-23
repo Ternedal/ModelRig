@@ -75,6 +75,19 @@ from .runtime import (
     compose_runtime,
     enabled,
 )
+from .self_state import (
+    PersistentSelfState,
+    PersonRevisionRebindAuthority,
+    SelfAffect,
+    SelfBootstrapAuthority,
+    SelfStateError,
+    SelfStateStore,
+    SelfUncertainty,
+    advance_self_state,
+    bootstrap_self_state,
+    rebind_person_revision,
+    verify_active_person,
+)
 from .sleep_lifecycle import (
     SLEEP_LIFECYCLE_FLAG,
     SleepBinding,
@@ -113,6 +126,17 @@ from .thought_engine import (
 
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
+    "verify_active_person",
+    "rebind_person_revision",
+    "bootstrap_self_state",
+    "advance_self_state",
+    "SelfUncertainty",
+    "SelfStateStore",
+    "SelfStateError",
+    "SelfBootstrapAuthority",
+    "SelfAffect",
+    "PersonRevisionRebindAuthority",
+    "PersistentSelfState",
     "sleep_lifecycle_enabled",
     "compose_sleep_lifecycle_lifespan",
     "SleepStateStore",
