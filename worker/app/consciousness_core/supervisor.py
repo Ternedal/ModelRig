@@ -14,6 +14,7 @@ from typing import Annotated, Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .contracts import CognitiveProfile, PersonalitySnapshot
+from .continuity import PostWakeContinuityState
 from .cycle import (
     CognitiveCycleCoordinator,
     CognitiveCycleResult,
@@ -456,6 +457,7 @@ class CognitionSupervisorKernel:
         profile: CognitiveProfile | Mapping[str, Any],
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
+        continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
     ) -> SupervisorCycleResult:
         try:
             sup = (
@@ -569,6 +571,7 @@ class CognitionSupervisorKernel:
             profile=profile,
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
+            continuity_state=continuity_state,
             requested_reasoning_mode="normal",
         )
         reduction = reduce_post_cycle(
