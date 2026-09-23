@@ -37,6 +37,7 @@ ExperienceKind = Literal[
     "PREFERENCE_EVIDENCE",
     "PERSONALITY_EVIDENCE",
     "UNRESOLVED_QUESTION",
+    "EXPERIENTIAL_EPISODE",
 ]
 ExperienceProvenance = Literal[
     "user_explicit",
@@ -44,6 +45,7 @@ ExperienceProvenance = Literal[
     "embodiment_observation",
     "shared_event",
     "inferred",
+    "core_episode",
 ]
 Sensitivity = Literal["public", "operational", "private", "secret"]
 
