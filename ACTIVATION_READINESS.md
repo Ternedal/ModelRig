@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 19 feature-switches er tændt som default.** (13 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 34 feature-switches er tændt som default.** (14 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -81,6 +81,22 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
 | `KALIV_COMPUTER_USE` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_PROFILE_FILE` | `./kaliv-consciousness-profile.json` | indstilling |
+| `KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_SELF_STATE_CHECKPOINT_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_STEP_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_TURN_CHECKPOINT_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | slukket |
 | `KALIV_EGRESS_GATE` | `(tom)` | slukket |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` | slukket |

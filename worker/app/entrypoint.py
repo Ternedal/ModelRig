@@ -23,6 +23,29 @@ from .memory.write_mount import (
     compose_memory4_write_lifespan,
     mount_memory4_write,
 )
+from .consciousness_core.autonomous_scheduler import (
+    compose_autonomous_scheduler_lifespan,
+)
+from .consciousness_core.production_lifecycle import production_sleep_runtime_factory
+from .consciousness_core.policy_checkpoint_lifecycle import (
+    compose_policy_checkpoint_service_lifespan,
+)
+from .consciousness_core.self_state_checkpoint_lifecycle import (
+    compose_shutdown_self_state_checkpoint_lifespan,
+)
+from .consciousness_core.session_lifecycle import (
+    compose_cognitive_session_lifespan,
+    production_cognitive_session_factory,
+)
+from .consciousness_core.sleep_lifecycle import compose_sleep_lifecycle_lifespan
+from .consciousness_core.supervisor_lifecycle import (
+    compose_supervisor_lifecycle_lifespan,
+    production_supervisor_bridge_factory,
+)
+from .consciousness_core.exact_event_step_api import mount_consciousness_exact_event_step
+from .consciousness_core.profile_step_api import mount_consciousness_profile_step
+from .consciousness_core.response_guidance_api import mount_consciousness_guidance
+from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
@@ -75,6 +98,28 @@ mount_memory4_context(fastapi_app)
 # later separately reviewed slice.
 mount_memory4_write(fastapi_app)
 
+# Consciousness Core C21-A is an independent default-off, loopback-only
+# normal-chat admission surface. Mounting it grants no model call or scheduler;
+# it only admits reported user-turn evidence into an already-live C19/C20
+# session, and the route is absent unless its own exact opt-in is set.
+mount_consciousness_user_turn(fastapi_app)
+
+# Consciousness Core C22-B is a separately gated, loopback-only, bodyless
+# one-shot control surface. It loads the local operator-calibrated CognitiveProfile
+# and calls the existing live session at most once. With its exact flag off this
+# mount adds no route and reads no profile file.
+mount_consciousness_profile_step(fastapi_app)
+
+# Consciousness Core C22-C is a separately gated exact-event one-shot surface.
+# Its only caller-selected value is one pending CognitionEvent id; event presence
+# and canonical selection are verified before ThoughtEngine invocation.
+mount_consciousness_exact_event_step(fastapi_app)
+
+# Consciousness Core C23-B is a separately gated loopback-only one-shot
+# response-guidance consume surface. It exposes only the already-isolated
+# response_intent projection and performs no model call.
+mount_consciousness_guidance(fastapi_app)
+
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
 # production surface; launchers do not add parallel routers.
@@ -108,7 +153,24 @@ mount_file_capabilities(fastapi_app)
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
 # around the existing scheduler lifespan so process shutdown deterministically
 # closes both optional substrates without transferring lifecycle ownership.
-fastapi_app.router.lifespan_context = compose_memory4_write_lifespan(
-    compose_memory4_context_lifespan(scheduler_lifespan)
+fastapi_app.router.lifespan_context = compose_autonomous_scheduler_lifespan(
+    compose_shutdown_self_state_checkpoint_lifespan(
+        compose_policy_checkpoint_service_lifespan(
+            compose_cognitive_session_lifespan(
+                compose_supervisor_lifecycle_lifespan(
+                    compose_sleep_lifecycle_lifespan(
+                        compose_memory4_write_lifespan(
+                            compose_memory4_context_lifespan(
+                                scheduler_lifespan
+                            )
+                        ),
+                        production_sleep_runtime_factory,
+                    ),
+                    production_supervisor_bridge_factory,
+                ),
+                production_cognitive_session_factory,
+            )
+        )
+    )
 )
 app = harden(fastapi_app)

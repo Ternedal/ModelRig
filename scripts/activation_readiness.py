@@ -21,6 +21,7 @@ Run: python3 scripts/activation_readiness.py [--check]
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import inspect
 import logging
@@ -841,6 +842,19 @@ def main() -> int:
         strip = lambda s: re.sub(r"\*\*Genereret:\*\*.*", "", s)  # noqa: E731
         if strip(cur) != strip(text):
             print("ACTIVATION_READINESS.md er driftet fra koden — kør generatoren")
+            diff = difflib.unified_diff(
+                strip(cur).splitlines(),
+                strip(text).splitlines(),
+                fromfile="committed/ACTIVATION_READINESS.md",
+                tofile="generated/ACTIVATION_READINESS.md",
+                lineterm="",
+                n=3,
+            )
+            for index, line in enumerate(diff):
+                if index >= 120:
+                    print("... readiness diff truncated ...")
+                    break
+                print(line)
             return 1
         print("ACTIVATION_READINESS.md matcher koden")
         return 0
