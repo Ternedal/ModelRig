@@ -164,6 +164,11 @@ from .episode_boundary_application import (
     EpisodeBoundaryApplicationReceipt,
     EpisodeBoundaryApplicationResult,
     apply_episode_boundary_decision,
+    episode_boundary_application_receipt_ref,
+)
+from .episode_experience import (
+    EpisodeExperienceCandidateError,
+    build_episode_experience_candidate,
 )
 from .episode_boundary import (
     EpisodeBoundaryError,
@@ -478,6 +483,9 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_episode_experience_candidate",
+    "EpisodeExperienceCandidateError",
+    "episode_boundary_application_receipt_ref",
     "apply_episode_boundary_decision",
     "EpisodeBoundaryApplicationResult",
     "EpisodeBoundaryApplicationReceipt",
