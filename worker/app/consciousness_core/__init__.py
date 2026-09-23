@@ -87,6 +87,12 @@ from .metacognition import (
     prediction_from_proposal,
     resolve_prediction,
 )
+from .reducer import (
+    CognitiveTransitionReceipt,
+    PostCycleReductionError,
+    PostCycleReductionResult,
+    reduce_post_cycle,
+)
 from .runtime import (
     CONSCIOUSNESS_CORE_FLAG,
     ConsciousnessCoreRuntime,
@@ -148,6 +154,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "reduce_post_cycle",
+    "PostCycleReductionResult",
+    "PostCycleReductionError",
+    "CognitiveTransitionReceipt",
     "world_state_ref",
     "workspace_ref",
     "self_state_ref",
