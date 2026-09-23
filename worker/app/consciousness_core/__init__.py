@@ -72,6 +72,13 @@ from .continuity_horizon import (
     consume_continuity_reorientation_window,
     open_continuity_reorientation_window,
 )
+from .continuity_orientation import (
+    ContinuityOrientationError,
+    ContinuityOrientationState,
+    complete_continuity_orientation,
+    continuity_orientation_state_ref,
+    open_continuity_orientation,
+)
 from .continuity_recovery import (
     ContinuityRecoveryCompletionReceipt,
     ContinuityRecoveryError,
@@ -431,6 +438,11 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "continuity_orientation_state_ref",
+    "complete_continuity_orientation",
+    "open_continuity_orientation",
+    "ContinuityOrientationState",
+    "ContinuityOrientationError",
     "continuity_recovery_completion_ref",
     "build_continuity_recovery_completion",
     "ContinuityRecoveryError",
