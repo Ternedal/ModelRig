@@ -43,7 +43,7 @@ def policy_checkpoint_service_enabled() -> bool:
     """Only exact string 1 enables the production C27-F service."""
     return (
         os.getenv(
-            POLICY_CHECKPOINT_SERVICE_FLAG,
+            "KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED",
             "0",
         )
         == "1"
@@ -52,7 +52,13 @@ def policy_checkpoint_service_enabled() -> bool:
 
 def checkpoint_liveness_enabled() -> bool:
     """Only exact string 1 couples successful C27-F commits to C29-B."""
-    return os.getenv(CHECKPOINT_LIVENESS_FLAG, "0") == "1"
+    return (
+        os.getenv(
+            "KALIV_CONSCIOUSNESS_CHECKPOINT_LIVENESS_ENABLED",
+            "0",
+        )
+        == "1"
+    )
 
 
 def production_runtime_liveness_store_factory() -> RuntimeLivenessStore:
