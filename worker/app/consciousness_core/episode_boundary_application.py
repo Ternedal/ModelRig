@@ -5,6 +5,8 @@ Closed episode contents are not accumulated as a parallel autobiographical store
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Annotated, Literal, Mapping, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -99,6 +101,32 @@ class EpisodeBoundaryApplicationReceipt(StrictModel):
                 )
         return self
 
+
+
+
+
+def _canonical_json(value: Any) -> bytes:
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+
+def episode_boundary_application_receipt_ref(
+    receipt: EpisodeBoundaryApplicationReceipt,
+) -> str:
+    if not isinstance(receipt, EpisodeBoundaryApplicationReceipt):
+        raise TypeError(
+            "receipt must be EpisodeBoundaryApplicationReceipt"
+        )
+    return (
+        "episode-boundary-application:"
+        + hashlib.sha256(_canonical_json(receipt)).hexdigest()
+    )
 
 class EpisodeBoundaryApplicationResult(StrictModel):
     schema: Literal[
