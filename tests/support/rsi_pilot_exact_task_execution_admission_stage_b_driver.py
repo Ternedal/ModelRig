@@ -140,6 +140,18 @@ def _run_serial_phase(phase: str, filename: str) -> None:
     result_name, returncode, elapsed, output = _run_contract_file(filename)
     status = "PASS" if returncode == 0 else f"FAIL({returncode})"
     print(f"  {status}: {result_name} ({elapsed:.1f}s)", flush=True)
+    if returncode == 0 and filename in (_MIDCHAIN_DRIVER_FILE, _DOWNSTREAM_DRIVER_FILE):
+        timing_lines = [
+            line
+            for line in output.splitlines()
+            if line.startswith("Stage-B exact-task ")
+            or line.lstrip().startswith("PASS: ")
+        ]
+        if timing_lines:
+            print(f"--- {filename} timing summary ---", flush=True)
+            for line in timing_lines:
+                print(line, flush=True)
+            print(f"--- end {filename} timing summary ---", flush=True)
     _raise_failures(
         phase,
         (filename,),
