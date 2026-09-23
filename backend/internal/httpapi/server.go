@@ -80,7 +80,7 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/models/unload", s.authMW(http.HandlerFunc(s.handleModelsUnload)))
 	s.mux.Handle("POST /api/v1/models/pull", s.authMW(http.HandlerFunc(s.handleModelsPull)))
 	s.mux.Handle("DELETE /api/v1/models/delete", s.authMW(http.HandlerFunc(s.handleModelsDelete)))
-	s.mux.Handle("POST /api/v1/chat", s.authMW(http.HandlerFunc(s.handleMemory4Chat)))
+	s.mux.Handle("POST /api/v1/chat", s.authMW(http.HandlerFunc(s.handleConsciousnessChat)))
 	s.mux.Handle("POST /api/v1/rag/query", s.authMW(http.HandlerFunc(s.handleRagQuery)))
 	s.mux.Handle("POST /api/v1/rag/ingest", s.authMW(http.HandlerFunc(s.handleRagIngest)))
 	s.mux.Handle("POST /api/v1/rag/ingest/pdf", s.authMW(http.HandlerFunc(s.handleRagIngestPdf)))
@@ -92,12 +92,6 @@ func (s *server) routes() {
 	s.mux.Handle("POST /api/v1/tools/confirm", s.authMW(http.HandlerFunc(s.handleToolsConfirm)))
 	s.mux.Handle("GET /api/v1/tools/audit", s.authMW(http.HandlerFunc(s.handleToolsAudit)))
 	s.mux.Handle("POST /api/v1/tools/enabled", s.authMW(http.HandlerFunc(s.handleToolsEnabled)))
-
-	// DC-L16 product candidate. Exact opt-in mounts one read-only status route;
-	// there is no DevControl import, task registry, executor or write surface.
-	if devControlPilotEnabled() {
-		s.mux.Handle("GET /api/v1/experimental/devcontrol-pilot/status", s.authMW(http.HandlerFunc(s.handleDevControlPilotStatus)))
-	}
 
 	// T-036/T-044 GitHub connector pilot. One default-off switch mounts both
 	// worker + backend surfaces. Every backend route remains Bearer-authenticated,
@@ -129,7 +123,6 @@ func (s *server) routes() {
 	// avatar, thumbnail and motions for phone/headset renderers. GET only.
 	s.mux.Handle("GET /api/v1/body/active", s.authMW(http.HandlerFunc(s.handleBodyActive)))
 	s.mux.Handle("GET /api/v1/body/active/avatar.vrm", s.authMW(http.HandlerFunc(s.handleBodyAvatar)))
-	s.mux.Handle("GET /api/v1/body/active/bodyprint.json", s.authMW(http.HandlerFunc(s.handleBodyBodyprint)))
 	s.mux.Handle("GET /api/v1/body/active/thumbnail.png", s.authMW(http.HandlerFunc(s.handleBodyThumbnail)))
 	// ServeMux wildcards must be whole segments: the ".vrma" suffix is part of
 	// the {file} value and is validated in the handler.
