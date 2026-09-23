@@ -23,7 +23,9 @@ from app.consciousness_core import (  # noqa: E402
     SelfBootstrapAuthority,
     SessionBootstrapError,
     SleepBinding,
+    SleepLifecycleRuntime,
     SleepRecord,
+    SleepStateStore,
     WakeReceipt,
     anchor_from_clock,
     bootstrap_runtime_session,
@@ -262,6 +264,39 @@ class SleepSelfStateBindingTests(unittest.TestCase):
                 bootstrap_source_ref="runtime:c28a:mismatch-ref",
                 wake_receipt=wake,
             )
+
+    def test_sleep_lifecycle_persists_binding_from_authoritative_input(self):
+        _authority, state = self.durable()
+        ref = self_state_ref(state)
+        binding = SleepBinding(
+            schema="kaliv-consciousness-core/sleep-binding/v1",
+            self_id=state.self_id,
+            person_revision=state.person_revision,
+            durable_self_state_ref=ref,
+            durable_self_state_revision=state.revision,
+            open_goal_refs=[],
+            open_loop_refs=[],
+            pending_review_refs=[],
+            production_activation=False,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            store = SleepStateStore(Path(td) / "sleep.json")
+            runtime = SleepLifecycleRuntime(
+                enabled_fn=lambda: True,
+                binding_provider=lambda: binding,
+                anchor_provider=lambda _kind: self.sleep_anchor(),
+                store_factory=lambda: store,
+            )
+            self.assertTrue(runtime.close())
+            record = store.read()
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record.durable_self_state_ref, ref)
+        self.assertEqual(
+            record.durable_self_state_revision,
+            state.revision,
+        )
 
     def test_authoritative_sleep_binding_uses_exact_c14_state(self):
         _authority, state = self.durable()
