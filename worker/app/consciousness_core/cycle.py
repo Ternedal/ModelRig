@@ -24,6 +24,11 @@ from .continuity import (
     PostWakeContinuityState,
     project_continuity_context,
 )
+from .episode_context import (
+    EpisodeContextProjection,
+    project_episode_context,
+)
+from .episodes import ExperienceEpisodeState
 from .continuity_orientation import ContinuityOrientationState
 from .continuity_retirement import retire_wake_artifacts_from_model_context
 from .runtime import ConsciousnessCoreRuntime
@@ -144,6 +149,7 @@ class CognitiveContextPacket(StrictModel):
     relevant_memory_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
     embodiment_state_ref: NonEmptyRef | None
     continuity: ContinuityContextProjection | None = None
+    episode: EpisodeContextProjection | None = None
     production_activation: Literal[False]
 
     @model_validator(mode="after")
@@ -298,6 +304,7 @@ def assemble_thought_request(
     relevant_memory_refs: list[str] | None = None,
     embodiment_state_ref: str | None = None,
     continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
+    experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
     requested_reasoning_mode: ReasoningMode = "normal",
 ) -> tuple[ThoughtRequest, CognitiveContextPacket]:
     """Materialize one exact context packet and its reference-only C3 request."""
@@ -334,6 +341,13 @@ def assemble_thought_request(
             if isinstance(continuity_state, PostWakeContinuityState)
             else PostWakeContinuityState.model_validate(continuity_state)
         )
+        episode_value = (
+            None
+            if experience_episode is None
+            else experience_episode
+            if isinstance(experience_episode, ExperienceEpisodeState)
+            else ExperienceEpisodeState.model_validate(experience_episode)
+        )
     except ValidationError as exc:
         raise CognitiveCycleError("invalid cognitive-cycle input") from exc
 
@@ -365,6 +379,20 @@ def assemble_thought_request(
             continuity_value
         )
 
+    episode_projection = None
+    if episode_value is not None:
+        if episode_value.self_id != current.self_id:
+            raise CognitiveCycleError(
+                "experience episode belongs to another self"
+            )
+        if episode_value.person_revision != current.person_revision:
+            raise CognitiveCycleError(
+                "experience episode belongs to another Person Revision"
+            )
+        episode_projection = project_episode_context(
+            episode_value
+        )
+
     memories = list(dict.fromkeys(relevant_memory_refs or []))
     if len(memories) > 64:
         raise CognitiveCycleError("relevant memory ref bound exceeded")
@@ -379,6 +407,7 @@ def assemble_thought_request(
         relevant_memory_refs=memories,
         embodiment_state_ref=embodiment_state_ref,
         continuity=continuity_projection,
+        episode=episode_projection,
         production_activation=False,
     )
 
@@ -429,6 +458,7 @@ class CognitiveCycleCoordinator:
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
+        experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
         retired_continuity_state: PostWakeContinuityState | None = None,
         retired_continuity_orientation: ContinuityOrientationState | None = None,
         requested_reasoning_mode: ReasoningMode = "normal",
@@ -458,6 +488,7 @@ class CognitiveCycleCoordinator:
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=continuity_state,
+            experience_episode=experience_episode,
             requested_reasoning_mode=requested_reasoning_mode,
         )
 
@@ -465,6 +496,10 @@ class CognitiveCycleCoordinator:
         if packet.continuity is None:
             # Keep pre-C29-F no-continuity model context shape unchanged.
             context_payload.pop("continuity", None)
+
+        if packet.episode is None:
+            # Keep pre-C30-E no-episode model context shape unchanged.
+            context_payload.pop("episode", None)
 
         if (
             (retired_continuity_state is None)

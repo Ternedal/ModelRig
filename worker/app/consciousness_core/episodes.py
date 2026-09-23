@@ -24,6 +24,8 @@ EpisodeOpenReason = Literal[
     "SESSION_START",
     "WAKE_REORIENTATION",
     "POST_WAKE_RECOVERY",
+    "GOAL_TRANSITION",
+    "FOCUS_SHIFT",
     "EXPLICIT_BOUNDARY",
 ]
 EpisodeCloseReason = Literal[
