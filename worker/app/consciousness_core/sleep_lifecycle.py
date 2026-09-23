@@ -18,7 +18,13 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .. import paths as _paths
-from .sleep import SleepRecord, WakeReceipt, prepare_sleep, wake_from_sleep
+from .sleep import (
+    SleepRecord,
+    WakeReceipt,
+    prepare_sleep,
+    wake_from_sleep,
+    wake_from_unplanned_restart,
+)
 from .temporal import TemporalAnchor
 
 SLEEP_LIFECYCLE_FLAG = "KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED"
@@ -314,11 +320,34 @@ class SleepLifecycleRuntime:
 
         store = self._store_factory()
         prior = store.read()
+        acknowledgement = store.read_acknowledgement()
         self._store = store
         self.configured = True
         self.last_error = None
         if prior is None:
-            self.wake_receipt = None
+            if acknowledgement is None:
+                self.wake_receipt = None
+                return True
+            if (
+                acknowledgement.self_id != binding.self_id
+                or acknowledgement.person_revision
+                != binding.person_revision
+            ):
+                raise SleepLifecycleError(
+                    "wake acknowledgement belongs to another Self/Person binding"
+                )
+            wake_anchor = self._anchor_provider("wake")
+            self.wake_receipt = wake_from_unplanned_restart(
+                wake_anchor=wake_anchor,
+                self_id=binding.self_id,
+                person_revision=binding.person_revision,
+                source_ref=(
+                    "sleep-wake-ack:"
+                    + _digest(
+                        acknowledgement.model_dump(mode="json")
+                    )
+                ),
+            )
             return True
 
         wake_anchor = self._anchor_provider("wake")
