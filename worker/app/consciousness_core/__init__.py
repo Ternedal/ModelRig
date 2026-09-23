@@ -159,6 +159,12 @@ from .exact_event_step_api import (
     exact_event_step_enabled,
     mount_consciousness_exact_event_step,
 )
+from .episode_context import (
+    EpisodeContextError,
+    EpisodeContextMoment,
+    EpisodeContextProjection,
+    project_episode_context,
+)
 from .episodes import (
     EpisodeMoment,
     ExperienceEpisodeState,
@@ -458,6 +464,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "project_episode_context",
+    "EpisodeContextProjection",
+    "EpisodeContextMoment",
+    "EpisodeContextError",
     "open_experience_episode",
     "experience_episode_ref",
     "episode_moment_ref",
