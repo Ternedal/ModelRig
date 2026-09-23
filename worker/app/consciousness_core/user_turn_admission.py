@@ -13,9 +13,20 @@ from collections.abc import Callable
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    ValidationError,
+    model_validator,
+)
 
 from ..netguard import is_loopback
+from .policy_checkpoint import (
+    PolicyDrivenCheckpointResult,
+    PolicyDrivenSelfStateCheckpointAdapter,
+)
 from .session_lifecycle import (
     CognitiveSessionLifecycleError,
     ProductionCognitiveSession,
@@ -25,6 +36,7 @@ from .world_reducer import WorldReducerError
 
 
 CONSCIOUSNESS_CHAT_FLAG = "KALIV_CONSCIOUSNESS_CHAT_ENABLED"
+TURN_CHECKPOINT_FLAG = "KALIV_CONSCIOUSNESS_TURN_CHECKPOINT_ENABLED"
 CONSCIOUSNESS_TURN_PREFIX = "/experimental/consciousness"
 MAX_USER_TURN_BODY_BYTES = 16 * 1024
 _MOUNTED_STATE = "consciousness_user_turn_mounted"
@@ -60,16 +72,73 @@ class UserTurnAdmissionReceipt(StrictModel):
     confidence: Literal[1.0]
     observed_sequence: Annotated[int, Field(ge=0, strict=True)]
     model_calls: Literal[0]
-    self_state_store_write_applied: Literal[False]
+    checkpoint_enabled: bool = False
+    checkpoint_evaluation_count: Annotated[
+        int,
+        Field(ge=0, le=2, strict=True),
+    ] = 0
+    checkpoint_commit_count: Annotated[
+        int,
+        Field(ge=0, le=2, strict=True),
+    ] = 0
+    checkpoint_last_outcome: (
+        Literal["IDLE", "HOLD", "COMMITTED"] | None
+    ) = None
+    checkpoint_last_pressure: (
+        Literal["IDLE", "HOLD", "CHECKPOINT", "REQUIRED"] | None
+    ) = None
+    self_state_store_write_applied: bool = False
     durable_memory_write_authority: Literal[False]
     execution_authority: Literal[False]
     scheduling_authority: Literal[False]
     production_activation: Literal[False]
 
+    @model_validator(mode="after")
+    def checkpoint_shape(self) -> "UserTurnAdmissionReceipt":
+        if not self.checkpoint_enabled:
+            if (
+                self.checkpoint_evaluation_count != 0
+                or self.checkpoint_commit_count != 0
+                or self.checkpoint_last_outcome is not None
+                or self.checkpoint_last_pressure is not None
+                or self.self_state_store_write_applied
+            ):
+                raise ValueError(
+                    "checkpoint-disabled user-turn receipt cannot claim work"
+                )
+        else:
+            if self.checkpoint_evaluation_count < 1:
+                raise ValueError(
+                    "checkpoint-enabled user-turn receipt requires evaluation"
+                )
+            if (
+                self.checkpoint_last_outcome is None
+                or self.checkpoint_last_pressure is None
+            ):
+                raise ValueError(
+                    "checkpoint-enabled user-turn receipt lacks outcome"
+                )
+            if self.checkpoint_commit_count > self.checkpoint_evaluation_count:
+                raise ValueError(
+                    "checkpoint commit count exceeds evaluation count"
+                )
+            if self.self_state_store_write_applied != (
+                self.checkpoint_commit_count > 0
+            ):
+                raise ValueError(
+                    "checkpoint write flag/count mismatch"
+                )
+        return self
+
 
 def consciousness_chat_enabled() -> bool:
     """Only the exact string 1 enables normal-chat admission."""
     return os.getenv("KALIV_CONSCIOUSNESS_CHAT_ENABLED", "0") == "1"
+
+
+def turn_checkpoint_enabled() -> bool:
+    """Only exact string 1 couples C21-A to the C27-G service."""
+    return (\n        os.getenv(\n            "KALIV_CONSCIOUSNESS_TURN_CHECKPOINT_ENABLED",\n            "0",\n        )\n        == "1"\n    )
 
 
 def _turn_ref(turn_id: str) -> str:
@@ -161,6 +230,41 @@ def build_consciousness_user_turn_router(
                 detail="consciousness session unavailable",
             )
 
+        checkpoint_service = None
+        checkpoint_results: list[PolicyDrivenCheckpointResult] = []
+        if turn_checkpoint_enabled():
+            checkpoint_service = getattr(
+                request.app.state,
+                "consciousness_policy_checkpoint",
+                None,
+            )
+            if not isinstance(
+                checkpoint_service,
+                PolicyDrivenSelfStateCheckpointAdapter,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="consciousness checkpoint service unavailable",
+                )
+            try:
+                checkpoint_before = (
+                    checkpoint_service.maybe_checkpoint_once()
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="consciousness checkpoint preflight failed",
+                ) from exc
+            if not isinstance(
+                checkpoint_before,
+                PolicyDrivenCheckpointResult,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="consciousness checkpoint preflight failed",
+                )
+            checkpoint_results.append(checkpoint_before)
+
         try:
             result = session.submit_reported_user_turn(
                 turn_id=body.turn_id,
@@ -178,6 +282,46 @@ def build_consciousness_user_turn_router(
                 detail="consciousness user-turn admission unavailable",
             ) from exc
 
+        if (
+            checkpoint_service is not None
+            and result.world_transition.world_changed
+        ):
+            try:
+                checkpoint_after = (
+                    checkpoint_service.maybe_checkpoint_once()
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "consciousness user-turn admitted but "
+                        "checkpoint failed"
+                    ),
+                ) from exc
+            if not isinstance(
+                checkpoint_after,
+                PolicyDrivenCheckpointResult,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "consciousness user-turn admitted but "
+                        "checkpoint failed"
+                    ),
+                )
+            checkpoint_results.append(checkpoint_after)
+
+        checkpoint_last = (
+            checkpoint_results[-1]
+            if checkpoint_results
+            else None
+        )
+        checkpoint_commits = sum(
+            1
+            for item in checkpoint_results
+            if item.outcome == "COMMITTED"
+        )
+
         event = result.cognition_event
         receipt = UserTurnAdmissionReceipt(
             schema="kaliv-consciousness-core/user-turn-admission/v1",
@@ -191,7 +335,20 @@ def build_consciousness_user_turn_router(
             confidence=1.0,
             observed_sequence=result.observed_sequence,
             model_calls=0,
-            self_state_store_write_applied=False,
+            checkpoint_enabled=checkpoint_service is not None,
+            checkpoint_evaluation_count=len(checkpoint_results),
+            checkpoint_commit_count=checkpoint_commits,
+            checkpoint_last_outcome=(
+                None
+                if checkpoint_last is None
+                else checkpoint_last.outcome
+            ),
+            checkpoint_last_pressure=(
+                None
+                if checkpoint_last is None
+                else checkpoint_last.pressure.decision
+            ),
+            self_state_store_write_applied=checkpoint_commits > 0,
             durable_memory_write_authority=False,
             execution_authority=False,
             scheduling_authority=False,
