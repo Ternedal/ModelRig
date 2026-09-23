@@ -46,6 +46,7 @@ EventKind = Literal[
     "embodiment_change",
     "tool_result",
     "memory_recall",
+    "prediction_error",
     "wake_followup",
     "operator_signal",
 ]
