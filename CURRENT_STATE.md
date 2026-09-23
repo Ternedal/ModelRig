@@ -261,6 +261,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_cycle.py`
 - `tests/worker_consciousness_core_embodiment.py`
 - `tests/worker_consciousness_core_embodiment_attention.py`
+- `tests/worker_consciousness_core_episode_event_admission.py`
 - `tests/worker_consciousness_core_experiential_episode.py`
 - `tests/worker_consciousness_core_exact_event_checkpoint.py`
 - `tests/worker_consciousness_core_exact_event_step.py`
