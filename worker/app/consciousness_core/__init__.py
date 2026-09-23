@@ -54,6 +54,15 @@ from .embodiment import (
     infer_embodiment_state,
     normalize_embodiment_state,
 )
+from .exact_event_step_api import (
+    EVENT_STEP_FLAG,
+    EVENT_STEP_PREFIX,
+    ExactEventStepBody,
+    ExactEventStepReceipt,
+    build_consciousness_exact_event_step_router,
+    exact_event_step_enabled,
+    mount_consciousness_exact_event_step,
+)
 from .experience import (
     ExperienceCandidate,
     ExperienceMemoryError,
@@ -245,6 +254,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "mount_consciousness_exact_event_step",
+    "exact_event_step_enabled",
+    "build_consciousness_exact_event_step_router",
+    "ExactEventStepReceipt",
+    "ExactEventStepBody",
+    "EVENT_STEP_PREFIX",
+    "EVENT_STEP_FLAG",
     "profile_step_enabled",
     "mount_consciousness_profile_step",
     "build_consciousness_profile_step_router",
