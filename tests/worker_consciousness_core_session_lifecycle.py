@@ -29,6 +29,15 @@ from app.consciousness_core import (  # noqa: E402
     bootstrap_self_state,
 )
 from app.consciousness_core.production_lifecycle import TrustedRuntimeClock  # noqa: E402
+from app.consciousness_core.sleep import WakeReceipt  # noqa: E402
+from app.consciousness_core.temporal import TemporalAnchor  # noqa: E402
+from app.consciousness_core.wake_followup import (  # noqa: E402
+    WAKE_FOLLOWUP_SALIENCE,
+    WakeFollowupAdmissionError,
+    build_wake_followup_event,
+    wake_followup_event_id,
+    wake_receipt_ref,
+)
 from app.consciousness_core.session_lifecycle import (  # noqa: E402
     CognitiveSessionLifecycleError,
     ProductionCognitiveSession,
@@ -152,6 +161,43 @@ class SessionLifecycleTests(unittest.TestCase):
         )
         return authority, state
 
+    def wake_receipt(self, state):
+        anchor = TemporalAnchor(
+            schema="kaliv-consciousness-core/temporal-anchor/v1",
+            anchor_id="tanch-" + "c" * 32,
+            event_ref="runtime:wake:test",
+            wall_time_unix_ms=1_700_000_100_000,
+            runtime_epoch_id="epoch-" + "d" * 32,
+            monotonic_ms=1_000,
+            sequence=7,
+            source_refs=["runtime:trusted-system-clock"],
+            confidence=1.0,
+            production_activation=False,
+        )
+        return WakeReceipt(
+            schema="kaliv-consciousness-core/wake-receipt/v1",
+            wake_id="wake-" + "e" * 32,
+            self_id=state.self_id,
+            person_revision=state.person_revision,
+            sleep_id="sleep-" + "f" * 32,
+            dormancy_kind="PLANNED_SLEEP",
+            entry_anchor_ref="temporal-anchor:tanch-" + "a" * 32,
+            wake_anchor=anchor,
+            offline_duration_ms=60_000,
+            duration_confidence=1.0,
+            duration_known=True,
+            continuity_preserved=True,
+            cognition_during_gap=False,
+            wake_state="WAKING",
+            resume_goal_refs=list(state.active_goal_refs),
+            resume_open_loop_refs=list(state.active_intention_refs),
+            pending_review_refs=[],
+            execution_authority=False,
+            scheduling_authority=False,
+            durable_memory_write_authority=False,
+            production_activation=False,
+        )
+
     def profile(self, model: str = "model-a") -> CognitiveProfile:
         marker = "1" if model == "model-a" else "2"
         return CognitiveProfile(
@@ -233,6 +279,90 @@ class SessionLifecycleTests(unittest.TestCase):
                 state.workspace_ref,
             )
             self.assertEqual(session.live_state.completed_cycles, 0)
+
+    def test_wake_followup_projection_is_deterministic_and_identity_bound(self):
+        _, state = self.durable_state(
+            "person-" + "1" * 32,
+            "person-r0007",
+        )
+        wake = self.wake_receipt(state)
+        first = build_wake_followup_event(
+            wake,
+            expected_self_id=state.self_id,
+            expected_person_revision=state.person_revision,
+        )
+        second = build_wake_followup_event(
+            wake.model_dump(mode="json"),
+            expected_self_id=state.self_id,
+            expected_person_revision=state.person_revision,
+        )
+        self.assertEqual(first, second)
+        self.assertEqual(first.kind, "wake_followup")
+        self.assertEqual(first.salience, WAKE_FOLLOWUP_SALIENCE)
+        self.assertEqual(first.observed_sequence, wake.wake_anchor.sequence)
+        self.assertEqual(first.source_ref, wake_receipt_ref(wake))
+        self.assertEqual(first.event_id, wake_followup_event_id(wake))
+        self.assertIn("PLANNED_SLEEP", first.summary)
+        self.assertIn("60000 ms", first.summary)
+        self.assertIn("did not continue", first.summary)
+        with self.assertRaises(WakeFollowupAdmissionError):
+            build_wake_followup_event(
+                wake,
+                expected_self_id="self-" + "9" * 32,
+                expected_person_revision=state.person_revision,
+            )
+
+    def test_wake_receipt_queues_one_deterministic_followup_without_model_call(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            person_path, person, revision = self.person_fixture(root)
+            authority, state = self.durable_state(person.person_id, revision.id)
+            store = SelfStateStore(root / "self.json")
+            store.bootstrap(state, authority)
+            wake = self.wake_receipt(state)
+
+            engine = Engine()
+            bridge = self.bridge(engine)
+            app = SimpleNamespace(
+                state=SimpleNamespace(
+                    consciousness_supervisor=bridge,
+                    consciousness_sleep_wake_receipt=wake,
+                )
+            )
+            session = production_cognitive_session_factory(
+                app,
+                self_store_factory=lambda: store,
+                registry_path_fn=lambda: str(person_path),
+            )
+            self.assertIsInstance(session, ProductionCognitiveSession)
+            self.assertEqual(engine.calls, 0)
+            pending = session.supervisor_state.pending_events
+            self.assertEqual(len(pending), 1)
+            event = pending[0]
+            self.assertEqual(event.kind, "wake_followup")
+            self.assertEqual(event.event_id, wake_followup_event_id(wake))
+            self.assertEqual(event.source_ref, wake_receipt_ref(wake))
+            self.assertTrue(
+                any(
+                    event.source_ref in observation.source_refs
+                    for observation in session.live_state.world.observations
+                )
+            )
+            self.assertTrue(
+                any(
+                    candidate.source_ref == event.source_ref
+                    for candidate in session.live_state.workspace.candidates
+                )
+            )
+
+            # Exact duplicate admission remains idempotent in C18.
+            before_revision = session.supervisor_state.revision
+            session.submit(event)
+            self.assertEqual(len(session.supervisor_state.pending_events), 1)
+            self.assertEqual(
+                session.supervisor_state.revision,
+                before_revision,
+            )
 
     def test_missing_active_person_yields_no_session(self):
         with tempfile.TemporaryDirectory() as td:
