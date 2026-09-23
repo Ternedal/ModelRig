@@ -400,6 +400,7 @@ def _event_workspace_kind(event: CognitionEvent) -> str:
         "tool_result": "tool_result",
         "memory_recall": "memory",
         "wake_followup": "perception",
+        "prediction_error": "perception",
         "operator_signal": "perception",
     }[event.kind]
 
