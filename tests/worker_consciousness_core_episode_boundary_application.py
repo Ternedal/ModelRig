@@ -296,6 +296,28 @@ class EpisodeBoundaryApplicationTests(unittest.TestCase):
             signal.anchor.anchor_id,
         )
 
+    def test_decision_for_another_episode_fails_closed(self):
+        episode = self.episode()
+        other = open_experience_episode(
+            self_id=SELF,
+            person_revision=PERSON_REV,
+            opening_anchor=anchor(
+                10,
+                event_ref="episode-open:other:c30g",
+            ),
+            reason="EXPLICIT_BOUNDARY",
+        )
+        decision = evaluate_episode_boundary(other)
+
+        with self.assertRaisesRegex(
+            Exception,
+            "belongs to another episode",
+        ):
+            apply_episode_boundary_decision(
+                episode,
+                decision,
+            )
+
     def test_session_rotation_takes_no_additional_clock_sample(self):
         session, engine, clock = self.session()
         session.submit_world_evidence(
