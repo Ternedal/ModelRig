@@ -351,11 +351,13 @@ from .world_reducer import (
 )
 from .user_turn_admission import (
     CONSCIOUSNESS_CHAT_FLAG,
+    TURN_CHECKPOINT_FLAG,
     CONSCIOUSNESS_TURN_PREFIX,
     UserTurnAdmissionBody,
     UserTurnAdmissionReceipt,
     build_consciousness_user_turn_router,
     consciousness_chat_enabled,
+    turn_checkpoint_enabled,
     mount_consciousness_user_turn,
 )
 from .wake_cycle import (
@@ -375,6 +377,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "turn_checkpoint_enabled",
+    "TURN_CHECKPOINT_FLAG",
     "exact_event_checkpoint_enabled",
     "EVENT_CHECKPOINT_FLAG",
     "autonomous_checkpoint_enabled",
