@@ -28,6 +28,7 @@ from .cycle import (
     workspace_ref,
     world_state_ref,
 )
+from .production_lifecycle import TrustedRuntimeClock
 from .response_guidance import (
     ResponseGuidanceEnvelope,
     build_response_guidance,
@@ -223,6 +224,11 @@ class ProductionCognitiveSession:
     @property
     def supervisor_state(self):
         return self._bridge.state
+
+    @property
+    def trusted_clock(self) -> TrustedRuntimeClock:
+        """Borrow C18's trusted runtime clock without creating a second epoch."""
+        return self._bridge.trusted_clock
 
     @property
     def closed(self) -> bool:
