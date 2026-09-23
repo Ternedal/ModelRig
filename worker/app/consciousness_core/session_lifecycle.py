@@ -62,13 +62,14 @@ from .episode_boundary_application import (
     EpisodeBoundaryApplicationResult,
     apply_episode_boundary_decision,
 )
+from .episode_experience import build_episode_experience_candidate
 from .episodes import (
     ExperienceEpisodeState,
     append_episode_moment,
     build_episode_moment,
     open_experience_episode,
 )
-from .experience import MemoryContextSnapshot
+from .experience import ExperienceCandidate, MemoryContextSnapshot
 from .memory_recall_attention import (
     MemoryRecallAdmissionResult,
     MemoryRecallPlan,
@@ -296,6 +297,7 @@ class ProductionCognitiveSession:
         )
         self._experience_episode = None
         self._last_episode_boundary_receipt = None
+        self._pending_episode_experience_candidate = None
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -370,6 +372,13 @@ class ProductionCognitiveSession:
         """Latest process-local episode segmentation application receipt."""
         return self._last_episode_boundary_receipt
 
+    @property
+    def pending_episode_experience_candidate(
+        self,
+    ) -> ExperienceCandidate | None:
+        """Latest review-only C7 candidate derived from a closed episode."""
+        return self._pending_episode_experience_candidate
+
     def apply_episode_boundary(
         self,
         signal: EpisodeBoundarySignal | None = None,
@@ -380,16 +389,28 @@ class ProductionCognitiveSession:
             raise CognitiveSessionLifecycleError(
                 "no active experience episode to segment"
             )
+        episode_before = self._experience_episode
         decision = evaluate_episode_boundary(
-            self._experience_episode,
+            episode_before,
             signal,
         )
         result = apply_episode_boundary_decision(
-            self._experience_episode,
+            episode_before,
             decision,
         )
+
+        next_candidate = self._pending_episode_experience_candidate
+        if result.receipt.mutation_applied:
+            next_candidate = build_episode_experience_candidate(
+                episode=episode_before,
+                application_receipt=result.receipt,
+                state=self._live.state,
+                cycle_id=self._live.workspace.cycle_id,
+            )
+
         self._experience_episode = result.active_episode
         self._last_episode_boundary_receipt = result.receipt
+        self._pending_episode_experience_candidate = next_candidate
         return result
 
     @property
@@ -1228,6 +1249,7 @@ class ProductionCognitiveSession:
         self._continuity_orientation = None
         self._experience_episode = None
         self._last_episode_boundary_receipt = None
+        self._pending_episode_experience_candidate = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
