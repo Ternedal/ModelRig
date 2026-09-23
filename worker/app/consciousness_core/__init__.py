@@ -5,6 +5,19 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, ThoughtProposal, ThoughtRequest
+from .personality import (
+    IdentityTrait,
+    PersonalityEvidence,
+    PersonalityIdentitySnapshot,
+    PersonalityModel,
+    PersonalityResolverError,
+    PersonalityState,
+    PersonalityStateTrait,
+    ResolvedTrait,
+    TransientTraitModifier,
+    resolve_personality_model,
+    resolve_personality_state,
+)
 from .metacognition import (
     MetacognitionContractError,
     MetacognitiveState,
@@ -31,7 +44,16 @@ from .thought_engine import (
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
     "CognitiveProfile",
+    "IdentityTrait",
     "MetacognitionContractError",
+    "PersonalityEvidence",
+    "PersonalityIdentitySnapshot",
+    "PersonalityModel",
+    "PersonalityResolverError",
+    "PersonalityState",
+    "PersonalityStateTrait",
+    "ResolvedTrait",
+    "TransientTraitModifier",
     "MetacognitiveState",
     "OutcomeObservation",
     "PredictionRecord",
@@ -47,5 +69,7 @@ __all__ = [
     "enabled",
     "initial_metacognitive_state",
     "prediction_from_proposal",
+    "resolve_personality_model",
+    "resolve_personality_state",
     "resolve_prediction",
 ]
