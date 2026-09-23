@@ -52,6 +52,11 @@ from .response_guidance import (
     build_response_guidance,
 )
 from .self_state import PersistentSelfState, SelfStateStore
+from .self_state_ledger import (
+    RuntimeSelfStateCheckpointPlan,
+    RuntimeSelfStateLedger,
+    RuntimeSelfStateLedgerError,
+)
 from .session_bootstrap import (
     RuntimeSessionContext,
     SessionBootstrapReceipt,
@@ -222,6 +227,7 @@ class ProductionCognitiveSession:
         *,
         supervisor_bridge: ProductionSupervisorBridge,
         bootstrap_context: RuntimeSessionContext,
+        durable_anchor_state: PersistentSelfState | None = None,
     ) -> None:
         if not isinstance(supervisor_bridge, ProductionSupervisorBridge):
             raise TypeError("supervisor_bridge must be ProductionSupervisorBridge")
@@ -230,6 +236,17 @@ class ProductionCognitiveSession:
         self._bridge = supervisor_bridge
         self._live = live_state_from_bootstrap(bootstrap_context)
         self._closed = False
+        self._self_state_ledger: RuntimeSelfStateLedger | None = None
+        if durable_anchor_state is not None:
+            if not isinstance(durable_anchor_state, PersistentSelfState):
+                raise TypeError(
+                    "durable_anchor_state must be PersistentSelfState or None"
+                )
+            self._self_state_ledger = RuntimeSelfStateLedger(
+                anchor_state=durable_anchor_state,
+                initial_state=self._live.state,
+                initial_source_ref=self._live.bootstrap_receipt_ref,
+            )
         # Bounded process-local replay ledger. Values are:
         # (observed_sequence, canonical evidence ref, observation id).
         self._user_turn_ledger: dict[str, tuple[int, str, str]] = {}
@@ -251,6 +268,21 @@ class ProductionCognitiveSession:
     def trusted_clock(self) -> TrustedRuntimeClock:
         """Borrow C18's trusted runtime clock without creating a second epoch."""
         return self._bridge.trusted_clock
+
+    @property
+    def self_state_checkpoint_plan(
+        self,
+    ) -> RuntimeSelfStateCheckpointPlan | None:
+        if self._self_state_ledger is None:
+            return None
+        return self._self_state_ledger.plan()
+
+    def pending_self_state_checkpoint_states(
+        self,
+    ) -> list[PersistentSelfState]:
+        if self._self_state_ledger is None:
+            return []
+        return self._self_state_ledger.checkpoint_states()
 
     @property
     def closed(self) -> bool:
@@ -816,6 +848,7 @@ def production_cognitive_session_factory(
     session = ProductionCognitiveSession(
         supervisor_bridge=bridge,
         bootstrap_context=context,
+        durable_anchor_state=durable,
     )
     if wake_receipt is not None:
         session.submit(
