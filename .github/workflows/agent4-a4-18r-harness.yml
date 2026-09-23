@@ -2,6 +2,7 @@ name: agent4-a4-18r-harness
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     paths:
       - "android/app/build.gradle.kts"
       - "android/app/src/a425f/**"
@@ -28,6 +29,7 @@ permissions:
 
 jobs:
   offline-harness:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,6 +79,7 @@ jobs:
           }
 
   android-current-product-variant:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
