@@ -11,6 +11,7 @@ import concurrent.futures
 import os
 import threading
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from functools import wraps
 from typing import Literal
 
@@ -21,11 +22,18 @@ from .autonomous_tick import (
     AutonomousCognitionTickReceipt,
     autonomous_cognition_enabled,
 )
+from .policy_checkpoint import (
+    PolicyDrivenCheckpointResult,
+    PolicyDrivenSelfStateCheckpointAdapter,
+)
 from .session_lifecycle import ProductionCognitiveSession
 
 
 AUTONOMOUS_SCHEDULER_FLAG = (
     "KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED"
+)
+AUTONOMOUS_CHECKPOINT_FLAG = (
+    "KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED"
 )
 _DEFAULT_BRIDGE_TIMEOUT_S = 30.0
 
@@ -59,6 +67,14 @@ class AutonomousSchedulerBridgeStatus(StrictModel):
         Literal["DISABLED", "IDLE", "DEFER", "WAIT", "RUN"] | None
     )
     last_error: str | None
+    checkpoint_enabled: bool = False
+    checkpoint_evaluation_count: int = Field(ge=0, strict=True, default=0)
+    checkpoint_commit_count: int = Field(ge=0, strict=True, default=0)
+    checkpoint_failure_count: int = Field(ge=0, strict=True, default=0)
+    last_checkpoint_outcome: (
+        Literal["IDLE", "HOLD", "COMMITTED"] | None
+    ) = None
+    last_checkpoint_error: str | None = None
     internal_thread_created: Literal[False]
     internal_timer_created: Literal[False]
     retry_authority: Literal[False]
@@ -77,6 +93,19 @@ def autonomous_scheduler_enabled() -> bool:
     )
 
 
+def autonomous_checkpoint_enabled() -> bool:
+    """Only exact string 1 couples C25-C to the C27-G service."""
+    return os.getenv(AUTONOMOUS_CHECKPOINT_FLAG, "0") == "1"
+
+
+@dataclass(frozen=True)
+class _OwnerLoopTickResult:
+    receipt: AutonomousCognitionTickReceipt | None
+    checkpoint_results: tuple[PolicyDrivenCheckpointResult, ...]
+    checkpoint_error_stage: Literal["pre", "post"] | None
+    checkpoint_error_type: str | None
+
+
 class ScheduledAutonomousCognitionBridge:
     """Scheduler-thread callback -> owner-loop C25-B coroutine bridge."""
 
@@ -86,6 +115,7 @@ class ScheduledAutonomousCognitionBridge:
         adapter: AutonomousCognitionTickAdapter,
         owner_loop: asyncio.AbstractEventLoop,
         timeout_s: float = _DEFAULT_BRIDGE_TIMEOUT_S,
+        checkpoint_adapter: PolicyDrivenSelfStateCheckpointAdapter | None = None,
     ) -> None:
         if not isinstance(adapter, AutonomousCognitionTickAdapter):
             raise TypeError("adapter must be AutonomousCognitionTickAdapter")
@@ -93,8 +123,17 @@ class ScheduledAutonomousCognitionBridge:
             raise TypeError("owner_loop must be an asyncio event loop")
         if timeout_s <= 0 or timeout_s > 120:
             raise ValueError("timeout_s must be in (0, 120]")
+        if checkpoint_adapter is not None and not isinstance(
+            checkpoint_adapter,
+            PolicyDrivenSelfStateCheckpointAdapter,
+        ):
+            raise TypeError(
+                "checkpoint_adapter must be "
+                "PolicyDrivenSelfStateCheckpointAdapter or None"
+            )
 
         self._adapter = adapter
+        self._checkpoint_adapter = checkpoint_adapter
         self._loop = owner_loop
         self._timeout_s = float(timeout_s)
         self._lock = threading.RLock()
@@ -108,6 +147,64 @@ class ScheduledAutonomousCognitionBridge:
         self._overlap_rejections = 0
         self._last_outcome: str | None = None
         self._last_error: str | None = None
+        self._checkpoint_evaluation_count = 0
+        self._checkpoint_commit_count = 0
+        self._checkpoint_failure_count = 0
+        self._last_checkpoint_outcome: str | None = None
+        self._last_checkpoint_error: str | None = None
+
+    async def _owner_loop_tick(self) -> _OwnerLoopTickResult:
+        checkpoint_results: list[PolicyDrivenCheckpointResult] = []
+
+        if self._checkpoint_adapter is not None:
+            try:
+                before = self._checkpoint_adapter.maybe_checkpoint_once()
+            except Exception as exc:
+                return _OwnerLoopTickResult(
+                    receipt=None,
+                    checkpoint_results=tuple(checkpoint_results),
+                    checkpoint_error_stage="pre",
+                    checkpoint_error_type=type(exc).__name__,
+                )
+            if not isinstance(before, PolicyDrivenCheckpointResult):
+                return _OwnerLoopTickResult(
+                    receipt=None,
+                    checkpoint_results=tuple(checkpoint_results),
+                    checkpoint_error_stage="pre",
+                    checkpoint_error_type="InvalidCheckpointResult",
+                )
+            checkpoint_results.append(before)
+
+        receipt = await self._adapter.tick_once()
+
+        if (
+            self._checkpoint_adapter is not None
+            and receipt.outcome == "RUN"
+        ):
+            try:
+                after = self._checkpoint_adapter.maybe_checkpoint_once()
+            except Exception as exc:
+                return _OwnerLoopTickResult(
+                    receipt=receipt,
+                    checkpoint_results=tuple(checkpoint_results),
+                    checkpoint_error_stage="post",
+                    checkpoint_error_type=type(exc).__name__,
+                )
+            if not isinstance(after, PolicyDrivenCheckpointResult):
+                return _OwnerLoopTickResult(
+                    receipt=receipt,
+                    checkpoint_results=tuple(checkpoint_results),
+                    checkpoint_error_stage="post",
+                    checkpoint_error_type="InvalidCheckpointResult",
+                )
+            checkpoint_results.append(after)
+
+        return _OwnerLoopTickResult(
+            receipt=receipt,
+            checkpoint_results=tuple(checkpoint_results),
+            checkpoint_error_stage=None,
+            checkpoint_error_type=None,
+        )
 
     def mark_installed(self) -> None:
         with self._lock:
@@ -128,7 +225,7 @@ class ScheduledAutonomousCognitionBridge:
                 return
             try:
                 future = asyncio.run_coroutine_threadsafe(
-                    self._adapter.tick_once(),
+                    self._owner_loop_tick(),
                     self._loop,
                 )
             except Exception as exc:
@@ -160,17 +257,55 @@ class ScheduledAutonomousCognitionBridge:
                     f"{type(exc).__name__}"[:256]
                 )
         else:
-            if not isinstance(receipt, AutonomousCognitionTickReceipt):
+            owner_result = receipt
+            if not isinstance(owner_result, _OwnerLoopTickResult):
                 with self._lock:
                     self._failure_count += 1
                     self._last_error = (
-                        "autonomous cognition tick returned invalid receipt"
+                        "autonomous cognition owner-loop returned invalid result"
                     )
             else:
                 with self._lock:
-                    self._completed_count += 1
-                    self._last_outcome = receipt.outcome
-                    self._last_error = None
+                    evaluations = len(owner_result.checkpoint_results)
+                    if owner_result.checkpoint_error_stage is not None:
+                        evaluations += 1
+                    self._checkpoint_evaluation_count += evaluations
+                    self._checkpoint_commit_count += sum(
+                        1
+                        for item in owner_result.checkpoint_results
+                        if item.outcome == "COMMITTED"
+                    )
+                    if owner_result.checkpoint_results:
+                        self._last_checkpoint_outcome = (
+                            owner_result.checkpoint_results[-1].outcome
+                        )
+                    if owner_result.checkpoint_error_stage is None:
+                        if owner_result.checkpoint_results:
+                            self._last_checkpoint_error = None
+                    else:
+                        self._checkpoint_failure_count += 1
+                        self._failure_count += 1
+                        self._last_checkpoint_error = (
+                            f"{owner_result.checkpoint_error_stage}-tick "
+                            f"SelfState checkpoint failed: "
+                            f"{owner_result.checkpoint_error_type}"
+                        )[:256]
+
+                    tick_receipt = owner_result.receipt
+                    if tick_receipt is None:
+                        self._last_error = self._last_checkpoint_error
+                    elif not isinstance(
+                        tick_receipt,
+                        AutonomousCognitionTickReceipt,
+                    ):
+                        self._failure_count += 1
+                        self._last_error = (
+                            "autonomous cognition tick returned invalid receipt"
+                        )
+                    else:
+                        self._completed_count += 1
+                        self._last_outcome = tick_receipt.outcome
+                        self._last_error = self._last_checkpoint_error
         finally:
             with self._lock:
                 if self._future is future:
@@ -210,6 +345,14 @@ class ScheduledAutonomousCognitionBridge:
                 active=bool(future is not None and not future.done()),
                 last_outcome=self._last_outcome,
                 last_error=self._last_error,
+                checkpoint_enabled=self._checkpoint_adapter is not None,
+                checkpoint_evaluation_count=(
+                    self._checkpoint_evaluation_count
+                ),
+                checkpoint_commit_count=self._checkpoint_commit_count,
+                checkpoint_failure_count=self._checkpoint_failure_count,
+                last_checkpoint_outcome=self._last_checkpoint_outcome,
+                last_checkpoint_error=self._last_checkpoint_error,
                 internal_thread_created=False,
                 internal_timer_created=False,
                 retry_authority=False,
@@ -255,10 +398,28 @@ def production_autonomous_scheduler_bridge_factory(
         session=session,
         clock=session.trusted_clock,
     )
+
+    checkpoint_adapter = None
+    if autonomous_checkpoint_enabled():
+        checkpoint_adapter = getattr(
+            app.state,
+            "consciousness_policy_checkpoint",
+            None,
+        )
+        if not isinstance(
+            checkpoint_adapter,
+            PolicyDrivenSelfStateCheckpointAdapter,
+        ):
+            raise AutonomousSchedulerBridgeError(
+                "autonomous checkpoint coupling requires live "
+                "C27-G policy checkpoint service"
+            )
+
     return ScheduledAutonomousCognitionBridge(
         adapter=adapter,
         owner_loop=loop,
         timeout_s=timeout_s,
+        checkpoint_adapter=checkpoint_adapter,
     )
 
 
