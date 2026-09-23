@@ -90,9 +90,10 @@ PY_GETENV_RE = re.compile(
     r""")\s*(?:,\s*(?P<default>["'][^"'\n]*["']|None|[0-9]+))?\s*\)"""
 )
 GO_ENV_CONST_RE = re.compile(
-    r"""(?m)^[ \t]*(?P<ident>[A-Za-z_][A-Za-z0-9_]*)[ \t]*"""
-    r"""(?::=[ \t]*|=[ \t]*)"(?P<env>(?:KALIV|MODELRIG)_[A-Z0-9_]+)" """
-    .rstrip()
+    r"""(?m)^[ \t]*(?:(?:const|var)[ \t]+)?"""
+    r"""(?P<ident>[A-Za-z_][A-Za-z0-9_]*)"""
+    r"""(?:[ \t]+[A-Za-z_][A-Za-z0-9_.]*)?[ \t]*(?::=|=)[ \t]*"""
+    r""""(?P<env>(?:KALIV|MODELRIG)_[A-Z0-9_]+)""""
 )
 GO_GETENV_RE = re.compile(
     r"""os\.Getenv\(\s*(?P<arg>"""
@@ -249,6 +250,7 @@ def flag_defaults() -> list[tuple[str, str, str]]:
         (name, default or "(tom)", kind)
         for name, (default, kind) in sorted(found.items())
     ]
+
 
 def validation() -> dict:
     """The on-rig report, assessed by the gate that already knows the rules.
