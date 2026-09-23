@@ -22,6 +22,7 @@ NonEmptyRef = Annotated[str, Field(min_length=1, max_length=256)]
 
 EpisodeOpenReason = Literal[
     "SESSION_START",
+    "WAKE_REORIENTATION",
     "POST_WAKE_RECOVERY",
     "EXPLICIT_BOUNDARY",
 ]
