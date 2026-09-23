@@ -7,6 +7,36 @@ Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document inge
 Ollama Cloud brain for when local isn't enough. The backend keeps the ModelRig
 name; everything user-facing is Kaliv.
 
+## Product definition
+
+**Kaliv is a local-first embodied AI platform that combines persistent cognitive
+state, replaceable model reasoning, memory, voice, tools and a source-derived
+digital body across desktop, mobile and VR.** ModelRig is the backend/control
+plane; Kaliv is the user-facing system.
+
+The LLM is deliberately replaceable rather than being the persistence or identity
+authority. Persistent cognitive state, VoiceRig, BodyRig and the clients keep
+separate ownership boundaries. Consciousness Core is the architecture for
+persistent SelfState/WorldState, temporal continuity, sleep/wake and bounded
+cognitive cycles; while its current PR stack remains unmerged it is **draft**, not
+current-main runtime authority.
+
+```mermaid
+flowchart LR
+    CC["Consciousness Core\nDRAFT until landed/qualified"] -. "cognitive state/guidance" .-> MR["ModelRig\nreasoning · memory · tools · semantic intent"]
+    LLM["Replaceable LLM\nlocal / explicit cloud"] <--> MR
+    MR -->|BodyCue| BR["BodyRig\nbody identity · Motor State\ndigital-twin authority"]
+    MR <--> VR["VoiceRig\nvoice/audio + timing authority"]
+    MR --> K["Kaliv\nAndroid · Desktop · VR"]
+    BR --> K
+    VR --> K
+    SP["SkyPlayer-Engine\nXR/media primitives"] --> K
+```
+
+See **[docs/KALIV_SYSTEM_DEFINITION.md](docs/KALIV_SYSTEM_DEFINITION.md)** for
+the canonical whole-system definition, authority map, cognitive-continuity model,
+embodiment model and evidence-state vocabulary.
+
 Current version: see `VERSION`. For what actually exists right now — tools with their
 risk/sensitivity, the dormant switches and their defaults, design-doc status — see
 **CURRENT_STATE.md**, which is GENERATED from the code and CI-checked for drift.
@@ -41,7 +71,7 @@ Earlier lines: streaming voice, a self-supervising appliance mode (autostart +
 crash-restart + update-with-rollback), and a multi-step agent with human-gated
 writes.
 
-## Architecture
+## Current implementation architecture
 
 ```mermaid
 flowchart TB
@@ -323,7 +353,7 @@ sh tests/run_tests.sh
 | backend  | Go server: pairing, tokens, reverse proxy — plus its own `/api/v1/system/status` and `/api/v1/models/unload` (stdlib only, fail-soft) | ✅ `go build` + `go test` (config, httpapi) in CI |
 | worker   | FastAPI: RAG, voice, tools, jobs, isolation   | ✅ full suite in CI — `tests/worker_*.py` + `tests/workflow_*.py`, auto-globbed (live counts in the CI log; this file does not keep score) |
 | android  | Kaliv APK (minSdk 26)                         | ✅ built in CI, `kaliv-latest.apk` on every release |
-| vr       | Kaliv VR Unity/OpenXR client                   | 🚧 bootstrap branch; Quest build/device qualification pending |
+| vr       | Kaliv VR Unity/OpenXR client                   | 🚧 landed on `main`; Quest build/device qualification pending |
 | desktop  | Kaliv Windows JAR (Compose JVM)               | ✅ built in CI, `Kaliv-windows-x64-X.Y.Z.jar` |
 | exes     | server + worker Windows executables           | ✅ built in CI, attached to every release |
 
