@@ -12,6 +12,8 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ValidationError
 
+from .continuity import PostWakeContinuityState
+from .continuity_reorientation import evaluate_continuity_reorientation
 from .sleep import WakeReceipt
 from .supervisor import CognitionEvent
 
@@ -83,6 +85,7 @@ def build_wake_followup_event(
     *,
     expected_self_id: str,
     expected_person_revision: str,
+    continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
 ) -> CognitionEvent:
     """Project one identity-bound WakeReceipt into one deterministic event."""
     try:
@@ -108,13 +111,46 @@ def build_wake_followup_event(
         )
 
     reference = wake_receipt_ref(receipt)
+    salience = WAKE_FOLLOWUP_SALIENCE
+    if continuity_state is not None:
+        try:
+            continuity = (
+                continuity_state
+                if isinstance(
+                    continuity_state,
+                    PostWakeContinuityState,
+                )
+                else PostWakeContinuityState.model_validate(
+                    continuity_state
+                )
+            )
+        except ValidationError as exc:
+            raise WakeFollowupAdmissionError(
+                "invalid continuity state"
+            ) from exc
+        if continuity.self_id != receipt.self_id:
+            raise WakeFollowupAdmissionError(
+                "continuity state belongs to another self"
+            )
+        if continuity.person_revision != receipt.person_revision:
+            raise WakeFollowupAdmissionError(
+                "continuity state belongs to another Person Revision"
+            )
+        if continuity.wake_receipt_ref != reference:
+            raise WakeFollowupAdmissionError(
+                "continuity state belongs to another WakeReceipt"
+            )
+        salience = evaluate_continuity_reorientation(
+            continuity
+        ).attention_salience
+
     return CognitionEvent(
         schema="kaliv-consciousness-core/cognition-event/v1",
         event_id=wake_followup_event_id(receipt),
         kind="wake_followup",
         source_ref=reference,
         summary=_wake_summary(receipt),
-        salience=WAKE_FOLLOWUP_SALIENCE,
+        salience=salience,
         observed_sequence=receipt.wake_anchor.sequence,
         production_activation=False,
     )

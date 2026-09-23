@@ -940,6 +940,7 @@ def production_cognitive_session_factory(
                 expected_person_revision=(
                     session.live_state.state.person_revision
                 ),
+                continuity_state=session.continuity_state,
             )
         )
 
