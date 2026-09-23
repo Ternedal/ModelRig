@@ -15,6 +15,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from ..netguard import is_loopback
 from .cycle import cognitive_profile_ref, self_state_ref, workspace_ref, world_state_ref
+from .policy_checkpoint import (
+    PolicyDrivenCheckpointResult,
+    PolicyDrivenSelfStateCheckpointAdapter,
+)
 from .profile_source import (
     CognitiveProfileLoadResult,
     CognitiveProfileSourceError,
@@ -28,6 +32,7 @@ from .supervisor_lifecycle import SupervisorLifecycleError
 
 
 EVENT_STEP_FLAG = "KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED"
+EVENT_CHECKPOINT_FLAG = "KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED"
 EVENT_STEP_PREFIX = "/experimental/consciousness"
 MAX_EVENT_STEP_BODY_BYTES = 1024
 _MOUNTED_STATE = "consciousness_exact_event_step_mounted"
@@ -71,7 +76,22 @@ class ExactEventStepReceipt(StrictModel):
     automatic_repeat: Literal[False]
     internal_thread_created: Literal[False]
     internal_timer_created: Literal[False]
-    self_state_store_write_applied: Literal[False]
+    checkpoint_enabled: bool = False
+    checkpoint_evaluation_count: Annotated[
+        int,
+        Field(ge=0, le=2, strict=True),
+    ] = 0
+    checkpoint_commit_count: Annotated[
+        int,
+        Field(ge=0, le=2, strict=True),
+    ] = 0
+    checkpoint_last_outcome: (
+        Literal["IDLE", "HOLD", "COMMITTED"] | None
+    ) = None
+    checkpoint_last_pressure: (
+        Literal["IDLE", "HOLD", "CHECKPOINT", "REQUIRED"] | None
+    ) = None
+    self_state_store_write_applied: bool = False
     durable_memory_write_authority: Literal[False]
     execution_authority: Literal[False]
     scheduling_authority: Literal[False]
@@ -97,6 +117,40 @@ class ExactEventStepReceipt(StrictModel):
                 raise ValueError("RUN must report exactly one ThoughtEngine call")
             if not self.context_updated or self.transition_receipt_ref is None:
                 raise ValueError("RUN must report one context transition")
+
+        if not self.checkpoint_enabled:
+            if (
+                self.checkpoint_evaluation_count != 0
+                or self.checkpoint_commit_count != 0
+                or self.checkpoint_last_outcome is not None
+                or self.checkpoint_last_pressure is not None
+                or self.self_state_store_write_applied
+            ):
+                raise ValueError(
+                    "checkpoint-disabled receipt cannot claim checkpoint work"
+                )
+        else:
+            if self.checkpoint_evaluation_count < 1:
+                raise ValueError(
+                    "checkpoint-enabled receipt requires one evaluation"
+                )
+            if (
+                self.checkpoint_last_outcome is None
+                or self.checkpoint_last_pressure is None
+            ):
+                raise ValueError(
+                    "checkpoint-enabled receipt requires bounded outcome metadata"
+                )
+            if self.checkpoint_commit_count > self.checkpoint_evaluation_count:
+                raise ValueError(
+                    "checkpoint commit count exceeds evaluation count"
+                )
+            if self.self_state_store_write_applied != (
+                self.checkpoint_commit_count > 0
+            ):
+                raise ValueError(
+                    "checkpoint write flag/count mismatch"
+                )
         return self
 
 
@@ -104,6 +158,14 @@ def exact_event_step_enabled(env: dict[str, str] | None = None) -> bool:
     if env is None:
         return os.getenv("KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED", "0") == "1"
     return env.get(EVENT_STEP_FLAG, "0") == "1"
+
+
+def exact_event_checkpoint_enabled(
+    env: dict[str, str] | None = None,
+) -> bool:
+    if env is None:
+        return os.getenv(EVENT_CHECKPOINT_FLAG, "0") == "1"
+    return env.get(EVENT_CHECKPOINT_FLAG, "0") == "1"
 
 
 def _loopback_allowed(request: Request) -> bool:
@@ -186,6 +248,41 @@ def build_consciousness_exact_event_step_router(
                 detail="consciousness session unavailable",
             )
 
+        checkpoint_service = None
+        checkpoint_results: list[PolicyDrivenCheckpointResult] = []
+        if exact_event_checkpoint_enabled():
+            checkpoint_service = getattr(
+                request.app.state,
+                "consciousness_policy_checkpoint",
+                None,
+            )
+            if not isinstance(
+                checkpoint_service,
+                PolicyDrivenSelfStateCheckpointAdapter,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="consciousness checkpoint service unavailable",
+                )
+            try:
+                checkpoint_before = (
+                    checkpoint_service.maybe_checkpoint_once()
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="consciousness checkpoint preflight failed",
+                ) from exc
+            if not isinstance(
+                checkpoint_before,
+                PolicyDrivenCheckpointResult,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="consciousness checkpoint preflight failed",
+                )
+            checkpoint_results.append(checkpoint_before)
+
         try:
             loaded = profile_loader()
         except CognitiveProfileSourceError as exc:
@@ -229,6 +326,46 @@ def build_consciousness_exact_event_step_router(
                 detail="required cognition event is not runnable",
             )
 
+        if (
+            checkpoint_service is not None
+            and result.context_updated
+        ):
+            try:
+                checkpoint_after = (
+                    checkpoint_service.maybe_checkpoint_once()
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "consciousness cognition completed but "
+                        "checkpoint failed"
+                    ),
+                ) from exc
+            if not isinstance(
+                checkpoint_after,
+                PolicyDrivenCheckpointResult,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "consciousness cognition completed but "
+                        "checkpoint failed"
+                    ),
+                )
+            checkpoint_results.append(checkpoint_after)
+
+        checkpoint_last = (
+            checkpoint_results[-1]
+            if checkpoint_results
+            else None
+        )
+        checkpoint_commits = sum(
+            1
+            for item in checkpoint_results
+            if item.outcome == "COMMITTED"
+        )
+
         live = result.live_state
         receipt = ExactEventStepReceipt(
             schema="kaliv-consciousness-core/exact-event-step-receipt/v1",
@@ -256,7 +393,20 @@ def build_consciousness_exact_event_step_router(
             automatic_repeat=False,
             internal_thread_created=False,
             internal_timer_created=False,
-            self_state_store_write_applied=False,
+            checkpoint_enabled=checkpoint_service is not None,
+            checkpoint_evaluation_count=len(checkpoint_results),
+            checkpoint_commit_count=checkpoint_commits,
+            checkpoint_last_outcome=(
+                None
+                if checkpoint_last is None
+                else checkpoint_last.outcome
+            ),
+            checkpoint_last_pressure=(
+                None
+                if checkpoint_last is None
+                else checkpoint_last.pressure.decision
+            ),
+            self_state_store_write_applied=checkpoint_commits > 0,
             durable_memory_write_authority=False,
             execution_authority=False,
             scheduling_authority=False,
