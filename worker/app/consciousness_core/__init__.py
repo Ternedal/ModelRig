@@ -51,6 +51,14 @@ from .cycle import (
     workspace_ref,
     world_state_ref,
 )
+from .checkpoint_pressure import (
+    DEFAULT_CHECKPOINT_PRESSURE_POLICY,
+    CheckpointPressureDecision,
+    CheckpointPressurePolicy,
+    CheckpointPressurePolicyError,
+    checkpoint_pressure_policy_ref,
+    evaluate_checkpoint_pressure,
+)
 from .consolidation import (
     ConsolidationCandidate,
     ConsolidationContractError,
@@ -351,6 +359,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "evaluate_checkpoint_pressure",
+    "checkpoint_pressure_policy_ref",
+    "CheckpointPressurePolicyError",
+    "CheckpointPressurePolicy",
+    "CheckpointPressureDecision",
+    "DEFAULT_CHECKPOINT_PRESSURE_POLICY",
     "shutdown_self_state_checkpoint_enabled",
     "production_shutdown_checkpoint_factory",
     "compose_shutdown_self_state_checkpoint_lifespan",
