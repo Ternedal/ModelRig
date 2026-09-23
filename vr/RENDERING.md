@@ -1,28 +1,20 @@
 # Kaliv VR rendering engine
 
-Kaliv VR owns a product rendering engine inside `vr/`. It is not the same thing as SkyPlayer-Engine.
+Kaliv VR owns a product rendering engine inside `vr/`. It is not the same thing as SkyPlayer-Engine. The whole-system authority model is defined in [`docs/KALIV_SYSTEM_DEFINITION.md`](../docs/KALIV_SYSTEM_DEFINITION.md).
 
 ## Ownership
 
-```
-ModelRig semantic intent
-        │
-        ▼
-BodyRig runtime / render_frame v0.1
-        │
-        ▼
-KalivVrRenderEngine
-  ├─ KalivVrmAvatarLoader
-  ├─ KalivBodyFrameStream
-  ├─ KalivVrmRenderer
-  │    ├─ face / visemes / emotion
-  │    ├─ gaze / head motion
-  │    ├─ breath
-  │    └─ gesture routing
-  ├─ spatial placement / lighting
-  ├─ Body / Media / UI / Debug composition roots
-  └─ SkyPlayer-Engine
-       └─ OpenXR / passthrough / VR media primitives
+```mermaid
+flowchart TB
+    MR["ModelRig\nsemantic intent"] -->|"BodyCue"| BR["BodyRig runtime\nperformed render_frame / Motor State"]
+    VO["VoiceRig\naudio + timing"] --> KRE
+    BR --> KRE["KalivVrRenderEngine"]
+    KRE --> AVL["KalivVrmAvatarLoader"]
+    KRE --> BFS["KalivBodyFrameStream"]
+    KRE --> R["KalivVrmRenderer\nface · visemes · emotion\ngaze · breath · gesture routing"]
+    KRE --> P["spatial placement / lighting"]
+    KRE --> ROOTS["Body / Media / UI / Debug roots"]
+    SP["SkyPlayer-Engine\nOpenXR · passthrough · VR media primitives"] --> KRE
 ```
 
 **BodyRig is authority for performed body state.** Kaliv VR never invents body semantics, body identity or joint commands.

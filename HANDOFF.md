@@ -132,15 +132,24 @@ de gengives IKKE her (A4-005's stopregel gælder ogsaa for denne fil):
 
 ## 1. Hvad projektet er
 
-Anders' personlige, selv-hostede AI-platform ("Local AI Control Surface"):
-Ollama-modeller på egen Windows-rig (RTX 3060 12GB), nået fra **Kaliv**
-(Android, Pixel 6a) og **Kaliv Desktop** (Windows, Compose JVM). Dansk voice
-(ASR→LLM→TTS, streamet sætning-for-sætning), RAG-ingest (pdf/docx/pptx/html/
-foto), bekræftelses-gatet tool-lag, og valgfri Ollama Cloud-hjerne. Telefonen
-når riggen via Tailscale: `http://100.88.91.64:8080`.
+Den kanoniske produktdefinition og de samlede arkitekturdiagrammer står i
+[`docs/KALIV_SYSTEM_DEFINITION.md`](docs/KALIV_SYSTEM_DEFINITION.md). Denne
+handoff gemmer beslutninger og historie; den må ikke udvikle en konkurrerende
+produktdefinition.
 
-Succes = pålidelig, testet on-device-oplevelse med rene CI-verificerede
-releases. Kadence: MVP → V1 → V2; roadmap er lukket-endet ved V15.
+Kort form: **Kaliv er en local-first embodied AI-platform, der kombinerer
+persistent cognitive state, udskiftelig model-reasoning, memory, voice, tools og
+en source-derived digital krop på desktop, mobil og VR.** ModelRig er backend og
+control plane; alt brugervendt er Kaliv. VoiceRig og standalone BodyRig beholder
+hver deres authority, og Kaliv VR er præsentationslaget over de kontrakter.
+
+Consciousness Core er det planlagte/aktive udviklingslag for persistent SelfState,
+WorldState, tidsfornemmelse, sleep/wake og bounded cognitive cycles. En åben PR-
+stack er **draft**, ikke current-main authority; aktuel tilstand kommer fortsat
+kun fra de genererede state/readiness-dokumenter.
+
+Succes er ikke blot CI-grøn kode: de relevante software-, rig/device- og
+menneskelige gates skal være bevist for den konkrete funktion og revision.
 
 ---
 

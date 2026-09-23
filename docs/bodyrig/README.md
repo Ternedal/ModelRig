@@ -1,6 +1,6 @@
 # BodyRig integration in ModelRig
 
-> **Authority notice:** standalone `Ternedal/BodyRig` is the authoritative BodyRig product/contract repository. This directory is retained as **ModelRig-side integration and historical design material**. If a BodyRig-owned contract here disagrees with standalone BodyRig, standalone BodyRig wins. See `../BODYRIG_AUTHORITY.md`.
+> **Authority notice:** standalone `Ternedal/BodyRig` is the authoritative BodyRig product/contract repository. This directory is retained as **ModelRig-side integration and historical design material**. If a BodyRig-owned contract here disagrees with standalone BodyRig, standalone BodyRig wins. See `../BODYRIG_AUTHORITY.md` and the whole-system definition in `../KALIV_SYSTEM_DEFINITION.md`.
 
 ## ModelRig's responsibility
 
@@ -21,12 +21,16 @@ Those are authored by `Ternedal/BodyRig` and consumed deliberately by ModelRig.
 
 ```mermaid
 flowchart LR
+    C["Consciousness Core\nupstream state/guidance\nDRAFT until landed/qualified"]
+    L["Replaceable LLM\nreasoning capability"]
     M["ModelRig\nreasoning + semantic intent"]
     A["ModelRig bodyrig compatibility layer\nvalidation · storage · orchestration adapters"]
     B["Ternedal/BodyRig\nAUTHORITATIVE\n.mrbody · BodyPrint · Movement Identity\nMotor State · realization semantics"]
     V["VoiceRig\naudio + timing"]
     R["Kaliv / VR / renderer"]
 
+    C -.-> M
+    L --> M
     M -->|BodyCue / semantic request| B
     V -->|utterance/viseme timing| B
     B -->|performed Motor State / embodiment| R
@@ -37,7 +41,7 @@ flowchart LR
     classDef authority stroke-width:3px;
     class B authority;
     classDef compat stroke-dasharray:5 3;
-    class A compat;
+    class A,C compat;
 ```
 
 Mirrored schemas/constants are snapshots for deterministic compatibility testing; copying them into ModelRig never transfers authorship.
