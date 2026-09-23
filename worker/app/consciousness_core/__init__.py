@@ -99,6 +99,14 @@ from .runtime import (
     compose_runtime,
     enabled,
 )
+from .profile_step_api import (
+    COGNITION_STEP_PREFIX,
+    CONSCIOUSNESS_STEP_FLAG,
+    ProfileBackedStepReceipt,
+    build_consciousness_profile_step_router,
+    mount_consciousness_profile_step,
+    profile_step_enabled,
+)
 from .profile_source import (
     CONSCIOUSNESS_PROFILE_FILE_ENV,
     CognitiveProfileConfig,
@@ -237,6 +245,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "profile_step_enabled",
+    "mount_consciousness_profile_step",
+    "build_consciousness_profile_step_router",
+    "ProfileBackedStepReceipt",
+    "CONSCIOUSNESS_STEP_FLAG",
+    "COGNITION_STEP_PREFIX",
     "load_cognitive_profile",
     "cognitive_profile_config_path",
     "build_cognitive_profile",
