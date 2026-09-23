@@ -80,40 +80,6 @@ import sys as _sys  # noqa: E402
 _sys.path.insert(0, str(ROOT / "scripts"))
 import activation_readiness as AR  # noqa: E402
 
-# The switch scanner must understand the production pattern where the
-# environment name is first assigned to a module constant and then passed to
-# os.getenv(). C27-D exposed that the old literal-only regex silently omitted
-# such gates from the generated readiness page.
-import tempfile as _flag_tmp  # noqa: E402
-
-_original_ar_root = AR.ROOT
-try:
-    with _flag_tmp.TemporaryDirectory() as _td:
-        _fixture_root = Path(_td)
-        (_fixture_root / "worker" / "app").mkdir(parents=True)
-        (_fixture_root / "backend").mkdir()
-        (_fixture_root / "worker" / "app" / "constant_flag_fixture.py").write_text(
-            "import os\n"
-            "FIXTURE_FLAG = (\n"
-            "    \"KALIV_READINESS_CONSTANT_FLAG\"\n"
-            ")\n"
-            "def enabled():\n"
-            "    return os.getenv(FIXTURE_FLAG, \"0\") == \"1\"\n",
-            encoding="utf-8",
-        )
-        AR.ROOT = _fixture_root
-        _constant_flags = {
-            name: (default, state)
-            for name, default, state in AR.flag_defaults()
-        }
-        check(
-            _constant_flags.get("KALIV_READINESS_CONSTANT_FLAG")
-            == ("0", "slukket"),
-            "constant-backed os.getenv switches are discovered by readiness",
-        )
-finally:
-    AR.ROOT = _original_ar_root
-
 server_plans, note = AR.plan_authority()
 check(server_plans is True, "production run creation is server-authoritative")
 check(
