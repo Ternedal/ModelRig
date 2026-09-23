@@ -115,6 +115,8 @@ class ExperienceEpisodeState(StrictModel):
         list[EpisodeMoment],
         Field(max_length=128),
     ]
+    moment_count: Annotated[int, Field(ge=0, strict=True)]
+    evicted_moment_count: Annotated[int, Field(ge=0, strict=True)]
     durable_memory_authority: Literal[False]
     self_state_store_write_applied: Literal[False]
     model_calls: Literal[0]
@@ -154,6 +156,10 @@ class ExperienceEpisodeState(StrictModel):
             ):
                 raise ValueError("episode close sequence moved backwards")
 
+        if self.moment_count != (
+            self.evicted_moment_count + len(self.moments)
+        ):
+            raise ValueError("episode moment accounting is inconsistent")
         previous_sequence = self.opened_anchor.sequence
         previous_monotonic = self.opened_anchor.monotonic_ms
         ids: set[str] = set()
@@ -267,6 +273,8 @@ def open_experience_episode(
             opened_anchor=anchor,
             closed_anchor=None,
             moments=[],
+            moment_count=0,
+            evicted_moment_count=0,
             durable_memory_authority=False,
             self_state_store_write_applied=False,
             model_calls=0,
@@ -348,10 +356,6 @@ def append_episode_moment(
         raise ExperientialEpisodeError(
             "cannot append to closed episode"
         )
-    if len(current.moments) >= 128:
-        raise ExperientialEpisodeError(
-            "episode moment bound exhausted"
-        )
     if (
         item.anchor.runtime_epoch_id
         != current.opened_anchor.runtime_epoch_id
@@ -391,7 +395,14 @@ def append_episode_moment(
         )
 
     payload = current.model_dump(mode="python")
-    payload["moments"] = [*current.moments, item]
+    retained = [*current.moments, item]
+    evicted = current.evicted_moment_count
+    if len(retained) > 128:
+        retained = retained[-128:]
+        evicted += 1
+    payload["moments"] = retained
+    payload["moment_count"] = current.moment_count + 1
+    payload["evicted_moment_count"] = evicted
     try:
         return ExperienceEpisodeState.model_validate(payload)
     except ValidationError as exc:
