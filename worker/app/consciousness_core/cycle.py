@@ -24,6 +24,8 @@ from .continuity import (
     PostWakeContinuityState,
     project_continuity_context,
 )
+from .continuity_orientation import ContinuityOrientationState
+from .continuity_retirement import retire_wake_artifacts_from_model_context
 from .runtime import ConsciousnessCoreRuntime
 from .self_state import PersistentSelfState
 
@@ -427,6 +429,8 @@ class CognitiveCycleCoordinator:
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
+        retired_continuity_state: PostWakeContinuityState | None = None,
+        retired_continuity_orientation: ContinuityOrientationState | None = None,
         requested_reasoning_mode: ReasoningMode = "normal",
     ) -> CognitiveCycleResult:
         try:
@@ -461,6 +465,20 @@ class CognitiveCycleCoordinator:
         if packet.continuity is None:
             # Keep pre-C29-F no-continuity model context shape unchanged.
             context_payload.pop("continuity", None)
+
+        if (
+            (retired_continuity_state is None)
+            != (retired_continuity_orientation is None)
+        ):
+            raise CognitiveCycleError(
+                "retired continuity state/orientation must be paired"
+            )
+        if retired_continuity_state is not None:
+            context_payload = retire_wake_artifacts_from_model_context(
+                context_payload,
+                continuity_state=retired_continuity_state,
+                orientation=retired_continuity_orientation,
+            )
 
         proposal = await self._runtime.think(
             request,

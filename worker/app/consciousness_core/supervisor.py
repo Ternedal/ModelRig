@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from .contracts import CognitiveProfile, PersonalitySnapshot
 from .continuity import PostWakeContinuityState
+from .continuity_orientation import ContinuityOrientationState
 from .cycle import (
     CognitiveCycleCoordinator,
     CognitiveCycleResult,
@@ -458,6 +459,8 @@ class CognitionSupervisorKernel:
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
+        retired_continuity_state: PostWakeContinuityState | None = None,
+        retired_continuity_orientation: ContinuityOrientationState | None = None,
     ) -> SupervisorCycleResult:
         try:
             sup = (
@@ -572,6 +575,8 @@ class CognitionSupervisorKernel:
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=continuity_state,
+            retired_continuity_state=retired_continuity_state,
+            retired_continuity_orientation=retired_continuity_orientation,
             requested_reasoning_mode="normal",
         )
         reduction = reduce_post_cycle(

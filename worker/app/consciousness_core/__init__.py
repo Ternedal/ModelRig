@@ -85,6 +85,10 @@ from .continuity_recovery import (
     build_continuity_recovery_completion,
     continuity_recovery_completion_ref,
 )
+from .continuity_retirement import (
+    ContinuityContextRetirementError,
+    retire_wake_artifacts_from_model_context,
+)
 from .continuity_status import (
     ContinuityStatusError,
     ContinuityStatusSnapshot,
@@ -443,6 +447,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "retire_wake_artifacts_from_model_context",
+    "ContinuityContextRetirementError",
     "build_continuity_status_snapshot",
     "ContinuityStatusSnapshot",
     "ContinuityStatusError",
