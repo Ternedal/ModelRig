@@ -208,6 +208,33 @@ class WakeAckTests(unittest.TestCase):
                 ack_before,
             )
 
+    def test_runtime_rejects_wake_other_than_its_own(self):
+        _authority, state = self.durable()
+        with tempfile.TemporaryDirectory() as td:
+            store = self.pending_store(Path(td) / "sleep.json", state)
+            runtime = SleepLifecycleRuntime(
+                enabled_fn=lambda: True,
+                binding_provider=lambda: self.binding(state),
+                anchor_provider=lambda _kind: self.wake_anchor(),
+                store_factory=lambda: store,
+            )
+            self.assertTrue(runtime.start())
+            wake = runtime.wake_receipt
+            self.assertIsNotNone(wake)
+            forged = wake.model_copy(
+                update={"wake_id": "wake-" + "f" * 32}
+            )
+
+            with self.assertRaisesRegex(
+                SleepLifecycleError,
+                "does not match this sleep runtime",
+            ):
+                runtime.acknowledge_wake(forged)
+
+            self.assertIsNotNone(store.read())
+            self.assertIsNone(store.read_acknowledgement())
+            self.assertIsNone(runtime.wake_acknowledgement)
+
     def test_ack_marker_is_not_replayed_as_planned_sleep(self):
         _authority, state = self.durable()
         with tempfile.TemporaryDirectory() as td:
