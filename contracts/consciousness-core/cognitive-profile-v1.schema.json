@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/consciousness-core/cognitive-profile-v1.schema.json",
+  "title": "Kaliv Consciousness Core transient CognitiveProfile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "profile_id",
+    "engine_instance_id",
+    "provider",
+    "model",
+    "reasoning_depth",
+    "planning_capacity",
+    "context_capacity_tokens",
+    "multimodal_capacity",
+    "tool_reasoning",
+    "uncertainty_calibration",
+    "ephemeral",
+    "identity_authority",
+    "persistent_state_authority",
+    "action_authority",
+    "production_activation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-consciousness-core/cognitive-profile/v1"
+    },
+    "profile_id": {
+      "type": "string",
+      "pattern": "^cog-[a-f0-9]{32}$"
+    },
+    "engine_instance_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "reasoning_depth": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "planning_capacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "context_capacity_tokens": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "multimodal_capacity": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "tool_reasoning": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "uncertainty_calibration": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "ephemeral": {
+      "const": true
+    },
+    "identity_authority": {
+      "const": false
+    },
+    "persistent_state_authority": {
+      "const": false
+    },
+    "action_authority": {
+      "const": false
+    },
+    "production_activation": {
+      "const": false
+    }
+  }
+}

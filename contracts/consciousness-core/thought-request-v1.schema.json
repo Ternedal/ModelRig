@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modelrig.local/contracts/consciousness-core/thought-request-v1.schema.json",
+  "title": "Kaliv Consciousness Core ThoughtRequest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request_id",
+    "cycle_id",
+    "self_state_ref",
+    "world_state_ref",
+    "workspace_ref",
+    "personality_snapshot",
+    "relevant_memory_refs",
+    "embodiment_state_ref",
+    "cognitive_profile_ref",
+    "requested_reasoning_mode",
+    "production_activation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kaliv-consciousness-core/thought-request/v1"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^thinkreq-[a-f0-9]{32}$"
+    },
+    "cycle_id": {
+      "type": "string",
+      "pattern": "^cycle-[a-f0-9]{32}$"
+    },
+    "self_state_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "world_state_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "workspace_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "personality_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "person_revision",
+        "personality_revision",
+        "personality_state_ref",
+        "source_refs"
+      ],
+      "properties": {
+        "person_revision": {
+          "type": "string",
+          "pattern": "^person-r[0-9]{4,}$"
+        },
+        "personality_revision": {
+          "type": "string",
+          "pattern": "^personality-r[0-9]{4,}$"
+        },
+        "personality_state_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "relevant_memory_refs": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "embodiment_state_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cognitive_profile_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "requested_reasoning_mode": {
+      "enum": [
+        "fast",
+        "normal",
+        "deep",
+        "verify"
+      ]
+    },
+    "production_activation": {
+      "const": false
+    }
+  }
+}
