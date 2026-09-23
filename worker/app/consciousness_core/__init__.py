@@ -5,6 +5,18 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, PersonalitySnapshot, ThoughtProposal, ThoughtRequest
+from .autonomous_trigger_policy import (
+    DEFAULT_AUTONOMOUS_TRIGGER_POLICY,
+    AutomaticCognitionAccounting,
+    AutomaticCognitionRecordReceipt,
+    AutonomousTriggerDecision,
+    AutonomousTriggerPolicy,
+    AutonomousTriggerPolicyError,
+    autonomous_trigger_policy_ref,
+    evaluate_autonomous_trigger,
+    new_automatic_cognition_accounting,
+    record_automatic_cognition,
+)
 from .cycle import (
     CognitiveContextPacket,
     CognitiveCycleCoordinator,
@@ -269,6 +281,16 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "record_automatic_cognition",
+    "new_automatic_cognition_accounting",
+    "evaluate_autonomous_trigger",
+    "autonomous_trigger_policy_ref",
+    "AutonomousTriggerPolicyError",
+    "AutonomousTriggerPolicy",
+    "AutonomousTriggerDecision",
+    "AutomaticCognitionRecordReceipt",
+    "AutomaticCognitionAccounting",
+    "DEFAULT_AUTONOMOUS_TRIGGER_POLICY",
     "mount_consciousness_guidance",
     "consciousness_guidance_enabled",
     "build_consciousness_guidance_router",
