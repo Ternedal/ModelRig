@@ -66,6 +66,12 @@ from .checkpoint_pressure import (
     checkpoint_pressure_policy_ref,
     evaluate_checkpoint_pressure,
 )
+from .continuity import (
+    ContinuityStateError,
+    PostWakeContinuityState,
+    build_post_wake_continuity_state,
+    post_wake_continuity_state_ref,
+)
 from .consolidation import (
     ConsolidationCandidate,
     ConsolidationContractError,
@@ -404,6 +410,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "post_wake_continuity_state_ref",
+    "build_post_wake_continuity_state",
+    "PostWakeContinuityState",
+    "ContinuityStateError",
     "CommittedCheckpointLivenessRecorder",
     "CommittedCheckpointLivenessReceipt",
     "CheckpointLivenessError",

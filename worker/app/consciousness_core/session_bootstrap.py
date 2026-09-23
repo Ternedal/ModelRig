@@ -13,6 +13,11 @@ from typing import Annotated, Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .contracts import PersonalitySnapshot
+from .continuity import (
+    PostWakeContinuityState,
+    build_post_wake_continuity_state,
+    post_wake_continuity_state_ref,
+)
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
@@ -102,6 +107,7 @@ class RuntimeSessionContext(StrictModel):
     workspace: CognitiveWorkspace
     personality_snapshot: PersonalitySnapshot
     receipt: SessionBootstrapReceipt
+    continuity_state: PostWakeContinuityState | None = None
     production_activation: Literal[False]
 
 
@@ -304,6 +310,8 @@ def bootstrap_runtime_session(
         ) from exc
 
     wake_reference: str | None = None
+    continuity_state: PostWakeContinuityState | None = None
+    continuity_reference: str | None = None
     if wake is not None:
         if wake.self_id != state.self_id:
             raise SessionBootstrapError("WakeReceipt belongs to another self")
@@ -325,6 +333,19 @@ def bootstrap_runtime_session(
                     "WakeReceipt durable SelfState ref does not match current state"
                 )
         wake_reference = _wake_receipt_ref(wake)
+        try:
+            continuity_state = build_post_wake_continuity_state(
+                wake,
+                expected_self_id=state.self_id,
+                expected_person_revision=state.person_revision,
+            )
+        except Exception as exc:
+            raise SessionBootstrapError(
+                "could not derive post-wake continuity state"
+            ) from exc
+        continuity_reference = post_wake_continuity_state_ref(
+            continuity_state
+        )
 
     state_reference = self_state_ref(state)
     person_reference = active_person_binding_ref(person)
@@ -384,7 +405,10 @@ def bootstrap_runtime_session(
                 proposition=_wake_summary(wake),
                 confidence=wake.duration_confidence if wake.duration_known else 1.0,
                 epistemic_status="observed",
-                source_refs=[wake_reference],
+                source_refs=[
+                    wake_reference,
+                    continuity_reference,
+                ],
             )
         )
 
@@ -551,5 +575,6 @@ def bootstrap_runtime_session(
         workspace=workspace,
         personality_snapshot=personality_snapshot,
         receipt=receipt,
+        continuity_state=continuity_state,
         production_activation=False,
     )

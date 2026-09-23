@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..person_api import registry_path
 from ..person_registry import PersonRegistry
 from .contracts import CognitiveProfile, PersonalitySnapshot
+from .continuity import PostWakeContinuityState
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
@@ -239,6 +240,7 @@ class ProductionCognitiveSession:
             raise TypeError("bootstrap_context must be RuntimeSessionContext")
         self._bridge = supervisor_bridge
         self._live = live_state_from_bootstrap(bootstrap_context)
+        self._continuity_state = bootstrap_context.continuity_state
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -263,6 +265,11 @@ class ProductionCognitiveSession:
     @property
     def live_state(self) -> LiveCognitiveSessionState:
         return self._live
+
+    @property
+    def continuity_state(self) -> PostWakeContinuityState | None:
+        """Process-local authenticated post-wake continuity knowledge."""
+        return self._continuity_state
 
     @property
     def supervisor_state(self):
@@ -868,6 +875,7 @@ class ProductionCognitiveSession:
         # and cannot cross the process/session lifecycle boundary.
         self._pending_response_guidance = None
         self._memory_recall_ledger.clear()
+        self._continuity_state = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
