@@ -60,6 +60,7 @@ from .self_state_ledger import (
     RuntimeSelfStateCheckpointPlan,
     RuntimeSelfStateLedger,
 )
+from .sleep_lifecycle import SleepLifecycleRuntime
 from .session_bootstrap import (
     RuntimeSessionContext,
     SessionBootstrapReceipt,
@@ -932,6 +933,25 @@ def production_cognitive_session_factory(
                 ),
             )
         )
+
+        sleep_runtime = getattr(
+            app.state,
+            "consciousness_sleep_runtime",
+            None,
+        )
+        if sleep_runtime is not None:
+            if not isinstance(sleep_runtime, SleepLifecycleRuntime):
+                session.close()
+                raise CognitiveSessionLifecycleError(
+                    "consciousness sleep runtime app state has unexpected type"
+                )
+            try:
+                sleep_runtime.acknowledge_wake(wake_receipt)
+            except Exception as exc:
+                session.close()
+                raise CognitiveSessionLifecycleError(
+                    "could not acknowledge planned sleep wake"
+                ) from exc
     return session
 
 
