@@ -47,69 +47,208 @@ def version() -> str:
     return (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
-def flag_defaults() -> list[tuple[str, str, str]]:
-    """Every KALIV_* switch the worker reads, and what it does when unset.
+BOOLISH_ENV_DEFAULTS = {"", "0", "1", "true", "false", "on", "off", "(unset)"}
+ACTIVE_ENV_DEFAULTS = {"1", "true", "on"}
+SETTING_ENV_SUFFIXES = (
+    "_PATH",
+    "_DIR",
+    "_ROOT",
+    "_FILE",
+    "_URL",
+    "_URI",
+    "_KEY",
+    "_SECRET",
+    "_TOKEN",
+    "_PASSWORD",
+    "_MODEL",
+    "_PORT",
+    "_HOST",
+    "_DB",
+    "_STATE",
+    "_STORE",
+    "_REPORT",
+    "_WORKERS",
+    "_CONFIG",
+    "_TTL",
+    "_POLL_S",
+    "_TIMEOUT_S",
+    "_AGE_HOURS",
+    "_MB",
+    "_MAX",
+    "_ID",
+    "_ISOLATION",
+)
+ENV_NAME_RE = re.compile(r"^(?:KALIV|MODELRIG)_[A-Z0-9_]+$")
+PY_ENV_CONST_RE = re.compile(
+    r"""(?m)^[ \t]*(?P<ident>[A-Za-z_][A-Za-z0-9_]*)[ \t]*"""
+    r"""(?::[^=\n]+)?=[ \t]*(?P<quote>["'])"""
+    r"""(?P<env>(?:KALIV|MODELRIG)_[A-Z0-9_]+)(?P=quote)"""
+)
+PY_GETENV_RE = re.compile(
+    r"""os\.getenv\(\s*(?P<arg>"""
+    r"""["'](?:KALIV|MODELRIG)_[A-Z0-9_]+["']|[A-Za-z_][A-Za-z0-9_]*"""
+    r""")\s*(?:,\s*(?P<default>["'][^"'\n]*["']|None|[0-9]+))?\s*\)"""
+)
+GO_ENV_CONST_RE = re.compile(
+    r"""(?m)^[ \t]*(?P<ident>[A-Za-z_][A-Za-z0-9_]*)[ \t]*"""
+    r"""(?::=[ \t]*|=[ \t]*)"(?P<env>(?:KALIV|MODELRIG)_[A-Z0-9_]+)" """
+    .rstrip()
+)
+GO_GETENV_RE = re.compile(
+    r"""os\.Getenv\(\s*(?P<arg>"""
+    r""""(?:KALIV|MODELRIG)_[A-Z0-9_]+"|[A-Za-z_][A-Za-z0-9_]*"""
+    r""")\s*\)"""
+)
+BOOL_COMPARE_RE = re.compile(
+    r"""^\s*(?:\.[A-Za-z_][A-Za-z0-9_]*\(\)\s*)*"""
+    r"""(?:(?:==|!=)\s*["'](?:1|true|on)["']"""
+    r"""|\bin\s*\{[^}]{0,120}["'](?:1|true|on)["'])""",
+    re.IGNORECASE,
+)
 
-    Read from the source, because a flag list maintained by hand is a flag list
-    that is wrong the first time someone adds a flag in a hurry.
+
+def _literal_env_token(token: str) -> str | None:
+    token = token.strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+        value = token[1:-1]
+        return value if ENV_NAME_RE.fullmatch(value) else None
+    return None
+
+
+def _default_env_token(token: str | None) -> str:
+    if token is None or token.strip() == "None":
+        return "(unset)"
+    token = token.strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+        return token[1:-1]
+    return token
+
+
+def _looks_like_setting(name: str) -> bool:
+    return name.endswith(SETTING_ENV_SUFFIXES)
+
+
+def _env_kind(
+    name: str,
+    default: str,
+    *,
+    explicit_switch: bool = False,
+    explicit_setting: bool = False,
+) -> str:
+    lowered = default.lower()
+    if explicit_switch:
+        return "**AKTIV**" if lowered in ACTIVE_ENV_DEFAULTS else "slukket"
+    if explicit_setting or _looks_like_setting(name) or lowered not in BOOLISH_ENV_DEFAULTS:
+        return "indstilling"
+    return "**AKTIV**" if lowered in ACTIVE_ENV_DEFAULTS else "slukket"
+
+
+def _python_env_reads(text: str) -> list[tuple[str, str, str]]:
+    """Resolve literal and same-file constant-backed os.getenv reads."""
+
+    constants = {m.group("ident"): m.group("env") for m in PY_ENV_CONST_RE.finditer(text)}
+    rows: list[tuple[str, str, str]] = []
+    for match in PY_GETENV_RE.finditer(text):
+        arg = match.group("arg")
+        name = _literal_env_token(arg) or constants.get(arg)
+        if not name:
+            continue
+        default = _default_env_token(match.group("default"))
+        tail = text[match.end(): match.end() + 160]
+        explicit_switch = bool(BOOL_COMPARE_RE.match(tail))
+        rows.append(
+            (
+                name,
+                default,
+                _env_kind(name, default, explicit_switch=explicit_switch),
+            )
+        )
+    return rows
+
+
+def _go_env_reads(text: str) -> list[tuple[str, str, str]]:
+    """Resolve literal and same-file constant-backed os.Getenv reads."""
+
+    constants = {m.group("ident"): m.group("env") for m in GO_ENV_CONST_RE.finditer(text)}
+    rows: list[tuple[str, str, str]] = []
+    for match in GO_GETENV_RE.finditer(text):
+        arg = match.group("arg")
+        name = _literal_env_token(arg) or constants.get(arg)
+        if not name:
+            continue
+        tail = text[match.end(): match.end() + 80]
+        explicit_switch = bool(
+            re.match(r"""\s*(?:==|!=)\s*["'](?:1|true|on)["']""", tail, re.IGNORECASE)
+        )
+        default = "0" if explicit_switch else "(unset)"
+        rows.append(
+            (
+                name,
+                default,
+                _env_kind(
+                    name,
+                    default,
+                    explicit_switch=explicit_switch,
+                    explicit_setting=not explicit_switch,
+                ),
+            )
+        )
+    return rows
+
+
+def flag_defaults() -> list[tuple[str, str, str]]:
+    """Every environment-backed switch/setting the worker and backend read.
+
+    Literal names and same-file string constants are both resolved. The latter
+    matters because production code deliberately centralises names such as
+    FILE_CAPABILITIES_FLAG and memory4ChatFlag instead of repeating raw strings
+    at each call site.
+
+    Classification is intentionally conservative: explicit boolean comparisons
+    are switches, while path/secret/model/database/etc. names and non-boolean
+    defaults are settings. A setting may still be reported on the page, but it
+    must never inflate the feature-switch count.
     """
-    pat = re.compile(r'os\.getenv\(\s*"(KALIV_[A-Z0-9_]+)"\s*(?:,\s*("[^"]*"|\'[^\']*\'))?')
-    found: dict[str, str] = {}
+
+    found: dict[str, tuple[str, str]] = {}
+
+    def absorb(rows: list[tuple[str, str, str]]) -> None:
+        for name, default, kind in rows:
+            prior = found.get(name)
+            if prior is None:
+                found[name] = (default, kind)
+                continue
+
+            prior_default, prior_kind = prior
+            merged_default = (
+                default
+                if prior_default == "(unset)" and default != "(unset)"
+                else prior_default
+            )
+            switch_kinds = {"slukket", "**AKTIV**"}
+            merged_kind = (
+                kind
+                if kind in switch_kinds and prior_kind not in switch_kinds
+                else prior_kind
+            )
+            if kind == "**AKTIV**":
+                merged_kind = kind
+            found[name] = (merged_default, merged_kind)
+
     for py in sorted((ROOT / "worker").rglob("*.py")):
         if "__pycache__" in str(py):
             continue
-        for m in pat.finditer(py.read_text(encoding="utf-8", errors="replace")):
-            name, default = m.group(1), m.group(2)
-            found.setdefault(name, (default or "(unset)").strip("\"'"))
-    # The Go backend is part of this system too (F-613). Scanning only
-    # worker/**/*.py meant KALIV_SCHEDULER_API -- the switch that decides whether
-    # the schedule admin surface is reachable REMOTELY at all -- appeared nowhere
-    # on the page whose whole promise is that it cannot be wrong. A page that
-    # says "0 of 12 switches are on" after reading one language's directory is
-    # not measuring the system; it is measuring my search path. Same mistake as
-    # the entrypoint scan that only walked the folders I thought of.
-    #
-    # `os.Getenv("X") == "1"` is unambiguous: off unless someone sets it to 1.
-    # Anything else read from the Go environment is a setting, not a decision,
-    # and is reported as such rather than guessed at.
-    go_switches: set[str] = set()
-    go_settings: set[str] = set()
-    go_switch = re.compile(r'os\.Getenv\(\s*"((?:KALIV|MODELRIG)_[A-Z0-9_]+)"\s*\)\s*==\s*"1"')
-    go_any = re.compile(r'os\.Getenv\(\s*"((?:KALIV|MODELRIG)_[A-Z0-9_]+)"\s*\)')
+        absorb(_python_env_reads(py.read_text(encoding="utf-8", errors="replace")))
+
     for go in sorted((ROOT / "backend").rglob("*.go")):
         if go.name.endswith("_test.go"):
             continue
-        text = go.read_text(encoding="utf-8", errors="replace")
-        for m in go_switch.finditer(text):
-            found.setdefault(m.group(1), "0")
-            go_switches.add(m.group(1))
-        for m in go_any.finditer(text):
-            # A key, a path or a claim limit read from the environment is a
-            # SETTING. Widening the scan made eight of them appear as "switches
-            # that are off", which dilutes the count the page exists to state --
-            # the same way calling a cache TTL an ACTIVE switch would. Only the
-            # ones whose code says == "1" get to be decisions.
-            if m.group(1) not in go_switches:
-                found.setdefault(m.group(1), "(unset)")
-                go_settings.add(m.group(1))
+        absorb(_go_env_reads(go.read_text(encoding="utf-8", errors="replace")))
 
-    # A switch and a setting are not the same thing, and calling a 10-second
-    # cache TTL an "ACTIVE switch" is how a readiness page teaches you to skim
-    # it. Only booleans can be on; a number is a value, not a decision.
-    BOOLISH = {"", "0", "1", "true", "false", "on", "off", "(unset)"}
-    rows = []
-    for name, default in sorted(found.items()):
-        if name in go_settings:
-            kind = "indstilling"
-        elif default not in BOOLISH:
-            kind = "indstilling"
-        elif default in ("1", "true", "on"):
-            kind = "**AKTIV**"
-        else:
-            kind = "slukket"
-        rows.append((name, default or "(tom)", kind))
-    return rows
-
+    return [
+        (name, default or "(tom)", kind)
+        for name, (default, kind) in sorted(found.items())
+    ]
 
 def validation() -> dict:
     """The on-rig report, assessed by the gate that already knows the rules.
