@@ -15,7 +15,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .. import paths as _paths
 from .sleep import SleepRecord, WakeReceipt, prepare_sleep, wake_from_sleep
@@ -40,10 +40,24 @@ class SleepBinding(StrictModel):
     schema: Literal["kaliv-consciousness-core/sleep-binding/v1"]
     self_id: Annotated[str, Field(pattern=r"^self-[a-f0-9]{32}$")]
     person_revision: Annotated[str, Field(pattern=r"^person-r[0-9]{4,}$")]
+    durable_self_state_ref: NonEmptyRef | None = None
+    durable_self_state_revision: Annotated[int, Field(ge=1, strict=True)] | None = None
     open_goal_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
     open_loop_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
     pending_review_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
     production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def exact_self_state_binding(self) -> "SleepBinding":
+        if (
+            self.durable_self_state_ref is None
+        ) != (
+            self.durable_self_state_revision is None
+        ):
+            raise ValueError(
+                "sleep binding SelfState ref/revision must be both present or absent"
+            )
+        return self
 
 
 def sleep_lifecycle_enabled() -> bool:
@@ -219,6 +233,8 @@ class SleepLifecycleRuntime:
                 person_revision=binding.person_revision,
                 entry_anchor=entry_anchor,
                 reason=reason,
+                durable_self_state_ref=binding.durable_self_state_ref,
+                durable_self_state_revision=binding.durable_self_state_revision,
                 open_goal_refs=binding.open_goal_refs,
                 open_loop_refs=binding.open_loop_refs,
                 pending_review_refs=binding.pending_review_refs,
