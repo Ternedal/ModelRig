@@ -4,20 +4,21 @@ Kaliv VR is the third first-party ModelRig client, alongside `android/` and `des
 
 It is a Unity/OpenXR client for Meta Quest. It talks to the same ModelRig backend and uses the same pairing/token model as the other Kaliv clients. VR playback, projection and passthrough mechanics come from the separate `Ternedal/SkyPlayer-Engine` package.
 
+For the whole-product context, see [`docs/KALIV_SYSTEM_DEFINITION.md`](../docs/KALIV_SYSTEM_DEFINITION.md). Kaliv VR is the embodied presentation surface; it does not move body, voice or cognition authority into the renderer.
+
 ## Architecture
 
-```
-ModelRig backend / worker
-          ↑
- pairing + bearer + BodyRig
-          ↑
-  Kaliv VR product
-   ├─ KalivVrRenderEngine
-   │   ├─ VRM / BodyRig live state
-   │   ├─ authored VRMA state motion
-   │   └─ Body / Media / UI / Debug composition
-   └─ SkyPlayer-Engine
-       └─ OpenXR / passthrough / VR media primitives
+```mermaid
+flowchart LR
+    CC["Consciousness Core\nDRAFT until landed/qualified"] -. "state/guidance" .-> MR["ModelRig backend / worker\nreasoning · memory · tools · semantic intent"]
+    LLM["Replaceable LLM"] <--> MR
+    MR -->|"pairing / bearer / chat"| KVR["Kaliv VR\nKalivVrRenderEngine"]
+    MR -->|"BodyCue"| BR["BodyRig\nbody identity + performed Motor State"]
+    BR -->|"accepted avatar + live state"| KVR
+    VO["VoiceRig\naudio + timing"] --> KVR
+    VO -->|"utterance timing"| BR
+    SP["SkyPlayer-Engine\nOpenXR · passthrough · VR media primitives"] --> KVR
+    KVR --> Q["Meta Quest / OpenXR"]
 ```
 
 The product boundary is deliberate:
@@ -27,9 +28,9 @@ The product boundary is deliberate:
 - **SkyPlayer-Engine** owns reusable XR/media mechanics.
 - **Skyplayer** remains a separate Stash-oriented client of the same engine.
 
-## Bootstrap scope
+## Current landed scope
 
-The first slice provides:
+The landed first-party VR slice provides:
 
 - code-driven XR rig; no hand-authored scene dependency
 - Kaliv dark/gold world-space UI foundation
@@ -49,7 +50,7 @@ The first slice provides:
 - Kaliv-owned media facade over SkyPlayer-Engine with flat/VR180/VR360 projection bound to `KalivMedia`
 - tracking-origin compensation propagated into immersive media orientation
 
-This is still a bootstrap, not a finished VR product. Streaming chat, voice, RAG, tools/confirmation, richer spatial interaction and full Kaliv conversation UX still need parity with Android/Desktop.
+The implementation is landed on `main`, but it is not yet a physically qualified finished VR product. Streaming chat, voice, RAG, tools/confirmation, richer spatial interaction and full Kaliv conversation UX still need parity with Android/Desktop, and Quest device evidence remains its own gate.
 
 ## Build
 
