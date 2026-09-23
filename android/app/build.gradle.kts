@@ -94,7 +94,7 @@ dependencies {
     //    til at TEGNE koden, telefonen til at laese den.
     //  * CameraX giver et livscyklus-bundet kamera uden at vi skal skrive
     //    Camera2-state selv. Vi tager kun de fire moduler vi bruger.
-    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.google.zxing:core:3.5.4")
     implementation("androidx.camera:camera-core:1.4.2")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")
@@ -111,7 +111,7 @@ dependencies {
     // org.json lives in the Android framework; the unit-test stub throws on
     // every call. StreamContract parses real NDJSON, so the tests need a real
     // implementation on the JVM test classpath.
-    testImplementation("org.json:json:20260719")
+    testImplementation("org.json:json:20260814")
     // Scheduler client contracts need a real HTTP boundary without relying on
     // JDK-only com.sun.net.httpserver, which is absent from AGP's test compiler.
     testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
