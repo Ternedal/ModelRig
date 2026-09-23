@@ -281,12 +281,20 @@ from .self_state_checkpoint_runtime import (
     runtime_checkpoint_plan_ref,
     self_state_checkpoint_receipt_ref,
 )
+from .policy_checkpoint_liveness import (
+    LivenessCoupledPolicyCheckpointAdapter,
+    PolicyCheckpointLivenessError,
+)
 from .policy_checkpoint_lifecycle import (
+    CHECKPOINT_LIVENESS_FLAG,
+    CHECKPOINT_LIVENESS_STATE_ENV,
     POLICY_CHECKPOINT_SERVICE_FLAG,
     PolicyCheckpointServiceError,
+    checkpoint_liveness_enabled,
     compose_policy_checkpoint_service_lifespan,
     policy_checkpoint_service_enabled,
     production_policy_checkpoint_service_factory,
+    production_runtime_liveness_store_factory,
 )
 from .policy_checkpoint import (
     PolicyDrivenCheckpointError,
@@ -409,10 +417,16 @@ __all__ = [
     "EVENT_CHECKPOINT_FLAG",
     "autonomous_checkpoint_enabled",
     "AUTONOMOUS_CHECKPOINT_FLAG",
+    "LivenessCoupledPolicyCheckpointAdapter",
+    "PolicyCheckpointLivenessError",
+    "production_runtime_liveness_store_factory",
     "production_policy_checkpoint_service_factory",
+    "checkpoint_liveness_enabled",
     "policy_checkpoint_service_enabled",
     "compose_policy_checkpoint_service_lifespan",
     "PolicyCheckpointServiceError",
+    "CHECKPOINT_LIVENESS_STATE_ENV",
+    "CHECKPOINT_LIVENESS_FLAG",
     "POLICY_CHECKPOINT_SERVICE_FLAG",
     "PolicyDrivenSelfStateCheckpointAdapter",
     "PolicyDrivenCheckpointResult",
