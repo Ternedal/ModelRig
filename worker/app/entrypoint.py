@@ -33,6 +33,7 @@ from .consciousness_core.supervisor_lifecycle import (
     compose_supervisor_lifecycle_lifespan,
     production_supervisor_bridge_factory,
 )
+from .consciousness_core.exact_event_step_api import mount_consciousness_exact_event_step
 from .consciousness_core.profile_step_api import mount_consciousness_profile_step
 from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
 from .schedule_api import build_schedule_router
@@ -98,6 +99,11 @@ mount_consciousness_user_turn(fastapi_app)
 # and calls the existing live session at most once. With its exact flag off this
 # mount adds no route and reads no profile file.
 mount_consciousness_profile_step(fastapi_app)
+
+# Consciousness Core C22-C is a separately gated exact-event one-shot surface.
+# Its only caller-selected value is one pending CognitionEvent id; event presence
+# and canonical selection are verified before ThoughtEngine invocation.
+mount_consciousness_exact_event_step(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
