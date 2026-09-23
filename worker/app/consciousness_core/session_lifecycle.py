@@ -274,8 +274,6 @@ class ProductionCognitiveSession:
             else None
         )
         self._recovery_completion = None
-        self._continuity_orientation = None
-        self._experience_episode = None
         self._continuity_orientation = (
             open_continuity_orientation(
                 continuity_state=self._continuity_state,
@@ -1069,6 +1067,8 @@ class ProductionCognitiveSession:
         self._continuity_state = None
         self._continuity_window = None
         self._recovery_completion = None
+        self._continuity_orientation = None
+        self._experience_episode = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
