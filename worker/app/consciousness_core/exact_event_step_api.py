@@ -164,7 +164,13 @@ def exact_event_checkpoint_enabled(
     env: dict[str, str] | None = None,
 ) -> bool:
     if env is None:
-        return (\n            os.getenv(\n                "KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED",\n                "0",\n            )\n            == "1"\n        )
+        return (
+            os.getenv(
+                "KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED",
+                "0",
+            )
+            == "1"
+        )
     return env.get(EVENT_CHECKPOINT_FLAG, "0") == "1"
 
 
