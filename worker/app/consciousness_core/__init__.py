@@ -159,6 +159,17 @@ from .exact_event_step_api import (
     exact_event_step_enabled,
     mount_consciousness_exact_event_step,
 )
+from .episodes import (
+    EpisodeMoment,
+    ExperienceEpisodeState,
+    ExperientialEpisodeError,
+    append_episode_moment,
+    build_episode_moment,
+    close_experience_episode,
+    episode_moment_ref,
+    experience_episode_ref,
+    open_experience_episode,
+)
 from .experience import (
     ExperienceCandidate,
     ExperienceMemoryError,
@@ -447,6 +458,15 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "open_experience_episode",
+    "experience_episode_ref",
+    "episode_moment_ref",
+    "close_experience_episode",
+    "build_episode_moment",
+    "append_episode_moment",
+    "ExperientialEpisodeError",
+    "ExperienceEpisodeState",
+    "EpisodeMoment",
     "retire_wake_artifacts_from_model_context",
     "ContinuityContextRetirementError",
     "build_continuity_status_snapshot",
