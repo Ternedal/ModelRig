@@ -757,6 +757,7 @@ class ProductionCognitiveSession:
             profile=profile,
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
+            continuity_state=self._continuity_state,
             required_event_id=required_event_id,
             allowed_event_ids=allowed_event_ids,
         )
