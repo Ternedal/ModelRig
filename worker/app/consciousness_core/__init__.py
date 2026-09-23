@@ -286,6 +286,7 @@ from .sleep_lifecycle import (
     SleepLifecycleError,
     SleepLifecycleRuntime,
     SleepStateStore,
+    SleepWakeAcknowledgement,
     compose_sleep_lifecycle_lifespan,
     sleep_lifecycle_enabled,
 )
@@ -377,6 +378,7 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "SleepWakeAcknowledgement",
     "turn_checkpoint_enabled",
     "TURN_CHECKPOINT_FLAG",
     "exact_event_checkpoint_enabled",
