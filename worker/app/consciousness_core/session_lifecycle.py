@@ -45,6 +45,7 @@ from .supervisor_lifecycle import (
     ProductionSupervisorBridge,
     SupervisorBridgeStep,
 )
+from .wake_followup import build_wake_followup_event
 from .world_reducer import (
     WorldEvidenceEvent,
     WorldTransitionReceipt,
@@ -655,10 +656,21 @@ def production_cognitive_session_factory(
         ),
         wake_receipt=wake_receipt,
     )
-    return ProductionCognitiveSession(
+    session = ProductionCognitiveSession(
         supervisor_bridge=bridge,
         bootstrap_context=context,
     )
+    if wake_receipt is not None:
+        session.submit(
+            build_wake_followup_event(
+                wake_receipt,
+                expected_self_id=session.live_state.state.self_id,
+                expected_person_revision=(
+                    session.live_state.state.person_revision
+                ),
+            )
+        )
+    return session
 
 
 def compose_cognitive_session_lifespan(
