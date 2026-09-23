@@ -30,7 +30,13 @@ class ShutdownSelfStateCheckpointError(RuntimeError):
 
 def shutdown_self_state_checkpoint_enabled() -> bool:
     """Only exact string 1 grants graceful-shutdown persistence."""
-    return os.getenv(SELF_STATE_CHECKPOINT_FLAG, "0") == "1"
+    return (
+        os.getenv(
+            "KALIV_CONSCIOUSNESS_SELF_STATE_CHECKPOINT_ENABLED",
+            "0",
+        )
+        == "1"
+    )
 
 
 def production_shutdown_checkpoint_factory(
