@@ -250,6 +250,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_checkpoint_pressure.py`
 - `tests/worker_consciousness_core_checkpoint_runtime.py`
 - `tests/worker_consciousness_core_consolidation.py`
+- `tests/worker_consciousness_core_context_retirement.py`
 - `tests/worker_consciousness_core_continuity_context.py`
 - `tests/worker_consciousness_core_continuity_horizon.py`
 - `tests/worker_consciousness_core_continuity_orientation.py`
