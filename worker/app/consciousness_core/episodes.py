@@ -157,7 +157,7 @@ class ExperienceEpisodeState(StrictModel):
         previous_sequence = self.opened_anchor.sequence
         previous_monotonic = self.opened_anchor.monotonic_ms
         ids: set[str] = set()
-        for moment in self.moments:
+        for index, moment in enumerate(self.moments):
             if moment.moment_id in ids:
                 raise ValueError("episode moment ids must be unique")
             ids.add(moment.moment_id)
@@ -169,7 +169,13 @@ class ExperienceEpisodeState(StrictModel):
                 raise ValueError("episode moment crossed runtime epoch")
             if anchor.monotonic_ms is None:
                 raise ValueError("episode moment requires monotonic anchor")
-            if anchor.sequence <= previous_sequence:
+            if (
+                anchor.sequence < previous_sequence
+                or (
+                    index > 0
+                    and anchor.sequence == previous_sequence
+                )
+            ):
                 raise ValueError(
                     "episode moments must advance temporal sequence"
                 )
@@ -358,7 +364,13 @@ def append_episode_moment(
         if current.moments
         else current.opened_anchor
     )
-    if item.anchor.sequence <= previous_anchor.sequence:
+    if (
+        item.anchor.sequence < previous_anchor.sequence
+        or (
+            current.moments
+            and item.anchor.sequence == previous_anchor.sequence
+        )
+    ):
         raise ExperientialEpisodeError(
             "episode moment sequence did not advance"
         )
