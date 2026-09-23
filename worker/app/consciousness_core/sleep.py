@@ -241,3 +241,58 @@ def wake_from_sleep(
         durable_memory_write_authority=False,
         production_activation=False,
     )
+
+
+
+def wake_from_unplanned_restart(
+    *,
+    wake_anchor: TemporalAnchor | Mapping[str, Any],
+    self_id: str,
+    person_revision: str,
+    source_ref: str,
+) -> WakeReceipt:
+    """Represent a crash/unclean restart without inventing outage duration."""
+    try:
+        wake = (
+            wake_anchor
+            if isinstance(wake_anchor, TemporalAnchor)
+            else TemporalAnchor.model_validate(wake_anchor)
+        )
+    except ValidationError as exc:
+        raise SleepContractError("invalid unplanned wake anchor") from exc
+
+    if not isinstance(source_ref, str) or not source_ref.strip():
+        raise SleepContractError("unplanned wake source_ref is required")
+
+    seed = {
+        "self_id": self_id,
+        "person_revision": person_revision,
+        "wake": wake.anchor_id,
+        "source_ref": source_ref,
+        "kind": "UNPLANNED_DORMANCY",
+    }
+    return WakeReceipt(
+        schema="kaliv-consciousness-core/wake-receipt/v1",
+        wake_id="wake-" + _digest(seed)[:32],
+        self_id=self_id,
+        person_revision=person_revision,
+        durable_self_state_ref=None,
+        durable_self_state_revision=None,
+        sleep_id=None,
+        dormancy_kind="UNPLANNED_DORMANCY",
+        entry_anchor_ref=None,
+        wake_anchor=wake,
+        offline_duration_ms=None,
+        duration_confidence=0.0,
+        duration_known=False,
+        continuity_preserved=True,
+        cognition_during_gap=False,
+        wake_state="WAKING",
+        resume_goal_refs=[],
+        resume_open_loop_refs=[],
+        pending_review_refs=[],
+        execution_authority=False,
+        scheduling_authority=False,
+        durable_memory_write_authority=False,
+        production_activation=False,
+    )
