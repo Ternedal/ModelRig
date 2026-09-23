@@ -53,6 +53,12 @@ from .embodiment_attention import (
     EmbodimentAttentionAdmissionResult,
     plan_embodiment_attention,
 )
+from .episodes import (
+    ExperienceEpisodeState,
+    append_episode_moment,
+    build_episode_moment,
+    open_experience_episode,
+)
 from .experience import MemoryContextSnapshot
 from .memory_recall_attention import (
     MemoryRecallAdmissionResult,
@@ -66,6 +72,7 @@ from .prediction_attention import (
     plan_prediction_outcome,
 )
 from .production_lifecycle import TrustedRuntimeClock
+from .temporal import anchor_from_clock
 from .response_guidance import (
     ResponseGuidanceEnvelope,
     build_response_guidance,
@@ -268,6 +275,7 @@ class ProductionCognitiveSession:
         )
         self._recovery_completion = None
         self._continuity_orientation = None
+        self._experience_episode = None
         self._continuity_orientation = (
             open_continuity_orientation(
                 continuity_state=self._continuity_state,
@@ -279,6 +287,7 @@ class ProductionCognitiveSession:
             )
             else None
         )
+        self._experience_episode = None
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -338,6 +347,13 @@ class ProductionCognitiveSession:
             orientation=self._continuity_orientation,
             completion=self._recovery_completion,
         )
+
+    @property
+    def experience_episode(
+        self,
+    ) -> ExperienceEpisodeState | None:
+        """Current bounded process-local experiential episode."""
+        return self._experience_episode
 
     @property
     def supervisor_state(self):
@@ -935,6 +951,50 @@ class ProductionCognitiveSession:
         next_transition_ref = transition_receipt_ref(
             reduction.receipt
         )
+        cycle_source_ref = _ref(
+            "supervisor-cycle-receipt",
+            cycle_result.receipt,
+        )
+        cycle_anchor = anchor_from_clock(
+            bridge_step.clock_sample,
+            event_ref=cycle_source_ref,
+        )
+        next_episode = self._experience_episode
+        if next_episode is None:
+            next_episode = open_experience_episode(
+                self_id=next_state.self_id,
+                person_revision=next_state.person_revision,
+                opening_anchor=cycle_anchor,
+                reason=(
+                    "POST_WAKE_RECOVERY"
+                    if self._continuity_state is not None
+                    else "SESSION_START"
+                ),
+            )
+        participant_refs = (
+            ["actor:user"]
+            if any(
+                event.kind == "user_turn"
+                for event in selected_events
+            )
+            else []
+        )
+        run_salience = max(
+            (event.salience for event in selected_events),
+            default=0.0,
+        )
+        next_episode = append_episode_moment(
+            next_episode,
+            build_episode_moment(
+                kind="COGNITIVE_RUN",
+                source_ref=cycle_source_ref,
+                anchor=cycle_anchor,
+                salience=run_salience,
+                active_goal_refs=list(next_state.active_goal_refs),
+                participant_refs=participant_refs,
+            ),
+        )
+
         next_window = self._continuity_window
         next_recovery = self._recovery_completion
         next_orientation = self._continuity_orientation
@@ -980,6 +1040,7 @@ class ProductionCognitiveSession:
             production_activation=False,
         )
         self._live = next_live
+        self._experience_episode = next_episode
         self._continuity_window = next_window
         self._recovery_completion = next_recovery
         self._continuity_orientation = next_orientation
