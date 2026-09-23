@@ -80,6 +80,91 @@ import sys as _sys  # noqa: E402
 _sys.path.insert(0, str(ROOT / "scripts"))
 import activation_readiness as AR  # noqa: E402
 
+
+# --- constant-backed environment discovery (#1781) -------------------------
+_py_env_rows = {
+    name: (default, kind)
+    for name, default, kind in AR._python_env_reads(
+        """
+FEATURE_FLAG = "KALIV_TEST_CONSTANT_ENABLED"
+CACHE_DIR = "KALIV_TEST_CACHE_DIR"
+API_SECRET = "KALIV_TEST_API_SECRET"
+
+if os.getenv(FEATURE_FLAG, "0") == "1":
+    pass
+cache_dir = os.getenv(CACHE_DIR, "")
+secret = os.getenv(API_SECRET, "")
+"""
+    )
+}
+check(
+    _py_env_rows["KALIV_TEST_CONSTANT_ENABLED"] == ("0", "slukket"),
+    "constant-backed Python boolean gates are discovered as switches",
+)
+check(
+    _py_env_rows["KALIV_TEST_CACHE_DIR"][1] == "indstilling",
+    "constant-backed Python paths are settings, not feature switches",
+)
+check(
+    _py_env_rows["KALIV_TEST_API_SECRET"][1] == "indstilling",
+    "constant-backed Python secrets are settings, not feature switches",
+)
+
+_go_env_rows = {
+    name: (default, kind)
+    for name, default, kind in AR._go_env_reads(
+        """
+const (
+    featureFlag = "KALIV_TEST_GO_ENABLED"
+    dataRoot = "KALIV_TEST_GO_DATA_ROOT"
+    apiSecret = "KALIV_TEST_GO_API_SECRET"
+)
+if os.Getenv(featureFlag) != "1" {
+}
+_ = os.Getenv(dataRoot)
+_ = os.Getenv(apiSecret)
+"""
+    )
+}
+check(
+    _go_env_rows["KALIV_TEST_GO_ENABLED"] == ("0", "slukket"),
+    "constant-backed Go boolean gates are discovered as switches",
+)
+check(
+    _go_env_rows["KALIV_TEST_GO_DATA_ROOT"][1] == "indstilling",
+    "constant-backed Go paths are settings, not feature switches",
+)
+check(
+    _go_env_rows["KALIV_TEST_GO_API_SECRET"][1] == "indstilling",
+    "constant-backed Go secrets are settings, not feature switches",
+)
+
+_repo_env_rows = {
+    name: (default, kind) for name, default, kind in AR.flag_defaults()
+}
+for _name in (
+    "KALIV_FILE_CAPABILITIES_ENABLED",
+    "KALIV_COMPUTER_USE_SCREEN",
+    "KALIV_MEMORY4_CHAT_ENABLED",
+    "KALIV_MEMORY4_CHAT_WRITE_ENABLED",
+    "KALIV_DEVCONTROL_PILOT",
+):
+    check(
+        _repo_env_rows.get(_name, (None, None))[1] == "slukket",
+        f"the real constant-backed gate {_name} is present and default-off",
+    )
+for _name in (
+    "KALIV_AGENT3_MEMORY_API_SECRET",
+    "KALIV_AGENT3_MEMORY_GRANT_DB",
+    "KALIV_AGENT4_DATA_ROOT",
+    "KALIV_DESKTOP_ALLOWLIST_FILE",
+    "KALIV_FILE_WORKSPACE_ROOT",
+):
+    check(
+        _repo_env_rows.get(_name, (None, None))[1] == "indstilling",
+        f"the real constant-backed setting {_name} is not counted as a feature switch",
+    )
+
 server_plans, note = AR.plan_authority()
 check(server_plans is True, "production run creation is server-authoritative")
 check(
