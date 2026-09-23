@@ -152,6 +152,95 @@ def _wake_ref(wake: WakeReceipt) -> str:
     return "wake-receipt:" + _digest(wake)
 
 
+
+
+class ContinuityContextProjection(StrictModel):
+    schema: Literal[
+        "kaliv-consciousness-core/continuity-context-projection/v1"
+    ]
+    continuity_state_ref: NonEmptyRef
+    dormancy_kind: Literal["PLANNED_SLEEP", "UNPLANNED_DORMANCY"]
+    knowledge: ContinuityKnowledge
+    exact_offline_duration_ms: NonNegativeInt | None
+    offline_duration_upper_bound_ms: NonNegativeInt | None
+    duration_confidence: UnitInterval
+    cognition_during_gap: Literal[False]
+    crash_timestamp_claimed: Literal[False]
+    identity_authority: Literal[False]
+    persistent_state_authority: Literal[False]
+    durable_memory_write_authority: Literal[False]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def exact_projection(self) -> "ContinuityContextProjection":
+        if self.knowledge == "PLANNED_EXACT":
+            if (
+                self.dormancy_kind != "PLANNED_SLEEP"
+                or self.exact_offline_duration_ms is None
+                or self.offline_duration_upper_bound_ms is not None
+            ):
+                raise ValueError("invalid planned exact projection")
+        elif self.knowledge == "PLANNED_UNKNOWN":
+            if (
+                self.dormancy_kind != "PLANNED_SLEEP"
+                or self.exact_offline_duration_ms is not None
+                or self.offline_duration_upper_bound_ms is not None
+            ):
+                raise ValueError("invalid planned unknown projection")
+        elif self.knowledge == "UNPLANNED_BOUNDED":
+            if (
+                self.dormancy_kind != "UNPLANNED_DORMANCY"
+                or self.exact_offline_duration_ms is not None
+                or self.offline_duration_upper_bound_ms is None
+            ):
+                raise ValueError("invalid unplanned bounded projection")
+        else:
+            if (
+                self.dormancy_kind != "UNPLANNED_DORMANCY"
+                or self.exact_offline_duration_ms is not None
+                or self.offline_duration_upper_bound_ms is not None
+            ):
+                raise ValueError("invalid unplanned unbounded projection")
+        return self
+
+
+def project_continuity_context(
+    state: PostWakeContinuityState | Mapping[str, Any],
+) -> ContinuityContextProjection:
+    """Expose only adjudicated continuity semantics to replaceable cognition."""
+    try:
+        value = (
+            state
+            if isinstance(state, PostWakeContinuityState)
+            else PostWakeContinuityState.model_validate(state)
+        )
+    except ValidationError as exc:
+        raise ContinuityStateError("invalid continuity state") from exc
+
+    return ContinuityContextProjection(
+        schema=(
+            "kaliv-consciousness-core/continuity-context-projection/v1"
+        ),
+        continuity_state_ref=post_wake_continuity_state_ref(value),
+        dormancy_kind=value.dormancy_kind,
+        knowledge=value.knowledge,
+        exact_offline_duration_ms=value.exact_offline_duration_ms,
+        offline_duration_upper_bound_ms=(
+            value.offline_duration_upper_bound_ms
+        ),
+        duration_confidence=value.duration_confidence,
+        cognition_during_gap=False,
+        crash_timestamp_claimed=False,
+        identity_authority=False,
+        persistent_state_authority=False,
+        durable_memory_write_authority=False,
+        execution_authority=False,
+        scheduling_authority=False,
+        production_activation=False,
+    )
+
 def build_post_wake_continuity_state(
     wake_receipt: WakeReceipt | Mapping[str, Any],
     *,

@@ -14,6 +14,7 @@ from typing import Annotated, Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .contracts import CognitiveProfile, PersonalitySnapshot
+from .continuity import build_post_wake_continuity_state
 from .cycle import (
     CognitiveCycleCoordinator,
     CognitiveCycleResult,
@@ -410,6 +411,13 @@ class WakeFirstCycleCoordinator:
             if isinstance(wake_receipt, WakeReceipt)
             else WakeReceipt.model_validate(wake_receipt)
         )
+        continuity_state = build_post_wake_continuity_state(
+            wake,
+            expected_self_id=orientation.oriented_self_state.self_id,
+            expected_person_revision=(
+                orientation.oriented_self_state.person_revision
+            ),
+        )
 
         cycle_result = await self._cycle.run(
             state=orientation.oriented_self_state,
@@ -419,6 +427,7 @@ class WakeFirstCycleCoordinator:
             profile=profile,
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
+            continuity_state=continuity_state,
             requested_reasoning_mode="verify",
         )
         reduction = reduce_post_cycle(

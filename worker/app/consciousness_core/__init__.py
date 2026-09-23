@@ -67,10 +67,12 @@ from .checkpoint_pressure import (
     evaluate_checkpoint_pressure,
 )
 from .continuity import (
+    ContinuityContextProjection,
     ContinuityStateError,
     PostWakeContinuityState,
     build_post_wake_continuity_state,
     post_wake_continuity_state_ref,
+    project_continuity_context,
 )
 from .consolidation import (
     ConsolidationCandidate,
@@ -410,6 +412,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "project_continuity_context",
+    "ContinuityContextProjection",
     "post_wake_continuity_state_ref",
     "build_post_wake_continuity_state",
     "PostWakeContinuityState",

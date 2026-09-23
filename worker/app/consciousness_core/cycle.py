@@ -19,6 +19,11 @@ from .contracts import (
     ThoughtProposal,
     ThoughtRequest,
 )
+from .continuity import (
+    ContinuityContextProjection,
+    PostWakeContinuityState,
+    project_continuity_context,
+)
 from .runtime import ConsciousnessCoreRuntime
 from .self_state import PersistentSelfState
 
@@ -136,6 +141,7 @@ class CognitiveContextPacket(StrictModel):
     personality_snapshot: PersonalitySnapshot
     relevant_memory_refs: Annotated[list[NonEmptyRef], Field(max_length=64)]
     embodiment_state_ref: NonEmptyRef | None
+    continuity: ContinuityContextProjection | None = None
     production_activation: Literal[False]
 
     @model_validator(mode="after")
@@ -289,6 +295,7 @@ def assemble_thought_request(
     profile: CognitiveProfile | Mapping[str, Any],
     relevant_memory_refs: list[str] | None = None,
     embodiment_state_ref: str | None = None,
+    continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
     requested_reasoning_mode: ReasoningMode = "normal",
 ) -> tuple[ThoughtRequest, CognitiveContextPacket]:
     """Materialize one exact context packet and its reference-only C3 request."""
@@ -318,6 +325,13 @@ def assemble_thought_request(
             if isinstance(profile, CognitiveProfile)
             else CognitiveProfile.model_validate(profile)
         )
+        continuity_value = (
+            None
+            if continuity_state is None
+            else continuity_state
+            if isinstance(continuity_state, PostWakeContinuityState)
+            else PostWakeContinuityState.model_validate(continuity_state)
+        )
     except ValidationError as exc:
         raise CognitiveCycleError("invalid cognitive-cycle input") from exc
 
@@ -335,6 +349,20 @@ def assemble_thought_request(
     if current.person_revision != personality.person_revision:
         raise CognitiveCycleError("personality snapshot belongs to another Person Revision")
 
+    continuity_projection = None
+    if continuity_value is not None:
+        if continuity_value.self_id != current.self_id:
+            raise CognitiveCycleError(
+                "continuity state belongs to another self"
+            )
+        if continuity_value.person_revision != current.person_revision:
+            raise CognitiveCycleError(
+                "continuity state belongs to another Person Revision"
+            )
+        continuity_projection = project_continuity_context(
+            continuity_value
+        )
+
     memories = list(dict.fromkeys(relevant_memory_refs or []))
     if len(memories) > 64:
         raise CognitiveCycleError("relevant memory ref bound exceeded")
@@ -348,6 +376,7 @@ def assemble_thought_request(
         personality_snapshot=personality,
         relevant_memory_refs=memories,
         embodiment_state_ref=embodiment_state_ref,
+        continuity=continuity_projection,
         production_activation=False,
     )
 
@@ -397,6 +426,7 @@ class CognitiveCycleCoordinator:
         profile: CognitiveProfile | Mapping[str, Any],
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
+        continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
         requested_reasoning_mode: ReasoningMode = "normal",
     ) -> CognitiveCycleResult:
         try:
@@ -423,13 +453,19 @@ class CognitiveCycleCoordinator:
             profile=profile_value,
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
+            continuity_state=continuity_state,
             requested_reasoning_mode=requested_reasoning_mode,
         )
+
+        context_payload = packet.model_dump(mode="json")
+        if packet.continuity is None:
+            # Keep pre-C29-F no-continuity model context shape unchanged.
+            context_payload.pop("continuity", None)
 
         proposal = await self._runtime.think(
             request,
             profile_value,
-            context=packet.model_dump(mode="json"),
+            context=context_payload,
         )
 
         # The ThoughtEngine never receives the SelfState object by reference, but
