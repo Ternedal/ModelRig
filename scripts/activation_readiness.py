@@ -53,13 +53,35 @@ def flag_defaults() -> list[tuple[str, str, str]]:
     Read from the source, because a flag list maintained by hand is a flag list
     that is wrong the first time someone adds a flag in a hurry.
     """
-    pat = re.compile(r'os\.getenv\(\s*"(KALIV_[A-Z0-9_]+)"\s*(?:,\s*("[^"]*"|\'[^\']*\'))?')
+    literal_getenv = re.compile(
+        r'os\.getenv\(\s*"((?:KALIV|MODELRIG)_[A-Z0-9_]+)"'
+        r'\s*(?:,\s*("[^"]*"|\'[^\']*\'))?'
+    )
+    constant_assignment = re.compile(
+        r'(?m)^\s*([A-Z][A-Z0-9_]*)\s*=\s*(?:\(\s*)?'
+        r'["\']((?:KALIV|MODELRIG)_[A-Z0-9_]+)["\']'
+    )
+    constant_getenv = re.compile(
+        r'os\.getenv\(\s*([A-Z][A-Z0-9_]*)'
+        r'\s*(?:,\s*("[^"]*"|\'[^\']*\'))?'
+    )
     found: dict[str, str] = {}
     for py in sorted((ROOT / "worker").rglob("*.py")):
         if "__pycache__" in str(py):
             continue
-        for m in pat.finditer(py.read_text(encoding="utf-8", errors="replace")):
+        text = py.read_text(encoding="utf-8", errors="replace")
+        constants = {
+            match.group(1): match.group(2)
+            for match in constant_assignment.finditer(text)
+        }
+        for m in literal_getenv.finditer(text):
             name, default = m.group(1), m.group(2)
+            found.setdefault(name, (default or "(unset)").strip("\"'"))
+        for m in constant_getenv.finditer(text):
+            name = constants.get(m.group(1))
+            if name is None:
+                continue
+            default = m.group(2)
             found.setdefault(name, (default or "(unset)").strip("\"'"))
     # The Go backend is part of this system too (F-613). Scanning only
     # worker/**/*.py meant KALIV_SCHEDULER_API -- the switch that decides whether
