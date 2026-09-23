@@ -36,6 +36,10 @@ from .continuity_orientation import (
     complete_continuity_orientation,
     open_continuity_orientation,
 )
+from .continuity_status import (
+    ContinuityStatusSnapshot,
+    build_continuity_status_snapshot,
+)
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
@@ -325,6 +329,15 @@ class ProductionCognitiveSession:
     ) -> ContinuityOrientationState | None:
         """Core-owned process-local wake recovery phase."""
         return self._continuity_orientation
+
+    @property
+    def continuity_status(self) -> ContinuityStatusSnapshot:
+        """Minimal read-only continuity/recovery status for diagnostics/UI."""
+        return build_continuity_status_snapshot(
+            continuity_state=self._continuity_state,
+            orientation=self._continuity_orientation,
+            completion=self._recovery_completion,
+        )
 
     @property
     def supervisor_state(self):
