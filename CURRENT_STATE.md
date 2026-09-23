@@ -279,6 +279,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_temporal.py`
 - `tests/worker_consciousness_core_turn_checkpoint.py`
 - `tests/worker_consciousness_core_user_turn_admission.py`
+- `tests/worker_consciousness_core_wake_ack.py`
 - `tests/worker_consciousness_core_wake_cycle.py`
 - `tests/worker_consciousness_core_world_reducer.py`
 - `tests/worker_consciousness_core_world_session.py`
