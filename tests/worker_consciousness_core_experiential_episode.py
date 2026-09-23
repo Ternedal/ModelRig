@@ -67,6 +67,8 @@ class ExperientialEpisodeTests(unittest.TestCase):
         self.assertIsNone(episode.closed_anchor)
         self.assertIsNone(episode.close_reason)
         self.assertEqual(episode.moments, [])
+        self.assertEqual(episode.moment_count, 0)
+        self.assertEqual(episode.evicted_moment_count, 0)
         self.assertEqual(episode.model_calls, 0)
         self.assertFalse(episode.durable_memory_authority)
         self.assertFalse(episode.execution_authority)
@@ -106,6 +108,8 @@ class ExperientialEpisodeTests(unittest.TestCase):
             [item.anchor.sequence for item in episode.moments],
             [1, 2],
         )
+        self.assertEqual(episode.moment_count, 2)
+        self.assertEqual(episode.evicted_moment_count, 0)
         self.assertFalse(first.raw_text_persisted)
         self.assertFalse(first.raw_chain_of_thought_persisted)
         self.assertTrue(
@@ -184,6 +188,37 @@ class ExperientialEpisodeTests(unittest.TestCase):
                 ),
                 reason="DORMANCY",
             )
+
+    def test_moment_window_rolls_without_blocking_episode(self):
+        episode = self.opened()
+        for index in range(1, 130):
+            sequence = index
+            moment = build_episode_moment(
+                kind="COGNITIVE_RUN",
+                source_ref=(
+                    "cycle-receipt:"
+                    + f"{index:064x}"[-64:]
+                ),
+                anchor=anchor(
+                    f"{(index % 15) + 1:x}"[-1],
+                    seq=sequence,
+                    mono=1000 + index * 10,
+                ),
+                salience=0.5,
+            )
+            episode = append_episode_moment(episode, moment)
+
+        self.assertEqual(episode.moment_count, 129)
+        self.assertEqual(episode.evicted_moment_count, 1)
+        self.assertEqual(len(episode.moments), 128)
+        self.assertEqual(
+            episode.moments[0].anchor.sequence,
+            2,
+        )
+        self.assertEqual(
+            episode.moments[-1].anchor.sequence,
+            129,
+        )
 
     def test_close_is_exact_and_terminal(self):
         episode = self.opened()
