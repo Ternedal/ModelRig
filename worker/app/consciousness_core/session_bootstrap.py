@@ -18,6 +18,7 @@ from .continuity import (
     build_post_wake_continuity_state,
     post_wake_continuity_state_ref,
 )
+from .continuity_reorientation import evaluate_continuity_reorientation
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
@@ -312,6 +313,7 @@ def bootstrap_runtime_session(
     wake_reference: str | None = None
     continuity_state: PostWakeContinuityState | None = None
     continuity_reference: str | None = None
+    wake_attention_salience = 0.96
     if wake is not None:
         if wake.self_id != state.self_id:
             raise SessionBootstrapError("WakeReceipt belongs to another self")
@@ -346,6 +348,9 @@ def bootstrap_runtime_session(
         continuity_reference = post_wake_continuity_state_ref(
             continuity_state
         )
+        wake_attention_salience = evaluate_continuity_reorientation(
+            continuity_state
+        ).attention_salience
 
     state_reference = self_state_ref(state)
     person_reference = active_person_binding_ref(person)
@@ -444,7 +449,7 @@ def bootstrap_runtime_session(
             WorkspaceCandidate(
                 candidate_id=_candidate_id("wake-continuity", wake_reference),
                 kind="perception",
-                salience=0.96,
+                salience=wake_attention_salience,
                 summary=_wake_summary(wake),
                 source_ref=wake_reference,
             )
