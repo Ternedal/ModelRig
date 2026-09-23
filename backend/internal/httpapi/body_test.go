@@ -16,6 +16,7 @@ func TestBodyRoutesRequireBearerBeforeWorker(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/body/active",
 		"/api/v1/body/active/avatar.vrm",
+		"/api/v1/body/active/bodyprint.json",
 		"/api/v1/body/active/thumbnail.png",
 		"/api/v1/body/active/motions/idle.vrma",
 	} {
@@ -45,6 +46,7 @@ func TestBodyRoutesForwardBytesAndHeadersUntouched(t *testing.T) {
 	cases := []struct{ path, want string }{
 		{"/api/v1/body/active", "GET /body/active"},
 		{"/api/v1/body/active/avatar.vrm", "GET /body/active/avatar.vrm"},
+		{"/api/v1/body/active/bodyprint.json", "GET /body/active/bodyprint.json"},
 		{"/api/v1/body/active/thumbnail.png", "GET /body/active/thumbnail.png"},
 		{"/api/v1/body/active/motions/talk.vrma", "GET /body/active/motions/talk.vrma"},
 	}
@@ -79,7 +81,7 @@ func TestBodyRoutesRejectBadMotionNamesAndWritesBeforeWorker(t *testing.T) {
 			t.Fatalf("GET %s: got %d, want 404", path, rec.Code)
 		}
 	}
-	for _, path := range []string{"/api/v1/body/active", "/api/v1/body/active/avatar.vrm"} {
+	for _, path := range []string{"/api/v1/body/active", "/api/v1/body/active/avatar.vrm", "/api/v1/body/active/bodyprint.json"} {
 		if rec := doScheduleRequest(h, http.MethodPost, path, scheduleToken, `{}`); rec.Code == http.StatusOK {
 			t.Fatalf("POST %s must not be routable", path)
 		}

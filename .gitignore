@@ -167,3 +167,9 @@ persons-registry.json
 # is right, the file simply is not source.
 renderers/bodyrig-unity/Assets/BodyRig/Scenes/
 renderers/bodyrig-unity/Assets/BodyRig/Scenes.meta
+
+# Kaliv VR exact-head physical qualification: local build/device evidence.
+/validation/kaliv-vr-quest-latest.json
+/validation/kaliv-vr-quest-latest.json.tmp
+/validation/kaliv-vr-unity-build.log
+/validation/kaliv-vr-quest-logcat.txt

@@ -129,6 +129,7 @@ func (s *server) routes() {
 	// avatar, thumbnail and motions for phone/headset renderers. GET only.
 	s.mux.Handle("GET /api/v1/body/active", s.authMW(http.HandlerFunc(s.handleBodyActive)))
 	s.mux.Handle("GET /api/v1/body/active/avatar.vrm", s.authMW(http.HandlerFunc(s.handleBodyAvatar)))
+	s.mux.Handle("GET /api/v1/body/active/bodyprint.json", s.authMW(http.HandlerFunc(s.handleBodyBodyprint)))
 	s.mux.Handle("GET /api/v1/body/active/thumbnail.png", s.authMW(http.HandlerFunc(s.handleBodyThumbnail)))
 	// ServeMux wildcards must be whole segments: the ".vrma" suffix is part of
 	// the {file} value and is validated in the handler.

@@ -79,8 +79,8 @@ def run_contract() -> None:
         assert item == {"path": relative, "git_blob_sha": sha}
         assert _git_blob_sha(path) == sha
 
-    # Backend seam remains byte-identical to the qualified parent slice.
-    assert _git_blob_sha(SERVER) == "3b202c783b288f77572611ee71e0d732183e5404"
+    # Backend seam remains bound to the currently qualified tracked-source transition.
+    assert _git_blob_sha(SERVER) == "6fac7c61adafb4872fca246fc0319332c482d2e6"
     assert _git_blob_sha(PILOT) == "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
 
     desktop = code_of(DESKTOP)

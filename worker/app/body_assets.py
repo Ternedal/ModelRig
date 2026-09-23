@@ -86,8 +86,10 @@ class ActiveBody:
             "package_sha256": self.stored.receipt.package_sha256,
             "source": self.source,
             "avatar": "/body/active/avatar.vrm",
+            "bodyprint": "/body/active/bodyprint.json",
             "thumbnail": "/body/active/thumbnail.png",
             "motions": {m: f"/body/active/motions/{m}.vrma" for m in motions},
+            "motion_names": motions,
             "payload_sizes": dict(self.stored.inspection.payload_sizes),
         }
 
@@ -176,6 +178,16 @@ def build_body_router() -> APIRouter:
         body = resolve_active_body()
         data = body.member("avatar.vrm")
         return Response(data, media_type=VRM_MEDIA_TYPE, headers=_asset_headers(body, "avatar.vrm"))
+
+    @router.get("/active/bodyprint.json")
+    def bodyprint() -> Response:
+        body = resolve_active_body()
+        data = body.member("bodyprint.json")
+        return Response(
+            data,
+            media_type="application/json",
+            headers=_asset_headers(body, "bodyprint.json"),
+        )
 
     @router.get("/active/thumbnail.png")
     def thumbnail() -> Response:
