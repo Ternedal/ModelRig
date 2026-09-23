@@ -27,6 +27,9 @@ from .consciousness_core.autonomous_scheduler import (
     compose_autonomous_scheduler_lifespan,
 )
 from .consciousness_core.production_lifecycle import production_sleep_runtime_factory
+from .consciousness_core.self_state_checkpoint_lifecycle import (
+    compose_shutdown_self_state_checkpoint_lifespan,
+)
 from .consciousness_core.session_lifecycle import (
     compose_cognitive_session_lifespan,
     production_cognitive_session_factory,
@@ -148,17 +151,19 @@ mount_file_capabilities(fastapi_app)
 # around the existing scheduler lifespan so process shutdown deterministically
 # closes both optional substrates without transferring lifecycle ownership.
 fastapi_app.router.lifespan_context = compose_autonomous_scheduler_lifespan(
-    compose_cognitive_session_lifespan(
-        compose_supervisor_lifecycle_lifespan(
-            compose_sleep_lifecycle_lifespan(
-                compose_memory4_write_lifespan(
-                    compose_memory4_context_lifespan(scheduler_lifespan)
+    compose_shutdown_self_state_checkpoint_lifespan(
+        compose_cognitive_session_lifespan(
+            compose_supervisor_lifecycle_lifespan(
+                compose_sleep_lifecycle_lifespan(
+                    compose_memory4_write_lifespan(
+                        compose_memory4_context_lifespan(scheduler_lifespan)
+                    ),
+                    production_sleep_runtime_factory,
                 ),
-                production_sleep_runtime_factory,
+                production_supervisor_bridge_factory,
             ),
-            production_supervisor_bridge_factory,
-        ),
-        production_cognitive_session_factory,
+            production_cognitive_session_factory,
+        )
     )
 )
 app = harden(fastapi_app)
