@@ -28,6 +28,11 @@ from .cycle import (
     workspace_ref,
     world_state_ref,
 )
+from .metacognition import OutcomeObservation, PredictionRecord
+from .prediction_attention import (
+    PredictionOutcomeAdmissionResult,
+    plan_prediction_outcome,
+)
 from .production_lifecycle import TrustedRuntimeClock
 from .response_guidance import (
     ResponseGuidanceEnvelope,
@@ -275,6 +280,45 @@ class ProductionCognitiveSession:
     def plan(self) -> tuple[Any, SupervisorPlan]:
         self._require_open()
         return self._bridge.plan()
+
+    def submit_prediction_outcome(
+        self,
+        *,
+        prediction: PredictionRecord,
+        outcome: OutcomeObservation,
+    ) -> PredictionOutcomeAdmissionResult:
+        """Resolve one structured prediction outcome and admit mismatch attention."""
+        self._require_open()
+        if not isinstance(prediction, PredictionRecord):
+            raise TypeError("prediction must be PredictionRecord")
+        if not isinstance(outcome, OutcomeObservation):
+            raise TypeError("outcome must be OutcomeObservation")
+
+        plan = plan_prediction_outcome(
+            prediction=prediction,
+            outcome=outcome,
+        )
+        before_revision = self._bridge.state.revision
+        if plan.cognition_event is not None:
+            self._bridge.submit(plan.cognition_event)
+        after_revision = self._bridge.state.revision
+
+        return PredictionOutcomeAdmissionResult(
+            schema=(
+                "kaliv-consciousness-core/"
+                "prediction-outcome-admission/v1"
+            ),
+            plan=plan,
+            cognition_event_admitted=plan.cognition_event is not None,
+            supervisor_revision_before=before_revision,
+            supervisor_revision_after=after_revision,
+            model_calls=0,
+            self_state_store_write_applied=False,
+            durable_memory_write_authority=False,
+            execution_authority=False,
+            scheduling_authority=False,
+            production_activation=False,
+        )
 
     def _submit_world_evidence_with_kind(
         self,
