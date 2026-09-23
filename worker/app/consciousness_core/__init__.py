@@ -303,13 +303,17 @@ from .policy_checkpoint import (
 )
 from .sleep_lifecycle import (
     SLEEP_LIFECYCLE_FLAG,
+    UNPLANNED_LIVENESS_FLAG,
+    UNPLANNED_LIVENESS_STATE_ENV,
     SleepBinding,
     SleepLifecycleError,
     SleepLifecycleRuntime,
     SleepStateStore,
     SleepWakeAcknowledgement,
     compose_sleep_lifecycle_lifespan,
+    production_unplanned_liveness_store_factory,
     sleep_lifecycle_enabled,
+    unplanned_liveness_enabled,
 )
 from .sleep import (
     SleepContractError,
@@ -410,6 +414,10 @@ __all__ = [
     "RuntimeLivenessStore",
     "RuntimeLivenessError",
     "wake_from_unplanned_restart",
+    "production_unplanned_liveness_store_factory",
+    "unplanned_liveness_enabled",
+    "UNPLANNED_LIVENESS_STATE_ENV",
+    "UNPLANNED_LIVENESS_FLAG",
     "SleepWakeAcknowledgement",
     "turn_checkpoint_enabled",
     "TURN_CHECKPOINT_FLAG",

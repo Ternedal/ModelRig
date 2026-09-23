@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from .liveness import RuntimeLivenessWitness, runtime_liveness_witness_ref
 from .temporal import TemporalAnchor, TemporalContractError, relate_anchors
 
 NonEmptyRef=Annotated[str,Field(min_length=1,max_length=256)]
@@ -77,6 +78,10 @@ class WakeReceipt(StrictModel):
     offline_duration_ms: NonNegativeInt|None
     duration_confidence: UnitInterval
     duration_known: bool
+    last_known_alive_witness_ref: NonEmptyRef|None=None
+    last_known_alive_anchor_ref: NonEmptyRef|None=None
+    offline_duration_upper_bound_ms: NonNegativeInt|None=None
+    offline_duration_upper_bound_confidence: UnitInterval=0.0
     continuity_preserved: Literal[True]
     cognition_during_gap: Literal[False]
     wake_state: WakeState
@@ -97,6 +102,46 @@ class WakeReceipt(StrictModel):
         ):
             raise ValueError(
                 "wake durable SelfState ref/revision must be both present or absent"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def exact_liveness_bound(self) -> "WakeReceipt":
+        refs_present = (
+            self.last_known_alive_witness_ref is not None,
+            self.last_known_alive_anchor_ref is not None,
+        )
+        if refs_present[0] != refs_present[1]:
+            raise ValueError(
+                "wake liveness witness/anchor refs must be both present or absent"
+            )
+        if self.dormancy_kind != "UNPLANNED_DORMANCY":
+            if (
+                any(refs_present)
+                or self.offline_duration_upper_bound_ms is not None
+                or self.offline_duration_upper_bound_confidence != 0.0
+            ):
+                raise ValueError(
+                    "planned sleep cannot carry unplanned liveness evidence"
+                )
+            return self
+
+        if self.offline_duration_upper_bound_ms is not None:
+            if not all(refs_present):
+                raise ValueError(
+                    "unplanned duration upper bound requires liveness evidence"
+                )
+            if self.offline_duration_upper_bound_confidence <= 0.0:
+                raise ValueError(
+                    "duration upper bound requires positive confidence"
+                )
+            if self.duration_known or self.offline_duration_ms is not None:
+                raise ValueError(
+                    "duration upper bound cannot become exact offline duration"
+                )
+        elif self.offline_duration_upper_bound_confidence != 0.0:
+            raise ValueError(
+                "duration upper-bound confidence requires an upper bound"
             )
         return self
 
@@ -250,19 +295,66 @@ def wake_from_unplanned_restart(
     self_id: str,
     person_revision: str,
     source_ref: str,
+    liveness_witness: RuntimeLivenessWitness | Mapping[str, Any] | None = None,
 ) -> WakeReceipt:
-    """Represent a crash/unclean restart without inventing outage duration."""
+    """Represent an unclean restart without inventing a crash timestamp."""
     try:
         wake = (
             wake_anchor
             if isinstance(wake_anchor, TemporalAnchor)
             else TemporalAnchor.model_validate(wake_anchor)
         )
+        witness = (
+            None
+            if liveness_witness is None
+            else liveness_witness
+            if isinstance(liveness_witness, RuntimeLivenessWitness)
+            else RuntimeLivenessWitness.model_validate(liveness_witness)
+        )
     except ValidationError as exc:
-        raise SleepContractError("invalid unplanned wake anchor") from exc
+        raise SleepContractError("invalid unplanned wake input") from exc
 
     if not isinstance(source_ref, str) or not source_ref.strip():
         raise SleepContractError("unplanned wake source_ref is required")
+
+    witness_ref = None
+    alive_anchor_ref = None
+    upper_bound = None
+    upper_bound_confidence = 0.0
+    if witness is not None:
+        if witness.self_id != self_id:
+            raise SleepContractError(
+                "liveness witness belongs to another self"
+            )
+        if witness.person_revision != person_revision:
+            raise SleepContractError(
+                "liveness witness belongs to another Person Revision"
+            )
+        witness_ref = runtime_liveness_witness_ref(witness)
+        alive_anchor_ref = "temporal-anchor:" + witness.anchor.anchor_id
+
+        # A last-known-alive witness can bound the possible outage window but
+        # cannot identify the crash instant. Across runtime epochs, only a
+        # forward trusted wall clock may provide the bound.
+        wall_clock_rolled_back = (
+            witness.anchor.runtime_epoch_id != wake.runtime_epoch_id
+            and witness.anchor.wall_time_unix_ms is not None
+            and wake.wall_time_unix_ms is not None
+            and wake.wall_time_unix_ms
+            < witness.anchor.wall_time_unix_ms
+        )
+        if not wall_clock_rolled_back:
+            try:
+                relation = relate_anchors(witness.anchor, wake)
+            except TemporalContractError:
+                relation = None
+            if (
+                relation is not None
+                and relation.relation in {"AFTER", "SAME_WINDOW"}
+                and relation.elapsed_ms is not None
+            ):
+                upper_bound = relation.elapsed_ms
+                upper_bound_confidence = relation.confidence
 
     seed = {
         "self_id": self_id,
@@ -270,6 +362,7 @@ def wake_from_unplanned_restart(
         "wake": wake.anchor_id,
         "source_ref": source_ref,
         "kind": "UNPLANNED_DORMANCY",
+        "liveness_witness_ref": witness_ref,
     }
     return WakeReceipt(
         schema="kaliv-consciousness-core/wake-receipt/v1",
@@ -285,6 +378,10 @@ def wake_from_unplanned_restart(
         offline_duration_ms=None,
         duration_confidence=0.0,
         duration_known=False,
+        last_known_alive_witness_ref=witness_ref,
+        last_known_alive_anchor_ref=alive_anchor_ref,
+        offline_duration_upper_bound_ms=upper_bound,
+        offline_duration_upper_bound_confidence=upper_bound_confidence,
         continuity_preserved=True,
         cognition_during_gap=False,
         wake_state="WAKING",
