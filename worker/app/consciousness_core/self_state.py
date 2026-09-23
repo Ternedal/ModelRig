@@ -47,6 +47,30 @@ class SelfUncertainty(StrictModel):
     source_refs: Annotated[list[NonEmptyRef], Field(max_length=32)]
 
 
+class SelfStateCheckpointReceipt(StrictModel):
+    schema: Literal["kaliv-consciousness-core/self-state-checkpoint-receipt/v1"]
+    previous_self_state_ref: NonEmptyRef
+    final_self_state_ref: NonEmptyRef
+    transition_state_refs: Annotated[
+        list[NonEmptyRef],
+        Field(min_length=1, max_length=128),
+    ]
+    self_id: Annotated[str, Field(pattern=r"^self-[a-f0-9]{32}$")]
+    person_id: Annotated[str, Field(pattern=r"^person-[a-f0-9]{32}$")]
+    person_revision: Annotated[str, Field(pattern=r"^person-r[0-9]{4,}$")]
+    revision_before: Annotated[int, Field(ge=1, strict=True)]
+    revision_after: Annotated[int, Field(ge=2, strict=True)]
+    transition_count: Annotated[int, Field(ge=1, le=128, strict=True)]
+    atomic_replace_applied: Literal[True]
+    intermediate_history_persisted: Literal[False]
+    self_state_store_write_applied: Literal[True]
+    model_calls: Literal[0]
+    durable_memory_write_authority: Literal[False]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    production_activation: Literal[False]
+
+
 class SelfBootstrapAuthority(StrictModel):
     schema: Literal["kaliv-consciousness-core/self-bootstrap-authority/v1"]
     self_id: Annotated[str, Field(pattern=r"^self-[a-f0-9]{32}$")]
@@ -93,6 +117,10 @@ def _canonical_json(value: Any) -> bytes:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
+
+
+def _self_state_ref(state: PersistentSelfState) -> str:
+    return "self-state:" + _digest(state.model_dump(mode="json"))
 
 
 def _unique(values: list[str], limit: int) -> list[str]:
@@ -306,6 +334,88 @@ class SelfStateStore:
             ):
                 raise SelfStateError("rebind authority does not match transition")
         self._write_atomic(state)
+
+    def write_chain(
+        self,
+        states: list[PersistentSelfState | Mapping[str, Any]],
+    ) -> SelfStateCheckpointReceipt:
+        """Atomically checkpoint a complete same-identity +1 revision chain.
+
+        Intermediate states prove revision continuity but are not stored as
+        history. Exactly one atomic replacement writes the final state.
+        """
+        if not isinstance(states, list):
+            raise SelfStateError("SelfState checkpoint chain must be a list")
+        if not states:
+            raise SelfStateError("SelfState checkpoint chain cannot be empty")
+        if len(states) > 128:
+            raise SelfStateError("SelfState checkpoint chain exceeds bound")
+
+        try:
+            parsed = [
+                item
+                if isinstance(item, PersistentSelfState)
+                else PersistentSelfState.model_validate(item)
+                for item in states
+            ]
+        except ValidationError as exc:
+            raise SelfStateError(
+                "invalid SelfState checkpoint chain"
+            ) from exc
+
+        current = self.read()
+        if current is None:
+            raise SelfStateError(
+                "cannot checkpoint missing SelfState"
+            )
+
+        previous = current
+        refs: list[str] = []
+        for item in parsed:
+            if item.revision != previous.revision + 1:
+                raise SelfStateError(
+                    "SelfState checkpoint revision must advance exactly by one"
+                )
+            if item.self_id != current.self_id:
+                raise SelfStateError(
+                    "SelfState checkpoint cannot change self identity"
+                )
+            if item.person_id != current.person_id:
+                raise SelfStateError(
+                    "SelfState checkpoint cannot change person identity"
+                )
+            if item.person_revision != current.person_revision:
+                raise SelfStateError(
+                    "SelfState checkpoint cannot change Person Revision"
+                )
+            refs.append(_self_state_ref(item))
+            previous = item
+
+        final = parsed[-1]
+        self._write_atomic(final)
+        return SelfStateCheckpointReceipt(
+            schema=(
+                "kaliv-consciousness-core/"
+                "self-state-checkpoint-receipt/v1"
+            ),
+            previous_self_state_ref=_self_state_ref(current),
+            final_self_state_ref=_self_state_ref(final),
+            transition_state_refs=refs,
+            self_id=current.self_id,
+            person_id=current.person_id,
+            person_revision=current.person_revision,
+            revision_before=current.revision,
+            revision_after=final.revision,
+            transition_count=len(parsed),
+            atomic_replace_applied=True,
+            intermediate_history_persisted=False,
+            self_state_store_write_applied=True,
+            model_calls=0,
+            durable_memory_write_authority=False,
+            execution_authority=False,
+            scheduling_authority=False,
+            production_activation=False,
+        )
 
     def _write_atomic(self, state: PersistentSelfState) -> None:
         payload = state.model_dump(mode="json")
