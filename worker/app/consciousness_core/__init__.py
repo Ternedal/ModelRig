@@ -6,10 +6,12 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 
 from .contracts import CognitiveProfile, PersonalitySnapshot, ThoughtProposal, ThoughtRequest
 from .autonomous_scheduler import (
+    AUTONOMOUS_CHECKPOINT_FLAG,
     AUTONOMOUS_SCHEDULER_FLAG,
     AutonomousSchedulerBridgeError,
     AutonomousSchedulerBridgeStatus,
     ScheduledAutonomousCognitionBridge,
+    autonomous_checkpoint_enabled,
     autonomous_scheduler_enabled,
     compose_autonomous_scheduler_lifespan,
     production_autonomous_scheduler_bridge_factory,
@@ -371,6 +373,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "autonomous_checkpoint_enabled",
+    "AUTONOMOUS_CHECKPOINT_FLAG",
     "production_policy_checkpoint_service_factory",
     "policy_checkpoint_service_enabled",
     "compose_policy_checkpoint_service_lifespan",
