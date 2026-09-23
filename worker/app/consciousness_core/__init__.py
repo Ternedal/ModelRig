@@ -242,6 +242,13 @@ from .session_lifecycle import (
     session_bootstrap_receipt_ref,
     transition_receipt_ref,
 )
+from .self_state_checkpoint_lifecycle import (
+    SELF_STATE_CHECKPOINT_FLAG,
+    ShutdownSelfStateCheckpointError,
+    compose_shutdown_self_state_checkpoint_lifespan,
+    production_shutdown_checkpoint_factory,
+    shutdown_self_state_checkpoint_enabled,
+)
 from .self_state_checkpoint_runtime import (
     ExplicitSelfStateCheckpointCoordinator,
     RuntimeSelfStateCheckpointError,
@@ -344,6 +351,11 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "shutdown_self_state_checkpoint_enabled",
+    "production_shutdown_checkpoint_factory",
+    "compose_shutdown_self_state_checkpoint_lifespan",
+    "ShutdownSelfStateCheckpointError",
+    "SELF_STATE_CHECKPOINT_FLAG",
     "self_state_checkpoint_receipt_ref",
     "runtime_checkpoint_plan_ref",
     "RuntimeSelfStateCheckpointResult",
