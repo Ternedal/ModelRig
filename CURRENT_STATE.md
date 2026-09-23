@@ -244,6 +244,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_autonomous_trigger_policy.py`
 - `tests/worker_consciousness_core_c13b_wiring.py`
 - `tests/worker_consciousness_core_checkpoint_lifecycle.py`
+- `tests/worker_consciousness_core_checkpoint_liveness.py`
 - `tests/worker_consciousness_core_checkpoint_pressure.py`
 - `tests/worker_consciousness_core_checkpoint_runtime.py`
 - `tests/worker_consciousness_core_consolidation.py`
