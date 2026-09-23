@@ -296,6 +296,7 @@ from .sleep import (
     WakeReceipt,
     prepare_sleep,
     wake_from_sleep,
+    wake_from_unplanned_restart,
 )
 from .supervisor import (
     CognitionEvent,
@@ -378,6 +379,7 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "wake_from_unplanned_restart",
     "SleepWakeAcknowledgement",
     "turn_checkpoint_enabled",
     "TURN_CHECKPOINT_FLAG",
