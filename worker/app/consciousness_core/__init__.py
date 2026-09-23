@@ -127,6 +127,17 @@ from .self_state import (
     rebind_person_revision,
     verify_active_person,
 )
+from .session_lifecycle import (
+    CognitiveSessionLifecycleError,
+    CognitiveSessionStep,
+    LiveCognitiveSessionState,
+    ProductionCognitiveSession,
+    compose_cognitive_session_lifespan,
+    live_state_from_bootstrap,
+    production_cognitive_session_factory,
+    session_bootstrap_receipt_ref,
+    transition_receipt_ref,
+)
 from .sleep_lifecycle import (
     SLEEP_LIFECYCLE_FLAG,
     SleepBinding,
@@ -198,6 +209,15 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "transition_receipt_ref",
+    "session_bootstrap_receipt_ref",
+    "production_cognitive_session_factory",
+    "live_state_from_bootstrap",
+    "compose_cognitive_session_lifespan",
+    "ProductionCognitiveSession",
+    "LiveCognitiveSessionState",
+    "CognitiveSessionStep",
+    "CognitiveSessionLifecycleError",
     "personality_snapshot_ref",
     "bootstrap_runtime_session",
     "active_person_binding_ref",
