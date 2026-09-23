@@ -288,6 +288,7 @@ class SleepLifecycleRuntime:
         self._store_factory = store_factory
         self._store: SleepStateStore | None = None
         self.wake_receipt: WakeReceipt | None = None
+        self.wake_acknowledgement: SleepWakeAcknowledgement | None = None
         self.last_error: str | None = None
         self.configured = False
 
@@ -385,11 +386,30 @@ def compose_sleep_lifecycle_lifespan(inner_lifespan, runtime_factory):
                 raise TypeError("runtime_factory must return SleepLifecycleRuntime")
             started = runtime.start()
             if started:
-                app.state.consciousness_sleep_wake_receipt = runtime.wake_receipt
+                app.state.consciousness_sleep_runtime = runtime
+                if runtime.wake_receipt is not None:
+                    app.state.consciousness_sleep_wake_receipt = (
+                        runtime.wake_receipt
+                    )
             try:
                 yield
             finally:
                 runtime.close()
+                if started:
+                    try:
+                        delattr(
+                            app.state,
+                            "consciousness_sleep_wake_receipt",
+                        )
+                    except AttributeError:
+                        pass
+                    try:
+                        delattr(
+                            app.state,
+                            "consciousness_sleep_runtime",
+                        )
+                    except AttributeError:
+                        pass
 
     composed.__wrapped__ = authority_owner
     return composed
