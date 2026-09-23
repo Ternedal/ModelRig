@@ -101,11 +101,13 @@ from .embodiment import (
     normalize_embodiment_state,
 )
 from .exact_event_step_api import (
+    EVENT_CHECKPOINT_FLAG,
     EVENT_STEP_FLAG,
     EVENT_STEP_PREFIX,
     ExactEventStepBody,
     ExactEventStepReceipt,
     build_consciousness_exact_event_step_router,
+    exact_event_checkpoint_enabled,
     exact_event_step_enabled,
     mount_consciousness_exact_event_step,
 )
@@ -373,6 +375,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "exact_event_checkpoint_enabled",
+    "EVENT_CHECKPOINT_FLAG",
     "autonomous_checkpoint_enabled",
     "AUTONOMOUS_CHECKPOINT_FLAG",
     "production_policy_checkpoint_service_factory",
