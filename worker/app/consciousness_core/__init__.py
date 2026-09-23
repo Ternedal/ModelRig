@@ -169,6 +169,15 @@ from .profile_source import (
     cognitive_profile_config_path,
     load_cognitive_profile,
 )
+from .prediction_attention import (
+    PredictionAttentionError,
+    PredictionOutcomeAdmissionResult,
+    PredictionOutcomePlan,
+    outcome_observation_ref,
+    plan_prediction_outcome,
+    prediction_attention_ref,
+    prediction_resolution_ref,
+)
 from .production_lifecycle import (
     TrustedRuntimeClock,
     authoritative_sleep_binding,
@@ -304,6 +313,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "prediction_resolution_ref",
+    "prediction_attention_ref",
+    "outcome_observation_ref",
+    "plan_prediction_outcome",
+    "PredictionOutcomePlan",
+    "PredictionOutcomeAdmissionResult",
+    "PredictionAttentionError",
     "wake_receipt_ref",
     "wake_followup_event_id",
     "build_wake_followup_event",
