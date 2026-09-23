@@ -235,14 +235,23 @@ def _fresh_cycle_id(
 
 
 def _wake_summary(wake: WakeReceipt) -> str:
-    if wake.duration_known and wake.offline_duration_ms is not None:
-        duration = f"{wake.offline_duration_ms} ms"
-    else:
-        duration = "unknown"
+    duration = (
+        f"{wake.offline_duration_ms} ms"
+        if wake.duration_known and wake.offline_duration_ms is not None
+        else "unknown"
+    )
+    liveness = ""
+    if wake.offline_duration_upper_bound_ms is not None:
+        liveness = (
+            " Last-known-alive evidence bounds the possible offline duration "
+            f"to at most {wake.offline_duration_upper_bound_ms} ms; this is "
+            "not a crash timestamp."
+        )
     return (
-        f"Runtime resumed after {wake.dormancy_kind}; offline duration is "
-        f"{duration}; the verified wake receipt states that cognition did not "
-        "continue during the gap."
+        f"Wake reorientation after {wake.dormancy_kind}; offline duration is "
+        f"{duration}; verified continuity states that cognition did not "
+        "continue during the offline gap."
+        + liveness
     )
 
 
