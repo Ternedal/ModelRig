@@ -298,6 +298,43 @@ class SleepLifecycleRuntime:
         self.last_error: str | None = None
         self.configured = False
 
+    def acknowledge_wake(
+        self,
+        wake: WakeReceipt | None = None,
+    ) -> bool:
+        """Consume only this runtime's exact planned wake receipt once."""
+        candidate = self.wake_receipt if wake is None else wake
+        if candidate is None:
+            return False
+        if not isinstance(candidate, WakeReceipt):
+            raise SleepLifecycleError(
+                "runtime wake acknowledgement requires WakeReceipt"
+            )
+        if (
+            self.wake_receipt is not None
+            and candidate != self.wake_receipt
+        ):
+            raise SleepLifecycleError(
+                "wake receipt does not match this sleep runtime"
+            )
+
+        # C28-C unplanned dormancy has no pending planned SleepRecord.
+        # Its acknowledgement marker must survive until the next clean
+        # shutdown writes a new SleepRecord.
+        if candidate.sleep_id is None:
+            self.last_error = None
+            return False
+
+        if not self.configured or self._store is None:
+            raise SleepLifecycleError(
+                "sleep runtime is not started for wake acknowledgement"
+            )
+
+        acknowledgement = self._store.acknowledge_wake(candidate)
+        self.wake_acknowledgement = acknowledgement
+        self.last_error = None
+        return True
+
     def start(self) -> bool:
         try:
             enabled = bool(self._enabled_fn())
