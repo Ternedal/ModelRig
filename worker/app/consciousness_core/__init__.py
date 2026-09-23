@@ -192,6 +192,14 @@ from .temporal import (
     relate_anchors,
     temporal_experience_state,
 )
+from .world_reducer import (
+    WorldEvidenceEvent,
+    WorldReducerError,
+    WorldTransitionReceipt,
+    WorldTransitionResult,
+    reduce_world_evidence,
+    world_evidence_event_ref,
+)
 from .wake_cycle import (
     WakeCycleError,
     WakeFirstCycleCoordinator,
@@ -209,6 +217,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "world_evidence_event_ref",
+    "reduce_world_evidence",
+    "WorldTransitionResult",
+    "WorldTransitionReceipt",
+    "WorldReducerError",
+    "WorldEvidenceEvent",
     "transition_receipt_ref",
     "session_bootstrap_receipt_ref",
     "production_cognitive_session_factory",
