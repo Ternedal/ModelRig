@@ -31,6 +31,11 @@ from .continuity_recovery import (
     ContinuityRecoveryCompletionReceipt,
     build_continuity_recovery_completion,
 )
+from .continuity_orientation import (
+    ContinuityOrientationState,
+    complete_continuity_orientation,
+    open_continuity_orientation,
+)
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
@@ -258,6 +263,18 @@ class ProductionCognitiveSession:
             else None
         )
         self._recovery_completion = None
+        self._continuity_orientation = None
+        self._continuity_orientation = (
+            open_continuity_orientation(
+                continuity_state=self._continuity_state,
+                window=self._continuity_window,
+            )
+            if (
+                self._continuity_state is not None
+                and self._continuity_window is not None
+            )
+            else None
+        )
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -301,6 +318,13 @@ class ProductionCognitiveSession:
     ) -> ContinuityRecoveryCompletionReceipt | None:
         """Process-local proof that wake reorientation completed."""
         return self._recovery_completion
+
+    @property
+    def continuity_orientation(
+        self,
+    ) -> ContinuityOrientationState | None:
+        """Core-owned process-local wake recovery phase."""
+        return self._continuity_orientation
 
     @property
     def supervisor_state(self):
@@ -885,6 +909,7 @@ class ProductionCognitiveSession:
         )
         next_window = self._continuity_window
         next_recovery = self._recovery_completion
+        next_orientation = self._continuity_orientation
         if (
             next_window is not None
             and next_window.state == "ACTIVE"
@@ -904,6 +929,16 @@ class ProductionCognitiveSession:
                 expected_self_id=next_state.self_id,
                 expected_person_revision=next_state.person_revision,
             )
+            if next_orientation is None:
+                raise CognitiveSessionLifecycleError(
+                    "active continuity window has no orientation state"
+                )
+            next_orientation = complete_continuity_orientation(
+                previous=next_orientation,
+                continuity_state=self._continuity_state,
+                window=next_window,
+                completion=next_recovery,
+            )
 
         next_live = LiveCognitiveSessionState(
             schema="kaliv-consciousness-core/live-session-state/v1",
@@ -919,6 +954,7 @@ class ProductionCognitiveSession:
         self._live = next_live
         self._continuity_window = next_window
         self._recovery_completion = next_recovery
+        self._continuity_orientation = next_orientation
         # A successful RUN advances the cognitive moment. Any older
         # unconsumed guidance is replaced, including by None when this cycle has
         # no unambiguous outward response intent. WAIT/IDLE returned above and
