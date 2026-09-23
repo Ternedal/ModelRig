@@ -75,6 +75,20 @@ from .runtime import (
     compose_runtime,
     enabled,
 )
+from .temporal import (
+    ClockSample,
+    DeadlineState,
+    TemporalAnchor,
+    TemporalContractError,
+    TemporalExperienceState,
+    TemporalRelation,
+    TemporalState,
+    anchor_from_clock,
+    build_temporal_state,
+    deadline_state,
+    relate_anchors,
+    temporal_experience_state,
+)
 from .thought_engine import (
     OllamaThoughtEngine,
     ThoughtEngine,
@@ -83,6 +97,18 @@ from .thought_engine import (
 
 __all__ = [
     "CONSCIOUSNESS_CORE_FLAG",
+    "temporal_experience_state",
+    "relate_anchors",
+    "deadline_state",
+    "build_temporal_state",
+    "anchor_from_clock",
+    "TemporalState",
+    "TemporalRelation",
+    "TemporalExperienceState",
+    "TemporalContractError",
+    "TemporalAnchor",
+    "DeadlineState",
+    "ClockSample",
     "ConsolidationCandidate",
     "ConsolidationContractError",
     "ConsolidationEvidence",
