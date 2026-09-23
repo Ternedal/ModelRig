@@ -72,6 +72,12 @@ from .continuity_horizon import (
     consume_continuity_reorientation_window,
     open_continuity_reorientation_window,
 )
+from .continuity_recovery import (
+    ContinuityRecoveryCompletionReceipt,
+    ContinuityRecoveryError,
+    build_continuity_recovery_completion,
+    continuity_recovery_completion_ref,
+)
 from .continuity_reorientation import (
     DEFAULT_CONTINUITY_REORIENTATION_POLICY,
     ContinuityReorientationDecision,
@@ -425,6 +431,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "continuity_recovery_completion_ref",
+    "build_continuity_recovery_completion",
+    "ContinuityRecoveryError",
+    "ContinuityRecoveryCompletionReceipt",
     "consume_continuity_reorientation_window",
     "open_continuity_reorientation_window",
     "ContinuityReorientationWindow",
