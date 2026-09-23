@@ -159,6 +159,14 @@ from .exact_event_step_api import (
     exact_event_step_enabled,
     mount_consciousness_exact_event_step,
 )
+from .episode_boundary import (
+    EpisodeBoundaryError,
+    EpisodeBoundaryPolicyDecision,
+    EpisodeBoundarySignal,
+    build_episode_boundary_signal,
+    episode_boundary_signal_ref,
+    evaluate_episode_boundary,
+)
 from .episode_context import (
     EpisodeContextError,
     EpisodeContextMoment,
@@ -464,6 +472,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "evaluate_episode_boundary",
+    "episode_boundary_signal_ref",
+    "build_episode_boundary_signal",
+    "EpisodeBoundarySignal",
+    "EpisodeBoundaryPolicyDecision",
+    "EpisodeBoundaryError",
     "project_episode_context",
     "EpisodeContextProjection",
     "EpisodeContextMoment",
