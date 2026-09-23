@@ -147,6 +147,16 @@ from .temporal import (
     relate_anchors,
     temporal_experience_state,
 )
+from .wake_cycle import (
+    WakeCycleError,
+    WakeFirstCycleCoordinator,
+    WakeFirstCycleReceipt,
+    WakeFirstCycleResult,
+    WakeOrientationReceipt,
+    WakeOrientationResult,
+    build_wake_orientation,
+    wake_receipt_ref,
+)
 from .thought_engine import (
     OllamaThoughtEngine,
     ThoughtEngine,
@@ -154,6 +164,14 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "wake_receipt_ref",
+    "build_wake_orientation",
+    "WakeOrientationResult",
+    "WakeOrientationReceipt",
+    "WakeFirstCycleResult",
+    "WakeFirstCycleReceipt",
+    "WakeFirstCycleCoordinator",
+    "WakeCycleError",
     "reduce_post_cycle",
     "PostCycleReductionResult",
     "PostCycleReductionError",
