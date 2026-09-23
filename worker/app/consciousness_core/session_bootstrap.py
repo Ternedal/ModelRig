@@ -306,6 +306,15 @@ def bootstrap_runtime_session(
             raise SessionBootstrapError(
                 "WakeReceipt may not claim cognition during the offline gap"
             )
+        if wake.durable_self_state_revision is not None:
+            if wake.durable_self_state_revision != state.revision:
+                raise SessionBootstrapError(
+                    "WakeReceipt durable SelfState revision does not match current state"
+                )
+            if wake.durable_self_state_ref != self_state_ref(state):
+                raise SessionBootstrapError(
+                    "WakeReceipt durable SelfState ref does not match current state"
+                )
         wake_reference = _wake_receipt_ref(wake)
 
     state_reference = self_state_ref(state)
