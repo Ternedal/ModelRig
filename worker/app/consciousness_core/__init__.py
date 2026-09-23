@@ -5,6 +5,19 @@ model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
 from .contracts import CognitiveProfile, ThoughtProposal, ThoughtRequest
+from .goals import (
+    Agent3IntentHandoff,
+    GoalAdmissionEvidence,
+    GoalCandidate,
+    GoalContractError,
+    GoalRecord,
+    IntentionRecord,
+    admit_goal,
+    build_agent3_handoff,
+    select_intention,
+    select_next_goal,
+    transition_goal,
+)
 from .embodiment import (
     EmbodimentContractError,
     EmbodimentObservation,
@@ -73,7 +86,13 @@ __all__ = [
     "PerformedBodyStateRef",
     "SemanticBodyIntent",
     "ExperienceMemoryError",
+    "Agent3IntentHandoff",
+    "GoalAdmissionEvidence",
+    "GoalCandidate",
+    "GoalContractError",
+    "GoalRecord",
     "IdentityTrait",
+    "IntentionRecord",
     "Memory4ExperienceBridge",
     "MemoryContextSnapshot",
     "MemoryDurableReceiptRef",
@@ -98,7 +117,9 @@ __all__ = [
     "ThoughtProposal",
     "ThoughtRequest",
     "compose_runtime",
+    "admit_goal",
     "apply_resolution",
+    "build_agent3_handoff",
     "enabled",
     "infer_embodiment_state",
     "initial_metacognitive_state",
@@ -107,5 +128,8 @@ __all__ = [
     "prediction_from_proposal",
     "resolve_personality_model",
     "resolve_personality_state",
+    "select_intention",
+    "select_next_goal",
+    "transition_goal",
     "resolve_prediction",
 ]
