@@ -113,6 +113,15 @@ from .personality import (
     resolve_personality_model,
     resolve_personality_state,
 )
+from .memory_recall_attention import (
+    MEMORY_RECALL_SALIENCE,
+    MemoryRecallAdmissionResult,
+    MemoryRecallAttentionError,
+    MemoryRecallPlan,
+    memory_context_snapshot_ref,
+    memory_recall_snapshot_has_items,
+    plan_memory_recall,
+)
 from .metacognition import (
     MetacognitionContractError,
     MetacognitiveState,
@@ -313,6 +322,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "plan_memory_recall",
+    "memory_recall_snapshot_has_items",
+    "memory_context_snapshot_ref",
+    "MemoryRecallPlan",
+    "MemoryRecallAttentionError",
+    "MemoryRecallAdmissionResult",
+    "MEMORY_RECALL_SALIENCE",
     "prediction_resolution_ref",
     "prediction_attention_ref",
     "outcome_observation_ref",
