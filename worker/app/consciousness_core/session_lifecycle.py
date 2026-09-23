@@ -979,6 +979,7 @@ class ProductionCognitiveSession:
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=active_continuity,
+            experience_episode=self._experience_episode,
             retired_continuity_state=retired_continuity_state,
             retired_continuity_orientation=retired_continuity_orientation,
             required_event_id=required_event_id,
