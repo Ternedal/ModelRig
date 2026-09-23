@@ -18,6 +18,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .. import paths as _paths
+from .liveness import RuntimeLivenessStore
 from .sleep import (
     SleepRecord,
     WakeReceipt,
@@ -30,6 +31,11 @@ from .temporal import TemporalAnchor
 SLEEP_LIFECYCLE_FLAG = "KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED"
 SLEEP_STATE_ENV = "KALIV_CONSCIOUSNESS_SLEEP_STATE"
 _SLEEP_STATE_DEFAULT = "./kaliv-consciousness-sleep.json"
+UNPLANNED_LIVENESS_FLAG = (
+    "KALIV_CONSCIOUSNESS_UNPLANNED_LIVENESS_ENABLED"
+)
+UNPLANNED_LIVENESS_STATE_ENV = "KALIV_CONSCIOUSNESS_LIVENESS_STATE"
+_UNPLANNED_LIVENESS_STATE_DEFAULT = "./kaliv-consciousness-liveness.json"
 
 NonEmptyRef = Annotated[str, Field(min_length=1, max_length=256)]
 
@@ -92,6 +98,25 @@ class SleepWakeAcknowledgement(StrictModel):
 
 def sleep_lifecycle_enabled() -> bool:
     return os.getenv(SLEEP_LIFECYCLE_FLAG, "").strip() == "1"
+
+
+def unplanned_liveness_enabled() -> bool:
+    """Only exact string 1 enables C29-D startup liveness evidence."""
+    return (
+        os.getenv(
+            "KALIV_CONSCIOUSNESS_UNPLANNED_LIVENESS_ENABLED",
+            "0",
+        )
+        == "1"
+    )
+
+
+def production_unplanned_liveness_store_factory() -> RuntimeLivenessStore:
+    resolved = _paths.resolve(
+        _UNPLANNED_LIVENESS_STATE_DEFAULT,
+        env=UNPLANNED_LIVENESS_STATE_ENV,
+    )
+    return RuntimeLivenessStore(resolved)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -275,6 +300,7 @@ class SleepStateStore:
 BindingProvider = Callable[[], SleepBinding | None]
 AnchorProvider = Callable[[str], TemporalAnchor]
 StoreFactory = Callable[[], SleepStateStore]
+LivenessStoreFactory = Callable[[], RuntimeLivenessStore]
 
 
 class SleepLifecycleRuntime:
@@ -287,11 +313,21 @@ class SleepLifecycleRuntime:
         binding_provider: BindingProvider,
         anchor_provider: AnchorProvider,
         store_factory: StoreFactory = SleepStateStore,
+        unplanned_liveness_enabled_fn: Callable[
+            [], bool
+        ] = unplanned_liveness_enabled,
+        liveness_store_factory: LivenessStoreFactory = (
+            production_unplanned_liveness_store_factory
+        ),
     ) -> None:
         self._enabled_fn = enabled_fn
         self._binding_provider = binding_provider
         self._anchor_provider = anchor_provider
         self._store_factory = store_factory
+        self._unplanned_liveness_enabled_fn = (
+            unplanned_liveness_enabled_fn
+        )
+        self._liveness_store_factory = liveness_store_factory
         self._store: SleepStateStore | None = None
         self.wake_receipt: WakeReceipt | None = None
         self.wake_acknowledgement: SleepWakeAcknowledgement | None = None
@@ -373,6 +409,68 @@ class SleepLifecycleRuntime:
                 raise SleepLifecycleError(
                     "wake acknowledgement belongs to another Self/Person binding"
                 )
+            try:
+                use_liveness = bool(
+                    self._unplanned_liveness_enabled_fn()
+                )
+            except Exception as exc:
+                raise SleepLifecycleError(
+                    "unplanned-liveness feature flag check failed"
+                ) from exc
+
+            witness = None
+            if use_liveness:
+                try:
+                    liveness_store = self._liveness_store_factory()
+                except Exception as exc:
+                    raise SleepLifecycleError(
+                        "could not construct runtime liveness store"
+                    ) from exc
+                if not isinstance(liveness_store, RuntimeLivenessStore):
+                    raise TypeError(
+                        "liveness_store_factory must return "
+                        "RuntimeLivenessStore"
+                    )
+                try:
+                    witness = liveness_store.read()
+                except Exception as exc:
+                    raise SleepLifecycleError(
+                        "could not read runtime liveness witness"
+                    ) from exc
+
+                if witness is not None:
+                    if (
+                        witness.self_id != binding.self_id
+                        or witness.person_revision
+                        != binding.person_revision
+                    ):
+                        raise SleepLifecycleError(
+                            "runtime liveness witness belongs to another "
+                            "Self/Person binding"
+                        )
+                    if (
+                        binding.durable_self_state_revision is not None
+                    ):
+                        if (
+                            witness.durable_self_state_revision
+                            > binding.durable_self_state_revision
+                        ):
+                            raise SleepLifecycleError(
+                                "runtime liveness witness is ahead of "
+                                "authoritative durable SelfState"
+                            )
+                        if (
+                            witness.durable_self_state_revision
+                            == binding.durable_self_state_revision
+                            and binding.durable_self_state_ref is not None
+                            and witness.durable_self_state_ref
+                            != binding.durable_self_state_ref
+                        ):
+                            raise SleepLifecycleError(
+                                "runtime liveness witness conflicts with "
+                                "authoritative durable SelfState"
+                            )
+
             wake_anchor = self._anchor_provider("wake")
             self.wake_receipt = wake_from_unplanned_restart(
                 wake_anchor=wake_anchor,
@@ -384,6 +482,7 @@ class SleepLifecycleRuntime:
                         acknowledgement.model_dump(mode="json")
                     )
                 ),
+                liveness_witness=witness,
             )
             return True
 
