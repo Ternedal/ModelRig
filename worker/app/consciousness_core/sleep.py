@@ -221,6 +221,8 @@ def wake_from_sleep(
         wake_id="wake-"+_digest(seed)[:32],
         self_id=self_id,
         person_revision=person_revision,
+        durable_self_state_ref=durable_self_state_ref,
+        durable_self_state_revision=durable_self_state_revision,
         sleep_id=sleep_id,
         dormancy_kind=kind,
         entry_anchor_ref=f"temporal-anchor:{entry.anchor_id}",
