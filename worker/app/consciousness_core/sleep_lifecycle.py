@@ -60,6 +60,30 @@ class SleepBinding(StrictModel):
         return self
 
 
+class SleepWakeAcknowledgement(StrictModel):
+    schema: Literal["kaliv-consciousness-core/sleep-wake-ack/v1"]
+    sleep_id: Annotated[str, Field(pattern=r"^sleep-[a-f0-9]{32}$")]
+    wake_id: Annotated[str, Field(pattern=r"^wake-[a-f0-9]{32}$")]
+    self_id: Annotated[str, Field(pattern=r"^self-[a-f0-9]{32}$")]
+    person_revision: Annotated[str, Field(pattern=r"^person-r[0-9]{4,}$")]
+    durable_self_state_ref: NonEmptyRef | None = None
+    durable_self_state_revision: Annotated[int, Field(ge=1, strict=True)] | None = None
+    planned_sleep_consumed: Literal[True]
+    production_activation: Literal[False]
+
+    @model_validator(mode="after")
+    def exact_self_state_binding(self) -> "SleepWakeAcknowledgement":
+        if (
+            self.durable_self_state_ref is None
+        ) != (
+            self.durable_self_state_revision is None
+        ):
+            raise ValueError(
+                "wake acknowledgement SelfState ref/revision must be both present or absent"
+            )
+        return self
+
+
 def sleep_lifecycle_enabled() -> bool:
     return os.getenv(SLEEP_LIFECYCLE_FLAG, "").strip() == "1"
 
@@ -78,7 +102,7 @@ def _digest(value: Any) -> str:
 
 
 class SleepStateStore:
-    """One bounded atomic lifecycle record; not autobiographical memory."""
+    """One bounded atomic lifecycle payload; not autobiographical memory."""
 
     def __init__(self, path: str | Path | None = None) -> None:
         resolved = (
@@ -88,7 +112,9 @@ class SleepStateStore:
         )
         self.path = Path(resolved)
 
-    def read(self) -> SleepRecord | None:
+    def _read_payload(
+        self,
+    ) -> SleepRecord | SleepWakeAcknowledgement | None:
         try:
             raw = self.path.read_bytes()
         except FileNotFoundError:
@@ -109,15 +135,35 @@ class SleepStateStore:
             raise SleepLifecycleError("incomplete sleep state envelope")
         if _digest(payload) != digest:
             raise SleepLifecycleError("sleep state digest mismatch")
-        try:
-            return SleepRecord.model_validate(payload)
-        except Exception as exc:
-            raise SleepLifecycleError("invalid SleepRecord payload") from exc
 
-    def write(self, record: SleepRecord) -> None:
-        if not isinstance(record, SleepRecord):
-            raise SleepLifecycleError("write requires SleepRecord")
-        payload = record.model_dump(mode="json")
+        schema = payload.get("schema")
+        try:
+            if schema == "kaliv-consciousness-core/sleep-record/v1":
+                return SleepRecord.model_validate(payload)
+            if schema == "kaliv-consciousness-core/sleep-wake-ack/v1":
+                return SleepWakeAcknowledgement.model_validate(payload)
+        except Exception as exc:
+            raise SleepLifecycleError("invalid sleep state payload") from exc
+        raise SleepLifecycleError("unsupported sleep state payload schema")
+
+    def read(self) -> SleepRecord | None:
+        """Return only an unconsumed planned SleepRecord."""
+        payload = self._read_payload()
+        return payload if isinstance(payload, SleepRecord) else None
+
+    def read_acknowledgement(self) -> SleepWakeAcknowledgement | None:
+        payload = self._read_payload()
+        return (
+            payload
+            if isinstance(payload, SleepWakeAcknowledgement)
+            else None
+        )
+
+    def _write_payload(
+        self,
+        payload_model: SleepRecord | SleepWakeAcknowledgement,
+    ) -> None:
+        payload = payload_model.model_dump(mode="json")
         envelope = {
             "schema": "kaliv-consciousness-core/sleep-envelope/v1",
             "payload": payload,
@@ -145,6 +191,79 @@ class SleepStateStore:
             except FileNotFoundError:
                 pass
             raise
+
+    def write(self, record: SleepRecord) -> None:
+        if not isinstance(record, SleepRecord):
+            raise SleepLifecycleError("write requires SleepRecord")
+        self._write_payload(record)
+
+    def acknowledge_wake(
+        self,
+        wake: WakeReceipt,
+    ) -> SleepWakeAcknowledgement:
+        if not isinstance(wake, WakeReceipt):
+            raise SleepLifecycleError(
+                "wake acknowledgement requires WakeReceipt"
+            )
+        if wake.sleep_id is None:
+            raise SleepLifecycleError(
+                "unplanned dormancy has no planned SleepRecord to acknowledge"
+            )
+
+        current = self._read_payload()
+        if isinstance(current, SleepWakeAcknowledgement):
+            if (
+                current.sleep_id == wake.sleep_id
+                and current.wake_id == wake.wake_id
+                and current.self_id == wake.self_id
+                and current.person_revision == wake.person_revision
+                and current.durable_self_state_ref
+                == wake.durable_self_state_ref
+                and current.durable_self_state_revision
+                == wake.durable_self_state_revision
+            ):
+                return current
+            raise SleepLifecycleError(
+                "sleep state already acknowledged by another wake"
+            )
+        if not isinstance(current, SleepRecord):
+            raise SleepLifecycleError(
+                "planned SleepRecord is unavailable for acknowledgement"
+            )
+        if current.sleep_id != wake.sleep_id:
+            raise SleepLifecycleError(
+                "wake does not match pending SleepRecord"
+            )
+        if (
+            current.self_id != wake.self_id
+            or current.person_revision != wake.person_revision
+        ):
+            raise SleepLifecycleError(
+                "wake identity does not match pending SleepRecord"
+            )
+        if (
+            current.durable_self_state_ref
+            != wake.durable_self_state_ref
+            or current.durable_self_state_revision
+            != wake.durable_self_state_revision
+        ):
+            raise SleepLifecycleError(
+                "wake SelfState binding does not match pending SleepRecord"
+            )
+
+        acknowledgement = SleepWakeAcknowledgement(
+            schema="kaliv-consciousness-core/sleep-wake-ack/v1",
+            sleep_id=current.sleep_id,
+            wake_id=wake.wake_id,
+            self_id=wake.self_id,
+            person_revision=wake.person_revision,
+            durable_self_state_ref=wake.durable_self_state_ref,
+            durable_self_state_revision=wake.durable_self_state_revision,
+            planned_sleep_consumed=True,
+            production_activation=False,
+        )
+        self._write_payload(acknowledgement)
+        return acknowledgement
 
 
 BindingProvider = Callable[[], SleepBinding | None]
