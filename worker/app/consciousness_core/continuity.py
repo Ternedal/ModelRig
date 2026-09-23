@@ -90,7 +90,6 @@ class PostWakeContinuityState(StrictModel):
                 or self.exact_offline_duration_ms is None
                 or self.offline_duration_upper_bound_ms is not None
                 or any(refs)
-                or self.duration_confidence <= 0.0
             ):
                 raise ValueError("PLANNED_EXACT continuity shape is invalid")
         elif self.knowledge == "PLANNED_UNKNOWN":
