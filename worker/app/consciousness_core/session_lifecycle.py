@@ -27,6 +27,10 @@ from .continuity_horizon import (
     consume_continuity_reorientation_window,
     open_continuity_reorientation_window,
 )
+from .continuity_recovery import (
+    ContinuityRecoveryCompletionReceipt,
+    build_continuity_recovery_completion,
+)
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
@@ -253,6 +257,7 @@ class ProductionCognitiveSession:
             if self._continuity_state is not None
             else None
         )
+        self._recovery_completion = None
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -289,6 +294,13 @@ class ProductionCognitiveSession:
     ) -> ContinuityReorientationWindow | None:
         """One successful-RUN horizon for direct continuity model context."""
         return self._continuity_window
+
+    @property
+    def recovery_completion(
+        self,
+    ) -> ContinuityRecoveryCompletionReceipt | None:
+        """Process-local proof that wake reorientation completed."""
+        return self._recovery_completion
 
     @property
     def supervisor_state(self):
@@ -868,7 +880,32 @@ class ProductionCognitiveSession:
                 ),
             )
 
-        self._live = LiveCognitiveSessionState(
+        next_transition_ref = transition_receipt_ref(
+            reduction.receipt
+        )
+        next_window = self._continuity_window
+        next_recovery = self._recovery_completion
+        if (
+            next_window is not None
+            and next_window.state == "ACTIVE"
+        ):
+            if self._continuity_state is None:
+                raise CognitiveSessionLifecycleError(
+                    "active continuity window has no continuity state"
+                )
+            next_window = consume_continuity_reorientation_window(
+                next_window,
+                cycle_id=cycle_result.cognitive_cycle.request.cycle_id,
+            )
+            next_recovery = build_continuity_recovery_completion(
+                continuity_state=self._continuity_state,
+                consumed_window=next_window,
+                transition_receipt_ref=next_transition_ref,
+                expected_self_id=next_state.self_id,
+                expected_person_revision=next_state.person_revision,
+            )
+
+        next_live = LiveCognitiveSessionState(
             schema="kaliv-consciousness-core/live-session-state/v1",
             state=next_state,
             world=before.world,
@@ -876,23 +913,12 @@ class ProductionCognitiveSession:
             personality_snapshot=before.personality_snapshot,
             bootstrap_receipt_ref=before.bootstrap_receipt_ref,
             completed_cycles=before.completed_cycles + 1,
-            last_transition_receipt_ref=transition_receipt_ref(
-                reduction.receipt
-            ),
+            last_transition_receipt_ref=next_transition_ref,
             production_activation=False,
         )
-        if (
-            self._continuity_window is not None
-            and self._continuity_window.state == "ACTIVE"
-        ):
-            self._continuity_window = (
-                consume_continuity_reorientation_window(
-                    self._continuity_window,
-                    cycle_id=(
-                        cycle_result.cognitive_cycle.request.cycle_id
-                    ),
-                )
-            )
+        self._live = next_live
+        self._continuity_window = next_window
+        self._recovery_completion = next_recovery
         # A successful RUN advances the cognitive moment. Any older
         # unconsumed guidance is replaced, including by None when this cycle has
         # no unambiguous outward response intent. WAIT/IDLE returned above and
@@ -917,6 +943,7 @@ class ProductionCognitiveSession:
         self._memory_recall_ledger.clear()
         self._continuity_state = None
         self._continuity_window = None
+        self._recovery_completion = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
