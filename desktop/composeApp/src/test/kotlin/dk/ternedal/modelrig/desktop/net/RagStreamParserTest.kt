@@ -2,6 +2,8 @@ package dk.ternedal.modelrig.desktop.net
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 
 /**
  * Pinner at `/rag/chat`-stroemmen afkodes efter FORM, ikke efter position.
@@ -45,15 +47,48 @@ class RagStreamParserTest {
     }
 
     @Test
-    fun bareErrorLineBecomesAFailure() {
-        // Den linje forsvandt tavst foer: ingen message.content -> tom delta.
-        // Workeren udsender den netop for at efterlade en GRUND paa traaden.
+    fun bareErrorLineBecomesAFailureWithoutRetainingWorkerText() {
+        // Worker-kontrolleret fejltekst maa aldrig kunne vandre videre til UI.
+        // Parseren bevarer derfor kun failure-signalet, ikke payloadens tekst.
         assertEquals(
-            RagStreamParser.Event.Failure("ollama nede"),
-            RagStreamParser.parse("""{"error":"ollama nede"}"""),
+            RagStreamParser.Event.Failure,
+            RagStreamParser.parse("""{"error":"secret-token at /internal/path"}"""),
         )
     }
 
+    @Test
+    fun operatorFacingRagErrorsAreBoundedAndNeverEchoRawDetail() {
+        val secret = "token=super-secret /internal/path"
+        val messages = listOf(
+            RagClientErrors.transport("rag chat"),
+            RagClientErrors.invalidEndpoint("rag chat"),
+            RagClientErrors.http("rag chat", 503),
+            RagClientErrors.worker("rag chat"),
+            RagClientErrors.invalidResponse("rag sources"),
+        )
+        assertEquals(
+            listOf(
+                "rag chat unavailable",
+                "rag chat failed (invalid endpoint)",
+                "rag chat failed (503)",
+                "rag chat failed (worker error)",
+                "rag sources failed (invalid response)",
+            ),
+            messages,
+        )
+        messages.forEach { assertFalse(it.contains(secret)) }
+    }
+
+    @Test
+    fun malformedEndpointFailsWithSafeNonEchoingText() {
+        val rawEndpoint = "http://[secret-host"
+        val error = assertFailsWith<OllamaException> {
+            RagClient(rawEndpoint, null).listSources()
+        }
+        assertEquals("rag sources failed (invalid endpoint)", error.message)
+        assertFalse(error.message.orEmpty().contains("secret-host"))
+        assertFalse(error.message.orEmpty().contains(rawEndpoint))
+    }
     @Test
     fun terminalLineIsRecognisedAndCanCarryTrailingText() {
         assertEquals(
