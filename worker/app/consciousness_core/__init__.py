@@ -224,6 +224,12 @@ from .self_state import (
     rebind_person_revision,
     verify_active_person,
 )
+from .self_state_ledger import (
+    RuntimeSelfStateCheckpointPlan,
+    RuntimeSelfStateLedger,
+    RuntimeSelfStateLedgerError,
+    RuntimeSelfStateTransition,
+)
 from .session_lifecycle import (
     CognitiveSessionLifecycleError,
     CognitiveSessionStep,
@@ -331,6 +337,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "RuntimeSelfStateTransition",
+    "RuntimeSelfStateLedgerError",
+    "RuntimeSelfStateLedger",
+    "RuntimeSelfStateCheckpointPlan",
     "SelfStateCheckpointReceipt",
     "plan_embodiment_attention",
     "embodiment_state_ref",
