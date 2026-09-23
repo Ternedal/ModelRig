@@ -52,6 +52,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_CHECKPOINT_LIVENESS_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_PROFILE_FILE` | `./kaliv-consciousness-profile.json` |
 | `KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED` | `0` |
@@ -261,6 +262,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_personality.py`
 - `tests/worker_consciousness_core_policy_checkpoint.py`
 - `tests/worker_consciousness_core_policy_checkpoint_lifecycle.py`
+- `tests/worker_consciousness_core_policy_checkpoint_liveness.py`
 - `tests/worker_consciousness_core_prediction_attention.py`
 - `tests/worker_consciousness_core_profile_source.py`
 - `tests/worker_consciousness_core_profile_step.py`
