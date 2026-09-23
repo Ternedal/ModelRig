@@ -825,6 +825,19 @@ class ProductionCognitiveSession:
             )
             else None
         )
+        retired_continuity_state = (
+            self._continuity_state
+            if (
+                self._continuity_orientation is not None
+                and self._continuity_orientation.phase == "ORIENTED"
+            )
+            else None
+        )
+        retired_continuity_orientation = (
+            self._continuity_orientation
+            if retired_continuity_state is not None
+            else None
+        )
         bridge_step = await self._bridge.step(
             current_state=before.state,
             current_world=before.world,
@@ -834,6 +847,8 @@ class ProductionCognitiveSession:
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=active_continuity,
+            retired_continuity_state=retired_continuity_state,
+            retired_continuity_orientation=retired_continuity_orientation,
             required_event_id=required_event_id,
             allowed_event_ids=allowed_event_ids,
         )
