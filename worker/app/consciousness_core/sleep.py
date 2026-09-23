@@ -10,13 +10,14 @@ import hashlib
 import json
 from typing import Annotated, Any, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .temporal import TemporalAnchor, TemporalContractError, relate_anchors
 
 NonEmptyRef=Annotated[str,Field(min_length=1,max_length=256)]
 NonNegativeInt=Annotated[int,Field(ge=0,strict=True)]
 UnitInterval=Annotated[float,Field(ge=0.0,le=1.0,strict=True,allow_inf_nan=False)]
+SelfStateRevision=Annotated[int,Field(ge=1,strict=True)]
 
 SleepReason=Literal["app_closed","host_shutdown","suspend"]
 DormancyKind=Literal["PLANNED_SLEEP","UNPLANNED_DORMANCY"]
@@ -35,6 +36,8 @@ class SleepRecord(StrictModel):
     sleep_id: Annotated[str,Field(pattern=r"^sleep-[a-f0-9]{32}$")]
     self_id: Annotated[str,Field(pattern=r"^self-[a-f0-9]{32}$")]
     person_revision: Annotated[str,Field(pattern=r"^person-r[0-9]{4,}$")]
+    durable_self_state_ref: NonEmptyRef|None=None
+    durable_self_state_revision: SelfStateRevision|None=None
     reason: SleepReason
     entry_anchor: TemporalAnchor
     open_goal_refs: Annotated[list[NonEmptyRef],Field(max_length=64)]
@@ -47,12 +50,26 @@ class SleepRecord(StrictModel):
     durable_memory_write_authority: Literal[False]
     production_activation: Literal[False]
 
+    @model_validator(mode="after")
+    def exact_self_state_binding(self) -> "SleepRecord":
+        if (
+            self.durable_self_state_ref is None
+        ) != (
+            self.durable_self_state_revision is None
+        ):
+            raise ValueError(
+                "sleep durable SelfState ref/revision must be both present or absent"
+            )
+        return self
+
 
 class WakeReceipt(StrictModel):
     schema: Literal["kaliv-consciousness-core/wake-receipt/v1"]
     wake_id: Annotated[str,Field(pattern=r"^wake-[a-f0-9]{32}$")]
     self_id: Annotated[str,Field(pattern=r"^self-[a-f0-9]{32}$")]
     person_revision: Annotated[str,Field(pattern=r"^person-r[0-9]{4,}$")]
+    durable_self_state_ref: NonEmptyRef|None=None
+    durable_self_state_revision: SelfStateRevision|None=None
     sleep_id: Annotated[str,Field(pattern=r"^sleep-[a-f0-9]{32}$")]|None
     dormancy_kind: DormancyKind
     entry_anchor_ref: NonEmptyRef|None
@@ -71,6 +88,18 @@ class WakeReceipt(StrictModel):
     durable_memory_write_authority: Literal[False]
     production_activation: Literal[False]
 
+    @model_validator(mode="after")
+    def exact_self_state_binding(self) -> "WakeReceipt":
+        if (
+            self.durable_self_state_ref is None
+        ) != (
+            self.durable_self_state_revision is None
+        ):
+            raise ValueError(
+                "wake durable SelfState ref/revision must be both present or absent"
+            )
+        return self
+
 
 def _digest(payload:Mapping[str,Any])->str:
     raw=json.dumps(payload,sort_keys=True,separators=(",",":"))
@@ -83,6 +112,8 @@ def prepare_sleep(
     person_revision:str,
     entry_anchor:TemporalAnchor|Mapping[str,Any],
     reason:SleepReason,
+    durable_self_state_ref:str|None=None,
+    durable_self_state_revision:int|None=None,
     open_goal_refs:list[str]|None=None,
     open_loop_refs:list[str]|None=None,
     pending_review_refs:list[str]|None=None,
@@ -93,11 +124,16 @@ def prepare_sleep(
     except ValidationError as exc:
         raise SleepContractError("invalid sleep entry anchor") from exc
     seed={"self_id":self_id,"person_revision":person_revision,"anchor":anchor.anchor_id,"reason":reason}
+    if durable_self_state_ref is not None or durable_self_state_revision is not None:
+        seed["durable_self_state_ref"]=durable_self_state_ref
+        seed["durable_self_state_revision"]=durable_self_state_revision
     return SleepRecord(
         schema="kaliv-consciousness-core/sleep-record/v1",
         sleep_id="sleep-"+_digest(seed)[:32],
         self_id=self_id,
         person_revision=person_revision,
+        durable_self_state_ref=durable_self_state_ref,
+        durable_self_state_revision=durable_self_state_revision,
         reason=reason,
         entry_anchor=anchor,
         open_goal_refs=list(dict.fromkeys(open_goal_refs or []))[:64],
@@ -134,6 +170,8 @@ def wake_from_sleep(
     if sleep is not None:
         self_id=sleep.self_id
         person_revision=sleep.person_revision
+        durable_self_state_ref=sleep.durable_self_state_ref
+        durable_self_state_revision=sleep.durable_self_state_revision
         entry=sleep.entry_anchor
         kind:DormancyKind="PLANNED_SLEEP"
         goal_refs=sleep.open_goal_refs
@@ -145,6 +183,8 @@ def wake_from_sleep(
             raise SleepContractError("unplanned dormancy requires expected identity binding")
         self_id=expected_self_id
         person_revision=expected_person_revision
+        durable_self_state_ref=None
+        durable_self_state_revision=None
         entry=last
         kind="UNPLANNED_DORMANCY"
         goal_refs=[]; loop_refs=[]; review_refs=[]; sleep_id=None
