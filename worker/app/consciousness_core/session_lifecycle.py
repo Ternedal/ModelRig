@@ -53,6 +53,15 @@ from .embodiment_attention import (
     EmbodimentAttentionAdmissionResult,
     plan_embodiment_attention,
 )
+from .episode_boundary import (
+    EpisodeBoundarySignal,
+    evaluate_episode_boundary,
+)
+from .episode_boundary_application import (
+    EpisodeBoundaryApplicationReceipt,
+    EpisodeBoundaryApplicationResult,
+    apply_episode_boundary_decision,
+)
 from .episodes import (
     ExperienceEpisodeState,
     append_episode_moment,
@@ -286,6 +295,7 @@ class ProductionCognitiveSession:
             else None
         )
         self._experience_episode = None
+        self._last_episode_boundary_receipt = None
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -352,6 +362,35 @@ class ProductionCognitiveSession:
     ) -> ExperienceEpisodeState | None:
         """Current bounded process-local experiential episode."""
         return self._experience_episode
+
+    @property
+    def last_episode_boundary_receipt(
+        self,
+    ) -> EpisodeBoundaryApplicationReceipt | None:
+        """Latest process-local episode segmentation application receipt."""
+        return self._last_episode_boundary_receipt
+
+    def apply_episode_boundary(
+        self,
+        signal: EpisodeBoundarySignal | None = None,
+    ) -> EpisodeBoundaryApplicationResult:
+        """Apply one C30-F boundary signal without sampling time."""
+        self._require_open()
+        if self._experience_episode is None:
+            raise CognitiveSessionLifecycleError(
+                "no active experience episode to segment"
+            )
+        decision = evaluate_episode_boundary(
+            self._experience_episode,
+            signal,
+        )
+        result = apply_episode_boundary_decision(
+            self._experience_episode,
+            decision,
+        )
+        self._experience_episode = result.active_episode
+        self._last_episode_boundary_receipt = result.receipt
+        return result
 
     @property
     def supervisor_state(self):
@@ -1188,6 +1227,7 @@ class ProductionCognitiveSession:
         self._recovery_completion = None
         self._continuity_orientation = None
         self._experience_episode = None
+        self._last_episode_boundary_receipt = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
