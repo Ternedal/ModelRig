@@ -467,7 +467,7 @@ class CognitiveCycleCoordinator:
             context_payload.pop("continuity", None)
 
         if (
-            retired_continuity_state is None
+            (retired_continuity_state is None)
             != (retired_continuity_orientation is None)
         ):
             raise CognitiveCycleError(
