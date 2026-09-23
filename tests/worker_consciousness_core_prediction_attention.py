@@ -35,9 +35,8 @@ from app.consciousness_core.metacognition import (  # noqa: E402
     OutcomeObservation,
 )
 from app.consciousness_core.prediction_attention import (  # noqa: E402
-    PredictionAttentionError,
-    admit_prediction_outcome if False else plan_prediction_outcome,
     outcome_observation_ref,
+    plan_prediction_outcome,
     prediction_attention_ref,
     prediction_resolution_ref,
 )
