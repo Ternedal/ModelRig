@@ -219,16 +219,19 @@ def plan_embodiment_attention(
     event_id = "cevt-" + hashlib.sha256(
         ("embodiment-change-v1|" + source_ref).encode("utf-8")
     ).hexdigest()[:32]
+    summary_prefix = (
+        f"Inferred embodiment change ({inferred.inference_kind}, "
+        f"confidence {inferred.confidence:.2f}): "
+    )
+    summary = summary_prefix + inferred.proposition[
+        : max(0, 2048 - len(summary_prefix))
+    ]
     event = CognitionEvent(
         schema="kaliv-consciousness-core/cognition-event/v1",
         event_id=event_id,
         kind="embodiment_change",
         source_ref=source_ref,
-        summary=(
-            f"Inferred embodiment change ({inferred.inference_kind}, "
-            f"confidence {inferred.confidence:.2f}): "
-            f"{inferred.proposition}"
-        ),
+        summary=summary,
         salience=salience,
         observed_sequence=current.last_observed_sequence,
         production_activation=False,
