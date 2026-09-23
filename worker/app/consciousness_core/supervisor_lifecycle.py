@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .contracts import CognitiveProfile, PersonalitySnapshot
 from .continuity import PostWakeContinuityState
+from .continuity_orientation import ContinuityOrientationState
 from .cycle import CognitiveWorkspace, RuntimeWorldState
 from .production_lifecycle import TrustedRuntimeClock
 from .runtime import ConsciousnessCoreRuntime, compose_runtime, enabled as core_enabled
@@ -185,6 +186,8 @@ class ProductionSupervisorBridge:
         relevant_memory_refs: list[str] | None = None,
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
+        retired_continuity_state: PostWakeContinuityState | None = None,
+        retired_continuity_orientation: ContinuityOrientationState | None = None,
         required_event_id: str | None = None,
         allowed_event_ids: list[str] | None = None,
     ) -> SupervisorBridgeStep:
@@ -280,6 +283,8 @@ class ProductionSupervisorBridge:
                 relevant_memory_refs=relevant_memory_refs,
                 embodiment_state_ref=embodiment_state_ref,
                 continuity_state=continuity_state,
+                retired_continuity_state=retired_continuity_state,
+                retired_continuity_orientation=retired_continuity_orientation,
             )
             if self._state is not state_before:
                 raise SupervisorLifecycleError(
