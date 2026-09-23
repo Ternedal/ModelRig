@@ -51,7 +51,11 @@ from .response_guidance import (
     ResponseGuidanceEnvelope,
     build_response_guidance,
 )
-from .self_state import PersistentSelfState, SelfStateStore
+from .self_state import (
+    PersistentSelfState,
+    SelfStateCheckpointReceipt,
+    SelfStateStore,
+)
 from .self_state_ledger import (
     RuntimeSelfStateCheckpointPlan,
     RuntimeSelfStateLedger,
@@ -282,6 +286,18 @@ class ProductionCognitiveSession:
         if self._self_state_ledger is None:
             return []
         return self._self_state_ledger.checkpoint_states()
+
+    def mark_self_state_checkpointed(
+        self,
+        receipt: SelfStateCheckpointReceipt,
+    ) -> None:
+        """Acknowledge only an exact successful C27-A checkpoint receipt."""
+        self._require_open()
+        if self._self_state_ledger is None:
+            raise CognitiveSessionLifecycleError(
+                "SelfState transition ledger is unavailable"
+            )
+        self._self_state_ledger.mark_checkpointed(receipt)
 
     @property
     def closed(self) -> bool:
