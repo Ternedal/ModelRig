@@ -22,6 +22,11 @@ from ..person_api import registry_path
 from ..person_registry import PersonRegistry
 from .contracts import CognitiveProfile, PersonalitySnapshot
 from .continuity import PostWakeContinuityState
+from .continuity_horizon import (
+    ContinuityReorientationWindow,
+    consume_continuity_reorientation_window,
+    open_continuity_reorientation_window,
+)
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
@@ -241,6 +246,13 @@ class ProductionCognitiveSession:
         self._bridge = supervisor_bridge
         self._live = live_state_from_bootstrap(bootstrap_context)
         self._continuity_state = bootstrap_context.continuity_state
+        self._continuity_window = (
+            open_continuity_reorientation_window(
+                self._continuity_state
+            )
+            if self._continuity_state is not None
+            else None
+        )
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -270,6 +282,13 @@ class ProductionCognitiveSession:
     def continuity_state(self) -> PostWakeContinuityState | None:
         """Process-local authenticated post-wake continuity knowledge."""
         return self._continuity_state
+
+    @property
+    def continuity_reorientation_window(
+        self,
+    ) -> ContinuityReorientationWindow | None:
+        """One successful-RUN horizon for direct continuity model context."""
+        return self._continuity_window
 
     @property
     def supervisor_state(self):
@@ -749,6 +768,14 @@ class ProductionCognitiveSession:
             event.event_id: event
             for event in self._bridge.state.pending_events
         }
+        active_continuity = (
+            self._continuity_state
+            if (
+                self._continuity_window is not None
+                and self._continuity_window.state == "ACTIVE"
+            )
+            else None
+        )
         bridge_step = await self._bridge.step(
             current_state=before.state,
             current_world=before.world,
@@ -757,7 +784,7 @@ class ProductionCognitiveSession:
             profile=profile,
             relevant_memory_refs=relevant_memory_refs,
             embodiment_state_ref=embodiment_state_ref,
-            continuity_state=self._continuity_state,
+            continuity_state=active_continuity,
             required_event_id=required_event_id,
             allowed_event_ids=allowed_event_ids,
         )
@@ -854,6 +881,18 @@ class ProductionCognitiveSession:
             ),
             production_activation=False,
         )
+        if (
+            self._continuity_window is not None
+            and self._continuity_window.state == "ACTIVE"
+        ):
+            self._continuity_window = (
+                consume_continuity_reorientation_window(
+                    self._continuity_window,
+                    cycle_id=(
+                        cycle_result.cognitive_cycle.request.cycle_id
+                    ),
+                )
+            )
         # A successful RUN advances the cognitive moment. Any older
         # unconsumed guidance is replaced, including by None when this cycle has
         # no unambiguous outward response intent. WAIT/IDLE returned above and
@@ -877,6 +916,7 @@ class ProductionCognitiveSession:
         self._pending_response_guidance = None
         self._memory_recall_ledger.clear()
         self._continuity_state = None
+        self._continuity_window = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
