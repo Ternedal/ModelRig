@@ -55,7 +55,6 @@ from .self_state import PersistentSelfState, SelfStateStore
 from .self_state_ledger import (
     RuntimeSelfStateCheckpointPlan,
     RuntimeSelfStateLedger,
-    RuntimeSelfStateLedgerError,
 )
 from .session_bootstrap import (
     RuntimeSessionContext,
@@ -523,9 +522,30 @@ class ProductionCognitiveSession:
             production_activation=False,
         )
 
-        # Bridge admission is the only side effect. If it rejects (for example
-        # because cognition is in flight), the live world is not adopted.
+        ledger_transition = None
+        if self._self_state_ledger is not None:
+            self._self_state_ledger.assert_current(before.state)
+            ledger_transition = self._self_state_ledger.prepare(
+                state=reduction.state,
+                kind="world_evidence",
+                source_ref=_ref(
+                    "world-transition-receipt",
+                    reduction.receipt,
+                ),
+            )
+
+        # Bridge admission is the first side effect. Ledger validation happened
+        # above, so an in-flight rejection leaves both live state and ledger
+        # unchanged.
         self._bridge.submit(event)
+        if (
+            self._self_state_ledger is not None
+            and ledger_transition is not None
+        ):
+            self._self_state_ledger.commit(
+                state=reduction.state,
+                transition=ledger_transition,
+            )
         self._live = prospective
         return WorldEvidenceAdmissionResult(
             schema="kaliv-consciousness-core/world-evidence-admission/v1",
@@ -691,6 +711,13 @@ class ProductionCognitiveSession:
             raise TypeError("profile must be CognitiveProfile")
 
         before = self._live
+        if self._self_state_ledger is not None:
+            self._self_state_ledger.assert_current(before.state)
+            if self._bridge.state.pending_events:
+                # A RUN advances SelfState twice: orientation then C16 reduction.
+                # Conservatively require room before entering C18 so ledger
+                # capacity can never fail after supervisor side effects.
+                self._self_state_ledger.require_capacity(2)
         pending_events_before = {
             event.event_id: event
             for event in self._bridge.state.pending_events
@@ -758,6 +785,32 @@ class ProductionCognitiveSession:
         if next_state.personality_state_ref != before.state.personality_state_ref:
             raise CognitiveSessionLifecycleError(
                 "supervisor transition changed personality binding"
+            )
+
+        if self._self_state_ledger is not None:
+            orientation_transition = self._self_state_ledger.append(
+                state=cycle_result.oriented_self_state,
+                kind="supervisor_orientation",
+                source_ref=_ref(
+                    "supervisor-cycle-receipt",
+                    cycle_result.receipt,
+                ),
+            )
+            # Keep the local variable to make the ordered two-step transition
+            # explicit; C27-A later verifies the exact refs/revisions again.
+            if (
+                orientation_transition.revision
+                != cycle_result.oriented_self_state.revision
+            ):
+                raise CognitiveSessionLifecycleError(
+                    "orientation ledger revision mismatch"
+                )
+            self._self_state_ledger.append(
+                state=next_state,
+                kind="post_cycle_reduction",
+                source_ref=transition_receipt_ref(
+                    reduction.receipt
+                ),
             )
 
         self._live = LiveCognitiveSessionState(
