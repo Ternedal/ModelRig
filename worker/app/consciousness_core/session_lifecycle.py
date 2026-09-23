@@ -29,6 +29,14 @@ from .cycle import (
     world_state_ref,
 )
 from .metacognition import OutcomeObservation, PredictionRecord
+from .experience import MemoryContextSnapshot
+from .memory_recall_attention import (
+    MemoryRecallAdmissionResult,
+    MemoryRecallPlan,
+    memory_context_snapshot_ref,
+    memory_recall_snapshot_has_items,
+    plan_memory_recall,
+)
 from .prediction_attention import (
     PredictionOutcomeAdmissionResult,
     plan_prediction_outcome,
@@ -222,6 +230,9 @@ class ProductionCognitiveSession:
         self._user_turn_ledger: dict[str, tuple[int, str, str]] = {}
         self._next_user_turn_sequence = 1
         self._pending_response_guidance: ResponseGuidanceEnvelope | None = None
+        # Bounded privacy-safe replay ledger. Plans contain only hashes/counts
+        # and event metadata, never recalled memory text or item ids.
+        self._memory_recall_ledger: dict[str, MemoryRecallPlan] = {}
 
     @property
     def live_state(self) -> LiveCognitiveSessionState:
@@ -280,6 +291,54 @@ class ProductionCognitiveSession:
     def plan(self) -> tuple[Any, SupervisorPlan]:
         self._require_open()
         return self._bridge.plan()
+
+    def submit_memory_recall(
+        self,
+        snapshot: MemoryContextSnapshot,
+    ) -> MemoryRecallAdmissionResult:
+        """Admit one verified Memory 4 recall as privacy-safe attention."""
+        self._require_open()
+        if not isinstance(snapshot, MemoryContextSnapshot):
+            raise TypeError("snapshot must be MemoryContextSnapshot")
+
+        snapshot_ref = memory_context_snapshot_ref(snapshot)
+        before_revision = self._bridge.state.revision
+        plan = self._memory_recall_ledger.get(snapshot_ref)
+
+        if plan is None:
+            if memory_recall_snapshot_has_items(snapshot):
+                plan = plan_memory_recall(
+                    snapshot=snapshot,
+                    clock=self.trusted_clock.sample(),
+                )
+            else:
+                plan = plan_memory_recall(snapshot=snapshot)
+
+            if plan.cognition_event is not None:
+                self._bridge.submit(plan.cognition_event)
+                self._memory_recall_ledger[snapshot_ref] = plan
+                if len(self._memory_recall_ledger) > 256:
+                    oldest = next(iter(self._memory_recall_ledger))
+                    del self._memory_recall_ledger[oldest]
+        elif plan.cognition_event is not None:
+            # Exact replay reuses the original event/clock binding. C18 exact
+            # event admission is idempotent and will not advance revision.
+            self._bridge.submit(plan.cognition_event)
+
+        after_revision = self._bridge.state.revision
+        return MemoryRecallAdmissionResult(
+            schema="kaliv-consciousness-core/memory-recall-admission/v1",
+            plan=plan,
+            cognition_event_admitted=plan.cognition_event is not None,
+            supervisor_revision_before=before_revision,
+            supervisor_revision_after=after_revision,
+            model_calls=0,
+            self_state_store_write_applied=False,
+            durable_memory_write_authority=False,
+            execution_authority=False,
+            scheduling_authority=False,
+            production_activation=False,
+        )
 
     def submit_prediction_outcome(
         self,
@@ -647,9 +706,10 @@ class ProductionCognitiveSession:
         )
 
     def close(self) -> None:
-        # Response guidance is transient and cannot cross the process/session
-        # lifecycle boundary.
+        # Response guidance and privacy-safe recall replay bindings are transient
+        # and cannot cross the process/session lifecycle boundary.
         self._pending_response_guidance = None
+        self._memory_recall_ledger.clear()
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
