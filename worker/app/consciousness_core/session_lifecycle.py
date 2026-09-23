@@ -518,9 +518,23 @@ class ProductionCognitiveSession:
             inference=inference,
         )
         before_revision = self._bridge.state.revision
+        prospective_episode = None
         if plan.cognition_event is not None:
+            episode_clock = self.trusted_clock.sample()
+            prospective_episode = self._prospective_episode_for_event(
+                kind="EMBODIMENT_CHANGE",
+                source_ref=plan.cognition_event.source_ref,
+                salience=plan.cognition_event.salience,
+                clock_sample=episode_clock,
+                state=self._live.state,
+            )
             self._bridge.submit(plan.cognition_event)
         after_revision = self._bridge.state.revision
+        if (
+            prospective_episode is not None
+            and after_revision > before_revision
+        ):
+            self._experience_episode = prospective_episode
 
         return EmbodimentAttentionAdmissionResult(
             schema=(
@@ -552,13 +566,25 @@ class ProductionCognitiveSession:
         snapshot_ref = memory_context_snapshot_ref(snapshot)
         before_revision = self._bridge.state.revision
         plan = self._memory_recall_ledger.get(snapshot_ref)
+        prospective_episode = None
 
         if plan is None:
             if memory_recall_snapshot_has_items(snapshot):
+                recall_clock = self.trusted_clock.sample()
                 plan = plan_memory_recall(
                     snapshot=snapshot,
-                    clock=self.trusted_clock.sample(),
+                    clock=recall_clock,
                 )
+                if plan.cognition_event is not None:
+                    prospective_episode = (
+                        self._prospective_episode_for_event(
+                            kind="MEMORY_RECALL",
+                            source_ref=plan.cognition_event.source_ref,
+                            salience=plan.cognition_event.salience,
+                            clock_sample=recall_clock,
+                            state=self._live.state,
+                        )
+                    )
             else:
                 plan = plan_memory_recall(snapshot=snapshot)
 
@@ -574,6 +600,11 @@ class ProductionCognitiveSession:
             self._bridge.submit(plan.cognition_event)
 
         after_revision = self._bridge.state.revision
+        if (
+            prospective_episode is not None
+            and after_revision > before_revision
+        ):
+            self._experience_episode = prospective_episode
         return MemoryRecallAdmissionResult(
             schema="kaliv-consciousness-core/memory-recall-admission/v1",
             plan=plan,
@@ -606,9 +637,23 @@ class ProductionCognitiveSession:
             outcome=outcome,
         )
         before_revision = self._bridge.state.revision
+        prospective_episode = None
         if plan.cognition_event is not None:
+            episode_clock = self.trusted_clock.sample()
+            prospective_episode = self._prospective_episode_for_event(
+                kind="PREDICTION_RESOLUTION",
+                source_ref=plan.cognition_event.source_ref,
+                salience=plan.cognition_event.salience,
+                clock_sample=episode_clock,
+                state=self._live.state,
+            )
             self._bridge.submit(plan.cognition_event)
         after_revision = self._bridge.state.revision
+        if (
+            prospective_episode is not None
+            and after_revision > before_revision
+        ):
+            self._experience_episode = prospective_episode
 
         return PredictionOutcomeAdmissionResult(
             schema=(
