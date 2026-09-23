@@ -142,6 +142,14 @@ from .memory_recall_attention import (
     memory_recall_snapshot_has_items,
     plan_memory_recall,
 )
+from .liveness import (
+    RuntimeLivenessError,
+    RuntimeLivenessStore,
+    RuntimeLivenessWitness,
+    RuntimeLivenessWriteReceipt,
+    build_runtime_liveness_witness,
+    runtime_liveness_witness_ref,
+)
 from .metacognition import (
     MetacognitionContractError,
     MetacognitiveState,
@@ -379,6 +387,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "runtime_liveness_witness_ref",
+    "build_runtime_liveness_witness",
+    "RuntimeLivenessWriteReceipt",
+    "RuntimeLivenessWitness",
+    "RuntimeLivenessStore",
+    "RuntimeLivenessError",
     "wake_from_unplanned_restart",
     "SleepWakeAcknowledgement",
     "turn_checkpoint_enabled",
