@@ -21,6 +21,7 @@ from app.consciousness_core import (  # noqa: E402
     TemporalAnchor,
     prepare_sleep,
     wake_from_sleep,
+    wake_from_unplanned_restart,
 )
 from app.consciousness_core.session_bootstrap import (  # noqa: E402
     SessionBootstrapError,
@@ -138,7 +139,7 @@ class SessionBootstrapTests(unittest.TestCase):
         )
 
     def unplanned_wake(self, state: PersistentSelfState):
-        return wake_from_sleep(
+        return wake_from_unplanned_restart(
             wake_anchor=self.anchor(
                 "4",
                 epoch="4",
@@ -146,15 +147,9 @@ class SessionBootstrapTests(unittest.TestCase):
                 monotonic_ms=3_000,
                 sequence=22,
             ),
-            last_known_anchor=self.anchor(
-                "3",
-                epoch="3",
-                wall_ms=2_000_000,
-                monotonic_ms=90_000,
-                sequence=21,
-            ),
-            expected_self_id=state.self_id,
-            expected_person_revision=state.person_revision,
+            self_id=state.self_id,
+            person_revision=state.person_revision,
+            source_ref="runtime:unplanned-restart:test",
         )
 
     def test_registry_projection_uses_exact_active_revision(self) -> None:
