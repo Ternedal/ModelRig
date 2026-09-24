@@ -217,8 +217,6 @@ from .episode_review_claim import (
     TrustedEpisodeReviewClaimService,
 )
 from .episode_review_api import (
-    CONSCIOUSNESS_EPISODE_REVIEW_FLAG,
-    CONSCIOUSNESS_EPISODE_REVIEW_PREFIX,
     EpisodeReviewAbandonBody,
     EpisodeReviewClaimBody,
     EpisodeReviewClaimTransportReceipt,
@@ -226,6 +224,12 @@ from .episode_review_api import (
     build_consciousness_episode_review_router,
     consciousness_episode_review_enabled,
     mount_consciousness_episode_review,
+)
+from .episode_review_manifest import (
+    CONSCIOUSNESS_EPISODE_REVIEW_FLAG,
+    CONSCIOUSNESS_EPISODE_REVIEW_PREFIX,
+    EpisodeReviewCapabilityManifest,
+    build_episode_review_capability_manifest,
 )
 from .episode_review_lifecycle import (
     DEFAULT_EPISODE_REVIEW_MAILBOX_CAPACITY,
@@ -569,6 +573,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_episode_review_capability_manifest",
+    "EpisodeReviewCapabilityManifest",
     "build_episode_review_operator_summary",
     "EpisodeReviewOperatorSummary",
     "evaluate_episode_review_attention",

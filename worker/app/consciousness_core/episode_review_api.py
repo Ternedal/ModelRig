@@ -28,15 +28,12 @@ from .episode_review_attention import evaluate_episode_review_attention
 from .episode_review_operator_summary import (
     build_episode_review_operator_summary,
 )
+from .episode_review_manifest import (
+    CONSCIOUSNESS_EPISODE_REVIEW_FLAG,
+    CONSCIOUSNESS_EPISODE_REVIEW_PREFIX,
+    build_episode_review_capability_manifest,
+)
 from .experience import ExperienceCandidate
-
-
-CONSCIOUSNESS_EPISODE_REVIEW_FLAG = (
-    "KALIV_CONSCIOUSNESS_EPISODE_REVIEW_ENABLED"
-)
-CONSCIOUSNESS_EPISODE_REVIEW_PREFIX = (
-    "/experimental/consciousness/episode-review"
-)
 MAX_EPISODE_REVIEW_BODY_BYTES = 65536
 _MOUNTED_STATE = "consciousness_episode_review_mounted"
 
@@ -173,6 +170,13 @@ def build_consciousness_episode_review_router(
         prefix=CONSCIOUSNESS_EPISODE_REVIEW_PREFIX,
         tags=["experimental-consciousness"],
     )
+
+    @router.get("/manifest")
+    async def manifest(request: Request) -> dict[str, object]:
+        _require_loopback(request, loopback_allowed)
+        return build_episode_review_capability_manifest().model_dump(
+            mode="json"
+        )
 
     @router.get("/status")
     async def status(request: Request) -> dict[str, object]:
