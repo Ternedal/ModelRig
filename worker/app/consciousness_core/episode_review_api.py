@@ -24,6 +24,7 @@ from .episode_review_claim import (
 )
 from .episode_review_mailbox import EpisodeExperienceReviewRequest
 from .episode_review_status import build_episode_review_status
+from .episode_review_attention import evaluate_episode_review_attention
 from .experience import ExperienceCandidate
 
 
@@ -174,6 +175,14 @@ def build_consciousness_episode_review_router(
     async def status(request: Request) -> dict[str, object]:
         _require_loopback(request, loopback_allowed)
         return build_episode_review_status(request.app).model_dump(
+            mode="json"
+        )
+
+    @router.get("/attention")
+    async def attention(request: Request) -> dict[str, object]:
+        _require_loopback(request, loopback_allowed)
+        status = build_episode_review_status(request.app)
+        return evaluate_episode_review_attention(status).model_dump(
             mode="json"
         )
 

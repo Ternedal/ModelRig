@@ -245,6 +245,13 @@ from .episode_review_observability import (
     EpisodeReviewObservability,
     EpisodeReviewObservabilitySnapshot,
 )
+from .episode_review_attention import (
+    DEFAULT_EPISODE_REVIEW_ATTENTION_POLICY,
+    EpisodeReviewAttentionPolicy,
+    EpisodeReviewAttentionSignal,
+    EpisodeReviewAttentionSnapshot,
+    evaluate_episode_review_attention,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -558,6 +565,11 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "evaluate_episode_review_attention",
+    "EpisodeReviewAttentionSnapshot",
+    "EpisodeReviewAttentionSignal",
+    "EpisodeReviewAttentionPolicy",
+    "DEFAULT_EPISODE_REVIEW_ATTENTION_POLICY",
     "MAX_OBSERVABILITY_COUNTER",
     "EpisodeReviewObservabilitySnapshot",
     "EpisodeReviewObservability",
