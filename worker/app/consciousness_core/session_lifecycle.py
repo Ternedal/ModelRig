@@ -1324,10 +1324,26 @@ def production_cognitive_session_factory(
         ),
         wake_receipt=wake_receipt,
     )
+    review_mailbox = getattr(
+        app.state,
+        "consciousness_episode_review_mailbox",
+        None,
+    )
+    if (
+        review_mailbox is not None
+        and not isinstance(
+            review_mailbox,
+            EpisodeExperienceReviewMailbox,
+        )
+    ):
+        raise CognitiveSessionLifecycleError(
+            "episode review mailbox app state has unexpected type"
+        )
     session = ProductionCognitiveSession(
         supervisor_bridge=bridge,
         bootstrap_context=context,
         durable_anchor_state=durable,
+        review_mailbox=review_mailbox,
     )
     if wake_receipt is not None:
         session.submit(

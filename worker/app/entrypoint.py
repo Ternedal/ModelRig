@@ -46,6 +46,9 @@ from .consciousness_core.exact_event_step_api import mount_consciousness_exact_e
 from .consciousness_core.profile_step_api import mount_consciousness_profile_step
 from .consciousness_core.response_guidance_api import mount_consciousness_guidance
 from .consciousness_core.episode_review_api import mount_consciousness_episode_review
+from .consciousness_core.episode_review_lifecycle import (
+    compose_episode_review_lifespan,
+)
 from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
@@ -163,16 +166,18 @@ fastapi_app.router.lifespan_context = compose_autonomous_scheduler_lifespan(
     compose_shutdown_self_state_checkpoint_lifespan(
         compose_policy_checkpoint_service_lifespan(
             compose_cognitive_session_lifespan(
-                compose_supervisor_lifecycle_lifespan(
-                    compose_sleep_lifecycle_lifespan(
-                        compose_memory4_write_lifespan(
-                            compose_memory4_context_lifespan(
-                                scheduler_lifespan
-                            )
+                compose_episode_review_lifespan(
+                    compose_supervisor_lifecycle_lifespan(
+                        compose_sleep_lifecycle_lifespan(
+                            compose_memory4_write_lifespan(
+                                compose_memory4_context_lifespan(
+                                    scheduler_lifespan
+                                )
+                            ),
+                            production_sleep_runtime_factory,
                         ),
-                        production_sleep_runtime_factory,
-                    ),
-                    production_supervisor_bridge_factory,
+                        production_supervisor_bridge_factory,
+                    )
                 ),
                 production_cognitive_session_factory,
             )

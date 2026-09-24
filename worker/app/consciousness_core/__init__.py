@@ -227,6 +227,15 @@ from .episode_review_api import (
     consciousness_episode_review_enabled,
     mount_consciousness_episode_review,
 )
+from .episode_review_lifecycle import (
+    DEFAULT_EPISODE_REVIEW_MAILBOX_CAPACITY,
+    EPISODE_REVIEW_RUNTIME_FLAG,
+    EpisodeReviewRuntime,
+    EpisodeReviewRuntimeError,
+    compose_episode_review_lifespan,
+    episode_review_runtime_enabled,
+    production_episode_review_runtime_factory,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -540,6 +549,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "production_episode_review_runtime_factory",
+    "episode_review_runtime_enabled",
+    "compose_episode_review_lifespan",
+    "EpisodeReviewRuntimeError",
+    "EpisodeReviewRuntime",
+    "EPISODE_REVIEW_RUNTIME_FLAG",
+    "DEFAULT_EPISODE_REVIEW_MAILBOX_CAPACITY",
     "mount_consciousness_episode_review",
     "consciousness_episode_review_enabled",
     "build_consciousness_episode_review_router",
