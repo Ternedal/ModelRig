@@ -208,6 +208,14 @@ from .episode_review_decision import (
     EpisodeReviewDecisionSnapshot,
     TrustedEpisodeReviewDecisionApplier,
 )
+from .episode_review_claim import (
+    EpisodeReviewClaim,
+    EpisodeReviewClaimAbandonReceipt,
+    EpisodeReviewClaimCommitReceipt,
+    EpisodeReviewClaimError,
+    EpisodeReviewClaimSnapshot,
+    TrustedEpisodeReviewClaimService,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -521,6 +529,12 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "TrustedEpisodeReviewClaimService",
+    "EpisodeReviewClaimSnapshot",
+    "EpisodeReviewClaimError",
+    "EpisodeReviewClaimCommitReceipt",
+    "EpisodeReviewClaimAbandonReceipt",
+    "EpisodeReviewClaim",
     "TrustedEpisodeReviewDecisionApplier",
     "EpisodeReviewDecisionSnapshot",
     "EpisodeReviewDecisionReceipt",
