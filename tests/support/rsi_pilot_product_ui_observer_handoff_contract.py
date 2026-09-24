@@ -80,7 +80,7 @@ def run_contract() -> None:
         assert _git_blob_sha(path) == sha
 
     # Backend seam remains bound to the currently qualified tracked-source transition.
-    assert _git_blob_sha(SERVER) == "6fac7c61adafb4872fca246fc0319332c482d2e6"
+    assert _git_blob_sha(SERVER) == "7c125a792995e79b2df2e25fd075c872a6be0298"
     assert _git_blob_sha(PILOT) == "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
 
     desktop = code_of(DESKTOP)
