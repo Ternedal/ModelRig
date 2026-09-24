@@ -252,6 +252,10 @@ from .episode_review_attention import (
     EpisodeReviewAttentionSnapshot,
     evaluate_episode_review_attention,
 )
+from .episode_review_operator_summary import (
+    EpisodeReviewOperatorSummary,
+    build_episode_review_operator_summary,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -565,6 +569,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_episode_review_operator_summary",
+    "EpisodeReviewOperatorSummary",
     "evaluate_episode_review_attention",
     "EpisodeReviewAttentionSnapshot",
     "EpisodeReviewAttentionSignal",
