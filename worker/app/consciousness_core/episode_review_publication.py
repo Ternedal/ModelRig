@@ -21,6 +21,7 @@ from .episode_review_mailbox import (
     build_episode_experience_review_request,
     episode_experience_review_request_ref,
 )
+from .episode_review_observability import EpisodeReviewObservability
 
 
 NonEmptyRef = Annotated[str, Field(min_length=1, max_length=256)]
@@ -104,52 +105,72 @@ class EpisodeReviewPublicationReceipt(StrictModel):
         return self
 
 
+def _record(
+    receipt: EpisodeReviewPublicationReceipt,
+    observability: EpisodeReviewObservability | None,
+) -> EpisodeReviewPublicationReceipt:
+    if observability is not None:
+        if not isinstance(observability, EpisodeReviewObservability):
+            raise TypeError(
+                "observability must be EpisodeReviewObservability or None"
+            )
+        observability.record_publication(receipt.status)
+    return receipt
+
+
 def publish_episode_closure_review(
     evidence: EpisodeClosureEvidence | None,
     mailbox: EpisodeExperienceReviewMailbox | None,
+    observability: EpisodeReviewObservability | None = None,
 ) -> EpisodeReviewPublicationReceipt:
     """Best-effort publication that never mutates durable state or schedules retry."""
     if evidence is None:
-        return EpisodeReviewPublicationReceipt(
-            schema=(
-                "kaliv-consciousness-core/"
-                "episode-review-publication-receipt/v1"
+        return _record(
+            EpisodeReviewPublicationReceipt(
+                schema=(
+                    "kaliv-consciousness-core/"
+                    "episode-review-publication-receipt/v1"
+                ),
+                status="NOT_APPLICABLE",
+                closure_evidence_ref=None,
+                request_ref=None,
+                mailbox_receipt=None,
+                boundary_result_preserved=True,
+                retry_scheduled=False,
+                durable_store_write_applied=False,
+                memory4_called=False,
+                model_calls=0,
+                execution_authority=False,
+                scheduling_authority=False,
+                timer_authority=False,
+                production_activation=False,
             ),
-            status="NOT_APPLICABLE",
-            closure_evidence_ref=None,
-            request_ref=None,
-            mailbox_receipt=None,
-            boundary_result_preserved=True,
-            retry_scheduled=False,
-            durable_store_write_applied=False,
-            memory4_called=False,
-            model_calls=0,
-            execution_authority=False,
-            scheduling_authority=False,
-            timer_authority=False,
-            production_activation=False,
+            observability,
         )
 
     evidence_ref = episode_closure_evidence_ref(evidence)
     if mailbox is None:
-        return EpisodeReviewPublicationReceipt(
-            schema=(
-                "kaliv-consciousness-core/"
-                "episode-review-publication-receipt/v1"
+        return _record(
+            EpisodeReviewPublicationReceipt(
+                schema=(
+                    "kaliv-consciousness-core/"
+                    "episode-review-publication-receipt/v1"
+                ),
+                status="MAILBOX_UNAVAILABLE",
+                closure_evidence_ref=evidence_ref,
+                request_ref=None,
+                mailbox_receipt=None,
+                boundary_result_preserved=True,
+                retry_scheduled=False,
+                durable_store_write_applied=False,
+                memory4_called=False,
+                model_calls=0,
+                execution_authority=False,
+                scheduling_authority=False,
+                timer_authority=False,
+                production_activation=False,
             ),
-            status="MAILBOX_UNAVAILABLE",
-            closure_evidence_ref=evidence_ref,
-            request_ref=None,
-            mailbox_receipt=None,
-            boundary_result_preserved=True,
-            retry_scheduled=False,
-            durable_store_write_applied=False,
-            memory4_called=False,
-            model_calls=0,
-            execution_authority=False,
-            scheduling_authority=False,
-            timer_authority=False,
-            production_activation=False,
+            observability,
         )
 
     if not isinstance(mailbox, EpisodeExperienceReviewMailbox):
@@ -157,24 +178,27 @@ def publish_episode_closure_review(
 
     request = build_episode_experience_review_request(evidence)
     if request is None:
-        return EpisodeReviewPublicationReceipt(
-            schema=(
-                "kaliv-consciousness-core/"
-                "episode-review-publication-receipt/v1"
+        return _record(
+            EpisodeReviewPublicationReceipt(
+                schema=(
+                    "kaliv-consciousness-core/"
+                    "episode-review-publication-receipt/v1"
+                ),
+                status="NO_REVIEW",
+                closure_evidence_ref=evidence_ref,
+                request_ref=None,
+                mailbox_receipt=None,
+                boundary_result_preserved=True,
+                retry_scheduled=False,
+                durable_store_write_applied=False,
+                memory4_called=False,
+                model_calls=0,
+                execution_authority=False,
+                scheduling_authority=False,
+                timer_authority=False,
+                production_activation=False,
             ),
-            status="NO_REVIEW",
-            closure_evidence_ref=evidence_ref,
-            request_ref=None,
-            mailbox_receipt=None,
-            boundary_result_preserved=True,
-            retry_scheduled=False,
-            durable_store_write_applied=False,
-            memory4_called=False,
-            model_calls=0,
-            execution_authority=False,
-            scheduling_authority=False,
-            timer_authority=False,
-            production_activation=False,
+            observability,
         )
 
     request_ref = episode_experience_review_request_ref(request)
@@ -190,15 +214,39 @@ def publish_episode_closure_review(
         status = status_by_code.get(exc.code)
         if status is None:
             raise
-        return EpisodeReviewPublicationReceipt(
+        return _record(
+            EpisodeReviewPublicationReceipt(
+                schema=(
+                    "kaliv-consciousness-core/"
+                    "episode-review-publication-receipt/v1"
+                ),
+                status=status,
+                closure_evidence_ref=evidence_ref,
+                request_ref=request_ref,
+                mailbox_receipt=None,
+                boundary_result_preserved=True,
+                retry_scheduled=False,
+                durable_store_write_applied=False,
+                memory4_called=False,
+                model_calls=0,
+                execution_authority=False,
+                scheduling_authority=False,
+                timer_authority=False,
+                production_activation=False,
+            ),
+            observability,
+        )
+
+    return _record(
+        EpisodeReviewPublicationReceipt(
             schema=(
                 "kaliv-consciousness-core/"
                 "episode-review-publication-receipt/v1"
             ),
-            status=status,
+            status="ENQUEUED",
             closure_evidence_ref=evidence_ref,
             request_ref=request_ref,
-            mailbox_receipt=None,
+            mailbox_receipt=receipt,
             boundary_result_preserved=True,
             retry_scheduled=False,
             durable_store_write_applied=False,
@@ -208,24 +256,7 @@ def publish_episode_closure_review(
             scheduling_authority=False,
             timer_authority=False,
             production_activation=False,
-        )
-
-    return EpisodeReviewPublicationReceipt(
-        schema=(
-            "kaliv-consciousness-core/"
-            "episode-review-publication-receipt/v1"
         ),
-        status="ENQUEUED",
-        closure_evidence_ref=evidence_ref,
-        request_ref=request_ref,
-        mailbox_receipt=receipt,
-        boundary_result_preserved=True,
-        retry_scheduled=False,
-        durable_store_write_applied=False,
-        memory4_called=False,
-        model_calls=0,
-        execution_authority=False,
-        scheduling_authority=False,
-        timer_authority=False,
-        production_activation=False,
+        observability,
     )
+

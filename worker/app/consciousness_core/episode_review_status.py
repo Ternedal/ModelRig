@@ -16,6 +16,10 @@ from .episode_review_lifecycle import (
     episode_review_runtime_enabled,
 )
 from .episode_review_mailbox import EpisodeExperienceReviewMailbox
+from .episode_review_observability import (
+    EpisodeReviewObservability,
+    EpisodeReviewObservabilitySnapshot,
+)
 from .session_lifecycle import ProductionCognitiveSession
 
 
@@ -57,6 +61,8 @@ class EpisodeReviewStatusSnapshot(StrictModel):
     runtime_closed: bool | None
     mailbox_closed: bool | None
     last_publication_status: str | None
+    observability_present: bool
+    observability: EpisodeReviewObservabilitySnapshot | None
     request_refs_included: Literal[False]
     claim_ids_included: Literal[False]
     closure_evidence_included: Literal[False]
@@ -77,6 +83,8 @@ class EpisodeReviewStatusSnapshot(StrictModel):
                 raise ValueError("absent mailbox cannot expose closed state")
         if not self.service_present and self.claimed_count != 0:
             raise ValueError("absent service cannot expose claimed work")
+        if self.observability_present != (self.observability is not None):
+            raise ValueError("review observability presence mismatch")
         if self.mailbox_present and self.mailbox_capacity is not None:
             if self.mailbox_full != (
                 self.pending_count >= self.mailbox_capacity
@@ -110,6 +118,11 @@ def build_episode_review_status(app) -> EpisodeReviewStatusSnapshot:
         "consciousness_episode_review_service",
         None,
     )
+    observability = getattr(
+        app.state,
+        "consciousness_episode_review_observability",
+        None,
+    )
 
     if runtime is not None and not isinstance(runtime, EpisodeReviewRuntime):
         runtime = None
@@ -123,6 +136,11 @@ def build_episode_review_status(app) -> EpisodeReviewStatusSnapshot:
         TrustedEpisodeReviewClaimService,
     ):
         service = None
+    if observability is not None and not isinstance(
+        observability,
+        EpisodeReviewObservability,
+    ):
+        observability = None
 
     mailbox_snapshot = mailbox.snapshot if mailbox is not None else None
     service_snapshot = service.snapshot if service is not None else None
@@ -159,6 +177,10 @@ def build_episode_review_status(app) -> EpisodeReviewStatusSnapshot:
         and service is not None
         and runtime.mailbox is mailbox
         and runtime.service is service
+        and (
+            runtime.observability is None
+            or runtime.observability is observability
+        )
     )
 
     if runtime is None:
@@ -202,6 +224,12 @@ def build_episode_review_status(app) -> EpisodeReviewStatusSnapshot:
             else None
         ),
         last_publication_status=last_publication_status,
+        observability_present=observability is not None,
+        observability=(
+            observability.snapshot
+            if observability is not None
+            else None
+        ),
         request_refs_included=False,
         claim_ids_included=False,
         closure_evidence_included=False,

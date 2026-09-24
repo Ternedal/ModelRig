@@ -13,6 +13,7 @@ from functools import wraps
 
 from .episode_review_claim import TrustedEpisodeReviewClaimService
 from .episode_review_mailbox import EpisodeExperienceReviewMailbox
+from .episode_review_observability import EpisodeReviewObservability
 
 
 EPISODE_REVIEW_RUNTIME_FLAG = (
@@ -29,6 +30,7 @@ class EpisodeReviewRuntimeError(RuntimeError):
 class EpisodeReviewRuntime:
     mailbox: EpisodeExperienceReviewMailbox
     service: TrustedEpisodeReviewClaimService
+    observability: EpisodeReviewObservability | None = None
     closed: bool = False
 
     def close(self) -> None:
@@ -54,10 +56,15 @@ def production_episode_review_runtime_factory(
     mailbox = EpisodeExperienceReviewMailbox(
         capacity=DEFAULT_EPISODE_REVIEW_MAILBOX_CAPACITY
     )
-    service = TrustedEpisodeReviewClaimService(mailbox=mailbox)
+    observability = EpisodeReviewObservability()
+    service = TrustedEpisodeReviewClaimService(
+        mailbox=mailbox,
+        observability=observability,
+    )
     return EpisodeReviewRuntime(
         mailbox=mailbox,
         service=service,
+        observability=observability,
     )
 
 
@@ -94,11 +101,16 @@ def compose_episode_review_lifespan(
                 app.state.consciousness_episode_review_service = (
                     runtime.service
                 )
+                if runtime.observability is not None:
+                    app.state.consciousness_episode_review_observability = (
+                        runtime.observability
+                    )
 
             try:
                 yield
             finally:
                 for name in (
+                    "consciousness_episode_review_observability",
                     "consciousness_episode_review_service",
                     "consciousness_episode_review_mailbox",
                     "consciousness_episode_review_runtime",

@@ -30,6 +30,7 @@ from .episode_review_mailbox import (
     EpisodeExperienceReviewRequest,
     episode_experience_review_request_ref,
 )
+from .episode_review_observability import EpisodeReviewObservability
 from .experience import ExperienceCandidate
 
 
@@ -153,10 +154,19 @@ class TrustedEpisodeReviewClaimService:
         self,
         *,
         mailbox: EpisodeExperienceReviewMailbox,
+        observability: EpisodeReviewObservability | None = None,
     ) -> None:
         if not isinstance(mailbox, EpisodeExperienceReviewMailbox):
             raise TypeError("mailbox must be EpisodeExperienceReviewMailbox")
+        if (
+            observability is not None
+            and not isinstance(observability, EpisodeReviewObservability)
+        ):
+            raise TypeError(
+                "observability must be EpisodeReviewObservability or None"
+            )
         self._mailbox = mailbox
+        self._observability = observability
         self._adapter = TrustedEpisodeReviewAdapter(mailbox=mailbox)
         self._decision_applier = TrustedEpisodeReviewDecisionApplier()
         self._claims: dict[str, EpisodeReviewClaim] = {}
@@ -231,6 +241,8 @@ class TrustedEpisodeReviewClaimService:
             production_activation=False,
         )
         self._claims[request_ref] = claim
+        if self._observability is not None:
+            self._observability.record_claim()
         return request, claim
 
     def abandon(
@@ -252,6 +264,8 @@ class TrustedEpisodeReviewClaimService:
             )
 
         del self._claims[request_ref]
+        if self._observability is not None:
+            self._observability.record_abandon()
         return EpisodeReviewClaimAbandonReceipt(
             schema=(
                 "kaliv-consciousness-core/"
@@ -317,6 +331,8 @@ class TrustedEpisodeReviewClaimService:
         )
 
         del self._claims[request_ref]
+        if self._observability is not None:
+            self._observability.record_decision(review.decision)
         return EpisodeReviewClaimCommitReceipt(
             schema=(
                 "kaliv-consciousness-core/"

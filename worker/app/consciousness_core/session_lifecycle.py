@@ -70,6 +70,7 @@ from .episode_review_publication import (
     EpisodeReviewPublicationReceipt,
     publish_episode_closure_review,
 )
+from .episode_review_observability import EpisodeReviewObservability
 from .episodes import (
     ExperienceEpisodeState,
     append_episode_moment,
@@ -276,6 +277,7 @@ class ProductionCognitiveSession:
         bootstrap_context: RuntimeSessionContext,
         durable_anchor_state: PersistentSelfState | None = None,
         review_mailbox: EpisodeExperienceReviewMailbox | None = None,
+        review_observability: EpisodeReviewObservability | None = None,
     ) -> None:
         if not isinstance(supervisor_bridge, ProductionSupervisorBridge):
             raise TypeError("supervisor_bridge must be ProductionSupervisorBridge")
@@ -290,6 +292,16 @@ class ProductionCognitiveSession:
         ):
             raise TypeError(
                 "review_mailbox must be EpisodeExperienceReviewMailbox or None"
+            )
+        if (
+            review_observability is not None
+            and not isinstance(
+                review_observability,
+                EpisodeReviewObservability,
+            )
+        ):
+            raise TypeError(
+                "review_observability must be EpisodeReviewObservability or None"
             )
         self._bridge = supervisor_bridge
         self._live = live_state_from_bootstrap(bootstrap_context)
@@ -316,6 +328,7 @@ class ProductionCognitiveSession:
         self._experience_episode = None
         self._last_episode_boundary_receipt = None
         self._review_mailbox = review_mailbox
+        self._review_observability = review_observability
         self._last_episode_review_publication = None
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
@@ -431,6 +444,7 @@ class ProductionCognitiveSession:
             publish_episode_closure_review(
                 result.closure_evidence,
                 self._review_mailbox,
+                self._review_observability,
             )
         )
         return result
@@ -1339,11 +1353,27 @@ def production_cognitive_session_factory(
         raise CognitiveSessionLifecycleError(
             "episode review mailbox app state has unexpected type"
         )
+    review_observability = getattr(
+        app.state,
+        "consciousness_episode_review_observability",
+        None,
+    )
+    if (
+        review_observability is not None
+        and not isinstance(
+            review_observability,
+            EpisodeReviewObservability,
+        )
+    ):
+        raise CognitiveSessionLifecycleError(
+            "episode review observability app state has unexpected type"
+        )
     session = ProductionCognitiveSession(
         supervisor_bridge=bridge,
         bootstrap_context=context,
         durable_anchor_state=durable,
         review_mailbox=review_mailbox,
+        review_observability=review_observability,
     )
     if wake_receipt is not None:
         session.submit(

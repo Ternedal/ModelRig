@@ -240,6 +240,11 @@ from .episode_review_status import (
     EpisodeReviewStatusSnapshot,
     build_episode_review_status,
 )
+from .episode_review_observability import (
+    MAX_OBSERVABILITY_COUNTER,
+    EpisodeReviewObservability,
+    EpisodeReviewObservabilitySnapshot,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -553,6 +558,9 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "MAX_OBSERVABILITY_COUNTER",
+    "EpisodeReviewObservabilitySnapshot",
+    "EpisodeReviewObservability",
     "build_episode_review_status",
     "EpisodeReviewStatusSnapshot",
     "production_episode_review_runtime_factory",

@@ -254,11 +254,13 @@ class EpisodeReviewLifecycleTests(unittest.TestCase):
                 bootstrap_context,
                 durable_anchor_state,
                 review_mailbox=None,
+                review_observability=None,
             ):
                 self.supervisor_bridge = supervisor_bridge
                 self.bootstrap_context = bootstrap_context
                 self.durable_anchor_state = durable_anchor_state
                 self.review_mailbox = review_mailbox
+                self.review_observability = review_observability
 
         try:
             session_lifecycle.ProductionSupervisorBridge = FakeBridge
@@ -290,6 +292,7 @@ class EpisodeReviewLifecycleTests(unittest.TestCase):
                 )
 
             self.assertIs(result.review_mailbox, mailbox)
+            self.assertIsNone(result.review_observability)
         finally:
             for name, value in originals.items():
                 setattr(session_lifecycle, name, value)
