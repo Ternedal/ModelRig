@@ -23,6 +23,7 @@ from .episode_review_claim import (
     TrustedEpisodeReviewClaimService,
 )
 from .episode_review_mailbox import EpisodeExperienceReviewRequest
+from .episode_review_status import build_episode_review_status
 from .experience import ExperienceCandidate
 
 
@@ -168,6 +169,13 @@ def build_consciousness_episode_review_router(
         prefix=CONSCIOUSNESS_EPISODE_REVIEW_PREFIX,
         tags=["experimental-consciousness"],
     )
+
+    @router.get("/status")
+    async def status(request: Request) -> dict[str, object]:
+        _require_loopback(request, loopback_allowed)
+        return build_episode_review_status(request.app).model_dump(
+            mode="json"
+        )
 
     @router.get("/pending")
     async def list_pending(request: Request) -> dict[str, object]:

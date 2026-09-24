@@ -236,6 +236,10 @@ from .episode_review_lifecycle import (
     episode_review_runtime_enabled,
     production_episode_review_runtime_factory,
 )
+from .episode_review_status import (
+    EpisodeReviewStatusSnapshot,
+    build_episode_review_status,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -549,6 +553,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_episode_review_status",
+    "EpisodeReviewStatusSnapshot",
     "production_episode_review_runtime_factory",
     "episode_review_runtime_enabled",
     "compose_episode_review_lifespan",
