@@ -127,6 +127,9 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
             runtime=ConsciousnessCoreRuntime(engine),
             clock=clock,
         )
+        # Bridge construction owns one bootstrap clock sample. Admission
+        # assertions below measure only samples taken after bootstrap.
+        clock.calls = 0
         return (
             ProductionCognitiveSession(
                 supervisor_bridge=bridge,
