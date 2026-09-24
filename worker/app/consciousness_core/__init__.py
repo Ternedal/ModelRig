@@ -165,6 +165,13 @@ from .episode_boundary_application import (
     EpisodeBoundaryApplicationResult,
     apply_episode_boundary_decision,
 )
+from .episode_closure_evidence import (
+    EpisodeClosureEvidence,
+    EpisodeClosureEvidenceError,
+    EpisodeKindCount,
+    derive_episode_closure_evidence,
+    episode_closure_evidence_ref,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -478,6 +485,11 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "episode_closure_evidence_ref",
+    "derive_episode_closure_evidence",
+    "EpisodeKindCount",
+    "EpisodeClosureEvidenceError",
+    "EpisodeClosureEvidence",
     "apply_episode_boundary_decision",
     "EpisodeBoundaryApplicationResult",
     "EpisodeBoundaryApplicationReceipt",
