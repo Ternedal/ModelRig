@@ -126,6 +126,10 @@ class WakeReceipt(StrictModel):
                 )
             return self
 
+        if self.duration_known or self.offline_duration_ms is not None:
+            raise ValueError(
+                "unplanned dormancy cannot claim exact offline duration"
+            )
         if self.offline_duration_upper_bound_ms is not None:
             if not all(refs_present):
                 raise ValueError(
@@ -134,10 +138,6 @@ class WakeReceipt(StrictModel):
             if self.offline_duration_upper_bound_confidence <= 0.0:
                 raise ValueError(
                     "duration upper bound requires positive confidence"
-                )
-            if self.duration_known or self.offline_duration_ms is not None:
-                raise ValueError(
-                    "duration upper bound cannot become exact offline duration"
                 )
         elif self.offline_duration_upper_bound_confidence != 0.0:
             raise ValueError(
