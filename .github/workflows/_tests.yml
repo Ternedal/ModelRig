@@ -2,6 +2,12 @@ name: _tests
 
 on:
   workflow_call:
+    inputs:
+      run_stage_b:
+        description: Run the heavy Stage-B physical-gate shards.
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -833,6 +839,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   stage-b-slices:
+    if: inputs.run_stage_b
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

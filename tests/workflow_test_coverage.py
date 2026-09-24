@@ -17,6 +17,8 @@ from source_code import code_of  # noqa: E402
 
 root = Path(__file__).resolve().parents[1]
 workflow = code_of(root / ".github/workflows/_tests.yml")
+ci_workflow = code_of(root / ".github/workflows/ci.yml")
+release_workflow = code_of(root / ".github/workflows/build-and-release.yml")
 stage_b_workflow = code_of(root / ".github/workflows/_stage_b_slices.yml")
 exact_head_workflow = code_of(root / ".github/workflows/exact-head-qualification.yml")
 agent3_full_workflow = code_of(root / ".github/workflows/agent3-full-diagnostics.yml")
@@ -94,6 +96,35 @@ for label, caller in (
         "uses: ./.github/workflows/_stage_b_slices.yml" in caller,
         f"{label} includes the reusable Stage-B shard workflow",
     )
+
+check(
+    "run_stage_b:" in workflow
+    and "default: true" in workflow
+    and "if: inputs.run_stage_b" in workflow,
+    "the shared test workflow keeps Stage-B default-on and explicitly gated",
+)
+check(
+    "run_stage_b: ${{ github.event_name != 'pull_request' }}" in ci_workflow,
+    "PR CI skips only the duplicate Stage-B invocation; push/dispatch keep it",
+)
+agent3_stage_b = agent3_full_workflow.split("  stage-b-slices:", 1)[1]
+check(
+    "if: github.event_name != 'pull_request'" in agent3_stage_b,
+    "PR Agent 3 full diagnostics delegates Stage-B ownership to exact-head qualification",
+)
+check(
+    "if: github.event_name != 'pull_request' || github.event.action != 'closed'"
+    in exact_head_workflow,
+    "exact-head qualification remains the sole PR Stage-B authority",
+)
+release_server_tests = release_workflow.split("  server-tests:", 1)[1].split(
+    "\n  android-build:", 1
+)[0]
+check(
+    "uses: ./.github/workflows/_tests.yml" in release_server_tests
+    and "run_stage_b:" not in release_server_tests,
+    "release keeps the shared workflow's default-on Stage-B gate",
+)
 
 expected_stage_b_names = (
     "midchain-1",

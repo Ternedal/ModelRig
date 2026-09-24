@@ -27,6 +27,10 @@ jobs:
   test:
     if: github.event_name != 'pull_request' || github.event.action != 'closed'
     uses: ./.github/workflows/_tests.yml
+    with:
+      # Pull requests are already Stage-B qualified by exact-head-qualification.
+      # Push/main and workflow_dispatch keep the reusable default=true gate.
+      run_stage_b: ${{ github.event_name != 'pull_request' }}
 
   # The optional browser runtime stays out of worker/requirements.txt. This job
   # validates the pinned package and locked profile, launches real Chromium
