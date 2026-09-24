@@ -172,6 +172,16 @@ from .episode_closure_evidence import (
     derive_episode_closure_evidence,
     episode_closure_evidence_ref,
 )
+from .episode_experience_review import (
+    EpisodeExperienceCandidateEvaluation,
+    EpisodeExperienceReviewError,
+    EpisodeExperienceReviewPlan,
+    TrustedEpisodeExperienceReview,
+    evaluate_reviewed_episode_candidate,
+    experience_candidate_ref,
+    plan_episode_experience_review,
+    trusted_episode_experience_review_ref,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -485,6 +495,14 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "trusted_episode_experience_review_ref",
+    "plan_episode_experience_review",
+    "experience_candidate_ref",
+    "evaluate_reviewed_episode_candidate",
+    "TrustedEpisodeExperienceReview",
+    "EpisodeExperienceReviewPlan",
+    "EpisodeExperienceReviewError",
+    "EpisodeExperienceCandidateEvaluation",
     "episode_closure_evidence_ref",
     "derive_episode_closure_evidence",
     "EpisodeKindCount",
