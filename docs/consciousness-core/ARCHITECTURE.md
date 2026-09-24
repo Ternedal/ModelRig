@@ -174,6 +174,7 @@ authority map above.
 Current invariants are:
 
 - production activation remains false in Consciousness Core contracts;
+- root activation remains default-off at `KALIV_CONSCIOUSNESS_CORE_ENABLED=0`;
 - runtime integrations require explicit default-off feature gates;
 - private operator routes are independently gated and loopback-only where
   specified;
