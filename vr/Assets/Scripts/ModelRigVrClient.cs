@@ -330,8 +330,9 @@ namespace Kaliv.VR
 
             if (req.result != UnityWebRequest.Result.Success)
             {
-                string body = req.downloadHandler?.text;
-                string detail = string.IsNullOrWhiteSpace(body) ? req.error : body;
+                string detail = string.IsNullOrWhiteSpace(req.error)
+                    ? "forbindelsen blev afbrudt"
+                    : req.error;
                 fail?.Invoke($"POST {Normalize(baseUrl)}/api/v1/chat fejlede ({req.responseCode}): {detail}");
                 yield break;
             }
