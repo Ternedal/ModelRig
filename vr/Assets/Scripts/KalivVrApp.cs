@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using Kaliv.VR.Rendering;
 
@@ -18,6 +19,9 @@ namespace Kaliv.VR
         private KalivVrPanel _panel;
         private KalivVrRenderEngine _renderEngine;
         private readonly List<ModelRigVrClient.ChatMessage> _history = new();
+        private readonly StringBuilder _streamedAnswer = new();
+        private bool _chatInFlight;
+        private int _chatGeneration;
 
         public string BaseUrl { get; private set; }
         public string Token { get; private set; }
@@ -136,33 +140,81 @@ namespace Kaliv.VR
                 _panel.SetStatus("Vælg en model først.", true);
                 return;
             }
+            if (_chatInFlight)
+            {
+                _panel.SetStatus("Kaliv svarer allerede · tryk STOP for at afbryde.", false);
+                return;
+            }
             if (prompt.Length == 0) return;
 
             _history.Add(new ModelRigVrClient.ChatMessage("user", prompt));
             _panel.AppendUser(prompt);
+            _panel.BeginAssistantStream();
             _panel.SetComposerBusy(true);
             _panel.SetStatus("Kaliv tænker …", false);
 
-            StartCoroutine(_client.Chat(
+            _chatInFlight = true;
+            _streamedAnswer.Clear();
+            int generation = ++_chatGeneration;
+
+            StartCoroutine(_client.ChatStream(
                 BaseUrl,
                 Token,
                 Model,
                 _history,
-                answer =>
+                delta =>
                 {
-                    string clean = string.IsNullOrWhiteSpace(answer)
-                        ? "(tomt svar fra modellen)"
-                        : answer.Trim();
-                    _history.Add(new ModelRigVrClient.ChatMessage("assistant", clean));
-                    _panel.AppendAssistant(clean);
-                    _panel.SetComposerBusy(false);
-                    _panel.SetStatus($"Rig · {Model}", false);
+                    if (!_chatInFlight || generation != _chatGeneration) return;
+                    _streamedAnswer.Append(delta);
+                    _panel.AppendAssistantDelta(delta);
+                    _panel.SetStatus($"Rig · {Model} · streamer", false);
                 },
-                error =>
-                {
-                    _panel.SetComposerBusy(false);
-                    _panel.SetStatus(Friendly(error), true);
-                }));
+                () => CompleteStreamingTurn(generation),
+                error => FailStreamingTurn(generation, error)));
+        }
+
+        public void StopChat()
+        {
+            if (!_chatInFlight) return;
+            _panel.SetStatus("Stopper svar …", false);
+            _client?.CancelChat();
+        }
+
+        private void CompleteStreamingTurn(int generation)
+        {
+            if (!_chatInFlight || generation != _chatGeneration) return;
+
+            string clean = _streamedAnswer.ToString().Trim();
+            if (clean.Length == 0)
+            {
+                clean = "(tomt svar fra modellen)";
+                _panel.AppendAssistantDelta(clean);
+            }
+
+            _history.Add(new ModelRigVrClient.ChatMessage("assistant", clean));
+            _panel.FinishAssistantStream(null);
+            _streamedAnswer.Clear();
+            _chatInFlight = false;
+            _panel.SetComposerBusy(false);
+            _panel.SetStatus($"Rig · {Model}", false);
+        }
+
+        private void FailStreamingTurn(int generation, string error)
+        {
+            if (!_chatInFlight || generation != _chatGeneration) return;
+
+            bool stopped = string.Equals(error, "Chat stoppet.", System.StringComparison.Ordinal);
+            _panel.FinishAssistantStream(stopped
+                ? "\n[stoppet]"
+                : "\n[ufuldstændigt svar]");
+            _streamedAnswer.Clear();
+            _chatInFlight = false;
+
+            if (_history.Count > 0 && _history[_history.Count - 1].role == "user")
+                _history.RemoveAt(_history.Count - 1);
+
+            _panel.SetComposerBusy(false);
+            _panel.SetStatus(stopped ? "Svar stoppet." : Friendly(error), !stopped);
         }
 
         public void RefreshBody() => _renderEngine?.RefreshBody();
@@ -171,6 +223,12 @@ namespace Kaliv.VR
 
         public void ForgetRig()
         {
+            ++_chatGeneration;
+            _client?.CancelChat();
+            _chatInFlight = false;
+            _streamedAnswer.Clear();
+            _panel?.SetComposerBusy(false);
+
             BaseUrl = "";
             Token = "";
             Model = "";
