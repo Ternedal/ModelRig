@@ -107,6 +107,16 @@ check(
     "run_stage_b: ${{ github.event_name != 'pull_request' }}" in ci_workflow,
     "PR CI skips only the duplicate Stage-B invocation; push/dispatch keep it",
 )
+agent3_stage_b = agent3_full_workflow.split("  stage-b-slices:", 1)[1]
+check(
+    "if: github.event_name != 'pull_request'" in agent3_stage_b,
+    "PR Agent 3 full diagnostics delegates Stage-B ownership to exact-head qualification",
+)
+check(
+    "if: github.event_name != 'pull_request' || github.event.action != 'closed'"
+    in exact_head_workflow,
+    "exact-head qualification remains the sole PR Stage-B authority",
+)
 release_server_tests = release_workflow.split("  server-tests:", 1)[1].split(
     "\n  android-build:", 1
 )[0]
