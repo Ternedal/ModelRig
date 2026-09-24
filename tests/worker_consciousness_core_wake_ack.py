@@ -255,7 +255,16 @@ class WakeAckTests(unittest.TestCase):
                 store_factory=lambda: store,
             )
             self.assertTrue(second.start())
-            self.assertIsNone(second.wake_receipt)
+            self.assertIsNotNone(second.wake_receipt)
+            self.assertEqual(
+                second.wake_receipt.dormancy_kind,
+                "UNPLANNED_DORMANCY",
+            )
+            self.assertIsNone(second.wake_receipt.sleep_id)
+            self.assertFalse(second.wake_receipt.duration_known)
+            self.assertIsNone(second.wake_receipt.offline_duration_ms)
+            self.assertFalse(second.wake_receipt.cognition_during_gap)
+            self.assertNotEqual(second.wake_receipt.wake_id, first.wake_receipt.wake_id)
             self.assertIsNotNone(store.read_acknowledgement())
 
     def test_clean_shutdown_overwrites_ack_marker_with_new_sleep(self):
