@@ -66,7 +66,7 @@ def run_contract() -> None:
     assert transition == {
         "path": "backend/internal/httpapi/server.go",
         "from_git_blob_sha": "6085d525ff86a3d2b5c7cdece20bcaeace896e85",
-        "to_git_blob_sha": "6fac7c61adafb4872fca246fc0319332c482d2e6",
+        "to_git_blob_sha": "7c125a792995e79b2df2e25fd075c872a6be0298",
     }
     assert _git_blob_sha(SERVER) == transition["to_git_blob_sha"]
 
