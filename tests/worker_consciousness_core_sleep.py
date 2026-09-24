@@ -19,7 +19,7 @@ class SleepTests(unittest.TestCase):
   a=anchor_from_clock(sample("1",1000,9000,1,EA),event_ref="last-running")
   b=anchor_from_clock(sample("2",11000,100,2,EB),event_ref="wake")
   w=wake_from_sleep(wake_anchor=b,last_known_anchor=a,expected_self_id=SELF,expected_person_revision=PERSON)
-  self.assertEqual(w.dormancy_kind,"UNPLANNED_DORMANCY"); self.assertIsNone(w.sleep_id); self.assertFalse(w.cognition_during_gap)
+  self.assertEqual(w.dormancy_kind,"UNPLANNED_DORMANCY"); self.assertIsNone(w.sleep_id); self.assertFalse(w.cognition_during_gap)\n  self.assertFalse(w.duration_known); self.assertIsNone(w.offline_duration_ms)
  def test_forged_identity_fails_closed(self):
   a=anchor_from_clock(sample("1",1000,9000,1,EA),event_ref="sleep")
   s=prepare_sleep(self_id=SELF,person_revision=PERSON,entry_anchor=a,reason="host_shutdown")
