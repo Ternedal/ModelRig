@@ -25,8 +25,20 @@ NonEmptyRef = Annotated[str, Field(min_length=1, max_length=256)]
 NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
 
 
+MailboxErrorCode = Literal[
+    "INVALID_CAPACITY",
+    "DUPLICATE",
+    "REPLAY_LEDGER_FULL",
+    "CAPACITY_REACHED",
+    "NOT_PENDING",
+    "CLOSED",
+]
+
+
 class EpisodeReviewMailboxError(RuntimeError):
-    pass
+    def __init__(self, code: MailboxErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class StrictModel(BaseModel):
@@ -210,7 +222,8 @@ class EpisodeExperienceReviewMailbox:
             raise TypeError("capacity must be int")
         if capacity < 1 or capacity > 32:
             raise EpisodeReviewMailboxError(
-                "capacity must be between 1 and 32"
+                "INVALID_CAPACITY",
+                "capacity must be between 1 and 32",
             )
         self._capacity = capacity
         self._pending: dict[str, EpisodeExperienceReviewRequest] = {}
@@ -253,15 +266,18 @@ class EpisodeExperienceReviewMailbox:
             )
         if request.request_id in self._seen_request_ids:
             raise EpisodeReviewMailboxError(
-                "episode review request has already been admitted"
+                "DUPLICATE",
+                "episode review request has already been admitted",
             )
         if len(self._seen_request_ids) >= self.MAX_SEEN_REQUESTS:
             raise EpisodeReviewMailboxError(
-                "episode review mailbox replay ledger is full"
+                "REPLAY_LEDGER_FULL",
+                "episode review mailbox replay ledger is full",
             )
         if len(self._pending) >= self._capacity:
             raise EpisodeReviewMailboxError(
-                "episode review mailbox capacity reached"
+                "CAPACITY_REACHED",
+                "episode review mailbox capacity reached",
             )
 
         before = len(self._pending)
@@ -298,7 +314,8 @@ class EpisodeExperienceReviewMailbox:
         self._require_open()
         if request_id not in self._pending:
             raise EpisodeReviewMailboxError(
-                "episode review request is not pending"
+                "NOT_PENDING",
+                "episode review request is not pending",
             )
 
         before = len(self._pending)
@@ -354,5 +371,6 @@ class EpisodeExperienceReviewMailbox:
     def _require_open(self) -> None:
         if self._closed:
             raise EpisodeReviewMailboxError(
-                "episode review mailbox is closed"
+                "CLOSED",
+                "episode review mailbox is closed",
             )

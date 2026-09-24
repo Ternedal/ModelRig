@@ -191,6 +191,10 @@ from .episode_review_mailbox import (
     build_episode_experience_review_request,
     episode_experience_review_request_ref,
 )
+from .episode_review_publication import (
+    EpisodeReviewPublicationReceipt,
+    publish_episode_closure_review,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -504,6 +508,8 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "publish_episode_closure_review",
+    "EpisodeReviewPublicationReceipt",
     "episode_experience_review_request_ref",
     "build_episode_experience_review_request",
     "EpisodeReviewMailboxSnapshot",
