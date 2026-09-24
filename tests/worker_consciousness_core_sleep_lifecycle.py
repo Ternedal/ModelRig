@@ -209,7 +209,14 @@ class SleepLifecycleTests(unittest.TestCase):
         asyncio.run(run())
         self.assertEqual(
             events,
-            ["inner:start", "store:read", "body", "store:write", "inner:close"],
+            [
+                "inner:start",
+                "store:read",
+                "store:read_acknowledgement",
+                "body",
+                "store:write",
+                "inner:close",
+            ],
         )
 
     def test_source_has_no_scheduler_agent_memory_or_background_authority(self) -> None:
@@ -238,6 +245,10 @@ class _RecordingStore:
 
     def read(self):
         self.events.append("store:read")
+        return None
+
+    def read_acknowledgement(self):
+        self.events.append("store:read_acknowledgement")
         return None
 
     def write(self, record):
