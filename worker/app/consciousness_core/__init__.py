@@ -182,6 +182,15 @@ from .episode_experience_review import (
     plan_episode_experience_review,
     trusted_episode_experience_review_ref,
 )
+from .episode_review_mailbox import (
+    EpisodeExperienceReviewMailbox,
+    EpisodeExperienceReviewRequest,
+    EpisodeReviewMailboxError,
+    EpisodeReviewMailboxReceipt,
+    EpisodeReviewMailboxSnapshot,
+    build_episode_experience_review_request,
+    episode_experience_review_request_ref,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -495,6 +504,13 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "episode_experience_review_request_ref",
+    "build_episode_experience_review_request",
+    "EpisodeReviewMailboxSnapshot",
+    "EpisodeReviewMailboxReceipt",
+    "EpisodeReviewMailboxError",
+    "EpisodeExperienceReviewRequest",
+    "EpisodeExperienceReviewMailbox",
     "trusted_episode_experience_review_ref",
     "plan_episode_experience_review",
     "experience_candidate_ref",
