@@ -202,6 +202,12 @@ from .episode_review_adapter import (
     EpisodeReviewAdapterSnapshot,
     TrustedEpisodeReviewAdapter,
 )
+from .episode_review_decision import (
+    EpisodeReviewDecisionError,
+    EpisodeReviewDecisionReceipt,
+    EpisodeReviewDecisionSnapshot,
+    TrustedEpisodeReviewDecisionApplier,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -515,6 +521,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "TrustedEpisodeReviewDecisionApplier",
+    "EpisodeReviewDecisionSnapshot",
+    "EpisodeReviewDecisionReceipt",
+    "EpisodeReviewDecisionError",
     "TrustedEpisodeReviewAdapter",
     "EpisodeReviewAdapterSnapshot",
     "EpisodeReviewAdapterItem",
