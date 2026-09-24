@@ -119,7 +119,7 @@ class ExperientialEpisodeTests(unittest.TestCase):
         payload = episode.model_dump(mode="json")
         encoded = str(payload)
         self.assertNotIn("interpretation", encoded)
-        self.assertNotIn("chain_of_thought", encoded)
+        # The deny flag raw_chain_of_thought_persisted is part of the\n        # contract; only a raw payload field itself must be absent.\n        self.assertNotIn("'chain_of_thought':", encoded)
         self.assertNotIn("user_text", encoded)
 
     def test_append_rejects_non_advancing_sequence(self):
