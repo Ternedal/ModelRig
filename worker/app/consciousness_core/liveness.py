@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .cycle import self_state_ref
+from .state_refs import self_state_ref
 from .self_state import PersistentSelfState
 from .temporal import TemporalAnchor
 
