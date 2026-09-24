@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 43 feature-switches er tændt som default.** (32 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 35 feature-switches er tændt som default.** (32 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -81,37 +81,23 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_AGENT3_MEMORY_API_SECRET` | `(tom)` | indstilling |
 | `KALIV_AGENT3_MEMORY_GRANT_DB` | `(tom)` | indstilling |
 | `KALIV_AGENT3_MEMORY_STORE` | `(tom)` | indstilling |
-| `KALIV_AGENT3_PILOT_MAX_AGE_HOURS` | `(unset)` | indstilling |
-| `KALIV_AGENT3_PILOT_REPORT` | `(unset)` | indstilling |
-| `KALIV_AGENT3_TASK_UI` | `(unset)` | slukket |
 | `KALIV_AGENT3_TASK_WORKERS` | `2` | indstilling |
-| `KALIV_AGENT3_VALIDATION_MAX_AGE_HOURS` | `(unset)` | indstilling |
-| `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` | indstilling |
 | `KALIV_AGENT4_DATA_ROOT` | `(tom)` | indstilling |
 | `KALIV_AGENT4_OPERATOR_API` | `0` | slukket |
 | `KALIV_ALLOW_RAG_CLOUD` | `(tom)` | slukket |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` | slukket |
 | `KALIV_COMPUTER_USE` | `0` | slukket |
 | `KALIV_COMPUTER_USE_SCREEN` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_CHECKPOINT_LIVENESS_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_PROFILE_FILE` | `./kaliv-consciousness-profile.json` | indstilling |
 | `KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_SELF_STATE_CHECKPOINT_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED` | `(tom)` | slukket |
 | `KALIV_CONSCIOUSNESS_STEP_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_TURN_CHECKPOINT_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED` | `0` | slukket |
-| `KALIV_CONSCIOUSNESS_UNPLANNED_LIVENESS_ENABLED` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | indstilling |
 | `KALIV_DESKTOP_ALLOWLIST_FILE` | `(tom)` | indstilling |
 | `KALIV_DEVCONTROL_PILOT` | `0` | slukket |
@@ -137,18 +123,24 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_TOOLS_DIR` | `(unset)` | indstilling |
 | `KALIV_TOOLS_ENABLED` | `0` | slukket |
 | `KALIV_TOOL_ISOLATION` | `(tom)` | indstilling |
-| `KALIV_VISION_MODEL` | `(unset)` | indstilling |
+| `KALIV_VISION_MODEL` | `(tom)` | indstilling |
 | `KALIV_WEB_RESEARCH_ENABLED` | `(tom)` | slukket |
 | `KALIV_WORKER_ALLOW_LAN` | `0` | slukket |
 | `MODELRIG_ADMIN_KEY` | `(unset)` | indstilling |
 | `MODELRIG_CLAIM_MAX` | `(unset)` | indstilling |
 | `MODELRIG_CONFIG` | `(unset)` | indstilling |
-| `MODELRIG_DATA` | `(unset)` | indstilling |
+| `MODELRIG_DATA` | `(unset)` | slukket |
+| `MODELRIG_EMBED_MODEL` | `nomic-embed-text` | indstilling |
+| `MODELRIG_GEN_MODEL` | `qwen2.5-coder:7b` | indstilling |
 | `MODELRIG_HOST` | `(unset)` | indstilling |
+| `MODELRIG_OLLAMA_KEEP_ALIVE` | `30m` | indstilling |
 | `MODELRIG_OLLAMA_KEY` | `(unset)` | indstilling |
-| `MODELRIG_OLLAMA_URL` | `(unset)` | indstilling |
+| `MODELRIG_OLLAMA_TIMEOUT` | `600` | indstilling |
+| `MODELRIG_OLLAMA_URL` | `http://127.0.0.1:11434` | indstilling |
 | `MODELRIG_PAIRING_TTL` | `(unset)` | indstilling |
 | `MODELRIG_PORT` | `(unset)` | indstilling |
+| `MODELRIG_WORKER_HOST` | `127.0.0.1` | indstilling |
+| `MODELRIG_WORKER_PORT` | `8099` | indstilling |
 | `MODELRIG_WORKER_URL` | `(unset)` | indstilling |
 
 ---

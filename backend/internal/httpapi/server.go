@@ -93,6 +93,12 @@ func (s *server) routes() {
 	s.mux.Handle("GET /api/v1/tools/audit", s.authMW(http.HandlerFunc(s.handleToolsAudit)))
 	s.mux.Handle("POST /api/v1/tools/enabled", s.authMW(http.HandlerFunc(s.handleToolsEnabled)))
 
+	// DC-L16 product candidate. Exact opt-in mounts one read-only status route;
+	// there is no DevControl import, task registry, executor or write surface.
+	if devControlPilotEnabled() {
+		s.mux.Handle("GET /api/v1/experimental/devcontrol-pilot/status", s.authMW(http.HandlerFunc(s.handleDevControlPilotStatus)))
+	}
+
 	// T-036/T-044 GitHub connector pilot. One default-off switch mounts both
 	// worker + backend surfaces. Every backend route remains Bearer-authenticated,
 	// while github_connector.go additionally refuses a non-loopback worker before
@@ -123,6 +129,7 @@ func (s *server) routes() {
 	// avatar, thumbnail and motions for phone/headset renderers. GET only.
 	s.mux.Handle("GET /api/v1/body/active", s.authMW(http.HandlerFunc(s.handleBodyActive)))
 	s.mux.Handle("GET /api/v1/body/active/avatar.vrm", s.authMW(http.HandlerFunc(s.handleBodyAvatar)))
+	s.mux.Handle("GET /api/v1/body/active/bodyprint.json", s.authMW(http.HandlerFunc(s.handleBodyBodyprint)))
 	s.mux.Handle("GET /api/v1/body/active/thumbnail.png", s.authMW(http.HandlerFunc(s.handleBodyThumbnail)))
 	// ServeMux wildcards must be whole segments: the ".vrma" suffix is part of
 	// the {file} value and is validated in the handler.

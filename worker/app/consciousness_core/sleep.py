@@ -126,6 +126,10 @@ class WakeReceipt(StrictModel):
                 )
             return self
 
+        if self.duration_known or self.offline_duration_ms is not None:
+            raise ValueError(
+                "unplanned dormancy cannot claim exact offline duration"
+            )
         if self.offline_duration_upper_bound_ms is not None:
             if not all(refs_present):
                 raise ValueError(
@@ -134,10 +138,6 @@ class WakeReceipt(StrictModel):
             if self.offline_duration_upper_bound_confidence <= 0.0:
                 raise ValueError(
                     "duration upper bound requires positive confidence"
-                )
-            if self.duration_known or self.offline_duration_ms is not None:
-                raise ValueError(
-                    "duration upper bound cannot become exact offline duration"
                 )
         elif self.offline_duration_upper_bound_confidence != 0.0:
             raise ValueError(
@@ -240,25 +240,34 @@ def wake_from_sleep(
         raise SleepContractError("sleep record belongs to another Person Revision")
 
     duration=None; confidence=0.0; known=False
-    # Offline sleep normally crosses runtime epochs, so elapsed duration must
-    # bridge through trusted wall-clock evidence. A backwards wall clock is
-    # never accepted as a tiny "same window" sleep: keep duration unknown
-    # rather than inventing time that did not progress.
-    wall_clock_rolled_back = (
-        entry.runtime_epoch_id != wake.runtime_epoch_id
-        and entry.wall_time_unix_ms is not None
-        and wake.wall_time_unix_ms is not None
-        and wake.wall_time_unix_ms < entry.wall_time_unix_ms
-    )
-    if not wall_clock_rolled_back:
-        try:
-            relation=relate_anchors(entry,wake)
-            if relation.relation in {"AFTER","SAME_WINDOW"} and relation.elapsed_ms is not None:
-                duration=relation.elapsed_ms
-                confidence=relation.confidence
-                known=True
-        except TemporalContractError:
-            pass
+    # Only a planned sleep has an authoritative shutdown boundary, so only it
+    # may claim an exact offline duration. For unplanned dormancy the
+    # last-known anchor proves the runtime was alive at that instant; it does
+    # not identify the later crash instant and therefore cannot become an
+    # exact outage duration.
+    if kind == "PLANNED_SLEEP":
+        # Offline sleep normally crosses runtime epochs, so elapsed duration
+        # must bridge through trusted wall-clock evidence. A backwards wall
+        # clock is never accepted as a tiny "same window" sleep: keep duration
+        # unknown rather than inventing time that did not progress.
+        wall_clock_rolled_back = (
+            entry.runtime_epoch_id != wake.runtime_epoch_id
+            and entry.wall_time_unix_ms is not None
+            and wake.wall_time_unix_ms is not None
+            and wake.wall_time_unix_ms < entry.wall_time_unix_ms
+        )
+        if not wall_clock_rolled_back:
+            try:
+                relation=relate_anchors(entry,wake)
+                if (
+                    relation.relation in {"AFTER","SAME_WINDOW"}
+                    and relation.elapsed_ms is not None
+                ):
+                    duration=relation.elapsed_ms
+                    confidence=relation.confidence
+                    known=True
+            except TemporalContractError:
+                pass
 
     seed={"self_id":self_id,"person_revision":person_revision,"wake":wake.anchor_id,"sleep_id":sleep_id,"kind":kind}
     return WakeReceipt(

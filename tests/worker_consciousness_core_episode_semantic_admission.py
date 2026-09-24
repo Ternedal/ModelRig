@@ -229,24 +229,26 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
 
     def test_empty_memory_recall_is_episode_and_clock_noop(self):
         session, engine, clock = self.session()
+        clock_before = clock.calls
 
         result = session.submit_memory_recall(
             self.memory_snapshot(empty=True)
         )
 
         self.assertFalse(result.cognition_event_admitted)
-        self.assertEqual(clock.calls, 0)
+        self.assertEqual(clock.calls, clock_before)
         self.assertEqual(engine.calls, 0)
         self.assertIsNone(session.experience_episode)
 
     def test_memory_recall_reuses_attention_clock_and_replay_adds_no_moment(self):
         session, engine, clock = self.session()
         snapshot = self.memory_snapshot()
+        clock_before = clock.calls
 
         first = session.submit_memory_recall(snapshot)
 
         self.assertTrue(first.cognition_event_admitted)
-        self.assertEqual(clock.calls, 1)
+        self.assertEqual(clock.calls, clock_before + 1)
         self.assertEqual(engine.calls, 0)
         episode = session.experience_episode
         self.assertEqual(episode.moment_count, 1)
@@ -275,6 +277,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
     def test_gaze_no_event_is_episode_noop(self):
         session, engine, clock = self.session()
         state = self.embodiment_state()
+        clock_before = clock.calls
 
         result = session.submit_embodiment_inference(
             state=state,
@@ -282,7 +285,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.cognition_event_admitted)
-        self.assertEqual(clock.calls, 0)
+        self.assertEqual(clock.calls, clock_before)
         self.assertEqual(engine.calls, 0)
         self.assertIsNone(session.experience_episode)
 
@@ -290,6 +293,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
         session, engine, clock = self.session()
         state = self.embodiment_state()
         inference = self.inference()
+        clock_before = clock.calls
 
         first = session.submit_embodiment_inference(
             state=state,
@@ -297,7 +301,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
         )
 
         self.assertTrue(first.cognition_event_admitted)
-        self.assertEqual(clock.calls, 1)
+        self.assertEqual(clock.calls, clock_before + 1)
         self.assertEqual(engine.calls, 0)
         moment = session.experience_episode.moments[0]
         self.assertEqual(moment.kind, "EMBODIMENT_CHANGE")
@@ -324,6 +328,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
     def test_non_mismatch_prediction_is_episode_noop(self):
         session, engine, clock = self.session()
         prediction = self.prediction()
+        clock_before = clock.calls
 
         result = session.submit_prediction_outcome(
             prediction=prediction,
@@ -331,7 +336,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
         )
 
         self.assertFalse(result.cognition_event_admitted)
-        self.assertEqual(clock.calls, 0)
+        self.assertEqual(clock.calls, clock_before)
         self.assertEqual(engine.calls, 0)
         self.assertIsNone(session.experience_episode)
 
@@ -339,6 +344,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
         session, engine, clock = self.session()
         prediction = self.prediction()
         outcome = self.outcome(prediction)
+        clock_before = clock.calls
 
         first = session.submit_prediction_outcome(
             prediction=prediction,
@@ -346,7 +352,7 @@ class EpisodeSemanticAdmissionTests(unittest.TestCase):
         )
 
         self.assertTrue(first.cognition_event_admitted)
-        self.assertEqual(clock.calls, 1)
+        self.assertEqual(clock.calls, clock_before + 1)
         self.assertEqual(engine.calls, 0)
         moment = session.experience_episode.moments[0]
         self.assertEqual(moment.kind, "PREDICTION_RESOLUTION")

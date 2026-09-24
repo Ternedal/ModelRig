@@ -119,8 +119,22 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
+def self_state_ref(
+    state: PersistentSelfState | Mapping[str, Any],
+) -> str:
+    """Return the canonical content ref for one validated SelfState."""
+    parsed = (
+        state
+        if isinstance(state, PersistentSelfState)
+        else PersistentSelfState.model_validate(state)
+    )
+    return "self-state:" + _digest(parsed.model_dump(mode="json"))
+
+
 def _self_state_ref(state: PersistentSelfState) -> str:
-    return "self-state:" + _digest(state.model_dump(mode="json"))
+    # Compatibility for the C14 store internals; canonical ref authority is
+    # public here so lower-level persistence users need not import cycle.py.
+    return self_state_ref(state)
 
 
 def _unique(values: list[str], limit: int) -> list[str]:
