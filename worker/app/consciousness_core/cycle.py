@@ -32,7 +32,7 @@ from .episodes import ExperienceEpisodeState
 from .continuity_orientation import ContinuityOrientationState
 from .continuity_retirement import retire_wake_artifacts_from_model_context
 from .runtime import ConsciousnessCoreRuntime
-from .self_state import PersistentSelfState
+from .self_state import PersistentSelfState, self_state_ref
 
 
 UnitInterval = Annotated[
@@ -210,15 +210,6 @@ def _digest(value: Any) -> str:
 
 def _ref(kind: str, value: Any) -> str:
     return f"{kind}:{_digest(value)}"
-
-
-def self_state_ref(state: PersistentSelfState | Mapping[str, Any]) -> str:
-    parsed = (
-        state
-        if isinstance(state, PersistentSelfState)
-        else PersistentSelfState.model_validate(state)
-    )
-    return _ref("self-state", parsed)
 
 
 def world_state_ref(state: RuntimeWorldState | Mapping[str, Any]) -> str:
