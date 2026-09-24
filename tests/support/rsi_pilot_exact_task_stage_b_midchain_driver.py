@@ -15,21 +15,23 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from stage_b_weighted_costs import MIDCHAIN_COST_SECONDS
+from stage_b_weighted_sharding import weighted_shards
+
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
 _DEEP_SHARD_TIMEOUT_SECONDS = 2400
 _TARGETED_DEEP_TIMEOUT_SECONDS = 3600
+_DEEP_TIMEOUT_CONTRACTS = frozenset(
+    {"rsi_pilot_exact_task_remote_publication_transaction_contract.py"}
+)
 _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
     {"rsi_pilot_exact_task_post_merge_attestation_contract.py"}
 )
-# These contracts are CPU-heavy nested provenance qualifications. Two workers are
-# useful for the ordinary shards, but shard 2/3 contains the publication/merge
-# tail where each contract recursively rebuilds most of ADR-034+. Running two of
-# those tails together oversubscribes the hosted runner and turns otherwise-valid
-# contracts into exact 1800s timeout failures. Keep process isolation, but run
-# that specific deep shard serially. The outer Stage-B job still runs the three
-# shards in parallel.
+# Weighted sharding spreads the measured deep tail across all three hosted
+# runners.  Each shard can therefore keep two isolated child workers without
+# recreating the old round-robin shard-2 oversubscription.
 _MAX_PARALLEL_CONTRACTS = 2
 
 _CONTRACT_FILES = (
@@ -91,7 +93,11 @@ def _selected_contract_files() -> tuple[str, ...]:
         raise AssertionError(
             f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
         )
-    selected = _CONTRACT_FILES[index - 1 :: total]
+    selected = weighted_shards(
+        _CONTRACT_FILES,
+        MIDCHAIN_COST_SECONDS,
+        _REQUIRED_SHARD_COUNT,
+    )[index - 1]
     if not selected:
         raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
     return selected
@@ -109,18 +115,12 @@ def _decode_timeout_output(value: str | bytes | None) -> str:
 def _contract_timeout_seconds(filename: str | None = None) -> int:
     if filename in _TARGETED_DEEP_TIMEOUT_CONTRACTS:
         return _TARGETED_DEEP_TIMEOUT_SECONDS
-    shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
-    return (
-        _DEEP_SHARD_TIMEOUT_SECONDS
-        if shard == "2/3"
-        else _PER_CONTRACT_TIMEOUT_SECONDS
-    )
+    if filename in _DEEP_TIMEOUT_CONTRACTS:
+        return _DEEP_SHARD_TIMEOUT_SECONDS
+    return _PER_CONTRACT_TIMEOUT_SECONDS
 
 
 def _worker_count(contract_count: int) -> int:
-    shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
-    if shard == "2/3":
-        return 1
     return min(
         _MAX_PARALLEL_CONTRACTS,
         max(1, os.cpu_count() or 1),
@@ -170,6 +170,7 @@ def run_contract() -> None:
         f"Stage-B exact-task midchain: {len(_CONTRACT_FILES)} contracts, "
         f"shard {shard}, {worker_count} isolated worker(s), "
         f"{timeout_seconds}s default per-contract bound, "
+        f"{_DEEP_SHARD_TIMEOUT_SECONDS}s deep-contract bound, "
         f"{_TARGETED_DEEP_TIMEOUT_SECONDS}s targeted deep-contract bound",
         flush=True,
     )
