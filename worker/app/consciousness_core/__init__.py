@@ -216,6 +216,17 @@ from .episode_review_claim import (
     EpisodeReviewClaimSnapshot,
     TrustedEpisodeReviewClaimService,
 )
+from .episode_review_api import (
+    CONSCIOUSNESS_EPISODE_REVIEW_FLAG,
+    CONSCIOUSNESS_EPISODE_REVIEW_PREFIX,
+    EpisodeReviewAbandonBody,
+    EpisodeReviewClaimBody,
+    EpisodeReviewClaimTransportReceipt,
+    EpisodeReviewCommitBody,
+    build_consciousness_episode_review_router,
+    consciousness_episode_review_enabled,
+    mount_consciousness_episode_review,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -529,6 +540,15 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "mount_consciousness_episode_review",
+    "consciousness_episode_review_enabled",
+    "build_consciousness_episode_review_router",
+    "EpisodeReviewCommitBody",
+    "EpisodeReviewClaimTransportReceipt",
+    "EpisodeReviewClaimBody",
+    "EpisodeReviewAbandonBody",
+    "CONSCIOUSNESS_EPISODE_REVIEW_PREFIX",
+    "CONSCIOUSNESS_EPISODE_REVIEW_FLAG",
     "TrustedEpisodeReviewClaimService",
     "EpisodeReviewClaimSnapshot",
     "EpisodeReviewClaimError",

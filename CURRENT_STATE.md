@@ -50,6 +50,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_CHECKPOINT_LIVENESS_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_EPISODE_REVIEW_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` |
@@ -69,9 +70,9 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
-| `KALIV_SCHEDULER` | `` |
 | `KALIV_SCHEDULER_API` | `0` |
 | `KALIV_SCHEDULER_POLL_S` | `` |
+| `KALIV_SCHEDULER` | `` |
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
@@ -268,6 +269,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_episode_event_admission.py`
 - `tests/worker_consciousness_core_episode_experience_review.py`
 - `tests/worker_consciousness_core_episode_review_adapter.py`
+- `tests/worker_consciousness_core_episode_review_api.py`
 - `tests/worker_consciousness_core_episode_review_claim.py`
 - `tests/worker_consciousness_core_episode_review_decision.py`
 - `tests/worker_consciousness_core_episode_review_mailbox.py`

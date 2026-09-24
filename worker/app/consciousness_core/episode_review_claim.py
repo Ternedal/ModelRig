@@ -18,6 +18,7 @@ from .episode_experience_review import (
 )
 from .episode_review_adapter import (
     EpisodeReviewAdapterError,
+    EpisodeReviewAdapterSnapshot,
     TrustedEpisodeReviewAdapter,
 )
 from .episode_review_decision import (
@@ -176,6 +177,14 @@ class TrustedEpisodeReviewClaimService:
             automatic_expiry=False,
             production_activation=False,
         )
+
+    def list_pending(
+        self,
+        *,
+        limit: int = 8,
+    ) -> EpisodeReviewAdapterSnapshot:
+        self._require_open()
+        return self._adapter.list_pending(limit=limit)
 
     def claim_exact(
         self,

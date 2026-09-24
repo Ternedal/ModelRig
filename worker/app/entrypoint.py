@@ -45,6 +45,7 @@ from .consciousness_core.supervisor_lifecycle import (
 from .consciousness_core.exact_event_step_api import mount_consciousness_exact_event_step
 from .consciousness_core.profile_step_api import mount_consciousness_profile_step
 from .consciousness_core.response_guidance_api import mount_consciousness_guidance
+from .consciousness_core.episode_review_api import mount_consciousness_episode_review
 from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
@@ -119,6 +120,11 @@ mount_consciousness_exact_event_step(fastapi_app)
 # response-guidance consume surface. It exposes only the already-isolated
 # response_intent projection and performs no model call.
 mount_consciousness_guidance(fastapi_app)
+
+# Consciousness Core C30-O is a separately gated loopback-only episode-review
+# transport. With its flag off it adds no route and creates no mailbox/service.
+# Even when mounted it only delegates to an already-injected C30-N service.
+mount_consciousness_episode_review(fastapi_app)
 
 # Agent 3 wires through the same documented entrypoint the campaign probes. The
 # mount self-guards on KALIV_AGENT3_ENABLED (default off) and owns the complete
