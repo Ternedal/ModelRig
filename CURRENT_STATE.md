@@ -50,6 +50,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_CHAT_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_CHECKPOINT_LIVENESS_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_CORE_ENABLED` | `0` |
+| `KALIV_CONSCIOUSNESS_EPISODE_REVIEW_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_EVENT_CHECKPOINT_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED` | `0` |
@@ -263,8 +264,22 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_embodiment_attention.py`
 - `tests/worker_consciousness_core_episode_boundary.py`
 - `tests/worker_consciousness_core_episode_boundary_application.py`
+- `tests/worker_consciousness_core_episode_closure_evidence.py`
 - `tests/worker_consciousness_core_episode_context.py`
 - `tests/worker_consciousness_core_episode_event_admission.py`
+- `tests/worker_consciousness_core_episode_experience_review.py`
+- `tests/worker_consciousness_core_episode_review_adapter.py`
+- `tests/worker_consciousness_core_episode_review_api.py`
+- `tests/worker_consciousness_core_episode_review_attention.py`
+- `tests/worker_consciousness_core_episode_review_claim.py`
+- `tests/worker_consciousness_core_episode_review_decision.py`
+- `tests/worker_consciousness_core_episode_review_lifecycle.py`
+- `tests/worker_consciousness_core_episode_review_mailbox.py`
+- `tests/worker_consciousness_core_episode_review_manifest.py`
+- `tests/worker_consciousness_core_episode_review_observability.py`
+- `tests/worker_consciousness_core_episode_review_operator_summary.py`
+- `tests/worker_consciousness_core_episode_review_publication.py`
+- `tests/worker_consciousness_core_episode_review_status.py`
 - `tests/worker_consciousness_core_episode_semantic_admission.py`
 - `tests/worker_consciousness_core_exact_event_checkpoint.py`
 - `tests/worker_consciousness_core_exact_event_step.py`

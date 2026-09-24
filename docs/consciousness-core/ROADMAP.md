@@ -1,8 +1,38 @@
 # Consciousness Core — roadmap
 
-Status: side-track. No production activation.
+Status: active side-track implementation. No production activation. Runtime and operator surfaces remain explicitly gated and default-off.
 
-## Current slice: C0–C3
+## Current stacked focus — C30 experiential episode and review
+
+C30-A through C30-G establish bounded experiential episodes, live episode
+admission/context, trusted boundary policy and non-destructive boundary
+application.
+
+C30-H through C30-T add the optional review path for closed episodes:
+
+- C30-H: bounded reference-only closure evidence;
+- C30-I: trusted semantic review boundary into existing C7 evaluation;
+- C30-J: bounded process-local review mailbox;
+- C30-K: non-blocking publication from C19 boundary application;
+- C30-L: trusted bounded list/consume adapter;
+- C30-M: exact APPROVE/REJECT decision application;
+- C30-N: claim/abandon/commit lifecycle with semantic preflight before consume;
+- C30-O: independently default-off loopback-only review transport;
+- C30-P: independently default-off process-local review runtime lifecycle;
+- C30-Q: privacy-safe runtime status;
+- C30-R: aggregate process-local observability without per-request audit data;
+- C30-S: read-only operator-attention evaluation with no notifications/actions;
+- C30-T: compact privacy-safe operator summary.
+
+C30-U provides the static capability manifest and consolidated qualification
+contract for the complete C30-H through C30-T review capability.
+
+The review path remains subordinate to existing authorities: Memory 4 owns
+durable autobiographical memory; C7 handoff policy remains authoritative;
+Agent 3 owns execution; Person/Profile owns identity/person revision; the review
+control plane performs no model call and production_activation remains false.
+
+## Foundation slices: C0–C3
 
 ### C0 — architecture authority
 
@@ -58,7 +88,7 @@ Acceptance:
 - proposal schema has empty action/state-mutation surfaces;
 - engine authority flags are all false;\n- weak/strong mock engine profiles may change cognitive output/uncertainty while\n  SelfState remains byte-for-byte unchanged.
 
-## Later slices
+## Original staged roadmap
 
 ### C4 — first runtime ThoughtEngine adapter
 Default-off adapter integration. Mock engine remains the reference deterministic

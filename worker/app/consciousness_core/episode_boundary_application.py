@@ -13,6 +13,10 @@ from .episode_boundary import (
     BoundaryDecision,
     EpisodeBoundaryPolicyDecision,
 )
+from .episode_closure_evidence import (
+    EpisodeClosureEvidence,
+    derive_episode_closure_evidence,
+)
 from .episodes import (
     ExperienceEpisodeState,
     close_experience_episode,
@@ -106,6 +110,7 @@ class EpisodeBoundaryApplicationResult(StrictModel):
     ]
     active_episode: ExperienceEpisodeState | None
     receipt: EpisodeBoundaryApplicationReceipt
+    closure_evidence: EpisodeClosureEvidence | None = None
     production_activation: Literal[False]
 
     @model_validator(mode="after")
@@ -131,6 +136,38 @@ class EpisodeBoundaryApplicationResult(StrictModel):
             ):
                 raise ValueError(
                     "rotated active episode/ref mismatch"
+                )
+
+        if self.receipt.decision == "KEEP":
+            if self.closure_evidence is not None:
+                raise ValueError(
+                    "KEEP application cannot emit closure evidence"
+                )
+        else:
+            if self.closure_evidence is None:
+                raise ValueError(
+                    "episode close must emit bounded closure evidence"
+                )
+            if (
+                self.closure_evidence.closed_episode_ref
+                != self.receipt.closed_episode_ref
+            ):
+                raise ValueError(
+                    "closure evidence/closed episode ref mismatch"
+                )
+            if (
+                self.closure_evidence.boundary_signal_ref
+                != self.receipt.signal_ref
+            ):
+                raise ValueError(
+                    "closure evidence/boundary signal ref mismatch"
+                )
+            if (
+                self.closure_evidence.closed_anchor_id
+                != self.receipt.boundary_anchor_id
+            ):
+                raise ValueError(
+                    "closure evidence/boundary anchor mismatch"
                 )
         return self
 
@@ -195,6 +232,7 @@ def apply_episode_boundary_decision(
             ),
             active_episode=current,
             receipt=receipt,
+            closure_evidence=None,
             production_activation=False,
         )
 
@@ -213,6 +251,10 @@ def apply_episode_boundary_decision(
         reason=policy.close_reason,
     )
     closed_ref = experience_episode_ref(closed)
+    closure_evidence = derive_episode_closure_evidence(
+        closed,
+        boundary_signal_ref=policy.signal_ref,
+    )
 
     next_episode = None
     next_ref = None
@@ -257,5 +299,6 @@ def apply_episode_boundary_decision(
         ),
         active_episode=next_episode,
         receipt=receipt,
+        closure_evidence=closure_evidence,
         production_activation=False,
     )
