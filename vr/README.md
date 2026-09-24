@@ -38,7 +38,7 @@ The landed first-party VR slice provides:
 - ModelRig `POST /api/v1/pair/claim`
 - bearer-token persistence in Unity PlayerPrefs for bootstrap development
 - `GET /api/v1/models`
-- buffered `POST /api/v1/chat`
+- token-for-token NDJSON streaming over `POST /api/v1/chat`, including explicit STOP/cancel handling
 - SkyPlayer-Engine dependency pinned to an exact revision
 - Quest/Android build script using IL2CPP + ARM64 + GLES3
 - BodyRig VRM avatar loading with body/package/member-digest binding
@@ -50,7 +50,7 @@ The landed first-party VR slice provides:
 - Kaliv-owned media facade over SkyPlayer-Engine with flat/VR180/VR360 projection bound to `KalivMedia`
 - tracking-origin compensation propagated into immersive media orientation
 
-The implementation is landed on `main`, but it is not yet a physically qualified finished VR product. Streaming chat, voice, RAG, tools/confirmation, richer spatial interaction and full Kaliv conversation UX still need parity with Android/Desktop, and Quest device evidence remains its own gate.
+The implementation is landed on `main`, but it is not yet a physically qualified finished VR product. Voice, RAG, tools/confirmation, richer spatial interaction and full Kaliv conversation UX still need parity with Android/Desktop, and Quest device evidence remains its own gate.
 
 ## Build
 
