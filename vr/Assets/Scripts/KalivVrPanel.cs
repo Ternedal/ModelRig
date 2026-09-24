@@ -33,6 +33,7 @@ namespace Kaliv.VR
         private Text _bodyStatus;
         private Button _pairButton;
         private Button _sendButton;
+        private Button _stopButton;
         private readonly List<string> _models = new();
         private int _modelIndex;
         private readonly StringBuilder _conversation = new();
@@ -122,6 +123,9 @@ namespace Kaliv.VR
                 new Vector2(170, 44), new Vector2(-440, -318), Elevated, _app.RefreshBody);
             AddButton(_chatGroup.transform, "CENTRER KROP",
                 new Vector2(190, 44), new Vector2(-245, -318), Elevated, _app.RecenterBody);
+            _stopButton = AddButton(_chatGroup.transform, "STOP",
+                new Vector2(150, 44), new Vector2(0, -318), Danger, _app.StopChat);
+            _stopButton.interactable = false;
             AddButton(_chatGroup.transform, "GLEMME RIG",
                 new Vector2(220, 44), new Vector2(410, -318), Elevated, _app.ForgetRig);
 
@@ -163,6 +167,7 @@ namespace Kaliv.VR
         {
             if (_sendButton != null) _sendButton.interactable = !busy;
             if (_prompt != null) _prompt.interactable = !busy;
+            if (_stopButton != null) _stopButton.interactable = busy;
         }
 
         public void SetModels(List<string> models, string selected)
@@ -176,12 +181,43 @@ namespace Kaliv.VR
         public void AppendUser(string text) => Append("DIG", text);
         public void AppendAssistant(string text) => Append("KALIV", text);
 
+        public void BeginAssistantStream()
+        {
+            if (_conversation.Length > 0) _conversation.Append("\n\n");
+            _conversation.Append("KALIV\n");
+            RefreshTranscript();
+        }
+
+        public void AppendAssistantDelta(string delta)
+        {
+            if (string.IsNullOrEmpty(delta)) return;
+            _conversation.Append(delta);
+            RefreshTranscript();
+        }
+
+        public void FinishAssistantStream(string suffix)
+        {
+            if (!string.IsNullOrEmpty(suffix)) _conversation.Append(suffix);
+            TrimConversation();
+            RefreshTranscript();
+        }
+
         private void Append(string who, string text)
         {
             if (_conversation.Length > 0) _conversation.Append("\n\n");
             _conversation.Append(who).Append("\n").Append(text?.Trim());
+            TrimConversation();
+            RefreshTranscript();
+        }
+
+        private void TrimConversation()
+        {
             if (_conversation.Length > 5000)
                 _conversation.Remove(0, _conversation.Length - 5000);
+        }
+
+        private void RefreshTranscript()
+        {
             if (_transcript != null) _transcript.text = _conversation.ToString();
         }
 
