@@ -109,8 +109,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Pull requests are Stage-B qualified exactly once by
+  # exact-head-qualification. Push/main and workflow_dispatch keep this
+  # independent full-diagnostics Stage-B authority.
   stage-b-slices:
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
