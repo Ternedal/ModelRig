@@ -384,6 +384,14 @@ def _invalid_body() -> HTTPException:
 
 
 async def _read_event(request: Request) -> VisionRigPerceptionEventV3:
+    content_type = request.headers.get("content-type", "")
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type != "application/json":
+        raise HTTPException(
+            status_code=415,
+            detail="VisionRig perception event requires application/json",
+        )
+
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
