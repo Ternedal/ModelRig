@@ -157,12 +157,12 @@ function Get-WslInventory {
         $kernel = @(Invoke-ExternalText -FilePath "wsl.exe" -Arguments @("-d", $distro, "--", "sh", "-lc", "uname -r 2>/dev/null || true") -IgnoreExitCode)
         $manual = @(Invoke-ExternalText -FilePath "wsl.exe" -Arguments @("-d", $distro, "--", "sh", "-lc", "command -v apt-mark >/dev/null 2>&1 && apt-mark showmanual 2>/dev/null || true") -IgnoreExitCode)
 
-        $result.Add([pscustomobject][ordered]@{
+        $result += [pscustomobject][ordered]@{
             name = $distro
             os_release = if ($os.Count -gt 0) { ($os -join " ") } else { "" }
             kernel = if ($kernel.Count -gt 0) { $kernel[0] } else { "" }
             manual_packages = @($manual | Sort-Object -Unique)
-        })
+        }
     }
 
     return @($result | Sort-Object name)
