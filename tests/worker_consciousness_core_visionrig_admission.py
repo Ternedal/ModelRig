@@ -218,7 +218,9 @@ class VisionRigAdmissionTests(unittest.TestCase):
                 os.environ[CONSCIOUSNESS_VISIONRIG_FLAG] = old
 
     def test_projection_is_inferred_and_omits_unreviewed_visual_text(self):
-        event = VisionRigPerceptionEventV3.model_validate_json(\n            json.dumps(event_payload())\n        )
+        event = VisionRigPerceptionEventV3.model_validate_json(
+            json.dumps(event_payload())
+        )
         projection = project_visionrig_event(event)
 
         self.assertEqual(projection.evidence.epistemic_status, "inferred")
