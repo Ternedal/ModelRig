@@ -1,0 +1,88 @@
+name: rig-delta-inventory
+
+on:
+  pull_request:
+    paths:
+      - "scripts/rig-delta-inventory.ps1"
+      - "scripts/RIG_DELTA_INVENTORY.md"
+      - ".github/workflows/rig-delta-inventory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell51-contract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Parse with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ".\scripts\rig-delta-inventory.ps1"),
+            [ref]$null,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: Exercise offline compare contract
+        shell: powershell
+        run: |
+          $base = @{
+            schema = "modelrig/rig-delta-inventory/v1"
+            captured_utc = "2026-09-25T18:00:00Z"
+            label = "source"
+            computer_name = "OLD"
+            repositories = @(
+              @{ name = "ModelRig"; path = "C:\Rig\src\ModelRig"; origin = "https://github.com/Ternedal/ModelRig.git"; head = "aaa"; branch = "main"; dirty = $false }
+            )
+            installed_applications = @()
+            ollama_models = @(
+              @{ name = "nomic-embed-text:latest"; digest = "source-digest"; size_bytes = 123 }
+            )
+            wsl = @(
+              @{ name = "Ubuntu-22.04"; os_release = "ID=ubuntu VERSION_ID=22.04"; manual_packages = @("git", "make") }
+            )
+            tools = @(@{ name = "git"; available = $true })
+            python_environments = @()
+            scheduled_tasks = @()
+            services = @()
+            rig_top_level = @()
+          }
+          $target = @{
+            schema = "modelrig/rig-delta-inventory/v1"
+            captured_utc = "2026-09-25T18:01:00Z"
+            label = "target"
+            computer_name = "NEW"
+            repositories = @(
+              @{ name = "ModelRig"; path = "C:\Rig\src\ModelRig"; origin = "https://github.com/Ternedal/ModelRig.git"; head = "bbb"; branch = "main"; dirty = $false }
+            )
+            installed_applications = @()
+            ollama_models = @()
+            wsl = @(
+              @{ name = "Ubuntu-22.04"; os_release = "ID=ubuntu VERSION_ID=22.04"; manual_packages = @("git") }
+            )
+            tools = @(@{ name = "git"; available = $true })
+            python_environments = @()
+            scheduled_tasks = @()
+            services = @()
+            rig_top_level = @()
+          }
+          $base | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\source.json" -Encoding UTF8
+          $target | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\target.json" -Encoding UTF8
+
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\rig-delta-inventory.ps1" -Action Compare -SourceManifest "$env:RUNNER_TEMP\source.json" -TargetManifest "$env:RUNNER_TEMP\target.json" -CompareOutFile "$env:RUNNER_TEMP\delta.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $delta = Get-Content "$env:RUNNER_TEMP\delta.json" -Raw | ConvertFrom-Json
+          if ($delta.repositories.different.Count -ne 1) { throw "Expected one repository HEAD difference." }
+          if ($delta.ollama_models.source_only.Count -ne 1) { throw "Expected one missing Ollama model." }
+          if ($delta.wsl_manual_packages[0].missing_on_target -notcontains "make") { throw "Expected missing WSL package 'make'." }
