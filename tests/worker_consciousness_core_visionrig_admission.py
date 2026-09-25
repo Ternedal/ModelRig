@@ -2,6 +2,7 @@
 """VisionRig v3 -> Consciousness Core world-evidence bridge tests."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
