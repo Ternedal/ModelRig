@@ -11,6 +11,11 @@ from .lived_continuity import (
     LivedContinuityReceipt,
     build_lived_continuity_receipt,
 )
+from .lived_dormancy import (
+    LivedDormancyBridgeError,
+    LivedDormancyBridgeReceipt,
+    build_lived_dormancy_bridge,
+)
 from .lived_continuity_transition import (
     LivedContinuityTransitionError,
     LivedContinuityTransitionReceipt,
@@ -973,6 +978,9 @@ __all__ = [
     "LivedContinuityInputs",
     "LivedContinuityReceipt",
     "build_lived_continuity_receipt",
+    "LivedDormancyBridgeError",
+    "LivedDormancyBridgeReceipt",
+    "build_lived_dormancy_bridge",
     "LivedContinuityTransitionError",
     "LivedContinuityTransitionReceipt",
     "reduce_lived_continuity",
