@@ -16,14 +16,14 @@ plane; Kaliv is the user-facing system.
 
 The LLM is deliberately replaceable rather than being the persistence or identity
 authority. Persistent cognitive state, VoiceRig, BodyRig and the clients keep
-separate ownership boundaries. Consciousness Core is the architecture for
-persistent SelfState/WorldState, temporal continuity, sleep/wake and bounded
-cognitive cycles; while its current PR stack remains unmerged it is **draft**, not
-current-main runtime authority.
+separate ownership boundaries. Consciousness Core is the landed, default-off
+architecture for persistent SelfState/WorldState, temporal continuity, sleep/wake
+and bounded cognitive cycles. Its production activation remains false and its
+runtime paths stay behind explicit opt-in gates.
 
 ```mermaid
 flowchart LR
-    CC["Consciousness Core\nDRAFT until landed/qualified"] -. "cognitive state/guidance" .-> MR["ModelRig\nreasoning · memory · tools · semantic intent"]
+    CC["Consciousness Core\nLANDED · DORMANT / default-off"] -. "cognitive state/guidance" .-> MR["ModelRig\nreasoning · memory · tools · semantic intent"]
     LLM["Replaceable LLM\nlocal / explicit cloud"] <--> MR
     MR -->|BodyCue| BR["BodyRig\nbody identity · Motor State\ndigital-twin authority"]
     MR <--> VR["VoiceRig\nvoice/audio + timing authority"]
@@ -100,6 +100,7 @@ flowchart TB
         Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
         A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
         A4["Agent 4 — campaign/read architecture<br/>A4-01…A4-25 software chain<br/>DORMANT + default-off operator reads<br/>narrow A4-21 read context · immutable A4-25 snapshot roots<br/>A4-25f physical Windows/Pixel qualification remains separate"]
+        CC["Consciousness Core<br/>SelfState · WorldState · temporal sense · sleep/wake<br/>bounded cognitive cycles · checkpoints · experiential review<br/>LANDED · DORMANT · KALIV_CONSCIOUSNESS_CORE_ENABLED=0"]
         BC["BodyRig integration boundary<br/>semantic BodyCue producer + compatibility adapters<br/>standalone Ternedal/BodyRig owns body-domain contracts"]
         CU["Computer Use (Tier B)<br/>I3 see · I4 propose — DORMANT unless KALIV_COMPUTER_USE=1<br/>signed screenshot contract · local-only vision bridge<br/>I5 act: not built"]
         Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>workflow completion, not tool choice"]
@@ -129,6 +130,9 @@ flowchart TB
     Human == "approves every write" ==> Tools
     Human == "approves every scheduled write too" ==> Sched
     Sched -- "runs through the same gate" --> Tools
+    CC -. "replaceable ThoughtEngine" .-> Ollama
+    CC -. "intentions only — execution remains gated" .-> A3
+    CC -. "semantic body intent / embodiment feedback" .-> BC
     Worker -- "embeddings + generation<br/>embeddings ALWAYS local" --> Ollama
     Worker --> DB
     Worker -. "voice LLM step only ·<br/>explicit toggle · keep_alive<br/>NEVER sent to cloud" .-> Cloud
@@ -139,7 +143,7 @@ flowchart TB
     classDef ext stroke-dasharray: 6 4;
     class Cloud,GH,BodyRig,Sky ext;
     classDef dormant stroke-dasharray: 4 3;
-    class A3,A4,CU,Dev dormant;
+    class CC,A3,A4,CU,Dev dormant;
 ```
 
 **Two cloud roads, and they are not the same thing.**
