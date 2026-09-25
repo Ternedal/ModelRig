@@ -127,8 +127,8 @@ def event_payload(*, event_id="evt-vision-1", identity_hint="person-rumor"):
                 "method": "kinect-v2-hardware-depth",
             }
         ],
-        "scene_label": None,
-        "scene_confidence": None,
+        "scene_label": "mrvision-place:place:home:living-room",
+        "scene_confidence": 0.93,
         "dropped_frames": 0,
         "production_authority": False,
     }
@@ -228,6 +228,11 @@ class VisionRigAdmissionTests(unittest.TestCase):
         self.assertEqual(projection.evidence.observed_sequence, 42)
         self.assertEqual(projection.evidence.source_refs, [projection.visionrig_event_ref])
         self.assertIn("entity_kinds=person:1,text:1", projection.evidence.proposition)
+        self.assertIn(
+            "scene_label=mrvision-place:place:home:living-room",
+            projection.evidence.proposition,
+        )
+        self.assertIn("scene_confidence=0.930", projection.evidence.proposition)
         self.assertIn("metric_depth=nearest=1.25m,count=1", projection.evidence.proposition)
         self.assertIn("in_front_of:1", projection.evidence.proposition)
         self.assertIn("ocr_items=1", projection.evidence.proposition)
