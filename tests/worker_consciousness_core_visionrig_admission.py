@@ -254,6 +254,24 @@ class VisionRigAdmissionTests(unittest.TestCase):
             "Consciousness VisionRig admission is loopback-only",
         )
 
+    def test_route_rejects_simple_non_json_post_before_body_parse(self):
+        app = FastAPI()
+        app.include_router(
+            build_consciousness_visionrig_router(
+                loopback_allowed=lambda _request: True,
+            )
+        )
+        response = TestClient(app).post(
+            CONSCIOUSNESS_VISIONRIG_PREFIX + "/visionrig-event",
+            content=b"{invalid private sensor body",
+            headers={"content-type": "text/plain"},
+        )
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(
+            response.json()["detail"],
+            "VisionRig perception event requires application/json",
+        )
+
     def test_route_requires_v3_and_non_authoritative_input(self):
         app = FastAPI()
         app.include_router(
