@@ -29,6 +29,7 @@ from .episode_context import (
     project_episode_context,
 )
 from .episodes import ExperienceEpisodeState
+from .present_context import PresentContextProjection
 from .continuity_orientation import ContinuityOrientationState
 from .continuity_retirement import retire_wake_artifacts_from_model_context
 from .runtime import ConsciousnessCoreRuntime
@@ -150,6 +151,7 @@ class CognitiveContextPacket(StrictModel):
     embodiment_state_ref: NonEmptyRef | None
     continuity: ContinuityContextProjection | None = None
     episode: EpisodeContextProjection | None = None
+    present_context: PresentContextProjection | None = None
     production_activation: Literal[False]
 
     @model_validator(mode="after")
@@ -296,6 +298,7 @@ def assemble_thought_request(
     embodiment_state_ref: str | None = None,
     continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
     experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
+    present_context: PresentContextProjection | Mapping[str, Any] | None = None,
     requested_reasoning_mode: ReasoningMode = "normal",
 ) -> tuple[ThoughtRequest, CognitiveContextPacket]:
     """Materialize one exact context packet and its reference-only C3 request."""
@@ -338,6 +341,13 @@ def assemble_thought_request(
             else experience_episode
             if isinstance(experience_episode, ExperienceEpisodeState)
             else ExperienceEpisodeState.model_validate(experience_episode)
+        )
+        present_context_value = (
+            None
+            if present_context is None
+            else present_context
+            if isinstance(present_context, PresentContextProjection)
+            else PresentContextProjection.model_validate(present_context)
         )
     except ValidationError as exc:
         raise CognitiveCycleError("invalid cognitive-cycle input") from exc
@@ -399,6 +409,7 @@ def assemble_thought_request(
         embodiment_state_ref=embodiment_state_ref,
         continuity=continuity_projection,
         episode=episode_projection,
+        present_context=present_context_value,
         production_activation=False,
     )
 
@@ -411,6 +422,11 @@ def assemble_thought_request(
         "relevant_memory_refs": memories,
         "embodiment_state_ref": embodiment_state_ref,
         "cognitive_profile_ref": profile_ref,
+        "present_context_ref": (
+            present_context_value.lived_continuity_ref
+            if present_context_value is not None
+            else None
+        ),
         "requested_reasoning_mode": requested_reasoning_mode,
     }
     request = ThoughtRequest(
