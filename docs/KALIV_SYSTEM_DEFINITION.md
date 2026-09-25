@@ -47,6 +47,7 @@ flowchart TB
 
     LLM["Replaceable LLM<br/>local Ollama or explicit cloud path"]
     Voice["VoiceRig<br/>voice/audio + utterance/viseme timing authority"]
+    Vision["Ternedal/VisionRig<br/>visual sensing + structured perception<br/>scene/depth/recognition hints"]
     Body["Ternedal/BodyRig<br/>body identity · .mrbody · BodyPrint<br/>Movement Identity · Motor State<br/>digital-twin evidence/release authority"]
     Sky["Ternedal/SkyPlayer-Engine<br/>reusable OpenXR / passthrough / media mechanics"]
 
@@ -65,6 +66,7 @@ flowchart TB
     API --> Intent
 
     API <--> Voice
+    Vision -. "bounded inferred WorldEvidence" .-> CC
     Intent --> Body
     Voice -->|"utterance/timing"| Body
 
@@ -88,6 +90,7 @@ contract without becoming its owner.
 | **Consciousness Core** | persistent cognitive-state architecture: SelfState, WorldState, temporal continuity, sleep/wake lifecycle, bounded inner-monologue/cognitive-cycle orchestration | LLM weights, BodyRig identity, unrestricted autonomous authority |
 | **LLM** | replaceable reasoning/language capability for a turn/cycle | persistent identity or system authority merely by being the active model |
 | **VoiceRig** | voice/audio and utterance/viseme timing authority | body identity or cognitive policy |
+| **VisionRig** | visual capture, structured perception, spatial/depth observations and non-authoritative recognition hints | Person identity authority, durable memory, cognitive policy or action authority |
 | **BodyRig** | `.mrbody`, BodyPrint, Movement Identity, Motor State, body realization semantics, source/physical/human digital-twin evidence | assistant reasoning or Kaliv application UX |
 | **Kaliv clients** | interaction and presentation | redefining BodyRig/VoiceRig semantic authority |
 | **SkyPlayer-Engine** | reusable XR/media mechanics | Kaliv product policy, body identity or ModelRig reasoning |
@@ -98,7 +101,7 @@ The intended continuity loop is event-driven rather than model-identity-driven:
 
 ```mermaid
 flowchart LR
-    E["User turn / world evidence / clock / wake event"]
+    E["User turn / VisionRig evidence / other world evidence / clock / wake event"]
     S["Persistent cognitive state<br/>SelfState + WorldState + temporal context"]
     C["Bounded cognitive cycle"]
     M["Replaceable LLM"]
@@ -175,13 +178,15 @@ The complete Kaliv vision is reached only when one coherent system can:
 2. maintain durable memory and cognitive continuity through the accepted
    Consciousness Core path;
 3. converse through the accepted VoiceRig path;
-4. use tools/agents/scheduling only through their explicit policy and approval
+4. perceive the environment through VisionRig while preserving the boundary
+   between non-authoritative perception hints and ModelRig identity/cognitive authority;
+5. use tools/agents/scheduling only through their explicit policy and approval
    boundaries;
-5. bind a real, source-derived and human/physically accepted BodyRig Person;
-6. render that same accepted embodiment in Kaliv VR while preserving the
+6. bind a real, source-derived and human/physically accepted BodyRig Person;
+7. render that same accepted embodiment in Kaliv VR while preserving the
    BodyRig/VoiceRig authority boundaries;
-7. expose the experience across Kaliv Desktop, Android and VR; and
-8. retain exact evidence for the software, device and human gates required by
+8. expose the experience across Kaliv Desktop, Android and VR; and
+9. retain exact evidence for the software, device and human gates required by
    each subsystem.
 
 No single green CI run, model response, generated avatar or renderer screenshot
