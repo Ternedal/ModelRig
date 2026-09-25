@@ -32,6 +32,54 @@ durable autobiographical memory; C7 handoff policy remains authoritative;
 Agent 3 owns execution; Person/Profile owns identity/person revision; the review
 control plane performs no model call and production_activation remains false.
 
+## Next stacked focus — C31 lived continuity loop
+
+C31 closes the architectural gap between the already implemented temporal,
+sleep/wake, autonomous-cycle and C30 episode-review capabilities. It does not
+introduce a new consciousness claim or a second execution authority.
+
+The target is a bounded, inspectable **lived continuity loop** in which Kaliv can
+orient to time, wake from dormancy, run cognitive cycles through the external
+ThoughtEngine, close experiential episodes, and carry reviewed context into later
+cycles while preserving the existing authority boundaries.
+
+Planned slices:
+
+- C31-A: continuity-loop contract and receipt joining temporal state, wake
+  orientation, cognitive-cycle and episode refs without granting new authority;
+- C31-B: bounded present-context projection for ThoughtRequest so the external
+  ThoughtEngine receives explicit temporal/self/episode orientation rather than
+  owning continuity itself;
+- C31-C: post-cycle continuity reducer that records reference-only transitions
+  across cycles while Person/Profile and Memory 4 remain authoritative;
+- C31-D: dormancy bridge proving planned sleep and unplanned shutdown create a
+  gap in cognition, not fabricated hidden cognition, followed by explicit wake
+  reorientation;
+- C31-E: episode carry-forward policy connecting C30 closure/review evidence to
+  later workspace attention without automatic durable-memory writes;
+- C31-F: continuous-loop supervisor seam composing existing default-off scheduler,
+  wake and cycle primitives without bypassing Agent 3 or existing gates;
+- C31-G: model-swap continuity qualification proving ThoughtEngine replacement can
+  change cognitive capability while SelfState identity, Person binding, durable
+  memories and continuity references remain stable;
+- C31-H: privacy-safe operator status and consolidated qualification contract.
+
+Acceptance for the complete C31 stack:
+
+- the ThoughtEngine remains external and replaceable;
+- no raw chain-of-thought is persisted or exposed;
+- powered-off time is represented as dormancy with `cognition_during_gap=false`;
+- time perception is evidence-backed by C11 temporal contracts and uncertainty;
+- sleep/wake uses the existing C13/C17 lifecycle rather than inventing a parallel
+  state machine;
+- C30 review output can influence later bounded context only through explicit
+  references and existing authorities;
+- Memory 4 remains durable autobiographical-memory authority;
+- Agent 3 remains action/execution authority;
+- Person/Profile remains identity and Person Revision authority;
+- all runtime composition remains independently gated and default-off;
+- `production_activation` remains false.
+
 ## Foundation slices: C0–C3
 
 ### C0 — architecture authority
