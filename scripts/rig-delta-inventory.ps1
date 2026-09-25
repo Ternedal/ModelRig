@@ -375,12 +375,8 @@ function Compare-WslPackages {
         if (-not $targetMap.ContainsKey($key)) { continue }
         $sourcePkgs = @($sourceMap[$key].manual_packages)
         $targetPkgs = @($targetMap[$key].manual_packages)
-        $missing = @()
-        $extra = @()
-        if ($sourcePkgs.Count -gt 0 -or $targetPkgs.Count -gt 0) {
-            $missing = @(Compare-Object -ReferenceObject $targetPkgs -DifferenceObject $sourcePkgs -PassThru | Where-Object { $_.SideIndicator -eq "=>" } | Sort-Object)
-            $extra = @(Compare-Object -ReferenceObject $sourcePkgs -DifferenceObject $targetPkgs -PassThru | Where-Object { $_.SideIndicator -eq "=>" } | Sort-Object)
-        }
+        $missing = @($sourcePkgs | Where-Object { $targetPkgs -notcontains $_ } | Sort-Object -Unique)
+        $extra = @($targetPkgs | Where-Object { $sourcePkgs -notcontains $_ } | Sort-Object -Unique)
         if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
             $result += [pscustomobject][ordered]@{ distro = $sourceMap[$key].name; missing_on_target = $missing; target_only = $extra }
         }
