@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 35 feature-switches er tændt som default.** (32 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 36 feature-switches er tændt som default.** (32 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -98,6 +98,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_CONSCIOUSNESS_STEP_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED` | `0` | slukket |
 | `KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED` | `0` | slukket |
+| `KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED` | `0` | slukket |
 | `KALIV_DATA_DIR` | `(unset)` | indstilling |
 | `KALIV_DESKTOP_ALLOWLIST_FILE` | `(tom)` | indstilling |
 | `KALIV_DEVCONTROL_PILOT` | `0` | slukket |
