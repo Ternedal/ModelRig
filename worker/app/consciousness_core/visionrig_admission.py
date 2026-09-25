@@ -6,6 +6,7 @@ atomic world update + attention admission. It never calls the ThoughtEngine.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -445,6 +446,9 @@ def build_consciousness_visionrig_router(
         tags=["experimental-consciousness"],
     )
 
+    sequence_lock = asyncio.Lock()
+    last_source_event: dict[str, tuple[int, str]] = {}
+
     @router.post("/visionrig-event")
     async def admit_visionrig_event(request: Request) -> dict[str, object]:
         # Check locality before body parsing. Remote input never gets parsed by
@@ -460,25 +464,50 @@ def build_consciousness_visionrig_router(
             )
 
         projection = project_visionrig_event(event)
-        try:
-            result = session.submit_world_evidence(
-                projection.evidence,
-                attention_salience=projection.attention_salience,
-            )
-        except (
-            WorldReducerError,
-            SupervisorContractError,
-            CognitiveSessionLifecycleError,
-        ) as exc:
-            raise HTTPException(
-                status_code=409,
-                detail="VisionRig perception admission conflict",
-            ) from exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="VisionRig perception admission unavailable",
-            ) from exc
+        source_id = event.source.source_id
+        async with sequence_lock:
+            prior = last_source_event.get(source_id)
+            if prior is not None:
+                prior_sequence, prior_event_ref = prior
+                if event.frame_sequence < prior_sequence:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="VisionRig perception sequence moved backwards",
+                    )
+                if (
+                    event.frame_sequence == prior_sequence
+                    and projection.visionrig_event_ref != prior_event_ref
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="VisionRig perception sequence was reused",
+                    )
+
+            try:
+                result = session.submit_world_evidence(
+                    projection.evidence,
+                    attention_salience=projection.attention_salience,
+                )
+            except (
+                WorldReducerError,
+                SupervisorContractError,
+                CognitiveSessionLifecycleError,
+            ) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="VisionRig perception admission conflict",
+                ) from exc
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="VisionRig perception admission unavailable",
+                ) from exc
+
+            if prior is None or event.frame_sequence > prior[0]:
+                last_source_event[source_id] = (
+                    event.frame_sequence,
+                    projection.visionrig_event_ref,
+                )
 
         cognition = result.cognition_event
         receipt = VisionRigAdmissionReceipt(
