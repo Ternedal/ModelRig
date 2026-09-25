@@ -26,6 +26,7 @@ class ControlCenterClientTest {
             assertEquals("stale", status.components.getValue("models").state)
             assertFalse(status.components.getValue("models").green)
             assertEquals("disabled", status.components.getValue("agent3").state)
+            assertEquals("disabled", status.components.getValue("visionrig").state)
             assertEquals("fallback", status.routing.state)
             assertEquals("readiness report expired", status.routing.fallbackReason)
             assertEquals(listOf("models"), status.requiredFailures)
@@ -225,6 +226,16 @@ class ControlCenterClientTest {
                     reason = "disabled_by_configuration",
                 ),
             )
+            .put(
+                "visionrig",
+                component(
+                    "visionrig",
+                    required = false,
+                    state = "disabled",
+                    green = false,
+                    reason = "disabled_by_configuration",
+                ),
+            )
 
         val routing = JSONObject()
             .put("state", "fallback")
@@ -283,7 +294,7 @@ class ControlCenterClientTest {
             .put(
                 "summary",
                 JSONObject()
-                    .put("states", JSONObject().put("healthy", 2).put("stale", 1).put("disabled", 1).put("fallback", 1))
+                    .put("states", JSONObject().put("healthy", 2).put("stale", 1).put("disabled", 2).put("fallback", 1))
                     .put("required_failures", JSONArray().put("models")),
             )
     }
