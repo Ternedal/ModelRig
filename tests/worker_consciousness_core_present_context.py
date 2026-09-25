@@ -8,8 +8,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "worker") not in sys.path:
     sys.path.insert(0, str(ROOT / "worker"))
 
-import pytest
-
 from app.consciousness_core.lived_continuity import (
     LivedContinuityInputs,
     build_lived_continuity_receipt,
@@ -89,14 +87,23 @@ def test_present_context_is_bounded_and_authority_free():
     assert value.production_activation is False
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("self_id", "self-" + "9" * 32),
-        ("person_revision", "person-r9999"),
-    ],
-)
-def test_present_context_rejects_cross_identity_temporal_state(field, value):
-    kwargs = {field: value}
-    with pytest.raises(PresentContextError):
-        project_present_context(_lived(), _temporal(**kwargs))
+def test_present_context_rejects_cross_self_temporal_state():
+    try:
+        project_present_context(
+            _lived(), _temporal(self_id="self-" + "9" * 32)
+        )
+    except PresentContextError:
+        pass
+    else:
+        raise AssertionError("cross-self temporal state must fail closed")
+
+
+def test_present_context_rejects_cross_revision_temporal_state():
+    try:
+        project_present_context(
+            _lived(), _temporal(person_revision="person-r9999")
+        )
+    except PresentContextError:
+        pass
+    else:
+        raise AssertionError("cross-revision temporal state must fail closed")
