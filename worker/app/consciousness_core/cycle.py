@@ -466,6 +466,7 @@ class CognitiveCycleCoordinator:
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
         experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
+        present_context: PresentContextProjection | Mapping[str, Any] | None = None,
         retired_continuity_state: PostWakeContinuityState | None = None,
         retired_continuity_orientation: ContinuityOrientationState | None = None,
         requested_reasoning_mode: ReasoningMode = "normal",
@@ -496,6 +497,7 @@ class CognitiveCycleCoordinator:
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=continuity_state,
             experience_episode=experience_episode,
+            present_context=present_context,
             requested_reasoning_mode=requested_reasoning_mode,
         )
 
@@ -507,6 +509,10 @@ class CognitiveCycleCoordinator:
         if packet.episode is None:
             # Keep pre-C30-E no-episode model context shape unchanged.
             context_payload.pop("episode", None)
+
+        if packet.present_context is None:
+            # Keep pre-C31-B model context shape unchanged.
+            context_payload.pop("present_context", None)
 
         if (
             (retired_continuity_state is None)
