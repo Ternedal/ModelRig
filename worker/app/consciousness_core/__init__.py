@@ -11,6 +11,11 @@ from .lived_continuity import (
     LivedContinuityReceipt,
     build_lived_continuity_receipt,
 )
+from .lived_continuity_transition import (
+    LivedContinuityTransitionError,
+    LivedContinuityTransitionReceipt,
+    reduce_lived_continuity,
+)
 from .present_context import (
     PresentContextError,
     PresentContextProjection,
@@ -968,6 +973,9 @@ __all__ = [
     "LivedContinuityInputs",
     "LivedContinuityReceipt",
     "build_lived_continuity_receipt",
+    "LivedContinuityTransitionError",
+    "LivedContinuityTransitionReceipt",
+    "reduce_lived_continuity",
     "CognitiveProfile",
     "EmbodimentContractError",
     "EmbodimentObservation",
