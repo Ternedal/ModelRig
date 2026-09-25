@@ -44,6 +44,7 @@ The proposition is deliberately bounded and structural. It can contain:
 
 - entity-kind counts;
 - up to six highest-confidence non-text labels;
+- inferred scene/place label plus its confidence when present;
 - count + nearest measured metric depth;
 - relation predicate counts;
 - OCR item count;
