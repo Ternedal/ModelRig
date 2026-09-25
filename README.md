@@ -82,69 +82,103 @@ writes.
 
 ```mermaid
 flowchart TB
-    Desktop["Kaliv Desktop<br/>Compose JVM · Windows<br/>draws the pairing QR (code is minted, not claimed)"]
-    Kaliv["Kaliv Android<br/>chat · streaming voice · tools · RAG · foto→RAG<br/>QR pairing · share-in · answer citations<br/>offline queue (never auto-sends) · in-app updates"]
-    KalivVR["Kaliv VR<br/>Unity · OpenXR · Quest<br/>first-party embodied client<br/>pairing/bearer/chat + BodyRig embodiment"]
-    Sky["Ternedal/SkyPlayer-Engine<br/>reusable OpenXR · passthrough · media mechanics"]
-
-    subgraph Appliance["Appliance layer — the rig stays up without a person watching"]
-        Sup["modelrig-supervisor<br/>starts worker, then server<br/>supplies MODELRIG_HOST=0.0.0.0<br/>restarts either on exit or hang"]
-        Upd["modelrig-updater<br/>newer release? swap exes<br/>verify /healthz reports the new version<br/>restore backup if it does not"]
+    subgraph Clients["Kaliv clients"]
+        direction LR
+        Desktop["Desktop"]
+        Android["Android"]
+        KalivVR["VR / OpenXR"]
     end
 
-    Go["Backend (Go) :8080<br/>pairing · tokens · reverse proxy<br/>flushes streams chunk-by-chunk<br/>own endpoints (stdlib only, fail-soft):<br/>/api/v1/system/status · /api/v1/models/unload"]
+    subgraph ModelRig["ModelRig — control plane"]
+        direction TB
+        Go["Go backend :8080<br/>pairing · auth · proxy"]
 
-    subgraph Worker["Worker (Python) :8099 — mounted from app.entrypoint"]
-        Pipe["RAG&nbsp;&nbsp;pdf · docx · pptx · html · foto (vision)<br/>ingest is atomic: embed all → BEGIN IMMEDIATE → replace<br/>corpus bound to the model that built it; mismatch fails closed<br/>per-source on/off: absence = enabled, survives re-ingest<br/>Voice&nbsp;&nbsp;ASR → LLM(stream) → sentence-TTS<br/>buffered: /voice/converse/upload<br/>streamed: /voice/converse/stream (NDJSON)"]
-        Tools["Kaliv Tools<br/>registry (in code)<br/>confirmation gate<br/>audit log (append-only)<br/>Executor seam<br/>web_research: risk=read + network=public<br/>gated KALIV_WEB_RESEARCH_ENABLED"]
-        Sched["Scheduler<br/>at-most-once by construction<br/>claim + budget slot in one transaction<br/>write approvals leave a receipt"]
-        A3["Agent 3<br/>mount_agent3() owns the whole surface<br/>DORMANT unless KALIV_AGENT3_ENABLED=1<br/>server-authoritative plan · one confirmation per side effect"]
-        A4["Agent 4 — campaign/read architecture<br/>A4-01…A4-25 software chain<br/>DORMANT + default-off operator reads<br/>narrow A4-21 read context · immutable A4-25 snapshot roots<br/>A4-25f physical Windows/Pixel qualification remains separate"]
-        CC["Consciousness Core<br/>SelfState · WorldState · temporal sense · sleep/wake<br/>bounded cognitive cycles · checkpoints · experiential review<br/>LANDED · DORMANT · KALIV_CONSCIOUSNESS_CORE_ENABLED=0"]
-        BC["BodyRig integration boundary<br/>semantic BodyCue producer + compatibility adapters<br/>standalone Ternedal/BodyRig owns body-domain contracts"]
-        CU["Computer Use (Tier B)<br/>I3 see · I4 propose — DORMANT unless KALIV_COMPUTER_USE=1<br/>signed screenshot contract · local-only vision bridge<br/>I5 act: not built"]
-        Eval["Eval-harness<br/>tool-discipline · dansk · latency<br/>workflow completion, not tool choice"]
+        subgraph Worker["Python worker :8099"]
+            direction TB
+
+            subgraph Cognitive["Cognitive layer"]
+                direction LR
+                CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>LANDED · DORMANT / default-off"]
+                A3["Agent 3<br/>planning + gated execution<br/>DORMANT"]
+                A4["Agent 4<br/>campaign / read architecture<br/>DORMANT"]
+            end
+
+            subgraph Services["Runtime services"]
+                direction LR
+                RAG["RAG + voice pipeline"]
+                Tools["Tools<br/>approval gate"]
+                Sched["Scheduler"]
+                BC["BodyCue / BodyRig adapter"]
+            end
+        end
     end
 
-    Dev["KalivDev / DevControl<br/>DC-L01…DC-L14 landed core<br/>DORMANT · local-only authority chain<br/>empty default registry/catalog<br/>DC-L15 physical I0b + DC-L16 product pilot pending"]
-    Human(["human"])
-    Ollama["Ollama :11434<br/>local — ALWAYS for embeddings"]
-    DB[("SQLite<br/>RAG (documents + corpus_meta) · audit · schedules")]
-    BodyRig["Ternedal/BodyRig<br/>AUTHORITATIVE body-domain repository<br/>.mrbody · BodyPrint · Movement Identity<br/>Motor State · body realization"]
-    Cloud["Ollama Cloud<br/>(optional)<br/>text model ≠ voice model<br/>(cloudModel / voiceCloudModel)"]
-    GH["GitHub Releases<br/>kaliv-latest.apk (stable asset URL)<br/>no API, no token"]
+    subgraph Local["Local model + state"]
+        direction LR
+        Ollama["Ollama<br/>LLM + embeddings"]
+        DB[("SQLite<br/>memory · RAG · audit · schedules")]
+    end
 
-    Sup -- "supervises" --> Go
-    Sup -- "supervises" --> Worker
-    Upd -. "checks releases · rolls back a bad one" .-> Sup
+    subgraph Authorities["Independent authorities / engines"]
+        direction LR
+        Voice["VoiceRig<br/>voice + timing"]
+        BodyRig["BodyRig<br/>body identity + Motor State"]
+        Sky["SkyPlayer-Engine<br/>XR / media"]
+    end
 
-    Desktop -- "local-first, cloud fallback" --> Go
-    Kaliv -- "pair + bearer token" --> Go
-    KalivVR -- "pair + bearer token" --> Go
-    BodyRig -- "accepted body / Motor State" --> KalivVR
-    Sky -- "XR + media primitives" --> KalivVR
-    Kaliv -. "direct cloud chat: rig not involved,<br/>NO tools exist on this road" .-> Cloud
-    Kaliv -. "in-app update: reads the releases/latest redirect,<br/>fetches kaliv-latest.apk — rig not involved" .-> GH
-    Go -- "/api/chat · /api/tags" --> Ollama
-    Go -- "/rag/* · /voice/* · /tools/* · /schedules/*<br/>Agent 4 operator reads: proxied ONLY, per-device grant" --> Worker
-    Human == "approves every write" ==> Tools
-    Human == "approves every scheduled write too" ==> Sched
-    Sched -- "runs through the same gate" --> Tools
-    CC -. "replaceable ThoughtEngine" .-> Ollama
-    CC -. "intentions only — execution remains gated" .-> A3
-    CC -. "semantic body intent / embodiment feedback" .-> BC
-    Worker -- "embeddings + generation<br/>embeddings ALWAYS local" --> Ollama
-    Worker --> DB
-    Worker -. "voice LLM step only ·<br/>explicit toggle · keep_alive<br/>NEVER sent to cloud" .-> Cloud
-    BC -- "semantic contract / compatibility" --> BodyRig
-    Human -. "separate physical/human authority gates" .-> BodyRig
-    Human -. "separate L15/L16 GO gates" .-> Dev
+    subgraph Ops["Appliance + development"]
+        direction LR
+        Sup["Supervisor"]
+        Upd["Updater"]
+        Dev["DevControl<br/>DORMANT"]
+    end
 
-    classDef ext stroke-dasharray: 6 4;
-    class Cloud,GH,BodyRig,Sky ext;
-    classDef dormant stroke-dasharray: 4 3;
-    class CC,A3,A4,CU,Dev dormant;
+    Desktop --> Go
+    Android --> Go
+    KalivVR --> Go
+
+    Go --> RAG
+    Go --> A3
+    Go --> A4
+    Go -. "gated cognition" .-> CC
+
+    CC <--> Ollama
+    CC <--> DB
+    CC -. "intentions" .-> A3
+    CC -. "body intent / feedback" .-> BC
+
+    RAG <--> Ollama
+    RAG <--> DB
+    Tools --> DB
+    Sched --> Tools
+    Sched --> DB
+    A3 --> Tools
+
+    RAG <--> Voice
+    BC <--> BodyRig
+    BodyRig --> KalivVR
+    Voice --> KalivVR
+    Sky --> KalivVR
+
+    Sup --> Go
+    Sup --> Worker
+    Upd -. "release / rollback" .-> Sup
+
+    classDef core stroke-width:3px;
+    classDef dormant stroke-dasharray:6 4;
+    classDef external stroke-dasharray:2 4;
+
+    class CC core;
+    class CC,A3,A4,Dev dormant;
+    class Voice,BodyRig,Sky external;
 ```
+
+**How to read it:** Consciousness Core is the persistent cognitive coordination
+layer inside ModelRig's worker. It owns continuity state and bounded cognitive
+cycles, but not model weights, durable-memory authority, tool execution, body
+identity or voice identity. Those boundaries remain separate even when the Core
+is enabled. The Core is landed on `main`, but remains dormant/default-off behind
+`KALIV_CONSCIOUSNESS_CORE_ENABLED=0` and its narrower feature gates.
 
 **Two cloud roads, and they are not the same thing.**
 
