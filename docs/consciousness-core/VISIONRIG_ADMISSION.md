@@ -18,7 +18,9 @@ POST /experimental/consciousness/visionrig-event
 ```
 
 The request body is a strict `visionrig/perception-event/v3` object and is
-bounded to 256 KiB. Loopback admission happens before body parsing.
+bounded to 256 KiB. Loopback admission happens before body parsing. The route
+also requires an `application/json` media type before parsing; simple
+cross-origin browser POST media types such as `text/plain` are rejected.
 
 ## Epistemic mapping
 
