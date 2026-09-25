@@ -24,6 +24,7 @@ _COMPONENTS: dict[str, bool] = {
     "worker": True,
     "models": True,
     "agent3": False,
+    "visionrig": False,
 }
 _ALLOWED_SURFACES = {"agent_v2", "agent3_developer"}
 
