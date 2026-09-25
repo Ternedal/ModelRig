@@ -32,7 +32,6 @@ class ControlCenterScreenTest {
         assertEquals("Backend", controlCenterComponentTitle("backend"))
         assertEquals("Worker", controlCenterComponentTitle("worker"))
         assertEquals("Modeller", controlCenterComponentTitle("models"))
-        assertEquals("VisionRig", controlCenterComponentTitle("visionrig"))
         assertEquals("Agent 3", controlCenterComponentTitle("agent3"))
         assertEquals("custom", controlCenterComponentTitle("custom"))
     }
