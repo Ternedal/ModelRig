@@ -1,26 +1,19 @@
-"""C31-A VisionRig -> Consciousness Core perception bridge.
+"""C31-A VisionRig -> Consciousness Core semantic projection.
 
-VisionRig owns visual perception. ModelRig owns semantic projection and Core
-admission. This module contains no polling loop, scheduler, persistence, tool
-execution, body/voice action or production activation.
+VisionRig owns visual perception. ModelRig owns semantic projection. This module
+does not mutate Core state; ProductionCognitiveSession remains admission
+authority.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from typing import Annotated, Any, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .cycle import RuntimeWorldState
-from .self_state import PersistentSelfState
-from .supervisor import CognitionEvent, SupervisorState, queue_cognition_event
-from .world_reducer import (
-    WorldEvidenceEvent,
-    WorldTransitionReceipt,
-    reduce_world_evidence,
-    world_evidence_event_ref,
-)
+from .world_reducer import WorldEvidenceEvent
 
 
 UnitInterval = Annotated[
@@ -58,6 +51,16 @@ class VisionRigEntity(StrictModel):
     bbox: VisionRigBoundingBox | None
     track_id: Annotated[str, Field(max_length=128)] | None
     identity_hint: Annotated[str, Field(max_length=256)] | None
+
+
+class VisionRigRelation(StrictModel):
+    subject_id: Annotated[str, Field(min_length=1, max_length=128)]
+    predicate: Literal[
+        "left_of", "right_of", "above", "below", "near", "inside",
+        "looking_at", "holding", "moving_towards", "moving_away"
+    ]
+    object_id: Annotated[str, Field(min_length=1, max_length=128)]
+    confidence: UnitInterval
 
 
 class VisionRigLandmark(StrictModel):
@@ -98,7 +101,7 @@ class VisionRigPerceptionEvent(StrictModel):
     source: VisionRigSource
     frame_sequence: Annotated[int, Field(ge=0, strict=True)]
     entities: Annotated[list[VisionRigEntity], Field(max_length=512)]
-    relations: list[dict[str, Any]]
+    relations: Annotated[list[VisionRigRelation], Field(max_length=1024)]
     landmarks: Annotated[list[VisionRigLandmarkObservation], Field(max_length=32)]
     depth: Annotated[list[VisionRigDepthObservation], Field(max_length=512)]
     scene_label: Annotated[str, Field(max_length=256)] | None
@@ -107,33 +110,18 @@ class VisionRigPerceptionEvent(StrictModel):
     production_authority: Literal[False]
 
 
+class VisionRigEvidencePlan(StrictModel):
+    evidence: WorldEvidenceEvent
+    attention_salience: UnitInterval
+
+
 class VisionRigProjection(StrictModel):
-    schema: Literal["kaliv-consciousness-core/visionrig-projection/v1"]
+    schema: Literal["kaliv-consciousness-core/visionrig-projection/v2"]
     visionrig_event_id: Annotated[str, Field(min_length=1, max_length=128)]
     source_ref: Annotated[str, Field(min_length=1, max_length=256)]
-    world_evidence: Annotated[list[WorldEvidenceEvent], Field(max_length=16)]
-    cognition_events: Annotated[list[CognitionEvent], Field(max_length=16)]
+    evidence_plans: Annotated[list[VisionRigEvidencePlan], Field(max_length=16)]
     deduplicated_items: Annotated[int, Field(ge=0, strict=True)]
     identity_hints_promoted: Literal[False]
-    durable_memory_write_authority: Literal[False]
-    execution_authority: Literal[False]
-    scheduling_authority: Literal[False]
-    production_activation: Literal[False]
-
-    @model_validator(mode="after")
-    def paired_projection(self) -> "VisionRigProjection":
-        if len(self.world_evidence) != len(self.cognition_events):
-            raise ValueError("VisionRig world/cognition projection must stay paired")
-        return self
-
-
-class VisionRigAdmissionResult(StrictModel):
-    schema: Literal["kaliv-consciousness-core/visionrig-admission-result/v1"]
-    world: RuntimeWorldState
-    state: PersistentSelfState
-    supervisor_state: SupervisorState
-    world_receipts: Annotated[list[WorldTransitionReceipt], Field(max_length=16)]
-    queued_cognition_event_ids: Annotated[list[str], Field(max_length=16)]
     model_calls: Literal[0]
     durable_memory_write_authority: Literal[False]
     execution_authority: Literal[False]
@@ -167,8 +155,7 @@ def _region(box: VisionRigBoundingBox | None) -> str:
 
 
 def _safe_label(label: str, limit: int = 240) -> str:
-    value = " ".join(label.split())
-    return value[:limit]
+    return " ".join(label.split())[:limit]
 
 
 def _entity_key(entity: VisionRigEntity) -> str:
@@ -176,12 +163,7 @@ def _entity_key(entity: VisionRigEntity) -> str:
         return f"{entity.kind}:track:{entity.track_id}"
     return (
         f"{entity.kind}:untracked:"
-        + _digest(
-            {
-                "label": entity.label,
-                "region": _region(entity.bbox),
-            }
-        )[:24]
+        + _digest({"label": entity.label, "region": _region(entity.bbox)})[:24]
     )
 
 
@@ -211,8 +193,8 @@ def _entity_proposition(entity: VisionRigEntity) -> str:
     return f'Vision inference: a visible object labelled "{label}" is in the {region} region.'
 
 
-def _base_salience(entity: VisionRigEntity) -> float:
-    return {
+def _salience(entity: VisionRigEntity) -> float:
+    base = {
         "person": 0.90,
         "face": 0.82,
         "text": 0.75,
@@ -221,17 +203,14 @@ def _base_salience(entity: VisionRigEntity) -> float:
         "object": 0.58,
         "unknown": 0.45,
     }[entity.kind]
-
-
-def _bounded_salience(entity: VisionRigEntity) -> float:
-    return float(max(0.0, min(1.0, _base_salience(entity) * entity.confidence)))
+    return float(max(0.0, min(1.0, base * entity.confidence)))
 
 
 class VisionRigPerceptionProjector:
-    """Stateful short-term deduplicator and semantic projector.
+    """Short-term deduplication plus evidence projection.
 
-    State is process-local and non-authoritative. It suppresses unchanged tracked
-    observations; it never promotes VisionRig identity_hint into Core identity.
+    The cache is an optimization only. Call checkpoint()/restore() around a
+    multi-event admission transaction if downstream admission can fail.
     """
 
     def __init__(self, *, max_items_per_event: int = 16) -> None:
@@ -240,6 +219,17 @@ class VisionRigPerceptionProjector:
         self._max_items = max_items_per_event
         self._last_sequence: dict[str, int] = {}
         self._fingerprints: dict[tuple[str, str], str] = {}
+
+    def checkpoint(self) -> tuple[dict[str, int], dict[tuple[str, str], str]]:
+        return copy.deepcopy(self._last_sequence), copy.deepcopy(self._fingerprints)
+
+    def restore(
+        self,
+        checkpoint: tuple[dict[str, int], dict[tuple[str, str], str]],
+    ) -> None:
+        sequences, fingerprints = checkpoint
+        self._last_sequence = copy.deepcopy(sequences)
+        self._fingerprints = copy.deepcopy(fingerprints)
 
     def project(
         self,
@@ -266,7 +256,6 @@ class VisionRigPerceptionProjector:
         source_ref = f"visionrig:event:{value.event_id}"
         candidates: list[tuple[float, str, VisionRigEntity]] = []
         deduplicated = 0
-
         for entity in value.entities:
             key = _entity_key(entity)
             signature = _entity_signature(entity)
@@ -275,24 +264,24 @@ class VisionRigPerceptionProjector:
                 deduplicated += 1
                 continue
             self._fingerprints[state_key] = signature
-            candidates.append((_bounded_salience(entity), key, entity))
+            candidates.append((_salience(entity), key, entity))
 
         candidates.sort(key=lambda item: (-item[0], item[1]))
         selected = candidates[: self._max_items]
         deduplicated += max(0, len(candidates) - len(selected))
 
-        evidence: list[WorldEvidenceEvent] = []
-        cognition: list[CognitionEvent] = []
+        plans: list[VisionRigEvidencePlan] = []
         for salience, semantic_key, entity in selected:
             proposition = _entity_proposition(entity)
-            seed = {
-                "visionrig_event_id": value.event_id,
-                "semantic_key": semantic_key,
-                "proposition": proposition,
-            }
-            evidence_event = WorldEvidenceEvent(
+            evidence = WorldEvidenceEvent(
                 schema="kaliv-consciousness-core/world-evidence-event/v1",
-                event_id="wevt-" + _digest(seed)[:32],
+                event_id="wevt-" + _digest(
+                    {
+                        "visionrig_event_id": value.event_id,
+                        "semantic_key": semantic_key,
+                        "proposition": proposition,
+                    }
+                )[:32],
                 subject_ref=f"visionrig-subject:{source_id}:{semantic_key}"[:256],
                 proposition=proposition,
                 confidence=float(entity.confidence),
@@ -304,98 +293,23 @@ class VisionRigPerceptionProjector:
                 observed_sequence=value.frame_sequence,
                 production_activation=False,
             )
-            evidence.append(evidence_event)
-            evidence_ref = world_evidence_event_ref(evidence_event)
-            cognition.append(
-                CognitionEvent(
-                    schema="kaliv-consciousness-core/cognition-event/v1",
-                    event_id="cevt-" + _digest(
-                        {
-                            "world_evidence_ref": evidence_ref,
-                            "visionrig_event_id": value.event_id,
-                        }
-                    )[:32],
-                    kind="world_change",
-                    source_ref=evidence_ref,
-                    summary=proposition,
-                    salience=salience,
-                    observed_sequence=value.frame_sequence,
-                    production_activation=False,
+            plans.append(
+                VisionRigEvidencePlan(
+                    evidence=evidence,
+                    attention_salience=salience,
                 )
             )
 
         return VisionRigProjection(
-            schema="kaliv-consciousness-core/visionrig-projection/v1",
+            schema="kaliv-consciousness-core/visionrig-projection/v2",
             visionrig_event_id=value.event_id,
             source_ref=source_ref,
-            world_evidence=evidence,
-            cognition_events=cognition,
+            evidence_plans=plans,
             deduplicated_items=deduplicated,
             identity_hints_promoted=False,
+            model_calls=0,
             durable_memory_write_authority=False,
             execution_authority=False,
             scheduling_authority=False,
             production_activation=False,
         )
-
-
-def admit_visionrig_projection(
-    *,
-    state: PersistentSelfState | Mapping[str, Any],
-    world: RuntimeWorldState | Mapping[str, Any],
-    supervisor_state: SupervisorState | Mapping[str, Any],
-    projection: VisionRigProjection | Mapping[str, Any],
-) -> VisionRigAdmissionResult:
-    try:
-        current_state = (
-            state
-            if isinstance(state, PersistentSelfState)
-            else PersistentSelfState.model_validate(state)
-        )
-        current_world = (
-            world
-            if isinstance(world, RuntimeWorldState)
-            else RuntimeWorldState.model_validate(world)
-        )
-        current_supervisor = (
-            supervisor_state
-            if isinstance(supervisor_state, SupervisorState)
-            else SupervisorState.model_validate(supervisor_state)
-        )
-        projected = (
-            projection
-            if isinstance(projection, VisionRigProjection)
-            else VisionRigProjection.model_validate(projection)
-        )
-    except ValidationError as exc:
-        raise VisionRigBridgeError("invalid VisionRig admission input") from exc
-
-    receipts: list[WorldTransitionReceipt] = []
-    for evidence in projected.world_evidence:
-        transition = reduce_world_evidence(
-            state=current_state,
-            world=current_world,
-            evidence=evidence,
-        )
-        current_state = transition.state
-        current_world = transition.world
-        receipts.append(transition.receipt)
-
-    queued_ids: list[str] = []
-    for event in projected.cognition_events:
-        current_supervisor = queue_cognition_event(current_supervisor, event)
-        queued_ids.append(event.event_id)
-
-    return VisionRigAdmissionResult(
-        schema="kaliv-consciousness-core/visionrig-admission-result/v1",
-        world=current_world,
-        state=current_state,
-        supervisor_state=current_supervisor,
-        world_receipts=receipts,
-        queued_cognition_event_ids=queued_ids,
-        model_calls=0,
-        durable_memory_write_authority=False,
-        execution_authority=False,
-        scheduling_authority=False,
-        production_activation=False,
-    )

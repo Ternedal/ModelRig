@@ -1,63 +1,67 @@
-# C31-A — VisionRig perception bridge
+# C31 — VisionRig perception bridge
 
 Status: implemented on a default-off integration branch.
 
-## Boundary
+## C31-A — semantic projection
 
-VisionRig owns visual sensing and emits `visionrig/perception-event/v2`.
-Consciousness Core does not consume pixels, ONNX tensors or embedding vectors.
+VisionRig owns sensing and emits `visionrig/perception-event/v2`. ModelRig owns
+semantic projection. C31-A converts bounded visual entity observations into
+`WorldEvidenceEvent/v1` plans plus attention salience.
 
-ModelRig owns the semantic projection:
+It does **not** mutate a session directly.
+
+Detector/OCR labels are projected as `epistemic_status="inferred"`.
+`identity_hint` is deliberately ignored; visual recognition is not identity
+authority.
+
+Frame-rate load is collapsed through a process-local fingerprint cache. A tracked
+entity re-emits only when its semantic label or coarse visual region changes.
+Projection is capped at 16 evidence plans per VisionRig event.
+
+## C31-B — explicit transport/admission
 
 ```text
-VisionRig PerceptionEvent/v2
+VisionRig bounded journal
+        |
+        | GET /api/v1/perception/events
+        | explicit poll_once; max 4 events
+        v
+VisionRigClient (loopback only)
         |
         v
 VisionRigPerceptionProjector
         |
-        +--> WorldEvidenceEvent/v1 --> C20-A world reducer
+        v
+ProductionCognitiveSession.submit_world_evidence()
         |
-        +--> CognitionEvent/v1 -----> C18-A supervisor
+        +--> C20-A WorldState reducer
+        +--> C18-A supervisor CognitionEvent
+        +--> existing episode / SelfState-ledger handling
 ```
 
-No new world-state authority is introduced. The bridge only creates inputs for
-the existing authority boundaries.
+C31-B deliberately reuses `ProductionCognitiveSession.submit_world_evidence()`
+instead of duplicating world/supervisor admission. This preserves the existing
+atomic admission, episode and SelfState-ledger semantics.
 
-## Epistemic policy
+If the VisionRig journal reports a cursor gap, C31-B fails closed and requires
+explicit resynchronization. There is no silent skip.
 
-Detector/OCR labels are projected as `epistemic_status="inferred"`, not as
-unquestioned truth. Exact VisionRig event/source refs remain attached as
-provenance.
-
-`identity_hint` is deliberately ignored by C31-A. Visual recognition may later
-supply identity evidence through an explicit reviewed policy, but a raw
-recognition hint cannot rewrite person identity or become identity authority.
-
-## Load policy
-
-Live vision can run at tens of frames per second, while cognitive/world state
-must not churn at frame rate. C31-A therefore keeps a process-local,
-non-authoritative fingerprint cache:
-
-- tracked entities are keyed by track id and kind;
-- only changes in semantic label or coarse screen region are re-emitted;
-- unchanged observations are suppressed;
-- each VisionRig event is capped at 16 projected evidence items;
-- stale per-source frame sequences fail closed.
-
-The cache is an optimization, not durable memory. Replaying the same deterministic
-evidence through the Core reducers remains idempotent.
+If admission fails after some items were accepted, only the non-authoritative
+projector cache is rolled back. Retrying re-emits the exact deterministic
+evidence; the existing session admission treats already-admitted evidence as
+idempotent replay and continues from there.
 
 ## Authority invariants
 
-The bridge has:
+C31 has:
 
-- zero model calls;
-- zero durable-memory write authority;
+- no pixels or embedding vectors in Consciousness Core;
+- no identity-hint promotion;
+- no internal polling thread;
+- no timer;
+- no automatic repeat;
+- zero direct model calls;
+- zero durable-memory-write authority;
 - zero execution authority;
 - zero scheduling authority;
 - `production_activation=false`.
-
-There is deliberately no internal polling thread or timer in C31-A. A later
-transport slice may perform an explicit `poll_once` against VisionRig's bounded
-journal, behind its own default-off loopback gate.
