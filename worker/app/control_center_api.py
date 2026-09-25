@@ -116,6 +116,68 @@ def _default_agent3_provider() -> Mapping[str, Any]:
     }
 
 
+async def _default_visionrig_provider() -> Mapping[str, Any]:
+    """Probe the separately gated local VisionRig integration without side effects."""
+    observed_at = time.time()
+    if os.getenv("KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED", "0") != "1":
+        return {
+            "enabled": False,
+            "ok": False,
+            "observed_at": observed_at,
+            "detail": "VisionRig cognitive admission disabled",
+        }
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get("http://127.0.0.1:8110/health")
+        if response.status_code != 200:
+            return {
+                "enabled": True,
+                "ok": False,
+                "observed_at": observed_at,
+                "detail": f"VisionRig health HTTP {response.status_code}",
+            }
+
+        payload = response.json()
+        if not isinstance(payload, Mapping):
+            raise TypeError("VisionRig health returned a non-object")
+
+        contract_ok = (
+            payload.get("status") == "ok"
+            and payload.get("service") == "visionrig"
+            and payload.get("schema") == "visionrig/health/v4"
+            and payload.get("perception_schema") == "visionrig/perception-event/v3"
+        )
+        bridge = payload.get("modelrig_bridge")
+        bridge = bridge if isinstance(bridge, Mapping) else {}
+        bridge_enabled = bridge.get("enabled") is True
+        last_status = bridge.get("last_status")
+        if contract_ok and bridge_enabled:
+            detail = (
+                "VisionRig health v4; ModelRig bridge "
+                + (str(last_status) if last_status else "idle")
+            )
+        elif contract_ok:
+            detail = "VisionRig healthy; ModelRig bridge disabled"
+        else:
+            detail = "unexpected VisionRig health contract"
+        return {
+            "enabled": True,
+            "ok": contract_ok and bridge_enabled,
+            "observed_at": observed_at,
+            "detail": detail,
+        }
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "ok": False,
+            "observed_at": observed_at,
+            "detail": f"provider_error:{type(exc).__name__}",
+        }
+
+
 def _default_routing_provider() -> Mapping[str, Any]:
     # Normal chat is still Agent v2. Agent 3 is an explicit developer surface,
     # represented by its own component readiness instead of a fake fallback.
@@ -212,6 +274,7 @@ def build_control_center_router(
     *,
     health_provider: HealthProvider = _default_health_provider,
     agent3_provider: Agent3Provider = _default_agent3_provider,
+    visionrig_provider: HealthProvider = _default_visionrig_provider,
     routing_provider: RoutingProvider = _default_routing_provider,
     schedule_history_provider: ScheduleHistoryProvider = build_control_center_schedule_history,
     privacy_provider: PrivacyProvider = build_control_center_privacy,
@@ -244,6 +307,14 @@ def build_control_center_router(
                 "detail": f"provider_error:{type(exc).__name__}",
             }
         try:
+            visionrig = await _call_health(visionrig_provider)
+        except Exception as exc:
+            visionrig = {
+                "enabled": os.getenv("KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED", "0") == "1",
+                "detail": f"provider_error:{type(exc).__name__}",
+            }
+
+        try:
             routing = routing_provider()
         except Exception as exc:
             routing = {"detail": f"provider_error:{type(exc).__name__}"}
@@ -259,6 +330,7 @@ def build_control_center_router(
             "backend": _backend_component(request),
             **_health_components(health, observed_at=now),
             "agent3": agent3,
+            "visionrig": visionrig,
         }
         payload = build_control_center_status(
             components,
