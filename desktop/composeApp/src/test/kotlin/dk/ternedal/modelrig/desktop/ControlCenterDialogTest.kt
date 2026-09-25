@@ -76,6 +76,7 @@ class ControlCenterDialogTest {
         assertEquals("Backend", desktopControlCenterTitle("backend"))
         assertEquals("Worker", desktopControlCenterTitle("worker"))
         assertEquals("Modeller", desktopControlCenterTitle("models"))
+        assertEquals("VisionRig", desktopControlCenterTitle("visionrig"))
         assertEquals("Agent 3", desktopControlCenterTitle("agent3"))
         assertEquals("custom", desktopControlCenterTitle("custom"))
         assertEquals("målt nu", desktopControlCenterAge(0.0))
