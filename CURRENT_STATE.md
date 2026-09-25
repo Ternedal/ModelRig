@@ -286,6 +286,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_experiential_episode.py`
 - `tests/worker_consciousness_core_goals.py`
 - `tests/worker_consciousness_core_live_episode.py`
+- `tests/worker_consciousness_core_lived_continuity.py`
 - `tests/worker_consciousness_core_liveness.py`
 - `tests/worker_consciousness_core_memory4.py`
 - `tests/worker_consciousness_core_memory_recall_attention.py`
@@ -295,6 +296,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_policy_checkpoint_lifecycle.py`
 - `tests/worker_consciousness_core_policy_checkpoint_liveness.py`
 - `tests/worker_consciousness_core_prediction_attention.py`
+- `tests/worker_consciousness_core_present_context.py`
 - `tests/worker_consciousness_core_profile_source.py`
 - `tests/worker_consciousness_core_profile_step.py`
 - `tests/worker_consciousness_core_recovery_completion.py`
