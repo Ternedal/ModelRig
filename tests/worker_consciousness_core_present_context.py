@@ -1,17 +1,24 @@
 """Contract checks for C31-B present-context projection."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "worker") not in sys.path:
+    sys.path.insert(0, str(ROOT / "worker"))
+
 import pytest
 
-from worker.app.consciousness_core.lived_continuity import (
+from app.consciousness_core.lived_continuity import (
     LivedContinuityInputs,
     build_lived_continuity_receipt,
 )
-from worker.app.consciousness_core.present_context import (
+from app.consciousness_core.present_context import (
     PresentContextError,
     project_present_context,
 )
-from worker.app.consciousness_core.temporal import TemporalAnchor, TemporalState
+from app.consciousness_core.temporal import TemporalAnchor, TemporalState
 
 
 def _lived():
