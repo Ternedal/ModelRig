@@ -197,6 +197,8 @@ is sufficient to claim the whole system complete.
 - `CURRENT_STATE.md` — generated truth for what is wired on current `main`.
 - `ACTIVATION_READINESS.md` — generated activation/readiness evidence.
 - `docs/BODYRIG_AUTHORITY.md` — cross-repository body-domain authority.
+- `docs/consciousness-core/VISIONRIG_ADMISSION.md` — bounded VisionRig ->
+  Consciousness Core perception-admission contract and authority limits.
 - `vr/README.md` and `vr/RENDERING.md` — Kaliv VR implementation/rendering
   boundary.
 - `AGENT_4_ARCHITECTURE_DECISIONS.md` — Agent 4 decision authority.
