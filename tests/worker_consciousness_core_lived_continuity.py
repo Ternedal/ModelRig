@@ -1,9 +1,16 @@
 """Contract checks for C31-A lived continuity."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "worker") not in sys.path:
+    sys.path.insert(0, str(ROOT / "worker"))
+
 from pydantic import ValidationError
 
-from worker.app.consciousness_core.lived_continuity import (
+from app.consciousness_core.lived_continuity import (
     LivedContinuityInputs,
     build_lived_continuity_receipt,
 )
