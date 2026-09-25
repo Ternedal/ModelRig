@@ -11,6 +11,11 @@ from .lived_continuity import (
     LivedContinuityReceipt,
     build_lived_continuity_receipt,
 )
+from .present_context import (
+    PresentContextError,
+    PresentContextProjection,
+    project_present_context,
+)
 from .autonomous_scheduler import (
     AUTONOMOUS_CHECKPOINT_FLAG,
     AUTONOMOUS_SCHEDULER_FLAG,
@@ -956,6 +961,9 @@ __all__ = [
     "ConsolidationContractError",
     "ConsolidationEvidence",
     "ConsolidationResult",
+    "PresentContextError",
+    "PresentContextProjection",
+    "project_present_context",
     "LivedContinuityError",
     "LivedContinuityInputs",
     "LivedContinuityReceipt",
