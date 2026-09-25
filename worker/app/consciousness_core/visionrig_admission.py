@@ -195,7 +195,9 @@ class VisionRigAdmissionReceipt(StrictModel):
 
 def consciousness_visionrig_enabled() -> bool:
     """Only exact string 1 enables the VisionRig admission surface."""
-    return os.getenv(CONSCIOUSNESS_VISIONRIG_FLAG, "0") == "1"
+    # Keep the env key literal at the read site so CURRENT_STATE's source
+    # scanner can derive this default-off switch instead of relying on docs.
+    return os.getenv("KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED", "0") == "1"
 
 
 def _canonical_json(value: BaseModel) -> bytes:
