@@ -266,14 +266,14 @@ def _attention_salience(event: VisionRigPerceptionEventV3) -> float:
     ]
     if metric and min(metric) <= 1.5:
         value += 0.15
-    confidence = max(
-        [float(item.confidence) for item in event.entities]
-        + [float(event.scene_confidence)]
-        if event.scene_confidence is not None
-        else [float(item.confidence) for item in event.entities]
-    )
-    if event.entities or event.scene_confidence is not None:
-        value += 0.15 * confidence
+    confidence_values = [
+        float(item.confidence)
+        for item in event.entities
+    ]
+    if event.scene_confidence is not None:
+        confidence_values.append(float(event.scene_confidence))
+    if confidence_values:
+        value += 0.15 * max(confidence_values)
     return max(0.0, min(0.95, value))
 
 
