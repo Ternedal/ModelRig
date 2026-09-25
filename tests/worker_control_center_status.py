@@ -55,6 +55,7 @@ def healthy_components(agent3=None):
         "worker": component(detail="worker reachable"),
         "models": component(detail="models loaded"),
         "agent3": agent3 if agent3 is not None else component(enabled=False),
+        "visionrig": component(enabled=False, detail="VisionRig disabled"),
     }
 
 
@@ -118,6 +119,39 @@ status = build_control_center_status(
 )
 check(status["components"]["agent3"]["state"] == "unavailable", "enabled unready Agent 3 is unavailable")
 check(status["overall"] == "attention", "optional unready surface yields attention")
+
+# VisionRig is optional: disabled is neutral, healthy is green, and an
+# explicitly enabled-but-unavailable integration raises attention.
+vision_ready = healthy_components()
+vision_ready["visionrig"] = component(
+    ok=True,
+    enabled=True,
+    detail="VisionRig health v4; ModelRig bridge idle",
+)
+status = build_control_center_status(
+    vision_ready,
+    {"configured_surface": "agent_v2", "active_surface": "agent_v2", "observed_at": NOW},
+    now=NOW,
+)
+check(status["components"]["visionrig"]["state"] == "healthy", "healthy VisionRig is visible")
+check(status["overall"] == "healthy", "healthy optional VisionRig preserves green")
+
+vision_unavailable = healthy_components()
+vision_unavailable["visionrig"] = component(
+    ok=False,
+    enabled=True,
+    detail="VisionRig health unavailable",
+)
+status = build_control_center_status(
+    vision_unavailable,
+    {"configured_surface": "agent_v2", "active_surface": "agent_v2", "observed_at": NOW},
+    now=NOW,
+)
+check(
+    status["components"]["visionrig"]["state"] == "unavailable",
+    "enabled unavailable VisionRig is explicit",
+)
+check(status["overall"] == "attention", "unavailable optional VisionRig yields attention")
 
 # Server-selected fallback must say why. Clients may not invent the reason.
 status = build_control_center_status(
