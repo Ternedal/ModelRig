@@ -316,6 +316,16 @@ def _semantic_summary(event: VisionRigPerceptionEventV3) -> str:
         if metric
         else "none"
     )
+    scene_label = (
+        _safe_label(event.scene_label)
+        if event.scene_label is not None
+        else "none"
+    )
+    scene_confidence = (
+        f"{float(event.scene_confidence):.3f}"
+        if event.scene_confidence is not None
+        else "none"
+    )
 
     # Deliberately omit OCR text, identity_hint and raw landmarks. Those need
     # separately reviewed semantics before they may become cognitive context.
@@ -323,6 +333,8 @@ def _semantic_summary(event: VisionRigPerceptionEventV3) -> str:
         "VisionRig inferred visual state; "
         f"entity_kinds={kinds}; "
         f"top_labels={label_text}; "
+        f"scene_label={scene_label}; "
+        f"scene_confidence={scene_confidence}; "
         f"metric_depth={metric_text}; "
         f"relations={relations}; "
         f"ocr_items={sum(1 for item in event.entities if item.kind == 'text')}; "
