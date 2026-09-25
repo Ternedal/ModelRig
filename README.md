@@ -91,14 +91,15 @@ flowchart TB
 
     subgraph ModelRig["ModelRig — control plane"]
         direction TB
-        Go["Go backend :8080<br/>pairing · auth · proxy"]
+        Go["Go backend :8080<br/>pairing · auth · routing"]
 
         subgraph Worker["Python worker :8099"]
             direction TB
 
-            subgraph Cognitive["Cognitive layer"]
+            subgraph Cognition["Cognition + continuity"]
                 direction LR
-                CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>LANDED · DORMANT / default-off"]
+                CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>LANDED · DORMANT"]
+                M4["Memory 4<br/>autobiographical memory authority"]
                 A3["Agent 3<br/>planning + gated execution<br/>DORMANT"]
                 A4["Agent 4<br/>campaign / read architecture<br/>DORMANT"]
             end
@@ -108,15 +109,16 @@ flowchart TB
                 RAG["RAG + voice pipeline"]
                 Tools["Tools<br/>approval gate"]
                 Sched["Scheduler"]
-                BC["BodyCue / BodyRig adapter"]
+                BC["BodyCue<br/>integration boundary"]
             end
         end
     end
 
-    subgraph Local["Local model + state"]
+    subgraph State["Local model + state"]
         direction LR
-        Ollama["Ollama<br/>LLM + embeddings"]
-        DB[("SQLite<br/>memory · RAG · audit · schedules")]
+        Ollama["Ollama<br/>replaceable LLM + embeddings"]
+        CoreState["Continuity store<br/>atomic SelfState / lifecycle files"]
+        DB[("SQLite<br/>RAG · memory · audit · schedules")]
     end
 
     subgraph Authorities["Independent authorities / engines"]
@@ -126,7 +128,7 @@ flowchart TB
         Sky["SkyPlayer-Engine<br/>XR / media"]
     end
 
-    subgraph Ops["Appliance + development"]
+    subgraph Operations["Appliance + development"]
         direction LR
         Sup["Supervisor"]
         Upd["Updater"]
@@ -138,21 +140,25 @@ flowchart TB
     KalivVR --> Go
 
     Go --> RAG
-    Go --> A3
-    Go --> A4
-    Go -. "gated cognition" .-> CC
+    Go -. "gated" .-> CC
+    Go -. "gated" .-> M4
+    Go -.-> A3
+    Go -.-> A4
 
     CC <--> Ollama
-    CC <--> DB
+    CC <--> CoreState
+    CC -. "recall / experience candidates" .-> M4
     CC -. "intentions" .-> A3
     CC -. "body intent / feedback" .-> BC
 
+    M4 <--> DB
+    A3 --> M4
+    A3 --> Tools
+    Sched --> Tools
+    Tools --> DB
+    Sched --> DB
     RAG <--> Ollama
     RAG <--> DB
-    Tools --> DB
-    Sched --> Tools
-    Sched --> DB
-    A3 --> Tools
 
     RAG <--> Voice
     BC <--> BodyRig
@@ -164,20 +170,23 @@ flowchart TB
     Sup --> Worker
     Upd -. "release / rollback" .-> Sup
 
-    classDef core stroke-width:3px;
+    classDef focus stroke-width:3px;
     classDef dormant stroke-dasharray:6 4;
     classDef external stroke-dasharray:2 4;
 
-    class CC core;
+    class CC focus;
     class CC,A3,A4,Dev dormant;
     class Voice,BodyRig,Sky external;
 ```
 
-**How to read it:** Consciousness Core is the persistent cognitive coordination
-layer inside ModelRig's worker. It owns continuity state and bounded cognitive
-cycles, but not model weights, durable-memory authority, tool execution, body
-identity or voice identity. Those boundaries remain separate even when the Core
-is enabled. The Core is landed on `main`, but remains dormant/default-off behind
+The diagram is intentionally architectural rather than exhaustive: **solid lines**
+show normal runtime/data relationships, while **dashed lines** show gated,
+dormant or advisory paths. Consciousness Core is deliberately central to
+continuity and cognition, but it does not absorb the authorities around it:
+Memory 4 owns durable autobiographical memory, Agent 3/tools own execution,
+BodyRig owns body identity and realization, and VoiceRig owns voice/timing.
+
+Consciousness Core is landed on `main` but remains dormant/default-off behind
 `KALIV_CONSCIOUSNESS_CORE_ENABLED=0` and its narrower feature gates.
 
 **Two cloud roads, and they are not the same thing.**
