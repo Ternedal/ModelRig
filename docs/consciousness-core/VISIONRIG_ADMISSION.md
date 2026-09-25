@@ -55,6 +55,14 @@ It deliberately does **not** place raw OCR text, `identity_hint`, raw
 landmarks, RGB pixels, IR arrays or depth maps into Consciousness Core context.
 Those require separately reviewed semantics.
 
+## Source sequencing
+
+For each VisionRig `source_id`, the mounted receiver keeps a process-local
+monotonic frame-sequence guard. Exact replay of the same event/sequence remains
+idempotent, but a lower sequence or a different event reusing the latest
+sequence fails closed with HTTP 409. The sequence guard advances only after
+successful world-evidence admission.
+
 ## Attention
 
 Admission reuses C20-B. A new event updates transient WorldState first and queues
