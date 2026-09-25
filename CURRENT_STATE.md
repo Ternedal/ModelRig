@@ -317,6 +317,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_unplanned_dormancy.py`
 - `tests/worker_consciousness_core_unplanned_liveness.py`
 - `tests/worker_consciousness_core_user_turn_admission.py`
+- `tests/worker_consciousness_core_visionrig_perception.py`
+- `tests/worker_consciousness_core_visionrig_transport.py`
 - `tests/worker_consciousness_core_wake_ack.py`
 - `tests/worker_consciousness_core_wake_cycle.py`
 - `tests/worker_consciousness_core_world_reducer.py`
