@@ -321,6 +321,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_wake_cycle.py`
 - `tests/worker_consciousness_core_world_reducer.py`
 - `tests/worker_consciousness_core_world_session.py`
+- `tests/worker_consciousness_core_present_context.py`
 - `tests/worker_control_center_api.py`
 - `tests/worker_control_center_status.py`
 - `tests/worker_d4_auto_routing.py`
