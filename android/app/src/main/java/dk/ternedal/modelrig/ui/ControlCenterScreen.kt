@@ -47,7 +47,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 
-private val CONTROL_CENTER_COMPONENT_ORDER = listOf("backend", "worker", "models", "agent3")
+private val CONTROL_CENTER_COMPONENT_ORDER = listOf("backend", "worker", "models", "visionrig", "agent3")
 
 internal fun controlCenterOverallLabel(state: String): String = when (state) {
     "healthy" -> "Alt ser godt ud"
@@ -71,6 +71,7 @@ internal fun controlCenterComponentTitle(name: String): String = when (name) {
     "backend" -> "Backend"
     "worker" -> "Worker"
     "models" -> "Modeller"
+    "visionrig" -> "VisionRig"
     "agent3" -> "Agent 3"
     else -> name
 }
