@@ -68,7 +68,12 @@ def deterministic_clock():
     )
 
 
-def event_payload(*, event_id="evt-vision-1", identity_hint="person-rumor"):
+def event_payload(
+    *,
+    event_id="evt-vision-1",
+    identity_hint="person-rumor",
+    frame_sequence=42,
+):
     return {
         "schema_id": "visionrig/perception-event/v3",
         "event_id": event_id,
@@ -78,7 +83,7 @@ def event_payload(*, event_id="evt-vision-1", identity_hint="person-rumor"):
             "source_type": "camera",
             "device": "kinect-v2",
         },
-        "frame_sequence": 42,
+        "frame_sequence": frame_sequence,
         "entities": [
             {
                 "entity_id": "person-1",
@@ -350,6 +355,43 @@ class VisionRigAdmissionTests(unittest.TestCase):
         self.assertFalse(replay_body["world_changed"])
         self.assertFalse(replay_body["cognition_event_queued"])
         self.assertEqual(engine.calls, 0)
+
+    def test_source_sequence_cannot_move_backwards_or_be_reused(self):
+        session, _ = self.session()
+        app = FastAPI()
+        app.state.consciousness_session = session
+        app.include_router(
+            build_consciousness_visionrig_router(
+                loopback_allowed=lambda _request: True,
+            )
+        )
+        client = TestClient(app)
+
+        accepted = client.post(
+            CONSCIOUSNESS_VISIONRIG_PREFIX + "/visionrig-event",
+            json=event_payload(event_id="evt-seq-42", frame_sequence=42),
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+
+        stale = client.post(
+            CONSCIOUSNESS_VISIONRIG_PREFIX + "/visionrig-event",
+            json=event_payload(event_id="evt-seq-41", frame_sequence=41),
+        )
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(
+            stale.json()["detail"],
+            "VisionRig perception sequence moved backwards",
+        )
+
+        reused = client.post(
+            CONSCIOUSNESS_VISIONRIG_PREFIX + "/visionrig-event",
+            json=event_payload(event_id="evt-other-42", frame_sequence=42),
+        )
+        self.assertEqual(reused.status_code, 409)
+        self.assertEqual(
+            reused.json()["detail"],
+            "VisionRig perception sequence was reused",
+        )
 
     def test_same_event_identity_changed_payload_fails_closed(self):
         session, _ = self.session()
