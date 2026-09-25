@@ -9,7 +9,11 @@ if str(ROOT / "worker") not in sys.path:
     sys.path.insert(0, str(ROOT / "worker"))
 
 from app.consciousness_core.lived_continuity import LivedContinuityInputs, build_lived_continuity_receipt
-from app.consciousness_core.lived_continuity_transition import LivedContinuityTransitionError, reduce_lived_continuity
+from app.consciousness_core import (
+    LivedContinuityTransitionError,
+    LivedContinuityTransitionReceipt,
+    reduce_lived_continuity,
+)
 from app.consciousness_core.reducer import CognitiveTransitionReceipt
 
 
@@ -65,6 +69,15 @@ def _transition(**updates):
     )
     values.update(updates)
     return CognitiveTransitionReceipt(**values)
+
+
+def test_c31c_is_exported_from_consciousness_core_boundary():
+    result = reduce_lived_continuity(
+        _lived(),
+        _transition(),
+        temporal_state_ref="temporal-state:after",
+    )
+    assert isinstance(result, LivedContinuityTransitionReceipt)
 
 
 def test_transition_is_deterministic_reference_only_and_authority_free():
