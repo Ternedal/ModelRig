@@ -165,6 +165,101 @@ from .episode_boundary_application import (
     EpisodeBoundaryApplicationResult,
     apply_episode_boundary_decision,
 )
+from .episode_closure_evidence import (
+    EpisodeClosureEvidence,
+    EpisodeClosureEvidenceError,
+    EpisodeKindCount,
+    derive_episode_closure_evidence,
+    episode_closure_evidence_ref,
+)
+from .episode_experience_review import (
+    EpisodeExperienceCandidateEvaluation,
+    EpisodeExperienceReviewError,
+    EpisodeExperienceReviewPlan,
+    TrustedEpisodeExperienceReview,
+    evaluate_reviewed_episode_candidate,
+    experience_candidate_ref,
+    plan_episode_experience_review,
+    trusted_episode_experience_review_ref,
+)
+from .episode_review_mailbox import (
+    EpisodeExperienceReviewMailbox,
+    EpisodeExperienceReviewRequest,
+    EpisodeReviewMailboxError,
+    EpisodeReviewMailboxReceipt,
+    EpisodeReviewMailboxSnapshot,
+    build_episode_experience_review_request,
+    episode_experience_review_request_ref,
+)
+from .episode_review_publication import (
+    EpisodeReviewPublicationReceipt,
+    publish_episode_closure_review,
+)
+from .episode_review_adapter import (
+    EpisodeReviewAdapterConsumeReceipt,
+    EpisodeReviewAdapterError,
+    EpisodeReviewAdapterItem,
+    EpisodeReviewAdapterSnapshot,
+    TrustedEpisodeReviewAdapter,
+)
+from .episode_review_decision import (
+    EpisodeReviewDecisionError,
+    EpisodeReviewDecisionReceipt,
+    EpisodeReviewDecisionSnapshot,
+    TrustedEpisodeReviewDecisionApplier,
+)
+from .episode_review_claim import (
+    EpisodeReviewClaim,
+    EpisodeReviewClaimAbandonReceipt,
+    EpisodeReviewClaimCommitReceipt,
+    EpisodeReviewClaimError,
+    EpisodeReviewClaimSnapshot,
+    TrustedEpisodeReviewClaimService,
+)
+from .episode_review_api import (
+    EpisodeReviewAbandonBody,
+    EpisodeReviewClaimBody,
+    EpisodeReviewClaimTransportReceipt,
+    EpisodeReviewCommitBody,
+    build_consciousness_episode_review_router,
+    consciousness_episode_review_enabled,
+    mount_consciousness_episode_review,
+)
+from .episode_review_manifest import (
+    CONSCIOUSNESS_EPISODE_REVIEW_FLAG,
+    CONSCIOUSNESS_EPISODE_REVIEW_PREFIX,
+    EpisodeReviewCapabilityManifest,
+    build_episode_review_capability_manifest,
+)
+from .episode_review_lifecycle import (
+    DEFAULT_EPISODE_REVIEW_MAILBOX_CAPACITY,
+    EPISODE_REVIEW_RUNTIME_FLAG,
+    EpisodeReviewRuntime,
+    EpisodeReviewRuntimeError,
+    compose_episode_review_lifespan,
+    episode_review_runtime_enabled,
+    production_episode_review_runtime_factory,
+)
+from .episode_review_status import (
+    EpisodeReviewStatusSnapshot,
+    build_episode_review_status,
+)
+from .episode_review_observability import (
+    MAX_OBSERVABILITY_COUNTER,
+    EpisodeReviewObservability,
+    EpisodeReviewObservabilitySnapshot,
+)
+from .episode_review_attention import (
+    DEFAULT_EPISODE_REVIEW_ATTENTION_POLICY,
+    EpisodeReviewAttentionPolicy,
+    EpisodeReviewAttentionSignal,
+    EpisodeReviewAttentionSnapshot,
+    evaluate_episode_review_attention,
+)
+from .episode_review_operator_summary import (
+    EpisodeReviewOperatorSummary,
+    build_episode_review_operator_summary,
+)
 from .episode_boundary import (
     EpisodeBoundaryError,
     EpisodeBoundaryPolicyDecision,
@@ -478,6 +573,73 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_episode_review_capability_manifest",
+    "EpisodeReviewCapabilityManifest",
+    "build_episode_review_operator_summary",
+    "EpisodeReviewOperatorSummary",
+    "evaluate_episode_review_attention",
+    "EpisodeReviewAttentionSnapshot",
+    "EpisodeReviewAttentionSignal",
+    "EpisodeReviewAttentionPolicy",
+    "DEFAULT_EPISODE_REVIEW_ATTENTION_POLICY",
+    "MAX_OBSERVABILITY_COUNTER",
+    "EpisodeReviewObservabilitySnapshot",
+    "EpisodeReviewObservability",
+    "build_episode_review_status",
+    "EpisodeReviewStatusSnapshot",
+    "production_episode_review_runtime_factory",
+    "episode_review_runtime_enabled",
+    "compose_episode_review_lifespan",
+    "EpisodeReviewRuntimeError",
+    "EpisodeReviewRuntime",
+    "EPISODE_REVIEW_RUNTIME_FLAG",
+    "DEFAULT_EPISODE_REVIEW_MAILBOX_CAPACITY",
+    "mount_consciousness_episode_review",
+    "consciousness_episode_review_enabled",
+    "build_consciousness_episode_review_router",
+    "EpisodeReviewCommitBody",
+    "EpisodeReviewClaimTransportReceipt",
+    "EpisodeReviewClaimBody",
+    "EpisodeReviewAbandonBody",
+    "CONSCIOUSNESS_EPISODE_REVIEW_PREFIX",
+    "CONSCIOUSNESS_EPISODE_REVIEW_FLAG",
+    "TrustedEpisodeReviewClaimService",
+    "EpisodeReviewClaimSnapshot",
+    "EpisodeReviewClaimError",
+    "EpisodeReviewClaimCommitReceipt",
+    "EpisodeReviewClaimAbandonReceipt",
+    "EpisodeReviewClaim",
+    "TrustedEpisodeReviewDecisionApplier",
+    "EpisodeReviewDecisionSnapshot",
+    "EpisodeReviewDecisionReceipt",
+    "EpisodeReviewDecisionError",
+    "TrustedEpisodeReviewAdapter",
+    "EpisodeReviewAdapterSnapshot",
+    "EpisodeReviewAdapterItem",
+    "EpisodeReviewAdapterError",
+    "EpisodeReviewAdapterConsumeReceipt",
+    "publish_episode_closure_review",
+    "EpisodeReviewPublicationReceipt",
+    "episode_experience_review_request_ref",
+    "build_episode_experience_review_request",
+    "EpisodeReviewMailboxSnapshot",
+    "EpisodeReviewMailboxReceipt",
+    "EpisodeReviewMailboxError",
+    "EpisodeExperienceReviewRequest",
+    "EpisodeExperienceReviewMailbox",
+    "trusted_episode_experience_review_ref",
+    "plan_episode_experience_review",
+    "experience_candidate_ref",
+    "evaluate_reviewed_episode_candidate",
+    "TrustedEpisodeExperienceReview",
+    "EpisodeExperienceReviewPlan",
+    "EpisodeExperienceReviewError",
+    "EpisodeExperienceCandidateEvaluation",
+    "episode_closure_evidence_ref",
+    "derive_episode_closure_evidence",
+    "EpisodeKindCount",
+    "EpisodeClosureEvidenceError",
+    "EpisodeClosureEvidence",
     "apply_episode_boundary_decision",
     "EpisodeBoundaryApplicationResult",
     "EpisodeBoundaryApplicationReceipt",

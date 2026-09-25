@@ -62,6 +62,15 @@ from .episode_boundary_application import (
     EpisodeBoundaryApplicationResult,
     apply_episode_boundary_decision,
 )
+from .episode_review_mailbox import (
+    EpisodeExperienceReviewMailbox,
+    EpisodeReviewMailboxSnapshot,
+)
+from .episode_review_publication import (
+    EpisodeReviewPublicationReceipt,
+    publish_episode_closure_review,
+)
+from .episode_review_observability import EpisodeReviewObservability
 from .episodes import (
     ExperienceEpisodeState,
     append_episode_moment,
@@ -267,11 +276,33 @@ class ProductionCognitiveSession:
         supervisor_bridge: ProductionSupervisorBridge,
         bootstrap_context: RuntimeSessionContext,
         durable_anchor_state: PersistentSelfState | None = None,
+        review_mailbox: EpisodeExperienceReviewMailbox | None = None,
+        review_observability: EpisodeReviewObservability | None = None,
     ) -> None:
         if not isinstance(supervisor_bridge, ProductionSupervisorBridge):
             raise TypeError("supervisor_bridge must be ProductionSupervisorBridge")
         if not isinstance(bootstrap_context, RuntimeSessionContext):
             raise TypeError("bootstrap_context must be RuntimeSessionContext")
+        if (
+            review_mailbox is not None
+            and not isinstance(
+                review_mailbox,
+                EpisodeExperienceReviewMailbox,
+            )
+        ):
+            raise TypeError(
+                "review_mailbox must be EpisodeExperienceReviewMailbox or None"
+            )
+        if (
+            review_observability is not None
+            and not isinstance(
+                review_observability,
+                EpisodeReviewObservability,
+            )
+        ):
+            raise TypeError(
+                "review_observability must be EpisodeReviewObservability or None"
+            )
         self._bridge = supervisor_bridge
         self._live = live_state_from_bootstrap(bootstrap_context)
         self._continuity_state = bootstrap_context.continuity_state
@@ -296,6 +327,9 @@ class ProductionCognitiveSession:
         )
         self._experience_episode = None
         self._last_episode_boundary_receipt = None
+        self._review_mailbox = review_mailbox
+        self._review_observability = review_observability
+        self._last_episode_review_publication = None
         self._closed = False
         self._self_state_ledger: RuntimeSelfStateLedger | None = None
         if durable_anchor_state is not None:
@@ -370,6 +404,22 @@ class ProductionCognitiveSession:
         """Latest process-local episode segmentation application receipt."""
         return self._last_episode_boundary_receipt
 
+    @property
+    def episode_review_mailbox_snapshot(
+        self,
+    ) -> EpisodeReviewMailboxSnapshot | None:
+        """Read-only state of the optional process-local review mailbox."""
+        if self._review_mailbox is None:
+            return None
+        return self._review_mailbox.snapshot
+
+    @property
+    def last_episode_review_publication(
+        self,
+    ) -> EpisodeReviewPublicationReceipt | None:
+        """Latest non-blocking attempt to publish closure review evidence."""
+        return self._last_episode_review_publication
+
     def apply_episode_boundary(
         self,
         signal: EpisodeBoundarySignal | None = None,
@@ -390,6 +440,13 @@ class ProductionCognitiveSession:
         )
         self._experience_episode = result.active_episode
         self._last_episode_boundary_receipt = result.receipt
+        self._last_episode_review_publication = (
+            publish_episode_closure_review(
+                result.closure_evidence,
+                self._review_mailbox,
+                self._review_observability,
+            )
+        )
         return result
 
     @property
@@ -1228,6 +1285,9 @@ class ProductionCognitiveSession:
         self._continuity_orientation = None
         self._experience_episode = None
         self._last_episode_boundary_receipt = None
+        if self._review_mailbox is not None:
+            self._review_mailbox.close()
+        self._last_episode_review_publication = None
         # C18-B owns and closes the underlying bridge. C19-B only prevents
         # further use of this higher-level session view.
         self._closed = True
@@ -1278,10 +1338,42 @@ def production_cognitive_session_factory(
         ),
         wake_receipt=wake_receipt,
     )
+    review_mailbox = getattr(
+        app.state,
+        "consciousness_episode_review_mailbox",
+        None,
+    )
+    if (
+        review_mailbox is not None
+        and not isinstance(
+            review_mailbox,
+            EpisodeExperienceReviewMailbox,
+        )
+    ):
+        raise CognitiveSessionLifecycleError(
+            "episode review mailbox app state has unexpected type"
+        )
+    review_observability = getattr(
+        app.state,
+        "consciousness_episode_review_observability",
+        None,
+    )
+    if (
+        review_observability is not None
+        and not isinstance(
+            review_observability,
+            EpisodeReviewObservability,
+        )
+    ):
+        raise CognitiveSessionLifecycleError(
+            "episode review observability app state has unexpected type"
+        )
     session = ProductionCognitiveSession(
         supervisor_bridge=bridge,
         bootstrap_context=context,
         durable_anchor_state=durable,
+        review_mailbox=review_mailbox,
+        review_observability=review_observability,
     )
     if wake_receipt is not None:
         session.submit(

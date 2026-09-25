@@ -1,7 +1,7 @@
 # Consciousness Core — architecture authority
 
-Status: C0 architecture authority + C1–C3 contract slice. Experimental, isolated, default-off.
-Base authority for this slice: ModelRig main @ `d0b1cecca4452c26b57185ec2871032c8af6c277`.
+Status: architecture authority with reviewed default-off runtime slices, including the C30 experiential episode/review stack. Experimental and gated.
+Authority basis: this document plus the existing Person/Profile, Memory 4, Agent 3, BodyRig and VoiceRig ownership boundaries.
 Production activation: **false**.
 
 ## Purpose
@@ -165,23 +165,38 @@ observe
 
 Multiple thought cycles may happen without an external action.
 
-## C0–C3 isolation invariant
+## Runtime isolation and activation invariant
 
-This slice is contracts/docs/tests only.
+C0–C3 began as contracts/docs/tests only. Later slices introduced reviewed
+runtime integrations and private operator surfaces, but they do not weaken the
+authority map above.
 
-It MUST NOT:
+Current invariants are:
 
-- import into normal worker/backend runtime;
-- add an API route;
-- create a scheduler or background loop;
-- enable Agent 3, Agent 4, DevControl, Memory 4, tools, BodyRig, or VoiceRig;
-- modify Person/Profile activation;
-- grant model action/state/memory authority;
-- set production activation true.
+- production activation remains false in Consciousness Core contracts;
+- root activation remains default-off at `KALIV_CONSCIOUSNESS_CORE_ENABLED=0`;
+- runtime integrations require explicit default-off feature gates;
+- private operator routes are independently gated and loopback-only where
+  specified;
+- mounting a transport route does not create the underlying runtime authority;
+- the model never gains direct persistent-state, durable-memory, identity or
+  execution authority;
+- Memory 4 remains the only durable autobiographical-memory authority;
+- Agent 3 and existing confirmation/tool gates remain execution authority;
+- Person/Profile remains identity and Person Revision authority;
+- optional review infrastructure is process-local unless a separately reviewed
+  durable authority is introduced.
 
-A future runtime integration requires a separate reviewed slice and an explicit
-default-off gate, currently reserved as
-`KALIV_CONSCIOUSNESS_CORE_ENABLED=0`.
+The C30 episode-review capability uses two independent exact opt-ins:
+
+`KALIV_CONSCIOUSNESS_EPISODE_REVIEW_RUNTIME_ENABLED=1`
+
+`KALIV_CONSCIOUSNESS_EPISODE_REVIEW_ENABLED=1`
+
+The first constructs the bounded process-local review runtime. The second mounts
+the loopback-only transport. Either may remain off independently. Neither grants
+automatic Memory 4 persistence, model invocation, scheduling, notification,
+tool execution or production activation.
 
 ## Scientific wording
 
