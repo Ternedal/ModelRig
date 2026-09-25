@@ -42,7 +42,7 @@ flowchart TB
         Memory["Persistent memory / Person context"]
         Agents["Agent runtimes + policy gates"]
         Intent["Semantic response + BodyCue intent"]
-        CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>inner-monologue/cognitive-cycle architecture<br/><b>DRAFT until landed and qualified</b>"]
+        CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>inner-monologue/cognitive-cycle architecture<br/><b>LANDED · DORMANT / default-off</b>"]
     end
 
     LLM["Replaceable LLM<br/>local Ollama or explicit cloud path"]
@@ -72,8 +72,8 @@ flowchart TB
     Voice -->|"speech/audio"| KVR
     Sky -->|"XR + media primitives"| KVR
 
-    classDef draft stroke-dasharray:6 4;
-    class CC draft;
+    classDef dormant stroke-dasharray:6 4;
+    class CC dormant;
 ```
 
 The diagram deliberately separates **authority** from **implementation
