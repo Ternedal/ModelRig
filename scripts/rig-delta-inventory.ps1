@@ -150,7 +150,7 @@ function Get-WslInventory {
 
     $raw = @(Invoke-ExternalText -FilePath "wsl.exe" -Arguments @("-l", "-q") -IgnoreExitCode)
     $distros = @($raw | ForEach-Object { ($_ -replace [char]0, "").Trim() } | Where-Object { $_ } | Sort-Object -Unique)
-    $result = New-Object System.Collections.Generic.List[object]
+    $result = @()
 
     foreach ($distro in $distros) {
         $os = @(Invoke-ExternalText -FilePath "wsl.exe" -Arguments @("-d", $distro, "--", "sh", "-lc", "cat /etc/os-release 2>/dev/null | grep -E '^(ID|VERSION_ID)=' | tr '\n' ' '") -IgnoreExitCode)
@@ -332,30 +332,30 @@ function Compare-Keyed {
     param([object[]]$Source, [object[]]$Target, [scriptblock]$Key, [string[]]$Fields = @())
     $sourceMap = New-Lookup -Items $Source -Key $Key
     $targetMap = New-Lookup -Items $Target -Key $Key
-    $sourceOnly = New-Object System.Collections.Generic.List[object]
-    $targetOnly = New-Object System.Collections.Generic.List[object]
-    $different = New-Object System.Collections.Generic.List[object]
+    $sourceOnly = @()
+    $targetOnly = @()
+    $different = @()
 
     foreach ($k in @($sourceMap.Keys | Sort-Object)) {
         if (-not $targetMap.ContainsKey($k)) {
-            $sourceOnly.Add($sourceMap[$k])
+            $sourceOnly += $sourceMap[$k]
             continue
         }
-        $changes = New-Object System.Collections.Generic.List[object]
+        $changes = @()
         foreach ($field in $Fields) {
             $a = Normalize-Text $sourceMap[$k].$field
             $b = Normalize-Text $targetMap[$k].$field
             if ($a -ne $b) {
-                $changes.Add([pscustomobject][ordered]@{ field = $field; source = $a; target = $b })
+                $changes += [pscustomobject][ordered]@{ field = $field; source = $a; target = $b }
             }
         }
         if ($changes.Count -gt 0) {
-            $different.Add([pscustomobject][ordered]@{ key = $k; changes = @($changes) })
+            $different += [pscustomobject][ordered]@{ key = $k; changes = @($changes) }
         }
     }
 
     foreach ($k in @($targetMap.Keys | Sort-Object)) {
-        if (-not $sourceMap.ContainsKey($k)) { $targetOnly.Add($targetMap[$k]) }
+        if (-not $sourceMap.ContainsKey($k)) { $targetOnly += $targetMap[$k] }
     }
 
     return [pscustomobject][ordered]@{
@@ -369,7 +369,7 @@ function Compare-WslPackages {
     param([object[]]$Source, [object[]]$Target)
     $sourceMap = New-Lookup -Items $Source -Key { param($x) $x.name }
     $targetMap = New-Lookup -Items $Target -Key { param($x) $x.name }
-    $result = New-Object System.Collections.Generic.List[object]
+    $result = @()
 
     foreach ($key in @($sourceMap.Keys | Sort-Object)) {
         if (-not $targetMap.ContainsKey($key)) { continue }
@@ -382,7 +382,7 @@ function Compare-WslPackages {
             $extra = @(Compare-Object -ReferenceObject $sourcePkgs -DifferenceObject $targetPkgs -PassThru | Where-Object { $_.SideIndicator -eq "=>" } | Sort-Object)
         }
         if ($missing.Count -gt 0 -or $extra.Count -gt 0) {
-            $result.Add([pscustomobject][ordered]@{ distro = $sourceMap[$key].name; missing_on_target = $missing; target_only = $extra })
+            $result += [pscustomobject][ordered]@{ distro = $sourceMap[$key].name; missing_on_target = $missing; target_only = $extra }
         }
     }
 
@@ -452,15 +452,15 @@ $rigDiff = Compare-Keyed -Source @($source.rig_top_level) -Target @($target.rig_
 $pythonDiff = Compare-Keyed -Source @($source.python_environments) -Target @($target.python_environments) -Key { param($x) $x.repo } -Fields @("python_version")
 $wslPackages = @(Compare-WslPackages -Source @($source.wsl) -Target @($target.wsl))
 
-$recommendations = New-Object System.Collections.Generic.List[string]
-if ($repoDiff.source_only.Count -gt 0) { $recommendations.Add("Clone/reconcile repositories present only on the source rig.") }
-if ($repoDiff.different.Count -gt 0) { $recommendations.Add("Review repository HEAD/branch differences; preserve dirty source work before syncing through Git/GitHub.") }
-if ($ollamaDiff.source_only.Count -gt 0 -or $ollamaDiff.different.Count -gt 0) { $recommendations.Add("Pull missing or digest-different Ollama models on the target instead of copying opaque blob stores.") }
-if ($wslDiff.source_only.Count -gt 0) { $recommendations.Add("Install missing WSL distributions intentionally; do not copy a live distro filesystem.") }
-if ($wslPackages.Count -gt 0) { $recommendations.Add("Reconcile manually installed apt packages for matching WSL distributions.") }
-if ($appDiff.source_only.Count -gt 0) { $recommendations.Add("Review source-only Windows applications and install only those still needed on the new rig.") }
-if ($taskDiff.source_only.Count -gt 0 -or $serviceDiff.source_only.Count -gt 0) { $recommendations.Add("Recreate missing rig scheduled tasks/services through repository installers/bootstrap.") }
-if ($rigDiff.source_only.Count -gt 0) { $recommendations.Add("Inspect source-only top-level C:\Rig entries and use the owning subsystem migration path for mutable data.") }
+$recommendations = @()
+if ($repoDiff.source_only.Count -gt 0) { $recommendations += "Clone/reconcile repositories present only on the source rig." }
+if ($repoDiff.different.Count -gt 0) { $recommendations += "Review repository HEAD/branch differences; preserve dirty source work before syncing through Git/GitHub." }
+if ($ollamaDiff.source_only.Count -gt 0 -or $ollamaDiff.different.Count -gt 0) { $recommendations += "Pull missing or digest-different Ollama models on the target instead of copying opaque blob stores." }
+if ($wslDiff.source_only.Count -gt 0) { $recommendations += "Install missing WSL distributions intentionally; do not copy a live distro filesystem." }
+if ($wslPackages.Count -gt 0) { $recommendations += "Reconcile manually installed apt packages for matching WSL distributions." }
+if ($appDiff.source_only.Count -gt 0) { $recommendations += "Review source-only Windows applications and install only those still needed on the new rig." }
+if ($taskDiff.source_only.Count -gt 0 -or $serviceDiff.source_only.Count -gt 0) { $recommendations += "Recreate missing rig scheduled tasks/services through repository installers/bootstrap." }
+if ($rigDiff.source_only.Count -gt 0) { $recommendations += "Inspect source-only top-level C:\Rig entries and use the owning subsystem migration path for mutable data." }
 
 $report = [pscustomobject][ordered]@{
     schema = "modelrig/rig-delta-report/v1"
