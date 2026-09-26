@@ -47,7 +47,7 @@
       "properties": {
         "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"},
         "from_git_blob_sha": {"const": "0a9498ac0fe61ea742a47c1d6be1cf7886992321"},
-        "to_git_blob_sha": {"const": "e8589c42a6d6625b76eb75bd74c5411db3923fa3"}
+        "to_git_blob_sha": {"const": "1fe374f7bcc14f33dfef0d9fcc61f97348a8b305"}
       }
     },
     "new_product_files": {

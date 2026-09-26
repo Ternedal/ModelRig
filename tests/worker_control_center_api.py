@@ -56,6 +56,33 @@ def v2_route():
     }
 
 
+def vision_status():
+    return {
+        "schema": "kaliv-control-center-vision/v1",
+        "available": True,
+        "sensors": [
+            {
+                "source_id": "kinect-living-room",
+                "display_name": "Stue Kinect",
+                "location": "Stue",
+                "role": "tracking",
+                "source_type": "camera",
+                "device": "kinect-v2",
+                "capabilities": ["depth", "infrared", "rgb"],
+                "presence": "online",
+                "desired_enabled": True,
+                "effective_capture_active": True,
+                "convergence": "converged",
+                "first_seen_utc": "2026-09-26T04:30:00+00:00",
+                "last_seen_utc": "2026-09-26T04:35:00+00:00",
+                "runtime_last_seen_utc": "2026-09-26T04:35:00+00:00",
+                "observation_count": 12,
+            }
+        ],
+        "production_activation": False,
+    }
+
+
 def schedule_history():
     return {
         "schema": "kaliv-control-center-schedule-history/v1",
@@ -99,6 +126,7 @@ def app_for(**kwargs):
             routing_provider=kwargs.get("routing_provider", v2_route),
             schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
             privacy_provider=kwargs.get("privacy_provider", build_control_center_privacy),
+            vision_provider=kwargs.get("vision_provider", vision_status),
             loopback_allowed=kwargs.get("loopback_allowed", lambda _request: True),
             clock=lambda: NOW,
         )
@@ -183,12 +211,21 @@ check(history_payload["schema"] == "kaliv-control-center-schedule-history/v1", "
 check(history_payload["items"][0]["terminal_outcome"] == "executed", "history returns durable outcome")
 check(history_payload["production_activation"] is False, "history route cannot authorize production")
 
+vision = client.get("/control-center/vision")
+check(vision.status_code == 200, "loopback VisionRig route succeeds")
+vision_payload = vision.json()
+check(vision_payload["schema"] == "kaliv-control-center-vision/v1", "VisionRig route is versioned")
+check(vision_payload["sensors"][0]["source_id"] == "kinect-living-room", "VisionRig projection is returned")
+check(vision_payload["production_activation"] is False, "VisionRig read cannot activate production")
+
 # Both routes remain loopback-only even if the wider worker is intentionally LAN-enabled.
 denied_client = app_for(loopback_allowed=lambda _request: False)
 denied = denied_client.get("/control-center/status", headers=headers)
 check(denied.status_code == 403, "non-loopback status caller is rejected")
 denied_history = denied_client.get("/control-center/schedules")
 check(denied_history.status_code == 403, "non-loopback history caller is rejected")
+denied_vision = denied_client.get("/control-center/vision")
+check(denied_vision.status_code == 403, "non-loopback VisionRig caller is rejected")
 
 # Provider failures reveal type only and keep both affected components unknown.
 async def broken_health():
@@ -281,6 +318,19 @@ bad_stamp["X-Kaliv-Backend-Observed-At"] = "not-a-time"
 bad = client.get("/control-center/status", headers=bad_stamp).json()
 check(bad["components"]["backend"]["state"] == "unknown", "invalid backend timestamp fails closed")
 check(not bad["green"], "invalid backend timestamp blocks green")
+
+
+
+async def broken_vision():
+    raise RuntimeError("secret VisionRig URL and token")
+
+
+broken_vision_response = app_for(vision_provider=broken_vision).get("/control-center/vision")
+check(broken_vision_response.status_code == 200, "VisionRig provider failure stays structured")
+broken_vision_payload = broken_vision_response.json()
+check(broken_vision_payload["available"] is False, "VisionRig provider failure is unavailable")
+check("vision_provider_error:RuntimeError" in str(broken_vision_payload), "VisionRig failure retains type only")
+check("secret VisionRig" not in str(broken_vision_payload), "VisionRig failure does not leak exception message")
 
 print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
