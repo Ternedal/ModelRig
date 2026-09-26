@@ -289,6 +289,11 @@ from .episode_boundary import (
     episode_boundary_signal_ref,
     evaluate_episode_boundary,
 )
+from .episode_carry_forward import (
+    EpisodeCarryForwardError,
+    EpisodeCarryForwardPlan,
+    plan_episode_carry_forward,
+)
 from .episode_context import (
     EpisodeContextError,
     EpisodeContextMoment,
