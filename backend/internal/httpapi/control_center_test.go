@@ -168,3 +168,100 @@ func TestControlCenterRouteRequiresBearerToken(t *testing.T) {
 		t.Fatalf("worker calls after auth = %d, want 1", workerCalls.Load())
 	}
 }
+
+
+func TestControlCenterVisionProxyValidatesSchema(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/control-center/vision" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"schema":"kaliv-control-center-vision/v1","available":true,"sensors":[],"production_activation":false}`))
+	}))
+	defer upstream.Close()
+
+	s := &server{Deps: Deps{Worker: proxy.New(upstream.URL, time.Second)}}
+	rec := httptest.NewRecorder()
+	s.handleControlCenterVision(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+func TestControlCenterVisionProxyRejectsWrongSchema(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"schema":"visionrig/sensor-catalog/v4","sources":[]}`))
+	}))
+	defer upstream.Close()
+
+	s := &server{Deps: Deps{Worker: proxy.New(upstream.URL, time.Second)}}
+	rec := httptest.NewRecorder()
+	s.handleControlCenterVision(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestControlCenterVisionEnabledForwardsOnlyBooleanToLoopback(t *testing.T) {
+	var seenPath, seenBody, seenRequestID string
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		seenBody = string(raw)
+		seenRequestID = r.Header.Get("X-Request-ID")
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s", r.Method)
+		}
+		_, _ = w.Write([]byte(`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"kinect-living-room","enabled":false}}`))
+	}))
+	defer vision.Close()
+	t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+
+	s := &server{}
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/control-center/vision/sensors/kinect-living-room/enabled",
+		strings.NewReader(`{"enabled":false}`),
+	)
+	req.SetPathValue("sourceID", "kinect-living-room")
+	req.Header.Set("X-Request-ID", "req-vision-control")
+	rec := httptest.NewRecorder()
+
+	s.handleControlCenterVisionSensorEnabled(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if seenPath != "/api/v1/sensors/kinect-living-room/metadata" {
+		t.Fatalf("VisionRig path = %q", seenPath)
+	}
+	if seenBody != `{"enabled":false}` {
+		t.Fatalf("VisionRig body = %q", seenBody)
+	}
+	if seenRequestID != "req-vision-control" {
+		t.Fatalf("request id = %q", seenRequestID)
+	}
+}
+
+func TestControlCenterVisionEnabledRejectsExtraFieldsAndNonLoopbackTarget(t *testing.T) {
+	s := &server{}
+
+	t.Setenv("KALIV_VISIONRIG_URL", "http://127.0.0.1:8110")
+	extra := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true,"location":"secret"}`))
+	extra.SetPathValue("sourceID", "cam-a")
+	extraRec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(extraRec, extra)
+	if extraRec.Code != http.StatusBadRequest {
+		t.Fatalf("extra-field status = %d", extraRec.Code)
+	}
+
+	t.Setenv("KALIV_VISIONRIG_URL", "https://example.com")
+	remote := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true}`))
+	remote.SetPathValue("sourceID", "cam-a")
+	remoteRec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(remoteRec, remote)
+	if remoteRec.Code != http.StatusBadGateway {
+		t.Fatalf("remote-target status = %d", remoteRec.Code)
+	}
+}
