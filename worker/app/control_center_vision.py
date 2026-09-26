@@ -6,9 +6,11 @@ Control Center read surface.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -18,6 +20,25 @@ VISIONRIG_CATALOG_SCHEMA = "visionrig/sensor-catalog/v4"
 
 def _visionrig_base_url() -> str:
     raw = os.getenv("KALIV_VISIONRIG_URL", "http://127.0.0.1:8110").strip()
+    parsed = urlparse(raw)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("invalid VisionRig URL")
+    host = parsed.hostname.lower()
+    loopback = host == "localhost"
+    if not loopback:
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = False
+    if not loopback:
+        raise ValueError("VisionRig URL must be loopback")
     return raw.rstrip("/")
 
 
