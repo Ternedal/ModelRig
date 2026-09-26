@@ -26,7 +26,7 @@ Only the inventory-pinned backend host source is allowed to drift in this slice:
 
 - `backend/internal/httpapi/server.go`
 - from Git blob `6085d525ff86a3d2b5c7cdece20bcaeace896e85`
-- to Git blob `582b163d7a71a934b43671ddad62a5644df3087e`
+- to Git blob `112ea8961bc58e288d31f8a6dc370f09f6e27a8e`
 
 Two new backend files are pinned independently:
 
