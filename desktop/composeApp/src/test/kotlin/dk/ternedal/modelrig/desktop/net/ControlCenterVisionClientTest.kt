@@ -52,7 +52,7 @@ class ControlCenterVisionClientTest {
         val server = server { exchange ->
             authorization.set(exchange.requestHeaders.getFirst("Authorization"))
             method.set(exchange.requestMethod)
-            path.set(exchange.requestURI.path)
+            path.set(exchange.requestURI.rawPath)
             requestBody.set(exchange.requestBody.bufferedReader().readText())
             val body = """
                 {"schema":"kaliv-control-center-vision-enabled/v1","source_id":"cam a","enabled":false}
