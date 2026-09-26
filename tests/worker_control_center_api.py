@@ -319,8 +319,6 @@ bad = client.get("/control-center/status", headers=bad_stamp).json()
 check(bad["components"]["backend"]["state"] == "unknown", "invalid backend timestamp fails closed")
 check(not bad["green"], "invalid backend timestamp blocks green")
 
-print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
-raise SystemExit(1 if failed else 0)
 
 
 async def broken_vision():
@@ -333,3 +331,6 @@ broken_vision_payload = broken_vision_response.json()
 check(broken_vision_payload["available"] is False, "VisionRig provider failure is unavailable")
 check("vision_provider_error:RuntimeError" in str(broken_vision_payload), "VisionRig failure retains type only")
 check("secret VisionRig" not in str(broken_vision_payload), "VisionRig failure does not leak exception message")
+
+print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
+raise SystemExit(1 if failed else 0)
