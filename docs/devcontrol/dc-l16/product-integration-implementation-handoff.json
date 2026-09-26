@@ -15,7 +15,7 @@
   "tracked_source_transition": {
     "path": "backend/internal/httpapi/server.go",
     "from_git_blob_sha": "6085d525ff86a3d2b5c7cdece20bcaeace896e85",
-    "to_git_blob_sha": "582b163d7a71a934b43671ddad62a5644df3087e"
+    "to_git_blob_sha": "112ea8961bc58e288d31f8a6dc370f09f6e27a8e"
   },
   "new_product_files": [
     {
