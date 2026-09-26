@@ -20,6 +20,7 @@ from .control_center_privacy import SCHEMA as PRIVACY_SCHEMA
 from .control_center_privacy import build_control_center_privacy
 from .control_center_schedule_history import build_control_center_schedule_history
 from .control_center_status import build_control_center_status
+from .control_center_vision import build_control_center_vision
 from .netguard import is_loopback
 
 HealthProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
@@ -27,6 +28,7 @@ Agent3Provider = Callable[[], Mapping[str, Any]]
 RoutingProvider = Callable[[], Mapping[str, Any]]
 ScheduleHistoryProvider = Callable[[], Mapping[str, Any]]
 PrivacyProvider = Callable[[], Mapping[str, Any]]
+VisionProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
 
 
 def _loopback_allowed(request: Request) -> bool:
@@ -215,6 +217,7 @@ def build_control_center_router(
     routing_provider: RoutingProvider = _default_routing_provider,
     schedule_history_provider: ScheduleHistoryProvider = build_control_center_schedule_history,
     privacy_provider: PrivacyProvider = build_control_center_privacy,
+    vision_provider: VisionProvider = build_control_center_vision,
     loopback_allowed: Callable[[Request], bool] = _loopback_allowed,
     clock: Callable[[], float] = time.time,
 ) -> APIRouter:
@@ -270,6 +273,25 @@ def build_control_center_router(
         # without a second remote authority or a duplicated policy route.
         payload["privacy"] = privacy
         return payload
+
+    @router.get("/vision")
+    async def control_center_vision(request: Request) -> dict[str, Any]:
+        _require_loopback(request, loopback_allowed)
+        try:
+            result = vision_provider()
+            if inspect.isawaitable(result):
+                result = await result
+            if not isinstance(result, Mapping):
+                raise TypeError("vision provider returned a non-object")
+            return dict(result)
+        except Exception as exc:
+            return {
+                "schema": "kaliv-control-center-vision/v1",
+                "available": False,
+                "reason": f"vision_provider_error:{type(exc).__name__}",
+                "sensors": [],
+                "production_activation": False,
+            }
 
     @router.get("/schedules")
     def control_center_schedules(request: Request) -> dict[str, Any]:
