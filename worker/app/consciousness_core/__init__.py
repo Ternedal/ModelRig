@@ -16,6 +16,11 @@ from .lived_continuity_transition import (
     LivedContinuityTransitionReceipt,
     reduce_lived_continuity,
 )
+from .dormancy_bridge import (
+    DormancyBridgeError,
+    DormancyBridgeReceipt,
+    build_dormancy_bridge,
+)
 from .present_context import (
     PresentContextError,
     PresentContextProjection,
