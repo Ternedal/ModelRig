@@ -63,7 +63,7 @@ def run_contract() -> None:
     assert transition == {
         "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt",
         "from_git_blob_sha": "0a9498ac0fe61ea742a47c1d6be1cf7886992321",
-        "to_git_blob_sha": "e8589c42a6d6625b76eb75bd74c5411db3923fa3",
+        "to_git_blob_sha": "1fe374f7bcc14f33dfef0d9fcc61f97348a8b305",
     }
     assert _git_blob_sha(DESKTOP) == transition["to_git_blob_sha"]
 
@@ -80,7 +80,7 @@ def run_contract() -> None:
         assert _git_blob_sha(path) == sha
 
     # Backend seam remains bound to the currently qualified tracked-source transition.
-    assert _git_blob_sha(SERVER) == "582b163d7a71a934b43671ddad62a5644df3087e"
+    assert _git_blob_sha(SERVER) == "112ea8961bc58e288d31f8a6dc370f09f6e27a8e"
     assert _git_blob_sha(PILOT) == "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
 
     desktop = code_of(DESKTOP)
