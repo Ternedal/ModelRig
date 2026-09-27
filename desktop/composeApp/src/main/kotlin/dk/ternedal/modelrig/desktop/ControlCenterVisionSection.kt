@@ -92,6 +92,12 @@ internal fun DesktopControlCenterVisionSection(
         }
         mutationError?.let { message ->
             VisionReadCard {
+                Text("Sensorændringen blev ikke gennemført.", color = KalivTheme.colors.TextHigh)
+                Text(message, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
+            }
+        }
+        mutationError?.let { message ->
+            VisionReadCard {
                 Text(
                     "Sensorændringen blev ikke gennemført",
                     color = KalivTheme.colors.TextHigh,
