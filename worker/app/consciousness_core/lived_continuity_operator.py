@@ -154,11 +154,23 @@ def build_lived_continuity_operator_status(
     model_swap: ModelSwapContinuityReceipt | None = None,
 ) -> LivedContinuityOperatorStatus:
     """Project privacy-safe booleans/state from already-authoritative evidence."""
+    any_evidence = any(
+        item is not None
+        for item in (
+            continuity,
+            present_context,
+            post_cycle_transition,
+            dormancy,
+            carry_forward,
+            loop_plan,
+            model_swap,
+        )
+    )
     if loop_plan is not None:
         state = "LOOP_STEP_PLANNED"
     elif dormancy is not None:
         state = "DORMANCY_PROVEN"
-    elif continuity is not None:
+    elif any_evidence:
         state = "CONTINUITY_PRESENT"
     else:
         state = "NO_EVIDENCE"
