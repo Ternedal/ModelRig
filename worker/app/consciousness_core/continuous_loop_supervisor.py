@@ -59,6 +59,8 @@ class ContinuousLoopSupervisorPlan(StrictModel):
         if self.disposition == "RUN_ONE_CYCLE":
             if self.max_cognitive_cycles != 1 or self.supervisor_plan_ref is None:
                 raise ValueError("run plan requires exactly one supervisor-authorized cycle")
+            if self.scheduler_tick_ref is None:
+                raise ValueError("run plan requires scheduler evidence")
         elif self.max_cognitive_cycles != 0:
             raise ValueError("non-run loop plan cannot authorize a cycle")
         if self.wake_orientation_ref is not None and not self.explicit_wake_reorientation:
