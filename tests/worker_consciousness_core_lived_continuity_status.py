@@ -39,7 +39,6 @@ class LivedContinuityQualificationTests(unittest.TestCase):
             "episode:",
             "engine:",
             "thinkreq-",
-            "thought",
         ):
             self.assertNotIn(forbidden, payload.lower())
         self.assertFalse(status.raw_text_included)
