@@ -19,6 +19,8 @@ BOOTSTRAP_SCHEMA = "visionrig/sensor-bootstrap-snapshot/v6"
 CATALOG_SCHEMA = "visionrig/sensor-catalog/v8"
 FLEET_SCHEMA = "visionrig/sensor-fleet-summary/v6"
 CONSISTENCY_SCHEMA = "visionrig/sensor-change-consistency/v1"
+MAX_SENSORS = 128
+MAX_CAPABILITIES_PER_SENSOR = 32
 
 
 def _visionrig_base_url() -> str:
@@ -67,7 +69,7 @@ def _sensor_projection(raw: Mapping[str, Any]) -> dict[str, Any]:
     lifecycle = _mapping(raw.get("lifecycle"))
     packet = _mapping(runtime.get("packet_transport"))
 
-    source_id = str(raw.get("source_id") or "").strip()
+    source_id = str(raw.get("source_id") or "").strip()[:128]
     capabilities = discovery.get("capabilities") or runtime.get("capabilities") or []
     if not isinstance(capabilities, (list, tuple)):
         capabilities = []
@@ -114,7 +116,7 @@ def _sensor_projection(raw: Mapping[str, Any]) -> dict[str, Any]:
             str(item).strip().lower()[:64]
             for item in capabilities
             if str(item).strip()
-        }),
+        })[:MAX_CAPABILITIES_PER_SENSOR],
         "lifecycle": lifecycle_status,
         "presence": presence,
         "desired_enabled": desired_enabled,
@@ -202,13 +204,21 @@ async def build_control_center_vision() -> dict[str, Any]:
         raw_sources = catalog.get("sources")
         if not isinstance(raw_sources, list):
             raise TypeError("catalog sources is not an array")
-        sensors = [
-            _sensor_projection(source)
+        bounded_sources = [
+            source
             for source in raw_sources
             if isinstance(source, Mapping)
+            and str(source.get("source_id") or "").strip()
+        ]
+        bounded_sources.sort(
+            key=lambda source: str(source.get("source_id") or "").strip()
+        )
+        catalog_total = len(bounded_sources)
+        sensors = [
+            _sensor_projection(source)
+            for source in bounded_sources[:MAX_SENSORS]
         ]
         sensors = [sensor for sensor in sensors if sensor["source_id"]]
-        sensors.sort(key=lambda item: item["source_id"])
 
         consistency_status = consistency.get("status")
         if consistency_status not in {"synced", "registry_ahead", "journal_ahead"}:
@@ -219,7 +229,9 @@ async def build_control_center_vision() -> dict[str, Any]:
             "available": True,
             "sensor_state_revision": int(payload.get("sensor_state_revision") or 0),
             "consistency": consistency_status,
-            "total": int(fleet.get("total") or len(sensors)),
+            "total": int(fleet.get("total") or catalog_total),
+            "sensors_returned": len(sensors),
+            "sensors_truncated": catalog_total > len(sensors),
             "presence": _count_map(
                 fleet.get("presence"),
                 ("online", "stale", "offline", "unknown"),
@@ -249,6 +261,8 @@ async def build_control_center_vision() -> dict[str, Any]:
             "sensor_state_revision": None,
             "consistency": "unknown",
             "total": 0,
+            "sensors_returned": 0,
+            "sensors_truncated": False,
             "presence": {},
             "control": {},
             "transport": {},
