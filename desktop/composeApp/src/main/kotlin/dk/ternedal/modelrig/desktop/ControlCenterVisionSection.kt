@@ -97,7 +97,11 @@ internal fun DesktopControlCenterVisionSection(
                         it.transportStatus == "warning" || it.transportStatus == "critical"
                     }
                     Text(
-                        "${current.sensors.size} sensorer · $online online · $pending pending",
+                        if (current.sensorsTruncated) {
+                            "${current.sensorsReturned} af ${current.total} sensorer · $online online · $pending pending"
+                        } else {
+                            "${current.sensors.size} sensorer · $online online · $pending pending"
+                        },
                         color = KalivTheme.colors.TextHigh,
                         fontWeight = FontWeight.SemiBold,
                     )
