@@ -48,6 +48,24 @@ def disabled_agent3():
     }
 
 
+def disabled_visionrig():
+    return {
+        "enabled": False,
+        "ok": False,
+        "observed_at": NOW,
+        "detail": "VisionRig cognitive admission disabled",
+    }
+
+
+def healthy_visionrig():
+    return {
+        "enabled": True,
+        "ok": True,
+        "observed_at": NOW,
+        "detail": "VisionRig health v4; ModelRig bridge idle",
+    }
+
+
 def v2_route():
     return {
         "configured_surface": "agent_v2",
@@ -96,6 +114,7 @@ def app_for(**kwargs):
         build_control_center_router(
             health_provider=kwargs.get("health_provider", healthy_health),
             agent3_provider=kwargs.get("agent3_provider", disabled_agent3),
+            visionrig_provider=kwargs.get("visionrig_provider", disabled_visionrig),
             routing_provider=kwargs.get("routing_provider", v2_route),
             schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
             privacy_provider=kwargs.get("privacy_provider", build_control_center_privacy),
@@ -121,7 +140,17 @@ check(payload["components"]["backend"]["detail"] == "modelrig-server 1.58.141", 
 check(payload["components"]["worker"]["state"] == "healthy", "worker health is mapped")
 check(payload["components"]["models"]["state"] == "healthy", "model health is mapped")
 check(payload["components"]["agent3"]["state"] == "disabled", "Agent 3 disablement stays explicit")
+check(payload["components"]["visionrig"]["state"] == "disabled", "VisionRig disablement stays explicit")
 check(payload["routing"]["active_surface"] == "agent_v2", "normal route remains Agent v2")
+
+vision_payload = app_for(visionrig_provider=healthy_visionrig).get(
+    "/control-center/status",
+    headers=headers,
+).json()
+check(
+    vision_payload["components"]["visionrig"]["state"] == "healthy",
+    "Control Center exposes healthy VisionRig integration",
+)
 
 # Privacy is additive to the existing status authority. It reports the active
 # ToolGate egress rule and must not promote the dormant common data-sharing DB
@@ -206,6 +235,28 @@ check(broken_payload["components"]["models"]["state"] == "unknown", "model provi
 serialized = str(broken_payload)
 check("provider_error:RuntimeError" in serialized, "provider failure type is retained")
 check("secret upstream" not in serialized and "token" not in serialized, "provider message is not leaked")
+
+# VisionRig provider failures are isolated to the optional component and expose
+# exception type only.
+async def broken_visionrig():
+    raise RuntimeError("secret VisionRig path and token")
+
+
+vision_failure = app_for(visionrig_provider=broken_visionrig).get(
+    "/control-center/status",
+    headers=headers,
+).json()
+check(
+    vision_failure["components"]["visionrig"]["state"] == "unknown",
+    "VisionRig provider failure fails closed",
+)
+check(vision_failure["overall"] == "attention", "VisionRig provider failure raises attention")
+vision_serialized = str(vision_failure)
+check("provider_error:RuntimeError" in vision_serialized, "VisionRig failure keeps exception type")
+check(
+    "secret VisionRig" not in vision_serialized and "token" not in vision_serialized,
+    "VisionRig provider message is redacted",
+)
 
 # Privacy is its own evidence domain: a privacy-provider failure must not erase
 # operational status, leak the exception message, or manufacture permissions.

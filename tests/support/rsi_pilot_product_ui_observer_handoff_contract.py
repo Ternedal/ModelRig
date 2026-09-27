@@ -63,7 +63,7 @@ def run_contract() -> None:
     assert transition == {
         "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt",
         "from_git_blob_sha": "0a9498ac0fe61ea742a47c1d6be1cf7886992321",
-        "to_git_blob_sha": "e8589c42a6d6625b76eb75bd74c5411db3923fa3",
+        "to_git_blob_sha": "ccf605762dfcdf95c9f2f1a60de0986a3c84564c",
     }
     assert _git_blob_sha(DESKTOP) == transition["to_git_blob_sha"]
 

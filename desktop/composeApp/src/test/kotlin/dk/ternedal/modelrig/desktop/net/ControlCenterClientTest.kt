@@ -33,6 +33,7 @@ class ControlCenterClientTest {
             assertEquals("healthy", status.components.getValue("backend").state)
             assertEquals("stale", status.components.getValue("models").state)
             assertEquals("disabled", status.components.getValue("agent3").state)
+            assertEquals("disabled", status.components.getValue("visionrig").state)
             assertEquals("fallback", status.routing.state)
             assertEquals("readiness report expired", status.routing.fallbackReason)
             assertEquals(listOf("models"), status.requiredFailures)
@@ -146,10 +147,11 @@ class ControlCenterClientTest {
             "backend":{"name":"backend","required":true,"state":"healthy","green":true,"observed_at":2000000000.0,"age_s":1.0,"detail":"backend detail","reason":null},
             "worker":{"name":"worker","required":true,"state":"healthy","green":true,"observed_at":2000000000.0,"age_s":1.0,"detail":"worker detail","reason":null},
             "models":{"name":"models","required":true,"state":"stale","green":false,"observed_at":1999999970.0,"age_s":31.0,"detail":"models detail","reason":"observation_too_old"},
-            "agent3":{"name":"agent3","required":false,"state":"disabled","green":false,"observed_at":2000000000.0,"age_s":1.0,"detail":"disabled","reason":"disabled_by_configuration"}
+            "agent3":{"name":"agent3","required":false,"state":"disabled","green":false,"observed_at":2000000000.0,"age_s":1.0,"detail":"disabled","reason":"disabled_by_configuration"},
+            "visionrig":{"name":"visionrig","required":false,"state":"disabled","green":false,"observed_at":2000000000.0,"age_s":1.0,"detail":"disabled","reason":"disabled_by_configuration"}
           },
           "routing":{"state":"fallback","green":false,"configured_surface":"agent3_developer","active_surface":"agent_v2","fallback_reason":"readiness report expired","observed_at":2000000000.0,"age_s":1.0,"reason":"server_selected_fallback"},
-          "summary":{"states":{"healthy":2,"stale":1,"disabled":1,"fallback":1},"required_failures":["models"]}
+          "summary":{"states":{"healthy":2,"stale":1,"disabled":2,"fallback":1},"required_failures":["models"]}
         }
     """.trimIndent()
 }

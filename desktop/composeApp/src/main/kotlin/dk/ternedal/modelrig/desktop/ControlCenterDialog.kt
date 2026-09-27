@@ -39,7 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-private val DESKTOP_CONTROL_CENTER_ORDER = listOf("backend", "worker", "models", "agent3")
+private val DESKTOP_CONTROL_CENTER_ORDER = listOf("backend", "worker", "models", "visionrig", "agent3")
 
 internal fun desktopControlCenterOverallLabel(state: String): String = when (state) {
     "healthy" -> "Alt ser godt ud"
@@ -100,6 +100,7 @@ internal fun desktopControlCenterTitle(name: String): String = when (name) {
     "backend" -> "Backend"
     "worker" -> "Worker"
     "models" -> "Modeller"
+    "visionrig" -> "VisionRig"
     "agent3" -> "Agent 3"
     else -> name
 }
