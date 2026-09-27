@@ -72,11 +72,18 @@ class LivedContinuityOperatorStatusTests(unittest.TestCase):
         class Marker:
             pass
 
+        class CarryForwardMarker:
+            disposition = "OMIT"
+            review_ref = None
+
+        class ModelSwapMarker:
+            cognitive_capability_changed = False
+
         cases = (
             {"present_context": Marker()},
             {"post_cycle_transition": Marker()},
-            {"carry_forward": Marker()},
-            {"model_swap": Marker()},
+            {"carry_forward": CarryForwardMarker()},
+            {"model_swap": ModelSwapMarker()},
         )
         for kwargs in cases:
             status = build_lived_continuity_operator_status(**kwargs)
