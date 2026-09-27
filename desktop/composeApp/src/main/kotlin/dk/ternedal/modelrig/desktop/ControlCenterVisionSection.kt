@@ -97,6 +97,11 @@ internal fun DesktopControlCenterVisionSection(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
+                        "State rev ${current.sensorStateRevision ?: 0} · ${current.consistency} · ${current.attentionTotal} attention",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 10.sp,
+                    )
+                    Text(
                         if (pressure == 0) "Ingen kendt packet-pressure." else "$pressure sensor(er) med packet-pressure.",
                         color = KalivTheme.colors.TextMuted,
                         fontSize = 10.sp,
