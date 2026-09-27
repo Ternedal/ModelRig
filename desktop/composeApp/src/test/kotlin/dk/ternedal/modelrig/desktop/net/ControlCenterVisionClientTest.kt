@@ -93,7 +93,7 @@ class ControlCenterVisionClientTest {
     }
 
     private fun assertInvalid(client: ControlCenterVisionClient, body: String, text: String) {
-        val error = runCatching { client.parse(body) }.exceptionOrNull()
+        val error = runCatching { client.parseSnapshot(body) }.exceptionOrNull()
         assertTrue(error is ControlCenterException)
         assertTrue(error?.message.orEmpty().contains(text), "${error?.message} should contain $text")
     }
