@@ -138,6 +138,11 @@ internal fun DesktopControlCenterVisionSection(
                         fontSize = 10.sp,
                     )
                     Text(
+                        if (current.controlAvailable) "Sensorstyring er aktiveret." else "Sensorstyring er slået fra på serveren.",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 9.sp,
+                    )
+                    Text(
                         if (pressure == 0) "Ingen kendt packet-pressure." else "$pressure sensor(er) med packet-pressure.",
                         color = KalivTheme.colors.TextMuted,
                         fontSize = 10.sp,
@@ -196,7 +201,7 @@ private fun VisionSensorReadCard(
             Switch(
                 checked = sensor.desiredEnabled,
                 onCheckedChange = onEnabledChange,
-                enabled = !mutationBusy && sensor.lifecycle == "active",
+                enabled = current.controlAvailable && !mutationBusy && sensor.lifecycle == "active",
             )
         }
         Text(
