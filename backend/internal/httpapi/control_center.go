@@ -14,6 +14,7 @@ import (
 const (
 	controlCenterStatusSchema          = "kaliv-control-center-status/v1"
 	controlCenterScheduleHistorySchema = "kaliv-control-center-schedule-history/v1"
+	controlCenterVisionSchema          = "kaliv-control-center-vision/v1"
 	maxControlCenterStatusBytes        = 1 << 20
 	controlCenterStatusTimeout         = 5 * time.Second
 )
@@ -127,6 +128,55 @@ func (s *server) handleControlCenterScheduleHistory(w http.ResponseWriter, r *ht
 	}
 	if payload["schema"] != controlCenterScheduleHistorySchema {
 		writeErr(w, http.StatusBadGateway, "control center schedule history unavailable")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, payload)
+}
+
+
+func (s *server) handleControlCenterVision(w http.ResponseWriter, r *http.Request) {
+	if s.Worker == nil || strings.TrimSpace(s.Worker.BaseURL) == "" {
+		writeErr(w, http.StatusBadGateway, "control center vision unavailable")
+		return
+	}
+
+	target := strings.TrimRight(s.Worker.BaseURL, "/") + "/control-center/vision"
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "control center vision unavailable")
+		return
+	}
+	if requestID := r.Header.Get("X-Request-ID"); requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
+
+	client := &http.Client{Timeout: controlCenterStatusTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "control center vision unavailable")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		writeErr(w, http.StatusBadGateway, "control center vision unavailable")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlCenterStatusBytes+1))
+	if err != nil || len(body) > maxControlCenterStatusBytes {
+		writeErr(w, http.StatusBadGateway, "control center vision unavailable")
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil ||
+		payload["schema"] != controlCenterVisionSchema {
+		writeErr(w, http.StatusBadGateway, "control center vision unavailable")
+		return
+	}
+	if activated, ok := payload["production_activation"].(bool); !ok || activated {
+		writeErr(w, http.StatusBadGateway, "control center vision unavailable")
 		return
 	}
 
