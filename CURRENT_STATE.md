@@ -291,11 +291,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_goals.py`
 - `tests/worker_consciousness_core_live_episode.py`
 - `tests/worker_consciousness_core_lived_continuity.py`
+- `tests/worker_consciousness_core_lived_continuity_status.py`
 - `tests/worker_consciousness_core_lived_continuity_transition.py`
 - `tests/worker_consciousness_core_liveness.py`
 - `tests/worker_consciousness_core_memory4.py`
 - `tests/worker_consciousness_core_memory_recall_attention.py`
 - `tests/worker_consciousness_core_metacognition.py`
+- `tests/worker_consciousness_core_model_swap_continuity.py`
 - `tests/worker_consciousness_core_personality.py`
 - `tests/worker_consciousness_core_policy_checkpoint.py`
 - `tests/worker_consciousness_core_policy_checkpoint_lifecycle.py`
