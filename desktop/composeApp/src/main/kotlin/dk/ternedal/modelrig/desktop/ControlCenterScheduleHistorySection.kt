@@ -94,6 +94,24 @@ internal fun DesktopControlCenterScheduleHistorySection(
     token: String,
     refreshGeneration: Int,
 ) {
+    DesktopControlCenterVisionSection(
+        baseUrl = baseUrl,
+        token = token,
+        refreshGeneration = refreshGeneration,
+    )
+    DesktopControlCenterScheduleHistoryContent(
+        baseUrl = baseUrl,
+        token = token,
+        refreshGeneration = refreshGeneration,
+    )
+}
+
+@Composable
+private fun DesktopControlCenterScheduleHistoryContent(
+    baseUrl: String,
+    token: String,
+    refreshGeneration: Int,
+) {
     var loading by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf<ControlCenterScheduleHistory?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
