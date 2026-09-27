@@ -27,6 +27,8 @@ class ControlCenterVisionClientTest {
             ).snapshot()
             assertTrue(snapshot.available)
             assertEquals(1, snapshot.sensors.size)
+            assertEquals(1, snapshot.sensorsReturned)
+            assertFalse(snapshot.sensorsTruncated)
             val sensor = snapshot.sensors.single()
             assertEquals("kinect-living-room", sensor.sourceId)
             assertEquals("online", sensor.presence)
@@ -113,6 +115,8 @@ class ControlCenterVisionClientTest {
           "sensor_state_revision":12,
           "consistency":"synced",
           "total":1,
+          "sensors_returned":1,
+          "sensors_truncated":false,
           "presence":{"online":1,"stale":0,"offline":0,"unknown":0},
           "control":{"converged":1,"pending":0,"unknown":0},
           "transport":{"normal":1,"warning":0,"critical":0,"unknown":0},
