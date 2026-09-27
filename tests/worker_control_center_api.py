@@ -81,6 +81,8 @@ def vision_snapshot():
         "sensor_state_revision": 3,
         "consistency": "synced",
         "total": 0,
+        "sensors_returned": 0,
+        "sensors_truncated": False,
         "presence": {},
         "control": {},
         "transport": {},
