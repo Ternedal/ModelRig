@@ -16,7 +16,7 @@ class ControlCenterVisionClientTest {
         val server = server { exchange ->
             authorization.set(exchange.requestHeaders.getFirst("Authorization"))
             path.set(exchange.requestURI.path)
-            val body = validSnapshot().toByteArray()
+            val body = """{"vision":${validSnapshot()}}""".toByteArray()
             exchange.sendResponseHeaders(200, body.size.toLong())
             exchange.responseBody.use { it.write(body) }
         }
@@ -36,7 +36,7 @@ class ControlCenterVisionClientTest {
             assertEquals(4194304, sensor.negotiatedMaxPayloadBytes)
             assertEquals("auto", sensor.negotiatedPacketCompression)
             assertEquals("Bearer desktop-token", authorization.get())
-            assertEquals("/api/v1/control-center/vision", path.get())
+            assertEquals("/api/v1/control-center/status", path.get())
         } finally {
             server.stop(0)
         }
