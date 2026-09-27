@@ -31,6 +31,13 @@ private data class VisionWireSnapshot(
 )
 
 @Serializable
+private data class VisionEnabledWireReceipt(
+    val schema: String,
+    @SerialName("source_id") val sourceId: String,
+    val enabled: Boolean,
+)
+
+@Serializable
 private data class VisionWireSensor(
     @SerialName("source_id") val sourceId: String,
     @SerialName("display_name") val displayName: String? = null,
@@ -87,6 +94,41 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
 
     internal fun parseSnapshot(body: String): ControlCenterVisionSnapshot =
         validateSnapshot(decode<VisionWireSnapshot>(body, "VisionRig status"))
+
+    fun setEnabled(sourceId: String, enabled: Boolean): ControlCenterVisionEnabledReceipt {
+        val normalized = sourceId.trim()
+        if (normalized.isEmpty() || normalized.length > 128) {
+            throw ControlCenterException("Invalid VisionRig source id")
+        }
+        val escaped = java.net.URLEncoder.encode(normalized, Charsets.UTF_8)
+            .replace("+", "%20")
+        val request = HttpRequest.newBuilder(
+            URI.create(base + "/api/v1/control-center/vision/sensors/$escaped/enabled"),
+        )
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer $bearer")
+            .timeout(Duration.ofSeconds(10))
+            .method(
+                "PATCH",
+                HttpRequest.BodyPublishers.ofString("""{"enabled":$enabled}"""),
+            )
+            .build()
+        val wire = decode<VisionEnabledWireReceipt>(
+            execute(request, "VisionRig sensor control"),
+            "VisionRig sensor control",
+        )
+        if (wire.schema != "kaliv-control-center-vision-enabled/v1") {
+            throw ControlCenterException("Invalid VisionRig sensor control receipt schema")
+        }
+        if (wire.sourceId != normalized || wire.enabled != enabled) {
+            throw ControlCenterException("VisionRig sensor control receipt does not match request")
+        }
+        return ControlCenterVisionEnabledReceipt(
+            sourceId = wire.sourceId,
+            enabled = wire.enabled,
+        )
+    }
 
     private fun validateSnapshot(wire: VisionWireSnapshot): ControlCenterVisionSnapshot {
         if (wire.schema != SCHEMA) fail("unsupported schema ${wire.schema}")
@@ -269,3 +311,9 @@ data class ControlCenterVisionSensor(
 ) {
     val title: String get() = displayName ?: sourceId
 }
+
+
+data class ControlCenterVisionEnabledReceipt(
+    val sourceId: String,
+    val enabled: Boolean,
+)
