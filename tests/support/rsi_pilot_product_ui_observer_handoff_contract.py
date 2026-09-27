@@ -10,6 +10,9 @@ SUPPORT = ROOT / "tests" / "support"
 if str(SUPPORT) not in sys.path:
     sys.path.insert(0, str(SUPPORT))
 
+from rsi_pilot_visionrig_sensor_control_handoff_contract import (  # noqa: E402
+    run_contract as run_sensor_control_handoff_contract,
+)
 from source_code import code_of  # noqa: E402
 
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
@@ -27,6 +30,7 @@ CLIENT_TEST = ROOT / "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/de
 SECTION_TEST = ROOT / "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSectionTest.kt"
 SERVER = ROOT / "backend/internal/httpapi/server.go"
 PILOT = ROOT / "backend/internal/httpapi/devcontrol_pilot.go"
+SENSOR_CONTROL_HANDOFF = ROOT / "docs/devcontrol/dc-l16/visionrig-sensor-control-handoff.json"
 
 
 def _load(path: Path) -> dict:
@@ -79,8 +83,16 @@ def run_contract() -> None:
         assert item == {"path": relative, "git_blob_sha": sha}
         assert _git_blob_sha(path) == sha
 
-    # Backend seam remains bound to the currently qualified tracked-source transition.
-    assert _git_blob_sha(SERVER) == "582b163d7a71a934b43671ddad62a5644df3087e"
+    # Backend seam may move only through the explicit VisionRig sensor-control
+    # successor handoff; arbitrary drift still fails closed.
+    server_sha = _git_blob_sha(SERVER)
+    if server_sha != "582b163d7a71a934b43671ddad62a5644df3087e":
+        assert SENSOR_CONTROL_HANDOFF.is_file()
+        successor = _load(SENSOR_CONTROL_HANDOFF)
+        transition = successor["tracked_source_transition"]
+        assert transition["from_git_blob_sha"] == "582b163d7a71a934b43671ddad62a5644df3087e"
+        assert transition["to_git_blob_sha"] == server_sha
+        run_sensor_control_handoff_contract()
     assert _git_blob_sha(PILOT) == "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
 
     desktop = code_of(DESKTOP)
