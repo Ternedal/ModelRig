@@ -5,6 +5,7 @@ Run: PYTHONPATH=worker python3 tests/worker_control_center_api.py
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -144,6 +145,51 @@ def app_for(**kwargs):
         )
     )
     return TestClient(app)
+
+
+async_probe_state = {"entered": 0, "gate": None}
+
+
+async def rendezvous(payload):
+    if async_probe_state["gate"] is None:
+        async_probe_state["gate"] = asyncio.Event()
+    gate = async_probe_state["gate"]
+    async_probe_state["entered"] += 1
+    if async_probe_state["entered"] == 3:
+        gate.set()
+    await asyncio.wait_for(gate.wait(), timeout=0.5)
+    return payload
+
+
+async def barrier_health():
+    return await rendezvous(await healthy_health())
+
+
+async def barrier_visionrig():
+    return await rendezvous(healthy_visionrig())
+
+
+async def barrier_vision_snapshot():
+    return await rendezvous(vision_snapshot())
+
+
+parallel_client = app_for(
+    health_provider=barrier_health,
+    visionrig_provider=barrier_visionrig,
+    vision_provider=barrier_vision_snapshot,
+)
+parallel_payload = parallel_client.get(
+    "/control-center/status",
+    headers={
+        "X-Kaliv-Backend-Observed-At": str(NOW),
+        "X-Kaliv-Backend-Version": "1.58.141",
+        "X-Kaliv-Backend-Status": "ok",
+    },
+).json()
+check(async_probe_state["entered"] == 3, "independent async status probes start concurrently")
+check(parallel_payload["components"]["models"]["state"] == "healthy", "parallel health probe remains healthy")
+check(parallel_payload["components"]["visionrig"]["state"] == "healthy", "parallel VisionRig health remains healthy")
+check(parallel_payload["vision"]["available"] is True, "parallel Vision sensor snapshot remains available")
 
 
 client = app_for()
