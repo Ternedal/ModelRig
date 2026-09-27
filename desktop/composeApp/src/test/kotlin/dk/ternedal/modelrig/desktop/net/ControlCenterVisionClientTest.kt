@@ -26,6 +26,7 @@ class ControlCenterVisionClientTest {
                 "desktop-token",
             ).snapshot()
             assertTrue(snapshot.available)
+            assertTrue(snapshot.controlAvailable)
             assertEquals(1, snapshot.sensors.size)
             assertEquals(1, snapshot.sensorsReturned)
             assertFalse(snapshot.sensorsTruncated)
@@ -173,6 +174,7 @@ class ControlCenterVisionClientTest {
           "available":true,
           "reason":null,
           "sensor_state_revision":12,
+          "control_available":true,
           "consistency":"synced",
           "total":1,
           "sensors_returned":1,
