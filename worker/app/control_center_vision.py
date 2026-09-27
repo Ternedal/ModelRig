@@ -155,6 +155,12 @@ def _sensor_projection(raw: Mapping[str, Any]) -> dict[str, Any]:
             )
             else None
         ),
+        "first_seen_utc": _bounded_str(discovery.get("first_seen_utc")),
+        "observation_count": (
+            int(discovery.get("observation_count"))
+            if isinstance(discovery.get("observation_count"), int)
+            else 0
+        ),
         "last_seen_utc": _bounded_str(
             runtime.get("last_seen_utc") or discovery.get("last_seen_utc")
         ),
