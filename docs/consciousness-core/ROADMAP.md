@@ -32,7 +32,7 @@ durable autobiographical memory; C7 handoff policy remains authoritative;
 Agent 3 owns execution; Person/Profile owns identity/person revision; the review
 control plane performs no model call and production_activation remains false.
 
-## Next stacked focus — C31 lived continuity loop
+## Current completed stack — C31 lived continuity loop
 
 C31 closes the architectural gap between the already implemented temporal,
 sleep/wake, autonomous-cycle and C30 episode-review capabilities. It does not
@@ -43,7 +43,7 @@ orient to time, wake from dormancy, run cognitive cycles through the external
 ThoughtEngine, close experiential episodes, and carry reviewed context into later
 cycles while preserving the existing authority boundaries.
 
-Planned slices:
+Implemented slices:
 
 - C31-A: continuity-loop contract and receipt joining temporal state, wake
   orientation, cognitive-cycle and episode refs without granting new authority;
@@ -63,6 +63,10 @@ Planned slices:
   change cognitive capability while SelfState identity, Person binding, durable
   memories and continuity references remain stable;
 - C31-H: privacy-safe operator status and consolidated qualification contract.
+
+C31-A through C31-H now form the complete bounded lived-continuity stack. C31-H
+adds no new runtime authority; it only exposes a privacy-safe read model and a
+static qualification manifest for the already-bounded A–G seams.
 
 Acceptance for the complete C31 stack:
 
