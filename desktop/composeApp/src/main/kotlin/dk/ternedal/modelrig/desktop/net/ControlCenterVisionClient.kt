@@ -10,6 +10,11 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 @Serializable
+private data class ControlCenterVisionStatusEnvelope(
+    val vision: VisionWireSnapshot,
+)
+
+@Serializable
 private data class VisionWireSnapshot(
     val schema: String,
     val available: Boolean,
@@ -70,11 +75,18 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
         .connectTimeout(Duration.ofSeconds(5))
         .build()
 
-    fun snapshot(): ControlCenterVisionSnapshot =
-        parseSnapshot(get("/api/v1/control-center/vision", "VisionRig status"))
+    fun snapshot(): ControlCenterVisionSnapshot {
+        val envelope = decode<ControlCenterVisionStatusEnvelope>(
+            get("/api/v1/control-center/status", "VisionRig status"),
+            "VisionRig status",
+        )
+        return validateSnapshot(envelope.vision)
+    }
 
-    internal fun parseSnapshot(body: String): ControlCenterVisionSnapshot {
-        val wire = decode<VisionWireSnapshot>(body, "VisionRig status")
+    internal fun parseSnapshot(body: String): ControlCenterVisionSnapshot =
+        validateSnapshot(decode<VisionWireSnapshot>(body, "VisionRig status"))
+
+    private fun validateSnapshot(wire: VisionWireSnapshot): ControlCenterVisionSnapshot {
         if (wire.schema != SCHEMA) fail("unsupported schema ${wire.schema}")
         if (wire.productionActivation) fail("production_activation must be false")
         if (!wire.available && wire.sensors.isNotEmpty()) fail("unavailable snapshot contains sensors")
