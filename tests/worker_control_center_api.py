@@ -74,6 +74,24 @@ def v2_route():
     }
 
 
+def vision_snapshot():
+    return {
+        "schema": "kaliv-control-center-vision/v1",
+        "available": True,
+        "sensor_state_revision": 3,
+        "consistency": "synced",
+        "total": 0,
+        "presence": {},
+        "control": {},
+        "transport": {},
+        "capability_refresh": {},
+        "attention_total": 0,
+        "attention_truncated": False,
+        "sensors": [],
+        "production_activation": False,
+    }
+
+
 def schedule_history():
     return {
         "schema": "kaliv-control-center-schedule-history/v1",
@@ -118,6 +136,7 @@ def app_for(**kwargs):
             routing_provider=kwargs.get("routing_provider", v2_route),
             schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
             privacy_provider=kwargs.get("privacy_provider", build_control_center_privacy),
+            vision_provider=kwargs.get("vision_provider", vision_snapshot),
             loopback_allowed=kwargs.get("loopback_allowed", lambda _request: True),
             clock=lambda: NOW,
         )
@@ -138,6 +157,9 @@ check(payload["schema"] == "kaliv-control-center-status/v1", "status route retur
 check(payload["overall"] == "healthy" and payload["green"], "fresh local stack is green")
 check(payload["components"]["backend"]["detail"] == "modelrig-server 1.58.141", "backend stamp is visible")
 check(payload["components"]["worker"]["state"] == "healthy", "worker health is mapped")
+check(payload["vision"]["schema"] == "kaliv-control-center-vision/v1", "Vision sensor snapshot is versioned")
+check(payload["vision"]["available"] is True, "Vision sensor snapshot preserves availability")
+check(payload["vision"]["production_activation"] is False, "Vision sensor snapshot cannot activate production")
 check(payload["components"]["models"]["state"] == "healthy", "model health is mapped")
 check(payload["components"]["agent3"]["state"] == "disabled", "Agent 3 disablement stays explicit")
 check(payload["components"]["visionrig"]["state"] == "disabled", "VisionRig disablement stays explicit")
@@ -332,6 +354,18 @@ bad_stamp["X-Kaliv-Backend-Observed-At"] = "not-a-time"
 bad = client.get("/control-center/status", headers=bad_stamp).json()
 check(bad["components"]["backend"]["state"] == "unknown", "invalid backend timestamp fails closed")
 check(not bad["green"], "invalid backend timestamp blocks green")
+
+def broken_vision_snapshot():
+    raise RuntimeError("secret VisionRig sensor path and token")
+
+
+vision_snapshot_failure = app_for(vision_provider=broken_vision_snapshot).get(
+    "/control-center/status",
+    headers=headers,
+).json()["vision"]
+check(vision_snapshot_failure["available"] is False, "Vision sensor provider failure fails closed")
+check("RuntimeError" in vision_snapshot_failure["reason"], "Vision sensor failure keeps exception type")
+check("secret" not in str(vision_snapshot_failure), "Vision sensor provider message is redacted")
 
 print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
