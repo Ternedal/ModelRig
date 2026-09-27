@@ -89,9 +89,9 @@ def run_contract() -> None:
     if server_sha != "582b163d7a71a934b43671ddad62a5644df3087e":
         assert SENSOR_CONTROL_HANDOFF.is_file()
         successor = _load(SENSOR_CONTROL_HANDOFF)
-        transition = successor["tracked_source_transition"]
-        assert transition["from_git_blob_sha"] == "582b163d7a71a934b43671ddad62a5644df3087e"
-        assert transition["to_git_blob_sha"] == server_sha
+        server_transition = successor["tracked_source_transition"]
+        assert server_transition["from_git_blob_sha"] == "582b163d7a71a934b43671ddad62a5644df3087e"
+        assert server_transition["to_git_blob_sha"] == server_sha
         run_sensor_control_handoff_contract()
     assert _git_blob_sha(PILOT) == "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
 
