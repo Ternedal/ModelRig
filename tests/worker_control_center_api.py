@@ -300,22 +300,18 @@ bad = client.get("/control-center/status", headers=bad_stamp).json()
 check(bad["components"]["backend"]["state"] == "unknown", "invalid backend timestamp fails closed")
 check(not bad["green"], "invalid backend timestamp blocks green")
 
-vision = client.get("/control-center/vision")
-check(vision.status_code == 200, "loopback VisionRig route succeeds")
-vision_payload = vision.json()
-check(vision_payload["schema"] == "kaliv-control-center-vision/v1", "VisionRig route is versioned")
-check(vision_payload["available"] is True, "VisionRig route preserves availability")
+vision_payload = payload["vision"]
+check(vision_payload["schema"] == "kaliv-control-center-vision/v1", "VisionRig status is versioned")
+check(vision_payload["available"] is True, "VisionRig status preserves availability")
 check(vision_payload["production_activation"] is False, "VisionRig read cannot activate production")
-
-denied_vision = denied_client.get("/control-center/vision")
-check(denied_vision.status_code == 403, "non-loopback VisionRig caller is rejected")
 
 def broken_vision():
     raise RuntimeError("secret VisionRig token and path")
 
-vision_failure = app_for(vision_provider=broken_vision).get("/control-center/vision")
-check(vision_failure.status_code == 200, "VisionRig provider failure returns structured unavailable state")
-vision_failure_payload = vision_failure.json()
+vision_failure_payload = app_for(vision_provider=broken_vision).get(
+    "/control-center/status",
+    headers=headers,
+).json()["vision"]
 check(vision_failure_payload["available"] is False, "VisionRig provider failure fails closed")
 check("RuntimeError" in vision_failure_payload["reason"], "VisionRig failure keeps exception type")
 check("secret" not in str(vision_failure_payload), "VisionRig failure message is redacted")
