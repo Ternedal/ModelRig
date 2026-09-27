@@ -5,6 +5,7 @@ Run: PYTHONPATH=worker python3 tests/worker_control_center_api.py
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -74,6 +75,26 @@ def v2_route():
     }
 
 
+def vision_snapshot():
+    return {
+        "schema": "kaliv-control-center-vision/v1",
+        "available": True,
+        "sensor_state_revision": 3,
+        "consistency": "synced",
+        "total": 0,
+        "sensors_returned": 0,
+        "sensors_truncated": False,
+        "presence": {},
+        "control": {},
+        "transport": {},
+        "capability_refresh": {},
+        "attention_total": 0,
+        "attention_truncated": False,
+        "sensors": [],
+        "production_activation": False,
+    }
+
+
 def schedule_history():
     return {
         "schema": "kaliv-control-center-schedule-history/v1",
@@ -118,11 +139,57 @@ def app_for(**kwargs):
             routing_provider=kwargs.get("routing_provider", v2_route),
             schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
             privacy_provider=kwargs.get("privacy_provider", build_control_center_privacy),
+            vision_provider=kwargs.get("vision_provider", vision_snapshot),
             loopback_allowed=kwargs.get("loopback_allowed", lambda _request: True),
             clock=lambda: NOW,
         )
     )
     return TestClient(app)
+
+
+async_probe_state = {"entered": 0, "gate": None}
+
+
+async def rendezvous(payload):
+    if async_probe_state["gate"] is None:
+        async_probe_state["gate"] = asyncio.Event()
+    gate = async_probe_state["gate"]
+    async_probe_state["entered"] += 1
+    if async_probe_state["entered"] == 3:
+        gate.set()
+    await asyncio.wait_for(gate.wait(), timeout=0.5)
+    return payload
+
+
+async def barrier_health():
+    return await rendezvous(await healthy_health())
+
+
+async def barrier_visionrig():
+    return await rendezvous(healthy_visionrig())
+
+
+async def barrier_vision_snapshot():
+    return await rendezvous(vision_snapshot())
+
+
+parallel_client = app_for(
+    health_provider=barrier_health,
+    visionrig_provider=barrier_visionrig,
+    vision_provider=barrier_vision_snapshot,
+)
+parallel_payload = parallel_client.get(
+    "/control-center/status",
+    headers={
+        "X-Kaliv-Backend-Observed-At": str(NOW),
+        "X-Kaliv-Backend-Version": "1.58.141",
+        "X-Kaliv-Backend-Status": "ok",
+    },
+).json()
+check(async_probe_state["entered"] == 3, "independent async status probes start concurrently")
+check(parallel_payload["components"]["models"]["state"] == "healthy", "parallel health probe remains healthy")
+check(parallel_payload["components"]["visionrig"]["state"] == "healthy", "parallel VisionRig health remains healthy")
+check(parallel_payload["vision"]["available"] is True, "parallel Vision sensor snapshot remains available")
 
 
 client = app_for()
@@ -138,6 +205,9 @@ check(payload["schema"] == "kaliv-control-center-status/v1", "status route retur
 check(payload["overall"] == "healthy" and payload["green"], "fresh local stack is green")
 check(payload["components"]["backend"]["detail"] == "modelrig-server 1.58.141", "backend stamp is visible")
 check(payload["components"]["worker"]["state"] == "healthy", "worker health is mapped")
+check(payload["vision"]["schema"] == "kaliv-control-center-vision/v1", "Vision sensor snapshot is versioned")
+check(payload["vision"]["available"] is True, "Vision sensor snapshot preserves availability")
+check(payload["vision"]["production_activation"] is False, "Vision sensor snapshot cannot activate production")
 check(payload["components"]["models"]["state"] == "healthy", "model health is mapped")
 check(payload["components"]["agent3"]["state"] == "disabled", "Agent 3 disablement stays explicit")
 check(payload["components"]["visionrig"]["state"] == "disabled", "VisionRig disablement stays explicit")
@@ -332,6 +402,18 @@ bad_stamp["X-Kaliv-Backend-Observed-At"] = "not-a-time"
 bad = client.get("/control-center/status", headers=bad_stamp).json()
 check(bad["components"]["backend"]["state"] == "unknown", "invalid backend timestamp fails closed")
 check(not bad["green"], "invalid backend timestamp blocks green")
+
+def broken_vision_snapshot():
+    raise RuntimeError("secret VisionRig sensor path and token")
+
+
+vision_snapshot_failure = app_for(vision_provider=broken_vision_snapshot).get(
+    "/control-center/status",
+    headers=headers,
+).json()["vision"]
+check(vision_snapshot_failure["available"] is False, "Vision sensor provider failure fails closed")
+check("RuntimeError" in vision_snapshot_failure["reason"], "Vision sensor failure keeps exception type")
+check("secret" not in str(vision_snapshot_failure), "Vision sensor provider message is redacted")
 
 print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

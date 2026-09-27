@@ -8,6 +8,7 @@ a separate read projection that never instantiates the writer stores.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 import time
@@ -20,6 +21,7 @@ from .control_center_privacy import SCHEMA as PRIVACY_SCHEMA
 from .control_center_privacy import build_control_center_privacy
 from .control_center_schedule_history import build_control_center_schedule_history
 from .control_center_status import build_control_center_status
+from .control_center_vision import build_control_center_vision
 from .netguard import is_loopback
 
 HealthProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
@@ -27,6 +29,7 @@ Agent3Provider = Callable[[], Mapping[str, Any]]
 RoutingProvider = Callable[[], Mapping[str, Any]]
 ScheduleHistoryProvider = Callable[[], Mapping[str, Any]]
 PrivacyProvider = Callable[[], Mapping[str, Any]]
+VisionProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
 
 
 def _loopback_allowed(request: Request) -> bool:
@@ -278,6 +281,7 @@ def build_control_center_router(
     routing_provider: RoutingProvider = _default_routing_provider,
     schedule_history_provider: ScheduleHistoryProvider = build_control_center_schedule_history,
     privacy_provider: PrivacyProvider = build_control_center_privacy,
+    vision_provider: VisionProvider = build_control_center_vision,
     loopback_allowed: Callable[[Request], bool] = _loopback_allowed,
     clock: Callable[[], float] = time.time,
 ) -> APIRouter:
@@ -289,28 +293,85 @@ def build_control_center_router(
         _require_loopback(request, loopback_allowed)
         now = float(clock())
 
-        try:
-            health = await _call_health(health_provider)
-        except Exception as exc:
+        health_result, visionrig_result, vision_result = await asyncio.gather(
+            _call_health(health_provider),
+            _call_health(visionrig_provider),
+            _call_health(vision_provider),
+            return_exceptions=True,
+        )
+
+        if isinstance(health_result, BaseException):
             health = {
                 "checks": {
-                    "worker": {"detail": f"provider_error:{type(exc).__name__}"},
-                    "ollama": {"detail": f"provider_error:{type(exc).__name__}"},
+                    "worker": {
+                        "detail": f"provider_error:{type(health_result).__name__}"
+                    },
+                    "ollama": {
+                        "detail": f"provider_error:{type(health_result).__name__}"
+                    },
                 }
             }
+        else:
+            health = health_result
+
+        if isinstance(visionrig_result, BaseException):
+            visionrig = {
+                "enabled": os.getenv(
+                    "KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED", "0"
+                ) == "1",
+                "detail": f"provider_error:{type(visionrig_result).__name__}",
+            }
+        else:
+            visionrig = visionrig_result
+
+        if isinstance(vision_result, BaseException):
+            vision = {
+                "schema": "kaliv-control-center-vision/v1",
+                "available": False,
+                "reason": (
+                    f"vision_provider_error:{type(vision_result).__name__}"
+                ),
+                "sensor_state_revision": None,
+                "consistency": "unknown",
+                "total": 0,
+                "sensors_returned": 0,
+                "sensors_truncated": False,
+                "presence": {},
+                "control": {},
+                "transport": {},
+                "capability_refresh": {},
+                "attention_total": 0,
+                "attention_truncated": False,
+                "sensors": [],
+                "production_activation": False,
+            }
+        else:
+            vision = dict(vision_result)
+            if vision.get("schema") != "kaliv-control-center-vision/v1":
+                vision = {
+                    "schema": "kaliv-control-center-vision/v1",
+                    "available": False,
+                    "reason": "vision_provider_error:ValueError",
+                    "sensor_state_revision": None,
+                    "consistency": "unknown",
+                    "total": 0,
+                    "sensors_returned": 0,
+                    "sensors_truncated": False,
+                    "presence": {},
+                    "control": {},
+                    "transport": {},
+                    "capability_refresh": {},
+                    "attention_total": 0,
+                    "attention_truncated": False,
+                    "sensors": [],
+                    "production_activation": False,
+                }
 
         try:
             agent3 = agent3_provider()
         except Exception as exc:
             agent3 = {
                 "enabled": os.getenv("KALIV_AGENT3_ENABLED", "0") == "1",
-                "detail": f"provider_error:{type(exc).__name__}",
-            }
-        try:
-            visionrig = await _call_health(visionrig_provider)
-        except Exception as exc:
-            visionrig = {
-                "enabled": os.getenv("KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED", "0") == "1",
                 "detail": f"provider_error:{type(exc).__name__}",
             }
 
@@ -341,6 +402,7 @@ def build_control_center_router(
         # older clients ignore it, while Control Center clients can adopt it
         # without a second remote authority or a duplicated policy route.
         payload["privacy"] = privacy
+        payload["vision"] = vision
         return payload
 
     @router.get("/schedules")
