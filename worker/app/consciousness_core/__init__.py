@@ -599,6 +599,11 @@ from .wake_cycle import (
     build_wake_orientation,
     wake_receipt_ref,
 )
+from .model_swap_continuity import (
+    ModelSwapContinuityError,
+    ModelSwapContinuityReceipt,
+    qualify_model_swap_continuity,
+)
 from .thought_engine import (
     OllamaThoughtEngine,
     ThoughtEngine,
@@ -606,6 +611,9 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "qualify_model_swap_continuity",
+    "ModelSwapContinuityReceipt",
+    "ModelSwapContinuityError",
     "build_episode_review_capability_manifest",
     "EpisodeReviewCapabilityManifest",
     "build_episode_review_operator_summary",
