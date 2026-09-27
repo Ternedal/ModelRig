@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"modelrig/internal/config"
 )
@@ -49,7 +50,12 @@ func (s *server) handleControlCenterStatus(w http.ResponseWriter, r *http.Reques
 		req.Header.Set("X-Request-ID", requestID)
 	}
 
-	client := &http.Client{Timeout: controlCenterStatusTimeout}
+	client := &http.Client{
+		Timeout: controlCenterStatusTimeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "control center status unavailable")
@@ -74,6 +80,9 @@ func (s *server) handleControlCenterStatus(w http.ResponseWriter, r *http.Reques
 	if payload["schema"] != controlCenterStatusSchema {
 		writeErr(w, http.StatusBadGateway, "control center status unavailable")
 		return
+	}
+	if vision, ok := payload["vision"].(map[string]any); ok {
+		vision["control_available"] = os.Getenv("KALIV_VISIONRIG_SENSOR_CONTROL") == "1"
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
@@ -171,7 +180,7 @@ func visionRigLoopbackBaseURL() (string, bool) {
 
 func (s *server) handleControlCenterVisionSensorEnabled(w http.ResponseWriter, r *http.Request) {
 	sourceID := strings.TrimSpace(r.PathValue("sourceID"))
-	if sourceID == "" || len(sourceID) > 128 {
+	if sourceID == "" || utf8.RuneCountInString(sourceID) > 128 {
 		writeErr(w, http.StatusBadRequest, "invalid VisionRig source id")
 		return
 	}
