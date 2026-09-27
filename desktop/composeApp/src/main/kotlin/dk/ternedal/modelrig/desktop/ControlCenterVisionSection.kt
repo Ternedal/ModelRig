@@ -92,12 +92,6 @@ internal fun DesktopControlCenterVisionSection(
         }
         mutationError?.let { message ->
             VisionReadCard {
-                Text("Sensorændringen blev ikke gennemført.", color = KalivTheme.colors.TextHigh)
-                Text(message, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
-            }
-        }
-        mutationError?.let { message ->
-            VisionReadCard {
                 Text(
                     "Sensorændringen blev ikke gennemført",
                     color = KalivTheme.colors.TextHigh,
@@ -151,6 +145,7 @@ internal fun DesktopControlCenterVisionSection(
                 current.sensors.forEach { sensor ->
                     VisionSensorReadCard(
                         sensor = sensor,
+                        controlAvailable = current.controlAvailable,
                         mutating = mutatingSource == sensor.sourceId,
                         mutationBusy = mutatingSource != null,
                         onEnabledChange = { enabled ->
@@ -183,6 +178,7 @@ internal fun DesktopControlCenterVisionSection(
 @Composable
 private fun VisionSensorReadCard(
     sensor: ControlCenterVisionSensor,
+    controlAvailable: Boolean,
     mutating: Boolean,
     mutationBusy: Boolean,
     onEnabledChange: (Boolean) -> Unit,
@@ -201,7 +197,7 @@ private fun VisionSensorReadCard(
             Switch(
                 checked = sensor.desiredEnabled,
                 onCheckedChange = onEnabledChange,
-                enabled = current.controlAvailable && !mutationBusy && sensor.lifecycle == "active",
+                enabled = controlAvailable && !mutationBusy && sensor.lifecycle == "active",
             )
         }
         Text(
