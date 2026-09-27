@@ -36,7 +36,12 @@ internal fun DesktopControlCenterVisionSection(
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(baseUrl, token, refreshGeneration) {
-        if (baseUrl.isBlank() || token.isBlank()) return@LaunchedEffect
+        if (baseUrl.isBlank() || token.isBlank()) {
+            snapshot = null
+            error = null
+            loading = false
+            return@LaunchedEffect
+        }
         loading = true
         val result = withContext(Dispatchers.IO) {
             runCatching { ControlCenterVisionClient(baseUrl, token).snapshot() }
