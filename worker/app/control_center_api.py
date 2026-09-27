@@ -271,24 +271,17 @@ def build_control_center_router(
         # Additive v1 field. Backend forwards the versioned object unchanged;
         # older clients ignore it, while Control Center clients can adopt it
         # without a second remote authority or a duplicated policy route.
-        payload["privacy"] = privacy
-        return payload
-
-    @router.get("/vision")
-    async def control_center_vision(request: Request) -> dict[str, Any]:
-        _require_loopback(request, loopback_allowed)
         try:
-            payload = vision_provider()
-            if inspect.isawaitable(payload):
-                payload = await payload
-            if not isinstance(payload, Mapping):
+            vision_raw = vision_provider()
+            if inspect.isawaitable(vision_raw):
+                vision_raw = await vision_raw
+            if not isinstance(vision_raw, Mapping):
                 raise TypeError("vision provider returned a non-object")
-            result = dict(payload)
-            if result.get("schema") != "kaliv-control-center-vision/v1":
+            vision = dict(vision_raw)
+            if vision.get("schema") != "kaliv-control-center-vision/v1":
                 raise ValueError("unsupported vision projection schema")
-            return result
         except Exception as exc:
-            return {
+            vision = {
                 "schema": "kaliv-control-center-vision/v1",
                 "available": False,
                 "reason": f"vision_provider_error:{type(exc).__name__}",
@@ -304,6 +297,10 @@ def build_control_center_router(
                 "sensors": [],
                 "production_activation": False,
             }
+
+        payload["privacy"] = privacy
+        payload["vision"] = vision
+        return payload
 
     @router.get("/schedules")
     def control_center_schedules(request: Request) -> dict[str, Any]:
