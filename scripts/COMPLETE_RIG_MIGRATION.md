@@ -256,6 +256,24 @@ The inventory is deliberately not a redistribution mechanism. It never copies
 licensed/private model payloads and explicitly records
 `payload_bytes_included=false`.
 
+## Post-cutover drift / later delta migration
+
+After the initial migration is complete, do not rerun the full cutover flow just
+because the old rig has accumulated newer tools, repositories or models.
+
+Capture both machines with:
+
+    scripts\rig-delta-inventory.ps1 -Action Capture
+
+and compare the two manifests with:
+
+    scripts\rig-delta-inventory.ps1 -Action Compare
+
+See `scripts/RIG_DELTA_INVENTORY.md` for the full workflow. The delta operator
+is read-only and does not inspect secret values. It is intended to tell you
+which owning installer or migration path should be rerun, rather than blindly
+cloning historical machine state.
+
 ## Cutover definition
 
 Do not decommission or repurpose the old rig merely because import returned
