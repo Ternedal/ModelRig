@@ -333,12 +333,6 @@ fun DesktopControlCenterDialog(
                     }
                 }
 
-                DesktopControlCenterVisionSection(
-                    baseUrl = baseUrl,
-                    token = token,
-                    refreshGeneration = refreshGeneration,
-                )
-
                 DevControlPilotStatusSection(
                     baseUrl = baseUrl,
                     token = token,
