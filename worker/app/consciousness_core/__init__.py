@@ -11,6 +11,12 @@ from .lived_continuity import (
     LivedContinuityReceipt,
     build_lived_continuity_receipt,
 )
+from .lived_continuity_status import (
+    LivedContinuityCapabilityManifest,
+    LivedContinuityOperatorStatus,
+    build_lived_continuity_capability_manifest,
+    build_lived_continuity_operator_status,
+)
 from .lived_continuity_transition import (
     LivedContinuityTransitionError,
     LivedContinuityTransitionReceipt,
@@ -611,6 +617,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_lived_continuity_capability_manifest",
+    "build_lived_continuity_operator_status",
+    "LivedContinuityCapabilityManifest",
+    "LivedContinuityOperatorStatus",
     "qualify_model_swap_continuity",
     "ModelSwapContinuityReceipt",
     "ModelSwapContinuityError",
