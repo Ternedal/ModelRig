@@ -122,6 +122,13 @@ from .continuity_reorientation import (
     ContinuityReorientationPolicy,
     evaluate_continuity_reorientation,
 )
+from .continuous_loop_supervisor import (
+    CONTINUOUS_LOOP_FLAG,
+    ContinuousLoopSupervisorError,
+    ContinuousLoopSupervisorPlan,
+    enabled as continuous_loop_enabled,
+    plan_continuous_loop_step,
+)
 from .continuity import (
     ContinuityContextProjection,
     ContinuityStateError,
