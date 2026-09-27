@@ -2,9 +2,8 @@
 import copy
 import json
 import sys
+import unittest
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
@@ -61,60 +60,68 @@ def qualify(**overrides):
     return qualify_model_swap_continuity(**args)
 
 
-def test_model_swap_changes_capability_without_changing_identity_authorities():
-    out = qualify()
-    assert out.cognitive_capability_changed is True
-    assert out.self_identity_stable is True
-    assert out.person_binding_stable is True
-    assert out.durable_memory_authority_stable is True
-    assert out.continuity_refs_stable is True
-    assert out.engine_before_ref != out.engine_after_ref
-    assert out.model_calls == 0 and out.persistent_writes == 0
-    assert out.thought_engine_identity_authority is False
-    assert out.thought_engine_durable_memory_authority is False
-    assert out.thought_engine_execution_authority is False
-    assert out.thought_engine_scheduling_authority is False
-    assert out.production_activation is False
+class ModelSwapContinuityTests(unittest.TestCase):
+    def test_model_swap_changes_capability_without_changing_identity_authorities(self):
+        out = qualify()
+        self.assertTrue(out.cognitive_capability_changed)
+        self.assertTrue(out.self_identity_stable)
+        self.assertTrue(out.person_binding_stable)
+        self.assertTrue(out.durable_memory_authority_stable)
+        self.assertTrue(out.continuity_refs_stable)
+        self.assertNotEqual(out.engine_before_ref, out.engine_after_ref)
+        self.assertEqual(out.model_calls, 0)
+        self.assertEqual(out.persistent_writes, 0)
+        self.assertFalse(out.thought_engine_identity_authority)
+        self.assertFalse(out.thought_engine_durable_memory_authority)
+        self.assertFalse(out.thought_engine_execution_authority)
+        self.assertFalse(out.thought_engine_scheduling_authority)
+        self.assertFalse(out.production_activation)
+
+    def test_identity_drift_fails_closed(self):
+        cases = [
+            ("self_id", "self-" + "9" * 32, "self identity"),
+            ("person_id", "person-" + "9" * 32, "Person binding"),
+            ("person_revision", "person-r9999", "Person Revision"),
+        ]
+        for field, new_value, error in cases:
+            with self.subTest(field=field):
+                changed = copy.deepcopy(FIXTURES["self_state"])
+                changed[field] = new_value
+                with self.assertRaisesRegex(ModelSwapContinuityError, error):
+                    qualify(self_after=changed)
+
+    def test_memory_authority_drift_fails_closed(self):
+        with self.assertRaisesRegex(
+            ModelSwapContinuityError, "durable-memory authority"
+        ):
+            qualify(durable_memory_authority_ref_after="memory4:authority:2")
+
+    def test_continuity_ref_drift_fails_closed(self):
+        with self.assertRaisesRegex(ModelSwapContinuityError, "continuity references"):
+            qualify(
+                continuity_refs_after=["continuity:state:2", "episode:review:7"]
+            )
+
+    def test_same_engine_is_not_a_model_swap(self):
+        weak, _ = profiles()
+        with self.assertRaisesRegex(
+            ModelSwapContinuityError, "real ThoughtEngine replacement"
+        ):
+            qualify(profile_before=weak, profile_after=copy.deepcopy(weak))
+
+    def test_engine_change_without_capability_change_does_not_qualify(self):
+        weak, same_capability = profiles()
+        same_capability["reasoning_depth"] = weak["reasoning_depth"]
+        same_capability["planning_capacity"] = weak["planning_capacity"]
+        same_capability["context_capacity_tokens"] = weak["context_capacity_tokens"]
+        same_capability["multimodal_capacity"] = weak["multimodal_capacity"]
+        same_capability["tool_reasoning"] = weak["tool_reasoning"]
+        same_capability["uncertainty_calibration"] = weak["uncertainty_calibration"]
+        with self.assertRaisesRegex(
+            ModelSwapContinuityError, "cognitive capability change"
+        ):
+            qualify(profile_before=weak, profile_after=same_capability)
 
 
-@pytest.mark.parametrize(
-    "field,new_value,error",
-    [
-        ("self_id", "self-" + "9" * 32, "self identity"),
-        ("person_id", "person-" + "9" * 32, "Person binding"),
-        ("person_revision", "person-r9999", "Person Revision"),
-    ],
-)
-def test_identity_drift_fails_closed(field, new_value, error):
-    changed = copy.deepcopy(FIXTURES["self_state"])
-    changed[field] = new_value
-    with pytest.raises(ModelSwapContinuityError, match=error):
-        qualify(self_after=changed)
-
-
-def test_memory_authority_drift_fails_closed():
-    with pytest.raises(ModelSwapContinuityError, match="durable-memory authority"):
-        qualify(durable_memory_authority_ref_after="memory4:authority:2")
-
-
-def test_continuity_ref_drift_fails_closed():
-    with pytest.raises(ModelSwapContinuityError, match="continuity references"):
-        qualify(continuity_refs_after=["continuity:state:2", "episode:review:7"])
-
-
-def test_same_engine_is_not_a_model_swap():
-    weak, _ = profiles()
-    with pytest.raises(ModelSwapContinuityError, match="real ThoughtEngine replacement"):
-        qualify(profile_before=weak, profile_after=copy.deepcopy(weak))
-
-
-def test_engine_change_without_capability_change_does_not_qualify():
-    weak, same_capability = profiles()
-    same_capability["reasoning_depth"] = weak["reasoning_depth"]
-    same_capability["planning_capacity"] = weak["planning_capacity"]
-    same_capability["context_capacity_tokens"] = weak["context_capacity_tokens"]
-    same_capability["multimodal_capacity"] = weak["multimodal_capacity"]
-    same_capability["tool_reasoning"] = weak["tool_reasoning"]
-    same_capability["uncertainty_calibration"] = weak["uncertainty_calibration"]
-    with pytest.raises(ModelSwapContinuityError, match="cognitive capability change"):
-        qualify(profile_before=weak, profile_after=same_capability)
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
