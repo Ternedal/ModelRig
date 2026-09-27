@@ -20,6 +20,7 @@ from .control_center_privacy import SCHEMA as PRIVACY_SCHEMA
 from .control_center_privacy import build_control_center_privacy
 from .control_center_schedule_history import build_control_center_schedule_history
 from .control_center_status import build_control_center_status
+from .control_center_vision import build_control_center_vision
 from .netguard import is_loopback
 
 HealthProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
@@ -27,6 +28,7 @@ Agent3Provider = Callable[[], Mapping[str, Any]]
 RoutingProvider = Callable[[], Mapping[str, Any]]
 ScheduleHistoryProvider = Callable[[], Mapping[str, Any]]
 PrivacyProvider = Callable[[], Mapping[str, Any]]
+VisionProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
 
 
 def _loopback_allowed(request: Request) -> bool:
@@ -278,6 +280,7 @@ def build_control_center_router(
     routing_provider: RoutingProvider = _default_routing_provider,
     schedule_history_provider: ScheduleHistoryProvider = build_control_center_schedule_history,
     privacy_provider: PrivacyProvider = build_control_center_privacy,
+    vision_provider: VisionProvider = build_control_center_vision,
     loopback_allowed: Callable[[Request], bool] = _loopback_allowed,
     clock: Callable[[], float] = time.time,
 ) -> APIRouter:
@@ -326,6 +329,33 @@ def build_control_center_router(
         except Exception as exc:
             privacy = _privacy_failure(exc)
 
+        try:
+            vision_raw = vision_provider()
+            if inspect.isawaitable(vision_raw):
+                vision_raw = await vision_raw
+            if not isinstance(vision_raw, Mapping):
+                raise TypeError("vision provider returned a non-object")
+            vision = dict(vision_raw)
+            if vision.get("schema") != "kaliv-control-center-vision/v1":
+                raise ValueError("unsupported vision projection schema")
+        except Exception as exc:
+            vision = {
+                "schema": "kaliv-control-center-vision/v1",
+                "available": False,
+                "reason": f"vision_provider_error:{type(exc).__name__}",
+                "sensor_state_revision": None,
+                "consistency": "unknown",
+                "total": 0,
+                "presence": {},
+                "control": {},
+                "transport": {},
+                "capability_refresh": {},
+                "attention_total": 0,
+                "attention_truncated": False,
+                "sensors": [],
+                "production_activation": False,
+            }
+
         components: dict[str, Any] = {
             "backend": _backend_component(request),
             **_health_components(health, observed_at=now),
@@ -341,6 +371,7 @@ def build_control_center_router(
         # older clients ignore it, while Control Center clients can adopt it
         # without a second remote authority or a duplicated policy route.
         payload["privacy"] = privacy
+        payload["vision"] = vision
         return payload
 
     @router.get("/schedules")
