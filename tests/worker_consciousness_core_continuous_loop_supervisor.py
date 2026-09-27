@@ -48,7 +48,8 @@ def test_deserialized_run_plan_requires_scheduler_evidence():
         supervisor_plan=plan("RUN"),
         env={"KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED":"1"},
     ).model_dump()
-    valid["scheduler_tick_ref"] = None
-
-    with pytest.raises(ValidationError, match="scheduler evidence"):
-        ContinuousLoopSupervisorPlan.model_validate(valid)
+    for missing_or_blank in (None, " ", "\t"):
+        invalid = dict(valid)
+        invalid["scheduler_tick_ref"] = missing_or_blank
+        with pytest.raises(ValidationError, match="scheduler evidence"):
+            ContinuousLoopSupervisorPlan.model_validate(invalid)
