@@ -27,6 +27,7 @@ flowchart LR
     LLM["Replaceable LLM\nlocal / explicit cloud"] <--> MR
     MR -->|BodyCue| BR["BodyRig\nbody identity · Motor State\ndigital-twin authority"]
     MR <--> VR["VoiceRig\nvoice/audio + timing authority"]
+    VIS["VisionRig\nvisual perception · scene/depth\nnon-authoritative hints"] -. "inferred visual evidence" .-> CC
     subgraph K["Kaliv product surfaces"]
         KA["Kaliv Android"]
         KD["Kaliv Desktop"]
@@ -124,6 +125,7 @@ flowchart TB
     subgraph Authorities["Independent authorities / engines"]
         direction LR
         Voice["VoiceRig<br/>voice + timing"]
+        Vision["VisionRig<br/>visual perception + scene/depth hints"]
         BodyRig["BodyRig<br/>body identity + Motor State"]
         Sky["SkyPlayer-Engine<br/>XR / media"]
     end
@@ -161,6 +163,7 @@ flowchart TB
     RAG <--> DB
 
     RAG <--> Voice
+    Vision -. "default-off inferred WorldEvidence" .-> CC
     BC <--> BodyRig
     BodyRig --> KalivVR
     Voice --> KalivVR
@@ -176,7 +179,7 @@ flowchart TB
 
     class CC focus;
     class CC,A3,A4,Dev dormant;
-    class Voice,BodyRig,Sky external;
+    class Voice,Vision,BodyRig,Sky external;
 ```
 
 The diagram is intentionally architectural rather than exhaustive: **solid lines**
@@ -184,7 +187,9 @@ show normal runtime/data relationships, while **dashed lines** show gated,
 dormant or advisory paths. Consciousness Core is deliberately central to
 continuity and cognition, but it does not absorb the authorities around it:
 Memory 4 owns durable autobiographical memory, Agent 3/tools own execution,
-BodyRig owns body identity and realization, and VoiceRig owns voice/timing.
+BodyRig owns body identity and realization, VoiceRig owns voice/timing, and
+VisionRig owns visual sensing/perception while ModelRig admits only bounded,
+non-authoritative inferred evidence into Consciousness Core.
 
 Consciousness Core is landed on `main` but remains dormant/default-off behind
 `KALIV_CONSCIOUSNESS_CORE_ENABLED=0` and its narrower feature gates.

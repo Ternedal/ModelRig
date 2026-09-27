@@ -50,6 +50,7 @@ from .consciousness_core.episode_review_lifecycle import (
     compose_episode_review_lifespan,
 )
 from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
+from .consciousness_core.visionrig_admission import mount_consciousness_visionrig
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
@@ -107,6 +108,12 @@ mount_memory4_write(fastapi_app)
 # it only admits reported user-turn evidence into an already-live C19/C20
 # session, and the route is absent unless its own exact opt-in is set.
 mount_consciousness_user_turn(fastapi_app)
+
+# VisionRig perception is a separately gated, loopback-only C20 event-source
+# adapter. It projects PerceptionEvent/v3 into inferred world evidence and
+# pending world-change attention without running cognition or gaining action
+# authority.
+mount_consciousness_visionrig(fastapi_app)
 
 # Consciousness Core C22-B is a separately gated, loopback-only, bodyless
 # one-shot control surface. It loads the local operator-calibrated CognitiveProfile
