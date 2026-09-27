@@ -14,6 +14,11 @@ private data class VisionWireSnapshot(
     val schema: String,
     val available: Boolean,
     val reason: String? = null,
+    @SerialName("sensor_state_revision") val sensorStateRevision: Long? = null,
+    val consistency: String = "unknown",
+    val total: Int = 0,
+    @SerialName("attention_total") val attentionTotal: Int = 0,
+    @SerialName("attention_truncated") val attentionTruncated: Boolean = false,
     val sensors: List<VisionWireSensor>,
     @SerialName("production_activation") val productionActivation: Boolean,
 )
@@ -52,6 +57,10 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
         const val SCHEMA = "kaliv-control-center-vision/v1"
         private val PRESENCE = setOf("online", "stale", "offline", "unknown")
         private val CONVERGENCE = setOf("converged", "pending", "unknown")
+        private val LIFECYCLE = setOf("active", "retired")
+        private val TRANSPORT = setOf("normal", "warning", "critical", "unknown")
+        private val REFRESH = setOf("current", "stale", "unknown")
+        private val CONSISTENCY = setOf("synced", "registry_ahead", "journal_ahead", "unknown")
         private val SOURCE_TYPE = Regex("^[a-z][a-z0-9_-]{0,31}$")
     }
 
@@ -70,6 +79,9 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
         if (wire.productionActivation) fail("production_activation must be false")
         if (!wire.available && wire.sensors.isNotEmpty()) fail("unavailable snapshot contains sensors")
         if (wire.available && !wire.reason.isNullOrBlank()) fail("available snapshot contains failure reason")
+        if (wire.consistency !in CONSISTENCY) fail("unsupported consistency ${wire.consistency}")
+        if (wire.total < 0 || wire.attentionTotal < 0) fail("negative summary count")
+        wire.sensorStateRevision?.let { if (it < 0) fail("negative state revision") }
 
         val sensors = wire.sensors.mapIndexed { index, sensor ->
             val path = "sensors[$index]"
@@ -78,7 +90,23 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
             if (!SOURCE_TYPE.matches(sensor.sourceType)) fail("$path.source_type is invalid")
             if (sensor.presence !in PRESENCE) fail("$path.presence is invalid")
             if (sensor.convergence !in CONVERGENCE) fail("$path.convergence is invalid")
+            if (sensor.lifecycle !in LIFECYCLE) fail("$path.lifecycle is invalid")
+            if (sensor.transportStatus !in TRANSPORT) fail("$path.transport_status is invalid")
+            if (sensor.capabilityRefreshStatus !in REFRESH) fail("$path.capability_refresh_status is invalid")
             if (sensor.observationCount < 0) fail("$path.observation_count is negative")
+            if (sensor.desiredRevision < 0) fail("$path.desired_revision is negative")
+            sensor.appliedRevision?.let { if (it < 0) fail("$path.applied_revision is negative") }
+            sensor.pendingSeconds?.let {
+                if (!it.isFinite() || it < 0.0) fail("$path.pending_seconds is invalid")
+            }
+            sensor.payloadUtilization?.let {
+                if (!it.isFinite() || it < 0.0) fail("$path.payload_utilization is invalid")
+            }
+            sensor.negotiatedPacketTargetUtilization?.let {
+                if (!it.isFinite() || it <= 0.0 || it >= 1.0) {
+                    fail("$path.negotiated target utilization is invalid")
+                }
+            }
             if (sensor.convergence == "converged" &&
                 sensor.effectiveCaptureActive != sensor.desiredEnabled
             ) {
@@ -122,9 +150,16 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
         if (sensors.map { it.sourceId }.distinct().size != sensors.size) {
             fail("duplicate source ids")
         }
+        if (wire.available && wire.total != sensors.size) {
+            fail("total contradicts sensor list")
+        }
         return ControlCenterVisionSnapshot(
             available = wire.available,
             reason = wire.reason?.trim()?.takeIf { it.isNotEmpty() },
+            sensorStateRevision = wire.sensorStateRevision,
+            consistency = wire.consistency,
+            attentionTotal = wire.attentionTotal,
+            attentionTruncated = wire.attentionTruncated,
             sensors = sensors.sortedBy { it.sourceId },
         )
     }
@@ -170,6 +205,10 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
 data class ControlCenterVisionSnapshot(
     val available: Boolean,
     val reason: String?,
+    val sensorStateRevision: Long?,
+    val consistency: String,
+    val attentionTotal: Int,
+    val attentionTruncated: Boolean,
     val sensors: List<ControlCenterVisionSensor>,
 )
 
