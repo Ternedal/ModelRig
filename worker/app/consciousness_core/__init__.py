@@ -122,6 +122,11 @@ from .continuity_reorientation import (
     ContinuityReorientationPolicy,
     evaluate_continuity_reorientation,
 )
+from .model_swap_continuity import (
+    ModelSwapContinuityError,
+    ModelSwapContinuityReceipt,
+    qualify_model_swap_continuity,
+)
 from .continuous_loop_supervisor import (
     CONTINUOUS_LOOP_FLAG,
     ContinuousLoopSupervisorError,
