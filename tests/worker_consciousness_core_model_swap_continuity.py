@@ -117,11 +117,14 @@ def test_capability_swap_preserves_authoritative_continuity():
 
 def test_engine_swap_without_capability_delta_is_still_profile_swap():
     s = state()
+    after = profile(5, 0.3).model_copy(
+        update={"context_capacity_tokens": 4096 * 4}
+    )
     r = qualify(
         s,
         s,
         before_profile=profile(4, 0.3),
-        after_profile=profile(5, 0.3),
+        after_profile=after,
     )
     assert r.cognitive_profile_changed is True
     assert r.cognitive_capability_changed is False
