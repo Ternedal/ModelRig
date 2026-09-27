@@ -68,6 +68,20 @@ class LivedContinuityOperatorStatusTests(unittest.TestCase):
         self.assertNotIn("workspace:test", encoded)
         self.assertNotIn("proposal:test", encoded)
 
+    def test_non_primary_evidence_never_reports_no_evidence(self):
+        class Marker:
+            pass
+
+        cases = (
+            {"present_context": Marker()},
+            {"post_cycle_transition": Marker()},
+            {"carry_forward": Marker()},
+            {"model_swap": Marker()},
+        )
+        for kwargs in cases:
+            status = build_lived_continuity_operator_status(**kwargs)
+            self.assertNotEqual(status.state, "NO_EVIDENCE")
+
     def test_loop_plan_reports_bounded_disposition_only(self):
         plan = plan_continuous_loop_step(
             scheduler_tick_ref=None,
