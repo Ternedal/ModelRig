@@ -50,12 +50,7 @@ func (s *server) handleControlCenterStatus(w http.ResponseWriter, r *http.Reques
 		req.Header.Set("X-Request-ID", requestID)
 	}
 
-	client := &http.Client{
-		Timeout: controlCenterStatusTimeout,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := &http.Client{Timeout: controlCenterStatusTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "control center status unavailable")
@@ -225,7 +220,12 @@ func (s *server) handleControlCenterVisionSensorEnabled(w http.ResponseWriter, r
 		req.Header.Set("X-Request-ID", requestID)
 	}
 
-	client := &http.Client{Timeout: controlCenterStatusTimeout}
+	client := &http.Client{
+		Timeout: controlCenterStatusTimeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
