@@ -36,3 +36,19 @@ def test_wait_and_idle_do_not_authorize_cycle():
     for decision,expected in [("WAIT","DEFER"),("IDLE","IDLE")]:
         out=plan_continuous_loop_step(scheduler_tick_ref="tick:1",supervisor_plan=plan(decision),env={"KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED":"1"})
         assert out.disposition==expected and out.max_cognitive_cycles==0
+
+
+def test_deserialized_run_plan_requires_scheduler_evidence():
+    import pytest
+    from pydantic import ValidationError
+    from app.consciousness_core.continuous_loop_supervisor import ContinuousLoopSupervisorPlan
+
+    valid = plan_continuous_loop_step(
+        scheduler_tick_ref="tick:1",
+        supervisor_plan=plan("RUN"),
+        env={"KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED":"1"},
+    ).model_dump()
+    valid["scheduler_tick_ref"] = None
+
+    with pytest.raises(ValidationError, match="scheduler evidence"):
+        ContinuousLoopSupervisorPlan.model_validate(valid)
