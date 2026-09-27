@@ -122,12 +122,23 @@ from .continuity_reorientation import (
     ContinuityReorientationPolicy,
     evaluate_continuity_reorientation,
 )
+from .model_swap_continuity import (
+    ModelSwapContinuityError,
+    ModelSwapContinuityReceipt,
+    qualify_model_swap_continuity,
+)
 from .continuous_loop_supervisor import (
     CONTINUOUS_LOOP_FLAG,
     ContinuousLoopSupervisorError,
     ContinuousLoopSupervisorPlan,
     enabled as continuous_loop_enabled,
     plan_continuous_loop_step,
+)
+from .lived_continuity_operator import (
+    LivedContinuityCapabilityManifest,
+    LivedContinuityOperatorStatus,
+    build_lived_continuity_capability_manifest,
+    build_lived_continuity_operator_status,
 )
 from .continuity import (
     ContinuityContextProjection,
@@ -606,6 +617,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_lived_continuity_operator_status",
+    "build_lived_continuity_capability_manifest",
+    "LivedContinuityOperatorStatus",
+    "LivedContinuityCapabilityManifest",
     "build_episode_review_capability_manifest",
     "EpisodeReviewCapabilityManifest",
     "build_episode_review_operator_summary",
