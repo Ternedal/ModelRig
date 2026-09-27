@@ -99,6 +99,24 @@ def app_for(**kwargs):
             routing_provider=kwargs.get("routing_provider", v2_route),
             schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
             privacy_provider=kwargs.get("privacy_provider", build_control_center_privacy),
+            vision_provider=kwargs.get(
+                "vision_provider",
+                lambda: {
+                    "schema": "kaliv-control-center-vision/v1",
+                    "available": True,
+                    "sensor_state_revision": 3,
+                    "consistency": "synced",
+                    "total": 1,
+                    "presence": {"online": 1},
+                    "control": {"converged": 1},
+                    "transport": {"normal": 1},
+                    "capability_refresh": {"current": 1},
+                    "attention_total": 0,
+                    "attention_truncated": False,
+                    "sensors": [],
+                    "production_activation": False,
+                },
+            ),
             loopback_allowed=kwargs.get("loopback_allowed", lambda _request: True),
             clock=lambda: NOW,
         )
@@ -284,3 +302,24 @@ check(not bad["green"], "invalid backend timestamp blocks green")
 
 print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)
+
+
+vision = client.get("/control-center/vision")
+check(vision.status_code == 200, "loopback VisionRig route succeeds")
+vision_payload = vision.json()
+check(vision_payload["schema"] == "kaliv-control-center-vision/v1", "VisionRig route is versioned")
+check(vision_payload["available"] is True, "VisionRig route preserves availability")
+check(vision_payload["production_activation"] is False, "VisionRig read cannot activate production")
+
+denied_vision = denied_client.get("/control-center/vision")
+check(denied_vision.status_code == 403, "non-loopback VisionRig caller is rejected")
+
+def broken_vision():
+    raise RuntimeError("secret VisionRig token and path")
+
+vision_failure = app_for(vision_provider=broken_vision).get("/control-center/vision")
+check(vision_failure.status_code == 200, "VisionRig provider failure returns structured unavailable state")
+vision_failure_payload = vision_failure.json()
+check(vision_failure_payload["available"] is False, "VisionRig provider failure fails closed")
+check("RuntimeError" in vision_failure_payload["reason"], "VisionRig failure keeps exception type")
+check("secret" not in str(vision_failure_payload), "VisionRig failure message is redacted")
