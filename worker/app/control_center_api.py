@@ -8,6 +8,7 @@ a separate read projection that never instantiates the writer stores.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 import time
@@ -292,28 +293,85 @@ def build_control_center_router(
         _require_loopback(request, loopback_allowed)
         now = float(clock())
 
-        try:
-            health = await _call_health(health_provider)
-        except Exception as exc:
+        health_result, visionrig_result, vision_result = await asyncio.gather(
+            _call_health(health_provider),
+            _call_health(visionrig_provider),
+            _call_health(vision_provider),
+            return_exceptions=True,
+        )
+
+        if isinstance(health_result, BaseException):
             health = {
                 "checks": {
-                    "worker": {"detail": f"provider_error:{type(exc).__name__}"},
-                    "ollama": {"detail": f"provider_error:{type(exc).__name__}"},
+                    "worker": {
+                        "detail": f"provider_error:{type(health_result).__name__}"
+                    },
+                    "ollama": {
+                        "detail": f"provider_error:{type(health_result).__name__}"
+                    },
                 }
             }
+        else:
+            health = health_result
+
+        if isinstance(visionrig_result, BaseException):
+            visionrig = {
+                "enabled": os.getenv(
+                    "KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED", "0"
+                ) == "1",
+                "detail": f"provider_error:{type(visionrig_result).__name__}",
+            }
+        else:
+            visionrig = visionrig_result
+
+        if isinstance(vision_result, BaseException):
+            vision = {
+                "schema": "kaliv-control-center-vision/v1",
+                "available": False,
+                "reason": (
+                    f"vision_provider_error:{type(vision_result).__name__}"
+                ),
+                "sensor_state_revision": None,
+                "consistency": "unknown",
+                "total": 0,
+                "sensors_returned": 0,
+                "sensors_truncated": False,
+                "presence": {},
+                "control": {},
+                "transport": {},
+                "capability_refresh": {},
+                "attention_total": 0,
+                "attention_truncated": False,
+                "sensors": [],
+                "production_activation": False,
+            }
+        else:
+            vision = dict(vision_result)
+            if vision.get("schema") != "kaliv-control-center-vision/v1":
+                vision = {
+                    "schema": "kaliv-control-center-vision/v1",
+                    "available": False,
+                    "reason": "vision_provider_error:ValueError",
+                    "sensor_state_revision": None,
+                    "consistency": "unknown",
+                    "total": 0,
+                    "sensors_returned": 0,
+                    "sensors_truncated": False,
+                    "presence": {},
+                    "control": {},
+                    "transport": {},
+                    "capability_refresh": {},
+                    "attention_total": 0,
+                    "attention_truncated": False,
+                    "sensors": [],
+                    "production_activation": False,
+                }
 
         try:
             agent3 = agent3_provider()
         except Exception as exc:
             agent3 = {
                 "enabled": os.getenv("KALIV_AGENT3_ENABLED", "0") == "1",
-                "detail": f"provider_error:{type(exc).__name__}",
-            }
-        try:
-            visionrig = await _call_health(visionrig_provider)
-        except Exception as exc:
-            visionrig = {
-                "enabled": os.getenv("KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED", "0") == "1",
                 "detail": f"provider_error:{type(exc).__name__}",
             }
 
@@ -328,33 +386,6 @@ def build_control_center_router(
             privacy = dict(privacy_raw)
         except Exception as exc:
             privacy = _privacy_failure(exc)
-
-        try:
-            vision_raw = vision_provider()
-            if inspect.isawaitable(vision_raw):
-                vision_raw = await vision_raw
-            if not isinstance(vision_raw, Mapping):
-                raise TypeError("vision provider returned a non-object")
-            vision = dict(vision_raw)
-            if vision.get("schema") != "kaliv-control-center-vision/v1":
-                raise ValueError("unsupported vision projection schema")
-        except Exception as exc:
-            vision = {
-                "schema": "kaliv-control-center-vision/v1",
-                "available": False,
-                "reason": f"vision_provider_error:{type(exc).__name__}",
-                "sensor_state_revision": None,
-                "consistency": "unknown",
-                "total": 0,
-                "presence": {},
-                "control": {},
-                "transport": {},
-                "capability_refresh": {},
-                "attention_total": 0,
-                "attention_truncated": False,
-                "sensors": [],
-                "production_activation": False,
-            }
 
         components: dict[str, Any] = {
             "backend": _backend_component(request),
