@@ -300,10 +300,6 @@ bad = client.get("/control-center/status", headers=bad_stamp).json()
 check(bad["components"]["backend"]["state"] == "unknown", "invalid backend timestamp fails closed")
 check(not bad["green"], "invalid backend timestamp blocks green")
 
-print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
-raise SystemExit(1 if failed else 0)
-
-
 vision = client.get("/control-center/vision")
 check(vision.status_code == 200, "loopback VisionRig route succeeds")
 vision_payload = vision.json()
@@ -323,3 +319,6 @@ vision_failure_payload = vision_failure.json()
 check(vision_failure_payload["available"] is False, "VisionRig provider failure fails closed")
 check("RuntimeError" in vision_failure_payload["reason"], "VisionRig failure keeps exception type")
 check("secret" not in str(vision_failure_payload), "VisionRig failure message is redacted")
+
+print(f"\n===== CONTROL CENTER API: {passed} passed, {failed} failed =====")
+raise SystemExit(1 if failed else 0)
