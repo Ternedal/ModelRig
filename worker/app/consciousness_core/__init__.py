@@ -134,6 +134,12 @@ from .continuous_loop_supervisor import (
     enabled as continuous_loop_enabled,
     plan_continuous_loop_step,
 )
+from .lived_continuity_operator import (
+    LivedContinuityCapabilityManifest,
+    LivedContinuityOperatorStatus,
+    build_lived_continuity_capability_manifest,
+    build_lived_continuity_operator_status,
+)
 from .continuity import (
     ContinuityContextProjection,
     ContinuityStateError,
@@ -611,6 +617,10 @@ from .thought_engine import (
 )
 
 __all__ = [
+    "build_lived_continuity_operator_status",
+    "build_lived_continuity_capability_manifest",
+    "LivedContinuityOperatorStatus",
+    "LivedContinuityCapabilityManifest",
     "build_episode_review_capability_manifest",
     "EpisodeReviewCapabilityManifest",
     "build_episode_review_operator_summary",
