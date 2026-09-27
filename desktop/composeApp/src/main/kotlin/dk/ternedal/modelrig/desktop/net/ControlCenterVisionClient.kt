@@ -22,6 +22,8 @@ private data class VisionWireSnapshot(
     @SerialName("sensor_state_revision") val sensorStateRevision: Long? = null,
     val consistency: String = "unknown",
     val total: Int = 0,
+    @SerialName("sensors_returned") val sensorsReturned: Int = 0,
+    @SerialName("sensors_truncated") val sensorsTruncated: Boolean = false,
     @SerialName("attention_total") val attentionTotal: Int = 0,
     @SerialName("attention_truncated") val attentionTruncated: Boolean = false,
     val sensors: List<VisionWireSensor>,
@@ -92,7 +94,9 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
         if (!wire.available && wire.sensors.isNotEmpty()) fail("unavailable snapshot contains sensors")
         if (wire.available && !wire.reason.isNullOrBlank()) fail("available snapshot contains failure reason")
         if (wire.consistency !in CONSISTENCY) fail("unsupported consistency ${wire.consistency}")
-        if (wire.total < 0 || wire.attentionTotal < 0) fail("negative summary count")
+        if (wire.total < 0 || wire.sensorsReturned < 0 || wire.attentionTotal < 0) {
+            fail("negative summary count")
+        }
         wire.sensorStateRevision?.let { if (it < 0) fail("negative state revision") }
 
         val sensors = wire.sensors.mapIndexed { index, sensor ->
@@ -162,14 +166,23 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
         if (sensors.map { it.sourceId }.distinct().size != sensors.size) {
             fail("duplicate source ids")
         }
-        if (wire.available && wire.total != sensors.size) {
-            fail("total contradicts sensor list")
+        if (wire.sensorsReturned != sensors.size) {
+            fail("sensors_returned contradicts sensor list")
+        }
+        if (wire.available && !wire.sensorsTruncated && wire.total != sensors.size) {
+            fail("total contradicts untruncated sensor list")
+        }
+        if (wire.available && wire.sensorsTruncated && wire.total <= sensors.size) {
+            fail("truncated snapshot requires hidden sensors")
         }
         return ControlCenterVisionSnapshot(
             available = wire.available,
             reason = wire.reason?.trim()?.takeIf { it.isNotEmpty() },
             sensorStateRevision = wire.sensorStateRevision,
             consistency = wire.consistency,
+            total = wire.total,
+            sensorsReturned = wire.sensorsReturned,
+            sensorsTruncated = wire.sensorsTruncated,
             attentionTotal = wire.attentionTotal,
             attentionTruncated = wire.attentionTruncated,
             sensors = sensors.sortedBy { it.sourceId },
@@ -219,6 +232,9 @@ data class ControlCenterVisionSnapshot(
     val reason: String?,
     val sensorStateRevision: Long?,
     val consistency: String,
+    val total: Int,
+    val sensorsReturned: Int,
+    val sensorsTruncated: Boolean,
     val attentionTotal: Int,
     val attentionTruncated: Boolean,
     val sensors: List<ControlCenterVisionSensor>,
