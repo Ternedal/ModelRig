@@ -249,3 +249,79 @@ func TestControlCenterVisionEnabledRejectsMismatchedReceipt(t *testing.T) {
 		t.Fatalf("mismatched receipt status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+
+func TestControlCenterVisionEnabledRefusesRedirect(t *testing.T) {
+	remoteCalled := false
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		remoteCalled = true
+		_, _ = w.Write([]byte(`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"cam-a","enabled":true}}`))
+	}))
+	defer remote.Close()
+
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Redirect(w, httptest.NewRequest(http.MethodPatch, "/", nil), remote.URL, http.StatusTemporaryRedirect)
+	}))
+	defer vision.Close()
+	t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+
+	s := &server{}
+	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true}`))
+	req.SetPathValue("sourceID", "cam-a")
+	rec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("redirect status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if remoteCalled {
+		t.Fatal("VisionRig control followed redirect outside loopback boundary")
+	}
+}
+
+func TestControlCenterVisionEnabledCountsSourceIDCharacters(t *testing.T) {
+	sourceID := strings.Repeat("é", 100)
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(
+			`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"` +
+				sourceID + `","enabled":true}}`,
+		))
+	}))
+	defer vision.Close()
+	t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+
+	s := &server{}
+	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true}`))
+	req.SetPathValue("sourceID", sourceID)
+	rec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unicode source id status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestControlCenterStatusAdvertisesVisionControlAvailability(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(
+			`{"schema":"kaliv-control-center-status/v1","vision":{"schema":"kaliv-control-center-vision/v1","available":true,"sensors":[],"production_activation":false}}`,
+		))
+	}))
+	defer worker.Close()
+
+	t.Setenv("KALIV_VISIONRIG_SENSOR_CONTROL", "1")
+	s := &server{Deps: Deps{Worker: proxy.New(worker.URL, time.Second)}}
+	rec := httptest.NewRecorder()
+	s.handleControlCenterStatus(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	vision, ok := payload["vision"].(map[string]any)
+	if !ok || vision["control_available"] != true {
+		t.Fatalf("vision control availability = %#v", payload["vision"])
+	}
+}
