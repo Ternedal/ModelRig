@@ -188,6 +188,33 @@ $merged = @{}
 foreach ($k in $appEnv.Keys) { $merged[$k] = $appEnv[$k] }
 foreach ($k in $overrides.Keys) { $merged[$k] = $overrides[$k] }
 
+# --- Consciousness identity bootstrap ----------------------------------------
+# The dev cognitive path needs an already-approved selected Person Revision and
+# one durable SelfState. The Python authority layer performs the actual
+# validation/write. It NEVER creates/selects/activates a Person and refuses an
+# existing SelfState/Person mismatch.
+$previousEnv = @{}
+foreach ($k in $merged.Keys) {
+    $previousEnv[$k] = [Environment]::GetEnvironmentVariable($k, "Process")
+    [Environment]::SetEnvironmentVariable($k, [string]$merged[$k], "Process")
+}
+try {
+    Write-Host "  Validerer Consciousness SelfState / aktiv Person..." -ForegroundColor DarkGray
+    Push-Location $repoRoot
+    try {
+        & python -m app.consciousness_core.dev_bootstrap
+        if ($LASTEXITCODE -ne 0) {
+            throw "Consciousness Core kunne ikke bootstrappe en live identitet. Aktivér/vælg en godkendt Person Revision eller udfør eksplicit SelfState rebind."
+        }
+    } finally {
+        Pop-Location
+    }
+} finally {
+    foreach ($k in $merged.Keys) {
+        [Environment]::SetEnvironmentVariable($k, $previousEnv[$k], "Process")
+    }
+}
+
 $setLines = ($merged.Keys | Sort-Object | ForEach-Object { 'set "' + $_ + '=' + (Escape-CmdValue ([string]$merged[$_])) + '"' }) -join "`r`n"
 $escapedRepo = Escape-CmdValue $repoRoot
 
