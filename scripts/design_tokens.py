@@ -65,7 +65,7 @@ def render(package: str, tok: dict) -> str:
         "",
     ]
 
-    for group in ("dark", "light", "gold", "brand", "semantic"):
+    for group in ("dark", "light", "gold", "signal", "brand", "semantic"):
         out.append(f"    object {group.capitalize()} {{")
         for name, hexv in tok["color"][group].items():
             out.append(f"        val {name}: Color = Color({_argb(hexv)})")
