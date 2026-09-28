@@ -3,6 +3,31 @@
 This adapter connects VisionRig `PerceptionEvent/v3` to the existing C20
 WorldEvidence boundary. It does not create a second world model.
 
+```mermaid
+flowchart LR
+    V["VisionRig<br/>sensor + structured perception"]
+    P["PerceptionEvent/v3"]
+    G["Admission gate<br/>loopback-only · default-off<br/>strict JSON · 256 KiB"]
+    E["WorldEvidenceEvent<br/>epistemic_status=inferred<br/>canonical provenance"]
+    W["Transient WorldState"]
+    A["world_change<br/>attention candidate"]
+    S["Existing supervisor policy"]
+    C["Later bounded cognitive cycle"]
+
+    V --> P
+    P -.-> G
+    G --> E
+    E --> W
+    W --> A
+    A -. "no model call here" .-> S
+    S -. "only if authorized" .-> C
+```
+
+The key boundary is deliberate: **VisionRig owns sensing and perception;
+Consciousness Core owns admission into its transient world model.** The adapter
+does not promote recognition output into identity authority and does not grant
+durable-memory, execution or scheduling authority.
+
 ## Activation
 
 The route is absent unless the exact opt-in is set:
