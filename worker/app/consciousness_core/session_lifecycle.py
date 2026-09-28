@@ -1115,6 +1115,7 @@ class ProductionCognitiveSession:
         temporal_sample: ClockSample | None = None
         temporal_state: TemporalState | None = None
         temporal_context = None
+        present_context = None
 
         def temporal_context_factory(clock_sample: ClockSample):
             nonlocal temporal_sample, temporal_state, temporal_context
@@ -1129,7 +1130,20 @@ class ProductionCognitiveSession:
             temporal_context = project_temporal_context(temporal_state)
             return temporal_context
 
-        present_context = None
+        def present_context_factory(_clock_sample: ClockSample):
+            nonlocal present_context
+            if self._last_lived_continuity is None:
+                present_context = None
+                return None
+            if temporal_state is None:
+                raise CognitiveSessionLifecycleError(
+                    "present context requires temporal context first"
+                )
+            present_context = project_present_context(
+                self._last_lived_continuity,
+                temporal_state,
+            )
+            return present_context
 
         bridge_step = await self._bridge.step(
             current_state=before.state,
@@ -1142,7 +1156,7 @@ class ProductionCognitiveSession:
             continuity_state=active_continuity,
             experience_episode=self._experience_episode,
             temporal_context_factory=temporal_context_factory,
-            present_context=present_context,
+            present_context_factory=present_context_factory,
             retired_continuity_state=retired_continuity_state,
             retired_continuity_orientation=retired_continuity_orientation,
             required_event_id=required_event_id,
@@ -1153,15 +1167,6 @@ class ProductionCognitiveSession:
             raise CognitiveSessionLifecycleError(
                 "supervisor step did not produce trusted temporal context"
             )
-        present_context = (
-            project_present_context(
-                self._last_lived_continuity,
-                temporal_state,
-            )
-            if self._last_lived_continuity is not None
-            else None
-        )
-
         if bridge_step.cycle_result is None:
             self._previous_temporal_sample = temporal_sample
             self._last_temporal_state = temporal_state
