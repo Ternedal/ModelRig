@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
@@ -119,6 +120,17 @@ def _default_agent3_provider() -> Mapping[str, Any]:
     }
 
 
+def _visionrig_health_version(value: object) -> int | None:
+    """Accept the forward-compatible VisionRig health contract family."""
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"visionrig/health/v([0-9]+)", value)
+    if match is None:
+        return None
+    version = int(match.group(1))
+    return version if version >= 4 else None
+
+
 async def _default_visionrig_provider() -> Mapping[str, Any]:
     """Probe the separately gated local VisionRig integration without side effects."""
     observed_at = time.time()
@@ -147,10 +159,12 @@ async def _default_visionrig_provider() -> Mapping[str, Any]:
         if not isinstance(payload, Mapping):
             raise TypeError("VisionRig health returned a non-object")
 
+        health_version = _visionrig_health_version(payload.get("schema"))
         contract_ok = (
             payload.get("status") == "ok"
             and payload.get("service") == "visionrig"
-            and payload.get("schema") == "visionrig/health/v4"
+            and health_version is not None
+            and health_version >= 4
             and payload.get("perception_schema") == "visionrig/perception-event/v3"
         )
         bridge = payload.get("modelrig_bridge")
@@ -159,7 +173,7 @@ async def _default_visionrig_provider() -> Mapping[str, Any]:
         last_status = bridge.get("last_status")
         if contract_ok and bridge_enabled:
             detail = (
-                "VisionRig health v4; ModelRig bridge "
+                f"VisionRig health v{health_version}; ModelRig bridge "
                 + (str(last_status) if last_status else "idle")
             )
         elif contract_ok:
