@@ -28,7 +28,10 @@ param(
     [string]$ApplianceDir = "",
     [string]$BackendHost = "0.0.0.0",
     [int]$BackendPort = 8080,
-    [int]$WorkerPort = 8099
+    [int]$WorkerPort = 8099,
+    [int]$VisionRigPort = 8110,
+    [string]$VisionRigDir = "",
+    [switch]$SkipVisionRig
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,6 +42,9 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 if ([string]::IsNullOrWhiteSpace($ApplianceDir)) {
     $ApplianceDir = Join-Path (Split-Path -Parent $repoRoot) "ModelRig-appliance"
+}
+if ([string]::IsNullOrWhiteSpace($VisionRigDir)) {
+    $VisionRigDir = Join-Path (Split-Path -Parent $repoRoot) "VisionRig"
 }
 $runtimeDir = Join-Path $repoRoot "validation\dev-appliance"
 $stateFile = Join-Path $runtimeDir "state.json"
@@ -82,13 +88,13 @@ function Stop-DevProcesses {
     if (Test-Path -LiteralPath $stateFile) {
         try {
             $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
-            foreach ($id in @($state.backend_pid, $state.worker_pid)) {
+            foreach ($id in @($state.backend_pid, $state.worker_pid, $state.visionrig_pid)) {
                 if ($id) { Stop-Process -Id ([int]$id) -Force -ErrorAction SilentlyContinue }
             }
         } catch { }
         Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
     }
-    foreach ($port in $BackendPort, $WorkerPort) {
+    foreach ($port in $BackendPort, $WorkerPort, $VisionRigPort) {
         $owner = Get-ListenerPid -Port $port
         if ($owner) {
             $proc = Get-Process -Id $owner -ErrorAction SilentlyContinue
@@ -112,6 +118,12 @@ if ($Stop) {
 # --- preflight ---------------------------------------------------------------
 if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw "go mangler i PATH." }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "python mangler i PATH." }
+if (-not $SkipVisionRig) {
+    $visionMain = Join-Path $VisionRigDir "src\visionrig\__main__.py"
+    if (-not (Test-Path -LiteralPath $visionMain -PathType Leaf)) {
+        throw "VisionRig checkout mangler ved '$VisionRigDir'. Klon Ternedal/VisionRig som sibling til ModelRig, angiv -VisionRigDir, eller brug -SkipVisionRig."
+    }
+}
 $envFile = Join-Path $ApplianceDir "modelrig.env"
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
     throw "Fandt ikke $envFile. Angiv -ApplianceDir, eller opret env-filen først."
@@ -143,7 +155,9 @@ Write-Host ""
 Stop-ReleaseAppliance
 Stop-DevProcesses
 Start-Sleep -Seconds 2
-foreach ($port in $BackendPort, $WorkerPort) {
+$requiredPorts = @($BackendPort, $WorkerPort)
+if (-not $SkipVisionRig) { $requiredPorts += $VisionRigPort }
+foreach ($port in $requiredPorts) {
     $owner = Get-ListenerPid -Port $port
     if ($owner) { throw "Port $port er stadig optaget af pid $owner. Luk den, og koer igen." }
 }
@@ -236,21 +250,56 @@ $setLines
 python -u -m uvicorn app.entrypoint:app --host 127.0.0.1 --port $WorkerPort
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
 
+$visionRigCmd = $null
+if (-not $SkipVisionRig) {
+    $visionRigCmd = Join-Path $runtimeDir "visionrig.cmd"
+    $escapedVisionRig = Escape-CmdValue $VisionRigDir
+    @"
+@echo off
+title VisionRig DEV -> ModelRig
+cd /d "$escapedVisionRig"
+set "PYTHONPATH=$escapedVisionRig\src"
+set "VISIONRIG_MODELRIG_BRIDGE=1"
+set "VISIONRIG_MODELRIG_WORKER_URL=http://127.0.0.1:$WorkerPort"
+python -u -m visionrig
+"@ | Set-Content -LiteralPath $visionRigCmd -Encoding ASCII
+}
+
 # --- start ---------------------------------------------------------------------
 $worker = Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "`"$workerCmd`"" -PassThru
 $backend = Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "`"$backendCmd`"" -PassThru
-@{ head = $head; backend_pid = $backend.Id; worker_pid = $worker.Id; started_at = (Get-Date).ToString("o") } |
-    ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding UTF8
+$visionRig = $null
+if ($visionRigCmd) {
+    $visionRig = Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "`"$visionRigCmd`"" -PassThru
+}
+@{
+    head = $head
+    backend_pid = $backend.Id
+    worker_pid = $worker.Id
+    visionrig_pid = $(if ($visionRig) { $visionRig.Id } else { $null })
+    started_at = (Get-Date).ToString("o")
+} | ConvertTo-Json | Set-Content -LiteralPath $stateFile -Encoding UTF8
 
 $deadline = (Get-Date).AddSeconds(90)
-$backendOk = $false; $workerOk = $false; $version = $null
-while ((Get-Date) -lt $deadline -and -not ($backendOk -and $workerOk)) {
+$backendOk = $false; $workerOk = $false; $visionRigOk = $SkipVisionRig.IsPresent; $version = $null
+while ((Get-Date) -lt $deadline -and -not ($backendOk -and $workerOk -and $visionRigOk)) {
     Start-Sleep -Seconds 2
     if (-not $workerOk) { try { Invoke-RestMethod "http://127.0.0.1:$WorkerPort/healthz" -TimeoutSec 2 | Out-Null; $workerOk = $true } catch { } }
     if (-not $backendOk) { try { $h = Invoke-RestMethod "http://127.0.0.1:$BackendPort/healthz" -TimeoutSec 2; $version = $h.version; $backendOk = $true } catch { } }
+    if (-not $visionRigOk) {
+        try {
+            $vh = Invoke-RestMethod "http://127.0.0.1:$VisionRigPort/health" -TimeoutSec 2
+            $visionRigOk = (
+                $vh.status -eq "ok" -and
+                $vh.service -eq "visionrig" -and
+                $vh.perception_schema -eq "visionrig/perception-event/v3" -and
+                $vh.modelrig_bridge.enabled -eq $true
+            )
+        } catch { }
+    }
 }
-if (-not ($backendOk -and $workerOk)) {
-    throw "Stacken kom ikke op inden 90 s (backend=$backendOk worker=$workerOk). Se de to konsolvinduer."
+if (-not ($backendOk -and $workerOk -and $visionRigOk)) {
+    throw "Stacken kom ikke op inden 90 s (backend=$backendOk worker=$workerOk visionrig=$visionRigOk). Se konsolvinduerne."
 }
 
 # Prove that the flags resulted in a mounted live cognitive session rather than
@@ -267,6 +316,9 @@ if (-not $consciousness.ready_for_user_driven_cognition) {
 
 Write-Host ""
 Write-Host "  Consciousness Core: LIVE SESSION READY" -ForegroundColor Green
+if (-not $SkipVisionRig) {
+    Write-Host "  VisionRig: LIVE + MODELRIG BRIDGE ENABLED" -ForegroundColor Green
+}
 Write-Host "  DEV-APPLIANCE OPPE -- version $version fra HEAD $($head.Substring(0,10))" -ForegroundColor Green
 Write-Host "  Telefonen naar backend paa http://<rig-LAN-ip>:$BackendPort (binding $BackendHost)." -ForegroundColor DarkGray
 Write-Host "  Ny kode: git pull, og koer scriptet igen. Tilbage til release: -Stop." -ForegroundColor DarkGray
