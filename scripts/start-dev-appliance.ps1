@@ -133,6 +133,7 @@ Write-Host "  HEAD:      $head" -ForegroundColor DarkGray
 Write-Host "  tree:      $(if ($dirty.Count -eq 0) { 'rent' } else { "$($dirty.Count) aendrede filer (dev-mode tillader det)" })" -ForegroundColor DarkGray
 Write-Host "  appliance: $ApplianceDir ($($appEnv.Count) env-noegler, kommentarer strippet)" -ForegroundColor DarkGray
 Write-Host "  binding:   ${BackendHost}:$BackendPort / worker 127.0.0.1:$WorkerPort" -ForegroundColor DarkGray
+Write-Host "  cognition: Consciousness Core + same-turn guidance + VisionRig ENABLED (dev only)" -ForegroundColor Green
 Write-Host ""
 Write-Host "  IKKE BEVIST: dette er udviklingskanalen. production_activation" -ForegroundColor Yellow
 Write-Host "  forbliver false; intet herfra taeller som evidens." -ForegroundColor Yellow
@@ -168,6 +169,20 @@ $overrides = @{
     'MODELRIG_WORKER_URL'    = "http://127.0.0.1:$WorkerPort"
     'PYTHONPATH'             = (Join-Path $repoRoot "worker")
     'PYTHONDONTWRITEBYTECODE' = '1'
+
+    # Consciousness Core development channel.
+    # These are explicit dev-appliance opt-ins. Source/release defaults remain
+    # fail-closed and production_activation remains false.
+    'KALIV_CONSCIOUSNESS_CORE_ENABLED'           = '1'
+    'KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED'     = '1'
+    'KALIV_CONSCIOUSNESS_CHAT_ENABLED'           = '1'
+    'KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED' = '1'
+    'KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED'     = '1'
+    'KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED'       = '1'
+    'KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED' = '1'
+    'KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED'      = '1'
+    'KALIV_CONSCIOUSNESS_STEP_ENABLED'           = '1'
+    'KALIV_CONSCIOUSNESS_PROFILE_FILE'           = (Join-Path $repoRoot "deploy\consciousness-dev-profile.json")
 }
 $merged = @{}
 foreach ($k in $appEnv.Keys) { $merged[$k] = $appEnv[$k] }
