@@ -63,6 +63,58 @@ class TemporalState(StrictModel):
     uncertainty: UnitInterval
     production_activation: Literal[False]
 
+class TemporalContextProjection(StrictModel):
+    """Authority-free 'now' context available from the first cognitive cycle."""
+
+    schema: Literal["kaliv-consciousness-core/temporal-context/v1"]
+    temporal_anchor_ref: NonEmptyRef
+    local_day_phase: DayPhase
+    session_elapsed_ms: NonNegativeInt | None
+    continuity_gap_detected: bool
+    continuity_gap_ms: NonNegativeInt | None
+    clock_anomaly: ClockAnomaly
+    temporal_uncertainty: UnitInterval
+    reference_only: Literal[True]
+    identity_authority: Literal[False]
+    persistent_state_authority: Literal[False]
+    durable_memory_write_authority: Literal[False]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    production_activation: Literal[False]
+
+
+def project_temporal_context(
+    temporal: TemporalState | Mapping[str, Any],
+) -> TemporalContextProjection:
+    """Project trusted temporal state without inventing lived-continuity evidence."""
+    try:
+        now = (
+            temporal
+            if isinstance(temporal, TemporalState)
+            else TemporalState.model_validate(temporal)
+        )
+    except ValidationError as exc:
+        raise TemporalContractError("invalid TemporalState") from exc
+
+    return TemporalContextProjection(
+        schema="kaliv-consciousness-core/temporal-context/v1",
+        temporal_anchor_ref="temporal-anchor:" + now.now_anchor.anchor_id,
+        local_day_phase=now.local_day_phase,
+        session_elapsed_ms=now.session_elapsed_ms,
+        continuity_gap_detected=now.continuity_gap_detected,
+        continuity_gap_ms=now.continuity_gap_ms,
+        clock_anomaly=now.clock_anomaly,
+        temporal_uncertainty=now.uncertainty,
+        reference_only=True,
+        identity_authority=False,
+        persistent_state_authority=False,
+        durable_memory_write_authority=False,
+        execution_authority=False,
+        scheduling_authority=False,
+        production_activation=False,
+    )
+
+
 class DeadlineState(StrictModel):
     schema: Literal["kaliv-consciousness-core/deadline-state/v1"]
     orientation: Literal["PAST","PRESENT","FUTURE","UNKNOWN"]
