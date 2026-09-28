@@ -71,6 +71,7 @@ For an Android batch build on a rig with Unity Android Build Support installed:
 $env:BODYRIG_ANDROID_BUILD_PATH = "C:\work\KalivBody.apk"
 & "C:\Program Files\Unity\Hub\Editor\6000.3.21f1\Editor\Unity.exe" `
   -batchmode -quit -projectPath .\renderers\bodyrig-unity `
+  -buildTarget Android `
   -executeMethod ModelRig.BodyRig.UnityRenderer.Editor.BodyRigBuild.BuildAndroid
 ```
 
