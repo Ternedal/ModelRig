@@ -10,7 +10,8 @@ asking the app what it publishes:
     dormant until an operator opts in. That is a claim about the SERVED
     SURFACE, so import graphs and greps cannot verify it -- only the published
     paths can. This test fails if a single `/experimental/agent3` route is
-    reachable with the flag off.
+    reachable with the flag off. Other independently gated experimental
+    surfaces, such as Consciousness Core status, are not Agent 3 routes.
 
 Why this file exists at all (Sol, 25/07): "Importgrafer alene kan ikke opdage en
 router, som findes men ikke er inkluderet." Measuring the same question three
@@ -60,9 +61,11 @@ off = _surface(False)
 on = _surface(True)
 
 # --- dormancy: the single most important assertion in this file ------------
-leaked = [p for p in off if "agent3" in p or "/experimental/" in p]
+leaked = [p for p in off if p.startswith("/experimental/agent3/")]
 check(not leaked,
-      f"INGEN agent3/experimental-rute serveres uden flaget (laekket: {leaked[:3]})")
+      f"INGEN Agent 3-rute serveres uden flaget (laekket: {leaked[:3]})")
+check("/experimental/consciousness/status" in off,
+      "Consciousness Core-status er en selvstaendig host-rute og kraever ikke Agent 3")
 
 added = sorted(set(on) - set(off))
 check(len(added) > 0, f"flaget tilfoejer faktisk ruter ({len(added)})")
