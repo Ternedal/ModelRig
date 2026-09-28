@@ -36,11 +36,12 @@ På riggen, i Unity `6000.3.21f1`:
    repository-pinnet i `Packages/manifest.json` og `packages-lock.json`.
    Det er Unity 6000.3's released package-line; ændr ikke versionerne manuelt i
    Package Manager uden at opdatere lock + `tests/bodyrig/ar_packages_contract.py`.
-2. Project Settings -> XR Plug-in Management -> Android -> aktiver ARCore.
-3. Player Settings -> Android: ARM64, IL2CPP og minimum API 24 eller højere.
-4. Player Settings -> Scripting Define Symbols (Android) -> tilføj
-   `BODYRIG_AR`.
-5. Scenen skal indeholde `AR Session`, `XR Origin (AR)`, `ARRaycastManager` og
+2. Android batch-buildet aktiverer `ARCoreLoader` programmatisk gennem
+   midlertidige XR Management-subassets. Eksisterende XR-settings overskrives
+   aldrig; findes de uden ARCore, fejler buildet lukket.
+3. Player Settings er repository-pinnet til ARM64, minSdk 28 og
+   `BODYRIG_AR` for Android. De værdier skal ikke klikkes ind manuelt.
+4. Scenen skal indeholde `AR Session`, `XR Origin (AR)`, `ARRaycastManager` og
    `ARPlaneManager`. Placement-komponenten finder raycast-manageren i scenen.
 
 ## Software-proof vs. fysisk proof
