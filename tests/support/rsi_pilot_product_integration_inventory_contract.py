@@ -33,6 +33,9 @@ HANDOFF_PATH = (
 UI_HANDOFF_PATH = (
     ROOT / "docs" / "devcontrol" / "dc-l16" / "product-ui-observer-handoff.json"
 )
+SENSOR_CONTROL_HANDOFF_PATH = (
+    ROOT / "docs" / "devcontrol" / "dc-l16" / "visionrig-sensor-control-handoff.json"
+)
 SELECTION_REQUIREMENTS_PATH = (
     ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-selection-requirements.json"
 )
@@ -179,19 +182,24 @@ def run_contract() -> None:
     schema = _load(SCHEMA_PATH)
     handoff = _load(HANDOFF_PATH) if HANDOFF_PATH.is_file() else None
     ui_handoff = _load(UI_HANDOFF_PATH) if UI_HANDOFF_PATH.is_file() else None
+    sensor_control_handoff = (
+        _load(SENSOR_CONTROL_HANDOFF_PATH)
+        if SENSOR_CONTROL_HANDOFF_PATH.is_file()
+        else None
+    )
 
     assert inventory["schema"] == "kaliv-rsi-dc-l16-product-integration-inventory/v1"
     assert inventory["repository"] == "Ternedal/ModelRig"
     assert inventory["source_parent_sha"] == "7cc350fc50baad9f48fae88f76b6ad17b3a3817f"
     assert schema["properties"]["source_parent_sha"]["const"] == inventory["source_parent_sha"]
 
-    transitions: dict[str, dict] = {}
+    transitions: dict[str, list[dict]] = {}
     if handoff is not None:
         transition = handoff["tracked_source_transition"]
         assert handoff["source_inventory_head_sha"] == "30be16b320acd6655c07ab1476cceaead547e3e3"
         assert transition["path"] == "backend/internal/httpapi/server.go"
         assert transition["from_git_blob_sha"] == "6085d525ff86a3d2b5c7cdece20bcaeace896e85"
-        transitions[transition["path"]] = transition
+        transitions.setdefault(transition["path"], []).append(transition)
 
     if ui_handoff is not None:
         ui_transition = ui_handoff["tracked_source_transition"]
@@ -203,8 +211,18 @@ def run_contract() -> None:
             "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
         )
         assert ui_transition["from_git_blob_sha"] == "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
-        assert ui_transition["path"] not in transitions
-        transitions[ui_transition["path"]] = ui_transition
+        transitions.setdefault(ui_transition["path"], []).append(ui_transition)
+
+    if sensor_control_handoff is not None:
+        sensor_transition = sensor_control_handoff["tracked_source_transition"]
+        assert sensor_control_handoff["predecessor_server_blob_sha"] == (
+            "582b163d7a71a934b43671ddad62a5644df3087e"
+        )
+        assert sensor_transition["path"] == "backend/internal/httpapi/server.go"
+        assert sensor_transition["from_git_blob_sha"] == (
+            "582b163d7a71a934b43671ddad62a5644df3087e"
+        )
+        transitions.setdefault(sensor_transition["path"], []).append(sensor_transition)
 
     candidates = inventory["candidate_surfaces"]
     assert len(candidates) == len(EXPECTED) == 3
@@ -215,14 +233,16 @@ def run_contract() -> None:
         assert item["selected"] is False
         path = ROOT / relative_path
         assert path.is_file(), relative_path
-        transition = transitions.get(relative_path)
-        if transition is not None:
-            assert transition["from_git_blob_sha"] == expected_sha
-            assert _git_blob_sha(path) == transition["to_git_blob_sha"], (
-                f"unbound selected-source drift: {relative_path}"
+        chain = transitions.get(relative_path, [])
+        bound_sha = expected_sha
+        for transition in chain:
+            assert transition["from_git_blob_sha"] == bound_sha, (
+                f"broken selected-source transition chain: {relative_path}"
             )
-        else:
-            assert _git_blob_sha(path) == expected_sha, f"source drift: {relative_path}"
+            bound_sha = transition["to_git_blob_sha"]
+        assert _git_blob_sha(path) == bound_sha, (
+            f"unbound selected-source drift: {relative_path}"
+        )
 
     desktop = code_of(ROOT / EXPECTED[0][1])
     android = code_of(ROOT / EXPECTED[1][1])
