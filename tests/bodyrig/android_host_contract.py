@@ -54,6 +54,7 @@ check("AndroidTargetArchitectures: 2" in SETTINGS, "Android host remains ARM64")
 check("AndroidIsGame: 0" in SETTINGS, "Kaliv Body is configured as an app, not a game")
 
 for required in (
+    "using UnityEditor.Build;",
     "public static void BuildAndroid()",
     'NamedBuildTarget.Android',
     '"dk.ternedal.kalivbody"',
