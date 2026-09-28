@@ -64,7 +64,7 @@ internal fun ControlCenterScheduleHistoryLoader(
             CircularProgressIndicator(
                 modifier = Modifier.height(20.dp),
                 strokeWidth = 2.dp,
-                color = KalivTheme.colors.signal,
+                color = KalivTheme.colors.cognition,
             )
             Text(
                 "Henter execution-historik…",
