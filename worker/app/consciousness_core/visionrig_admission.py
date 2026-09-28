@@ -471,9 +471,9 @@ async def _read_event(request: Request) -> VisionRigPerceptionEvent:
             raise ValueError("VisionRig body must be an object")
         schema_id = decoded.get("schema_id")
         if schema_id == "visionrig/perception-event/v3":
-            return VisionRigPerceptionEventV3.model_validate(decoded)
+            return VisionRigPerceptionEventV3.model_validate_json(bytes(raw))
         if schema_id == "visionrig/perception-event/v4":
-            return VisionRigPerceptionEventV4.model_validate(decoded)
+            return VisionRigPerceptionEventV4.model_validate_json(bytes(raw))
         raise ValueError("unsupported VisionRig perception schema")
     except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
         raise _invalid_body() from None
