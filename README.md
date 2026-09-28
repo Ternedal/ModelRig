@@ -504,3 +504,6 @@ one-liner) and **ROADMAP.md** for where this is going (closed-ended at V15).
 
 ## License
 MIT — see LICENSE.
+Consciousness Core supplies authority-free temporal context from the first
+cognitive cycle; richer lived-continuity present context is added only after the
+first real continuity receipt exists.
