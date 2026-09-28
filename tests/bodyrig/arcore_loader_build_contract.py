@@ -6,11 +6,15 @@ production activation is claimed here.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = ROOT / "renderers" / "bodyrig-unity"
-BUILD = (PROJECT / "Assets" / "BodyRig" / "Editor" / "BodyRigBuild.cs").read_text(encoding="utf-8")
+BUILD = code_of(PROJECT / "Assets" / "BodyRig" / "Editor" / "BodyRigBuild.cs")
 SETTINGS = (PROJECT / "ProjectSettings" / "ProjectSettings.asset").read_text(encoding="utf-8")
 
 passed = failed = 0
