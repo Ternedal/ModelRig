@@ -21,6 +21,8 @@ RUNTIME_SCHEMA = "bodyrig.unity_runtime_load/v0.1"
 VISUAL_SCHEMA = "bodyrig.unity_visual_acceptance/v0.2"
 EXPECTED_UNITY = "6000.3.21f1"
 EXPECTED_DEPS = {
+    "com.unity.xr.arcore": "6.3.5",
+    "com.unity.xr.arfoundation": "6.3.5",
     "com.vrmc.gltf": "https://github.com/vrm-c/UniVRM.git?path=/Packages/UniGLTF#v0.131.2",
     "com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.2",
 }
@@ -225,7 +227,7 @@ def _validate_project_pins(repo_root: Path) -> None:
            for line in pin_lines):
         raise PhysicalRendererGateError("Unity project version pin file has unexpected content")
     if not isinstance(manifest, dict) or manifest.get("dependencies") != EXPECTED_DEPS:
-        raise PhysicalRendererGateError("UniVRM dependency pins changed")
+        raise PhysicalRendererGateError("renderer dependency pins changed")
 
 
 def _validate_runtime_receipt(
