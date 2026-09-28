@@ -23,6 +23,12 @@ C31-H adds no route, timer, thread, scheduler, persistence layer, notification,
 model call, Memory 4 call, identity authority, execution authority, or durable
 memory write authority.
 
+The development runtime now couples C31-F to the already-existing scheduler-owned
+autonomous cognition bridge. Each real scheduler callback composes one bounded
+continuous-loop plan from scheduler evidence and the exact C18 supervisor plan
+when one exists. Runtime status retains only plan count and final disposition;
+internal plan refs are not exposed.
+
 ## Qualification
 
 Focused direct-run tests prove:
