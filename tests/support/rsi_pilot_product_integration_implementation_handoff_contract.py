@@ -13,6 +13,9 @@ if str(SUPPORT) not in sys.path:
 from rsi_pilot_product_ui_observer_handoff_contract import (  # noqa: E402
     run_contract as run_ui_handoff_contract,
 )
+from rsi_pilot_visionrig_sensor_control_handoff_contract import (  # noqa: E402
+    run_contract as run_sensor_control_handoff_contract,
+)
 from source_code import code_of  # noqa: E402
 
 DEVCONTROL_SRC = ROOT / "devcontrol" / "src"
@@ -24,6 +27,7 @@ from kaliv_dev_control import catalog  # noqa: E402
 HANDOFF = ROOT / "docs/devcontrol/dc-l16/product-integration-implementation-handoff.json"
 SCHEMA = ROOT / "devcontrol/schemas/rsi-pilot-product-integration-implementation-handoff-v1.schema.json"
 UI_HANDOFF = ROOT / "docs/devcontrol/dc-l16/product-ui-observer-handoff.json"
+SENSOR_CONTROL_HANDOFF = ROOT / "docs/devcontrol/dc-l16/visionrig-sensor-control-handoff.json"
 DESKTOP = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
 ANDROID = ROOT / "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
 SERVER = ROOT / "backend/internal/httpapi/server.go"
@@ -68,7 +72,17 @@ def run_contract() -> None:
         "from_git_blob_sha": "6085d525ff86a3d2b5c7cdece20bcaeace896e85",
         "to_git_blob_sha": "582b163d7a71a934b43671ddad62a5644df3087e",
     }
-    assert _git_blob_sha(SERVER) == transition["to_git_blob_sha"]
+    server_sha = _git_blob_sha(SERVER)
+    if server_sha == transition["to_git_blob_sha"]:
+        pass
+    else:
+        assert SENSOR_CONTROL_HANDOFF.is_file()
+        successor = _load(SENSOR_CONTROL_HANDOFF)
+        successor_transition = successor["tracked_source_transition"]
+        assert successor_transition["path"] == "backend/internal/httpapi/server.go"
+        assert successor_transition["from_git_blob_sha"] == transition["to_git_blob_sha"]
+        assert successor_transition["to_git_blob_sha"] == server_sha
+        run_sensor_control_handoff_contract()
 
     new_files = handoff["new_product_files"]
     assert new_files == [
