@@ -11,7 +11,7 @@ import dk.ternedal.modelrig.ui.theme.KalivTheme
  */
 @Composable
 internal fun stateColor(state: String): Color = when (state) {
-    "healthy" -> KalivTheme.colors.signal
+    "healthy" -> KalivTheme.colors.success
     "unavailable" -> KalivTheme.colors.danger
     "attention", "fallback" -> KalivTheme.colors.textHigh
     else -> KalivTheme.colors.textMuted
