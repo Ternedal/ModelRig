@@ -247,7 +247,10 @@ can exercise the full cognitive path without silently promoting the same authori
 into a signed release. A loopback-only
 `/experimental/consciousness/status` surface reports only activation/readiness
 booleans and aggregate cycle count, and the dev launcher requires it to confirm
-a mounted live session before declaring startup successful.
+a mounted live session before declaring startup successful. The same dev launcher
+also starts the sibling `VisionRig` checkout by default, forces its ModelRig
+publisher to the loopback worker, and requires VisionRig health to report the
+`PerceptionEvent/v3` contract plus an enabled bridge before startup is green.
 
 **Two cloud roads, and they are not the same thing.**
 
