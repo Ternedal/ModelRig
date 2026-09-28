@@ -1,7 +1,7 @@
 {
   "meta": {
     "name": "Kaliv UI",
-    "version": "2.0",
+    "version": "2.1",
     "baseGrid": 8
   },
   "color": {
@@ -69,6 +69,13 @@
       "fill": "#B08A3E",
       "on": "#2B1C05",
       "tint": "#29D4AB52"
+    },
+    "signal": {
+      "primary": "#48C7FF",
+      "light": "#73D6FF",
+      "strong": "#159FDB",
+      "deep": "#0B5F8C",
+      "glow": "#3848C7FF"
     }
   },
   "spacing": {

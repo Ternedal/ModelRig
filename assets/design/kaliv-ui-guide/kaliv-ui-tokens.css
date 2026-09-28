@@ -15,6 +15,13 @@
   --kaliv-gold-accent-light: #7E621C;
   --kaliv-gold-outline: #7E621C;
 
+  /* Unified brand / cognitive Signal roles. Ember remains the default action language. */
+  --kaliv-signal: #48C7FF;
+  --kaliv-signal-light: #73D6FF;
+  --kaliv-signal-strong: #159FDB;
+  --kaliv-signal-deep: #0B5F8C;
+  --kaliv-signal-glow: rgba(72, 199, 255, 0.22);
+
   /* Dark theme color mirror. */
   --kaliv-dark-canvas: #0B0A09;
   --kaliv-dark-deep: #0E0B08;

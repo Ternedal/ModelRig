@@ -26,7 +26,10 @@ data class KalivColors(
     val SurfaceHigh: Color,  // elevated (menus, chips, composer)
     val CodeSurface: Color,
     val Border: Color,       // 1dp borders on chips/bubbles/composer
-    val Signal: Color,       // primary action/link color
+    val Signal: Color,       // Ember: legacy primary action/link color
+    val Cognition: Color,    // Signal blue: live model/perception/voice/runtime activity
+    val CognitionLight: Color,
+    val CognitionGlow: Color,
     val Amber: Color,        // secondary accent
     val Highlight: Color,    // highlighted accent
     val TextHigh: Color,
@@ -61,8 +64,11 @@ val KalivDark = KalivColors(
     SurfaceHigh = KalivTokens.Dark.elevated,
     CodeSurface = Color(0xFF14100C),
     Border = KalivTokens.Dark.border,
-    Signal = KalivTokens.Brand.bronze,
-    Amber = KalivTokens.Brand.gold,
+    Signal = KalivTokens.Gold.fill,
+    Cognition = KalivTokens.Signal.primary,
+    CognitionLight = KalivTokens.Signal.light,
+    CognitionGlow = KalivTokens.Signal.glow,
+    Amber = KalivTokens.Dark.accent,
     Highlight = KalivTokens.Brand.highlight,
     TextHigh = KalivTokens.Dark.text,
     TextMuted = KalivTokens.Dark.muted,
@@ -91,6 +97,9 @@ val KalivLight = KalivColors(
     CodeSurface = Color(0xFFEDE7DA),
     Border = KalivTokens.Light.border,
     Signal = KalivTokens.Light.accent,
+    Cognition = KalivTokens.Signal.deep,
+    CognitionLight = KalivTokens.Signal.strong,
+    CognitionGlow = KalivTokens.Signal.glow,
     Amber = KalivTokens.Light.accentSoft,
     Highlight = KalivTokens.Light.accentSoft,
     TextHigh = KalivTokens.Light.text,
