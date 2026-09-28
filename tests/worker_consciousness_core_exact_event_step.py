@@ -7,6 +7,7 @@ Run:
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
 import sys
@@ -478,6 +479,200 @@ class ExactEventStepTests(unittest.TestCase):
             self.assertEqual(result.supervisor_step.plan.decision, "RUN")
             self.assertTrue(result.context_updated)
             self.assertEqual(engine.calls, 1)
+
+
+LIVE_PROBE_SPEC = importlib.util.spec_from_file_location(
+    "consciousness_live_cycle_probe_test",
+    ROOT / "scripts" / "consciousness_live_cycle_probe.py",
+)
+assert LIVE_PROBE_SPEC and LIVE_PROBE_SPEC.loader
+live_probe = importlib.util.module_from_spec(LIVE_PROBE_SPEC)
+sys.modules[LIVE_PROBE_SPEC.name] = live_probe
+LIVE_PROBE_SPEC.loader.exec_module(live_probe)
+
+
+class LiveCycleProbeContractTests(unittest.TestCase):
+    def identity(self):
+        return {
+            "git_sha": "a" * 40,
+            "branch": "qualification",
+            "working_tree_clean": True,
+        }
+
+    def admission(self):
+        return {
+            "schema": "kaliv-consciousness-core/user-turn-admission/v1",
+            "turn_ref": "chat-turn:" + "1" * 64,
+            "evidence_ref": "world-evidence:" + "2" * 64,
+            "cognition_event_id": "cevt-" + "3" * 32,
+            "world_changed": True,
+            "replayed": False,
+            "cognition_event_queued": True,
+            "epistemic_status": "reported",
+            "confidence": 1.0,
+            "observed_sequence": 7,
+            "model_calls": 0,
+            "checkpoint_enabled": False,
+            "checkpoint_evaluation_count": 0,
+            "checkpoint_commit_count": 0,
+            "checkpoint_last_outcome": None,
+            "checkpoint_last_pressure": None,
+            "self_state_store_write_applied": False,
+            "durable_memory_write_authority": False,
+            "execution_authority": False,
+            "scheduling_authority": False,
+            "production_activation": False,
+        }
+
+    def step(self, decision="RUN"):
+        event_id = "cevt-" + "3" * 32
+        base = {
+            "schema": "kaliv-consciousness-core/exact-event-step-receipt/v1",
+            "required_event_id": event_id,
+            "profile_ref": "cognitive-profile:" + "4" * 64,
+            "profile_id": "cog-" + "5" * 32,
+            "profile_config_sha256": "6" * 64,
+            "self_state_ref": "self-state:" + "7" * 64,
+            "world_state_ref": "world-state:" + "8" * 64,
+            "workspace_ref": "workspace:" + "9" * 64,
+            "completed_cycles": 1,
+            "automatic_repeat": False,
+            "internal_thread_created": False,
+            "internal_timer_created": False,
+            "checkpoint_enabled": False,
+            "checkpoint_evaluation_count": 0,
+            "checkpoint_commit_count": 0,
+            "checkpoint_last_outcome": None,
+            "checkpoint_last_pressure": None,
+            "self_state_store_write_applied": False,
+            "durable_memory_write_authority": False,
+            "execution_authority": False,
+            "scheduling_authority": False,
+            "production_activation": False,
+        }
+        if decision == "WAIT":
+            base.update(
+                {
+                    "decision": "WAIT",
+                    "selected_event_ids": [],
+                    "required_event_selected": False,
+                    "thought_engine_invoked": False,
+                    "model_calls": 0,
+                    "transition_receipt_ref": None,
+                    "context_updated": False,
+                }
+            )
+        else:
+            base.update(
+                {
+                    "decision": "RUN",
+                    "selected_event_ids": [event_id],
+                    "required_event_selected": True,
+                    "thought_engine_invoked": True,
+                    "model_calls": 1,
+                    "transition_receipt_ref": "transition:" + "a" * 64,
+                    "context_updated": True,
+                }
+            )
+        return base
+
+    def clock(self):
+        values = iter([1.0, 1.01, 2.0, 2.02, 3.0, 3.03])
+        return lambda: next(values)
+
+    def test_live_probe_accepts_one_exact_run(self):
+        calls = []
+
+        def http_json(method, url, body, *, timeout):
+            calls.append((method, url, body, timeout))
+            if url.endswith("/healthz"):
+                return 200, {"ok": True}
+            if url.endswith("/user-turn"):
+                return 200, self.admission()
+            if url.endswith("/step-event"):
+                return 200, self.step("RUN")
+            raise AssertionError(url)
+
+        report = live_probe.run_live_cycle(
+            "http://127.0.0.1:8099",
+            root=ROOT,
+            http_json=http_json,
+            sleep_fn=lambda _seconds: None,
+            clock=self.clock(),
+            identity=self.identity(),
+            probe_nonce="b" * 32,
+        )
+        self.assertTrue(report["gate"]["passed"])
+        self.assertTrue(report["gate"]["live_cycle_proven"])
+        self.assertFalse(report["gate"]["full_lifecycle_qualified"])
+        self.assertFalse(report["gate"]["release_gate_satisfied"])
+        self.assertEqual(report["cycle"]["model_calls"], 1)
+        self.assertEqual(report["cycle"]["wait_count"], 0)
+        self.assertFalse(report["authority"]["production_activation"])
+        self.assertEqual(len(calls), 3)
+
+    def test_live_probe_allows_bounded_wait_then_run(self):
+        steps = iter([self.step("WAIT"), self.step("RUN")])
+        sleeps = []
+
+        def http_json(method, url, body, *, timeout):
+            if url.endswith("/healthz"):
+                return 200, {"ok": True}
+            if url.endswith("/user-turn"):
+                return 200, self.admission()
+            if url.endswith("/step-event"):
+                return 200, next(steps)
+            raise AssertionError(url)
+
+        report = live_probe.run_live_cycle(
+            "http://localhost:8099",
+            root=ROOT,
+            http_json=http_json,
+            sleep_fn=sleeps.append,
+            clock=self.clock(),
+            identity=self.identity(),
+            probe_nonce="c" * 32,
+        )
+        self.assertEqual(report["cycle"]["attempts"], 2)
+        self.assertEqual(report["cycle"]["wait_count"], 1)
+        self.assertEqual(sleeps, [live_probe.WAIT_DELAY_SECONDS])
+
+    def test_live_probe_rejects_authority_overclaim(self):
+        bad = self.step("RUN")
+        bad["production_activation"] = True
+
+        def http_json(method, url, body, *, timeout):
+            if url.endswith("/healthz"):
+                return 200, {"ok": True}
+            if url.endswith("/user-turn"):
+                return 200, self.admission()
+            return 200, bad
+
+        with self.assertRaisesRegex(
+            live_probe.LiveCycleProbeError,
+            "overclaimed production_activation",
+        ):
+            live_probe.run_live_cycle(
+                "http://127.0.0.1:8099",
+                root=ROOT,
+                http_json=http_json,
+                sleep_fn=lambda _seconds: None,
+                clock=self.clock(),
+                identity=self.identity(),
+                probe_nonce="d" * 32,
+            )
+
+    def test_live_probe_rejects_non_loopback_worker(self):
+        with self.assertRaisesRegex(
+            live_probe.LiveCycleProbeError,
+            "must be loopback",
+        ):
+            live_probe.run_live_cycle(
+                "http://192.168.1.50:8099",
+                root=ROOT,
+                identity=self.identity(),
+            )
+
 
 
 if __name__ == "__main__":
