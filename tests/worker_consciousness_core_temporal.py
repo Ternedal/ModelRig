@@ -4,7 +4,7 @@ import inspect,sys,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"worker"))
-from app.consciousness_core import ClockSample,TemporalContractError,TemporalState,anchor_from_clock,build_temporal_state,deadline_state,relate_anchors,temporal_experience_state
+from app.consciousness_core import ClockSample,TemporalContractError,TemporalState,anchor_from_clock,build_temporal_state,deadline_state,project_temporal_context,relate_anchors,temporal_experience_state
 SELF="self-"+"1"*32; PERSON="person-r0007"; EA="epoch-"+"a"*32; EB="epoch-"+"b"*32
 class TemporalTests(unittest.TestCase):
  def s(self,x,wall,mono,seq,epoch=EA,hour=10):
@@ -17,6 +17,14 @@ class TemporalTests(unittest.TestCase):
  def test_stale_rejected(self):
   a=self.s("1",1000,100,2); b=self.s("2",2000,200,2)
   with self.assertRaises(TemporalContractError): build_temporal_state(self_id=SELF,person_revision=PERSON,current_sample=b,session_started_anchor=anchor_from_clock(a,event_ref="start"),previous_sample=a)
+ def test_temporal_context_is_available_without_lived_continuity(self):
+  a=self.s("1",1000,100,1,hour=20); b=self.s("2",2500,1600,2,hour=20)
+  st=build_temporal_state(self_id=SELF,person_revision=PERSON,current_sample=b,session_started_anchor=anchor_from_clock(a,event_ref="start"),previous_sample=a)
+  ctx=project_temporal_context(st)
+  self.assertEqual(ctx.local_day_phase,"evening"); self.assertEqual(ctx.session_elapsed_ms,1500)
+  self.assertFalse(ctx.continuity_gap_detected); self.assertTrue(ctx.reference_only)
+  self.assertFalse(ctx.identity_authority); self.assertFalse(ctx.persistent_state_authority)
+  self.assertFalse(ctx.durable_memory_write_authority); self.assertFalse(ctx.execution_authority); self.assertFalse(ctx.scheduling_authority)
  def test_deadline_has_no_scheduler_authority(self):
   a=self.s("1",1000,100,1); b=self.s("2",61000,60100,2); d=deadline_state(now_anchor=anchor_from_clock(a,event_ref="now"),deadline_anchor=anchor_from_clock(b,event_ref="deadline")); self.assertEqual(d.orientation,"FUTURE"); self.assertFalse(d.scheduling_authority); self.assertFalse(d.execution_authority)
  def test_duration_salience_keeps_objective_time(self):
