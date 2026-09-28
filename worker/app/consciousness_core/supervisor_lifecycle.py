@@ -18,7 +18,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from functools import wraps
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -190,6 +190,10 @@ class ProductionSupervisorBridge:
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
         experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
         temporal_context: TemporalContextProjection | Mapping[str, Any] | None = None,
+        temporal_context_factory: Callable[
+            [ClockSample],
+            TemporalContextProjection | Mapping[str, Any] | None,
+        ] | None = None,
         present_context: PresentContextProjection | Mapping[str, Any] | None = None,
         retired_continuity_state: PostWakeContinuityState | None = None,
         retired_continuity_orientation: ContinuityOrientationState | None = None,
@@ -201,6 +205,18 @@ class ProductionSupervisorBridge:
         self._in_step = True
         try:
             clock = self._clock.sample()
+            if temporal_context is not None and temporal_context_factory is not None:
+                raise SupervisorLifecycleError(
+                    "temporal_context and temporal_context_factory are mutually exclusive"
+                )
+            resolved_temporal_context = temporal_context
+            if temporal_context_factory is not None:
+                if not callable(temporal_context_factory):
+                    raise SupervisorLifecycleError(
+                        "temporal_context_factory must be callable"
+                    )
+                resolved_temporal_context = temporal_context_factory(clock)
+
             plan = plan_supervisor_step(
                 state=self._state,
                 clock_sample=clock,
@@ -289,7 +305,7 @@ class ProductionSupervisorBridge:
                 embodiment_state_ref=embodiment_state_ref,
                 continuity_state=continuity_state,
                 experience_episode=experience_episode,
-                temporal_context=temporal_context,
+                temporal_context=resolved_temporal_context,
                 present_context=present_context,
                 retired_continuity_state=retired_continuity_state,
                 retired_continuity_orientation=retired_continuity_orientation,
