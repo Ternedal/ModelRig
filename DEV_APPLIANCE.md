@@ -35,7 +35,9 @@ SelfState-bootstrap. Den må kun bruge den allerede valgte og aktiverede
 **godkendte Person Revision**. Mangler den, eller matcher en eksisterende
 SelfState ikke den aktive Person Revision, stopper startup med fejl. Bootstrap
 opretter aldrig selv en Person, vælger aldrig en Person og aktiverer aldrig en
-Person Revision.
+Person Revision. Efter stacken er startet, kræver launcheren desuden at
+`GET /experimental/consciousness/status` rapporterer
+`ready_for_user_driven_cognition=true`; ellers stoppes startup som fejlet.
 
 `STOP_DEV_APPLIANCE.cmd` (eller `-Stop`) lukker dev-stakken og starter
 `KalivBootstrap` igen, så den signerede release kommer tilbage.
