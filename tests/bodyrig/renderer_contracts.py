@@ -60,10 +60,12 @@ packages = json.loads(
 check(
     packages
     == {
+        "com.unity.xr.arcore": "6.3.5",
+        "com.unity.xr.arfoundation": "6.3.5",
         "com.vrmc.gltf": "https://github.com/vrm-c/UniVRM.git?path=/Packages/UniGLTF#v0.131.2",
         "com.vrmc.vrm": "https://github.com/vrm-c/UniVRM.git?path=/Packages/VRM10#v0.131.2",
     },
-    "Unity renderer pins only the required VRM 1.0 UniVRM packages",
+    "Unity renderer pins exactly UniVRM plus the approved Unity 6000.3 AR packages",
 )
 
 schema = json.loads(
