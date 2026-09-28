@@ -252,7 +252,21 @@ while ((Get-Date) -lt $deadline -and -not ($backendOk -and $workerOk)) {
 if (-not ($backendOk -and $workerOk)) {
     throw "Stacken kom ikke op inden 90 s (backend=$backendOk worker=$workerOk). Se de to konsolvinduer."
 }
+
+# Prove that the flags resulted in a mounted live cognitive session rather than
+# merely an environment that says "enabled".
+try {
+    $consciousness = Invoke-RestMethod "http://127.0.0.1:$WorkerPort/experimental/consciousness/status" -TimeoutSec 4
+} catch {
+    throw "Consciousness status kunne ikke laeses efter startup: $($_.Exception.Message)"
+}
+if (-not $consciousness.ready_for_user_driven_cognition) {
+    $details = ($consciousness | ConvertTo-Json -Depth 6 -Compress)
+    throw "Consciousness Core er aktiveret i env, men live cognition er ikke klar: $details"
+}
+
 Write-Host ""
+Write-Host "  Consciousness Core: LIVE SESSION READY" -ForegroundColor Green
 Write-Host "  DEV-APPLIANCE OPPE -- version $version fra HEAD $($head.Substring(0,10))" -ForegroundColor Green
 Write-Host "  Telefonen naar backend paa http://<rig-LAN-ip>:$BackendPort (binding $BackendHost)." -ForegroundColor DarkGray
 Write-Host "  Ny kode: git pull, og koer scriptet igen. Tilbage til release: -Stop." -ForegroundColor DarkGray
