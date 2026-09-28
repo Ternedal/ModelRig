@@ -43,7 +43,7 @@ flowchart TB
         Agents["Agent 3 / agent runtimes<br/>policy + execution gates"]
         Intent["Semantic response + BodyCue intent"]
 
-        subgraph Core["Consciousness Core — default-off"]
+        subgraph Core["Consciousness Core — DEV ACTIVE / release default-off"]
             Admission["Vision admission<br/>loopback-only"]
             WE["WorldEvidence<br/>inferred · provenance-bound"]
             WS["WorldState + SelfState<br/>temporal context"]
@@ -109,6 +109,22 @@ contract without becoming its owner.
 | **BodyRig** | `.mrbody`, BodyPrint, Movement Identity, Motor State, body realization semantics, source/physical/human digital-twin evidence | assistant reasoning or Kaliv application UX |
 | **Kaliv clients** | interaction and presentation | redefining BodyRig/VoiceRig semantic authority |
 | **SkyPlayer-Engine** | reusable XR/media mechanics | Kaliv product policy, body identity or ModelRig reasoning |
+
+## Development activation state
+
+On the development appliance, the cognitive path is explicitly enabled for live
+integration testing:
+
+- Core runtime + supervisor;
+- authenticated normal-chat admission;
+- exact-event same-turn cognition;
+- bounded response guidance;
+- VisionRig inferred WorldEvidence admission;
+- the tracked dev CognitiveProfile in `deploy/consciousness-dev-profile.json`.
+
+This does not grant autonomous action authority. Agent 3/tool execution and the
+autonomous cognition scheduler remain separately gated. Signed-release defaults
+remain fail-closed and `production_activation` remains false.
 
 ## Cognitive continuity model
 

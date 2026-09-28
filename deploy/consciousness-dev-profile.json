@@ -1,0 +1,15 @@
+{
+  "schema": "kaliv-consciousness-core/cognitive-profile-config/v1",
+  "provider": "ollama",
+  "model": "qwen3:14b",
+  "reasoning_depth": 0.6,
+  "planning_capacity": 0.55,
+  "context_capacity_tokens": 32768,
+  "multimodal_capacity": 0.0,
+  "tool_reasoning": 0.5,
+  "uncertainty_calibration": 0.6,
+  "calibration_refs": [
+    "operator:initial-dev-profile-2026-09-28",
+    "model:local-qwen3-14b"
+  ]
+}

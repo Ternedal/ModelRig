@@ -25,7 +25,7 @@ runtime paths stay behind explicit opt-in gates.
 flowchart LR
     VIS["VisionRig\nvisual sensing · scene/depth\nstructured perception"] -.-> ADM["Vision admission\nloopback-only · default-off"]
     ADM -.-> WE["WorldEvidence\nepistemic_status=inferred"]
-    WE -.-> CC["Consciousness Core\nSelfState · WorldState · time · sleep/wake\nC31 lived continuity\nLANDED · DORMANT / default-off"]
+    WE -.-> CC["Consciousness Core\nSelfState · WorldState · time · sleep/wake\nC31 lived continuity\nLANDED · DEV ACTIVE / release default-off"]
 
     CC <--> TE["External ThoughtEngine\nreplaceable cognitive capability"]
     TE <--> LLM["Replaceable LLM\nlocal / explicit cloud"]
@@ -111,7 +111,7 @@ flowchart TB
 
             subgraph Cognition["Cognition + continuity"]
                 direction LR
-                CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>LANDED · DORMANT"]
+                CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>LANDED · DEV ACTIVE"]
                 M4["Memory 4<br/>autobiographical memory authority"]
                 A3["Agent 3<br/>planning + gated execution<br/>DORMANT"]
                 A4["Agent 4<br/>campaign / read architecture<br/>DORMANT"]
@@ -236,8 +236,12 @@ BodyRig owns body identity and realization, VoiceRig owns voice/timing, and
 VisionRig owns visual sensing/perception while ModelRig admits only bounded,
 non-authoritative inferred evidence into Consciousness Core.
 
-Consciousness Core is landed on `main` but remains dormant/default-off behind
-`KALIV_CONSCIOUSNESS_CORE_ENABLED=0` and its narrower feature gates.
+Consciousness Core is landed on `main`. The **development appliance explicitly
+opts in** to Core, supervisor, normal-chat admission, exact-event cognition,
+bounded response guidance and VisionRig admission. Source/release defaults remain
+fail-closed (`0`) and `production_activation` remains false. This is deliberate:
+the development rig can exercise the full cognitive path without silently promoting
+the same authority into a signed release.
 
 **Two cloud roads, and they are not the same thing.**
 

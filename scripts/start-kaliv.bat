@@ -51,6 +51,15 @@ echo   [2/3] starter worker med tools slaaet til (port 8099)...
 > "%TEMP%\kaliv_worker.cmd" echo @echo off
 >>"%TEMP%\kaliv_worker.cmd" echo cd /d "%REPO%"
 >>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_TOOLS_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_CORE_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_CHAT_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_GUIDANCE_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_STEP_ENABLED=1"
+>>"%TEMP%\kaliv_worker.cmd" echo set "KALIV_CONSCIOUSNESS_PROFILE_FILE=%REPO%\deploy\consciousness-dev-profile.json"
 >>"%TEMP%\kaliv_worker.cmd" echo set "PYTHONPATH=%REPO%\worker"
 >>"%TEMP%\kaliv_worker.cmd" echo python -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 start "Kaliv worker" cmd /k "%TEMP%\kaliv_worker.cmd"
@@ -66,6 +75,9 @@ echo   [3/3] starter server: %SRV%
 :: Generate a launch script that sets the bind host CLEANLY (no trailing space).
 > "%TEMP%\kaliv_server.cmd" echo @echo off
 >>"%TEMP%\kaliv_server.cmd" echo set "MODELRIG_HOST=0.0.0.0"
+>>"%TEMP%\kaliv_server.cmd" echo set "KALIV_CONSCIOUSNESS_CHAT_ENABLED=1"
+>>"%TEMP%\kaliv_server.cmd" echo set "KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED=1"
+>>"%TEMP%\kaliv_server.cmd" echo set "KALIV_CONSCIOUSNESS_REPLY_GUIDANCE_ENABLED=1"
 >>"%TEMP%\kaliv_server.cmd" echo "%SRV%"
 start "Kaliv server" cmd /k "%TEMP%\kaliv_server.cmd"
 goto health

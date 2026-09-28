@@ -21,7 +21,7 @@ Those are authored by `Ternedal/BodyRig` and consumed deliberately by ModelRig.
 
 ```mermaid
 flowchart LR
-    C["Consciousness Core\nupstream state/guidance\nLANDED · DORMANT / default-off"]
+    C["Consciousness Core\nupstream state/guidance\nLANDED · DEV ACTIVE / release default-off"]
     L["Replaceable LLM\nreasoning capability"]
     M["ModelRig\nreasoning + semantic intent"]
     A["ModelRig bodyrig compatibility layer\nvalidation · storage · orchestration adapters"]
