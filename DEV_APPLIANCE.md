@@ -39,6 +39,13 @@ Person Revision. Efter stacken er startet, kræver launcheren desuden at
 `GET /experimental/consciousness/status` rapporterer
 `ready_for_user_driven_cognition=true`; ellers stoppes startup som fejlet.
 
+Som standard starter dev-appliancen også et sibling-checkout af
+`Ternedal/VisionRig` på port 8110 med
+`VISIONRIG_MODELRIG_BRIDGE=1`. Startup bliver først erklæret klar, når
+VisionRig-health bekræfter både `PerceptionEvent/v3` og en aktiveret
+ModelRig-bro. Brug `-VisionRigDir <sti>` ved en anden checkout-placering eller
+`-SkipVisionRig` når perception bevidst skal køres separat.
+
 `STOP_DEV_APPLIANCE.cmd` (eller `-Stop`) lukker dev-stakken og starter
 `KalivBootstrap` igen, så den signerede release kommer tilbage.
 
