@@ -55,8 +55,9 @@ fun VoiceOverlayContent(
     onMainTap: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    barsColor: Color = Color(0xFF8A6A38),
+    barsColor: Color? = null,
 ) {
+    val liveSignal = barsColor ?: KalivTheme.colors.cognition
     Column(modifier.fillMaxSize().background(KalivTheme.colors.background)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 4.dp),
@@ -109,7 +110,7 @@ fun VoiceOverlayContent(
             Spacer(Modifier.height(41.dp))
             EqualizerBars(
                 barCount = 15,
-                color = barsColor,
+                color = liveSignal,
                 barHeight = 54.dp,
                 // Referencens eksakte boelgeform (bar-hoejder / 44px-max).
                 profile = listOf(0.20f, 0.34f, 0.55f, 0.77f, 1.00f, 0.73f, 0.45f, 0.30f, 0.59f, 0.91f, 0.68f, 0.41f, 0.25f, 0.50f, 0.32f),
