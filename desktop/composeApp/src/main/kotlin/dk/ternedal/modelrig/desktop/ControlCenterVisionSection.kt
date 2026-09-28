@@ -4,17 +4,23 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,6 +29,7 @@ import dk.ternedal.modelrig.desktop.net.ControlCenterVisionClient
 import dk.ternedal.modelrig.desktop.net.ControlCenterVisionSensor
 import dk.ternedal.modelrig.desktop.net.ControlCenterVisionSnapshot
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -31,11 +38,15 @@ internal fun DesktopControlCenterVisionSection(
     token: String,
     refreshGeneration: Int,
 ) {
+    var localGeneration by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf<ControlCenterVisionSnapshot?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var mutationError by remember { mutableStateOf<String?>(null) }
+    var mutatingSource by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(baseUrl, token, refreshGeneration) {
+    LaunchedEffect(baseUrl, token, refreshGeneration, localGeneration) {
         if (baseUrl.isBlank() || token.isBlank()) {
             snapshot = null
             error = null
@@ -67,7 +78,7 @@ internal fun DesktopControlCenterVisionSection(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            "Read-only drift · liveness · convergence · transport",
+            "Drift · liveness · convergence · transport · sensorstyring",
             color = KalivTheme.colors.TextMuted,
             fontSize = 10.sp,
         )
@@ -76,6 +87,16 @@ internal fun DesktopControlCenterVisionSection(
         }
         error?.let { message ->
             VisionReadCard {
+                Text(message, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
+            }
+        }
+        mutationError?.let { message ->
+            VisionReadCard {
+                Text(
+                    "Sensorændringen blev ikke gennemført",
+                    color = KalivTheme.colors.TextHigh,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 Text(message, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
             }
         }
@@ -111,6 +132,11 @@ internal fun DesktopControlCenterVisionSection(
                         fontSize = 10.sp,
                     )
                     Text(
+                        if (current.controlAvailable) "Sensorstyring er aktiveret." else "Sensorstyring er slået fra på serveren.",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 9.sp,
+                    )
+                    Text(
                         if (pressure == 0) "Ingen kendt packet-pressure." else "$pressure sensor(er) med packet-pressure.",
                         color = KalivTheme.colors.TextMuted,
                         fontSize = 10.sp,
@@ -144,28 +170,70 @@ internal fun DesktopControlCenterVisionSection(
                         )
                     }
                 }
-                current.sensors.forEach { VisionSensorReadCard(it) }
+                current.sensors.forEach { sensor ->
+                    VisionSensorReadCard(
+                        sensor = sensor,
+                        controlAvailable = current.controlAvailable,
+                        mutating = mutatingSource == sensor.sourceId,
+                        mutationBusy = mutatingSource != null,
+                        onEnabledChange = { enabled ->
+                            if (mutatingSource == null) {
+                                mutatingSource = sensor.sourceId
+                                mutationError = null
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            ControlCenterVisionClient(baseUrl, token)
+                                                .setEnabled(sensor.sourceId, enabled)
+                                        }
+                                    }
+                                    result.onSuccess {
+                                        localGeneration += 1
+                                    }.onFailure {
+                                        mutationError = "Sensorstyring kunne ikke bekræftes."
+                                    }
+                                    mutatingSource = null
+                                }
+                            }
+                        },
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun VisionSensorReadCard(sensor: ControlCenterVisionSensor) {
+private fun VisionSensorReadCard(
+    sensor: ControlCenterVisionSensor,
+    controlAvailable: Boolean,
+    mutating: Boolean,
+    mutationBusy: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
     VisionReadCard {
-        Row(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 sensor.title,
                 color = KalivTheme.colors.TextHigh,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                sensor.presence,
-                color = if (sensor.presence == "online") KalivTheme.colors.Signal else KalivTheme.colors.TextMuted,
-                fontSize = 10.sp,
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = sensor.desiredEnabled,
+                onCheckedChange = onEnabledChange,
+                enabled = controlAvailable && !mutationBusy && sensor.lifecycle == "active",
             )
         }
+        Text(
+            if (mutating) "Ændrer ønsket sensor-state…" else sensor.presence,
+            color = if (sensor.presence == "online") KalivTheme.colors.Signal else KalivTheme.colors.TextMuted,
+            fontSize = 10.sp,
+        )
         if (sensor.displayName != null) {
             Text(sensor.sourceId, color = KalivTheme.colors.TextMuted, fontSize = 9.sp)
         }
