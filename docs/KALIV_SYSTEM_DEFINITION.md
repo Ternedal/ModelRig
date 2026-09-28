@@ -39,12 +39,19 @@ flowchart TB
 
     subgraph MR["ModelRig — orchestration/control plane"]
         API["Backend + Worker<br/>pairing · auth · RAG · tools · jobs · scheduler"]
-        Memory["Persistent memory / Person context"]
-        Agents["Agent runtimes + policy gates"]
+        Memory["Memory 4<br/>durable autobiographical-memory authority"]
+        Agents["Agent 3 / agent runtimes<br/>policy + execution gates"]
         Intent["Semantic response + BodyCue intent"]
-        CC["Consciousness Core<br/>SelfState · WorldState · time · sleep/wake<br/>inner-monologue/cognitive-cycle architecture<br/><b>LANDED · DORMANT / default-off</b>"]
+
+        subgraph Core["Consciousness Core — default-off"]
+            Admission["Vision admission<br/>loopback-only"]
+            WE["WorldEvidence<br/>inferred · provenance-bound"]
+            WS["WorldState + SelfState<br/>temporal context"]
+            C31["C31 lived continuity<br/>wake · cycle · episode carry-forward · dormancy"]
+        end
     end
 
+    TE["External ThoughtEngine<br/>replaceable cognitive capability"]
     LLM["Replaceable LLM<br/>local Ollama or explicit cloud path"]
     Voice["VoiceRig<br/>voice/audio + utterance/viseme timing authority"]
     Vision["Ternedal/VisionRig<br/>visual sensing + structured perception<br/>scene/depth/recognition hints"]
@@ -61,12 +68,20 @@ flowchart TB
 
     API <--> Memory
     API <--> Agents
-    CC -. "cognitive guidance/state" .-> API
-    API <--> LLM
+    C31 -. "bounded cognitive guidance/state" .-> API
     API --> Intent
 
+    Vision -. "PerceptionEvent/v3" .-> Admission
+    Admission -.-> WE
+    WE --> WS
+    WS --> C31
+
+    C31 <--> TE
+    TE <--> LLM
+    C31 -. "experience / recall refs" .-> Memory
+    C31 -. "intentions only" .-> Agents
+
     API <--> Voice
-    Vision -. "bounded inferred WorldEvidence" .-> CC
     Intent --> Body
     Voice -->|"utterance/timing"| Body
 
@@ -75,7 +90,7 @@ flowchart TB
     Sky -->|"XR + media primitives"| KVR
 
     classDef dormant stroke-dasharray:6 4;
-    class CC dormant;
+    class Admission,WE,WS,C31,Agents dormant;
 ```
 
 The diagram deliberately separates **authority** from **implementation
@@ -101,26 +116,37 @@ The intended continuity loop is event-driven rather than model-identity-driven:
 
 ```mermaid
 flowchart LR
-    E["User turn / VisionRig evidence / other world evidence / clock / wake event"]
-    S["Persistent cognitive state<br/>SelfState + WorldState + temporal context"]
+    E["User turn / admitted VisionRig evidence / clock / wake event"]
+    P["C31-B present-context projection"]
+    S["SelfState + WorldState + temporal context"]
+    W["C31-D wake reorientation / dormancy gap"]
     C["Bounded cognitive cycle"]
-    M["Replaceable LLM"]
+    TE["External ThoughtEngine"]
+    X["C31-C continuity reducer"]
+    EP["C30 episode close / review evidence"]
+    CF["C31-E reference-only episode carry-forward"]
     O["Response guidance / plan / semantic intent"]
     R["Kaliv response"]
     B["BodyCue"]
     V["Voice utterance/timing"]
     MS["BodyRig Motor State"]
 
-    E --> S
-    S --> C
-    C <--> M
+    E --> W
+    W --> S
+    S --> P
+    P --> C
+    C <--> TE
     C --> O
+    C --> X
+    X --> S
+    EP -.-> CF
+    CF -.-> P
+
     O --> R
     O --> B
     R --> V
     B --> MS
     V --> MS
-    O -->|"state update/checkpoint"| S
 ```
 
 The LLM may change. The persisted state and authority boundaries do not silently
