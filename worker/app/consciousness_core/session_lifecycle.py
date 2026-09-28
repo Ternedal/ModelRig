@@ -105,6 +105,7 @@ from .temporal import (
     TemporalState,
     anchor_from_clock,
     build_temporal_state,
+    project_temporal_context,
 )
 from .response_guidance import (
     ResponseGuidanceEnvelope,
@@ -1119,6 +1120,7 @@ class ProductionCognitiveSession:
             session_started_anchor=self._session_started_anchor,
             previous_sample=self._previous_temporal_sample,
         )
+        temporal_context = project_temporal_context(temporal_state)
         present_context = (
             project_present_context(
                 self._last_lived_continuity,
@@ -1138,6 +1140,7 @@ class ProductionCognitiveSession:
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=active_continuity,
             experience_episode=self._experience_episode,
+            temporal_context=temporal_context,
             present_context=present_context,
             retired_continuity_state=retired_continuity_state,
             retired_continuity_orientation=retired_continuity_orientation,
