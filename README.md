@@ -238,10 +238,16 @@ non-authoritative inferred evidence into Consciousness Core.
 
 Consciousness Core is landed on `main`. The **development appliance explicitly
 opts in** to Core, supervisor, normal-chat admission, exact-event cognition,
-bounded response guidance and VisionRig admission. Source/release defaults remain
-fail-closed (`0`) and `production_activation` remains false. This is deliberate:
-the development rig can exercise the full cognitive path without silently promoting
-the same authority into a signed release.
+bounded response guidance and VisionRig admission. Before runtime startup it also
+ensures a durable SelfState exists for the already-selected approved Person
+Revision; it never creates or activates a Person and refuses identity/revision
+drift. Source/release defaults remain fail-closed (`0`) and
+`production_activation` remains false. This is deliberate: the development rig
+can exercise the full cognitive path without silently promoting the same authority
+into a signed release. A loopback-only
+`/experimental/consciousness/status` surface reports only activation/readiness
+booleans and aggregate cycle count, and the dev launcher requires it to confirm
+a mounted live session before declaring startup successful.
 
 **Two cloud roads, and they are not the same thing.**
 

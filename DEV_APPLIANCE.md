@@ -30,6 +30,15 @@ Det er **ikke** autonom action-authority: Agent 3, værktøjsudførelse og den
 autonome cognition scheduler bliver ikke slået til af denne profil. Release-
 defaults forbliver fail-closed, og `production_activation` forbliver `false`.
 
+Før worker/backend starter, kører dev-appliancen desuden en idempotent
+SelfState-bootstrap. Den må kun bruge den allerede valgte og aktiverede
+**godkendte Person Revision**. Mangler den, eller matcher en eksisterende
+SelfState ikke den aktive Person Revision, stopper startup med fejl. Bootstrap
+opretter aldrig selv en Person, vælger aldrig en Person og aktiverer aldrig en
+Person Revision. Efter stacken er startet, kræver launcheren desuden at
+`GET /experimental/consciousness/status` rapporterer
+`ready_for_user_driven_cognition=true`; ellers stoppes startup som fejlet.
+
 `STOP_DEV_APPLIANCE.cmd` (eller `-Stop`) lukker dev-stakken og starter
 `KalivBootstrap` igen, så den signerede release kommer tilbage.
 

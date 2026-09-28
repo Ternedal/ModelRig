@@ -188,6 +188,33 @@ $merged = @{}
 foreach ($k in $appEnv.Keys) { $merged[$k] = $appEnv[$k] }
 foreach ($k in $overrides.Keys) { $merged[$k] = $overrides[$k] }
 
+# --- Consciousness identity bootstrap ----------------------------------------
+# The dev cognitive path needs an already-approved selected Person Revision and
+# one durable SelfState. The Python authority layer performs the actual
+# validation/write. It NEVER creates/selects/activates a Person and refuses an
+# existing SelfState/Person mismatch.
+$previousEnv = @{}
+foreach ($k in $merged.Keys) {
+    $previousEnv[$k] = [Environment]::GetEnvironmentVariable($k, "Process")
+    [Environment]::SetEnvironmentVariable($k, [string]$merged[$k], "Process")
+}
+try {
+    Write-Host "  Validerer Consciousness SelfState / aktiv Person..." -ForegroundColor DarkGray
+    Push-Location $repoRoot
+    try {
+        & python -m app.consciousness_core.dev_bootstrap
+        if ($LASTEXITCODE -ne 0) {
+            throw "Consciousness Core kunne ikke bootstrappe en live identitet. Aktivér/vælg en godkendt Person Revision eller udfør eksplicit SelfState rebind."
+        }
+    } finally {
+        Pop-Location
+    }
+} finally {
+    foreach ($k in $merged.Keys) {
+        [Environment]::SetEnvironmentVariable($k, $previousEnv[$k], "Process")
+    }
+}
+
 $setLines = ($merged.Keys | Sort-Object | ForEach-Object { 'set "' + $_ + '=' + (Escape-CmdValue ([string]$merged[$_])) + '"' }) -join "`r`n"
 $escapedRepo = Escape-CmdValue $repoRoot
 
@@ -225,7 +252,21 @@ while ((Get-Date) -lt $deadline -and -not ($backendOk -and $workerOk)) {
 if (-not ($backendOk -and $workerOk)) {
     throw "Stacken kom ikke op inden 90 s (backend=$backendOk worker=$workerOk). Se de to konsolvinduer."
 }
+
+# Prove that the flags resulted in a mounted live cognitive session rather than
+# merely an environment that says "enabled".
+try {
+    $consciousness = Invoke-RestMethod "http://127.0.0.1:$WorkerPort/experimental/consciousness/status" -TimeoutSec 4
+} catch {
+    throw "Consciousness status kunne ikke laeses efter startup: $($_.Exception.Message)"
+}
+if (-not $consciousness.ready_for_user_driven_cognition) {
+    $details = ($consciousness | ConvertTo-Json -Depth 6 -Compress)
+    throw "Consciousness Core er aktiveret i env, men live cognition er ikke klar: $details"
+}
+
 Write-Host ""
+Write-Host "  Consciousness Core: LIVE SESSION READY" -ForegroundColor Green
 Write-Host "  DEV-APPLIANCE OPPE -- version $version fra HEAD $($head.Substring(0,10))" -ForegroundColor Green
 Write-Host "  Telefonen naar backend paa http://<rig-LAN-ip>:$BackendPort (binding $BackendHost)." -ForegroundColor DarkGray
 Write-Host "  Ny kode: git pull, og koer scriptet igen. Tilbage til release: -Stop." -ForegroundColor DarkGray
