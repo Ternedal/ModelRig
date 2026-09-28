@@ -77,8 +77,8 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
+| `KALIV_VISIONRIG_SENSOR_CONTROL` | `0` |
 | `KALIV_VISIONRIG_URL` | `http://127.0.0.1:8110` |
-| `KALIV_VISIONRIG_SENSOR_CONTROL` | `(unset)` |
 | `KALIV_VISION_MODEL` | `(unset)` |
 | `KALIV_WEB_RESEARCH_ENABLED` | `` |
 | `KALIV_WORKER_ALLOW_LAN` | `0` |
