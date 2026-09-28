@@ -263,6 +263,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_continuity_wake_attention.py`
 - `tests/worker_consciousness_core_continuous_loop_supervisor.py`
 - `tests/worker_consciousness_core_cycle.py`
+- `tests/worker_consciousness_core_dev_bootstrap.py`
 - `tests/worker_consciousness_core_dormancy_bridge.py`
 - `tests/worker_consciousness_core_embodiment.py`
 - `tests/worker_consciousness_core_embodiment_attention.py`
@@ -320,6 +321,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_sleep.py`
 - `tests/worker_consciousness_core_sleep_lifecycle.py`
 - `tests/worker_consciousness_core_sleep_self_state_binding.py`
+- `tests/worker_consciousness_core_status_api.py`
 - `tests/worker_consciousness_core_supervisor.py`
 - `tests/worker_consciousness_core_supervisor_lifecycle.py`
 - `tests/worker_consciousness_core_temporal.py`
