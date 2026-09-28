@@ -221,7 +221,7 @@ class ScheduledAutonomousCognitionBridge:
                     checkpoint_results=tuple(checkpoint_results),
                     checkpoint_error_stage="post",
                     checkpoint_error_type=type(exc).__name__,
-                    continuous_loop_plan=None,
+                    continuous_loop_plan=continuous_plan,
                 )
             if not isinstance(after, PolicyDrivenCheckpointResult):
                 return _OwnerLoopTickResult(
@@ -229,7 +229,7 @@ class ScheduledAutonomousCognitionBridge:
                     checkpoint_results=tuple(checkpoint_results),
                     checkpoint_error_stage="post",
                     checkpoint_error_type="InvalidCheckpointResult",
-                    continuous_loop_plan=None,
+                    continuous_loop_plan=continuous_plan,
                 )
             checkpoint_results.append(after)
 
