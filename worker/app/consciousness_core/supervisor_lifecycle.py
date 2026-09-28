@@ -42,7 +42,7 @@ from .supervisor import (
     plan_supervisor_step,
     queue_cognition_event,
 )
-from .temporal import ClockSample
+from .temporal import ClockSample, TemporalContextProjection
 
 
 SUPERVISOR_LIFECYCLE_FLAG = "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED"
@@ -189,6 +189,7 @@ class ProductionSupervisorBridge:
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
         experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
+        temporal_context: TemporalContextProjection | Mapping[str, Any] | None = None,
         present_context: PresentContextProjection | Mapping[str, Any] | None = None,
         retired_continuity_state: PostWakeContinuityState | None = None,
         retired_continuity_orientation: ContinuityOrientationState | None = None,
@@ -288,6 +289,7 @@ class ProductionSupervisorBridge:
                 embodiment_state_ref=embodiment_state_ref,
                 continuity_state=continuity_state,
                 experience_episode=experience_episode,
+                temporal_context=temporal_context,
                 present_context=present_context,
                 retired_continuity_state=retired_continuity_state,
                 retired_continuity_orientation=retired_continuity_orientation,
