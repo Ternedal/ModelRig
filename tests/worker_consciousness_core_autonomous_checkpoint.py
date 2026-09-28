@@ -26,6 +26,9 @@ from app.consciousness_core.autonomous_scheduler import (  # noqa: E402
     autonomous_checkpoint_enabled,
     production_autonomous_scheduler_bridge_factory,
 )
+from app.consciousness_core.continuous_loop_supervisor import (  # noqa: E402
+    CONTINUOUS_LOOP_FLAG,
+)
 from app.consciousness_core.autonomous_tick import (  # noqa: E402
     AUTONOMOUS_COGNITION_FLAG,
     AutonomousCognitionTickAdapter,
@@ -321,6 +324,7 @@ class AutonomousCheckpointTests(unittest.TestCase):
                 AUTONOMOUS_CHECKPOINT_FLAG,
                 AUTONOMOUS_SCHEDULER_FLAG,
                 AUTONOMOUS_COGNITION_FLAG,
+                CONTINUOUS_LOOP_FLAG,
             )
         }
 
@@ -510,6 +514,35 @@ class AutonomousCheckpointTests(unittest.TestCase):
                 "COMMITTED",
             )
             self.assertIsNone(second.last_checkpoint_error)
+            await bridge.aclose()
+
+        asyncio.run(scenario())
+
+    def test_c31_continuous_loop_plan_is_composed_on_real_scheduler_tick(self):
+        async def scenario():
+            os.environ[CONTINUOUS_LOOP_FLAG] = "1"
+            tick = StubTickAdapter(["IDLE"])
+            bridge = ScheduledAutonomousCognitionBridge(
+                adapter=tick,
+                owner_loop=asyncio.get_running_loop(),
+                timeout_s=1.0,
+            )
+            bridge.mark_installed()
+
+            await asyncio.to_thread(
+                bridge.on_scheduler_tick,
+                schedule_tick(),
+            )
+
+            status = bridge.status()
+            self.assertTrue(status.continuous_loop_enabled)
+            self.assertEqual(status.continuous_loop_plan_count, 1)
+            self.assertEqual(
+                status.last_continuous_loop_disposition,
+                "IDLE",
+            )
+            self.assertFalse(status.execution_authority)
+            self.assertFalse(status.production_activation)
             await bridge.aclose()
 
         asyncio.run(scenario())
