@@ -11,7 +11,7 @@ Den valgte persons krop (Person Revision → `body`-kandidat → `.mrbody`) stå
 brugerens rum på telefonen, bevæger sig og taler i takt med Kaliv, og skifter
 når personen skifter — uden at brugeren forlader Kaliv-appen.
 
-## 2. Hvad der findes (main, 2/9)
+## 2. Hvad der findes (main, afstemt 3/9)
 
 | Lag | Status |
 |---|---|
@@ -19,8 +19,8 @@ når personen skifter — uden at brugeren forlader Kaliv-appen.
 | Runtime-tilstand (`BodyRigRuntime`), face-/motion-mixere, `render_frame` v0.1-wire | landet |
 | Unity/VRM-renderer (blink, mund, visemer, emotion, gaze, breath, gesture-router) | landet (#830) |
 | Person Profile-registry med atomisk aktivering; `active_bindings().body` | landet (#752) |
-| **Live frame-feed fra Kalivs faktiske tur og tale** | **mangler** — Unity afspiller en fixture |
-| **Aktiver over HTTP til telefonen** | **mangler** — handoff er fil-sti på riggen |
+| **Live frame-feed fra Kalivs faktiske tur og tale** | **landet (#843)** — `/body/frames` SSE fra `BodyRigRuntime`, drevet af chat-faser og TTS |
+| **Aktiver over HTTP til telefonen** | **landet i L1 (#842–#844)** — aktive assets + frames forwardes via backend; Unity-netværkskilden verificeres fortsat fysisk |
 | **Unity som library i Kaliv Android** | **mangler** — projektet er en Windows-batch-build |
 | **ARFoundation** | **mangler** |
 
@@ -85,10 +85,10 @@ taler med Kaliv, skifter ved personskift.
 
 ## 7. Næste skridt
 
-1. L1: frame-feed + aktiver-endpoints i workeren, Go-forwarding, kontrakttests.
-2. L2: `BodyRigNetworkSource` i Unity-projektet + UaaL-eksportindstillinger.
-3. L3: `Krop`-skærm og Gradle-flag i Kaliv Android.
-4. L4: Android-build i den fysiske proof; visuel accept.
+1. **L1: færdig på main.** Frame-feed, aktive assets/endpoints, Go-forwarding og kontrakttests er landet.
+2. **L2:** verificér `BodyRigFrameSource` fysisk i Unity og færdiggør den valgte Android-host; UaaL er nu V2-sporet, ikke MVP-krav.
+3. **L3:** Kaliv åbner den valgte Body-host med rig-URL + token; behold host-valget adskilt fra L1/L2-kontrakten.
+4. **L4:** Android-build i den fysiske proof; visuel accept af live krop, tale og personskift.
 
 ## 8. Status 3/9 — afstemt med `UNITY_RENDERER_ROADMAP.md`
 
