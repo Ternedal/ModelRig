@@ -28,6 +28,7 @@ from app.consciousness_core import (  # noqa: E402
     RuntimeWorldState,
     SelfAffect,
     ThoughtEngineContractError,
+    TemporalContextProjection,
     WorkspaceCandidate,
     WorldObservation,
     build_workspace,
@@ -279,6 +280,54 @@ class CognitiveCycleTests(unittest.TestCase):
             result.request.cognitive_profile_ref,
             cognitive_profile_ref(self.profile()),
         )
+
+    def test_request_id_is_bound_to_temporal_anchor(self) -> None:
+        state, world, workspace, personality = self.context()
+
+        def temporal(anchor_marker: str) -> TemporalContextProjection:
+            return TemporalContextProjection(
+                schema="kaliv-consciousness-core/temporal-context/v1",
+                temporal_anchor_ref="temporal-anchor:tanch-" + anchor_marker * 32,
+                local_day_phase="morning",
+                session_elapsed_ms=1000,
+                continuity_gap_detected=False,
+                continuity_gap_ms=None,
+                clock_anomaly="none",
+                temporal_uncertainty=0.0,
+                reference_only=True,
+                identity_authority=False,
+                persistent_state_authority=False,
+                durable_memory_write_authority=False,
+                execution_authority=False,
+                scheduling_authority=False,
+                production_activation=False,
+            )
+
+        first = run(
+            CognitiveCycleCoordinator(
+                ConsciousnessCoreRuntime(ContextAwareEngine())
+            ).run(
+                state=state,
+                world=world,
+                workspace=workspace,
+                personality_snapshot=personality,
+                profile=self.profile(),
+                temporal_context=temporal("1"),
+            )
+        )
+        second = run(
+            CognitiveCycleCoordinator(
+                ConsciousnessCoreRuntime(ContextAwareEngine())
+            ).run(
+                state=state,
+                world=world,
+                workspace=workspace,
+                personality_snapshot=personality,
+                profile=self.profile(),
+                temporal_context=temporal("2"),
+            )
+        )
+        self.assertNotEqual(first.request.request_id, second.request.request_id)
 
     def test_cycle_receipt_proves_no_model_state_or_execution_authority(self) -> None:
         state, world, workspace, personality = self.context()
