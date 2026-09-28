@@ -4,9 +4,11 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.URI
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 
 @Serializable
@@ -20,6 +22,7 @@ private data class VisionWireSnapshot(
     val available: Boolean,
     val reason: String? = null,
     @SerialName("sensor_state_revision") val sensorStateRevision: Long? = null,
+    @SerialName("control_available") val controlAvailable: Boolean = false,
     val consistency: String = "unknown",
     val total: Int = 0,
     @SerialName("sensors_returned") val sensorsReturned: Int = 0,
@@ -28,6 +31,13 @@ private data class VisionWireSnapshot(
     @SerialName("attention_truncated") val attentionTruncated: Boolean = false,
     val sensors: List<VisionWireSensor>,
     @SerialName("production_activation") val productionActivation: Boolean,
+)
+
+@Serializable
+private data class VisionEnabledWireReceipt(
+    val schema: String,
+    @SerialName("source_id") val sourceId: String,
+    val enabled: Boolean,
 )
 
 @Serializable
@@ -62,6 +72,7 @@ private data class VisionWireSensor(
 class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
     companion object {
         const val SCHEMA = "kaliv-control-center-vision/v1"
+        const val ENABLED_SCHEMA = "kaliv-control-center-vision-enabled/v1"
         private val PRESENCE = setOf("online", "stale", "offline", "unknown")
         private val CONVERGENCE = setOf("converged", "pending", "unknown")
         private val LIFECYCLE = setOf("active", "retired")
@@ -87,6 +98,28 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
 
     internal fun parseSnapshot(body: String): ControlCenterVisionSnapshot =
         validateSnapshot(decode<VisionWireSnapshot>(body, "VisionRig status"))
+
+    fun setEnabled(sourceId: String, enabled: Boolean): ControlCenterVisionEnabledReceipt {
+        val normalized = sourceId.trim()
+        if (normalized.isEmpty() || normalized.length > 128) {
+            throw ControlCenterException("Invalid VisionRig source id")
+        }
+        val wire = decode<VisionEnabledWireReceipt>(
+            patch(
+                "/api/v1/control-center/vision/sensors/${seg(normalized)}/enabled",
+                """{"enabled":$enabled}""",
+                "VisionRig sensor control",
+            ),
+            "VisionRig sensor control",
+        )
+        if (wire.schema != ENABLED_SCHEMA) {
+            throw ControlCenterException("Invalid VisionRig sensor control receipt schema")
+        }
+        if (wire.sourceId != normalized || wire.enabled != enabled) {
+            throw ControlCenterException("VisionRig sensor control receipt does not match request")
+        }
+        return ControlCenterVisionEnabledReceipt(wire.sourceId, wire.enabled)
+    }
 
     private fun validateSnapshot(wire: VisionWireSnapshot): ControlCenterVisionSnapshot {
         if (wire.schema != SCHEMA) fail("unsupported schema ${wire.schema}")
@@ -179,6 +212,7 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
             available = wire.available,
             reason = wire.reason?.trim()?.takeIf { it.isNotEmpty() },
             sensorStateRevision = wire.sensorStateRevision,
+            controlAvailable = wire.controlAvailable,
             consistency = wire.consistency,
             total = wire.total,
             sensorsReturned = wire.sensorsReturned,
@@ -204,6 +238,20 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
             .build()
         return execute(request, label)
     }
+
+    private fun patch(path: String, body: String, label: String): String {
+        val request = HttpRequest.newBuilder(URI.create(base + path))
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $bearer")
+            .header("Content-Type", "application/json")
+            .timeout(Duration.ofSeconds(10))
+            .method("PATCH", HttpRequest.BodyPublishers.ofString(body))
+            .build()
+        return execute(request, label)
+    }
+
+    private fun seg(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
 
     private fun execute(request: HttpRequest, label: String): String {
         val response = try {
@@ -231,6 +279,7 @@ data class ControlCenterVisionSnapshot(
     val available: Boolean,
     val reason: String?,
     val sensorStateRevision: Long?,
+    val controlAvailable: Boolean,
     val consistency: String,
     val total: Int,
     val sensorsReturned: Int,
@@ -269,3 +318,10 @@ data class ControlCenterVisionSensor(
 ) {
     val title: String get() = displayName ?: sourceId
 }
+
+
+data class ControlCenterVisionEnabledReceipt(
+    val sourceId: String,
+    val enabled: Boolean,
+)
+
