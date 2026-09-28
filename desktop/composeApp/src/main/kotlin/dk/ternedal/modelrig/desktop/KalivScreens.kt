@@ -216,7 +216,7 @@ internal fun MetaBar(fraction: Float, modifier: Modifier = Modifier, height: Int
                 .fillMaxHeight()
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .clip(RoundedCornerShape(999.dp))
-                .background(Brush.horizontalGradient(listOf(KalivTheme.colors.Signal, KalivTheme.colors.Highlight))),
+                .background(Brush.horizontalGradient(listOf(KalivTheme.colors.Cognition, KalivTheme.colors.CognitionLight))),
         )
     }
 }
@@ -276,10 +276,10 @@ fun KalivTitleBar(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(7.dp).clip(CircleShape)
-                        .background(KalivTheme.colors.Warning),
+                        .background(KalivTheme.colors.Cognition),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text(live, fontSize = 11.sp, color = Color(0xFFD09A55))
+                Text(live, fontSize = 11.sp, color = KalivTheme.colors.CognitionLight)
             }
         }
         Spacer(Modifier.weight(1f))
