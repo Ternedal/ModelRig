@@ -14,7 +14,10 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 
-from app.control_center_api import build_control_center_router  # noqa: E402
+from app.control_center_api import (  # noqa: E402
+    _visionrig_health_version,
+    build_control_center_router,
+)
 from app.control_center_privacy import build_control_center_privacy  # noqa: E402
 
 passed = failed = 0
@@ -29,6 +32,19 @@ def check(condition, message):
     else:
         failed += 1
         print(f"  FAIL: {message}")
+
+
+for schema, expected in (
+    ("visionrig/health/v4", 4),
+    ("visionrig/health/v61", 61),
+    ("visionrig/health/v3", None),
+    ("visionrig/health/latest", None),
+    (None, None),
+):
+    check(
+        _visionrig_health_version(schema) == expected,
+        f"VisionRig health contract {schema!r} maps to {expected!r}",
+    )
 
 
 async def healthy_health():
