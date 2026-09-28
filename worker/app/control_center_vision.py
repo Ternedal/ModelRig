@@ -15,9 +15,12 @@ from urllib.parse import urlparse
 import httpx
 
 SCHEMA = "kaliv-control-center-vision/v1"
-BOOTSTRAP_SCHEMA = "visionrig/sensor-bootstrap-snapshot/v6"
-CATALOG_SCHEMA = "visionrig/sensor-catalog/v8"
-FLEET_SCHEMA = "visionrig/sensor-fleet-summary/v6"
+BOOTSTRAP_SCHEMA = "visionrig/sensor-bootstrap-snapshot/v31"
+CATALOG_SCHEMA = "visionrig/sensor-catalog/v15"
+FLEET_SCHEMA = "visionrig/sensor-fleet-summary/v28"
+BOOTSTRAP_SCHEMA_MIN_VERSION = 6
+CATALOG_SCHEMA_MIN_VERSION = 8
+FLEET_SCHEMA_MIN_VERSION = 6
 CONSISTENCY_SCHEMA = "visionrig/sensor-change-consistency/v1"
 MAX_SENSORS = 128
 MAX_CAPABILITIES_PER_SENSOR = 32
@@ -50,6 +53,25 @@ def _visionrig_base_url() -> str:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _require_compatible_schema(
+    value: Any,
+    *,
+    family: str,
+    min_version: int,
+) -> int:
+    text = str(value or "").strip()
+    prefix = family + "/v"
+    if not text.startswith(prefix):
+        raise ValueError(f"unsupported {family} schema")
+    suffix = text[len(prefix):]
+    if not suffix.isdigit():
+        raise ValueError(f"unsupported {family} schema")
+    version = int(suffix)
+    if version < min_version:
+        raise ValueError(f"unsupported {family} schema")
+    return version
 
 
 def _bounded_str(value: Any, *, max_length: int = 256) -> str | None:
@@ -188,16 +210,25 @@ async def build_control_center_vision() -> dict[str, Any]:
         payload = response.json()
         if not isinstance(payload, Mapping):
             raise TypeError("bootstrap response is not an object")
-        if payload.get("schema") != BOOTSTRAP_SCHEMA:
-            raise ValueError("unsupported VisionRig bootstrap schema")
+        bootstrap_version = _require_compatible_schema(
+            payload.get("schema"),
+            family="visionrig/sensor-bootstrap-snapshot",
+            min_version=BOOTSTRAP_SCHEMA_MIN_VERSION,
+        )
 
         catalog = _mapping(payload.get("catalog"))
         fleet = _mapping(payload.get("fleet"))
         consistency = _mapping(payload.get("change_consistency"))
-        if catalog.get("schema") != CATALOG_SCHEMA:
-            raise ValueError("unsupported VisionRig catalog schema")
-        if fleet.get("schema") != FLEET_SCHEMA:
-            raise ValueError("unsupported VisionRig fleet schema")
+        catalog_version = _require_compatible_schema(
+            catalog.get("schema"),
+            family="visionrig/sensor-catalog",
+            min_version=CATALOG_SCHEMA_MIN_VERSION,
+        )
+        fleet_version = _require_compatible_schema(
+            fleet.get("schema"),
+            family="visionrig/sensor-fleet-summary",
+            min_version=FLEET_SCHEMA_MIN_VERSION,
+        )
         if consistency.get("schema") != CONSISTENCY_SCHEMA:
             raise ValueError("unsupported VisionRig consistency schema")
 
@@ -224,9 +255,81 @@ async def build_control_center_vision() -> dict[str, Any]:
         if consistency_status not in {"synced", "registry_ahead", "journal_ahead"}:
             consistency_status = "unknown"
 
+        readiness_raw = _mapping(fleet.get("producer_readiness"))
+        transition_raw = _mapping(fleet.get("producer_readiness_transition"))
+
+        def ratio(name: str) -> float | None:
+            value = readiness_raw.get(name)
+            if not isinstance(value, (int, float)):
+                return None
+            number = float(value)
+            if not 0.0 <= number <= 1.0:
+                return None
+            return number
+
+        producer_readiness = {
+            "runtime_sources": int(readiness_raw.get("runtime_sources") or 0),
+            "heartbeat_v6_sources": int(
+                readiness_raw.get("heartbeat_v6_sources") or 0
+            ),
+            "heartbeat_upgrade_required": int(
+                readiness_raw.get("heartbeat_upgrade_required") or 0
+            ),
+            "heartbeat_v6_ratio": ratio("heartbeat_v6_ratio"),
+            "packet_measurement_complete_sources": int(
+                readiness_raw.get("packet_measurement_complete_sources") or 0
+            ),
+            "packet_measurement_gap_sources": int(
+                readiness_raw.get("packet_measurement_gap_sources") or 0
+            ),
+            "packet_measurement_complete_ratio": ratio(
+                "packet_measurement_complete_ratio"
+            ),
+        }
+        producer_readiness_transition = {
+            "changed_utc": _bounded_str(transition_raw.get("changed_utc")),
+            "heartbeat_v6_sources_delta": (
+                int(transition_raw["heartbeat_v6_sources_delta"])
+                if isinstance(
+                    transition_raw.get("heartbeat_v6_sources_delta"),
+                    int,
+                )
+                else None
+            ),
+            "heartbeat_v6_ratio_delta": (
+                float(transition_raw["heartbeat_v6_ratio_delta"])
+                if isinstance(
+                    transition_raw.get("heartbeat_v6_ratio_delta"),
+                    (int, float),
+                )
+                else None
+            ),
+            "packet_measurement_complete_sources_delta": (
+                int(transition_raw["packet_measurement_complete_sources_delta"])
+                if isinstance(
+                    transition_raw.get("packet_measurement_complete_sources_delta"),
+                    int,
+                )
+                else None
+            ),
+            "packet_measurement_complete_ratio_delta": (
+                float(transition_raw["packet_measurement_complete_ratio_delta"])
+                if isinstance(
+                    transition_raw.get("packet_measurement_complete_ratio_delta"),
+                    (int, float),
+                )
+                else None
+            ),
+        }
+
         return {
             "schema": SCHEMA,
             "available": True,
+            "visionrig_schema_versions": {
+                "bootstrap": bootstrap_version,
+                "catalog": catalog_version,
+                "fleet": fleet_version,
+            },
             "sensor_state_revision": int(payload.get("sensor_state_revision") or 0),
             "consistency": consistency_status,
             "total": int(fleet.get("total") or catalog_total),
@@ -250,6 +353,8 @@ async def build_control_center_vision() -> dict[str, Any]:
             ),
             "attention_total": int(fleet.get("attention_total") or 0),
             "attention_truncated": fleet.get("attention_truncated") is True,
+            "producer_readiness": producer_readiness,
+            "producer_readiness_transition": producer_readiness_transition,
             "sensors": sensors,
             "production_activation": False,
         }
@@ -269,6 +374,23 @@ async def build_control_center_vision() -> dict[str, Any]:
             "capability_refresh": {},
             "attention_total": 0,
             "attention_truncated": False,
+            "visionrig_schema_versions": None,
+            "producer_readiness": {
+                "runtime_sources": 0,
+                "heartbeat_v6_sources": 0,
+                "heartbeat_upgrade_required": 0,
+                "heartbeat_v6_ratio": None,
+                "packet_measurement_complete_sources": 0,
+                "packet_measurement_gap_sources": 0,
+                "packet_measurement_complete_ratio": None,
+            },
+            "producer_readiness_transition": {
+                "changed_utc": None,
+                "heartbeat_v6_sources_delta": None,
+                "heartbeat_v6_ratio_delta": None,
+                "packet_measurement_complete_sources_delta": None,
+                "packet_measurement_complete_ratio_delta": None,
+            },
             "sensors": [],
             "production_activation": False,
         }
