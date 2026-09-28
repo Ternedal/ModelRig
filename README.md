@@ -238,7 +238,12 @@ non-authoritative inferred evidence into Consciousness Core.
 
 Consciousness Core is landed on `main`. The **development appliance explicitly
 opts in** to Core, supervisor, normal-chat admission, exact-event cognition,
-bounded response guidance and VisionRig admission. Before runtime startup it also
+bounded response guidance and VisionRig admission. The dev channel also enables the
+bounded lived-continuity path: sleep/wake, liveness evidence, policy checkpoints
+and scheduler-driven autonomous cognition for admitted non-user events. The
+default policy is capped at four automatic cognitive steps per five-minute
+window with a 30-second cooldown; user turns, operator signals and tool results
+cannot autonomously trigger it. Before runtime startup it also
 ensures a durable SelfState exists for the already-selected approved Person
 Revision; it never creates or activates a Person and refuses identity/revision
 drift. Source/release defaults remain fail-closed (`0`) and
