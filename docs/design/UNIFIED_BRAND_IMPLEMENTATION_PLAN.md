@@ -22,25 +22,25 @@ Implement the unified Ember / Signal identity across Android, Windows, Quest and
 - [x] Extend the Kotlin token generator.
 - [x] Regenerate Android and desktop token sources.
 - [x] Expose explicit cognition roles in Android and desktop themes.
-- [ ] Add brand-state contract test.
+- [x] Add brand-state contract test.
 
 ## Phase 2 — Android
-- [ ] Voice/listening activity uses Signal blue.
-- [ ] Runtime/loading indicators use Signal blue.
-- [ ] Semantic health uses semantic colors, not brand gold.
-- [ ] Keep primary user actions Ember/gold.
+- [x] Voice/listening activity uses Signal blue.
+- [x] Runtime/loading indicators use Signal blue.
+- [x] Semantic health uses semantic colors, not brand gold.
+- [x] Keep primary user actions Ember/gold.
 - [ ] Verify no local hard-coded Signal literals.
 
 ## Phase 3 — Windows / ModelRig desktop
-- [ ] Live model/runtime/performance visualizations use Signal.
+- [x] Live model/runtime/performance visualizations use Signal.
 - [ ] Keep approvals/destructive actions semantic and identity controls Ember.
 - [ ] Active technical telemetry uses Signal consistently.
 - [ ] Remove remaining hand-authored brand-state colors where touched.
 
 ## Phase 4 — Quest / VR
-- [ ] Replace local palette ownership with named Ember/Signal roles.
-- [ ] Apply Signal to live model/listening/perception state.
-- [ ] Keep primary interaction actions Ember.
+- [x] Replace local palette ownership with named Ember/Signal roles.
+- [x] Apply Signal to live model/listening/perception state.
+- [x] Keep primary interaction actions Ember.
 - [ ] Preserve world-space contrast and readable target sizes.
 
 ## Phase 5 — BodyRig
@@ -51,7 +51,7 @@ Implement the unified Ember / Signal identity across Android, Windows, Quest and
 - [ ] Semantic colors = health only.
 
 ## Phase 6 — Gates and documentation
-- [ ] CI gate verifies required Signal tokens and bindings.
+- [x] CI gate verifies required Signal tokens and bindings.
 - [ ] CI gate rejects duplicated hard-coded canonical Signal hex values.
 - [ ] Update design handoff/readme.
 - [ ] Run available compile/workflow tests.
