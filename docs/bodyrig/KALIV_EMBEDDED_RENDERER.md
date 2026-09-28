@@ -20,7 +20,7 @@ når personen skifter — uden at brugeren forlader Kaliv-appen.
 | Unity/VRM-renderer (blink, mund, visemer, emotion, gaze, breath, gesture-router) | landet (#830) |
 | Person Profile-registry med atomisk aktivering; `active_bindings().body` | landet (#752) |
 | **Live frame-feed fra Kalivs faktiske tur og tale** | **landet (#843)** — `/body/frames` SSE fra `BodyRigRuntime`, drevet af chat-faser og TTS |
-| **Aktiver over HTTP til telefonen** | **landet i L1 (#842–#844)** — aktive assets + frames forwardes via backend; Unity-netværkskilden verificeres fortsat fysisk |
+| **Server assets + live frames over HTTP** | **landet i L1 (#842–#844)** — backend forwarder aktive assets og `/body/frames`; Unity-klientens `BodyRigFrameSource` er ikke på `main` |
 | **Unity som library i Kaliv Android** | **mangler** — projektet er en Windows-batch-build |
 | **ARFoundation** | **mangler** |
 
@@ -86,7 +86,7 @@ taler med Kaliv, skifter ved personskift.
 ## 7. Næste skridt
 
 1. **L1: færdig på main.** Frame-feed, aktive assets/endpoints, Go-forwarding og kontrakttests er landet.
-2. **L2:** verificér `BodyRigFrameSource` fysisk i Unity og færdiggør den valgte Android-host; UaaL er nu V2-sporet, ikke MVP-krav.
+2. **L2:** re-land/restack `BodyRigFrameSource` fra det lukkede, umergede #846-spor, verificér den fysisk i Unity og færdiggør den valgte Android-host; UaaL er V2-sporet, ikke MVP-krav.
 3. **L3:** Kaliv åbner den valgte Body-host med rig-URL + token; behold host-valget adskilt fra L1/L2-kontrakten.
 4. **L4:** Android-build i den fysiske proof; visuel accept af live krop, tale og personskift.
 
