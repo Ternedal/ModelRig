@@ -51,6 +51,7 @@ from .consciousness_core.episode_review_lifecycle import (
 )
 from .consciousness_core.user_turn_admission import mount_consciousness_user_turn
 from .consciousness_core.visionrig_admission import mount_consciousness_visionrig
+from .consciousness_core.status_api import build_consciousness_status_router
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
@@ -64,6 +65,10 @@ fastapi_app.include_router(build_schedule_router())
 # even when the wider worker has deliberately been made LAN-reachable. It does no
 # collection until called and exposes no permission or activation write surface.
 fastapi_app.include_router(build_control_center_router())
+
+# Privacy-safe, loopback-only Consciousness runtime/readiness status. It grants
+# no activation surface and exposes no identity, prompt, event or memory refs.
+fastapi_app.include_router(build_consciousness_status_router())
 
 # Person Profile registry (#752). Route construction opens nothing; the
 # store is read on the first call. The route set is the contract: the only
