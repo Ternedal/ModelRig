@@ -88,8 +88,11 @@ function Stop-DevProcesses {
     if (Test-Path -LiteralPath $stateFile) {
         try {
             $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
-            foreach ($id in @($state.backend_pid, $state.worker_pid, $state.visionrig_pid)) {
-                if ($id) { Stop-Process -Id ([int]$id) -Force -ErrorAction SilentlyContinue }
+            foreach ($name in "backend_pid", "worker_pid", "visionrig_pid") {
+                $property = $state.PSObject.Properties[$name]
+                if ($null -ne $property -and $property.Value) {
+                    Stop-Process -Id ([int]$property.Value) -Force -ErrorAction SilentlyContinue
+                }
             }
         } catch { }
         Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
