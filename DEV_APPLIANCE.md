@@ -26,9 +26,19 @@ Dev-appliancen aktiverer nu eksplicit den bruger-drevne cognitive kæde:
 - VisionRig -> inferred WorldEvidence admission;
 - den operator-kalibrerede dev-profil i `deploy/consciousness-dev-profile.json`.
 
-Det er **ikke** autonom action-authority: Agent 3, værktøjsudførelse og den
-autonome cognition scheduler bliver ikke slået til af denne profil. Release-
-defaults forbliver fail-closed, og `production_activation` forbliver `false`.
+Dev-appliancen aktiverer også **lived continuity**: sleep/wake-boundary,
+unplanned-restart liveness, policy-baseret SelfState-checkpoint samt den
+eksisterende scheduler-bro til bounded autonomous cognition. Den autonome
+trigger-policy tillader højst 4 automatiske cognitive trin pr. 5 minutter med
+30 sekunders cooldown og afviser `user_turn`, `operator_signal` og
+`tool_result` som autonome triggers.
+
+Det er **ikke** autonom action-authority: Agent 3 bliver ikke slået til af denne
+profil, og cognition-kæden får ingen execution authority. Den almindelige
+ModelRig scheduler er aktiv i dev for at levere cadence; eventuelle allerede
+godkendte schedules følger fortsat deres eksisterende ToolGate-regler.
+Release-defaults forbliver fail-closed, og `production_activation` forbliver
+`false`.
 
 Før worker/backend starter, kører dev-appliancen desuden en idempotent
 SelfState-bootstrap. Den må kun bruge den allerede valgte og aktiverede

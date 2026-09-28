@@ -23,8 +23,13 @@ class ConsciousnessRuntimeStatusTests(unittest.TestCase):
             "kaliv-consciousness-core/runtime-status/v1",
         )
         self.assertFalse(body["enabled"]["core"])
+        self.assertFalse(body["enabled"]["continuous_loop"])
+        self.assertFalse(body["enabled"]["autonomous_cognition"])
         self.assertFalse(body["mounted"]["live_session"])
+        self.assertFalse(body["mounted"]["autonomous_scheduler"])
         self.assertFalse(body["ready_for_user_driven_cognition"])
+        self.assertFalse(body["ready_for_lived_continuity"])
+        self.assertIsNone(body["autonomous_scheduler_status"])
         self.assertFalse(body["production_activation"])
 
         encoded = str(body).lower()

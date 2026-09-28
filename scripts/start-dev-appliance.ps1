@@ -148,7 +148,7 @@ Write-Host "  HEAD:      $head" -ForegroundColor DarkGray
 Write-Host "  tree:      $(if ($dirty.Count -eq 0) { 'rent' } else { "$($dirty.Count) aendrede filer (dev-mode tillader det)" })" -ForegroundColor DarkGray
 Write-Host "  appliance: $ApplianceDir ($($appEnv.Count) env-noegler, kommentarer strippet)" -ForegroundColor DarkGray
 Write-Host "  binding:   ${BackendHost}:$BackendPort / worker 127.0.0.1:$WorkerPort" -ForegroundColor DarkGray
-Write-Host "  cognition: Consciousness Core + same-turn guidance + VisionRig ENABLED (dev only)" -ForegroundColor Green
+Write-Host "  cognition: Core + lived continuity + bounded autonomous cognition + VisionRig ENABLED (dev only)" -ForegroundColor Green
 Write-Host ""
 Write-Host "  IKKE BEVIST: dette er udviklingskanalen. production_activation" -ForegroundColor Yellow
 Write-Host "  forbliver false; intet herfra taeller som evidens." -ForegroundColor Yellow
@@ -200,6 +200,17 @@ $overrides = @{
     'KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED'      = '1'
     'KALIV_CONSCIOUSNESS_STEP_ENABLED'           = '1'
     'KALIV_CONSCIOUSNESS_PROFILE_FILE'           = (Join-Path $repoRoot "deploy\consciousness-dev-profile.json")
+
+    # Lived-continuity / bounded autonomous cognition in dev.
+    'KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED'        = '1'
+    'KALIV_CONSCIOUSNESS_UNPLANNED_LIVENESS_ENABLED'     = '1'
+    'KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED'      = '1'
+    'KALIV_CONSCIOUSNESS_CHECKPOINT_LIVENESS_ENABLED'    = '1'
+    'KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED'             = '1'
+    'KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED'   = '1'
+    'KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED'  = '1'
+    'KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED'        = '1'
+    'KALIV_SCHEDULER'                                    = '1'
 }
 $merged = @{}
 foreach ($k in $appEnv.Keys) { $merged[$k] = $appEnv[$k] }
@@ -316,9 +327,14 @@ if (-not $consciousness.ready_for_user_driven_cognition) {
     $details = ($consciousness | ConvertTo-Json -Depth 6 -Compress)
     throw "Consciousness Core er aktiveret i env, men live cognition er ikke klar: $details"
 }
+if (-not $consciousness.ready_for_lived_continuity) {
+    $details = ($consciousness | ConvertTo-Json -Depth 6 -Compress)
+    throw "Lived continuity er aktiveret i env, men runtime-kæden er ikke klar: $details"
+}
 
 Write-Host ""
 Write-Host "  Consciousness Core: LIVE SESSION READY" -ForegroundColor Green
+Write-Host "  Lived continuity: ACTIVE + BOUNDED AUTONOMOUS COGNITION" -ForegroundColor Green
 if (-not $SkipVisionRig) {
     Write-Host "  VisionRig: LIVE + MODELRIG BRIDGE ENABLED" -ForegroundColor Green
 }
