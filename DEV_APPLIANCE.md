@@ -45,6 +45,11 @@ C31-F er nu runtime-koblet i dev: hvert faktisk scheduler-callback komponerer et
 når et supervisor-step finder sted. Status viser kun plan-antal og seneste
 disposition; interne refs eksponeres ikke.
 
+C31-B er også runtime-koblet: efter den første gennemførte cognitive cycle findes
+en reference-only C31-A lived-continuity-receipt. Den næste cycle får et
+`PresentContextProjection` med trusted lokal dagfase og session-elapsed tid.
+ThoughtEngine får ingen clock-, identity-, persistence- eller scheduling-authority.
+
 Før worker/backend starter, kører dev-appliancen desuden en idempotent
 SelfState-bootstrap. Den må kun bruge den allerede valgte og aktiverede
 **godkendte Person Revision**. Mangler den, eller matcher en eksisterende
