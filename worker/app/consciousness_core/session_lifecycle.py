@@ -43,9 +43,19 @@ from .continuity_status import (
 from .cycle import (
     CognitiveWorkspace,
     RuntimeWorldState,
+    proposal_ref,
     self_state_ref,
     workspace_ref,
     world_state_ref,
+)
+from .lived_continuity import (
+    LivedContinuityInputs,
+    LivedContinuityReceipt,
+    build_lived_continuity_receipt,
+)
+from .present_context import (
+    PresentContextProjection,
+    project_present_context,
 )
 from .metacognition import OutcomeObservation, PredictionRecord
 from .embodiment import EmbodimentState, InferredEmbodimentState
@@ -90,7 +100,12 @@ from .prediction_attention import (
     plan_prediction_outcome,
 )
 from .production_lifecycle import TrustedRuntimeClock
-from .temporal import anchor_from_clock
+from .temporal import (
+    ClockSample,
+    TemporalState,
+    anchor_from_clock,
+    build_temporal_state,
+)
 from .response_guidance import (
     ResponseGuidanceEnvelope,
     build_response_guidance,
@@ -347,6 +362,20 @@ class ProductionCognitiveSession:
         self._user_turn_ledger: dict[str, tuple[int, str, str]] = {}
         self._next_user_turn_sequence = 1
         self._pending_response_guidance: ResponseGuidanceEnvelope | None = None
+
+        # C31 runtime present-context chain. The clock remains owned by C18;
+        # these are process-local projections only and grant no persistence or
+        # scheduling authority.
+        session_started_sample = self.trusted_clock.sample()
+        self._session_started_anchor = anchor_from_clock(
+            session_started_sample,
+            event_ref="consciousness-core:session-start",
+        )
+        self._previous_temporal_sample: ClockSample | None = session_started_sample
+        self._last_temporal_state: TemporalState | None = None
+        self._last_lived_continuity: LivedContinuityReceipt | None = None
+        self._last_present_context: PresentContextProjection | None = None
+
         # Bounded privacy-safe replay ledger. Plans contain only hashes/counts
         # and event metadata, never recalled memory text or item ids.
         self._memory_recall_ledger: dict[str, MemoryRecallPlan] = {}
@@ -354,6 +383,21 @@ class ProductionCognitiveSession:
     @property
     def live_state(self) -> LiveCognitiveSessionState:
         return self._live
+
+    @property
+    def temporal_state(self) -> TemporalState | None:
+        """Latest process-local trusted temporal projection."""
+        return self._last_temporal_state
+
+    @property
+    def lived_continuity(self) -> LivedContinuityReceipt | None:
+        """Latest reference-only C31-A lived-continuity receipt."""
+        return self._last_lived_continuity
+
+    @property
+    def present_context(self) -> PresentContextProjection | None:
+        """Latest C31-B present context actually supplied to cognition."""
+        return self._last_present_context
 
     @property
     def continuity_state(self) -> PostWakeContinuityState | None:
@@ -1066,6 +1110,24 @@ class ProductionCognitiveSession:
             if retired_continuity_state is not None
             else None
         )
+
+        temporal_sample = self.trusted_clock.sample()
+        temporal_state = build_temporal_state(
+            self_id=before.state.self_id,
+            person_revision=before.state.person_revision,
+            current_sample=temporal_sample,
+            session_started_anchor=self._session_started_anchor,
+            previous_sample=self._previous_temporal_sample,
+        )
+        present_context = (
+            project_present_context(
+                self._last_lived_continuity,
+                temporal_state,
+            )
+            if self._last_lived_continuity is not None
+            else None
+        )
+
         bridge_step = await self._bridge.step(
             current_state=before.state,
             current_world=before.world,
@@ -1076,6 +1138,7 @@ class ProductionCognitiveSession:
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=active_continuity,
             experience_episode=self._experience_episode,
+            present_context=present_context,
             retired_continuity_state=retired_continuity_state,
             retired_continuity_orientation=retired_continuity_orientation,
             required_event_id=required_event_id,
@@ -1083,6 +1146,9 @@ class ProductionCognitiveSession:
         )
 
         if bridge_step.cycle_result is None:
+            self._previous_temporal_sample = temporal_sample
+            self._last_temporal_state = temporal_state
+            self._last_present_context = present_context
             return CognitiveSessionStep(
                 schema="kaliv-consciousness-core/session-step/v1",
                 supervisor_step=bridge_step,
@@ -1241,6 +1307,41 @@ class ProductionCognitiveSession:
                 completion=next_recovery,
             )
 
+        post_wake_ref = (
+            _ref("post-wake-continuity", self._continuity_state)
+            if self._continuity_state is not None
+            else None
+        )
+        wake_orientation_ref = (
+            _ref("continuity-orientation", next_orientation)
+            if next_orientation is not None
+            else None
+        )
+        next_lived_continuity = build_lived_continuity_receipt(
+            LivedContinuityInputs(
+                schema="kaliv-consciousness-core/lived-continuity-inputs/v1",
+                self_id=next_state.self_id,
+                person_revision=next_state.person_revision,
+                cycle_id=cycle_result.cognitive_cycle.request.cycle_id,
+                self_state_ref=self_state_ref(next_state),
+                temporal_state_ref=_ref("temporal-state", temporal_state),
+                workspace_ref=workspace_ref(next_workspace),
+                thought_proposal_ref=proposal_ref(
+                    cycle_result.cognitive_cycle.proposal
+                ),
+                active_episode_ref=(
+                    _ref("experience-episode", next_episode)
+                    if next_episode is not None
+                    else None
+                ),
+                post_wake_continuity_ref=post_wake_ref,
+                wake_orientation_ref=wake_orientation_ref,
+                episode_closure_evidence_ref=None,
+                episode_review_ref=None,
+                production_activation=False,
+            )
+        )
+
         next_live = LiveCognitiveSessionState(
             schema="kaliv-consciousness-core/live-session-state/v1",
             state=next_state,
@@ -1253,6 +1354,10 @@ class ProductionCognitiveSession:
             production_activation=False,
         )
         self._live = next_live
+        self._previous_temporal_sample = temporal_sample
+        self._last_temporal_state = temporal_state
+        self._last_present_context = present_context
+        self._last_lived_continuity = next_lived_continuity
         self._experience_episode = next_episode
         self._continuity_window = next_window
         self._recovery_completion = next_recovery
@@ -1279,6 +1384,9 @@ class ProductionCognitiveSession:
         # and cannot cross the process/session lifecycle boundary.
         self._pending_response_guidance = None
         self._memory_recall_ledger.clear()
+        self._last_temporal_state = None
+        self._last_lived_continuity = None
+        self._last_present_context = None
         self._continuity_state = None
         self._continuity_window = None
         self._recovery_completion = None
