@@ -433,8 +433,18 @@ def assemble_thought_request(
         "relevant_memory_refs": memories,
         "embodiment_state_ref": embodiment_state_ref,
         "cognitive_profile_ref": profile_ref,
+        "temporal_context_ref": (
+            temporal_context_value.temporal_anchor_ref
+            if temporal_context_value is not None
+            else None
+        ),
         "present_context_ref": (
             present_context_value.lived_continuity_ref
+            if present_context_value is not None
+            else None
+        ),
+        "present_context_temporal_anchor_ref": (
+            present_context_value.temporal_anchor_ref
             if present_context_value is not None
             else None
         ),
