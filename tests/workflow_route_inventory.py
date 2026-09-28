@@ -69,8 +69,8 @@ check("/experimental/consciousness/status" in off,
 
 added = sorted(set(on) - set(off))
 check(len(added) > 0, f"flaget tilfoejer faktisk ruter ({len(added)})")
-check(all(p.startswith("/experimental/") for p in added),
-      "hver Agent 3-rute ligger under /experimental/ -- ingen kan rammes ved et uheld")
+check(all(p.startswith("/experimental/agent3/") for p in added),
+      "hver Agent 3-rute ligger under /experimental/agent3/ -- ingen kan rammes ved et uheld")
 
 # The flag must be additive: turning Agent 3 on must not remove or rewrite a
 # host route. A dormant draft that mutates the production surface is not dormant.
