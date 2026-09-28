@@ -37,6 +37,18 @@ class ControlCenterVisionClientTest {
             assertEquals("current", sensor.capabilityRefreshStatus)
             assertEquals(4194304, sensor.negotiatedMaxPayloadBytes)
             assertEquals("auto", sensor.negotiatedPacketCompression)
+            assertEquals(31, snapshot.visionRigSchemaVersions?.bootstrap)
+            assertEquals(15, snapshot.visionRigSchemaVersions?.catalog)
+            assertEquals(28, snapshot.visionRigSchemaVersions?.fleet)
+            assertEquals(2, snapshot.producerReadiness.runtimeSources)
+            assertEquals(1, snapshot.producerReadiness.heartbeatV6Sources)
+            assertEquals(1, snapshot.producerReadiness.heartbeatUpgradeRequired)
+            assertEquals(0.5, snapshot.producerReadiness.heartbeatV6Ratio)
+            assertEquals(1, snapshot.producerReadiness.packetMeasurementCompleteSources)
+            assertEquals(1, snapshot.producerReadiness.packetMeasurementGapSources)
+            assertEquals(0.5, snapshot.producerReadiness.packetMeasurementCompleteRatio)
+            assertEquals(1, snapshot.producerReadinessTransition.heartbeatV6SourcesDelta)
+            assertEquals(0.1, snapshot.producerReadinessTransition.heartbeatV6RatioDelta)
             assertEquals("Bearer desktop-token", authorization.get())
             assertEquals("/api/v1/control-center/status", path.get())
         } finally {
@@ -123,6 +135,23 @@ class ControlCenterVisionClientTest {
           "capability_refresh":{"current":1,"stale":0,"unknown":0},
           "attention_total":0,
           "attention_truncated":false,
+          "visionrig_schema_versions":{"bootstrap":31,"catalog":15,"fleet":28},
+          "producer_readiness":{
+            "runtime_sources":2,
+            "heartbeat_v6_sources":1,
+            "heartbeat_upgrade_required":1,
+            "heartbeat_v6_ratio":0.5,
+            "packet_measurement_complete_sources":1,
+            "packet_measurement_gap_sources":1,
+            "packet_measurement_complete_ratio":0.5
+          },
+          "producer_readiness_transition":{
+            "changed_utc":"2026-09-28T05:00:00+00:00",
+            "heartbeat_v6_sources_delta":1,
+            "heartbeat_v6_ratio_delta":0.1,
+            "packet_measurement_complete_sources_delta":1,
+            "packet_measurement_complete_ratio_delta":0.1
+          },
           "sensors":[{
             "source_id":"kinect-living-room",
             "display_name":"Kinect stue",
