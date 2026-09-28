@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = ROOT / "renderers" / "bodyrig-unity"
 SETTINGS = (PROJECT / "ProjectSettings" / "ProjectSettings.asset").read_text(encoding="utf-8")
-BUILD = (PROJECT / "Assets" / "BodyRig" / "Editor" / "BodyRigBuild.cs").read_text(encoding="utf-8")
-BRIDGE = (
+BUILD = code_of(PROJECT / "Assets" / "BodyRig" / "Editor" / "BodyRigBuild.cs")
+BRIDGE = code_of(
     ROOT
     / "android"
     / "app"
@@ -23,7 +23,7 @@ BRIDGE = (
     / "ternedal"
     / "modelrig"
     / "KalivBodyBridge.kt"
-).read_text(encoding="utf-8")
+)
 
 passed = failed = 0
 
