@@ -120,6 +120,17 @@ def _default_agent3_provider() -> Mapping[str, Any]:
     }
 
 
+def _visionrig_health_version(value: object) -> int | None:
+    """Accept the forward-compatible VisionRig health contract family."""
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"visionrig/health/v([0-9]+)", value)
+    if match is None:
+        return None
+    version = int(match.group(1))
+    return version if version >= 4 else None
+
+
 async def _default_visionrig_provider() -> Mapping[str, Any]:
     """Probe the separately gated local VisionRig integration without side effects."""
     observed_at = time.time()
@@ -148,13 +159,7 @@ async def _default_visionrig_provider() -> Mapping[str, Any]:
         if not isinstance(payload, Mapping):
             raise TypeError("VisionRig health returned a non-object")
 
-        schema = payload.get("schema")
-        schema_match = (
-            re.fullmatch(r"visionrig/health/v([0-9]+)", schema)
-            if isinstance(schema, str)
-            else None
-        )
-        health_version = int(schema_match.group(1)) if schema_match else None
+        health_version = _visionrig_health_version(payload.get("schema"))
         contract_ok = (
             payload.get("status") == "ok"
             and payload.get("service") == "visionrig"
