@@ -58,6 +58,9 @@ Implemented slices:
 - C31-E: episode carry-forward policy connecting C30 closure/review evidence to
   later workspace attention without automatic durable-memory writes;
 - C31-F: continuous-loop supervisor seam composing existing default-off scheduler,
+  now runtime-coupled in dev so each actual scheduler callback emits one bounded
+  ContinuousLoopSupervisorPlan from scheduler evidence plus the exact C18 plan
+  when a supervisor step occurs; C31 creates no timer/cadence of its own.
   wake and cycle primitives without bypassing Agent 3 or existing gates;
 - C31-G: model-swap continuity qualification proving ThoughtEngine replacement can
   change cognitive capability while SelfState identity, Person binding, durable

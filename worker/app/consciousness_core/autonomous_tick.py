@@ -30,7 +30,7 @@ from .autonomous_trigger_policy import (
 from .profile_source import CognitiveProfileLoadResult, load_cognitive_profile
 from .production_lifecycle import TrustedRuntimeClock
 from .session_lifecycle import ProductionCognitiveSession
-from .supervisor import CognitionEvent
+from .supervisor import CognitionEvent, SupervisorPlan
 from .temporal import ClockSample
 
 
@@ -173,10 +173,16 @@ class AutonomousCognitionTickAdapter:
         self._profile_loader = profile_loader
         self._policy = policy
         self._accounting = accounting
+        self._last_supervisor_plan: SupervisorPlan | None = None
 
     @property
     def accounting(self) -> AutomaticCognitionAccounting | None:
         return self._accounting
+
+    @property
+    def last_supervisor_plan(self) -> SupervisorPlan | None:
+        """Exact C18 plan produced by the most recent attempted session step."""
+        return self._last_supervisor_plan
 
     def _receipt(
         self,
@@ -241,6 +247,7 @@ class AutonomousCognitionTickAdapter:
         Flag-off is intentionally first: it samples no clock, inspects no session,
         loads no profile and cannot invoke a model.
         """
+        self._last_supervisor_plan = None
         if not autonomous_cognition_enabled():
             before = (
                 0
@@ -348,6 +355,7 @@ class AutonomousCognitionTickAdapter:
         )
 
         plan = step.supervisor_step.plan
+        self._last_supervisor_plan = plan
         if plan.decision == "WAIT":
             return self._receipt(
                 outcome="WAIT",

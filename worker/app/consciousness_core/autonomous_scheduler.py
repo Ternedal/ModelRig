@@ -22,6 +22,11 @@ from .autonomous_tick import (
     AutonomousCognitionTickReceipt,
     autonomous_cognition_enabled,
 )
+from .continuous_loop_supervisor import (
+    ContinuousLoopSupervisorPlan,
+    enabled as continuous_loop_enabled,
+    plan_continuous_loop_step,
+)
 from .policy_checkpoint import (
     PolicyDrivenCheckpointResult,
     PolicyDrivenSelfStateCheckpointAdapter,
@@ -75,6 +80,11 @@ class AutonomousSchedulerBridgeStatus(StrictModel):
         Literal["IDLE", "HOLD", "COMMITTED"] | None
     ) = None
     last_checkpoint_error: str | None = None
+    continuous_loop_enabled: bool = False
+    continuous_loop_plan_count: int = Field(ge=0, strict=True, default=0)
+    last_continuous_loop_disposition: (
+        Literal["DISABLED", "IDLE", "DEFER", "RUN_ONE_CYCLE"] | None
+    ) = None
     internal_thread_created: Literal[False]
     internal_timer_created: Literal[False]
     retry_authority: Literal[False]
@@ -110,6 +120,7 @@ class _OwnerLoopTickResult:
     checkpoint_results: tuple[PolicyDrivenCheckpointResult, ...]
     checkpoint_error_stage: Literal["pre", "post"] | None
     checkpoint_error_type: str | None
+    continuous_loop_plan: ContinuousLoopSupervisorPlan | None
 
 
 class ScheduledAutonomousCognitionBridge:
@@ -158,8 +169,13 @@ class ScheduledAutonomousCognitionBridge:
         self._checkpoint_failure_count = 0
         self._last_checkpoint_outcome: str | None = None
         self._last_checkpoint_error: str | None = None
+        self._continuous_loop_plan_count = 0
+        self._last_continuous_loop_disposition: str | None = None
 
-    async def _owner_loop_tick(self) -> _OwnerLoopTickResult:
+    async def _owner_loop_tick(
+        self,
+        scheduler_tick_ref: str,
+    ) -> _OwnerLoopTickResult:
         checkpoint_results: list[PolicyDrivenCheckpointResult] = []
 
         if self._checkpoint_adapter is not None:
@@ -171,6 +187,7 @@ class ScheduledAutonomousCognitionBridge:
                     checkpoint_results=tuple(checkpoint_results),
                     checkpoint_error_stage="pre",
                     checkpoint_error_type=type(exc).__name__,
+                    continuous_loop_plan=None,
                 )
             if not isinstance(before, PolicyDrivenCheckpointResult):
                 return _OwnerLoopTickResult(
@@ -178,10 +195,19 @@ class ScheduledAutonomousCognitionBridge:
                     checkpoint_results=tuple(checkpoint_results),
                     checkpoint_error_stage="pre",
                     checkpoint_error_type="InvalidCheckpointResult",
+                    continuous_loop_plan=None,
                 )
             checkpoint_results.append(before)
 
         receipt = await self._adapter.tick_once()
+        continuous_plan = plan_continuous_loop_step(
+            scheduler_tick_ref=scheduler_tick_ref,
+            supervisor_plan=getattr(
+                self._adapter,
+                "last_supervisor_plan",
+                None,
+            ),
+        )
 
         if (
             self._checkpoint_adapter is not None
@@ -195,6 +221,7 @@ class ScheduledAutonomousCognitionBridge:
                     checkpoint_results=tuple(checkpoint_results),
                     checkpoint_error_stage="post",
                     checkpoint_error_type=type(exc).__name__,
+                    continuous_loop_plan=continuous_plan,
                 )
             if not isinstance(after, PolicyDrivenCheckpointResult):
                 return _OwnerLoopTickResult(
@@ -202,6 +229,7 @@ class ScheduledAutonomousCognitionBridge:
                     checkpoint_results=tuple(checkpoint_results),
                     checkpoint_error_stage="post",
                     checkpoint_error_type="InvalidCheckpointResult",
+                    continuous_loop_plan=continuous_plan,
                 )
             checkpoint_results.append(after)
 
@@ -210,6 +238,7 @@ class ScheduledAutonomousCognitionBridge:
             checkpoint_results=tuple(checkpoint_results),
             checkpoint_error_stage=None,
             checkpoint_error_type=None,
+            continuous_loop_plan=continuous_plan,
         )
 
     def mark_installed(self) -> None:
@@ -230,8 +259,12 @@ class ScheduledAutonomousCognitionBridge:
                 self._overlap_rejections += 1
                 return
             try:
+                scheduler_tick_ref = (
+                    "scheduler-tick:"
+                    + f"{self._callback_count:016x}"
+                )
                 future = asyncio.run_coroutine_threadsafe(
-                    self._owner_loop_tick(),
+                    self._owner_loop_tick(scheduler_tick_ref),
                     self._loop,
                 )
             except Exception as exc:
@@ -297,6 +330,13 @@ class ScheduledAutonomousCognitionBridge:
                             f"{owner_result.checkpoint_error_type}"
                         )[:256]
 
+                    loop_plan = owner_result.continuous_loop_plan
+                    if loop_plan is not None:
+                        self._continuous_loop_plan_count += 1
+                        self._last_continuous_loop_disposition = (
+                            loop_plan.disposition
+                        )
+
                     tick_receipt = owner_result.receipt
                     if tick_receipt is None:
                         self._last_error = self._last_checkpoint_error
@@ -359,6 +399,11 @@ class ScheduledAutonomousCognitionBridge:
                 checkpoint_failure_count=self._checkpoint_failure_count,
                 last_checkpoint_outcome=self._last_checkpoint_outcome,
                 last_checkpoint_error=self._last_checkpoint_error,
+                continuous_loop_enabled=continuous_loop_enabled(),
+                continuous_loop_plan_count=self._continuous_loop_plan_count,
+                last_continuous_loop_disposition=(
+                    self._last_continuous_loop_disposition
+                ),
                 internal_thread_created=False,
                 internal_timer_created=False,
                 retry_authority=False,

@@ -40,6 +40,11 @@ godkendte schedules følger fortsat deres eksisterende ToolGate-regler.
 Release-defaults forbliver fail-closed, og `production_activation` forbliver
 `false`.
 
+C31-F er nu runtime-koblet i dev: hvert faktisk scheduler-callback komponerer et
+`ContinuousLoopSupervisorPlan` ud fra scheduler-evidens og den konkrete C18-plan,
+når et supervisor-step finder sted. Status viser kun plan-antal og seneste
+disposition; interne refs eksponeres ikke.
+
 Før worker/backend starter, kører dev-appliancen desuden en idempotent
 SelfState-bootstrap. Den må kun bruge den allerede valgte og aktiverede
 **godkendte Person Revision**. Mangler den, eller matcher en eksisterende
