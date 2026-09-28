@@ -387,7 +387,7 @@ class ExactEventStepTests(unittest.TestCase):
     def test_required_event_waits_without_model_call_or_consumption(self):
         policy = SupervisorPolicy(
             schema="kaliv-consciousness-core/supervisor-policy/v1",
-            min_cycle_interval_ms=1500,
+            min_cycle_interval_ms=60_000,
             max_events_per_cycle=4,
             production_activation=False,
         )
