@@ -15,6 +15,21 @@ Ny kode på riggen er derefter to skridt:
     git pull --ff-only
     START_DEV_APPLIANCE.cmd
 
+## Consciousness Core i dev-kanalen
+
+Dev-appliancen aktiverer nu eksplicit den bruger-drevne cognitive kæde:
+
+- Consciousness Core runtime + supervisor;
+- normal chat admission;
+- exact-event cognition for det aktuelle user turn;
+- bounded same-turn response guidance;
+- VisionRig -> inferred WorldEvidence admission;
+- den operator-kalibrerede dev-profil i `deploy/consciousness-dev-profile.json`.
+
+Det er **ikke** autonom action-authority: Agent 3, værktøjsudførelse og den
+autonome cognition scheduler bliver ikke slået til af denne profil. Release-
+defaults forbliver fail-closed, og `production_activation` forbliver `false`.
+
 `STOP_DEV_APPLIANCE.cmd` (eller `-Stop`) lukker dev-stakken og starter
 `KalivBootstrap` igen, så den signerede release kommer tilbage.
 
