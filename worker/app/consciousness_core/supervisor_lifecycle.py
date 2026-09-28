@@ -195,6 +195,10 @@ class ProductionSupervisorBridge:
             TemporalContextProjection | Mapping[str, Any] | None,
         ] | None = None,
         present_context: PresentContextProjection | Mapping[str, Any] | None = None,
+        present_context_factory: Callable[
+            [ClockSample],
+            PresentContextProjection | Mapping[str, Any] | None,
+        ] | None = None,
         retired_continuity_state: PostWakeContinuityState | None = None,
         retired_continuity_orientation: ContinuityOrientationState | None = None,
         required_event_id: str | None = None,
@@ -216,6 +220,18 @@ class ProductionSupervisorBridge:
                         "temporal_context_factory must be callable"
                     )
                 resolved_temporal_context = temporal_context_factory(clock)
+
+            if present_context is not None and present_context_factory is not None:
+                raise SupervisorLifecycleError(
+                    "present_context and present_context_factory are mutually exclusive"
+                )
+            resolved_present_context = present_context
+            if present_context_factory is not None:
+                if not callable(present_context_factory):
+                    raise SupervisorLifecycleError(
+                        "present_context_factory must be callable"
+                    )
+                resolved_present_context = present_context_factory(clock)
 
             plan = plan_supervisor_step(
                 state=self._state,
@@ -306,7 +322,7 @@ class ProductionSupervisorBridge:
                 continuity_state=continuity_state,
                 experience_episode=experience_episode,
                 temporal_context=resolved_temporal_context,
-                present_context=present_context,
+                present_context=resolved_present_context,
                 retired_continuity_state=retired_continuity_state,
                 retired_continuity_orientation=retired_continuity_orientation,
             )
