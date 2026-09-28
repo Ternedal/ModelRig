@@ -68,6 +68,38 @@ C31-A through C31-H now form the complete bounded lived-continuity stack. C31-H
 adds no new runtime authority; it only exposes a privacy-safe read model and a
 static qualification manifest for the already-bounded A–G seams.
 
+```mermaid
+flowchart LR
+    E["World/user/time event"]
+    A["C31-A<br/>continuity receipt"]
+    B["C31-B<br/>present-context projection"]
+    D["C31-D<br/>dormancy + wake bridge"]
+    F["C31-F<br/>continuous-loop supervisor"]
+    CYCLE["Bounded cognitive cycle"]
+    TE["External ThoughtEngine"]
+    C["C31-C<br/>continuity reducer"]
+    EP["C30 closed/reviewed episode"]
+    EE["C31-E<br/>episode carry-forward"]
+    G["C31-G<br/>model-swap continuity"]
+    H["C31-H<br/>privacy-safe status + manifest"]
+
+    E --> A
+    A --> D
+    D --> B
+    B --> F
+    F -. "at most one authorized cycle" .-> CYCLE
+    CYCLE <--> TE
+    CYCLE --> C
+    C --> A
+    EP -. "reference-only" .-> EE
+    EE -.-> B
+    TE -. "replaceable" .-> G
+    A -. "identity/continuity stable" .-> G
+    A --> H
+    F --> H
+    G --> H
+```
+
 Acceptance for the complete C31 stack:
 
 - the ThoughtEngine remains external and replaceable;
