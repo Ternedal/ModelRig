@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
@@ -147,10 +148,18 @@ async def _default_visionrig_provider() -> Mapping[str, Any]:
         if not isinstance(payload, Mapping):
             raise TypeError("VisionRig health returned a non-object")
 
+        schema = payload.get("schema")
+        schema_match = (
+            re.fullmatch(r"visionrig/health/v([0-9]+)", schema)
+            if isinstance(schema, str)
+            else None
+        )
+        health_version = int(schema_match.group(1)) if schema_match else None
         contract_ok = (
             payload.get("status") == "ok"
             and payload.get("service") == "visionrig"
-            and payload.get("schema") == "visionrig/health/v4"
+            and health_version is not None
+            and health_version >= 4
             and payload.get("perception_schema") == "visionrig/perception-event/v3"
         )
         bridge = payload.get("modelrig_bridge")
@@ -159,7 +168,7 @@ async def _default_visionrig_provider() -> Mapping[str, Any]:
         last_status = bridge.get("last_status")
         if contract_ok and bridge_enabled:
             detail = (
-                "VisionRig health v4; ModelRig bridge "
+                f"VisionRig health v{health_version}; ModelRig bridge "
                 + (str(last_status) if last_status else "idle")
             )
         elif contract_ok:
