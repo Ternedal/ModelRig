@@ -29,6 +29,7 @@ from app.consciousness_core.visionrig_admission import (  # noqa: E402
     CONSCIOUSNESS_VISIONRIG_FLAG,
     CONSCIOUSNESS_VISIONRIG_PREFIX,
     VisionRigPerceptionEventV3,
+    VisionRigPerceptionEventV4,
     build_consciousness_visionrig_router,
     consciousness_visionrig_enabled,
     mount_consciousness_visionrig,
@@ -139,6 +140,28 @@ def event_payload(
     }
 
 
+def event_payload_v4(
+    *,
+    event_id="evt-vision-v4-1",
+    frame_sequence=43,
+):
+    payload = event_payload(
+        event_id=event_id,
+        frame_sequence=frame_sequence,
+    )
+    payload["schema_id"] = "visionrig/perception-event/v4"
+    payload["infrared"] = [
+        {
+            "mean_intensity": 0.42,
+            "contrast": 0.18,
+            "hotspot_fraction": 0.07,
+            "sample_count": 217088,
+            "method": "kinect-v2-infrared-summary",
+        }
+    ]
+    return payload
+
+
 class VisionRigAdmissionTests(unittest.TestCase):
     def session(self):
         state = PersistentSelfState(
@@ -246,6 +269,32 @@ class VisionRigAdmissionTests(unittest.TestCase):
         self.assertGreater(projection.attention_salience, 0.5)
         self.assertLessEqual(projection.attention_salience, 0.95)
 
+    def test_v4_projection_accepts_bounded_infrared_summary(self):
+        event = VisionRigPerceptionEventV4.model_validate_json(
+            json.dumps(event_payload_v4())
+        )
+        projection = project_visionrig_event(event)
+
+        self.assertIn(
+            "infrared=mean=0.420/contrast=0.180/hotspot=0.070",
+            projection.evidence.proposition,
+        )
+        self.assertNotIn("infrared_frames", projection.evidence.proposition)
+        self.assertTrue(
+            projection.visionrig_event_ref.startswith("visionrig-event:")
+        )
+
+    def test_v4_rejects_raw_or_unbounded_infrared_payload(self):
+        invalid = event_payload_v4()
+        invalid["infrared"][0]["raw"] = [1, 2, 3]
+        with self.assertRaises(Exception):
+            VisionRigPerceptionEventV4.model_validate(invalid)
+
+        too_many = event_payload_v4()
+        too_many["infrared"] = too_many["infrared"] * 5
+        with self.assertRaises(Exception):
+            VisionRigPerceptionEventV4.model_validate(too_many)
+
     def test_loopback_gate_runs_before_body_parse(self):
         app = FastAPI()
         app.include_router(
@@ -282,7 +331,26 @@ class VisionRigAdmissionTests(unittest.TestCase):
             "VisionRig perception event requires application/json",
         )
 
-    def test_route_requires_v3_and_non_authoritative_input(self):
+    def test_route_accepts_v4_when_session_is_available(self):
+        session, engine = self.session()
+        app = FastAPI()
+        app.state.consciousness_session = session
+        app.include_router(
+            build_consciousness_visionrig_router(
+                loopback_allowed=lambda _request: True,
+            )
+        )
+        response = TestClient(app).post(
+            CONSCIOUSNESS_VISIONRIG_PREFIX + "/visionrig-event",
+            json=event_payload_v4(),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["epistemic_status"], "inferred")
+        self.assertEqual(engine.calls, 0)
+        proposition = session.live_state.world.observations[-1].proposition
+        self.assertIn("infrared=mean=0.420/contrast=0.180/hotspot=0.070", proposition)
+
+    def test_route_requires_supported_schema_and_non_authoritative_input(self):
         app = FastAPI()
         app.include_router(
             build_consciousness_visionrig_router(

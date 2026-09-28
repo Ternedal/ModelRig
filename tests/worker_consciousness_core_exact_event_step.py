@@ -384,9 +384,14 @@ class ExactEventStepTests(unittest.TestCase):
             self.assertFalse(body["durable_memory_write_authority"])
 
     def test_required_event_waits_without_model_call_or_consumption(self):
+        # session.step() samples the trusted clock once for temporal/present
+        # context and the supervisor samples it again for pacing. The deterministic
+        # test clock advances 1000 ms per sample, so keep the interval above the
+        # two-sample 2000 ms gap to exercise WAIT semantics rather than coupling
+        # this regression to the internal number of clock consumers.
         policy = SupervisorPolicy(
             schema="kaliv-consciousness-core/supervisor-policy/v1",
-            min_cycle_interval_ms=1500,
+            min_cycle_interval_ms=2500,
             max_events_per_cycle=4,
             production_activation=False,
         )

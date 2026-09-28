@@ -1,6 +1,6 @@
-"""Default-off loopback VisionRig v3 -> Consciousness Core world-evidence adapter.
+"""Default-off loopback VisionRig -> Consciousness Core world-evidence adapter.
 
-The adapter accepts only VisionRig PerceptionEvent/v3 payloads, projects a
+The adapter accepts VisionRig PerceptionEvent/v3 and additive v4 payloads, projects a
 bounded semantic summary, labels it as inferred evidence, and reuses C20-B for
 atomic world update + attention admission. It never calls the ThoughtEngine.
 """
@@ -130,6 +130,14 @@ class VisionRigDepthObservation(StrictModel):
     method: StrictStr = Field(min_length=1, max_length=128)
 
 
+class VisionRigInfraredObservation(StrictModel):
+    mean_intensity: UnitInterval
+    contrast: UnitInterval
+    hotspot_fraction: UnitInterval
+    sample_count: Annotated[int, Field(ge=1, le=4_194_304, strict=True)]
+    method: Literal["kinect-v2-infrared-summary"]
+
+
 class VisionRigSourceDescriptor(StrictModel):
     source_id: StrictStr = Field(min_length=1, max_length=128)
     source_type: Literal[
@@ -163,6 +171,17 @@ class VisionRigPerceptionEventV3(StrictModel):
     scene_confidence: UnitInterval | None = None
     dropped_frames: Annotated[int, Field(ge=0, strict=True)] = 0
     production_authority: Literal[False]
+
+
+class VisionRigPerceptionEventV4(VisionRigPerceptionEventV3):
+    schema_id: Literal["visionrig/perception-event/v4"]
+    infrared: Annotated[
+        list[VisionRigInfraredObservation],
+        Field(max_length=4),
+    ] = []
+
+
+VisionRigPerceptionEvent = VisionRigPerceptionEventV3 | VisionRigPerceptionEventV4
 
 
 class VisionRigAdmissionProjection(StrictModel):
@@ -209,13 +228,14 @@ def _canonical_json(value: BaseModel) -> bytes:
     ).encode("utf-8")
 
 
-def visionrig_event_ref(event: VisionRigPerceptionEventV3) -> str:
+def visionrig_event_ref(event: VisionRigPerceptionEvent) -> str:
     return "visionrig-event:" + hashlib.sha256(_canonical_json(event)).hexdigest()
 
 
-def _evidence_event_id(event: VisionRigPerceptionEventV3) -> str:
+def _evidence_event_id(event: VisionRigPerceptionEvent) -> str:
+    version = "visionrig-v4|" if event.schema_id.endswith("/v4") else "visionrig-v3|"
     seed = (
-        "visionrig-v3|"
+        version
         + event.source.source_id
         + "|"
         + event.event_id
@@ -223,7 +243,7 @@ def _evidence_event_id(event: VisionRigPerceptionEventV3) -> str:
     return "wevt-" + hashlib.sha256(seed).hexdigest()[:32]
 
 
-def _source_subject_ref(event: VisionRigPerceptionEventV3) -> str:
+def _source_subject_ref(event: VisionRigPerceptionEvent) -> str:
     payload = (
         event.source.source_type
         + "|"
@@ -234,7 +254,7 @@ def _source_subject_ref(event: VisionRigPerceptionEventV3) -> str:
     return "sensor:visionrig:" + hashlib.sha256(payload).hexdigest()[:32]
 
 
-def _aggregate_confidence(event: VisionRigPerceptionEventV3) -> float:
+def _aggregate_confidence(event: VisionRigPerceptionEvent) -> float:
     values: list[float] = []
     values.extend(float(item.confidence) for item in event.entities)
     values.extend(float(item.confidence) for item in event.relations)
@@ -250,7 +270,7 @@ def _aggregate_confidence(event: VisionRigPerceptionEventV3) -> float:
     return max(0.0, min(1.0, sum(values) / len(values)))
 
 
-def _attention_salience(event: VisionRigPerceptionEventV3) -> float:
+def _attention_salience(event: VisionRigPerceptionEvent) -> float:
     value = 0.15
     if event.entities:
         value += 0.10
@@ -285,7 +305,7 @@ def _safe_label(value: str) -> str:
     return compact[:64]
 
 
-def _semantic_summary(event: VisionRigPerceptionEventV3) -> str:
+def _semantic_summary(event: VisionRigPerceptionEvent) -> str:
     kind_counts = Counter(item.kind for item in event.entities)
     kinds = ",".join(
         f"{kind}:{count}"
@@ -330,6 +350,20 @@ def _semantic_summary(event: VisionRigPerceptionEventV3) -> str:
         else "none"
     )
 
+    infrared = getattr(event, "infrared", [])
+    infrared_text = (
+        ",".join(
+            (
+                f"mean={float(item.mean_intensity):.3f}"
+                f"/contrast={float(item.contrast):.3f}"
+                f"/hotspot={float(item.hotspot_fraction):.3f}"
+            )
+            for item in infrared[:4]
+        )
+        if infrared
+        else "none"
+    )
+
     # Deliberately omit OCR text, identity_hint and raw landmarks. Those need
     # separately reviewed semantics before they may become cognitive context.
     return (
@@ -339,6 +373,7 @@ def _semantic_summary(event: VisionRigPerceptionEventV3) -> str:
         f"scene_label={scene_label}; "
         f"scene_confidence={scene_confidence}; "
         f"metric_depth={metric_text}; "
+        f"infrared={infrared_text}; "
         f"relations={relations}; "
         f"ocr_items={sum(1 for item in event.entities if item.kind == 'text')}; "
         f"landmark_groups={len(event.landmarks)}; "
@@ -347,10 +382,10 @@ def _semantic_summary(event: VisionRigPerceptionEventV3) -> str:
 
 
 def project_visionrig_event(
-    event: VisionRigPerceptionEventV3,
+    event: VisionRigPerceptionEvent,
 ) -> VisionRigAdmissionProjection:
-    if not isinstance(event, VisionRigPerceptionEventV3):
-        raise TypeError("event must be VisionRigPerceptionEventV3")
+    if not isinstance(event, (VisionRigPerceptionEventV3, VisionRigPerceptionEventV4)):
+        raise TypeError("event must be a supported VisionRig perception event")
     event_ref = visionrig_event_ref(event)
     confidence = _aggregate_confidence(event)
     salience = _attention_salience(event)
@@ -398,7 +433,7 @@ def _invalid_body() -> HTTPException:
     )
 
 
-async def _read_event(request: Request) -> VisionRigPerceptionEventV3:
+async def _read_event(request: Request) -> VisionRigPerceptionEvent:
     content_type = request.headers.get("content-type", "")
     media_type = content_type.split(";", 1)[0].strip().lower()
     if media_type != "application/json":
@@ -431,8 +466,16 @@ async def _read_event(request: Request) -> VisionRigPerceptionEventV3:
         raise _invalid_body()
 
     try:
-        return VisionRigPerceptionEventV3.model_validate_json(bytes(raw))
-    except ValidationError:
+        decoded = json.loads(bytes(raw))
+        if not isinstance(decoded, dict):
+            raise ValueError("VisionRig body must be an object")
+        schema_id = decoded.get("schema_id")
+        if schema_id == "visionrig/perception-event/v3":
+            return VisionRigPerceptionEventV3.model_validate_json(bytes(raw))
+        if schema_id == "visionrig/perception-event/v4":
+            return VisionRigPerceptionEventV4.model_validate_json(bytes(raw))
+        raise ValueError("unsupported VisionRig perception schema")
+    except (ValidationError, ValueError, TypeError, json.JSONDecodeError):
         raise _invalid_body() from None
 
 

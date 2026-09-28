@@ -1,12 +1,12 @@
 # VisionRig -> Consciousness Core admission
 
-This adapter connects VisionRig `PerceptionEvent/v3` to the existing C20
+This adapter connects VisionRig `PerceptionEvent/v3`/`v4` to the existing C20
 WorldEvidence boundary. It does not create a second world model.
 
 ```mermaid
 flowchart LR
     V["VisionRig<br/>sensor + structured perception"]
-    P["PerceptionEvent/v3"]
+    P["PerceptionEvent/v3 or v4"]
     G["Admission gate<br/>loopback-only · default-off<br/>strict JSON · 256 KiB"]
     E["WorldEvidenceEvent<br/>epistemic_status=inferred<br/>canonical provenance"]
     W["Transient WorldState"]
@@ -42,7 +42,7 @@ When enabled, the private loopback-only endpoint is:
 POST /experimental/consciousness/visionrig-event
 ```
 
-The request body is a strict `visionrig/perception-event/v3` object and is
+The request body is a strict `visionrig/perception-event/v3` or additive `v4` object and is
 bounded to 256 KiB. Loopback admission happens before body parsing. The route
 also requires an `application/json` media type before parsing; simple
 cross-origin browser POST media types such as `text/plain` are rejected.
@@ -71,13 +71,14 @@ The proposition is deliberately bounded and structural. It can contain:
 - up to six highest-confidence non-text labels;
 - inferred scene/place label plus its confidence when present;
 - count + nearest measured metric depth;
+- bounded IR summary for v4 (`mean_intensity`, `contrast`, `hotspot_fraction`);
 - relation predicate counts;
 - OCR item count;
 - landmark-group count;
 - dropped-frame count.
 
 It deliberately does **not** place raw OCR text, `identity_hint`, raw
-landmarks, RGB pixels, IR arrays or depth maps into Consciousness Core context.
+landmarks, RGB pixels, raw IR arrays or depth maps into Consciousness Core context.
 Those require separately reviewed semantics.
 
 ## Source sequencing
@@ -113,3 +114,15 @@ production_activation=false
 
 VisionRig therefore supplies sensory evidence and attention candidates without
 gaining memory, tool, scheduler, BodyRig, VoiceRig or action authority.
+
+
+## PerceptionEvent/v4 compatibility
+
+V4 is additive and preserves the v3 authority boundary. ModelRig accepts at
+most four `InfraredObservation` items. Each observation contains only bounded,
+normalized summary values plus a sample count and fixed method identifier. Raw
+infrared pixels are rejected by strict schema validation and never enter
+Consciousness Core context.
+
+V3 remains accepted unchanged so VisionRig and ModelRig can be rolled out
+independently without a breaking deployment window.
