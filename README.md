@@ -244,7 +244,10 @@ Revision; it never creates or activates a Person and refuses identity/revision
 drift. Source/release defaults remain fail-closed (`0`) and
 `production_activation` remains false. This is deliberate: the development rig
 can exercise the full cognitive path without silently promoting the same authority
-into a signed release.
+into a signed release. A loopback-only
+`/experimental/consciousness/status` surface reports only activation/readiness
+booleans and aggregate cycle count, and the dev launcher requires it to confirm
+a mounted live session before declaring startup successful.
 
 **Two cloud roads, and they are not the same thing.**
 
