@@ -1112,23 +1112,24 @@ class ProductionCognitiveSession:
             else None
         )
 
-        temporal_sample = self.trusted_clock.sample()
-        temporal_state = build_temporal_state(
-            self_id=before.state.self_id,
-            person_revision=before.state.person_revision,
-            current_sample=temporal_sample,
-            session_started_anchor=self._session_started_anchor,
-            previous_sample=self._previous_temporal_sample,
-        )
-        temporal_context = project_temporal_context(temporal_state)
-        present_context = (
-            project_present_context(
-                self._last_lived_continuity,
-                temporal_state,
+        temporal_sample: ClockSample | None = None
+        temporal_state: TemporalState | None = None
+        temporal_context = None
+
+        def temporal_context_factory(clock_sample: ClockSample):
+            nonlocal temporal_sample, temporal_state, temporal_context
+            temporal_sample = clock_sample
+            temporal_state = build_temporal_state(
+                self_id=before.state.self_id,
+                person_revision=before.state.person_revision,
+                current_sample=clock_sample,
+                session_started_anchor=self._session_started_anchor,
+                previous_sample=self._previous_temporal_sample,
             )
-            if self._last_lived_continuity is not None
-            else None
-        )
+            temporal_context = project_temporal_context(temporal_state)
+            return temporal_context
+
+        present_context = None
 
         bridge_step = await self._bridge.step(
             current_state=before.state,
@@ -1140,12 +1141,25 @@ class ProductionCognitiveSession:
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=active_continuity,
             experience_episode=self._experience_episode,
-            temporal_context=temporal_context,
+            temporal_context_factory=temporal_context_factory,
             present_context=present_context,
             retired_continuity_state=retired_continuity_state,
             retired_continuity_orientation=retired_continuity_orientation,
             required_event_id=required_event_id,
             allowed_event_ids=allowed_event_ids,
+        )
+
+        if temporal_sample is None or temporal_state is None:
+            raise CognitiveSessionLifecycleError(
+                "supervisor step did not produce trusted temporal context"
+            )
+        present_context = (
+            project_present_context(
+                self._last_lived_continuity,
+                temporal_state,
+            )
+            if self._last_lived_continuity is not None
+            else None
         )
 
         if bridge_step.cycle_result is None:
