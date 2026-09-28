@@ -30,6 +30,9 @@ class ConsciousnessRuntimeStatusTests(unittest.TestCase):
         self.assertFalse(body["ready_for_user_driven_cognition"])
         self.assertFalse(body["ready_for_lived_continuity"])
         self.assertIsNone(body["autonomous_scheduler_status"])
+        self.assertFalse(body["lived_continuity"]["temporal_state_present"])
+        self.assertFalse(body["lived_continuity"]["receipt_present"])
+        self.assertFalse(body["lived_continuity"]["present_context_present"])
         self.assertFalse(body["production_activation"])
 
         encoded = str(body).lower()

@@ -49,7 +49,9 @@ Implemented slices:
   orientation, cognitive-cycle and episode refs without granting new authority;
 - C31-B: bounded present-context projection for ThoughtRequest so the external
   ThoughtEngine receives explicit temporal/self/episode orientation rather than
-  owning continuity itself;
+  owning continuity itself; runtime-integrated in dev so a completed cycle
+  establishes C31-A lived-continuity evidence and the following cycle receives
+  trusted day-phase/session-elapsed context;
 - C31-C: post-cycle continuity reducer that records reference-only transitions
   across cycles while Person/Profile and Memory 4 remain authoritative;
 - C31-D: dormancy bridge proving planned sleep and unplanned shutdown create a

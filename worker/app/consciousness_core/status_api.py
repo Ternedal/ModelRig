@@ -112,6 +112,17 @@ def build_consciousness_status_router() -> APIRouter:
             "completed_cycles": (
                 session.live_state.completed_cycles if live else 0
             ),
+            "lived_continuity": {
+                "temporal_state_present": bool(
+                    live and session.temporal_state is not None
+                ),
+                "receipt_present": bool(
+                    live and session.lived_continuity is not None
+                ),
+                "present_context_present": bool(
+                    live and session.present_context is not None
+                ),
+            },
             "ready_for_user_driven_cognition": bool(
                 _flag("KALIV_CONSCIOUSNESS_CORE_ENABLED")
                 and _flag("KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED")

@@ -66,10 +66,12 @@ class Engine:
     def __init__(self):
         self.calls = 0
         self.models = []
+        self.contexts = []
 
     async def think(self, request, cognitive_profile, *, context=None):
         self.calls += 1
         self.models.append(cognitive_profile.model)
+        self.contexts.append(copy.deepcopy(context))
         payload = copy.deepcopy(FIXTURES["thought_proposal"])
         payload["request_id"] = request.request_id
         payload["proposal_id"] = "thinkprop-" + f"{self.calls:x}"[-1] * 32
@@ -90,6 +92,12 @@ def deterministic_clock():
             1_700_000_003_000_000_000,
             1_700_000_004_000_000_000,
             1_700_000_005_000_000_000,
+            1_700_000_006_000_000_000,
+            1_700_000_007_000_000_000,
+            1_700_000_008_000_000_000,
+            1_700_000_009_000_000_000,
+            1_700_000_010_000_000_000,
+            1_700_000_011_000_000_000,
         ]
     )
     mono = iter(
@@ -100,6 +108,12 @@ def deterministic_clock():
             13_000_000_000,
             14_000_000_000,
             15_000_000_000,
+            16_000_000_000,
+            17_000_000_000,
+            18_000_000_000,
+            19_000_000_000,
+            20_000_000_000,
+            21_000_000_000,
         ]
     )
     return TrustedRuntimeClock(
@@ -530,6 +544,23 @@ class SessionLifecycleTests(unittest.TestCase):
             self.assertTrue(first.context_updated)
             self.assertTrue(second.context_updated)
             self.assertEqual(engine.models, ["model-a", "model-b"])
+            self.assertNotIn("present_context", engine.contexts[0])
+            self.assertIn("present_context", engine.contexts[1])
+            present = engine.contexts[1]["present_context"]
+            self.assertEqual(
+                present["schema"],
+                "kaliv-consciousness-core/present-context/v1",
+            )
+            self.assertGreaterEqual(present["session_elapsed_ms"], 0)
+            self.assertIn(
+                present["local_day_phase"],
+                ("night", "morning", "afternoon", "evening"),
+            )
+            self.assertTrue(present["reference_only"])
+            self.assertFalse(present["identity_authority"])
+            self.assertFalse(present["persistent_state_authority"])
+            self.assertIsNotNone(session.lived_continuity)
+            self.assertIsNotNone(session.temporal_state)
             self.assertEqual(
                 (
                     session.live_state.state.self_id,
