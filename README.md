@@ -240,7 +240,9 @@ Consciousness Core is landed on `main`. The **development appliance explicitly
 opts in** to Core, supervisor, normal-chat admission, exact-event cognition,
 bounded response guidance and VisionRig admission. The dev channel also enables the
 bounded lived-continuity path: sleep/wake, liveness evidence, policy checkpoints
-and scheduler-driven autonomous cognition for admitted non-user events. The
+and scheduler-driven autonomous cognition for admitted non-user events. Completed
+cycles establish reference-only lived-continuity evidence, and the following
+cycle receives trusted local day-phase and session-elapsed present context. The
 default policy is capped at four automatic cognitive steps per five-minute
 window with a 30-second cooldown; user turns, operator signals and tool results
 cannot autonomously trigger it. Before runtime startup it also
