@@ -23,22 +23,34 @@ runtime paths stay behind explicit opt-in gates.
 
 ```mermaid
 flowchart LR
-    CC["Consciousness Core\nLANDED · DORMANT / default-off"] -. "cognitive state/guidance" .-> MR["ModelRig\nreasoning · memory · tools · semantic intent"]
-    LLM["Replaceable LLM\nlocal / explicit cloud"] <--> MR
+    VIS["VisionRig\nvisual sensing · scene/depth\nstructured perception"] -.-> ADM["Vision admission\nloopback-only · default-off"]
+    ADM -.-> WE["WorldEvidence\nepistemic_status=inferred"]
+    WE -.-> CC["Consciousness Core\nSelfState · WorldState · time · sleep/wake\nC31 lived continuity\nLANDED · DORMANT / default-off"]
+
+    CC <--> TE["External ThoughtEngine\nreplaceable cognitive capability"]
+    TE <--> LLM["Replaceable LLM\nlocal / explicit cloud"]
+    CC -. "bounded guidance / state" .-> MR["ModelRig\nmemory integration · tools · semantic intent"]
+    CC -. "intentions" .-> A3["Agent 3\ngated execution"]
+    CC -. "experience / recall refs" .-> M4["Memory 4\ndurable autobiographical memory"]
+
     MR -->|BodyCue| BR["BodyRig\nbody identity · Motor State\ndigital-twin authority"]
     MR <--> VR["VoiceRig\nvoice/audio + timing authority"]
-    VIS["VisionRig\nvisual perception · scene/depth\nnon-authoritative hints"] -. "inferred visual evidence" .-> CC
+
     subgraph K["Kaliv product surfaces"]
         KA["Kaliv Android"]
         KD["Kaliv Desktop"]
         KVR["Kaliv VR"]
     end
+
     MR --> KA
     MR --> KD
     MR --> KVR
     BR --> KVR
     VR --> KVR
     SP["SkyPlayer-Engine\nXR/media primitives"] --> KVR
+
+    classDef dormant stroke-dasharray:6 4;
+    class CC,ADM,A3 dormant;
 ```
 
 See **[docs/KALIV_SYSTEM_DEFINITION.md](docs/KALIV_SYSTEM_DEFINITION.md)** for
@@ -181,6 +193,39 @@ flowchart TB
     class CC,A3,A4,Dev dormant;
     class Voice,Vision,BodyRig,Sky external;
 ```
+
+### Perception-to-continuity path
+
+VisionRig does not write identity, durable memory or actions. Its current
+Consciousness Core integration is an explicit bounded evidence path:
+
+```mermaid
+flowchart LR
+    Sensor["VisionRig sensor / source"]
+    PE["PerceptionEvent/v3"]
+    Gate["Loopback admission gate\nKALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1"]
+    WE["WorldEvidenceEvent\ninferred · provenance-bound"]
+    WS["Transient WorldState"]
+    Attn["world_change attention candidate"]
+    Loop["C31 lived-continuity supervisor\ndefault-off"]
+    Cycle["Bounded cognitive cycle"]
+    TE["External ThoughtEngine"]
+    Out["Guidance / semantic intent"]
+
+    Sensor --> PE
+    PE -.-> Gate
+    Gate --> WE
+    WE --> WS
+    WS --> Attn
+    Attn -. "existing supervisor policy" .-> Loop
+    Loop -.-> Cycle
+    Cycle <--> TE
+    Cycle --> Out
+```
+
+The admission path performs **zero model calls** by itself. It only adds bounded,
+inferred evidence and an attention candidate; existing Consciousness Core policy
+decides whether a later cognitive cycle is allowed to run.
 
 The diagram is intentionally architectural rather than exhaustive: **solid lines**
 show normal runtime/data relationships, while **dashed lines** show gated,
