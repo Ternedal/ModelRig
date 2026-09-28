@@ -40,13 +40,13 @@ class ControlCenterVisionClientTest {
             assertEquals(31, snapshot.visionRigSchemaVersions?.bootstrap)
             assertEquals(15, snapshot.visionRigSchemaVersions?.catalog)
             assertEquals(28, snapshot.visionRigSchemaVersions?.fleet)
-            assertEquals(2, snapshot.producerReadiness.runtimeSources)
+            assertEquals(1, snapshot.producerReadiness.runtimeSources)
             assertEquals(1, snapshot.producerReadiness.heartbeatV6Sources)
-            assertEquals(1, snapshot.producerReadiness.heartbeatUpgradeRequired)
-            assertEquals(0.5, snapshot.producerReadiness.heartbeatV6Ratio)
+            assertEquals(0, snapshot.producerReadiness.heartbeatUpgradeRequired)
+            assertEquals(1.0, snapshot.producerReadiness.heartbeatV6Ratio)
             assertEquals(1, snapshot.producerReadiness.packetMeasurementCompleteSources)
-            assertEquals(1, snapshot.producerReadiness.packetMeasurementGapSources)
-            assertEquals(0.5, snapshot.producerReadiness.packetMeasurementCompleteRatio)
+            assertEquals(0, snapshot.producerReadiness.packetMeasurementGapSources)
+            assertEquals(1.0, snapshot.producerReadiness.packetMeasurementCompleteRatio)
             assertEquals(1, snapshot.producerReadinessTransition.heartbeatV6SourcesDelta)
             assertEquals(0.1, snapshot.producerReadinessTransition.heartbeatV6RatioDelta)
             assertEquals("Bearer desktop-token", authorization.get())
@@ -137,13 +137,13 @@ class ControlCenterVisionClientTest {
           "attention_truncated":false,
           "visionrig_schema_versions":{"bootstrap":31,"catalog":15,"fleet":28},
           "producer_readiness":{
-            "runtime_sources":2,
+            "runtime_sources":1,
             "heartbeat_v6_sources":1,
-            "heartbeat_upgrade_required":1,
-            "heartbeat_v6_ratio":0.5,
+            "heartbeat_upgrade_required":0,
+            "heartbeat_v6_ratio":1.0,
             "packet_measurement_complete_sources":1,
-            "packet_measurement_gap_sources":1,
-            "packet_measurement_complete_ratio":0.5
+            "packet_measurement_gap_sources":0,
+            "packet_measurement_complete_ratio":1.0
           },
           "producer_readiness_transition":{
             "changed_utc":"2026-09-28T05:00:00+00:00",
