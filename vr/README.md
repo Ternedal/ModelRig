@@ -10,7 +10,7 @@ For the whole-product context, see [`docs/KALIV_SYSTEM_DEFINITION.md`](../docs/K
 
 ```mermaid
 flowchart LR
-    CC["Consciousness Core\nLANDED · DORMANT / default-off"] -. "state/guidance" .-> MR["ModelRig backend / worker\nreasoning · memory · tools · semantic intent"]
+    CC["Consciousness Core\nLANDED · DEV ACTIVE / release default-off"] -. "state/guidance" .-> MR["ModelRig backend / worker\nreasoning · memory · tools · semantic intent"]
     LLM["Replaceable LLM"] <--> MR
     VIS["VisionRig\nvisual perception · scene/depth hints"] -. "inferred WorldEvidence" .-> CC
     MR -->|"pairing / bearer / chat"| KVR["Kaliv VR\nKalivVrRenderEngine"]
