@@ -14,6 +14,7 @@ on:
       - "tests/bodyrig/ar_placement_contract.py"
       - "tests/bodyrig/rig_link_contract.py"
       - "tests/bodyrig/android_host_contract.py"
+      - "tests/bodyrig/ar_packages_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
@@ -28,6 +29,7 @@ on:
       - "tests/bodyrig/ar_placement_contract.py"
       - "tests/bodyrig/rig_link_contract.py"
       - "tests/bodyrig/android_host_contract.py"
+      - "tests/bodyrig/ar_packages_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
@@ -78,6 +80,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/bodyrig/android_host_contract.py
+      - name: Validate BodyRig AR package graph
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/ar_packages_contract.py
       - name: Validate BodyRig M2.8 digest-bound renderer handoff
         env:
           PYTHONDONTWRITEBYTECODE: "1"
