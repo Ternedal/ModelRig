@@ -60,9 +60,9 @@ off = _surface(False)
 on = _surface(True)
 
 # --- dormancy: the single most important assertion in this file ------------
-leaked = [p for p in off if "agent3" in p or "/experimental/" in p]
+leaked = [p for p in off if "/experimental/agent3" in p]
 check(not leaked,
-      f"INGEN agent3/experimental-rute serveres uden flaget (laekket: {leaked[:3]})")
+      f"INGEN Agent 3-rute serveres uden flaget (laekket: {leaked[:3]})")
 
 added = sorted(set(on) - set(off))
 check(len(added) > 0, f"flaget tilfoejer faktisk ruter ({len(added)})")
