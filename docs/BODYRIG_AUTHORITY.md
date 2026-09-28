@@ -25,7 +25,7 @@ This ADR resolves authorship. It does not move runtime code and it does not weak
 
 ```mermaid
 flowchart LR
-    CC["Consciousness Core\nupstream cognitive-state architecture\nDRAFT until landed/qualified"]
+    CC["Consciousness Core\nupstream cognitive-state architecture\nLANDED · DORMANT / default-off"]
     LLM["Replaceable LLM\nreasoning capability, not body authority"]
     MR["Ternedal/ModelRig\nAUTHORITY\nreasoning + semantic intent\nBodyRig-facing cue production"]
     VR["VoiceRig\nAUTHORITY\naudio + utterance/viseme timing"]
