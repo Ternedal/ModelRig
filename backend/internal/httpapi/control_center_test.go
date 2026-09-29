@@ -211,6 +211,24 @@ func TestControlCenterVisionEnabledForwardsOnlyBooleanToLoopback(t *testing.T) {
 	}
 }
 
+func TestVisionRigLoopbackBaseURLCanonicalizesLocalhost(t *testing.T) {
+	t.Setenv("KALIV_VISIONRIG_URL", "http://localhost:8110")
+	got, ok := visionRigLoopbackBaseURL()
+	if !ok {
+		t.Fatal("localhost loopback URL was rejected")
+	}
+	if got != "http://127.0.0.1:8110" {
+		t.Fatalf("canonical loopback URL = %q, want literal IPv4 loopback", got)
+	}
+
+	t.Setenv("KALIV_VISIONRIG_URL", "http://[::1]:8110")
+	got, ok = visionRigLoopbackBaseURL()
+	if !ok || got != "http://[::1]:8110" {
+		t.Fatalf("literal IPv6 loopback changed/rejected: %q ok=%v", got, ok)
+	}
+}
+
+
 func TestControlCenterVisionEnabledRejectsExtraFieldsAndNonLoopbackTarget(t *testing.T) {
 	s := &server{}
 
