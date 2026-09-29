@@ -245,6 +245,12 @@ placement, digest-bound remote avatar, authenticated live frame,
 still returns `release_gate_satisfied=false` and
 `production_activation=false`.
 
+The PASS JSON also emits
+`kaliv-body-android-physical-gate:<exact-head>:<sha256>`. The release
+qualification uses both parts: the embedded 40-hex head must equal the pinned
+ModelRig revision, and the trailing SHA-256 content-addresses the independent
+gate result.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
