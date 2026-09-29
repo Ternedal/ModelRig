@@ -40,7 +40,7 @@ evidence reference:
    digest-bound active avatar, live BodyRig frames, ARCore runtime, detected-plane
    placement and explicit human visual acceptance are all evidence-bound. A PASS
    must reference the independent gate's content-addressed
-   `kaliv-body-android-physical-gate:<sha256>` evidence ref; a label/path is not
+   `kaliv-body-android-physical-gate:<modelrig-sha>:<sha256>` evidence ref; the embedded ModelRig SHA must equal the pinned release revision and a label/path is not
    sufficient. The Android gate result must still report
    `production_activation=false`.
 7. `end_to_end_latency` — one correlated real event traverses perception,
