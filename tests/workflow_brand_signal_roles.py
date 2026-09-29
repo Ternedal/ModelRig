@@ -57,6 +57,8 @@ def main() -> int:
     assert "pillDot = KalivTheme.colors.cognition" in app_ui, "active voice route must use Signal"
     control = need("android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt")
     assert "color = KalivTheme.colors.cognition" in control, "Control Center progress must use Signal"
+    rig_status = need("android/app/src/main/java/dk/ternedal/modelrig/ui/chat/RigStatusList.kt")
+    assert "KalivTheme.colors.cognition" in rig_status, "rig telemetry and active models must use Signal"
 
     desktop = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivScreens.kt")
     assert "KalivTheme.colors.Cognition" in desktop, "desktop live telemetry must use Signal"
