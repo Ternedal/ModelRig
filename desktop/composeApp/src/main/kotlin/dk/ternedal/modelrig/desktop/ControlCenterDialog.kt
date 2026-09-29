@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -493,8 +494,17 @@ private fun DesktopControlCenterNeutralCard(content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(KalivTheme.colors.Surface, RoundedCornerShape(12.dp))
-            .padding(12.dp),
+            .background(KalivTheme.colors.Surface, RoundedCornerShape(15.dp))
+            .border(
+                1.dp,
+                when (state) {
+                    "unavailable" -> KalivTheme.colors.Danger.copy(alpha = 0.34f)
+                    "attention", "fallback" -> KalivTheme.colors.Warning.copy(alpha = 0.30f)
+                    else -> KalivTheme.colors.Border
+                },
+                RoundedCornerShape(15.dp),
+            )
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         content()
