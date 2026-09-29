@@ -170,6 +170,7 @@ renderers/bodyrig-unity/Assets/BodyRig/Scenes.meta
 
 # Kaliv Body Android exact-head host qualification: local build/device evidence.
 /validation/kaliv-body-android-latest.json
+/validation/kaliv-body-android-visual-latest.json
 /validation/kaliv-body-android-latest.json.tmp
 /validation/kaliv-body-unity-build.log
 /validation/kaliv-body-android-logcat.txt
