@@ -874,6 +874,15 @@ rendereren er på main; beviset (proof → visuel accept → gate) mangler stadi
 køres mod main's head. #846 er retargetet til main. `agent/bodyrig-unity-
 renderer` er en død gren.
 
+### Statuskorrektion 28/9 — nuværende authority
+
+Afsnittet nedenfor er historik fra 4/9. De faktiske PR-states er siden ændret:
+#846, #858 og #860 er alle lukket uden merge; #861 er merged. Worker/backend-
+live-feedet fra Slice A/B er på main. Den nyttige Unity live-frame-kerne fra
+#846 er isoleret og restacket på current main som **#1920**. AR-placement og
+RigLink fra #858/#860 er fortsat ikke landet og må ikke behandles som aktive
+drafts.
+
 ### I luften 4/9 — læs FØR du bygger noget på kroppen (to sessioner kører)
 
 To sessioner har i dag landet identisk kode uafhængigt af hinanden (#861 og
@@ -912,8 +921,9 @@ Værtsvalget er taget (separat Kaliv Body-app; UaaL som V2) — byg ikke UaaL.
 - Person-værktøjer: `person_bind.py` (#859) binder bodyid/.mrvoice som NY
   reviewet revision. Runbook-kapitler for stemme og rigtig krop.
 
-**Åbent i git nu: kun #846 → #858 → #860 (Unity-drafts).** Alt andet er landet
-eller lukket. Ingen gren bag main.
+**Historisk status 4/9:** dengang var #846 → #858 → #860 de åbne Unity-drafts.
+Pr. 28/9 er de tre PR'er lukket uden merge; #1920 er den nye, minimale
+current-main restack af live-frame-klienten.
 
 Parallelt landede den anden session samme aften ny-rig-bootstrap og komplet
 ModelRig+VoiceRig-migration (`scripts/NEW_RIG_BOOTSTRAP.md`,
@@ -1017,16 +1027,17 @@ ProjectSettings aldrig committet; den genererede proof-scene sporet (#896,
 Windows frigav filen (#899); UniVRM-shaders strippet ud af player-buildet
 (#900, #901).
 
-**Næste:** #846 (frame-kilde) kan nu importeres i Unity og prøves mod
-riggens `/body/frames` — kroppen følger så samtalen i stedet for fixturen.
+**Næste:** #1920 (minimal restack af frame-kilden fra #846) skal kvalificeres
+mod riggens `/body/frames`; når Unity-gaten er grøn, kan kroppen følge samtalen
+i stedet for fixturen.
 
 
 ### Bolden ligger hos Anders
 
 0. **Læs `docs/bodyrig/FIRST_LIVE_BODY.md`** — hele rig-dagen på én side.
 1. **Den fysiske Unity-gate mod main** (Unity i Hub, VRM fra VRoid, `.mrbody`
-   i store + valgt, proof → visuel accept → gate). Derefter #846 (Slice C),
-   der kun kan verificeres ved at kompilere i Unity.
+   i store + valgt, proof → visuel accept → gate). Derefter #1920 (Slice C),
+   som også kræver Unity-kompilering/fysisk proof på sin exact head.
 2. Dev-kanalen, #789-bekræftelse, `person_create.py` — uændret fra 2/9.
 3. `KALIV_BODY_STORE` sættes i appliancens env, når en profil-store findes.
 
