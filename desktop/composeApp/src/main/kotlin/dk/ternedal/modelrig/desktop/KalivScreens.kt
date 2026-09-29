@@ -468,15 +468,15 @@ private fun PrivacySeal() {
     val shape = RoundedCornerShape(11.dp)
     Row(
         Modifier.fillMaxWidth().clip(shape)
-            .background(Color(0x1A9A7136)) // rgba(154,113,54,.1)
-            .border(1.dp, Color(0x339A7136), shape)
+            .background(KalivTheme.colors.Signal.copy(alpha = 0.10f))
+            .border(1.dp, KalivTheme.colors.Signal.copy(alpha = 0.20f), shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("\uD83D\uDD12", color = KalivTheme.colors.Highlight, fontSize = 15.sp) // 🔒
         Spacer(Modifier.width(9.dp))
         Column {
-            Text("100 % lokal", color = Color(0xFFE9DFCE), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text("100 % lokal", color = KalivTheme.colors.TextHigh, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             Text("Intet forlader maskinen", color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp)
         }
     }
