@@ -246,7 +246,7 @@ fun DesktopControlCenterDialog(
                         CircularProgressIndicator(
                             modifier = Modifier.height(22.dp),
                             strokeWidth = 2.dp,
-                            color = KalivTheme.colors.Signal,
+                            color = KalivTheme.colors.Cognition,
                         )
                     }
                     Text(
