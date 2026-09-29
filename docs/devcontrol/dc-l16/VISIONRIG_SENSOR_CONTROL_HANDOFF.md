@@ -29,9 +29,12 @@ The route is mounted only when
 `PATCH /api/v1/control-center/vision/sensors/{sourceID}/enabled`
 
 The backend remains Bearer-authenticated. The request accepts exactly one
-boolean `enabled` field. VisionRig must resolve to loopback. The upstream
-metadata receipt must match both the requested sensor id and resulting enabled
-state before ModelRig returns success.
+boolean `enabled` field. VisionRig must resolve to loopback. A configured
+`localhost` alias is canonicalized to literal `127.0.0.1` before egress so
+the boundary does not depend on later hostname resolution; literal IPv4/IPv6
+loopback addresses remain valid. Redirects are refused. The upstream metadata
+receipt must match both the requested sensor id and resulting enabled state
+before ModelRig returns success.
 
 This handoff grants no generic sensor-metadata mutation, no raw perception or
 frame access, no scheduler/tool execution authority, and no production
