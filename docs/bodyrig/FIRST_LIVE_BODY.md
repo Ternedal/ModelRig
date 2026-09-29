@@ -123,7 +123,7 @@ hendes krop, ikke demo-identitetens. MediaPipe-kravene står i
 På en ren checkout af kandidat-headen:
 
     $sha = (git rev-parse HEAD).Trim()
-    powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 -ExpectedSha $sha -Install -Launch -ProveRigLink -ProveArCore
+    powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 -ExpectedSha $sha -Install -Launch -ProveRigLink -ProveArCore -ProvePlacement -ProveLiveBody
 
 Når host-receiptet også har bevist remote avatar, live frames og detected-plane
 placement, køres den eksplicitte human visual acceptance og derefter:
