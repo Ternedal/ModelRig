@@ -51,9 +51,16 @@ A successful verdict contains:
     production_activation=false
 
 The emitted "evidence_refs" are deterministic SHA-256 references to the exact
-three evidence payloads. One of those references, or the qualification report
-itself, can be supplied as evidence for the "consciousness_live_lifecycle"
-entry in the cross-repository Kaliv release manifest.
+three component evidence payloads. The verdict additionally emits one canonical
+release reference:
+
+    consciousness-live-lifecycle:<exact-modelrig-sha>:<verdict-sha256>
+
+The digest is computed over the complete qualification verdict before
+"release_evidence_ref" is added, so it is stable and non-self-referential.
+The cross-repository Kaliv release manifest must use exactly this canonical
+reference for the "consciousness_live_lifecycle" gate; arbitrary labels or a
+component evidence ref are not sufficient.
 
 ## Fail-closed rules
 
