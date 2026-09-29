@@ -117,13 +117,25 @@ def main() -> int:
 
     for path in LIVE_ANDROID_SURFACES:
         source = need(path)
-        if "CircularProgressIndicator" in source:
-            assert "KalivTheme.colors.signal" not in source, f"{path}: live progress regressed to Ember"
+        offset = 0
+        while True:
+            index = source.find("CircularProgressIndicator", offset)
+            if index < 0:
+                break
+            block = source[index:index + 500]
+            assert "KalivTheme.colors.signal" not in block, f"{path}: live progress regressed to Ember"
+            offset = index + 1
 
     for path in LIVE_DESKTOP_SURFACES:
         source = need(path)
-        if "CircularProgressIndicator" in source:
-            assert "color = KalivTheme.colors.Signal" not in source, f"{path}: live progress regressed to Ember"
+        offset = 0
+        while True:
+            index = source.find("CircularProgressIndicator", offset)
+            if index < 0:
+                break
+            block = source[index:index + 500]
+            assert "color = KalivTheme.colors.Signal" not in block, f"{path}: live progress regressed to Ember"
+            offset = index + 1
 
     for root in (
         ROOT / "android" / "app" / "src" / "main",
