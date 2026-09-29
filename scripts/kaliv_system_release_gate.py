@@ -48,6 +48,9 @@ _END_TO_END_LATENCY_REF = re.compile(
 _BODYRIG_M6_REF = re.compile(
     r"^bodyrig-digital-twin-m6:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
+_BODYRIG_PHOTOREAL_REF = re.compile(
+    r"^bodyrig-photoreal-likeness:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -344,6 +347,23 @@ def _validate_gates(
                 raise SystemReleaseManifestError(
                     "visionrig_physical_perception evidence is bound to a different "
                     "VisionRig Git SHA"
+                )
+        if gate == "bodyrig_photoreal_likeness" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "bodyrig_photoreal_likeness PASS requires exactly one "
+                    "canonical Photoreal evidence ref"
+                )
+            match = _BODYRIG_PHOTOREAL_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "bodyrig_photoreal_likeness PASS requires canonical "
+                    "bodyrig-photoreal-likeness evidence"
+                )
+            if match.group(1) != bodyrig_sha:
+                raise SystemReleaseManifestError(
+                    "bodyrig_photoreal_likeness evidence is bound to a different "
+                    "BodyRig Git SHA"
                 )
         if gate == "bodyrig_digital_twin_m6" and status == "PASS":
             if len(refs) != 1:
