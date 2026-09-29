@@ -169,13 +169,18 @@ def _validate_gates(value: Any, *, modelrig_sha: str) -> tuple[tuple[str, ...], 
             require=status == "PASS",
         )
         if gate == "bodyrig_android_live_body" and status == "PASS":
-            matches = [_ANDROID_LIVE_BODY_REF.fullmatch(ref) for ref in refs]
-            if any(match is None for match in matches):
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "bodyrig_android_live_body PASS requires exactly one "
+                    "independent physical gate evidence ref"
+                )
+            match = _ANDROID_LIVE_BODY_REF.fullmatch(refs[0])
+            if match is None:
                 raise SystemReleaseManifestError(
                     "bodyrig_android_live_body PASS requires exact-head-bound "
                     "kaliv-body-android-physical-gate evidence refs"
                 )
-            if any(match.group(1) != modelrig_sha for match in matches if match is not None):
+            if match.group(1) != modelrig_sha:
                 raise SystemReleaseManifestError(
                     "bodyrig_android_live_body evidence is bound to a different "
                     "ModelRig Git SHA"
