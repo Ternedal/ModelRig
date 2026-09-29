@@ -193,8 +193,25 @@ During the evidence window, tap a detected physical plane. The receipt sets
 path executed after the stronger ARCore runtime qualification; it still does
 not claim human visual acceptance.
 
-After the same exact-head host receipt also proves `live_body_qualified=true`,
-record the five direct human observations:
+Before human acceptance, produce **one combined host receipt** on the same
+exact head. The rolling host receipt is overwritten on each run, so ARCore,
+placement and live-body evidence must be collected together:
+
+```powershell
+$env:KALIV_BODY_RIG_URL = "http://<rig-host>:8080"
+$env:KALIV_BODY_RIG_TOKEN = "<paired-device-token>"
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveLiveBody -ProveArCore -ProvePlacement
+```
+
+That one receipt must contain `rig_link_qualified=true`,
+`arcore_runtime_qualified=true`, `plane_placement_qualified=true`,
+`avatar_from_rig_qualified=true`, `live_frame_qualified=true` and
+`live_body_qualified=true`, while visual/release/production authority stays
+false.
+
+Then record the five direct human observations:
 
 ```powershell
 $sha = (git rev-parse HEAD).Trim()
