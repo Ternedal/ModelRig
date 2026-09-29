@@ -29,13 +29,13 @@ Implement the unified Ember / Signal identity across Android, Windows, Quest and
 - [x] Runtime/loading indicators use Signal blue.
 - [x] Semantic health uses semantic colors, not brand gold.
 - [x] Keep primary user actions Ember/gold.
-- [ ] Verify no local hard-coded Signal literals.
+- [x] Verify no local hard-coded Signal literals.
 
 ## Phase 3 — Windows / ModelRig desktop
 - [x] Live model/runtime/performance visualizations use Signal.
-- [ ] Keep approvals/destructive actions semantic and identity controls Ember.
-- [ ] Active technical telemetry uses Signal consistently.
-- [ ] Remove remaining hand-authored brand-state colors where touched.
+- [x] Keep approvals/destructive actions semantic and identity controls Ember.
+- [x] Active technical telemetry uses Signal consistently.
+- [x] Remove remaining hand-authored brand-state colors where touched.
 
 ## Phase 4 — Quest / VR
 - [x] Replace local palette ownership with named Ember/Signal roles.
