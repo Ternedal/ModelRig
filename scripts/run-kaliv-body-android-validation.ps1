@@ -8,6 +8,7 @@ param(
     [switch]$Launch,
     [switch]$ProveRigLink,
     [switch]$ProveArCore,
+    [switch]$ProvePlacement,
     [switch]$ProveLiveBody,
     [ValidateRange(2, 60)]
     [int]$LaunchEvidenceSeconds = 8
@@ -151,6 +152,7 @@ $fatalPackageCrashObserved = $false
 $rigLinkResolvedFromIntent = $false
 $rigLinkTokenLeakObserved = $false
 $arCoreRuntimeQualified = $false
+$planePlacementQualified = $false
 $avatarFromRigQualified = $false
 $liveFrameQualified = $false
 
@@ -159,6 +161,12 @@ if ($ProveRigLink -and -not $Launch) {
 }
 if ($ProveArCore -and -not $Launch) {
     throw "-ProveArCore requires -Launch."
+}
+if ($ProvePlacement -and -not $Launch) {
+    throw "-ProvePlacement requires -Launch."
+}
+if ($ProvePlacement -and -not $ProveArCore) {
+    throw "-ProvePlacement requires -ProveArCore."
 }
 if ($ProveLiveBody -and -not $Launch) {
     throw "-ProveLiveBody requires -Launch."
@@ -252,6 +260,14 @@ if ($Install -or $Launch) {
                 throw "Kaliv Body did not emit the ARCore runtime qualification marker."
             }
         }
+
+        if ($ProvePlacement) {
+            $planePlacementQualified =
+                $logcatText.Contains("BodyRig: AR avatar placed on detected plane.")
+            if (-not $planePlacementQualified) {
+                throw "Kaliv Body did not prove a successful detected-plane placement. Tap a detected plane during the evidence window."
+            }
+        }
     }
 } else {
     Write-Host "[3/4] ADB install skipped (use -Install or -Launch)"
@@ -281,6 +297,7 @@ $receipt = [ordered]@{
     rig_link_qualified = [bool]$rigLinkResolvedFromIntent
     rig_link_token_leak_observed = [bool]$rigLinkTokenLeakObserved
     arcore_runtime_qualified = [bool]$arCoreRuntimeQualified
+    plane_placement_qualified = [bool]$planePlacementQualified
     avatar_from_rig_qualified = [bool]$avatarFromRigQualified
     live_frame_qualified = [bool]$liveFrameQualified
     live_body_qualified = [bool]($avatarFromRigQualified -and $liveFrameQualified -and $rigLinkResolvedFromIntent)
@@ -305,6 +322,11 @@ if ($ProveArCore) {
     Write-Host "ARCore runtime qualified from active loader/session/camera/plane/raycast evidence."
 } else {
     Write-Host "ARCore runtime remains FALSE (use -ProveArCore with -Launch)."
+}
+if ($ProvePlacement) {
+    Write-Host "Detected-plane placement qualified."
+} else {
+    Write-Host "Plane placement remains FALSE (use -ProvePlacement with -ProveArCore)."
 }
 if ($ProveLiveBody) {
     Write-Host "Live BodyRig qualified: intent RigLink + digest-bound avatar + first applied authenticated frame."
