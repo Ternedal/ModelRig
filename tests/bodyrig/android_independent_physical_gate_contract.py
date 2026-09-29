@@ -48,6 +48,8 @@ for required in (
     "production_activation",
     "directly observed on the physical Android Kaliv Body host",
     "KALIV BODY ANDROID PHYSICAL GATE: PASS",
+    '"evidence_ref"',
+    '"kaliv-body-android-physical-gate:"',
 ):
     check(required in GATE, f"independent gate contains {required}")
 
@@ -89,6 +91,12 @@ check(
     '"production_activation": False' in GATE
     and '"release_gate_satisfied": False' in GATE,
     "gate result cannot activate production or self-satisfy release",
+)
+check(
+    'sort_keys=True' in GATE
+    and 'separators=(",", ":")' in GATE
+    and '"kaliv-body-android-physical-gate:" + hashlib.sha256(canonical).hexdigest()' in GATE,
+    "PASS result issues a deterministic content-addressed release evidence ref",
 )
 for forbidden in (
     '"production_activation": True',
