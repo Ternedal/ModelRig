@@ -544,7 +544,19 @@ class SessionLifecycleTests(unittest.TestCase):
             self.assertTrue(first.context_updated)
             self.assertTrue(second.context_updated)
             self.assertEqual(engine.models, ["model-a", "model-b"])
+            self.assertIn("temporal_context", engine.contexts[0])
+            first_temporal = engine.contexts[0]["temporal_context"]
+            self.assertEqual(
+                first_temporal["schema"],
+                "kaliv-consciousness-core/temporal-context/v1",
+            )
+            self.assertGreaterEqual(first_temporal["session_elapsed_ms"], 0)
+            self.assertTrue(first_temporal["reference_only"])
+            self.assertFalse(first_temporal["identity_authority"])
+            self.assertFalse(first_temporal["persistent_state_authority"])
+            self.assertFalse(first_temporal["execution_authority"])
             self.assertNotIn("present_context", engine.contexts[0])
+            self.assertIn("temporal_context", engine.contexts[1])
             self.assertIn("present_context", engine.contexts[1])
             present = engine.contexts[1]["present_context"]
             self.assertEqual(

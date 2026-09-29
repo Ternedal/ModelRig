@@ -113,3 +113,11 @@ PR'en. Workflowet nægter at køre mod `main`.
   klient-isolation gør alligevel telefonen blind for riggen; brug da
   `adb reverse tcp:8080 tcp:8080` og `http://127.0.0.1:8080` i appen.
 - De to konsolvinduer ER stakken. Luk dem ikke; brug `-Stop`.
+
+## First-cycle temporal sense
+
+ThoughtEngine receives a bounded `temporal_context` from its first RUN. It
+contains trusted-clock-derived day phase, session elapsed time, continuity-gap
+signal and uncertainty, with no identity, persistence, scheduling or execution
+authority. The richer C31-B `present_context` remains available only after an
+actual lived-continuity receipt exists.

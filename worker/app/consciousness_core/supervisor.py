@@ -31,7 +31,7 @@ from .cycle import (
 from .reducer import PostCycleReductionResult, reduce_post_cycle
 from .runtime import ConsciousnessCoreRuntime
 from .self_state import PersistentSelfState, advance_self_state
-from .temporal import ClockSample
+from .temporal import ClockSample, TemporalContextProjection
 
 
 NonEmptyRef = Annotated[str, Field(min_length=1, max_length=256)]
@@ -462,6 +462,7 @@ class CognitionSupervisorKernel:
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
         experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
+        temporal_context: TemporalContextProjection | Mapping[str, Any] | None = None,
         present_context: PresentContextProjection | Mapping[str, Any] | None = None,
         retired_continuity_state: PostWakeContinuityState | None = None,
         retired_continuity_orientation: ContinuityOrientationState | None = None,
@@ -580,6 +581,7 @@ class CognitionSupervisorKernel:
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=continuity_state,
             experience_episode=experience_episode,
+            temporal_context=temporal_context,
             present_context=present_context,
             retired_continuity_state=retired_continuity_state,
             retired_continuity_orientation=retired_continuity_orientation,

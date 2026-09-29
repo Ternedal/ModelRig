@@ -218,3 +218,9 @@ Prove:
 > durable memories.
 
 Capability may improve or degrade. Identity may not be replaced.
+
+### First-cycle temporal context
+
+The runtime supplies authority-free temporal context from the first cognitive
+cycle. C31-B present context remains evidence-bound to an actual prior lived-
+continuity receipt and is not fabricated during bootstrap.

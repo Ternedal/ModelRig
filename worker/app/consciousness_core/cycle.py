@@ -30,6 +30,7 @@ from .episode_context import (
 )
 from .episodes import ExperienceEpisodeState
 from .present_context import PresentContextProjection
+from .temporal import TemporalContextProjection
 from .continuity_orientation import ContinuityOrientationState
 from .continuity_retirement import retire_wake_artifacts_from_model_context
 from .runtime import ConsciousnessCoreRuntime
@@ -151,6 +152,7 @@ class CognitiveContextPacket(StrictModel):
     embodiment_state_ref: NonEmptyRef | None
     continuity: ContinuityContextProjection | None = None
     episode: EpisodeContextProjection | None = None
+    temporal_context: TemporalContextProjection | None = None
     present_context: PresentContextProjection | None = None
     production_activation: Literal[False]
 
@@ -298,6 +300,7 @@ def assemble_thought_request(
     embodiment_state_ref: str | None = None,
     continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
     experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
+    temporal_context: TemporalContextProjection | Mapping[str, Any] | None = None,
     present_context: PresentContextProjection | Mapping[str, Any] | None = None,
     requested_reasoning_mode: ReasoningMode = "normal",
 ) -> tuple[ThoughtRequest, CognitiveContextPacket]:
@@ -341,6 +344,13 @@ def assemble_thought_request(
             else experience_episode
             if isinstance(experience_episode, ExperienceEpisodeState)
             else ExperienceEpisodeState.model_validate(experience_episode)
+        )
+        temporal_context_value = (
+            None
+            if temporal_context is None
+            else temporal_context
+            if isinstance(temporal_context, TemporalContextProjection)
+            else TemporalContextProjection.model_validate(temporal_context)
         )
         present_context_value = (
             None
@@ -409,6 +419,7 @@ def assemble_thought_request(
         embodiment_state_ref=embodiment_state_ref,
         continuity=continuity_projection,
         episode=episode_projection,
+        temporal_context=temporal_context_value,
         present_context=present_context_value,
         production_activation=False,
     )
@@ -422,8 +433,18 @@ def assemble_thought_request(
         "relevant_memory_refs": memories,
         "embodiment_state_ref": embodiment_state_ref,
         "cognitive_profile_ref": profile_ref,
+        "temporal_context_ref": (
+            temporal_context_value.temporal_anchor_ref
+            if temporal_context_value is not None
+            else None
+        ),
         "present_context_ref": (
             present_context_value.lived_continuity_ref
+            if present_context_value is not None
+            else None
+        ),
+        "present_context_temporal_anchor_ref": (
+            present_context_value.temporal_anchor_ref
             if present_context_value is not None
             else None
         ),
@@ -466,6 +487,7 @@ class CognitiveCycleCoordinator:
         embodiment_state_ref: str | None = None,
         continuity_state: PostWakeContinuityState | Mapping[str, Any] | None = None,
         experience_episode: ExperienceEpisodeState | Mapping[str, Any] | None = None,
+        temporal_context: TemporalContextProjection | Mapping[str, Any] | None = None,
         present_context: PresentContextProjection | Mapping[str, Any] | None = None,
         retired_continuity_state: PostWakeContinuityState | None = None,
         retired_continuity_orientation: ContinuityOrientationState | None = None,
@@ -497,6 +519,7 @@ class CognitiveCycleCoordinator:
             embodiment_state_ref=embodiment_state_ref,
             continuity_state=continuity_state,
             experience_episode=experience_episode,
+            temporal_context=temporal_context,
             present_context=present_context,
             requested_reasoning_mode=requested_reasoning_mode,
         )
@@ -509,6 +532,9 @@ class CognitiveCycleCoordinator:
         if packet.episode is None:
             # Keep pre-C30-E no-episode model context shape unchanged.
             context_payload.pop("episode", None)
+
+        if packet.temporal_context is None:
+            context_payload.pop("temporal_context", None)
 
         if packet.present_context is None:
             # Keep pre-C31-B model context shape unchanged.
