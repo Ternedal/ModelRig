@@ -22,7 +22,7 @@ identity.
 
 ## Required gates
 
-All eight gates must be `PASS`, and every PASS must carry at least one explicit
+All nine gates must be `PASS`, and every PASS must carry at least one explicit
 evidence reference:
 
 1. `software_exact_green` — exact pinned repository revisions qualified by their
@@ -35,11 +35,16 @@ evidence reference:
    including required human review, has passed.
 5. `bodyrig_digital_twin_m6` — one coherent Person lineage reaches canonical M6
    with the required physical/human Windows and Quest evidence.
-6. `end_to_end_latency` — one correlated real event traverses perception,
+6. `bodyrig_android_live_body` — the standalone Kaliv Body Android surface has
+   passed its independent exact-head physical gate: authenticated RigLink,
+   digest-bound active avatar, live BodyRig frames, ARCore runtime, detected-plane
+   placement and explicit human visual acceptance are all evidence-bound. The
+   Android receipt must still report `production_activation=false`.
+7. `end_to_end_latency` — one correlated real event traverses perception,
    cognition and outward voice/body behavior with measured latency evidence.
-7. `recovery_soak` — the pinned system passes the agreed restart/recovery and
+8. `recovery_soak` — the pinned system passes the agreed restart/recovery and
    long-running soak campaign.
-8. `repository_authority` — the repositories used for the release are protected
+9. `repository_authority` — the repositories used for the release are protected
    by the accepted exact-green merge authority.
 
 A missing or failed gate yields `BLOCKED`. A PASS without evidence is malformed,
@@ -78,6 +83,7 @@ human-review, physical-rig, soak or production-activation evidence.
     "visionrig_physical_perception": {"status": "PENDING", "evidence_refs": []},
     "bodyrig_photoreal_likeness": {"status": "PENDING", "evidence_refs": []},
     "bodyrig_digital_twin_m6": {"status": "PENDING", "evidence_refs": []},
+    "bodyrig_android_live_body": {"status": "PENDING", "evidence_refs": []},
     "end_to_end_latency": {"status": "PENDING", "evidence_refs": []},
     "recovery_soak": {"status": "PENDING", "evidence_refs": []},
     "repository_authority": {"status": "PENDING", "evidence_refs": []}
@@ -92,5 +98,5 @@ Run:
 python scripts/kaliv_system_release_gate.py .\path\to\kaliv-release-manifest.json
 ```
 
-Exit code 0 means all eight evidence gates qualify. Exit code 1 means a valid
+Exit code 0 means all nine evidence gates qualify. Exit code 1 means a valid
 manifest is still blocked. Exit code 2 means the manifest itself is invalid.
