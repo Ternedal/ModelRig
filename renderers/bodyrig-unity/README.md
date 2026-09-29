@@ -123,11 +123,15 @@ On Android, a resolved RigLink now also starts
 2. requires `schema=modelrig-body-assets/v1`, canonical `body_id` and
    lowercase 64-hex `package_sha256`;
 3. GETs `/api/v1/body/active/avatar.vrm` with redirects disabled;
-4. requires the body/package response headers to match the manifest and requires
-   `X-BodyRig-Member-SHA256`;
-5. verifies the downloaded bytes against that member digest;
-6. commits only the verified VRM into `Application.persistentDataPath`; and
-7. hands the cached path to the existing `BodyRigVrmLoader`.
+4. fetches `/api/v1/body/active/bodyprint.json`, requires matching
+   body/package/member headers, verifies its SHA-256 and accepts only
+   `modelrig-bodyprint` v1 with a finite `height_scale <= 4`;
+5. requires the avatar body/package response headers to match the manifest and
+   requires `X-BodyRig-Member-SHA256`;
+6. verifies the downloaded avatar bytes against that member digest;
+7. commits only the verified VRM into `Application.persistentDataPath`;
+8. hands the cached path to the existing `BodyRigVrmLoader`; and
+9. applies the verified BodyPrint `height_scale` to the returned VRM instance.
 
 The network component never parses VRM, binds the renderer, owns AR placement or
 logs the device token. Desktop keeps its existing local
