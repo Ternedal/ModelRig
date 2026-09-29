@@ -58,6 +58,12 @@ if ([string]$host.exact_head -ne $actualSha) {
 if ([bool]$host.production_activation -ne $false) {
     throw "Host receipt unexpectedly activated production."
 }
+if ([bool]$host.release_gate_satisfied -ne $false) {
+    throw "Host receipt unexpectedly self-satisfied the release gate."
+}
+if ([bool]$host.visual_acceptance -ne $false) {
+    throw "Host receipt may not self-assert visual acceptance."
+}
 if (-not [bool]$host.installed -or -not [bool]$host.launched) {
     throw "Host receipt does not prove physical install + launch."
 }
