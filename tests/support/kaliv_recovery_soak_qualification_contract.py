@@ -81,6 +81,10 @@ def run_contract() -> None:
     assert q.sample_count == 3
     assert q.max_observed_gap_seconds == 3600
     assert tuple(q.required_recovery_kinds) == gate._REQUIRED_RECOVERY_KINDS
+    assert q.release_evidence_ref.startswith(
+        "kaliv-recovery-soak:" + "a" * 40 + ":"
+    )
+    assert len(q.release_evidence_ref.rsplit(":", 1)[1]) == 64
 
     short = copy.deepcopy(valid)
     short["policy"]["required_duration_seconds"] = 7201
