@@ -115,6 +115,22 @@ value and fails if it appears, then records only
 `rig_link_qualified=true` / `rig_link_token_leak_observed=false`. The rig URL
 and token themselves are never written to the receipt.
 
+
+To qualify the **ARCore runtime** on the same exact head without claiming visual
+placement acceptance:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveArCore
+```
+
+`-ProveArCore` requires the runtime marker emitted only after the active loader
+is `ARCoreLoader`, `ARSession.state == SessionTracking`, camera/plane/raycast
+subsystems are running, and the AR camera background has received a frame. The
+receipt may then set `arcore_runtime_qualified=true`; visual acceptance,
+release-gate satisfaction and production activation remain false.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
