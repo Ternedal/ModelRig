@@ -62,6 +62,7 @@ def main() -> int:
 
     desktop = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivScreens.kt")
     assert "KalivTheme.colors.Cognition" in desktop, "desktop live telemetry must use Signal"
+    assert "KalivTheme.colors.CognitionLight" in desktop, "active desktop model must expose Signal runtime state"
     desktop_cc = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt")
     assert "\"healthy\" -> KalivTheme.colors.Success" in desktop_cc, "health must stay semantic"
     assert "color = KalivTheme.colors.Cognition" in desktop_cc, "live Control Center progress must use Signal"
