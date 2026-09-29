@@ -180,6 +180,13 @@ def validate(
     logcat_path, logcat_sha, logcat_bytes = _hash_file(
         host.get("logcat_path"), label="logcat", maximum=MAX_LOG_BYTES
     )
+    expected_logcat_sha = _require_sha256(
+        host.get("logcat_sha256"), label="host.logcat_sha256"
+    )
+    if logcat_sha != expected_logcat_sha:
+        raise AndroidPhysicalGateError("logcat SHA-256 mismatch")
+    if host.get("logcat_size_bytes") != logcat_bytes:
+        raise AndroidPhysicalGateError("logcat byte count mismatch")
 
     host_time = _parse_time(host.get("timestamp_utc"), label="host")
     visual_time = _parse_time(visual.get("accepted_at"), label="visual")
