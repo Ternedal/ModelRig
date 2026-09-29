@@ -7,6 +7,7 @@ param(
     [switch]$Install,
     [switch]$Launch,
     [switch]$ProveRigLink,
+    [switch]$ProveArCore,
     [ValidateRange(2, 60)]
     [int]$LaunchEvidenceSeconds = 8
 )
@@ -148,9 +149,15 @@ $androidVersion = $null
 $fatalPackageCrashObserved = $false
 $rigLinkResolvedFromIntent = $false
 $rigLinkTokenLeakObserved = $false
+$arCoreSessionTrackingObserved = $false
+$arCoreUnsupportedObserved = $false
+$arCoreNeedsInstallObserved = $false
 
 if ($ProveRigLink -and -not $Launch) {
     throw "-ProveRigLink requires -Launch."
+}
+if ($ProveArCore -and -not $Launch) {
+    throw "-ProveArCore requires -Launch."
 }
 if ($ProveRigLink) {
     if ([string]::IsNullOrWhiteSpace($env:KALIV_BODY_RIG_URL) -or
@@ -218,6 +225,24 @@ if ($Install -or $Launch) {
                 throw "Kaliv Body did not emit the intent RigLink resolution marker."
             }
         }
+
+        if ($ProveArCore) {
+            $arCoreSessionTrackingObserved =
+                $logcatText.Contains("BodyRig: AR session tracking.")
+            $arCoreUnsupportedObserved =
+                $logcatText.Contains("BodyRig: AR session unsupported.")
+            $arCoreNeedsInstallObserved =
+                $logcatText.Contains("BodyRig: AR session needs install.")
+            if ($arCoreUnsupportedObserved) {
+                throw "Kaliv Body reported ARSessionState.Unsupported."
+            }
+            if ($arCoreNeedsInstallObserved) {
+                throw "Kaliv Body reported ARSessionState.NeedsInstall."
+            }
+            if (-not $arCoreSessionTrackingObserved) {
+                throw "Kaliv Body did not reach ARSessionState.SessionTracking."
+            }
+        }
     }
 } else {
     Write-Host "[3/4] ADB install skipped (use -Install or -Launch)"
@@ -246,7 +271,9 @@ $receipt = [ordered]@{
     fatal_package_crash_observed = $fatalPackageCrashObserved
     rig_link_qualified = [bool]$rigLinkResolvedFromIntent
     rig_link_token_leak_observed = [bool]$rigLinkTokenLeakObserved
-    arcore_runtime_qualified = $false
+    arcore_runtime_qualified = [bool]$arCoreSessionTrackingObserved
+    arcore_unsupported_observed = [bool]$arCoreUnsupportedObserved
+    arcore_needs_install_observed = [bool]$arCoreNeedsInstallObserved
     visual_acceptance = $false
     release_gate_satisfied = $false
 }
@@ -264,4 +291,9 @@ if ($ProveRigLink) {
 } else {
     Write-Host "RigLink remains FALSE (use -ProveRigLink with KALIV_BODY_RIG_URL/TOKEN)."
 }
-Write-Host "ARCore runtime, visual acceptance and production activation remain FALSE."
+if ($ProveArCore) {
+    Write-Host "ARCore runtime qualified at ARSessionState.SessionTracking."
+} else {
+    Write-Host "ARCore runtime remains FALSE (use -ProveArCore with -Launch)."
+}
+Write-Host "Visual acceptance and production activation remain FALSE."
