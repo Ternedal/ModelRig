@@ -53,9 +53,16 @@ def main() -> int:
 
     voice = need("android/app/src/main/java/dk/ternedal/modelrig/ui/chat/VoiceScreen.kt")
     assert "KalivTheme.colors.cognition" in voice, "voice activity must use Signal"
+    app_ui = need("android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt")
+    assert "pillDot = KalivTheme.colors.cognition" in app_ui, "active voice route must use Signal"
+    control = need("android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt")
+    assert "color = KalivTheme.colors.cognition" in control, "Control Center progress must use Signal"
 
     desktop = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivScreens.kt")
     assert "KalivTheme.colors.Cognition" in desktop, "desktop live telemetry must use Signal"
+    desktop_cc = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt")
+    assert "\"healthy\" -> KalivTheme.colors.Success" in desktop_cc, "health must stay semantic"
+    assert "color = KalivTheme.colors.Cognition" in desktop_cc, "live Control Center progress must use Signal"
 
     vr_brand = need("vr/Assets/Scripts/KalivVrBrand.cs")
     vr_panel = need("vr/Assets/Scripts/KalivVrPanel.cs")
