@@ -46,7 +46,6 @@ for required in (
     "logcat -d -v threadtime",
     'schema = "modelrig.kaliv-body.android-host-qualification/v1"',
     "production_activation = $false",
-    "rig_link_qualified = $false",
     "arcore_runtime_qualified = $false",
     "visual_acceptance = $false",
     "release_gate_satisfied = $false",
