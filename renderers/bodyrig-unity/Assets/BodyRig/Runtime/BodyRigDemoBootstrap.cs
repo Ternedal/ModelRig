@@ -27,24 +27,35 @@ namespace ModelRig.BodyRig.UnityRenderer
             loader.LoadOnStart = true;
 
 #if BODYRIG_AR
-            // Placement lives on the always-active controller root. The loader
-            // hands it the loaded VRM child after a successful renderer bind;
-            // hiding that child must never disable this controller itself.
             var placement = root.AddComponent<BodyRigArPlacement>();
             placement.Loader = loader;
 #endif
 
-            // Frame source: the rig's live stream when a rig is named, otherwise
-            // the deterministic fixture -- the physical proof runs unchanged
-            // with both env vars unset.
+            // Desktop keeps the deterministic fixture unless environment
+            // authority is explicitly mentioned. Android always resolves through
+            // BodyRigRigLink because Kaliv supplies the rig via package-pinned
+            // intent extras. Partial environment authority is still explicit and
+            // therefore fails closed instead of falling back to intent/fixture.
             var rigUrl = Environment.GetEnvironmentVariable("BODYRIG_RIG_URL");
             var rigToken = Environment.GetEnvironmentVariable("BODYRIG_RIG_TOKEN");
-            if (!string.IsNullOrWhiteSpace(rigUrl) && !string.IsNullOrWhiteSpace(rigToken))
+            var environmentMentioned =
+                !string.IsNullOrWhiteSpace(rigUrl) || !string.IsNullOrWhiteSpace(rigToken);
+            var liveRequested = environmentMentioned
+                || Application.platform == RuntimePlatform.Android;
+            if (liveRequested)
             {
-                var source = root.AddComponent<BodyRigFrameSource>();
-                source.Renderer = renderer;
-                source.BaseUrl = rigUrl;
-                source.Token = rigToken;
+                var link = root.AddComponent<BodyRigRigLink>();
+                link.Resolved += (url, token) =>
+                {
+                    if (root.GetComponent<BodyRigFrameSource>() != null)
+                    {
+                        return;
+                    }
+                    var source = root.AddComponent<BodyRigFrameSource>();
+                    source.Renderer = renderer;
+                    source.BaseUrl = url;
+                    source.Token = token;
+                };
                 return;
             }
 
