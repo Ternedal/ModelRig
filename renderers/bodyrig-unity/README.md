@@ -115,6 +115,20 @@ value and fails if it appears, then records only
 `rig_link_qualified=true` / `rig_link_token_leak_observed=false`. The rig URL
 and token themselves are never written to the receipt.
 
+To additionally prove the physical **ARCore runtime** (without claiming visual
+placement acceptance):
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveArCore
+```
+
+This requires logcat to reach `BodyRig: AR session tracking.` and fails closed
+if the app reports `AR session unsupported` or `AR session needs install`.
+Only then does the receipt set `arcore_runtime_qualified=true`. Visual
+placement acceptance and production activation remain separate and false.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
