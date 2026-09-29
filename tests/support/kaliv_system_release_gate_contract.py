@@ -26,6 +26,8 @@ def _evidence_ref(name: str) -> str:
             + "4" * 40 + ":"
             + "7" * 64
         )
+    if name == "bodyrig_photoreal_likeness":
+        return "bodyrig-photoreal-likeness:" + "2" * 40 + ":" + "d" * 64
     if name == "bodyrig_digital_twin_m6":
         return "bodyrig-digital-twin-m6:" + "2" * 40 + ":" + "f" * 64
     if name == "bodyrig_android_live_body":
@@ -301,6 +303,34 @@ def run_contract() -> None:
     _must_reject(
         vision_multiple_refs,
         "requires exactly one physical qualification evidence ref",
+    )
+
+    photoreal_mutable_ref = copy.deepcopy(valid)
+    photoreal_mutable_ref["gates"]["bodyrig_photoreal_likeness"]["evidence_refs"] = [
+        "operator-says-photoreal-passed"
+    ]
+    _must_reject(
+        photoreal_mutable_ref,
+        "requires canonical bodyrig-photoreal-likeness evidence",
+    )
+
+    photoreal_wrong_body = copy.deepcopy(valid)
+    photoreal_wrong_body["gates"]["bodyrig_photoreal_likeness"]["evidence_refs"] = [
+        "bodyrig-photoreal-likeness:" + "f" * 40 + ":" + "d" * 64
+    ]
+    _must_reject(
+        photoreal_wrong_body,
+        "bound to a different BodyRig Git SHA",
+    )
+
+    photoreal_multiple_refs = copy.deepcopy(valid)
+    photoreal_multiple_refs["gates"]["bodyrig_photoreal_likeness"]["evidence_refs"] = [
+        "bodyrig-photoreal-likeness:" + "2" * 40 + ":" + "d" * 64,
+        "bodyrig-photoreal-likeness:" + "2" * 40 + ":" + "e" * 64,
+    ]
+    _must_reject(
+        photoreal_multiple_refs,
+        "requires exactly one canonical Photoreal evidence ref",
     )
 
     m6_mutable_ref = copy.deepcopy(valid)
