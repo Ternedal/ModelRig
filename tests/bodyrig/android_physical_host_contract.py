@@ -55,6 +55,9 @@ for required in (
     "bodyrig_rig_token",
     "BodyRig: rig link resolved from intent (",
     "rig_link_token_leak_observed",
+    "[switch]$ProvePlacement",
+    "BodyRig: AR avatar placed on detected plane.",
+    "plane_placement_qualified",
 ):
     check(required in SCRIPT, f"physical host qualifier contains {required}")
 
@@ -82,6 +85,17 @@ for forbidden in (
     "visual_acceptance = $true",
 ):
     check(forbidden not in SCRIPT, f"qualifier does not overclaim authority: {forbidden}")
+
+check(
+    "-ProvePlacement requires -Launch." in SCRIPT
+    and "-ProvePlacement requires -ProveArCore." in SCRIPT,
+    "placement proof requires a launched, ARCore-qualified physical session",
+)
+check(
+    "plane_placement_qualified = [bool]$planePlacementQualified" in SCRIPT
+    and 'BodyRig: AR avatar placed on detected plane.' in SCRIPT,
+    "plane-placement qualification is bound to the detected-plane marker",
+)
 
 check(
     '$env:KALIV_BODY_RIG_TOKEN' in SCRIPT
