@@ -56,7 +56,10 @@ namespace ModelRig.BodyRig.UnityRenderer
                 Debug.LogWarning(
                     "BodyRig: AR placement needs BodyRigVrmLoader and ARRaycastManager; avatar stays hidden.");
                 enabled = false;
+                return;
             }
+
+            Debug.Log("BodyRig: AR placement runtime ready.");
         }
 
         /// <summary>
