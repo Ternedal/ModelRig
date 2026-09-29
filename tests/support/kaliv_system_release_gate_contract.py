@@ -34,7 +34,7 @@ def _manifest() -> dict:
                 "status": "PASS",
                 "evidence_refs": [
                     (
-                        "kaliv-body-android-physical-gate:" + "a" * 64
+                        "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
                         if name == "bodyrig_android_live_body"
                         else f"evidence:{name}:1"
                     )
@@ -89,7 +89,16 @@ def run_contract() -> None:
     ]
     _must_reject(
         android_mutable_ref,
-        "requires digest-bound kaliv-body-android-physical-gate evidence refs",
+        "requires exact-head-bound kaliv-body-android-physical-gate evidence refs",
+    )
+
+    android_wrong_head = copy.deepcopy(valid)
+    android_wrong_head["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+        "kaliv-body-android-physical-gate:" + "f" * 40 + ":" + "b" * 64
+    ]
+    _must_reject(
+        android_wrong_head,
+        "bound to a different ModelRig Git SHA",
     )
 
     failed = copy.deepcopy(valid)
