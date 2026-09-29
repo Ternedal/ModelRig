@@ -9,6 +9,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS = ROOT / "assets/design/kaliv-ui-guide/kaliv-ui-tokens.json"
 
+ALLOWED_SIGNAL_LITERAL_PATHS = {
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/theme/KalivTokens.kt",
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivTokens.kt",
+    "vr/Assets/Scripts/KalivVrBrand.cs",
+}
+
+CANONICAL_SIGNAL_LITERALS = (
+    "#48C7FF", "#73D6FF", "#159FDB", "#0B5F8C",
+    "0xFF48C7FF", "0xFF73D6FF", "0xFF159FDB", "0xFF0B5F8C", "0x3848C7FF",
+)
+
 LIVE_ANDROID_SURFACES = (
     "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScheduleHistoryLoader.kt",
     "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt",
@@ -113,6 +124,21 @@ def main() -> int:
         source = need(path)
         if "CircularProgressIndicator" in source:
             assert "color = KalivTheme.colors.Signal" not in source, f"{path}: live progress regressed to Ember"
+
+    for root in (
+        ROOT / "android" / "app" / "src" / "main",
+        ROOT / "desktop" / "composeApp" / "src" / "main",
+        ROOT / "vr" / "Assets" / "Scripts",
+    ):
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in {".kt", ".cs"}:
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            if rel in ALLOWED_SIGNAL_LITERAL_PATHS:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for literal in CANONICAL_SIGNAL_LITERALS:
+                assert literal not in source, f"{rel}: hard-coded canonical Signal literal {literal}"
 
     css = need("assets/design/kaliv-ui-guide/kaliv-ui-tokens.css")
     assert "--kaliv-signal: #48C7FF;" in css
