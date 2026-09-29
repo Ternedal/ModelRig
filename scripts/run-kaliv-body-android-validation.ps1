@@ -194,24 +194,48 @@ if ($Install -or $Launch) {
         }
         $launched = $true
 
-        Start-Sleep -Seconds $LaunchEvidenceSeconds
-        $pidText = (& $adb -s $device shell pidof $appId 2>$null | Out-String).Trim()
-        if ([string]::IsNullOrWhiteSpace($pidText)) {
-            throw "Kaliv Body launch returned success, but no running app process was observed."
-        }
-        $appPid = $pidText
+        $deadline = [DateTime]::UtcNow.AddSeconds($LaunchEvidenceSeconds)
+        $logcatText = ""
+        do {
+            Start-Sleep -Seconds 1
 
-        $logcat = & $adb -s $device logcat -d -v threadtime 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "Failed to capture device logcat after launch." }
-        $logcatText = ($logcat -join [Environment]::NewLine)
+            $pidText = (& $adb -s $device shell pidof $appId 2>$null | Out-String).Trim()
+            if ([string]::IsNullOrWhiteSpace($pidText)) {
+                throw "Kaliv Body launch returned success, but no running app process was observed."
+            }
+            $appPid = $pidText
+
+            $logcat = & $adb -s $device logcat -d -v threadtime 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "Failed to capture device logcat after launch." }
+            $logcatText = ($logcat -join [Environment]::NewLine)
+
+            $fatalPackageCrashObserved =
+                $logcatText.Contains("FATAL EXCEPTION") -and
+                $logcatText.Contains($appId)
+            if ($fatalPackageCrashObserved) {
+                $logcatText | Set-Content -LiteralPath $logcatPath -Encoding utf8
+                throw "Kaliv Body package emitted a FATAL EXCEPTION after launch. See $logcatPath"
+            }
+
+            if (-not $ProveArCore) {
+                break
+            }
+
+            $arCoreSessionTrackingObserved =
+                $logcatText.Contains("BodyRig: AR session tracking.")
+            $arCoreUnsupportedObserved =
+                $logcatText.Contains("BodyRig: AR session unsupported.")
+            $arCoreNeedsInstallObserved =
+                $logcatText.Contains("BodyRig: AR session needs install.")
+
+            if ($arCoreUnsupportedObserved -or
+                $arCoreNeedsInstallObserved -or
+                $arCoreSessionTrackingObserved) {
+                break
+            }
+        } while ([DateTime]::UtcNow -lt $deadline)
+
         $logcatText | Set-Content -LiteralPath $logcatPath -Encoding utf8
-
-        $fatalPackageCrashObserved =
-            $logcatText.Contains("FATAL EXCEPTION") -and
-            $logcatText.Contains($appId)
-        if ($fatalPackageCrashObserved) {
-            throw "Kaliv Body package emitted a FATAL EXCEPTION after launch. See $logcatPath"
-        }
 
         if ($ProveRigLink) {
             $rigLinkResolvedFromIntent =
@@ -227,12 +251,6 @@ if ($Install -or $Launch) {
         }
 
         if ($ProveArCore) {
-            $arCoreSessionTrackingObserved =
-                $logcatText.Contains("BodyRig: AR session tracking.")
-            $arCoreUnsupportedObserved =
-                $logcatText.Contains("BodyRig: AR session unsupported.")
-            $arCoreNeedsInstallObserved =
-                $logcatText.Contains("BodyRig: AR session needs install.")
             if ($arCoreUnsupportedObserved) {
                 throw "Kaliv Body reported ARSessionState.Unsupported."
             }
