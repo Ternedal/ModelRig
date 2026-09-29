@@ -35,6 +35,11 @@ namespace Kaliv.VR
         internal static readonly Color Success = Hex("#77836D");
         internal static readonly Color Danger = Hex("#C96B5D");
 
+        // World-space interaction targets: visual controls may be slimmer, but
+        // the collider must remain comfortably targetable in-headset.
+        internal const float MinWorldButtonHeight = 56f;
+        internal const float MinWorldButtonWidth = 96f;
+
         private static Color Hex(string value)
         {
             ColorUtility.TryParseHtmlString(value, out Color color);
