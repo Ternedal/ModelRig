@@ -88,12 +88,11 @@ def _modelrig_evidence_matches_pin(evidence_sha: str, pinned_sha: str) -> bool:
             stderr=subprocess.PIPE,
             text=True,
         )
-    except subprocess.CalledProcessError as exc:
-        if exc.returncode == 1:
-            return False
-        raise SystemReleaseManifestError(
-            "cannot verify ModelRig evidence ancestry"
-        ) from exc
+    except subprocess.CalledProcessError:
+        # Non-ancestor and unknown/unavailable commit objects are both
+        # non-equivalent evidence. Fail closed without converting this into an
+        # infrastructure authority error.
+        return False
     except OSError as exc:
         raise SystemReleaseManifestError(
             "cannot verify ModelRig evidence ancestry"
