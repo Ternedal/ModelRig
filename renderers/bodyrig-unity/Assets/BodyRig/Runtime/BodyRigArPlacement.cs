@@ -26,6 +26,7 @@ namespace ModelRig.BodyRig.UnityRenderer
         private Pose pendingPose;
         private bool hasPendingPose;
         private bool placed;
+        private bool arTrackingReady;
 
         public BodyRigVrmLoader Loader
         {
@@ -40,6 +41,21 @@ namespace ModelRig.BodyRig.UnityRenderer
         }
 
         public bool IsPlaced => placed;
+        public bool IsArTrackingReady => arTrackingReady;
+
+        private void OnEnable()
+        {
+            ARSession.stateChanged += OnArSessionStateChanged;
+            if (ARSession.state == ARSessionState.SessionTracking)
+            {
+                MarkArTrackingReady();
+            }
+        }
+
+        private void OnDisable()
+        {
+            ARSession.stateChanged -= OnArSessionStateChanged;
+        }
 
         private void Start()
         {
@@ -60,6 +76,24 @@ namespace ModelRig.BodyRig.UnityRenderer
             }
 
             Debug.Log("BodyRig: AR placement runtime ready.");
+        }
+
+        private void OnArSessionStateChanged(ARSessionStateChangedEventArgs args)
+        {
+            if (args.state == ARSessionState.SessionTracking)
+            {
+                MarkArTrackingReady();
+            }
+        }
+
+        private void MarkArTrackingReady()
+        {
+            if (arTrackingReady)
+            {
+                return;
+            }
+            arTrackingReady = true;
+            Debug.Log("BodyRig: ARCore runtime tracking.");
         }
 
         /// <summary>
