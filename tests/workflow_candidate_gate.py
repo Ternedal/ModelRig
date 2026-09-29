@@ -307,6 +307,20 @@ with tempfile.TemporaryDirectory(prefix="candidate-gate-reject-") as rej_dir:
         module.freeze.load_receipt = old_freeze
         module.release_gate.validate_attestation = old_browser
 
+# The repository-local candidate gate is not the final system release gate.
+# Run the cross-repository contract here so a future weakening cannot silently
+# turn exact-green ModelRig into a claim that the whole Kaliv system is ready.
+SYSTEM_GATE_SPEC = importlib.util.spec_from_file_location(
+    "kaliv_system_release_gate_support",
+    ROOT / "tests" / "support" / "kaliv_system_release_gate_contract.py",
+)
+assert SYSTEM_GATE_SPEC and SYSTEM_GATE_SPEC.loader
+system_gate_contract = importlib.util.module_from_spec(SYSTEM_GATE_SPEC)
+sys.modules[SYSTEM_GATE_SPEC.name] = system_gate_contract
+SYSTEM_GATE_SPEC.loader.exec_module(system_gate_contract)
+system_gate_contract.run_contract()
+check(True, "cross-repository Kaliv system release gate remains fail-closed")
+
 print(f"candidate final gate contracts: {passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)
