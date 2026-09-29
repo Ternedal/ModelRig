@@ -8,6 +8,7 @@ param(
     [switch]$Launch,
     [switch]$ProveRigLink,
     [switch]$ProveArCore,
+    [switch]$ProveLiveBody,
     [ValidateRange(2, 60)]
     [int]$LaunchEvidenceSeconds = 8
 )
@@ -150,6 +151,8 @@ $fatalPackageCrashObserved = $false
 $rigLinkResolvedFromIntent = $false
 $rigLinkTokenLeakObserved = $false
 $arCoreRuntimeQualified = $false
+$avatarFromRigQualified = $false
+$liveFrameQualified = $false
 
 if ($ProveRigLink -and -not $Launch) {
     throw "-ProveRigLink requires -Launch."
@@ -157,10 +160,14 @@ if ($ProveRigLink -and -not $Launch) {
 if ($ProveArCore -and -not $Launch) {
     throw "-ProveArCore requires -Launch."
 }
-if ($ProveRigLink) {
+if ($ProveLiveBody -and -not $Launch) {
+    throw "-ProveLiveBody requires -Launch."
+}
+$useRigLinkIntent = $ProveRigLink -or $ProveLiveBody
+if ($useRigLinkIntent) {
     if ([string]::IsNullOrWhiteSpace($env:KALIV_BODY_RIG_URL) -or
         [string]::IsNullOrWhiteSpace($env:KALIV_BODY_RIG_TOKEN)) {
-        throw "-ProveRigLink requires KALIV_BODY_RIG_URL and KALIV_BODY_RIG_TOKEN."
+        throw "RigLink/live-body proof requires KALIV_BODY_RIG_URL and KALIV_BODY_RIG_TOKEN."
     }
 }
 
@@ -179,7 +186,7 @@ if ($Install -or $Launch) {
         $deviceModel = (& $adb -s $device shell getprop ro.product.model 2>$null | Out-String).Trim()
         $androidVersion = (& $adb -s $device shell getprop ro.build.version.release 2>$null | Out-String).Trim()
 
-        if ($ProveRigLink) {
+        if ($useRigLinkIntent) {
             $launchCommand = 'am start -W -S -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ' +
                 $appId +
                 ' --es bodyrig_rig_url "' + $env:KALIV_BODY_RIG_URL +
@@ -211,7 +218,7 @@ if ($Install -or $Launch) {
             throw "Kaliv Body package emitted a FATAL EXCEPTION after launch. See $logcatPath"
         }
 
-        if ($ProveRigLink) {
+        if ($useRigLinkIntent) {
             $rigLinkResolvedFromIntent =
                 $logcatText.Contains("BodyRig: rig link resolved from intent (")
             $rigLinkTokenLeakObserved =
@@ -221,6 +228,19 @@ if ($Install -or $Launch) {
             }
             if (-not $rigLinkResolvedFromIntent) {
                 throw "Kaliv Body did not emit the intent RigLink resolution marker."
+            }
+        }
+
+        if ($ProveLiveBody) {
+            $avatarFromRigQualified =
+                $logcatText.Contains("BodyRig: active avatar loaded from rig (")
+            $liveFrameQualified =
+                $logcatText.Contains("BodyRig: first authenticated live frame applied (")
+            if (-not $avatarFromRigQualified) {
+                throw "Kaliv Body did not prove a digest-bound active avatar load from the rig."
+            }
+            if (-not $liveFrameQualified) {
+                throw "Kaliv Body did not prove an authenticated live frame reached renderer.Apply()."
             }
         }
 
@@ -261,6 +281,9 @@ $receipt = [ordered]@{
     rig_link_qualified = [bool]$rigLinkResolvedFromIntent
     rig_link_token_leak_observed = [bool]$rigLinkTokenLeakObserved
     arcore_runtime_qualified = [bool]$arCoreRuntimeQualified
+    avatar_from_rig_qualified = [bool]$avatarFromRigQualified
+    live_frame_qualified = [bool]$liveFrameQualified
+    live_body_qualified = [bool]($avatarFromRigQualified -and $liveFrameQualified -and $rigLinkResolvedFromIntent)
     visual_acceptance = $false
     release_gate_satisfied = $false
 }
@@ -282,5 +305,10 @@ if ($ProveArCore) {
     Write-Host "ARCore runtime qualified from active loader/session/camera/plane/raycast evidence."
 } else {
     Write-Host "ARCore runtime remains FALSE (use -ProveArCore with -Launch)."
+}
+if ($ProveLiveBody) {
+    Write-Host "Live BodyRig qualified: intent RigLink + digest-bound avatar + first applied authenticated frame."
+} else {
+    Write-Host "Live BodyRig remains FALSE (use -ProveLiveBody with rig URL/token)."
 }
 Write-Host "Visual acceptance and production activation remain FALSE."
