@@ -19,6 +19,7 @@ SCHEMA = "kaliv-system-release-manifest/v1"
 VERDICT_SCHEMA = "kaliv-system-release-verdict/v1"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _RELEASE_ID = re.compile(r"^kaliv-rc-[A-Za-z0-9._-]{1,64}$")
+_ANDROID_LIVE_BODY_REF = re.compile(r"^kaliv-body-android-physical-gate:[0-9a-f]{64}$")
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -162,11 +163,20 @@ def _validate_gates(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
             raise SystemReleaseManifestError(
                 f"{gate}.status must be PASS, PENDING or FAIL"
             )
-        _validate_evidence_refs(
+        refs = _validate_evidence_refs(
             entry["evidence_refs"],
             gate,
             require=status == "PASS",
         )
+        if (
+            gate == "bodyrig_android_live_body"
+            and status == "PASS"
+            and any(_ANDROID_LIVE_BODY_REF.fullmatch(ref) is None for ref in refs)
+        ):
+            raise SystemReleaseManifestError(
+                "bodyrig_android_live_body PASS requires digest-bound "
+                "kaliv-body-android-physical-gate evidence refs"
+            )
         if status == "PENDING":
             pending.append(gate)
         elif status == "FAIL":
