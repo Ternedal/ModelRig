@@ -31,9 +31,10 @@ evidence reference:
    continuity, wake/dormancy and model replacement without identity drift.
    A PASS must contain exactly one canonical
    `consciousness-live-lifecycle:<modelrig-sha>:<sha256>` reference emitted by
-   the lifecycle qualifier; the embedded 40-hex SHA must equal the pinned
-   ModelRig revision. Arbitrary labels and component evidence refs are not
-   sufficient.
+   the lifecycle qualifier. The embedded SHA must equal the pinned ModelRig
+   revision, or be an ancestor with the exact same Git tree so a clean GitHub
+   merge-commit does not invalidate unchanged physical/runtime evidence.
+   Arbitrary labels and component evidence refs are not sufficient.
 3. `visionrig_physical_perception` — real sensor input reaches bounded
    WorldEvidence/WorldState through the accepted VisionRig boundary. A PASS must
    contain exactly one canonical
@@ -50,9 +51,12 @@ evidence reference:
    digest-bound active avatar, live BodyRig frames, ARCore runtime, detected-plane
    placement and explicit human visual acceptance are all evidence-bound. A PASS
    must reference the independent gate's content-addressed
-   `kaliv-body-android-physical-gate:<modelrig-sha>:<sha256>` evidence ref; the embedded ModelRig SHA must equal the pinned release revision and a label/path is not
-   sufficient. The Android gate result must still report
-   `production_activation=false`.
+   `kaliv-body-android-physical-gate:<modelrig-sha>:<sha256>` evidence ref.
+   The embedded ModelRig SHA must either equal the pinned release revision
+   directly, or be its Git ancestor **and resolve to the exact same Git tree**.
+   The latter permits only a clean merge-commit identity change; any content
+   change, squash/rewrite without ancestry, mutable label or path fails closed.
+   The Android gate result must still report `production_activation=false`.
 7. `end_to_end_latency` — one correlated real event traverses perception,
    cognition and outward voice/body behavior with measured latency evidence.
 8. `recovery_soak` — the pinned system passes the agreed restart/recovery and
