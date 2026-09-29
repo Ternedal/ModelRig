@@ -48,6 +48,7 @@ class Qualification:
     required_recovery_kinds: tuple[str, ...]
     observations_sha256: str
     stage_b_evidence_ref: str
+    release_evidence_ref: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -62,7 +63,18 @@ class Qualification:
             "required_recovery_kinds": list(self.required_recovery_kinds),
             "observations_sha256": self.observations_sha256,
             "stage_b_evidence_ref": self.stage_b_evidence_ref,
+            "release_evidence_ref": self.release_evidence_ref,
         }
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
 
 
 def _mapping(value: Any, name: str) -> Mapping[str, Any]:
@@ -229,6 +241,24 @@ def qualify(observations: Mapping[str, Any], *, observations_sha256: str) -> Qua
             "missing required recovery events: " + ", ".join(missing)
         )
 
+    payload = {
+        "schema": RECEIPT_SCHEMA,
+        "candidate_sha": candidate_sha,
+        "qualified": True,
+        "production_activation": False,
+        "observed_duration_seconds": duration,
+        "required_duration_seconds": required_duration,
+        "sample_count": len(timestamps),
+        "max_observed_gap_seconds": max_gap,
+        "required_recovery_kinds": list(_REQUIRED_RECOVERY_KINDS),
+        "observations_sha256": observations_sha256,
+        "stage_b_evidence_ref": stage_b_ref,
+    }
+    digest = hashlib.sha256(_canonical(payload)).hexdigest()
+    release_evidence_ref = (
+        "kaliv-recovery-soak:" + candidate_sha + ":" + digest
+    )
+
     return Qualification(
         schema=RECEIPT_SCHEMA,
         candidate_sha=candidate_sha,
@@ -241,6 +271,7 @@ def qualify(observations: Mapping[str, Any], *, observations_sha256: str) -> Qua
         required_recovery_kinds=_REQUIRED_RECOVERY_KINDS,
         observations_sha256=observations_sha256,
         stage_b_evidence_ref=stage_b_ref,
+        release_evidence_ref=release_evidence_ref,
     )
 
 
