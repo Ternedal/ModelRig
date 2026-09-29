@@ -9,6 +9,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS = ROOT / "assets/design/kaliv-ui-guide/kaliv-ui-tokens.json"
 
+LIVE_ANDROID_SURFACES = (
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScheduleHistoryLoader.kt",
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt",
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterAuditSection.kt",
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterGitHubConnectorSection.kt",
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/Agent4OperatorScreen.kt",
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/Agent4CampaignDetailScreen.kt",
+    "android/app/src/main/java/dk/ternedal/modelrig/ui/Agent3TaskScreen.kt",
+)
+
+LIVE_DESKTOP_SURFACES = (
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt",
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterAuditSection.kt",
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterSchedulesSection.kt",
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterScheduleHistorySection.kt",
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterVisionSection.kt",
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterGitHubConnectorSection.kt",
+    "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/Agent3TaskApp.kt",
+)
+
 EXPECTED_SIGNAL = {
     "primary": "#48C7FF",
     "light": "#73D6FF",
@@ -74,6 +94,16 @@ def main() -> int:
     vr_panel = need("vr/Assets/Scripts/KalivVrPanel.cs")
     assert '#48C7FF' in vr_brand and '#D4AB52' in vr_brand
     assert "KalivVrBrand.Signal" in vr_panel, "Quest panel is not bound to shared roles"
+
+    for path in LIVE_ANDROID_SURFACES:
+        source = need(path)
+        if "CircularProgressIndicator" in source:
+            assert "KalivTheme.colors.signal" not in source, f"{path}: live progress regressed to Ember"
+
+    for path in LIVE_DESKTOP_SURFACES:
+        source = need(path)
+        if "CircularProgressIndicator" in source:
+            assert "color = KalivTheme.colors.Signal" not in source, f"{path}: live progress regressed to Ember"
 
     css = need("assets/design/kaliv-ui-guide/kaliv-ui-tokens.css")
     assert "--kaliv-signal: #48C7FF;" in css
