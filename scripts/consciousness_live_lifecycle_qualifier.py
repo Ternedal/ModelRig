@@ -296,7 +296,7 @@ def qualify(value: Mapping[str, Any]) -> dict[str, Any]:
         )
     ).hexdigest()[:32]
 
-    return {
+    verdict = {
         "schema": VERDICT_SCHEMA,
         "qualification_id": qualification_id,
         "candidate_git_sha": candidate_sha,
@@ -317,6 +317,14 @@ def qualify(value: Mapping[str, Any]) -> dict[str, Any]:
         "model_authority": False,
         "production_activation": False,
     }
+    release_digest = hashlib.sha256(_canonical(verdict)).hexdigest()
+    verdict["release_evidence_ref"] = (
+        "consciousness-live-lifecycle:"
+        + candidate_sha
+        + ":"
+        + release_digest
+    )
+    return verdict
 
 
 def load(path: Path) -> Mapping[str, Any]:
