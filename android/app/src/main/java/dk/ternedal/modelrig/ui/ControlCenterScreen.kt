@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -42,6 +43,7 @@ import dk.ternedal.modelrig.net.ControlCenterScheduleSnapshot
 import dk.ternedal.modelrig.net.ControlCenterSchedulesClient
 import dk.ternedal.modelrig.net.ControlCenterStatus
 import dk.ternedal.modelrig.ui.theme.KalivTheme
+import dk.ternedal.modelrig.ui.theme.KalivTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
