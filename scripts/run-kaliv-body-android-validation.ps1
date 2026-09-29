@@ -106,7 +106,7 @@ Assert-CleanTree
 $unity = Resolve-Unity
 $projectVersion = (Get-Content -LiteralPath (Join-Path $projectPath "ProjectSettings\ProjectVersion.txt") -Raw).Trim()
 if ($projectVersion -notmatch [regex]::Escape($requiredUnity)) {
-    throw "ProjectVersion.txt does not pin required Unity $requiredUnity: $projectVersion"
+    throw "ProjectVersion.txt does not pin required Unity ${requiredUnity}: $projectVersion"
 }
 
 if (Test-Path -LiteralPath $logPath) { Remove-Item -LiteralPath $logPath -Force }
