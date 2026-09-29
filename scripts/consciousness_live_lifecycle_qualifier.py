@@ -206,6 +206,22 @@ def _validate_model_swap(
             raise LiveLifecycleQualificationError(
                 f"model_swap did not prove {field}"
             )
+
+    from_profile = receipt.get("from_cognitive_profile_ref")
+    to_profile = receipt.get("to_cognitive_profile_ref")
+    if (
+        not isinstance(from_profile, str)
+        or not from_profile
+        or not isinstance(to_profile, str)
+        or not to_profile
+    ):
+        raise LiveLifecycleQualificationError(
+            "model_swap cognitive profile refs must be non-empty strings"
+        )
+    if from_profile == to_profile:
+        raise LiveLifecycleQualificationError(
+            "model_swap cognitive profile refs did not actually change"
+        )
     _require_false(
         receipt,
         (
