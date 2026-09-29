@@ -38,6 +38,7 @@ namespace ModelRig.BodyRig.UnityRenderer
             loader.LoadOnStart = true;
 
 #if BODYRIG_AR
+            root.AddComponent<BodyRigArRuntimeEvidence>();
             var placement = root.AddComponent<BodyRigArPlacement>();
             placement.Loader = loader;
             placement.RaycastManager = raycastManager;
