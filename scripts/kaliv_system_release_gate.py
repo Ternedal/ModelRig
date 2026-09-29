@@ -22,6 +22,9 @@ _RELEASE_ID = re.compile(r"^kaliv-rc-[A-Za-z0-9._-]{1,64}$")
 _ANDROID_LIVE_BODY_REF = re.compile(
     r"^kaliv-body-android-physical-gate:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
+_CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
+    r"^consciousness-live-lifecycle:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -170,6 +173,23 @@ def _validate_gates(value: Any, *, modelrig_sha: str) -> tuple[tuple[str, ...], 
             gate,
             require=status == "PASS",
         )
+        if gate == "consciousness_live_lifecycle" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "consciousness_live_lifecycle PASS requires exactly one "
+                    "lifecycle qualification evidence ref"
+                )
+            match = _CONSCIOUSNESS_LIFECYCLE_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "consciousness_live_lifecycle PASS requires exact-head-bound "
+                    "consciousness-live-lifecycle evidence"
+                )
+            if match.group(1) != modelrig_sha:
+                raise SystemReleaseManifestError(
+                    "consciousness_live_lifecycle evidence is bound to a different "
+                    "ModelRig Git SHA"
+                )
         if gate == "bodyrig_android_live_body" and status == "PASS":
             if len(refs) != 1:
                 raise SystemReleaseManifestError(
