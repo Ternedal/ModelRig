@@ -438,18 +438,18 @@ private fun ActiveModelCard(modelName: String, usedGb: Double, totalGb: Double, 
     Column(
         Modifier.fillMaxWidth().clip(shape)
             .background(KalivTheme.colors.SurfaceHigh)
-            .border(1.dp, Color(0x33785A37), shape)
+            .border(1.dp, KalivTheme.colors.Cognition.copy(alpha = 0.20f), shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
     ) {
         SectionLabel("Aktiv model")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Success))
+            Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Cognition))
             Spacer(Modifier.width(7.dp))
             Text(modelName, color = KalivTheme.colors.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+        Text("Lokal \u00b7 $backend", color = KalivTheme.colors.CognitionLight, fontSize = 11.5.sp)
         Spacer(Modifier.height(9.dp))
         val frac = if (totalGb > 0) (usedGb / totalGb).toFloat() else 0f
         MetaBar(frac)
