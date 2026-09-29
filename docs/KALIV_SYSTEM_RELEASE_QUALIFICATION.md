@@ -29,6 +29,11 @@ evidence reference:
    software checks.
 2. `consciousness_live_lifecycle` — a real live Core lifecycle covering
    continuity, wake/dormancy and model replacement without identity drift.
+   A PASS must contain exactly one canonical
+   `consciousness-live-lifecycle:<modelrig-sha>:<sha256>` reference emitted by
+   the lifecycle qualifier; the embedded 40-hex SHA must equal the pinned
+   ModelRig revision. Arbitrary labels and component evidence refs are not
+   sufficient.
 3. `visionrig_physical_perception` — real sensor input reaches bounded
    WorldEvidence/WorldState through the accepted VisionRig boundary.
 4. `bodyrig_photoreal_likeness` — the real-person Photoreal likeness gate,
