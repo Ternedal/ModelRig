@@ -62,6 +62,9 @@ for required in (
     "arcore_runtime_qualified = [bool]$arCoreSessionTrackingObserved",
     "arcore_unsupported_observed = [bool]$arCoreUnsupportedObserved",
     "arcore_needs_install_observed = [bool]$arCoreNeedsInstallObserved",
+    "[switch]$ProvePlacement",
+    "BodyRig: AR avatar placed on detected plane.",
+    "plane_placement_qualified",
 ):
     check(required in SCRIPT, f"physical host qualifier contains {required}")
 
@@ -115,6 +118,17 @@ check(
     '$logcatText.Contains("BodyRig: AR session unsupported.")' in SCRIPT
     and '$logcatText.Contains("BodyRig: AR session needs install.")' in SCRIPT,
     "ARCore runtime proof fails closed on unsupported/install-required states",
+)
+
+check(
+    "-ProvePlacement requires -Launch." in SCRIPT
+    and "-ProvePlacement requires -ProveArCore." in SCRIPT,
+    "placement proof requires a launched, ARCore-qualified physical session",
+)
+check(
+    "plane_placement_qualified = [bool]$planePlacementQualified" in SCRIPT
+    and 'BodyRig: AR avatar placed on detected plane.' in SCRIPT,
+    "plane-placement qualification is bound to the detected-plane marker",
 )
 
 for ignored in (
