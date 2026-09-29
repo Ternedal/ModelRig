@@ -7,6 +7,7 @@ param(
     [switch]$Install,
     [switch]$Launch,
     [switch]$ProveRigLink,
+    [switch]$ProveArRuntime,
     [ValidateRange(2, 60)]
     [int]$LaunchEvidenceSeconds = 8
 )
@@ -148,9 +149,15 @@ $androidVersion = $null
 $fatalPackageCrashObserved = $false
 $rigLinkResolvedFromIntent = $false
 $rigLinkTokenLeakObserved = $false
+$arRuntimeBootstrapReady = $false
+$arPlacementRuntimeReady = $false
+$arCoreTrackingReady = $false
 
 if ($ProveRigLink -and -not $Launch) {
     throw "-ProveRigLink requires -Launch."
+}
+if ($ProveArRuntime -and -not $Launch) {
+    throw "-ProveArRuntime requires -Launch."
 }
 if ($ProveRigLink) {
     if ([string]::IsNullOrWhiteSpace($env:KALIV_BODY_RIG_URL) -or
@@ -218,6 +225,18 @@ if ($Install -or $Launch) {
                 throw "Kaliv Body did not emit the intent RigLink resolution marker."
             }
         }
+
+        if ($ProveArRuntime) {
+            $arRuntimeBootstrapReady =
+                $logcatText.Contains("BodyRig: AR runtime bootstrap ready (session+xr-origin+camera+planes+raycast).")
+            $arPlacementRuntimeReady =
+                $logcatText.Contains("BodyRig: AR placement runtime ready.")
+            $arCoreTrackingReady =
+                $logcatText.Contains("BodyRig: ARCore runtime tracking.")
+            if (-not ($arRuntimeBootstrapReady -and $arPlacementRuntimeReady -and $arCoreTrackingReady)) {
+                throw "Kaliv Body did not prove complete AR runtime tracking. See $logcatPath"
+            }
+        }
     }
 } else {
     Write-Host "[3/4] ADB install skipped (use -Install or -Launch)"
@@ -246,7 +265,9 @@ $receipt = [ordered]@{
     fatal_package_crash_observed = $fatalPackageCrashObserved
     rig_link_qualified = [bool]$rigLinkResolvedFromIntent
     rig_link_token_leak_observed = [bool]$rigLinkTokenLeakObserved
-    arcore_runtime_qualified = $false
+    ar_runtime_bootstrap_ready = [bool]$arRuntimeBootstrapReady
+    ar_placement_runtime_ready = [bool]$arPlacementRuntimeReady
+    arcore_runtime_qualified = [bool]$arCoreTrackingReady
     visual_acceptance = $false
     release_gate_satisfied = $false
 }
@@ -264,4 +285,9 @@ if ($ProveRigLink) {
 } else {
     Write-Host "RigLink remains FALSE (use -ProveRigLink with KALIV_BODY_RIG_URL/TOKEN)."
 }
-Write-Host "ARCore runtime, visual acceptance and production activation remain FALSE."
+if ($ProveArRuntime) {
+    Write-Host "ARCore runtime tracking qualified."
+} else {
+    Write-Host "ARCore runtime remains FALSE (use -ProveArRuntime)."
+}
+Write-Host "Visual acceptance and production activation remain FALSE."
