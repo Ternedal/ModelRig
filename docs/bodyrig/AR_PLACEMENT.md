@@ -64,7 +64,10 @@ Fysisk acceptance kræver stadig, på samme exact candidate head:
   kræver `ARSessionState.SessionTracking` i logcat og afviser
   Unsupported/NeedsInstall;
 - rigtig VRM load og live frames fra riggen;
-- tap på et detekteret plan;
+- tap på et detekteret plan: kør med `-ProvePlacement` sammen med
+  `-ProveArCore`; receiptet må kun sætte
+  `plane_placement_qualified=true` efter markøren
+  `BodyRig: AR avatar placed on detected plane.`;
 - direkte observation af at avatarens placering ikke stopper blink, gaze,
   speech-mouth, gesture eller interruption;
 - separat evidence/acceptance-gate. CI eller screenshots alene må ikke erstatte
