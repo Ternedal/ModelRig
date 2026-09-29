@@ -17,6 +17,7 @@ on:
       - "tests/bodyrig/ar_packages_contract.py"
       - "tests/bodyrig/arcore_loader_build_contract.py"
       - "tests/bodyrig/arcore_runtime_contract.py"
+      - "tests/bodyrig/remote_avatar_contract.py"
       - "tests/bodyrig/android_physical_host_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
@@ -36,6 +37,7 @@ on:
       - "tests/bodyrig/ar_packages_contract.py"
       - "tests/bodyrig/arcore_loader_build_contract.py"
       - "tests/bodyrig/arcore_runtime_contract.py"
+      - "tests/bodyrig/remote_avatar_contract.py"
       - "tests/bodyrig/android_physical_host_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
@@ -100,6 +102,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/bodyrig/arcore_runtime_contract.py
+      - name: Validate BodyRig Android remote avatar contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/remote_avatar_contract.py
       - name: Validate Kaliv Body Android physical host qualifier
         env:
           PYTHONDONTWRITEBYTECODE: "1"
