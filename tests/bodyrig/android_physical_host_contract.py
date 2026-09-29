@@ -117,6 +117,19 @@ check(
     "ARCore runtime proof fails closed on unsupported/install-required states",
 )
 
+check(
+    "$deadline = [DateTime]::UtcNow.AddSeconds($LaunchEvidenceSeconds)" in SCRIPT
+    and "do {" in SCRIPT
+    and "} while ([DateTime]::UtcNow -lt $deadline)" in SCRIPT,
+    "ARCore evidence uses a bounded polling window instead of one timing-sensitive snapshot",
+)
+check(
+    "$arCoreUnsupportedObserved -or" in SCRIPT
+    and "$arCoreNeedsInstallObserved -or" in SCRIPT
+    and "$arCoreSessionTrackingObserved) {" in SCRIPT,
+    "ARCore polling stops as soon as a terminal proof state is observed",
+)
+
 for ignored in (
     "/validation/kaliv-body-android-latest.json",
     "/validation/kaliv-body-unity-build.log",
