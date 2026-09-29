@@ -116,6 +116,25 @@ value and fails if it appears, then records only
 and token themselves are never written to the receipt.
 
 
+On Android, a resolved RigLink now also starts
+`BodyRigRemoteAvatarSource`. The source:
+
+1. GETs `/api/v1/body/active` with the paired Bearer token;
+2. requires `schema=modelrig-body-assets/v1`, canonical `body_id` and
+   lowercase 64-hex `package_sha256`;
+3. GETs `/api/v1/body/active/avatar.vrm` with redirects disabled;
+4. requires the body/package response headers to match the manifest and requires
+   `X-BodyRig-Member-SHA256`;
+5. verifies the downloaded bytes against that member digest;
+6. commits only the verified VRM into `Application.persistentDataPath`; and
+7. hands the cached path to the existing `BodyRigVrmLoader`.
+
+The network component never parses VRM, binds the renderer, owns AR placement or
+logs the device token. Desktop keeps its existing local
+`BODYRIG_VRM_PATH` proof path; Android disables that startup path and waits for
+RigLink authority instead.
+
+
 To qualify the **ARCore runtime** on the same exact head without claiming visual
 placement acceptance:
 
