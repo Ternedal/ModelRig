@@ -193,6 +193,26 @@ During the evidence window, tap a detected physical plane. The receipt sets
 path executed after the stronger ARCore runtime qualification; it still does
 not claim human visual acceptance.
 
+After the same exact-head host receipt also proves `live_body_qualified=true`,
+record the five direct human observations:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\accept-kaliv-body-android-visual.ps1 `
+  -ExpectedSha $sha `
+  -AvatarVisibleAndStable `
+  -PlacementMatchesTappedPlane `
+  -CameraBackgroundTracksRoom `
+  -BodyAnimationContinuesAfterPlacement `
+  -NoVisibleCredentialOrDebugLeak
+```
+
+Visual acceptance refuses a fixture/local-avatar substitute: the bound host
+receipt must already prove intent RigLink, digest-bound remote avatar,
+authenticated live frame, ARCore runtime and detected-plane placement. The
+visual receipt still keeps release-gate satisfaction and production activation
+false.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
