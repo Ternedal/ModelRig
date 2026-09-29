@@ -68,6 +68,15 @@ def run_contract() -> None:
     assert verdict.pending_gates == ("bodyrig_photoreal_likeness",)
     assert verdict.production_activation is False
 
+    android_pending = copy.deepcopy(valid)
+    android_pending["gates"]["bodyrig_android_live_body"]["status"] = "PENDING"
+    android_pending["gates"]["bodyrig_android_live_body"]["evidence_refs"] = []
+    verdict = gate.evaluate_manifest(android_pending)
+    assert verdict.state == "BLOCKED"
+    assert verdict.release_ready is False
+    assert verdict.pending_gates == ("bodyrig_android_live_body",)
+    assert verdict.production_activation is False
+
     failed = copy.deepcopy(valid)
     failed["gates"]["recovery_soak"]["status"] = "FAIL"
     verdict = gate.evaluate_manifest(failed)
@@ -110,7 +119,7 @@ def run_contract() -> None:
     _must_reject(activation, "cannot activate production")
 
     # A software-only manifest must remain blocked even if every repository is
-    # exact-pinned. CI is deliberately only one of eight independent gates.
+    # exact-pinned. CI is deliberately only one of nine independent gates.
     software_only = copy.deepcopy(valid)
     for name in gate.REQUIRED_GATES:
         if name == "software_exact_green":
