@@ -25,6 +25,9 @@ _ANDROID_LIVE_BODY_REF = re.compile(
 _CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
     r"^consciousness-live-lifecycle:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
+_VISIONRIG_PHYSICAL_REF = re.compile(
+    r"^visionrig-physical-perception:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -153,7 +156,12 @@ def _validate_evidence_refs(value: Any, gate: str, *, require: bool) -> tuple[st
     return tuple(refs)
 
 
-def _validate_gates(value: Any, *, modelrig_sha: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _validate_gates(
+    value: Any,
+    *,
+    modelrig_sha: str,
+    visionrig_sha: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     gates = _require_mapping(value, "gates")
     expected = set(REQUIRED_GATES)
     _exact_keys(gates, expected, "gates")
@@ -189,6 +197,23 @@ def _validate_gates(value: Any, *, modelrig_sha: str) -> tuple[tuple[str, ...], 
                 raise SystemReleaseManifestError(
                     "consciousness_live_lifecycle evidence is bound to a different "
                     "ModelRig Git SHA"
+                )
+        if gate == "visionrig_physical_perception" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "visionrig_physical_perception PASS requires exactly one "
+                    "physical qualification evidence ref"
+                )
+            match = _VISIONRIG_PHYSICAL_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "visionrig_physical_perception PASS requires exact-head-bound "
+                    "visionrig-physical-perception evidence"
+                )
+            if match.group(1) != visionrig_sha:
+                raise SystemReleaseManifestError(
+                    "visionrig_physical_perception evidence is bound to a different "
+                    "VisionRig Git SHA"
                 )
         if gate == "bodyrig_android_live_body" and status == "PASS":
             if len(refs) != 1:
@@ -244,6 +269,7 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
     pending, failed = _validate_gates(
         root["gates"],
         modelrig_sha=pinned["Ternedal/ModelRig"],
+        visionrig_sha=pinned["Ternedal/VisionRig"],
     )
     ready = not pending and not failed
     return SystemReleaseVerdict(
