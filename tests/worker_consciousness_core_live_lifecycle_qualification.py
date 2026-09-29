@@ -198,6 +198,14 @@ def test_authority_overclaim_fails_closed():
     must_reject(value, "overclaimed execution_authority")
 
 
+def test_model_swap_refs_must_actually_change():
+    value = evidence()
+    value["model_swap"]["receipt"]["to_cognitive_profile_ref"] = (
+        value["model_swap"]["receipt"]["from_cognitive_profile_ref"]
+    )
+    must_reject(value, "cognitive profile refs did not actually change")
+
+
 def test_live_cycle_cannot_preclaim_full_lifecycle():
     value = evidence()
     value["live_cycle"]["gate"]["full_lifecycle_qualified"] = True
@@ -216,6 +224,7 @@ if __name__ == "__main__":
     test_restart_must_be_explicitly_proven()
     test_identity_lineage_mismatch_fails_closed()
     test_authority_overclaim_fails_closed()
+    test_model_swap_refs_must_actually_change()
     test_live_cycle_cannot_preclaim_full_lifecycle()
     test_qualifier_never_accepts_production_activation()
     print("Consciousness live lifecycle qualifier contract: PASS")
