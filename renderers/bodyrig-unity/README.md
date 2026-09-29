@@ -162,6 +162,25 @@ The acceptance script re-hashes and binds the host qualification receipt and
 refuses partial observation. Its own rolling receipt still keeps
 `release_gate_satisfied=false` and `production_activation=false`.
 
+Finally, run the independent validator against the same exact clean checkout:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+python .\scripts\kaliv_body_android_physical_gate.py --expected-sha $sha
+```
+
+A valid result ends with:
+
+```text
+KALIV BODY ANDROID PHYSICAL GATE: PASS
+```
+
+The gate re-hashes the APK and captured logcat, re-parses both receipts,
+requires the visual receipt SHA-binding to the exact host receipt bytes, checks
+receipt ordering, exact visual-check membership, exact HEAD and clean-tree
+state. Its result still reports `release_gate_satisfied=false` and
+`production_activation=false`; promotion remains a separate authority.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
