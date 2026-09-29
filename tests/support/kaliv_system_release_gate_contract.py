@@ -42,7 +42,14 @@ def _manifest() -> dict:
                             + ":"
                             + "c" * 64
                             if name == "consciousness_live_lifecycle"
-                            else f"evidence:{name}:1"
+                            else (
+                                "visionrig-physical-perception:"
+                                + "3" * 40
+                                + ":"
+                                + "e" * 64
+                                if name == "visionrig_physical_perception"
+                                else f"evidence:{name}:1"
+                            )
                         )
                     )
                 ],
@@ -107,6 +114,34 @@ def run_contract() -> None:
     _must_reject(
         consciousness_multiple_refs,
         "requires exactly one lifecycle qualification evidence ref",
+    )
+
+    vision_mutable_ref = copy.deepcopy(valid)
+    vision_mutable_ref["gates"]["visionrig_physical_perception"]["evidence_refs"] = [
+        "operator-says-vision-is-good"
+    ]
+    _must_reject(
+        vision_mutable_ref,
+        "requires exact-head-bound visionrig-physical-perception evidence",
+    )
+
+    vision_wrong_head = copy.deepcopy(valid)
+    vision_wrong_head["gates"]["visionrig_physical_perception"]["evidence_refs"] = [
+        "visionrig-physical-perception:" + "f" * 40 + ":" + "e" * 64
+    ]
+    _must_reject(
+        vision_wrong_head,
+        "bound to a different VisionRig Git SHA",
+    )
+
+    vision_multiple_refs = copy.deepcopy(valid)
+    vision_multiple_refs["gates"]["visionrig_physical_perception"]["evidence_refs"] = [
+        "visionrig-physical-perception:" + "3" * 40 + ":" + "e" * 64,
+        "visionrig-physical-perception:" + "3" * 40 + ":" + "f" * 64,
+    ]
+    _must_reject(
+        vision_multiple_refs,
+        "requires exactly one physical qualification evidence ref",
     )
 
     android_pending = copy.deepcopy(valid)
