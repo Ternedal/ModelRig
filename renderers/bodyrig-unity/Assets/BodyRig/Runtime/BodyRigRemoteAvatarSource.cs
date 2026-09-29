@@ -17,6 +17,7 @@ namespace ModelRig.BodyRig.UnityRenderer
     public sealed class BodyRigRemoteAvatarSource : MonoBehaviour
     {
         private const int MaxAvatarBytes = 192 * 1024 * 1024;
+        private const int MaxBodyprintBytes = 1024 * 1024;
 
         [Serializable]
         private sealed class ActiveBodyManifest
@@ -147,6 +148,7 @@ namespace ModelRig.BodyRig.UnityRenderer
                     || !IsLowerHex(bodyprintSha, 64)
                     || bodyprintBytes == null
                     || bodyprintBytes.Length == 0
+                    || bodyprintBytes.Length > MaxBodyprintBytes
                     || !string.Equals(
                         Sha256(bodyprintBytes),
                         bodyprintSha,
