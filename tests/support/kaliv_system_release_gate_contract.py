@@ -32,7 +32,13 @@ def _manifest() -> dict:
         "gates": {
             name: {
                 "status": "PASS",
-                "evidence_refs": [f"evidence:{name}:1"],
+                "evidence_refs": [
+                    (
+                        "kaliv-body-android-physical-gate:" + "a" * 64
+                        if name == "bodyrig_android_live_body"
+                        else f"evidence:{name}:1"
+                    )
+                ],
             }
             for name in gate.REQUIRED_GATES
         },
@@ -76,6 +82,15 @@ def run_contract() -> None:
     assert verdict.release_ready is False
     assert verdict.pending_gates == ("bodyrig_android_live_body",)
     assert verdict.production_activation is False
+
+    android_mutable_ref = copy.deepcopy(valid)
+    android_mutable_ref["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+        "operator-says-android-is-good"
+    ]
+    _must_reject(
+        android_mutable_ref,
+        "requires digest-bound kaliv-body-android-physical-gate evidence refs",
+    )
 
     failed = copy.deepcopy(valid)
     failed["gates"]["recovery_soak"]["status"] = "FAIL"
