@@ -46,7 +46,6 @@ for required in (
     "logcat -d -v threadtime",
     'schema = "modelrig.kaliv-body.android-host-qualification/v1"',
     "production_activation = $false",
-    "arcore_runtime_qualified = $false",
     "visual_acceptance = $false",
     "release_gate_satisfied = $false",
     "[switch]$ProveRigLink",
@@ -56,6 +55,13 @@ for required in (
     "bodyrig_rig_token",
     "BodyRig: rig link resolved from intent (",
     "rig_link_token_leak_observed",
+    "[switch]$ProveArCore",
+    "BodyRig: AR session tracking.",
+    "BodyRig: AR session unsupported.",
+    "BodyRig: AR session needs install.",
+    "arcore_runtime_qualified = [bool]$arCoreSessionTrackingObserved",
+    "arcore_unsupported_observed = [bool]$arCoreUnsupportedObserved",
+    "arcore_needs_install_observed = [bool]$arCoreNeedsInstallObserved",
 ):
     check(required in SCRIPT, f"physical host qualifier contains {required}")
 
@@ -98,6 +104,17 @@ check(
     and "rig_token =" not in SCRIPT
     and "rig_url =" not in SCRIPT,
     "receipt schema does not persist rig token or rig URL values",
+)
+
+check(
+    "arcore_runtime_qualified = [bool]$arCoreSessionTrackingObserved" in SCRIPT
+    and 'throw "Kaliv Body did not reach ARSessionState.SessionTracking."' in SCRIPT,
+    "ARCore qualification is bound only to observed SessionTracking",
+)
+check(
+    '$logcatText.Contains("BodyRig: AR session unsupported.")' in SCRIPT
+    and '$logcatText.Contains("BodyRig: AR session needs install.")' in SCRIPT,
+    "ARCore runtime proof fails closed on unsupported/install-required states",
 )
 
 for ignored in (
