@@ -49,7 +49,9 @@ for required in (
 ):
     check(required in BUILD, f"Android ARCore build contract contains {required}")
 
-existing = BUILD[BUILD.index("if (EditorBuildSettings.TryGetConfigObject") : BUILD.index("if (AssetDatabase.LoadAssetAtPath")]
+helper_start = BUILD.index("private static Action ConfigureTemporaryAndroidArCore()")
+temporary_guard = BUILD.index("if (AssetDatabase.LoadAssetAtPath", helper_start)
+existing = BUILD[helper_start:temporary_guard]
 check(
     "if (loader is ARCoreLoader)" in existing
     and "ARCoreLoader is not active" in existing,
@@ -61,7 +63,7 @@ check(
 )
 
 android_start = BUILD.index("public static void BuildAndroid()")
-android_end = BUILD.index("/// <summary>\n        /// Ensure an Android ARCore loader", android_start)
+android_end = BUILD.index("private static Action ConfigureTemporaryAndroidArCore()", android_start)
 android = BUILD[android_start:android_end]
 check(
     android.index("ConfigureTemporaryAndroidArCore()") < android.index("BuildPipeline.BuildPlayer(options)"),
