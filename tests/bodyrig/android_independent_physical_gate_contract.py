@@ -47,13 +47,13 @@ for required in (
 
 check(
     "hashlib.sha256(host_raw).hexdigest()" in GATE
-    and "visual.get("host_receipt_sha256")" in GATE,
+    and 'visual.get("host_receipt_sha256")' in GATE,
     "visual receipt is digest-bound to the exact host receipt bytes",
 )
 check(
     "_hash_file(" in GATE
-    and "host.get("apk_path")" in GATE
-    and "host.get("logcat_path")" in GATE,
+    and 'host.get("apk_path")' in GATE
+    and 'host.get("logcat_path")' in GATE,
     "gate independently re-hashes APK and logcat artifacts",
 )
 check(
