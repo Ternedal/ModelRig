@@ -9,13 +9,20 @@
     "source_product_status_head_sha",
     "implementation_choice",
     "tracked_source_transition",
+    "android_tracked_source_transition",
     "new_product_files",
     "authority_state"
   ],
   "properties": {
-    "schema": {"const": "kaliv-rsi-dc-l16-product-ui-observer-handoff/v1"},
-    "repository": {"const": "Ternedal/ModelRig"},
-    "source_product_status_head_sha": {"const": "b7acd3db6e88a4316375923d4cf1f5be2cde51a8"},
+    "schema": {
+      "const": "kaliv-rsi-dc-l16-product-ui-observer-handoff/v1"
+    },
+    "repository": {
+      "const": "Ternedal/ModelRig"
+    },
+    "source_product_status_head_sha": {
+      "const": "b7acd3db6e88a4316375923d4cf1f5be2cde51a8"
+    },
     "implementation_choice": {
       "type": "object",
       "additionalProperties": false,
@@ -30,24 +37,50 @@
         "human_pilot_go_verified"
       ],
       "properties": {
-        "operator_surface": {"const": "desktop.control-center"},
-        "route": {"const": "GET /api/v1/experimental/devcontrol-pilot/status"},
-        "ui_observer_implemented": {"const": true},
-        "default_off_hidden_on_404": {"const": true},
-        "manual_refresh_only": {"const": true},
-        "executor_wired": {"const": false},
-        "start_control_present": {"const": false},
-        "human_pilot_go_verified": {"const": false}
+        "operator_surface": {
+          "const": "desktop.control-center"
+        },
+        "route": {
+          "const": "GET /api/v1/experimental/devcontrol-pilot/status"
+        },
+        "ui_observer_implemented": {
+          "const": true
+        },
+        "default_off_hidden_on_404": {
+          "const": true
+        },
+        "manual_refresh_only": {
+          "const": true
+        },
+        "executor_wired": {
+          "const": false
+        },
+        "start_control_present": {
+          "const": false
+        },
+        "human_pilot_go_verified": {
+          "const": false
+        }
       }
     },
     "tracked_source_transition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "from_git_blob_sha", "to_git_blob_sha"],
+      "required": [
+        "path",
+        "from_git_blob_sha",
+        "to_git_blob_sha"
+      ],
       "properties": {
-        "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"},
-        "from_git_blob_sha": {"const": "0a9498ac0fe61ea742a47c1d6be1cf7886992321"},
-        "to_git_blob_sha": {"const": "ccf605762dfcdf95c9f2f1a60de0986a3c84564c"}
+        "path": {
+          "const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
+        },
+        "from_git_blob_sha": {
+          "const": "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
+        },
+        "to_git_blob_sha": {
+          "const": "3a2b9ad372a758d5b2cfff1bc1e29fecd60c065c"
+        }
       }
     },
     "new_product_files": {
@@ -58,37 +91,65 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "git_blob_sha"],
+          "required": [
+            "path",
+            "git_blob_sha"
+          ],
           "properties": {
-            "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClient.kt"},
-            "git_blob_sha": {"const": "0e9b16b565cad721de7532d681abd89e7850a4f1"}
+            "path": {
+              "const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClient.kt"
+            },
+            "git_blob_sha": {
+              "const": "0e9b16b565cad721de7532d681abd89e7850a4f1"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "git_blob_sha"],
+          "required": [
+            "path",
+            "git_blob_sha"
+          ],
           "properties": {
-            "path": {"const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSection.kt"},
-            "git_blob_sha": {"const": "a3389801f3c7217b3d72bf85e2e87996d6f0a0b5"}
+            "path": {
+              "const": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSection.kt"
+            },
+            "git_blob_sha": {
+              "const": "a3389801f3c7217b3d72bf85e2e87996d6f0a0b5"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "git_blob_sha"],
+          "required": [
+            "path",
+            "git_blob_sha"
+          ],
           "properties": {
-            "path": {"const": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClientTest.kt"},
-            "git_blob_sha": {"const": "343eec567da69e4deaa09826c4e97aa795dbfcba"}
+            "path": {
+              "const": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClientTest.kt"
+            },
+            "git_blob_sha": {
+              "const": "343eec567da69e4deaa09826c4e97aa795dbfcba"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "git_blob_sha"],
+          "required": [
+            "path",
+            "git_blob_sha"
+          ],
           "properties": {
-            "path": {"const": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSectionTest.kt"},
-            "git_blob_sha": {"const": "cf6389262d25fcfd89ac15df2ce3f2169b8e28f0"}
+            "path": {
+              "const": "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSectionTest.kt"
+            },
+            "git_blob_sha": {
+              "const": "cf6389262d25fcfd89ac15df2ce3f2169b8e28f0"
+            }
           }
         }
       ]
@@ -113,20 +174,68 @@
         "authority"
       ],
       "properties": {
-        "runtime_preflight_satisfied": {"const": false},
-        "task_registry_ready": {"const": false},
-        "pilot_start_authorized": {"const": false},
-        "product_pilot_started": {"const": false},
-        "local_commit_authorized": {"const": false},
-        "remote_transport_available": {"const": false},
-        "remote_write_authorized": {"const": false},
-        "push_authorized": {"const": false},
-        "pr_mutation_authorized": {"const": false},
-        "merge_authorized": {"const": false},
-        "release_authorized": {"const": false},
-        "deploy_authorized": {"const": false},
-        "production_activation_authorized": {"const": false},
-        "authority": {"const": "dc-l16-product-ui-observer-handoff-only"}
+        "runtime_preflight_satisfied": {
+          "const": false
+        },
+        "task_registry_ready": {
+          "const": false
+        },
+        "pilot_start_authorized": {
+          "const": false
+        },
+        "product_pilot_started": {
+          "const": false
+        },
+        "local_commit_authorized": {
+          "const": false
+        },
+        "remote_transport_available": {
+          "const": false
+        },
+        "remote_write_authorized": {
+          "const": false
+        },
+        "push_authorized": {
+          "const": false
+        },
+        "pr_mutation_authorized": {
+          "const": false
+        },
+        "merge_authorized": {
+          "const": false
+        },
+        "release_authorized": {
+          "const": false
+        },
+        "deploy_authorized": {
+          "const": false
+        },
+        "production_activation_authorized": {
+          "const": false
+        },
+        "authority": {
+          "const": "dc-l16-product-ui-observer-handoff-only"
+        }
+      }
+    },
+    "android_tracked_source_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "from_git_blob_sha",
+        "to_git_blob_sha"
+      ],
+      "properties": {
+        "path": {
+          "const": "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
+        },
+        "from_git_blob_sha": {
+          "const": "82643d7cefe9a9c249e8e7cc8b480d9989b38606"
+        },
+        "to_git_blob_sha": {
+          "const": "29d27d1bde67c4e461a648424f846173572ac98b"
+        }
       }
     }
   }

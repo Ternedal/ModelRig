@@ -84,10 +84,11 @@ def run_contract() -> None:
     assert _git_blob_sha(PILOT) == new_files[0]["git_blob_sha"]
     assert _git_blob_sha(PILOT_TEST) == new_files[1]["git_blob_sha"]
 
-    # Android remains untouched at ADR-DC-018. Desktop may move only through
-    # the separately pinned successor observer handoff.
-    assert _git_blob_sha(ANDROID) == "82643d7cefe9a9c249e8e7cc8b480d9989b38606"
+    # UI surfaces may move only through the separately pinned successor
+    # observer handoff. Without that handoff both candidates remain byte-bound
+    # to the original ADR-DC-018 inventory.
     if ui_handoff is None:
+        assert _git_blob_sha(ANDROID) == "82643d7cefe9a9c249e8e7cc8b480d9989b38606"
         assert _git_blob_sha(DESKTOP) == "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
     else:
         assert ui_handoff["source_product_status_head_sha"] == "b7acd3db6e88a4316375923d4cf1f5be2cde51a8"
@@ -95,6 +96,10 @@ def run_contract() -> None:
         assert ui_transition["path"] == "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
         assert ui_transition["from_git_blob_sha"] == "0a9498ac0fe61ea742a47c1d6be1cf7886992321"
         assert _git_blob_sha(DESKTOP) == ui_transition["to_git_blob_sha"]
+        android_transition = ui_handoff["android_tracked_source_transition"]
+        assert android_transition["path"] == "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
+        assert android_transition["from_git_blob_sha"] == "82643d7cefe9a9c249e8e7cc8b480d9989b38606"
+        assert _git_blob_sha(ANDROID) == android_transition["to_git_blob_sha"]
         assert ui_handoff["implementation_choice"]["human_pilot_go_verified"] is False
         assert ui_handoff["implementation_choice"]["executor_wired"] is False
         assert ui_handoff["implementation_choice"]["start_control_present"] is False
