@@ -36,7 +36,14 @@ def _manifest() -> dict:
                     (
                         "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
                         if name == "bodyrig_android_live_body"
-                        else f"evidence:{name}:1"
+                        else (
+                            "consciousness-live-lifecycle:"
+                            + "1" * 40
+                            + ":"
+                            + "c" * 64
+                            if name == "consciousness_live_lifecycle"
+                            else f"evidence:{name}:1"
+                        )
                     )
                 ],
             }
@@ -73,6 +80,34 @@ def run_contract() -> None:
     assert verdict.release_ready is False
     assert verdict.pending_gates == ("bodyrig_photoreal_likeness",)
     assert verdict.production_activation is False
+
+    consciousness_mutable_ref = copy.deepcopy(valid)
+    consciousness_mutable_ref["gates"]["consciousness_live_lifecycle"]["evidence_refs"] = [
+        "operator-says-consciousness-is-good"
+    ]
+    _must_reject(
+        consciousness_mutable_ref,
+        "requires exact-head-bound consciousness-live-lifecycle evidence",
+    )
+
+    consciousness_wrong_head = copy.deepcopy(valid)
+    consciousness_wrong_head["gates"]["consciousness_live_lifecycle"]["evidence_refs"] = [
+        "consciousness-live-lifecycle:" + "f" * 40 + ":" + "d" * 64
+    ]
+    _must_reject(
+        consciousness_wrong_head,
+        "bound to a different ModelRig Git SHA",
+    )
+
+    consciousness_multiple_refs = copy.deepcopy(valid)
+    consciousness_multiple_refs["gates"]["consciousness_live_lifecycle"]["evidence_refs"] = [
+        "consciousness-live-lifecycle:" + "1" * 40 + ":" + "c" * 64,
+        "consciousness-live-lifecycle:" + "1" * 40 + ":" + "d" * 64,
+    ]
+    _must_reject(
+        consciousness_multiple_refs,
+        "requires exactly one lifecycle qualification evidence ref",
+    )
 
     android_pending = copy.deepcopy(valid)
     android_pending["gates"]["bodyrig_android_live_body"]["status"] = "PENDING"
