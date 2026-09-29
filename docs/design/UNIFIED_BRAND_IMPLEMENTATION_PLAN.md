@@ -1,6 +1,6 @@
 # Unified Kaliv / ModelRig Brand — Implementation Plan
 
-**Branch:** `feat/unified-brand-implementation-20260928`  
+**Branch:** `brand/unified-identity-20260928`  
 **Brand authority:** `brand/KALIV_MODELRIG_UNIFIED_BRAND_IDENTITY.md`  
 **Token authority:** `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json`
 
@@ -56,3 +56,10 @@ Implement the unified Ember / Signal identity across Android, Windows, Quest and
 - [x] Update design handoff/readme.
 - [ ] Run available compile/workflow tests.
 - [x] Open implementation PR and record any unverified visual checks.
+
+
+## Verification state
+
+- BodyRig PR #1308: repository CI, CodeQL, Windows regression and LOC checks green on the brand branch.
+- ModelRig PR #1914: mergeable; current head must pass Android compile, desktop compile, core CI, accessibility, diagnostics and CodeQL before the workflow/compile item is closed.
+- Physical visual review remains separate from compile/CI qualification, especially for Quest in-headset readability and the final pixel-level desktop/Android polish.
