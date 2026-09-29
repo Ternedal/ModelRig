@@ -213,6 +213,21 @@ authenticated live frame, ARCore runtime and detected-plane placement. The
 visual receipt still keeps release-gate satisfaction and production activation
 false.
 
+Finally, independently revalidate both physical receipts and their artifacts:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+python .\scripts\kaliv_body_android_physical_gate.py --expected-sha $sha
+```
+
+A PASS independently re-hashes the APK and captured logcat, SHA-binds the
+visual receipt to the exact host receipt bytes, requires exact clean HEAD,
+intent RigLink without token leakage, strong ARCore runtime, detected-plane
+placement, digest-bound remote avatar, authenticated live frame,
+`live_body_qualified=true` and all five human observations. The gate result
+still returns `release_gate_satisfied=false` and
+`production_activation=false`.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
