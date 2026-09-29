@@ -101,6 +101,12 @@ check(
     "ARCore runtime qualification marker is emitted only from SessionTracking and unsubscribes cleanly",
 )
 check(
+    "BodyRig: AR avatar placed on detected plane." in ar
+    and ar.index("avatarRoot.gameObject.SetActive(true);")
+        < ar.index("BodyRig: AR avatar placed on detected plane."),
+    "placement evidence marker is emitted only after the avatar is activated at a raycast-derived pose",
+)
+check(
     "public bool IsArTrackingReady => arTrackingReady;" in ar
     and "if (arTrackingReady)" in ar,
     "AR tracking readiness is monotonic and exposed without granting authority",
