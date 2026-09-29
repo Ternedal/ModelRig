@@ -57,6 +57,8 @@ def main() -> int:
     assert "pillDot = KalivTheme.colors.cognition" in app_ui, "active voice route must use Signal"
     control = need("android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt")
     assert "color = KalivTheme.colors.cognition" in control, "Control Center progress must use Signal"
+    assert "RoundedCornerShape(15.dp)" in control, "Android Control Center cards must use unified shell radius"
+    assert "stateBorder" in control, "Android Control Center cards must expose semantic state borders"
     rig_status = need("android/app/src/main/java/dk/ternedal/modelrig/ui/chat/RigStatusList.kt")
     assert "KalivTheme.colors.cognition" in rig_status, "rig telemetry and active models must use Signal"
 
@@ -65,6 +67,7 @@ def main() -> int:
     assert "KalivTheme.colors.CognitionLight" in desktop, "active desktop model must expose Signal runtime state"
     desktop_cc = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt")
     assert "\"healthy\" -> KalivTheme.colors.Success" in desktop_cc, "health must stay semantic"
+    assert "RoundedCornerShape(15.dp)" in desktop_cc, "desktop Control Center cards must use unified shell radius"
     assert "color = KalivTheme.colors.Cognition" in desktop_cc, "live Control Center progress must use Signal"
 
     vr_brand = need("vr/Assets/Scripts/KalivVrBrand.cs")
