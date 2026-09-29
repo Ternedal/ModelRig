@@ -23,6 +23,11 @@ _RELEASE_ID = re.compile(r"^kaliv-rc-[A-Za-z0-9._-]{1,64}$")
 _ANDROID_LIVE_BODY_REF = re.compile(
     r"^kaliv-body-android-physical-gate:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
+_SOFTWARE_EXACT_GREEN_REF = re.compile(
+    r"^kaliv-software-exact-green:"
+    r"([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):"
+    r"([0-9a-f]{64})$"
+)
 _CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
     r"^consciousness-live-lifecycle:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
@@ -209,7 +214,9 @@ def _validate_gates(
     value: Any,
     *,
     modelrig_sha: str,
+    bodyrig_sha: str,
     visionrig_sha: str,
+    voicerig_sha: str,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     gates = _require_mapping(value, "gates")
     expected = set(REQUIRED_GATES)
@@ -230,6 +237,29 @@ def _validate_gates(
             gate,
             require=status == "PASS",
         )
+        if gate == "software_exact_green" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "software_exact_green PASS requires exactly one "
+                    "cross-repository qualification evidence ref"
+                )
+            match = _SOFTWARE_EXACT_GREEN_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "software_exact_green PASS requires canonical "
+                    "kaliv-software-exact-green evidence"
+                )
+            expected_pins = (
+                modelrig_sha,
+                bodyrig_sha,
+                visionrig_sha,
+                voicerig_sha,
+            )
+            if match.groups()[:4] != expected_pins:
+                raise SystemReleaseManifestError(
+                    "software_exact_green evidence repository SHAs do not match "
+                    "the pinned release revisions"
+                )
         if gate == "consciousness_live_lifecycle" and status == "PASS":
             if len(refs) != 1:
                 raise SystemReleaseManifestError(
@@ -335,7 +365,9 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
     pending, failed = _validate_gates(
         root["gates"],
         modelrig_sha=pinned["Ternedal/ModelRig"],
+        bodyrig_sha=pinned["Ternedal/BodyRig"],
         visionrig_sha=pinned["Ternedal/VisionRig"],
+        voicerig_sha=pinned["Ternedal/VoiceRig"],
     )
     ready = not pending and not failed
     return SystemReleaseVerdict(
