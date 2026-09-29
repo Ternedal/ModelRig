@@ -95,8 +95,10 @@ check(
 check(
     'sort_keys=True' in GATE
     and 'separators=(",", ":")' in GATE
-    and '"kaliv-body-android-physical-gate:" + hashlib.sha256(canonical).hexdigest()' in GATE,
-    "PASS result issues a deterministic content-addressed release evidence ref",
+    and '"kaliv-body-android-physical-gate:"' in GATE
+    and "+ expected_sha" in GATE
+    and "hashlib.sha256(canonical).hexdigest()" in GATE,
+    "PASS result issues an exact-head-bound content-addressed release evidence ref",
 )
 for forbidden in (
     '"production_activation": True',
