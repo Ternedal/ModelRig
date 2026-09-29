@@ -37,6 +37,7 @@ check(SOURCE_PATH.is_file() and META_PATH.is_file(),
 
 for required in (
     '"/api/v1/body/active"',
+    '"/api/v1/body/active/bodyprint.json"',
     '"/api/v1/body/active/avatar.vrm"',
     '"modelrig-body-assets/v1"',
     '"X-BodyRig-Body-ID"',
@@ -49,9 +50,26 @@ for required in (
     "!string.Equals(actualSha, memberSha, StringComparison.Ordinal)",
     "Application.persistentDataPath",
     "loader.LoadAsync(path)",
+    '"modelrig-bodyprint"',
+    "bodyprint.version != 1",
+    "float.IsNaN(value)",
+    "float.IsInfinity(value)",
+    "value > 4.0f",
+    "instance.transform.localScale = Vector3.one * heightScale;",
 ):
     check(required in source, f"remote avatar source contains {required}")
 
+check(
+    source.count('"X-BodyRig-Body-ID"') >= 2
+    and source.count('"X-BodyRig-Package-SHA256"') >= 2
+    and source.count('"X-BodyRig-Member-SHA256"') >= 2,
+    "bodyprint and avatar both bind to explicit body/package/member receipt headers",
+)
+check(
+    "bodyprint identity/digest validation failed" in source
+    and "Sha256(bodyprintBytes)" in source,
+    "bodyprint bytes are digest-verified before parsing shape",
+)
 check(
     "request.redirectLimit = 0;" in source
     and 'request.SetRequestHeader("Authorization", "Bearer " + token.Trim());' in source
