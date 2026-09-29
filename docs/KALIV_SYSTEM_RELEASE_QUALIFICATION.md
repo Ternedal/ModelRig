@@ -74,10 +74,11 @@ one successful, evidence-referenced event for each of:
 - `interruption_recovery`.
 
 The receipt SHA-binds the observations file and carries the same exact candidate
-SHA plus a Stage-B evidence reference. It always keeps
-`production_activation=false`. A release manifest may mark `recovery_soak`
-PASS only by referencing a reviewed receipt from this qualifier (or a strictly
-stronger reviewed authority).
+SHA plus a Stage-B evidence reference. It emits the canonical release reference
+`kaliv-recovery-soak:<modelrig-sha>:<sha256>`, where the digest binds the
+qualified receipt fields. It always keeps `production_activation=false`.
+A release manifest may mark `recovery_soak` PASS only by referencing that
+reviewed canonical qualifier evidence (or a strictly stronger reviewed authority).
 
 ## Authority boundary
 
