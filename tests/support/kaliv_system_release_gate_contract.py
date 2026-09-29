@@ -69,7 +69,38 @@ def _must_reject(manifest: dict, fragment: str) -> None:
         raise AssertionError(f"manifest unexpectedly accepted; wanted {fragment!r}")
 
 
+def _test_modelrig_clean_merge_equivalence_helper() -> None:
+    original_run = gate.subprocess.run
+    original_git = gate._git
+
+    class _Result:
+        stdout = ""
+
+    try:
+        gate.subprocess.run = lambda *args, **kwargs: _Result()
+        gate._git = lambda *args: "tree-" + "a" * 40
+        assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is True
+
+        def different_tree(*args):
+            joined = " ".join(args)
+            return "tree-evidence" if ("a" * 40) in joined else "tree-pinned"
+
+        gate._git = different_tree
+        assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is False
+
+        def non_ancestor(*args, **kwargs):
+            raise gate.subprocess.CalledProcessError(1, args[0])
+
+        gate.subprocess.run = non_ancestor
+        gate._git = original_git
+        assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is False
+    finally:
+        gate.subprocess.run = original_run
+        gate._git = original_git
+
+
 def run_contract() -> None:
+    _test_modelrig_clean_merge_equivalence_helper()
     valid = _manifest()
     verdict = gate.evaluate_manifest(valid)
     assert verdict.state == "QUALIFIED"
