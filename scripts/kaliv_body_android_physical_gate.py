@@ -244,7 +244,7 @@ def validate(
         if _git("status", "--porcelain=v1", "--untracked-files=all"):
             raise AndroidPhysicalGateError("repository is not fully clean")
 
-    return {
+    result = {
         "schema": "modelrig.kaliv-body.android-physical-gate/v1",
         "status": "pass",
         "exact_head": expected_sha,
@@ -266,6 +266,17 @@ def validate(
         "live_body_qualified": True,
         "visual_acceptance": True,
     }
+    canonical = json.dumps(
+        result,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    result["evidence_ref"] = (
+        "kaliv-body-android-physical-gate:" + hashlib.sha256(canonical).hexdigest()
+    )
+    return result
 
 
 def main() -> int:
