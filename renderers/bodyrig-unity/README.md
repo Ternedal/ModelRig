@@ -129,6 +129,20 @@ if the app reports `AR session unsupported` or `AR session needs install`.
 Only then does the receipt set `arcore_runtime_qualified=true`. Visual
 placement acceptance and production activation remain separate and false.
 
+To prove the next machine-observable step — an actual tap/raycast that places
+the avatar on a detected plane:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveArCore -ProvePlacement
+```
+
+During the evidence window, tap a detected physical plane. The receipt sets
+`plane_placement_qualified=true` only after logcat contains
+`BodyRig: AR avatar placed on detected plane.`. This proves the placement path
+executed after ARCore tracking; it still does not claim visual correctness.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
