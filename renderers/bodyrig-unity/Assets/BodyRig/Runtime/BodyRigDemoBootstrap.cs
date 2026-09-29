@@ -35,7 +35,7 @@ namespace ModelRig.BodyRig.UnityRenderer
             loader.Renderer = renderer;
             loader.GazeTarget = camera.transform;
             loader.VrmPath = Environment.GetEnvironmentVariable("BODYRIG_VRM_PATH");
-            loader.LoadOnStart = true;
+            loader.LoadOnStart = Application.platform != RuntimePlatform.Android;
 
 #if BODYRIG_AR
             var placement = root.AddComponent<BodyRigArPlacement>();
@@ -66,14 +66,23 @@ namespace ModelRig.BodyRig.UnityRenderer
                 var link = root.AddComponent<BodyRigRigLink>();
                 link.Resolved += (url, token) =>
                 {
-                    if (root.GetComponent<BodyRigFrameSource>() != null)
+                    if (root.GetComponent<BodyRigRemoteAvatarSource>() == null)
                     {
-                        return;
+                        var avatarSource =
+                            root.AddComponent<BodyRigRemoteAvatarSource>();
+                        avatarSource.Loader = loader;
+                        avatarSource.BaseUrl = url;
+                        avatarSource.Token = token;
+                        avatarSource.Begin();
                     }
-                    var source = root.AddComponent<BodyRigFrameSource>();
-                    source.Renderer = renderer;
-                    source.BaseUrl = url;
-                    source.Token = token;
+
+                    if (root.GetComponent<BodyRigFrameSource>() == null)
+                    {
+                        var source = root.AddComponent<BodyRigFrameSource>();
+                        source.Renderer = renderer;
+                        source.BaseUrl = url;
+                        source.Token = token;
+                    }
                 };
                 return;
             }
