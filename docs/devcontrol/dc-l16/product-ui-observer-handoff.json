@@ -15,7 +15,7 @@
   "tracked_source_transition": {
     "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt",
     "from_git_blob_sha": "0a9498ac0fe61ea742a47c1d6be1cf7886992321",
-    "to_git_blob_sha": "ccf605762dfcdf95c9f2f1a60de0986a3c84564c"
+    "to_git_blob_sha": "3a2b9ad372a758d5b2cfff1bc1e29fecd60c065c"
   },
   "new_product_files": [
     {
