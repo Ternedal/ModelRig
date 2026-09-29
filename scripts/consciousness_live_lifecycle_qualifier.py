@@ -267,6 +267,14 @@ def qualify(value: Mapping[str, Any]) -> dict[str, Any]:
     )
     model_ref, model = _validate_model_swap(root["model_swap"], candidate_sha)
 
+    for label, receipt in (("dormancy", dormancy), ("model_swap", model)):
+        for field in ("self_id", "person_revision"):
+            value = receipt.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise LiveLifecycleQualificationError(
+                    f"{label} evidence requires non-empty {field}"
+                )
+
     if dormancy.get("self_id") != model.get("self_id"):
         raise LiveLifecycleQualificationError(
             "dormancy and model-swap evidence belong to different Self identities"
