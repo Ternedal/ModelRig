@@ -61,6 +61,9 @@ for required in (
     "BodyRig: ARCore runtime tracking.",
     "ar_runtime_bootstrap_ready",
     "ar_placement_runtime_ready",
+    "[switch]$ProvePlacement",
+    "BodyRig: AR avatar placed on detected plane.",
+    "plane_placement_qualified",
 ):
     check(required in SCRIPT, f"physical host qualifier contains {required}")
 
@@ -105,6 +108,15 @@ check(
 check(
     "-ProveArRuntime requires -Launch." in SCRIPT,
     "AR runtime proof cannot be minted without a physical launch",
+)
+check(
+    "-ProvePlacement requires -Launch." in SCRIPT
+    and "-ProvePlacement requires -ProveArRuntime." in SCRIPT,
+    "placement proof requires a launched, AR-qualified physical session",
+)
+check(
+    "plane_placement_qualified = [bool]$planePlacementQualified" in SCRIPT,
+    "plane-placement qualification is bound to the detected-plane placement marker",
 )
 check(
     "KALIV_BODY_RIG_TOKEN =" not in SCRIPT
