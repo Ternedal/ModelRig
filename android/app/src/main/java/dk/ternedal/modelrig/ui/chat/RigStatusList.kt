@@ -173,7 +173,7 @@ fun RigMeterRow(
                     Modifier
                         .fillMaxWidth(fraction.coerceIn(0f, 1f))
                         .height(6.dp)
-                        .background(KalivTokens.Gold.fill, RoundedCornerShape(KalivTokens.Radius.round)),
+                        .background(KalivTheme.colors.cognition, RoundedCornerShape(KalivTokens.Radius.round)),
                 )
             }
         }
@@ -194,7 +194,7 @@ fun RigLoadedModelRow(
         ) {
             Box(
                 Modifier.size(7.dp).background(
-                    KalivTheme.colors.success,
+                    KalivTheme.colors.cognition,
                     RoundedCornerShape(KalivTokens.Radius.round),
                 ),
             )
