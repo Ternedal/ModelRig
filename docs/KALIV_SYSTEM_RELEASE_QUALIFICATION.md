@@ -35,7 +35,12 @@ evidence reference:
    ModelRig revision. Arbitrary labels and component evidence refs are not
    sufficient.
 3. `visionrig_physical_perception` — real sensor input reaches bounded
-   WorldEvidence/WorldState through the accepted VisionRig boundary.
+   WorldEvidence/WorldState through the accepted VisionRig boundary. A PASS must
+   contain exactly one canonical
+   `visionrig-physical-perception:<visionrig-sha>:<sha256>` reference emitted
+   by VisionRig's physical qualifier, and the embedded SHA must equal the pinned
+   `Ternedal/VisionRig` revision. A mutable label or inner WorldEvidence ref is
+   not sufficient.
 4. `bodyrig_photoreal_likeness` — the real-person Photoreal likeness gate,
    including required human review, has passed.
 5. `bodyrig_digital_twin_m6` — one coherent Person lineage reaches canonical M6
