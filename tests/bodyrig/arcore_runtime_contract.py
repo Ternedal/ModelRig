@@ -54,8 +54,8 @@ for required in (
     "!RaycastManager.subsystem.running",
     "!CameraBackground.backgroundRenderingEnabled",
     "Qualified = true;",
-    "BodyRig: ARCore runtime qualified "
-    + "(loader+session-tracking+camera-background+planes+raycast).",
+    "BodyRig: ARCore runtime qualified ",
+    "(loader+session-tracking+camera-background+planes+raycast).",
 ):
     check(required in probe, f"runtime probe contains {required}")
 
