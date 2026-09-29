@@ -168,6 +168,12 @@ persons-registry.json
 renderers/bodyrig-unity/Assets/BodyRig/Scenes/
 renderers/bodyrig-unity/Assets/BodyRig/Scenes.meta
 
+# Kaliv Body Android exact-head host qualification: local build/device evidence.
+/validation/kaliv-body-android-latest.json
+/validation/kaliv-body-android-latest.json.tmp
+/validation/kaliv-body-unity-build.log
+/validation/kaliv-body-android-logcat.txt
+
 # Kaliv VR exact-head physical qualification: local build/device evidence.
 /validation/kaliv-vr-quest-latest.json
 /validation/kaliv-vr-quest-latest.json.tmp
