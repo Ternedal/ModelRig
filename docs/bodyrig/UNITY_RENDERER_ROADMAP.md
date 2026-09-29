@@ -13,11 +13,13 @@ afspille og afvikle** `.mrbody` på Windows, Android (AR) og Quest.
 | `BodyRigRuntime` tilstandsmaskine (idle/listening/thinking/speaking/waiting_for_tool/interrupted/error) | landet i core |
 | Render-frame wire v0.1 (`bodyrig.render_frame`) | landet i core |
 | Unity `6000.3.21f1` + UniVRM `v0.131.2` proof: VRM-load, blink, envelope-mund, visemes, emotion, gaze, breath, gesture-router, afbrydelse | **på main siden 2/9 21:13** (merget via base-gren uden fysisk gate — gaten er stadig IKKE kørt og skal køres mod main's head) |
-| Worker-udstilling af BodyRig (runtime, frames, assets) | **findes ikke** |
-| Android/Quest-klient | **findes ikke** |
+| Worker/backend-udstilling af BodyRig (runtime, frames, assets) | **landet (#842–#844)** |
+| Unity live-frame-klient | **restacket i #1920; ikke landet endnu** |
+| Android/Quest-host | **findes ikke på main** |
 
-Unity-proofen afspiller en canned fixture (`bodyrig-demo.json`). Den har ingen
-netværkskilde. Det er hullet mellem proof og produkt.
+Unity-proofen på `main` afspiller stadig en canned fixture (`bodyrig-demo.json`).
+Server-/backend-netværksfladen er landet; hullet er nu Unity-klientens live-kilde,
+som er isoleret i #1920.
 
 ## MVP — proofen bevises (BodyRig-spor, Anders på riggen)
 
@@ -65,10 +67,12 @@ følger med hvert `chunk`-event), så munden forankres til det, der faktisk
 høres. Gamle klienter beholder tilnærmelsen; en rig uden krop svarer 404,
 og appen holder op med at melde for resten af sessionen.
 
-**Slice C — Unity frame-kilde. SKREVET 3/9 (#846, draft mod main; kompilerer kun i Unity).** Rendereren får en `BodyRigFrameSource` der
-kan læse frames fra fixturen (som nu) ELLER fra `/body/frames` (UnityWebRequest,
-SSE). Fixturen bliver ved at være den deterministiske testkilde. C#-ændringen
-er lille; den verificeres af den fysiske gate, ikke af CI.
+**Slice C — Unity frame-kilde. RESTACKET 28/9 som #1920.** Det historiske #846
+blev lukket uden merge. #1920 bærer kun den nyttige current-main-kerne:
+`BodyRigFrameSource`, bootstrap-wiring og en CI-gatet statisk sikkerhedskontrakt.
+Rendereren kan dermed læse `/body/frames` via UnityWebRequest/SSE, mens fixturen
+forbliver deterministisk fallback. Unity-kompilering og fysisk proof er stadig
+separate gates.
 
 **Slice D — Android-host + AR. Skrevet 4/9 som drafts stablet på #846: AR-placering (#858), rig-link (#860); værtsvalg taget: separat Kaliv Body-app startet fra Kalivs ⋮ → Krop med token som intent-extras (#861).** Kaliv Body som separat Unity Android-app
 først (parring som enhver anden klient; asset + frames fra rig), ARFoundation
@@ -89,9 +93,9 @@ VRM-expression-nøgler krydser grænsen — kun v0.1-frames og validerede assets
 
 ## Rækkefølge
 
-A og B er landet. C (#846) targeter main og kan lande, når den er kompileret i
-Unity på riggen. D kræver C og en Android-build af Unity-projektet. Den fysiske
-gate er uafhængig og kan køres når som helst mod main.
+A og B er landet. C er nu #1920 og kan lande, når software-gates og den
+relevante Unity-fysiske proof er grønne. D kræver C og en Android-build af
+Unity-projektet. Den eksisterende renderer-gate kan fortsat køres mod main.
 
 Rig-runbook for den første levende krop: `docs/bodyrig/FIRST_LIVE_BODY.md`.
 
