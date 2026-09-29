@@ -32,10 +32,10 @@ forbliver den fysisk beviste Windows-sti uden AR Foundation-afhængighed.
 
 På riggen, i Unity `6000.3.21f1`:
 
-1. Installer **AR Foundation** og **Google ARCore XR Plugin** gennem Package
-   Manager. Brug de kompatible versioner Unity Package Manager tilbyder til det
-   installerede editor-/package-set; denne draft pinner ikke en uprøvet version
-   i `manifest.json`.
+1. **AR Foundation 6.3.5** og **Google ARCore XR Plugin 6.3.5** er
+   repository-pinnet i `Packages/manifest.json` og `packages-lock.json`.
+   Det er Unity 6000.3's released package-line; ændr ikke versionerne manuelt i
+   Package Manager uden at opdatere lock + `tests/bodyrig/ar_packages_contract.py`.
 2. Project Settings -> XR Plug-in Management -> Android -> aktiver ARCore.
 3. Player Settings -> Android: ARM64, IL2CPP og minimum API 24 eller højere.
 4. Player Settings -> Scripting Define Symbols (Android) -> tilføj
