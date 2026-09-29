@@ -545,7 +545,7 @@ fun Agent3TaskApp(onUseAgent2: () -> Unit) {
                             Text(evidence, color = KalivTheme.colors.TextMuted, fontSize = 10.sp)
                         }
                     }
-                    if (busy == DesktopTaskBusy.READINESS) CircularProgressIndicator()
+                    if (busy == DesktopTaskBusy.READINESS) CircularProgressIndicator(color = KalivTheme.colors.Cognition)
                 }
                 Spacer(Modifier.height(8.dp))
                 DesktopValueRow("Backend", baseUrl)
@@ -888,7 +888,7 @@ private fun DesktopRunCard(
                 Spacer(Modifier.height(5.dp))
                 Text(
                     presentTaskEventKind(event.kind),
-                    color = KalivTheme.colors.Signal,
+                    color = KalivTheme.colors.Cognition,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -911,7 +911,7 @@ private fun DesktopTerminationScopes(value: Agent3ReadonlyTaskSnapshot) {
     Text("Stop og afbrydelse", color = KalivTheme.colors.TextHigh, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(6.dp))
 
-    Text("Plan", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    Text("Plan", color = KalivTheme.colors.Cognition, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
     DesktopValueRow("Planstatus", presentTerminationPlanState(termination.plan.state))
     DesktopValueRow("Stopmulighed", if (termination.plan.canRequest) "Kan anmodes" else "Ikke tilgængelig")
     DesktopValueRow("Omfang", presentTerminationPlanScope(termination.plan.requestScope))
@@ -926,14 +926,14 @@ private fun DesktopTerminationScopes(value: Agent3ReadonlyTaskSnapshot) {
     DesktopTechnicalReceipt("Plan", terminationPlanEvidence(termination.plan))
 
     Spacer(Modifier.height(8.dp))
-    Text("Modelstream", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    Text("Modelstream", color = KalivTheme.colors.Cognition, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
     DesktopValueRow("Modelstream-status", presentTerminationModelState(termination.modelStream.state))
     DesktopValueRow("Stopmulighed", if (termination.modelStream.canRequest) "Kan anmodes" else "Ikke tilgængelig")
     DesktopValueRow("Runtime-handle", if (termination.modelStream.handlePresent) "Til stede" else "Ikke tilgængeligt")
     DesktopTechnicalReceipt("Modelstream", terminationModelEvidence(termination.modelStream))
 
     Spacer(Modifier.height(8.dp))
-    Text("Aktivt værktøj", color = KalivTheme.colors.Signal, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+    Text("Aktivt værktøj", color = KalivTheme.colors.Cognition, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
     termination.activeTool?.let { active ->
         DesktopValueRow("Værktøj", active.tool)
         DesktopValueRow("Trin-id", active.stepId)
