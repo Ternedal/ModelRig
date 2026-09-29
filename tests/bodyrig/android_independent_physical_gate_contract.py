@@ -72,7 +72,7 @@ check(
     "artifact reads are symlink-refusing and size-bounded",
 )
 check(
-    "host.get("live_body_qualified") is not True" in GATE
+    'host.get("live_body_qualified") is not True' in GATE
     and '"live_body_qualified": True' in GATE,
     "PASS requires end-to-end live-body evidence rather than fixture/local-avatar proof",
 )
