@@ -62,6 +62,13 @@ check(
     "avatar stays hidden until placement and a tap during async load is retained",
 )
 check(
+    "BodyRig: AR avatar placed on detected plane." in ar
+    and ar.index("avatarRoot.gameObject.SetActive(true);")
+        < ar.index("BodyRig: AR avatar placed on detected plane."),
+    "placement evidence marker is emitted only after avatar activation at a raycast-derived pose",
+)
+
+check(
     "placement.Loader = loader;" in bootstrap
     and "placement.AvatarRoot" not in bootstrap
     and "root.SetActive(false)" not in bootstrap,
