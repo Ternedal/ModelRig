@@ -1,0 +1,31 @@
+{
+  "schema": "kaliv-rsi-dc-l16-visionrig-sensor-control-handoff/v1",
+  "repository": "Ternedal/ModelRig",
+  "predecessor_server_blob_sha": "582b163d7a71a934b43671ddad62a5644df3087e",
+  "implementation_choice": {
+    "capability": "visionrig.sensor-enabled",
+    "feature_flag": "KALIV_VISIONRIG_SENSOR_CONTROL",
+    "route": "PATCH /api/v1/control-center/vision/sensors/{sourceID}/enabled",
+    "default_off": true,
+    "bearer_authenticated": true,
+    "loopback_upstream_required": true,
+    "boolean_only_request": true,
+    "receipt_verified": true,
+    "raw_perception_access": false,
+    "production_activation": false
+  },
+  "tracked_source_transition": {
+    "path": "backend/internal/httpapi/server.go",
+    "from_git_blob_sha": "582b163d7a71a934b43671ddad62a5644df3087e",
+    "to_git_blob_sha": "f9b646350c70900ec256387b7a7e544d2de3eb0b"
+  },
+  "authority_state": {
+    "sensor_enabled_mutation_when_flagged": true,
+    "other_sensor_metadata_mutation_authority": false,
+    "raw_perception_read_authority": false,
+    "scheduler_authority": false,
+    "tool_execution_authority": false,
+    "production_activation_authority": false,
+    "authority": "visionrig-sensor-enabled-only"
+  }
+}

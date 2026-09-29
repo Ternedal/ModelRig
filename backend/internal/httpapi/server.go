@@ -71,6 +71,13 @@ func (s *server) routes() {
 	s.mux.Handle("GET /api/v1/health/full", s.authMW(http.HandlerFunc(s.handleHealthFull)))
 	s.mux.Handle("GET /api/v1/control-center/status", s.authMW(http.HandlerFunc(s.handleControlCenterStatus)))
 	s.mux.Handle("GET /api/v1/control-center/schedules", s.authMW(http.HandlerFunc(s.handleControlCenterScheduleHistory)))
+
+	if os.Getenv("KALIV_VISIONRIG_SENSOR_CONTROL") == "1" {
+		s.mux.Handle(
+			"PATCH /api/v1/control-center/vision/sensors/{sourceID}/enabled",
+			s.authMW(http.HandlerFunc(s.handleControlCenterVisionSensorEnabled)),
+		)
+	}
 	s.mux.Handle("GET /api/v1/devices", s.authMW(http.HandlerFunc(s.handleDevicesList)))
 	s.mux.Handle("DELETE /api/v1/devices/{id}", s.authMW(http.HandlerFunc(s.handleDeviceRevoke)))
 	s.mux.Handle("POST /api/v1/token/rotate", s.authMW(http.HandlerFunc(s.handleTokenRotate)))

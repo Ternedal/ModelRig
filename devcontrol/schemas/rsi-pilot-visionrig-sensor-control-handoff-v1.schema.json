@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kaliv-rsi-dc-l16-visionrig-sensor-control-handoff/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "predecessor_server_blob_sha",
+    "implementation_choice",
+    "tracked_source_transition",
+    "authority_state"
+  ],
+  "properties": {
+    "schema": {"const": "kaliv-rsi-dc-l16-visionrig-sensor-control-handoff/v1"},
+    "repository": {"const": "Ternedal/ModelRig"},
+    "predecessor_server_blob_sha": {"const": "582b163d7a71a934b43671ddad62a5644df3087e"},
+    "implementation_choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "feature_flag",
+        "route",
+        "default_off",
+        "bearer_authenticated",
+        "loopback_upstream_required",
+        "boolean_only_request",
+        "receipt_verified",
+        "raw_perception_access",
+        "production_activation"
+      ],
+      "properties": {
+        "capability": {"const": "visionrig.sensor-enabled"},
+        "feature_flag": {"const": "KALIV_VISIONRIG_SENSOR_CONTROL"},
+        "route": {"const": "PATCH /api/v1/control-center/vision/sensors/{sourceID}/enabled"},
+        "default_off": {"const": true},
+        "bearer_authenticated": {"const": true},
+        "loopback_upstream_required": {"const": true},
+        "boolean_only_request": {"const": true},
+        "receipt_verified": {"const": true},
+        "raw_perception_access": {"const": false},
+        "production_activation": {"const": false}
+      }
+    },
+    "tracked_source_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "from_git_blob_sha", "to_git_blob_sha"],
+      "properties": {
+        "path": {"const": "backend/internal/httpapi/server.go"},
+        "from_git_blob_sha": {"const": "582b163d7a71a934b43671ddad62a5644df3087e"},
+        "to_git_blob_sha": {"const": "f9b646350c70900ec256387b7a7e544d2de3eb0b"}
+      }
+    },
+    "authority_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sensor_enabled_mutation_when_flagged",
+        "other_sensor_metadata_mutation_authority",
+        "raw_perception_read_authority",
+        "scheduler_authority",
+        "tool_execution_authority",
+        "production_activation_authority",
+        "authority"
+      ],
+      "properties": {
+        "sensor_enabled_mutation_when_flagged": {"const": true},
+        "other_sensor_metadata_mutation_authority": {"const": false},
+        "raw_perception_read_authority": {"const": false},
+        "scheduler_authority": {"const": false},
+        "tool_execution_authority": {"const": false},
+        "production_activation_authority": {"const": false},
+        "authority": {"const": "visionrig-sensor-enabled-only"}
+      }
+    }
+  }
+}
