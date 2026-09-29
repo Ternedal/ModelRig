@@ -2221,7 +2221,7 @@ private fun ChatScreen(
                     dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
                         modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                         pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",
-                        pillDot = if (voiceUsesCloud && store.cloudKey != null) KalivTheme.colors.signal else KalivTheme.colors.success,
+                        pillDot = if (voiceUsesCloud && store.cloudKey != null) KalivTheme.colors.cognition else KalivTheme.colors.cognition,
                         stateText = when {
                             recording -> "Lytter \u2026"
                             voiceBusy && !speaking -> "T\u00e6nker \u2026"
