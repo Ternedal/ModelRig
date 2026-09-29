@@ -1,8 +1,8 @@
 # BodyRig AR placement — Slice D
 
-Denne draft er AR-halvdelen af BodyRig Unity-rendererens Slice D. Den er stablet
-på den levende frame-kilde i #846 og ændrer ikke BodyRig wire-kontrakten,
-renderer-semantikken eller production authority.
+Denne slice er AR-halvdelen af BodyRig Unity-rendererens aktuelle Android-stack.
+Den er stablet på live-frame/RigLink/Android-host-sporet (#1930→#1940) og ændrer
+ikke BodyRig wire-kontrakten eller production authority.
 
 `production_activation=false`.
 
@@ -41,8 +41,11 @@ På riggen, i Unity `6000.3.21f1`:
    aldrig; findes de uden ARCore, fejler buildet lukket.
 3. Player Settings er repository-pinnet til ARM64, minSdk 28 og
    `BODYRIG_AR` for Android. De værdier skal ikke klikkes ind manuelt.
-4. Scenen skal indeholde `AR Session`, `XR Origin (AR)`, `ARRaycastManager` og
-   `ARPlaneManager`. Placement-komponenten finder raycast-manageren i scenen.
+4. Den genererede tomme build-scene bootstrapper nu selv `ARSession`,
+   `ARInputManager`, `XROrigin`, tracked AR-kamera (`ARCameraManager` +
+   `ARCameraBackground` + Input System `TrackedPoseDriver`), `ARPlaneManager`
+   og `ARRaycastManager`. Plane detection pinner horizontal + vertical, og den
+   konkrete raycast-manager gives direkte til placement-komponenten.
 
 ## Software-proof vs. fysisk proof
 
@@ -52,9 +55,11 @@ renderer-specifikke testsuite og ændrer derfor ikke repoets genererede top-leve
 test-inventory i `CURRENT_STATE.md`. Det er **ikke** et Android-build eller et
 fysisk AR-bevis.
 
-Fysisk acceptance kræver senere, på samme exact candidate head:
+Fysisk acceptance kræver stadig, på samme exact candidate head:
 
-- rigtig Android-build med ARCore;
+- Android host-build/install/launch receipt (#1939-sporet);
+- token-sikker intent RigLink receipt (#1940-sporet), hvis live rig anvendes;
+- ARCore runtime readiness på den fysiske enhed;
 - rigtig VRM load og live frames fra riggen;
 - tap på et detekteret plan;
 - direkte observation af at avatarens placering ikke stopper blink, gaze,
@@ -62,4 +67,4 @@ Fysisk acceptance kræver senere, på samme exact candidate head:
 - separat evidence/acceptance-gate. CI eller screenshots alene må ikke erstatte
   det.
 
-#846's live physical-proof freeze og dens authority ændres ikke af denne draft.
+Runtime-bootstrapen ændrer ingen release- eller production authority.
