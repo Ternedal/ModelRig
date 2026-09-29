@@ -53,8 +53,12 @@ check(
 check(
     "_hash_file(" in GATE
     and 'host.get("apk_path")' in GATE
-    and 'host.get("logcat_path")' in GATE,
-    "gate independently re-hashes APK and logcat artifacts",
+    and 'host.get("logcat_path")' in GATE
+    and 'host.get("logcat_sha256")' in GATE
+    and 'host.get("logcat_size_bytes")' in GATE
+    and "logcat SHA-256 mismatch" in GATE
+    and "logcat byte count mismatch" in GATE,
+    "gate independently re-hashes and verifies APK/logcat artifacts",
 )
 check(
     "stat.S_ISLNK" in GATE
