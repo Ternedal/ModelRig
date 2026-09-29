@@ -11,7 +11,7 @@ Den valgte persons krop (Person Revision → `body`-kandidat → `.mrbody`) stå
 brugerens rum på telefonen, bevæger sig og taler i takt med Kaliv, og skifter
 når personen skifter — uden at brugeren forlader Kaliv-appen.
 
-## 2. Hvad der findes (main, 2/9)
+## 2. Hvad der findes (main, afstemt 3/9)
 
 | Lag | Status |
 |---|---|
@@ -19,8 +19,8 @@ når personen skifter — uden at brugeren forlader Kaliv-appen.
 | Runtime-tilstand (`BodyRigRuntime`), face-/motion-mixere, `render_frame` v0.1-wire | landet |
 | Unity/VRM-renderer (blink, mund, visemer, emotion, gaze, breath, gesture-router) | landet (#830) |
 | Person Profile-registry med atomisk aktivering; `active_bindings().body` | landet (#752) |
-| **Live frame-feed fra Kalivs faktiske tur og tale** | **mangler** — Unity afspiller en fixture |
-| **Aktiver over HTTP til telefonen** | **mangler** — handoff er fil-sti på riggen |
+| **Live frame-feed fra Kalivs faktiske tur og tale** | **landet (#843)** — `/body/frames` SSE fra `BodyRigRuntime`, drevet af chat-faser og TTS |
+| **Server assets + live frames over HTTP** | **landet i L1 (#842–#844)** — backend forwarder aktive assets og `/body/frames`; Unity-klientens `BodyRigFrameSource` restackes i #1920 |
 | **Unity som library i Kaliv Android** | **mangler** — projektet er en Windows-batch-build |
 | **ARFoundation** | **mangler** |
 
@@ -85,10 +85,10 @@ taler med Kaliv, skifter ved personskift.
 
 ## 7. Næste skridt
 
-1. L1: frame-feed + aktiver-endpoints i workeren, Go-forwarding, kontrakttests.
-2. L2: `BodyRigNetworkSource` i Unity-projektet + UaaL-eksportindstillinger.
-3. L3: `Krop`-skærm og Gradle-flag i Kaliv Android.
-4. L4: Android-build i den fysiske proof; visuel accept.
+1. **L1: færdig på main.** Frame-feed, aktive assets/endpoints, Go-forwarding og kontrakttests er landet.
+2. **L2:** land #1920 (`BodyRigFrameSource` som minimal current-main restack af #846-kernen), verificér den fysisk i Unity og færdiggør den valgte Android-host; UaaL er V2-sporet, ikke MVP-krav.
+3. **L3:** Kaliv åbner den valgte Body-host med rig-URL + token; behold host-valget adskilt fra L1/L2-kontrakten.
+4. **L4:** Android-build i den fysiske proof; visuel accept af live krop, tale og personskift.
 
 ## 8. Status 3/9 — afstemt med `UNITY_RENDERER_ROADMAP.md`
 
@@ -102,11 +102,12 @@ drevet af chat-faser og TTS-sætninger (#843), telefonens afspilningsrapporter
 ingen timeout på streamen (#851), klient-rapporterbare tilstande begrænset
 til `listening`/`idle` (#852). `KALIV_BODY_STORE` i appliancens env.
 
-**L2's netværkskilde er skrevet:** `BodyRigFrameSource` (#846, draft mod
-#720-grenen) — samme `Apply` som fixturen, samme værn, genforbindelse;
-bootstrappen vælger den kun med `BODYRIG_RIG_URL`/`_TOKEN` sat. Kompilerer kun
-i Unity; verificeres af #720's fysiske gate. UaaL-eksportindstillingerne er
-IKKE lavet.
+**L2's netværkskilde er skrevet og restacket:** det historiske #846 blev lukket
+uden merge; den nyttige kerne (`BodyRigFrameSource` + bootstrap + CI-kontrakt)
+er genoprettet på current main som #1920. Samme `Apply` som fixturen, samme
+værn og genforbindelse; bootstrappen vælger den kun med både
+`BODYRIG_RIG_URL` og `BODYRIG_RIG_TOKEN` sat. Unity-kompilering/fysisk proof
+mangler stadig. UaaL-eksportindstillingerne er ikke lavet.
 
 **Valget om MVP-værten — taget 4/9, reversibelt:** separat **Kaliv Body**-app
 først (Unity-projektet bygget til Android, pakkenavn `dk.ternedal.kalivbody`),
