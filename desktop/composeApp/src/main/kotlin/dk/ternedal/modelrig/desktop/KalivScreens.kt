@@ -376,7 +376,7 @@ fun KalivNavRail(
         modifier
             .width(246.dp)
             .fillMaxHeight()
-            .background(Color(0x8C14110E)) // rgba(20,17,14,.55)
+            .background(KalivTheme.colors.ShellRail)
             .padding(horizontal = 14.dp, vertical = 16.dp),
     ) {
         // No brand row here: the 40dp KalivTitleBar above owns the ankh and
@@ -407,8 +407,8 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
         .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
     val bg = if (active) {
         base.background(
-            Brush.horizontalGradient(listOf(Color(0x389A7136), Color(0x0F9A7136))), // .22 → .06
-        ).border(1.dp, Color(0x599A7136), shape) // .35
+            Brush.horizontalGradient(listOf(KalivTheme.colors.Signal.copy(alpha = 0.22f), KalivTheme.colors.Signal.copy(alpha = 0.06f))),
+        ).border(1.dp, KalivTheme.colors.Signal.copy(alpha = 0.35f), shape)
     } else {
         base
     }
@@ -425,7 +425,7 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
         Spacer(Modifier.width(6.dp))
         Text(
             item.label,
-            color = if (active) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+            color = if (active) KalivTheme.colors.TextHigh else KalivTheme.colors.ShellInactiveText,
             fontSize = 13.5.sp,
             fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
         )
