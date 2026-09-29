@@ -151,7 +151,7 @@ for signature in (
 check(shell_light_boundary(shell), "L2a dark compatibility-literals er betingede og light bruger theme-roller")
 check("else c.TextHigh" in shell and "else c.TextMuted" in shell, "light title/nav tekst bruger theme-ink")
 check("else c.Border" in shell, "light shell borders bruger Kaliv Border")
-check("c.Signal.copy(alpha = 0.12f)" in shell, "light aktiv navigation bruger themed Signal-wash")
+check("c.Signal.copy(alpha = if (c.isDark) 0.22f else 0.12f)" in shell, "light aktiv navigation bruger themed Signal-wash")
 check("LiveViewport" not in shell, "L2a roerer ikke den simulerede browser/page-flade")
 
 title_start = app.index("KalivTitleBar(")
