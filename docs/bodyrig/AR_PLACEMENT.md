@@ -59,7 +59,10 @@ Fysisk acceptance kræver stadig, på samme exact candidate head:
 
 - Android host-build/install/launch receipt (#1939-sporet);
 - token-sikker intent RigLink receipt (#1940-sporet), hvis live rig anvendes;
-- ARCore runtime readiness på den fysiske enhed;
+- ARCore runtime readiness på den fysiske enhed: kør Android-qualifieren med
+  `-ProveArRuntime`; den kræver bootstrap-ready + placement-ready +
+  `ARSessionState.SessionTracking`-markøren før receiptet må sætte
+  `arcore_runtime_qualified=true`;
 - rigtig VRM load og live frames fra riggen;
 - tap på et detekteret plan;
 - direkte observation af at avatarens placering ikke stopper blink, gaze,
