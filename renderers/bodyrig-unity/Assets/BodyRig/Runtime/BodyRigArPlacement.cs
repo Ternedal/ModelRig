@@ -133,6 +133,7 @@ namespace ModelRig.BodyRig.UnityRenderer
             }
             avatarRoot.gameObject.SetActive(true);
             placed = true;
+            Debug.Log("BodyRig: AR avatar placed on detected plane.");
         }
     }
 }
