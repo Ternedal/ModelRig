@@ -585,7 +585,8 @@ private fun ScheduleGrantCard(grant: ControlCenterScheduleGrant) {
 private fun NeutralCard(content: @Composable () -> Unit) {
     Surface(
         color = KalivTheme.colors.surface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(15.dp),
+        border = BorderStroke(KalivTokens.Layout.hairline, KalivTheme.colors.hairline),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(16.dp)) { content() }
@@ -606,9 +607,16 @@ private fun StatusCard(
     badgeSuffix: String = "",
     content: @Composable () -> Unit,
 ) {
+    val stateInk = stateColor(state)
+    val stateBorder = when (state) {
+        "unavailable" -> KalivTheme.colors.danger.copy(alpha = 0.34f)
+        "attention", "fallback" -> KalivTheme.colors.amber.copy(alpha = 0.30f)
+        else -> KalivTheme.colors.hairline
+    }
     Surface(
         color = KalivTheme.colors.surface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(15.dp),
+        border = BorderStroke(KalivTokens.Layout.hairline, stateBorder),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -625,7 +633,7 @@ private fun StatusCard(
                 )
                 Text(
                     controlCenterStateLabel(state) + badgeSuffix,
-                    color = stateColor(state),
+                    color = stateInk,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
