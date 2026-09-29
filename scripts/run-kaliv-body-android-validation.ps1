@@ -148,6 +148,8 @@ $appPid = $null
 $deviceModel = $null
 $androidVersion = $null
 $fatalPackageCrashObserved = $false
+$logcatSha = $null
+$logcatBytes = $null
 $rigLinkResolvedFromIntent = $false
 $rigLinkTokenLeakObserved = $false
 $arCoreSessionTrackingObserved = $false
@@ -213,6 +215,10 @@ if ($Install -or $Launch) {
         if ($LASTEXITCODE -ne 0) { throw "Failed to capture device logcat after launch." }
         $logcatText = ($logcat -join [Environment]::NewLine)
         $logcatText | Set-Content -LiteralPath $logcatPath -Encoding utf8
+
+        $logcatFile = Get-Item -LiteralPath $logcatPath
+        $logcatSha = (Get-FileHash -LiteralPath $logcatPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $logcatBytes = $logcatFile.Length
 
         $fatalPackageCrashObserved =
             $logcatText.Contains("FATAL EXCEPTION") -and
@@ -284,6 +290,8 @@ $receipt = [ordered]@{
     launched = $launched
     app_pid = $appPid
     logcat_path = if ($launched) { $logcatPath } else { $null }
+    logcat_sha256 = if ($launched) { $logcatSha } else { $null }
+    logcat_size_bytes = if ($launched) { $logcatBytes } else { $null }
     fatal_package_crash_observed = $fatalPackageCrashObserved
     rig_link_qualified = [bool]$rigLinkResolvedFromIntent
     rig_link_token_leak_observed = [bool]$rigLinkTokenLeakObserved
