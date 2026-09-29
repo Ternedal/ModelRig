@@ -178,6 +178,21 @@ subsystems are running, and the AR camera background has received a frame. The
 receipt may then set `arcore_runtime_qualified=true`; visual acceptance,
 release-gate satisfaction and production activation remain false.
 
+To prove the next machine-observable step — an actual tap/raycast resulting in
+avatar placement on a detected plane — run:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveArCore -ProvePlacement
+```
+
+During the evidence window, tap a detected physical plane. The receipt sets
+`plane_placement_qualified=true` only after logcat contains
+`BodyRig: AR avatar placed on detected plane.`. This proves the placement
+path executed after the stronger ARCore runtime qualification; it still does
+not claim human visual acceptance.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
