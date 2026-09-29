@@ -57,7 +57,26 @@ that package and hands it the rig address and Kaliv's own device token as
 intent extras (`bodyrig_rig_url`, `bodyrig_rig_token`), which `BodyRigRigLink`
 reads first -- so the body app never pairs on its own. Unity as a Library
 inside Kaliv stays the V2 path if one app is wanted; everything below the
-host is identical. Set the package name in Player Settings → Android.
+host is identical.
+
+The host identity is repository-pinned in `ProjectSettings.asset`:
+`companyName=Ternedal`, `productName=Kaliv Body`,
+`applicationIdentifier.Android=dk.ternedal.kalivbody`, ARM64, minSdk 28.
+Do not repair these manually in the editor: `tests/bodyrig/android_host_contract.py`
+pins them against the already-landed Android launch bridge.
+
+For an Android batch build on a rig with Unity Android Build Support installed:
+
+```powershell
+$env:BODYRIG_ANDROID_BUILD_PATH = "C:\work\KalivBody.apk"
+& "C:\Program Files\Unity\Hub\Editor\6000.3.21f1\Editor\Unity.exe" `
+  -batchmode -quit -projectPath .\renderers\bodyrig-unity `
+  -buildTarget Android `
+  -executeMethod ModelRig.BodyRig.UnityRenderer.Editor.BodyRigBuild.BuildAndroid
+```
+
+That command is a build entrypoint, not proof. A successful physical Android
+build/install/launch remains separate evidence and does not activate production.
 
 ## Authoritative physical proof path
 

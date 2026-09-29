@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 
@@ -73,6 +74,72 @@ namespace ModelRig.BodyRig.UnityRenderer.Editor
                 // The proof scene is generated build input, not repository state.
                 // Remove it even on failure so later evidence cannot inherit an
                 // untracked scene or folder .meta from an earlier physical run.
+                EditorSceneManager.NewScene(
+                    NewSceneSetup.EmptyScene,
+                    NewSceneMode.Single);
+                if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(ScenePath) != null)
+                {
+                    AssetDatabase.DeleteAsset(ScenePath);
+                }
+                if (!sceneDirectoryExisted && AssetDatabase.IsValidFolder(SceneDirectory))
+                {
+                    AssetDatabase.DeleteAsset(SceneDirectory);
+                }
+                AssetDatabase.Refresh();
+            }
+        }
+
+        public static void BuildAndroid()
+        {
+            var sceneDirectoryExisted = AssetDatabase.IsValidFolder(SceneDirectory);
+            var restoreShaders = IncludeRequiredShaders();
+            try
+            {
+                Directory.CreateDirectory(SceneDirectory);
+                var scene = EditorSceneManager.NewScene(
+                    NewSceneSetup.EmptyScene,
+                    NewSceneMode.Single);
+                EditorSceneManager.SaveScene(scene, ScenePath);
+                AssetDatabase.Refresh();
+
+                PlayerSettings.SetApplicationIdentifier(
+                    NamedBuildTarget.Android,
+                    "dk.ternedal.kalivbody");
+                PlayerSettings.productName = "Kaliv Body";
+
+                var configured = Environment.GetEnvironmentVariable("BODYRIG_ANDROID_BUILD_PATH");
+                var output = string.IsNullOrWhiteSpace(configured)
+                    ? Path.GetFullPath("Build/Android/KalivBody.apk")
+                    : Path.GetFullPath(configured);
+                var outputDirectory = Path.GetDirectoryName(output);
+                if (string.IsNullOrWhiteSpace(outputDirectory))
+                {
+                    throw new InvalidOperationException("BodyRig Android build path has no directory.");
+                }
+                Directory.CreateDirectory(outputDirectory);
+
+                var options = new BuildPlayerOptions
+                {
+                    scenes = new[] { ScenePath },
+                    locationPathName = output,
+                    target = BuildTarget.Android,
+                    options = BuildOptions.StrictMode,
+                };
+
+                var report = BuildPipeline.BuildPlayer(options);
+                if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+                {
+                    throw new InvalidOperationException(
+                        "BodyRig Android renderer build failed: " + report.summary.result);
+                }
+            }
+            finally
+            {
+                if (restoreShaders != null)
+                {
+                    restoreShaders();
+                }
+
                 EditorSceneManager.NewScene(
                     NewSceneSetup.EmptyScene,
                     NewSceneMode.Single);
