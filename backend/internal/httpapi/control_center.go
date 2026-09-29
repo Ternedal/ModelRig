@@ -163,7 +163,16 @@ func visionRigLoopbackBaseURL() (string, bool) {
 		return "", false
 	}
 	host := parsed.Hostname()
-	if !strings.EqualFold(host, "localhost") {
+	if strings.EqualFold(host, "localhost") {
+		// Keep the authority boundary literal. Letting net/http resolve the
+		// hostname later would make a poisoned hosts/DNS mapping capable of
+		// escaping the loopback-only contract.
+		if port := parsed.Port(); port != "" {
+			parsed.Host = net.JoinHostPort("127.0.0.1", port)
+		} else {
+			parsed.Host = "127.0.0.1"
+		}
+	} else {
 		ip := net.ParseIP(host)
 		if ip == nil || !ip.IsLoopback() {
 			return "", false
