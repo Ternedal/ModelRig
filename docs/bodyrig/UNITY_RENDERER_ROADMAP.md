@@ -4,7 +4,7 @@
 fra `BODYRIG_V1.md` — ikke en web-renderer. Kaliv skal kunne **vise,
 afspille og afvikle** `.mrbody` på Windows, Android (AR) og Quest.
 
-## Hvad der findes (main + #720)
+## Hvad der findes (main + samlet Android-kandidat #1964)
 
 | Lag | Status |
 |---|---|
@@ -14,12 +14,16 @@ afspille og afvikle** `.mrbody` på Windows, Android (AR) og Quest.
 | Render-frame wire v0.1 (`bodyrig.render_frame`) | landet i core |
 | Unity `6000.3.21f1` + UniVRM `v0.131.2` proof: VRM-load, blink, envelope-mund, visemes, emotion, gaze, breath, gesture-router, afbrydelse | **på main siden 2/9 21:13** (merget via base-gren uden fysisk gate — gaten er stadig IKKE kørt og skal køres mod main's head) |
 | Worker/backend-udstilling af BodyRig (runtime, frames, assets) | **landet (#842–#844)** |
-| Unity live-frame-klient | **restacket i #1920; ikke landet endnu** |
-| Android/Quest-host | **findes ikke på main** |
+| Unity live-frame-klient | **samlet i #1964** |
+| Digest-bundet remote avatar + BodyPrint scale | **samlet i #1964** |
+| Kaliv Body Android-host + RigLink | **samlet i #1964** |
+| AR Foundation / ARCore runtime + detected-plane placement | **samlet i #1964** |
+| Android live-body + visual + independent physical gate | **samlet i #1964** |
+| Quest-host | **separat spor / ikke del af #1964** |
 
-Unity-proofen på `main` afspiller stadig en canned fixture (`bodyrig-demo.json`).
-Server-/backend-netværksfladen er landet; hullet er nu Unity-klientens live-kilde,
-som er isoleret i #1920.
+Unity-proofen på `main` beholder fixture-vejen som deterministisk desktop-test.
+#1964 tilføjer den Android-specifikke live-path uden at fjerne fixturen: RigLink
+→ remote active avatar/bodyprint → live frame SSE → ARCore/plane placement.
 
 ## MVP — proofen bevises (BodyRig-spor, Anders på riggen)
 
@@ -67,18 +71,16 @@ følger med hvert `chunk`-event), så munden forankres til det, der faktisk
 høres. Gamle klienter beholder tilnærmelsen; en rig uden krop svarer 404,
 og appen holder op med at melde for resten af sessionen.
 
-**Slice C — Unity frame-kilde. RESTACKET 28/9 som #1920.** Det historiske #846
-blev lukket uden merge. #1920 bærer kun den nyttige current-main-kerne:
-`BodyRigFrameSource`, bootstrap-wiring og en CI-gatet statisk sikkerhedskontrakt.
-Rendereren kan dermed læse `/body/frames` via UnityWebRequest/SSE, mens fixturen
-forbliver deterministisk fallback. Unity-kompilering og fysisk proof er stadig
-separate gates.
+**Slice C/D — integreret Android live-body. SAMLET 29/9 som #1964.** De gamle
+#846/#858/#860/#1920–#1958-grene er kildehistorik. #1964 flader den kvalificerede
+runtime/build/test-state ud på seneste main: authenticated live frames, digest-
+bundet remote avatar + BodyPrint scale, package-pinned RigLink, Android host,
+AR Foundation/ARCore loader+runtime probe, detected-plane placement, end-to-end
+live-body proof, human visual acceptance og en uafhængig physical gate.
 
-**Slice D — Android-host + AR. Skrevet 4/9 som drafts stablet på #846: AR-placering (#858), rig-link (#860); værtsvalg taget: separat Kaliv Body-app startet fra Kalivs ⋮ → Krop med token som intent-extras (#861).** Kaliv Body som separat Unity Android-app
-først (parring som enhver anden klient; asset + frames fra rig), ARFoundation
-for kamera-passthrough og plan-forankring. Unity as a Library ind i Kaliv-appen
-er V2-spørgsmålet — det koster build-kompleksitet, og en separat app beviser
-alt det samme.
+MVP-værten er den separate **Kaliv Body**-app
+(`dk.ternedal.kalivbody`) startet fra Kaliv med rig URL/token som intent-extras.
+Den har ingen sekundær pairing/token-store. Unity as a Library er V2-sporet.
 
 ## V2 — Quest og fidelity
 
@@ -93,9 +95,11 @@ VRM-expression-nøgler krydser grænsen — kun v0.1-frames og validerede assets
 
 ## Rækkefølge
 
-A og B er landet. C er nu #1920 og kan lande, når software-gates og den
-relevante Unity-fysiske proof er grønne. D kræver C og en Android-build af
-Unity-projektet. Den eksisterende renderer-gate kan fortsat køres mod main.
+A og B er landet. C/D er samlet i #1964 og skal først igennem software
+exact-head qualification. Derefter køres Android physical live-body proof,
+human visual acceptance og independent physical gate på samme exact head.
+Først den content-addressede independent-gate evidence-ref må bruges i Kalivs
+system-release gate. Production activation forbliver separat og false.
 
 Rig-runbook for den første levende krop: `docs/bodyrig/FIRST_LIVE_BODY.md`.
 
