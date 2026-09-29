@@ -27,6 +27,20 @@ namespace ModelRig.BodyRig.UnityRenderer
             public string package_sha256;
         }
 
+        [Serializable]
+        private sealed class BodyprintShape
+        {
+            public float height_scale;
+        }
+
+        [Serializable]
+        private sealed class BodyprintDocument
+        {
+            public string format;
+            public int version;
+            public BodyprintShape shape;
+        }
+
         [SerializeField] private BodyRigVrmLoader loader;
         [SerializeField] private string baseUrl = "";
         [SerializeField] private string token = "";
@@ -107,6 +121,70 @@ namespace ModelRig.BodyRig.UnityRenderer
                 yield break;
             }
 
+            var heightScale = 1.0f;
+            using (var request =
+                AuthorizedGet(origin + "/api/v1/body/active/bodyprint.json"))
+            {
+                yield return request.SendWebRequest();
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    Fail("bodyprint HTTP " + request.responseCode);
+                    yield break;
+                }
+
+                var responseBodyId =
+                    (request.GetResponseHeader("X-BodyRig-Body-ID") ?? "").Trim();
+                var responsePackage =
+                    (request.GetResponseHeader("X-BodyRig-Package-SHA256") ?? "")
+                    .Trim().ToLowerInvariant();
+                var bodyprintSha =
+                    (request.GetResponseHeader("X-BodyRig-Member-SHA256") ?? "")
+                    .Trim().ToLowerInvariant();
+                var bodyprintBytes = request.downloadHandler.data;
+
+                if (responseBodyId != manifest.body_id
+                    || responsePackage != manifest.package_sha256
+                    || !IsLowerHex(bodyprintSha, 64)
+                    || bodyprintBytes == null
+                    || bodyprintBytes.Length == 0
+                    || !string.Equals(
+                        Sha256(bodyprintBytes),
+                        bodyprintSha,
+                        StringComparison.Ordinal))
+                {
+                    Fail("bodyprint identity/digest validation failed");
+                    yield break;
+                }
+
+                try
+                {
+                    var json = Encoding.UTF8.GetString(bodyprintBytes);
+                    var bodyprint = JsonUtility.FromJson<BodyprintDocument>(json);
+                    if (bodyprint == null
+                        || bodyprint.format != "modelrig-bodyprint"
+                        || bodyprint.version != 1)
+                    {
+                        throw new FormatException("unknown bodyprint format");
+                    }
+                    if (bodyprint.shape != null && bodyprint.shape.height_scale > 0.0f)
+                    {
+                        var value = bodyprint.shape.height_scale;
+                        if (float.IsNaN(value)
+                            || float.IsInfinity(value)
+                            || value > 4.0f)
+                        {
+                            throw new FormatException("height_scale is outside contract");
+                        }
+                        heightScale = value;
+                    }
+                }
+                catch (Exception exc)
+                {
+                    Fail("bodyprint parse failed: " + exc.Message);
+                    yield break;
+                }
+            }
+
             byte[] avatarBytes;
             string memberSha;
             using (var request =
@@ -173,23 +251,27 @@ namespace ModelRig.BodyRig.UnityRenderer
                 path,
                 manifest.body_id,
                 manifest.package_sha256,
-                actualSha);
+                actualSha,
+                heightScale);
         }
 
         private async void LoadAndReportAsync(
             string path,
             string bodyId,
             string packageSha,
-            string avatarSha)
+            string avatarSha,
+            float heightScale)
         {
             try
             {
-                await loader.LoadAsync(path);
+                var instance = await loader.LoadAsync(path);
+                instance.transform.localScale = Vector3.one * heightScale;
                 Debug.Log(
                     "BodyRig: active avatar loaded from rig "
                     + "(body=" + bodyId
                     + ", package=" + packageSha
-                    + ", avatar_sha256=" + avatarSha + ").");
+                    + ", avatar_sha256=" + avatarSha
+                    + ", height_scale=" + heightScale.ToString("0.###") + ").");
             }
             catch (Exception exc)
             {
