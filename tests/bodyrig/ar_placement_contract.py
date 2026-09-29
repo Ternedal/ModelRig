@@ -94,6 +94,18 @@ check(
     "runtime emits non-secret positive AR readiness markers for physical qualification",
 )
 check(
+    "ARSession.stateChanged += OnArSessionStateChanged;" in ar
+    and "ARSessionState.SessionTracking" in ar
+    and "BodyRig: ARCore runtime tracking." in ar
+    and "ARSession.stateChanged -= OnArSessionStateChanged;" in ar,
+    "ARCore runtime qualification marker is emitted only from SessionTracking and unsubscribes cleanly",
+)
+check(
+    "public bool IsArTrackingReady => arTrackingReady;" in ar
+    and "if (arTrackingReady)" in ar,
+    "AR tracking readiness is monotonic and exposed without granting authority",
+)
+check(
     "EnsureArRuntime" in bootstrap
     and bootstrap.index("#if BODYRIG_AR") < bootstrap.index("EnsureArRuntime"),
     "AR runtime scene remains compile-bounded behind BODYRIG_AR",
