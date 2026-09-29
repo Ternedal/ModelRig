@@ -16,6 +16,27 @@ sys.modules[SPEC.name] = gate
 SPEC.loader.exec_module(gate)
 
 
+def _evidence_ref(name: str) -> str:
+    if name == "software_exact_green":
+        return (
+            "kaliv-software-exact-green:"
+            + "1" * 40 + ":"
+            + "2" * 40 + ":"
+            + "3" * 40 + ":"
+            + "4" * 40 + ":"
+            + "7" * 64
+        )
+    if name == "bodyrig_android_live_body":
+        return "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
+    if name == "consciousness_live_lifecycle":
+        return "consciousness-live-lifecycle:" + "1" * 40 + ":" + "c" * 64
+    if name == "visionrig_physical_perception":
+        return "visionrig-physical-perception:" + "3" * 40 + ":" + "e" * 64
+    if name == "end_to_end_latency":
+        return "kaliv-end-to-end-latency:" + "1" * 40 + ":" + "9" * 64
+    return f"evidence:{name}:1"
+
+
 def _manifest() -> dict:
     return {
         "schema": gate.SCHEMA,
@@ -32,44 +53,7 @@ def _manifest() -> dict:
         "gates": {
             name: {
                 "status": "PASS",
-                "evidence_refs": [
-                    (
-                        (
-                            "kaliv-software-exact-green:"
-                            + "1" * 40 + ":"
-                            + "2" * 40 + ":"
-                            + "3" * 40 + ":"
-                            + "4" * 40 + ":"
-                            + "7" * 64
-                            if name == "software_exact_green"
-                            else (
-                                "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
-                                if name == "bodyrig_android_live_body"
-                                else (
-                            "consciousness-live-lifecycle:"
-                            + "1" * 40
-                            + ":"
-                            + "c" * 64
-                            if name == "consciousness_live_lifecycle"
-                            else (
-                                "visionrig-physical-perception:"
-                                + "3" * 40
-                                + ":"
-                                + "e" * 64
-                                if name == "visionrig_physical_perception"
-                                else (
-                                    "kaliv-end-to-end-latency:"
-                                    + "1" * 40
-                                    + ":"
-                                    + "9" * 64
-                                    if name == "end_to_end_latency"
-                                    else f"evidence:{name}:1"
-                                )
-                            )
-                        )
-                    )
-                )
-                ],
+                "evidence_refs": [_evidence_ref(name)],
             }
             for name in gate.REQUIRED_GATES
         },
