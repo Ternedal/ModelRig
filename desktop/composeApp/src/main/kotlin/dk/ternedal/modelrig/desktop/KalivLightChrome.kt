@@ -205,7 +205,7 @@ private fun LightShellActiveModelCard(
             Text(modelName, color = c.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = c.TextMuted, fontSize = 11.5.sp)
+        Text("Lokal \u00b7 $backend", color = c.CognitionLight, fontSize = 11.5.sp)
         Spacer(Modifier.height(9.dp))
         val fraction = if (totalGb > 0.0) (usedGb / totalGb).toFloat() else 0f
         LightShellMetaBar(fraction)
@@ -235,7 +235,7 @@ private fun LightShellMetaBar(fraction: Float) {
                 .fillMaxHeight()
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .clip(CircleShape)
-                .background(Brush.horizontalGradient(listOf(c.Signal, c.Highlight))),
+                .background(Brush.horizontalGradient(listOf(c.Cognition, c.CognitionLight))),
         )
     }
 }
@@ -244,9 +244,9 @@ private fun LightShellMetaBar(fraction: Float) {
 private fun LightShellPrivacySeal() {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
-    val background = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
-    val border = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
-    val headline = if (c.isDark) Color(0xFFE9DFCE) else c.TextHigh
+    val background = c.Signal.copy(alpha = if (c.isDark) 0.10f else 0.08f)
+    val border = c.Signal.copy(alpha = if (c.isDark) 0.20f else 0.24f)
+    val headline = c.TextHigh
 
     Row(
         Modifier
