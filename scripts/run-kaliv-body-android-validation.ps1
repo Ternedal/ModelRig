@@ -8,6 +8,7 @@ param(
     [switch]$Launch,
     [switch]$ProveRigLink,
     [switch]$ProveArCore,
+    [switch]$ProvePlacement,
     [ValidateRange(2, 60)]
     [int]$LaunchEvidenceSeconds = 8
 )
@@ -152,12 +153,19 @@ $rigLinkTokenLeakObserved = $false
 $arCoreSessionTrackingObserved = $false
 $arCoreUnsupportedObserved = $false
 $arCoreNeedsInstallObserved = $false
+$planePlacementQualified = $false
 
 if ($ProveRigLink -and -not $Launch) {
     throw "-ProveRigLink requires -Launch."
 }
 if ($ProveArCore -and -not $Launch) {
     throw "-ProveArCore requires -Launch."
+}
+if ($ProvePlacement -and -not $Launch) {
+    throw "-ProvePlacement requires -Launch."
+}
+if ($ProvePlacement -and -not $ProveArCore) {
+    throw "-ProvePlacement requires -ProveArCore."
 }
 if ($ProveRigLink) {
     if ([string]::IsNullOrWhiteSpace($env:KALIV_BODY_RIG_URL) -or
@@ -243,6 +251,14 @@ if ($Install -or $Launch) {
                 throw "Kaliv Body did not reach ARSessionState.SessionTracking."
             }
         }
+
+        if ($ProvePlacement) {
+            $planePlacementQualified =
+                $logcatText.Contains("BodyRig: AR avatar placed on detected plane.")
+            if (-not $planePlacementQualified) {
+                throw "Kaliv Body did not prove a successful detected-plane placement. Tap a detected plane during the evidence window."
+            }
+        }
     }
 } else {
     Write-Host "[3/4] ADB install skipped (use -Install or -Launch)"
@@ -274,6 +290,7 @@ $receipt = [ordered]@{
     arcore_runtime_qualified = [bool]$arCoreSessionTrackingObserved
     arcore_unsupported_observed = [bool]$arCoreUnsupportedObserved
     arcore_needs_install_observed = [bool]$arCoreNeedsInstallObserved
+    plane_placement_qualified = [bool]$planePlacementQualified
     visual_acceptance = $false
     release_gate_satisfied = $false
 }
@@ -295,5 +312,10 @@ if ($ProveArCore) {
     Write-Host "ARCore runtime qualified at ARSessionState.SessionTracking."
 } else {
     Write-Host "ARCore runtime remains FALSE (use -ProveArCore with -Launch)."
+}
+if ($ProvePlacement) {
+    Write-Host "Detected-plane placement qualified."
+} else {
+    Write-Host "Plane placement remains FALSE (use -ProvePlacement with -ProveArCore)."
 }
 Write-Host "Visual acceptance and production activation remain FALSE."
