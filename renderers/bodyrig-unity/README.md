@@ -78,6 +78,26 @@ $env:BODYRIG_ANDROID_BUILD_PATH = "C:\work\KalivBody.apk"
 That command is a build entrypoint, not proof. A successful physical Android
 build/install/launch remains separate evidence and does not activate production.
 
+For exact-head physical **host** qualification on Windows with one authorized
+ADB device:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch
+```
+
+The qualifier requires a clean exact checkout, Unity 6000.3.21f1 with Android
+Build Support, builds `KalivBody.apk`, hashes it, installs it on exactly one
+ADB device, launches `dk.ternedal.kalivbody`, verifies a live PID and captures
+logcat. Its rolling receipt is
+`validation/kaliv-body-android-latest.json`.
+
+That receipt deliberately keeps `rig_link_qualified=false`,
+`arcore_runtime_qualified=false`, `visual_acceptance=false`,
+`release_gate_satisfied=false` and `production_activation=false`.
+Those stronger claims require their own physical evidence.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
