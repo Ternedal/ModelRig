@@ -538,7 +538,7 @@ private fun DesktopControlCenterCard(
 
 @Composable
 private fun desktopControlCenterStateColor(state: String): Color = when (state) {
-    "healthy" -> KalivTheme.colors.Signal
+    "healthy" -> KalivTheme.colors.Success
     "unavailable" -> KalivTheme.colors.Danger
     "attention", "fallback" -> KalivTheme.colors.TextHigh
     else -> KalivTheme.colors.TextMuted
