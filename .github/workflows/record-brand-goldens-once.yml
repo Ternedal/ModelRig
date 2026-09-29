@@ -1,0 +1,42 @@
+name: record-brand-goldens-once
+on:
+  push:
+    branches:
+      - brand/unified-identity-20260928
+    paths:
+      - .github/workflows/record-brand-goldens-once.yml
+permissions:
+  contents: write
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+        with:
+          packages: platform-tools
+      - name: Install platform and build-tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Record brand screenshot baselines
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:testDebugUnitTest -Proborazzi.test.record=true --no-daemon --console=plain
+      - name: Commit changed baselines
+        run: |
+          git config user.name "record-goldens"
+          git config user.email "record-goldens@users.noreply.github.com"
+          git add -A android/app/src/test/screenshots
+          if git diff --cached --quiet; then
+            echo "No screenshot baselines changed."
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m "test(android): record unified brand screenshot baselines"
+          git push origin HEAD:brand/unified-identity-20260928
