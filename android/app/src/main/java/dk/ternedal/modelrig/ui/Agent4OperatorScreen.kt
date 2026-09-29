@@ -260,7 +260,7 @@ private fun LoadingState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator()
+        CircularProgressIndicator(color = KalivTheme.colors.cognition)
         Spacer(Modifier.height(12.dp))
         Text("Indlæser read-only Agent 4-data…", color = KalivTheme.colors.textMuted)
     }
