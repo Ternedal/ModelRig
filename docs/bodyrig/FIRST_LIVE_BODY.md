@@ -2,10 +2,10 @@
 
 Alt her forudsætter dev-kanalen (`DEV_APPLIANCE.md`): riggen kører fra
 HEAD, telefonen fra CI's APK. Slice A/B og Unity-proofen (#720) er på main.
-Det historiske #846-spor med Unity-klientens `BodyRigFrameSource` blev lukket
-23/9 uden merge; worker/backend-live-feedet er på main, og den nyttige
-Unity-klientkerne er nu restacket på current main i #1920. Den fysiske gate er
-ikke kørt endnu.
+De historiske #846/#1920-stacks er superseded. Worker/backend-live-feedet er på
+main; den aktuelle Android-klient er samlet i **#1964** med live frames,
+digest-bundet remote avatar, RigLink, ARCore, plane placement og de fysiske
+qualification-værktøjer. Fysisk Android evidence er stadig separat fra CI.
 
 ## 1. Forberedelse (én gang)
 
@@ -53,14 +53,14 @@ Fra `main`, ren working tree, telefon ikke nødvendig:
     powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig_unity_visual_acceptance.ps1 -StatesDistinct -GazeBlinkBreathVisible -ExplainGestureVisible -SpeechModesDiffer -InterruptionImmediateNeutral
     python scripts\bodyrig_unity_physical_gate.py --expected-sha (git rev-parse HEAD)
 
-Grøn gate = den nuværende renderer på main er fysisk bevist. Derefter
-kvalificeres #1920 på sin egen exact head; den må ikke behandles som landet,
-før software-gates og den relevante Unity-fysiske proof er grønne.
+Grøn Windows-gate beviser fortsat den klassiske renderer. Android/live-body har
+sin egen stærkere exact-head gate i #1964 og må ikke arve Windows-beviset.
 
-## 3. Kroppen følger samtalen (#1920-kandidat)
+## 3. Kroppen følger samtalen (#1964 Android-kandidat)
 
-Brug #1920-kandidatens `BodyRigFrameSource` med riggen navngivet — ingen fixture.
-Den gamle `feat/unity-frame-source`-gren er kun kildehistorik, ikke authority:
+På #1964 kommer avatar, BodyPrint og frames fra riggen over den authenticated
+BodyRig-flade. Kaliv Body skal startes med RigLink-authority; lokal VRM-path er
+fortsat kun development fallback på desktop:
 
     $env:BODYRIG_VRM_PATH = "C:\Users\admin\Desktop\Kaliv.vrm"
     $env:BODYRIG_RIG_URL = "http://127.0.0.1:8080"
@@ -112,5 +112,24 @@ hendes krop, ikke demo-identitetens. MediaPipe-kravene står i
   lange sætninger får `explain`-gestik under tale, thinking er `curious`
   (lavt), fejl er `concerned`; idle/listening/interrupted nulstiller. Intet
   udledes af ordene selv — ingen sentiment-gætteri. Se `worker/app/body_cues.py`.
-- **Telefon/Quest**: Unity-projektet bygger endnu ikke til Android; slice D.
+- **Android:** softwarestakken er samlet i #1964, men fysisk build/install/live-body/
+  AR/visual evidence skal stadig køres på kandidatens exact head.
+- **Quest:** er fortsat et separat packaging/physical-proof spor.
 - **Demo-identiteten** er en fixture. Den rigtige krop: afsnit 5.
+
+
+## 6. Android live-body qualification (#1964)
+
+På en ren checkout af kandidat-headen:
+
+    $sha = (git rev-parse HEAD).Trim()
+    powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 -ExpectedSha $sha -Install -Launch -ProveRigLink -ProveArCore
+
+Når host-receiptet også har bevist remote avatar, live frames og detected-plane
+placement, køres den eksplicitte human visual acceptance og derefter:
+
+    python scripts\kaliv_body_android_physical_gate.py --expected-sha $sha
+
+Kun independent-gatens content-addressede `kaliv-body-android-physical-gate:...`
+reference er release-evidence. Ingen af disse trin sætter
+`production_activation=true`.
