@@ -83,8 +83,11 @@ def main() -> int:
     assert "KalivTheme.colors.cognition" in rig_status, "rig telemetry and active models must use Signal"
 
     desktop = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivScreens.kt")
+    light_chrome = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivLightChrome.kt")
     assert "KalivTheme.colors.Cognition" in desktop, "desktop live telemetry must use Signal"
     assert "KalivTheme.colors.CognitionLight" in desktop, "active desktop model must expose Signal runtime state"
+    assert "listOf(c.Cognition, c.CognitionLight)" in light_chrome, "desktop telemetry meter must use Signal"
+    assert "c.Signal.copy(alpha = if (c.isDark) 0.10f else 0.08f)" in light_chrome, "privacy seal must stay Ember"
     desktop_cc = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt")
     assert "\"healthy\" -> KalivTheme.colors.Success" in desktop_cc, "health must stay semantic"
     assert "RoundedCornerShape(15.dp)" in desktop_cc, "desktop Control Center cards must use unified shell radius"
