@@ -101,6 +101,8 @@ def main() -> int:
     vr_panel = need("vr/Assets/Scripts/KalivVrPanel.cs")
     assert '#48C7FF' in vr_brand and '#D4AB52' in vr_brand
     assert "KalivVrBrand.Signal" in vr_panel, "Quest panel is not bound to shared roles"
+    assert "MinWorldButtonHeight = 56f" in vr_brand
+    assert "KalivVrBrand.MinWorldButtonHeight" in vr_panel, "Quest buttons must preserve world-space target size"
 
     for path in LIVE_ANDROID_SURFACES:
         source = need(path)
