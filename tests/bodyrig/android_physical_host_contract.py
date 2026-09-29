@@ -46,7 +46,6 @@ for required in (
     "logcat -d -v threadtime",
     'schema = "modelrig.kaliv-body.android-host-qualification/v1"',
     "production_activation = $false",
-    "arcore_runtime_qualified = $false",
     "visual_acceptance = $false",
     "release_gate_satisfied = $false",
     "[switch]$ProveRigLink",
@@ -92,6 +91,11 @@ check(
 check(
     "rig_link_qualified = [bool]$rigLinkResolvedFromIntent" in SCRIPT,
     "RigLink qualification is bound to an observed intent-resolution marker",
+)
+check(
+    "arcore_runtime_qualified = [bool]$arCoreRuntimeQualified" in SCRIPT
+    and "arcore_runtime_qualified = $true" not in SCRIPT,
+    "ARCore qualification is evidence-bound and cannot be synthesized",
 )
 check(
     "KALIV_BODY_RIG_TOKEN =" not in SCRIPT
