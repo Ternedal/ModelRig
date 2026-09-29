@@ -69,6 +69,23 @@ PAYLOAD = {
         "capability_refresh": {"current": 140},
         "attention_total": 0,
         "attention_truncated": False,
+        "producer_readiness": {
+            "runtime_sources": 140,
+            "heartbeat_v6_sources": 126,
+            "heartbeat_upgrade_required": 14,
+            "heartbeat_v6_ratio": 0.9,
+            "packet_measurement_complete_sources": 119,
+            "packet_measurement_gap_sources": 21,
+            "packet_measurement_complete_ratio": 0.85,
+        },
+        "producer_readiness_transition": {
+            "previous": None,
+            "changed_utc": "2026-09-28T05:00:00+00:00",
+            "heartbeat_v6_sources_delta": 4,
+            "heartbeat_v6_ratio_delta": 0.03,
+            "packet_measurement_complete_sources_delta": 7,
+            "packet_measurement_complete_ratio_delta": 0.05,
+        },
     },
     "change_consistency": {
         "schema": vision.CONSISTENCY_SCHEMA,
@@ -120,7 +137,56 @@ async def run() -> None:
         all(len(item["source_id"]) <= 128 for item in payload["sensors"]),
         "source identifiers are bounded",
     )
+    check(
+        payload["visionrig_schema_versions"] == {
+            "bootstrap": 31,
+            "catalog": 15,
+            "fleet": 28,
+        },
+        "actual VisionRig schema versions remain visible",
+    )
+    check(
+        payload["producer_readiness"]["heartbeat_v6_ratio"] == 0.9,
+        "heartbeat v6 readiness crosses Control Center",
+    )
+    check(
+        payload["producer_readiness"]["packet_measurement_complete_ratio"] == 0.85,
+        "packet measurement readiness crosses Control Center",
+    )
+    check(
+        payload["producer_readiness_transition"]["heartbeat_v6_sources_delta"] == 4,
+        "readiness transition delta crosses Control Center",
+    )
     check(payload["production_activation"] is False, "read projection cannot activate production")
+
+    future = {
+        **PAYLOAD,
+        "schema": "visionrig/sensor-bootstrap-snapshot/v32",
+        "catalog": {**PAYLOAD["catalog"], "schema": "visionrig/sensor-catalog/v16"},
+        "fleet": {**PAYLOAD["fleet"], "schema": "visionrig/sensor-fleet-summary/v29"},
+    }
+
+    class FutureResponse(FakeResponse):
+        def json(self) -> dict:
+            return future
+
+    class FutureClient(FakeClient):
+        async def get(self, _target: str) -> FutureResponse:
+            return FutureResponse()
+
+    vision.httpx.AsyncClient = FutureClient
+    try:
+        future_payload = await vision.build_control_center_vision()
+    finally:
+        vision.httpx.AsyncClient = original
+    check(
+        future_payload["available"] is True,
+        "additive future VisionRig schema versions remain compatible",
+    )
+    check(
+        future_payload["visionrig_schema_versions"]["bootstrap"] == 32,
+        "future bootstrap version is surfaced",
+    )
 
 
 if __name__ == "__main__":
