@@ -525,7 +525,7 @@ fun Agent3TaskScreen(
                         fontSize = 12.sp,
                     )
                 }
-                TextButton(onClick = onClose) { Text("Luk", color = KalivTheme.colors.signal) }
+                TextButton(onClick = onClose) { Text("Luk", color = KalivTheme.colors.cognition) }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -902,7 +902,7 @@ private fun TaskRunCard(
                 Spacer(Modifier.height(5.dp))
                 Text(
                     presentAgent3TaskEventKind(event.kind),
-                    color = KalivTheme.colors.signal,
+                    color = KalivTheme.colors.cognition,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
