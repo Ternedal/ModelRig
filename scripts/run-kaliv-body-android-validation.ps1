@@ -6,6 +6,7 @@ param(
     [string]$UnityPath = "",
     [switch]$Install,
     [switch]$Launch,
+    [switch]$ProveRigLink,
     [ValidateRange(2, 60)]
     [int]$LaunchEvidenceSeconds = 8
 )
@@ -145,6 +146,18 @@ $appPid = $null
 $deviceModel = $null
 $androidVersion = $null
 $fatalPackageCrashObserved = $false
+$rigLinkResolvedFromIntent = $false
+$rigLinkTokenLeakObserved = $false
+
+if ($ProveRigLink -and -not $Launch) {
+    throw "-ProveRigLink requires -Launch."
+}
+if ($ProveRigLink) {
+    if ([string]::IsNullOrWhiteSpace($env:KALIV_BODY_RIG_URL) -or
+        [string]::IsNullOrWhiteSpace($env:KALIV_BODY_RIG_TOKEN)) {
+        throw "-ProveRigLink requires KALIV_BODY_RIG_URL and KALIV_BODY_RIG_TOKEN."
+    }
+}
 
 if ($Install -or $Launch) {
     Write-Host "[3/4] ADB device + install"
@@ -161,8 +174,17 @@ if ($Install -or $Launch) {
         $deviceModel = (& $adb -s $device shell getprop ro.product.model 2>$null | Out-String).Trim()
         $androidVersion = (& $adb -s $device shell getprop ro.build.version.release 2>$null | Out-String).Trim()
 
-        & $adb -s $device shell monkey -p $appId -c android.intent.category.LAUNCHER 1 | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "APK installed but launch command failed on device $device." }
+        if ($ProveRigLink) {
+            $launchCommand = 'am start -W -S -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ' +
+                $appId +
+                ' --es bodyrig_rig_url "' + $env:KALIV_BODY_RIG_URL +
+                '" --es bodyrig_rig_token "' + $env:KALIV_BODY_RIG_TOKEN + '"'
+            $launchCommand | & $adb -s $device shell | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Kaliv Body intent launch failed on device $device." }
+        } else {
+            & $adb -s $device shell monkey -p $appId -c android.intent.category.LAUNCHER 1 | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "APK installed but launch command failed on device $device." }
+        }
         $launched = $true
 
         Start-Sleep -Seconds $LaunchEvidenceSeconds
@@ -182,6 +204,19 @@ if ($Install -or $Launch) {
             $logcatText.Contains($appId)
         if ($fatalPackageCrashObserved) {
             throw "Kaliv Body package emitted a FATAL EXCEPTION after launch. See $logcatPath"
+        }
+
+        if ($ProveRigLink) {
+            $rigLinkResolvedFromIntent =
+                $logcatText.Contains("BodyRig: rig link resolved from intent (")
+            $rigLinkTokenLeakObserved =
+                $logcatText.Contains([string]$env:KALIV_BODY_RIG_TOKEN)
+            if ($rigLinkTokenLeakObserved) {
+                throw "Kaliv Body logcat leaked the rig token value."
+            }
+            if (-not $rigLinkResolvedFromIntent) {
+                throw "Kaliv Body did not emit the intent RigLink resolution marker."
+            }
         }
     }
 } else {
@@ -209,7 +244,8 @@ $receipt = [ordered]@{
     app_pid = $appPid
     logcat_path = if ($launched) { $logcatPath } else { $null }
     fatal_package_crash_observed = $fatalPackageCrashObserved
-    rig_link_qualified = $false
+    rig_link_qualified = [bool]$rigLinkResolvedFromIntent
+    rig_link_token_leak_observed = [bool]$rigLinkTokenLeakObserved
     arcore_runtime_qualified = $false
     visual_acceptance = $false
     release_gate_satisfied = $false
@@ -223,4 +259,9 @@ Write-Host "Receipt: $receiptPath"
 if ($Install -or $Launch) {
     Write-Host "ADB device: $device (installed=$installed, launched=$launched)"
 }
-Write-Host "RigLink, ARCore runtime, visual acceptance and production activation remain FALSE."
+if ($ProveRigLink) {
+    Write-Host "RigLink intent authority qualified without token leakage."
+} else {
+    Write-Host "RigLink remains FALSE (use -ProveRigLink with KALIV_BODY_RIG_URL/TOKEN)."
+}
+Write-Host "ARCore runtime, visual acceptance and production activation remain FALSE."
