@@ -50,6 +50,13 @@ for required in (
     "arcore_runtime_qualified = $false",
     "visual_acceptance = $false",
     "release_gate_satisfied = $false",
+    "[switch]$ProveRigLink",
+    "KALIV_BODY_RIG_URL",
+    "KALIV_BODY_RIG_TOKEN",
+    "bodyrig_rig_url",
+    "bodyrig_rig_token",
+    "BodyRig: rig link resolved from intent (",
+    "rig_link_token_leak_observed",
 ):
     check(required in SCRIPT, f"physical host qualifier contains {required}")
 
@@ -71,15 +78,28 @@ check(
 )
 
 for forbidden in (
-    "RigToken",
-    "bodyrig_rig_token",
     "approval_token",
     "production_activation = $true",
-    "rig_link_qualified = $true",
     "arcore_runtime_qualified = $true",
     "visual_acceptance = $true",
 ):
-    check(forbidden not in SCRIPT, f"qualifier does not overclaim/store sensitive authority: {forbidden}")
+    check(forbidden not in SCRIPT, f"qualifier does not overclaim authority: {forbidden}")
+
+check(
+    '$env:KALIV_BODY_RIG_TOKEN' in SCRIPT
+    and "rig_link_token_leak_observed = [bool]$rigLinkTokenLeakObserved" in SCRIPT,
+    "RigLink token is used only as runtime input and leak-check evidence",
+)
+check(
+    "rig_link_qualified = [bool]$rigLinkResolvedFromIntent" in SCRIPT,
+    "RigLink qualification is bound to an observed intent-resolution marker",
+)
+check(
+    "KALIV_BODY_RIG_TOKEN =" not in SCRIPT
+    and "rig_token =" not in SCRIPT
+    and "rig_url =" not in SCRIPT,
+    "receipt schema does not persist rig token or rig URL values",
+)
 
 for ignored in (
     "/validation/kaliv-body-android-latest.json",
