@@ -56,6 +56,12 @@ for required in (
     "bodyrig_rig_token",
     "BodyRig: rig link resolved from intent (",
     "rig_link_token_leak_observed",
+    "[switch]$ProveArRuntime",
+    "BodyRig: AR runtime bootstrap ready (session+xr-origin+camera+planes+raycast).",
+    "BodyRig: AR placement runtime ready.",
+    "BodyRig: ARCore runtime tracking.",
+    "ar_runtime_bootstrap_ready",
+    "ar_placement_runtime_ready",
 ):
     check(required in SCRIPT, f"physical host qualifier contains {required}")
 
@@ -79,7 +85,6 @@ check(
 for forbidden in (
     "approval_token",
     "production_activation = $true",
-    "arcore_runtime_qualified = $true",
     "visual_acceptance = $true",
 ):
     check(forbidden not in SCRIPT, f"qualifier does not overclaim authority: {forbidden}")
@@ -92,6 +97,15 @@ check(
 check(
     "rig_link_qualified = [bool]$rigLinkResolvedFromIntent" in SCRIPT,
     "RigLink qualification is bound to an observed intent-resolution marker",
+)
+check(
+    "arcore_runtime_qualified = [bool]$arCoreTrackingReady" in SCRIPT
+    and "$arRuntimeBootstrapReady -and $arPlacementRuntimeReady -and $arCoreTrackingReady" in SCRIPT,
+    "ARCore qualification is bound to bootstrap + placement + SessionTracking evidence",
+)
+check(
+    "-ProveArRuntime requires -Launch." in SCRIPT,
+    "AR runtime proof cannot be minted without a physical launch",
 )
 check(
     "KALIV_BODY_RIG_TOKEN =" not in SCRIPT
