@@ -209,7 +209,8 @@ def run_contract() -> None:
     try:
         gate._modelrig_evidence_matches_pin = (
             lambda evidence_sha, pinned_sha:
-            evidence_sha == "a" * 40 and pinned_sha == "1" * 40
+            evidence_sha == pinned_sha
+            or (evidence_sha == "a" * 40 and pinned_sha == "1" * 40)
         )
         merge_equivalent = copy.deepcopy(valid)
         merge_equivalent["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
