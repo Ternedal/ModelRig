@@ -139,6 +139,30 @@ logs the device token. Desktop keeps its existing local
 RigLink authority instead.
 
 
+For an end-to-end **live body** proof, use the same paired rig authority:
+
+```powershell
+$env:KALIV_BODY_RIG_URL = "http://<rig-host>:8080"
+$env:KALIV_BODY_RIG_TOKEN = "<paired-device-token>"
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveLiveBody
+```
+
+`-ProveLiveBody` uses the RigLink intent path and requires both non-secret
+runtime markers:
+
+- `BodyRig: active avatar loaded from rig (...)` — emitted only after the
+  manifest/bodyprint/avatar digest chain has completed and the existing
+  `BodyRigVrmLoader` has loaded/bound the cached VRM;
+- `BodyRig: first authenticated live frame applied (...)` — emitted only after
+  frame validation, renderer binding, monotone timestamp enforcement and
+  `renderer.Apply(...)`.
+
+Only then may the receipt set `live_body_qualified=true`. Visual acceptance,
+release-gate satisfaction and production activation remain false.
+
+
 To qualify the **ARCore runtime** on the same exact head without claiming visual
 placement acceptance:
 
