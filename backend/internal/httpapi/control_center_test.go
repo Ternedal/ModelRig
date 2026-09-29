@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -166,5 +167,161 @@ func TestControlCenterRouteRequiresBearerToken(t *testing.T) {
 	}
 	if workerCalls.Load() != 1 {
 		t.Fatalf("worker calls after auth = %d, want 1", workerCalls.Load())
+	}
+}
+
+
+func TestControlCenterVisionEnabledForwardsOnlyBooleanToLoopback(t *testing.T) {
+	var seenPath, seenBody, seenRequestID string
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		seenBody = string(raw)
+		seenRequestID = r.Header.Get("X-Request-ID")
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s", r.Method)
+		}
+		_, _ = w.Write([]byte(`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"kinect-living-room","enabled":false}}`))
+	}))
+	defer vision.Close()
+	t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+
+	s := &server{}
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/control-center/vision/sensors/kinect-living-room/enabled",
+		strings.NewReader(`{"enabled":false}`),
+	)
+	req.SetPathValue("sourceID", "kinect-living-room")
+	req.Header.Set("X-Request-ID", "req-vision-control")
+	rec := httptest.NewRecorder()
+
+	s.handleControlCenterVisionSensorEnabled(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if seenPath != "/api/v1/sensors/kinect-living-room/metadata" {
+		t.Fatalf("VisionRig path = %q", seenPath)
+	}
+	if seenBody != `{"enabled":false}` {
+		t.Fatalf("VisionRig body = %q", seenBody)
+	}
+	if seenRequestID != "req-vision-control" {
+		t.Fatalf("request id = %q", seenRequestID)
+	}
+}
+
+func TestControlCenterVisionEnabledRejectsExtraFieldsAndNonLoopbackTarget(t *testing.T) {
+	s := &server{}
+
+	t.Setenv("KALIV_VISIONRIG_URL", "http://127.0.0.1:8110")
+	extra := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true,"location":"secret"}`))
+	extra.SetPathValue("sourceID", "cam-a")
+	extraRec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(extraRec, extra)
+	if extraRec.Code != http.StatusBadRequest {
+		t.Fatalf("extra-field status = %d", extraRec.Code)
+	}
+
+	t.Setenv("KALIV_VISIONRIG_URL", "https://example.com")
+	remote := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true}`))
+	remote.SetPathValue("sourceID", "cam-a")
+	remoteRec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(remoteRec, remote)
+	if remoteRec.Code != http.StatusBadGateway {
+		t.Fatalf("remote-target status = %d", remoteRec.Code)
+	}
+}
+
+func TestControlCenterVisionEnabledRejectsMismatchedReceipt(t *testing.T) {
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"other-camera","enabled":true}}`))
+	}))
+	defer vision.Close()
+	t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+
+	s := &server{}
+	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true}`))
+	req.SetPathValue("sourceID", "cam-a")
+	rec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("mismatched receipt status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+
+func TestControlCenterVisionEnabledRefusesRedirect(t *testing.T) {
+	remoteCalled := false
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		remoteCalled = true
+		_, _ = w.Write([]byte(`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"cam-a","enabled":true}}`))
+	}))
+	defer remote.Close()
+
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Redirect(w, httptest.NewRequest(http.MethodPatch, "/", nil), remote.URL, http.StatusTemporaryRedirect)
+	}))
+	defer vision.Close()
+	t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+
+	s := &server{}
+	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true}`))
+	req.SetPathValue("sourceID", "cam-a")
+	rec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("redirect status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if remoteCalled {
+		t.Fatal("VisionRig control followed redirect outside loopback boundary")
+	}
+}
+
+func TestControlCenterVisionEnabledCountsSourceIDCharacters(t *testing.T) {
+	sourceID := strings.Repeat("é", 100)
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(
+			`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"` +
+				sourceID + `","enabled":true}}`,
+		))
+	}))
+	defer vision.Close()
+	t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+
+	s := &server{}
+	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"enabled":true}`))
+	req.SetPathValue("sourceID", sourceID)
+	rec := httptest.NewRecorder()
+	s.handleControlCenterVisionSensorEnabled(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unicode source id status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestControlCenterStatusAdvertisesVisionControlAvailability(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(
+			`{"schema":"kaliv-control-center-status/v1","vision":{"schema":"kaliv-control-center-vision/v1","available":true,"sensors":[],"production_activation":false}}`,
+		))
+	}))
+	defer worker.Close()
+
+	t.Setenv("KALIV_VISIONRIG_SENSOR_CONTROL", "1")
+	s := &server{Deps: Deps{Worker: proxy.New(worker.URL, time.Second)}}
+	rec := httptest.NewRecorder()
+	s.handleControlCenterStatus(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	vision, ok := payload["vision"].(map[string]any)
+	if !ok || vision["control_available"] != true {
+		t.Fatalf("vision control availability = %#v", payload["vision"])
 	}
 }

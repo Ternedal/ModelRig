@@ -26,6 +26,7 @@ class ControlCenterVisionClientTest {
                 "desktop-token",
             ).snapshot()
             assertTrue(snapshot.available)
+            assertTrue(snapshot.controlAvailable)
             assertEquals(1, snapshot.sensors.size)
             assertEquals(1, snapshot.sensorsReturned)
             assertFalse(snapshot.sensorsTruncated)
@@ -51,6 +52,66 @@ class ControlCenterVisionClientTest {
             assertEquals(0.1, snapshot.producerReadinessTransition.heartbeatV6RatioDelta)
             assertEquals("Bearer desktop-token", authorization.get())
             assertEquals("/api/v1/control-center/status", path.get())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun enabledMutationUsesAuthenticatedNarrowPatch() {
+        val authorization = AtomicReference<String>()
+        val method = AtomicReference<String>()
+        val path = AtomicReference<String>()
+        val requestBody = AtomicReference<String>()
+        val server = server { exchange ->
+            authorization.set(exchange.requestHeaders.getFirst("Authorization"))
+            method.set(exchange.requestMethod)
+            path.set(exchange.requestURI.rawPath)
+            requestBody.set(exchange.requestBody.bufferedReader().readText())
+            val body = """
+                {"schema":"kaliv-control-center-vision-enabled/v1","source_id":"cam a","enabled":false}
+            """.trimIndent().toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        try {
+            val receipt = ControlCenterVisionClient(
+                "http://127.0.0.1:${server.address.port}",
+                "desktop-token",
+            ).setEnabled("cam a", false)
+
+            assertEquals("cam a", receipt.sourceId)
+            assertFalse(receipt.enabled)
+            assertEquals("PATCH", method.get())
+            assertEquals(
+                "/api/v1/control-center/vision/sensors/cam%20a/enabled",
+                path.get(),
+            )
+            assertEquals("""{"enabled":false}""", requestBody.get())
+            assertEquals("Bearer desktop-token", authorization.get())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun enabledMutationRejectsMismatchedReceipt() {
+        val server = server { exchange ->
+            val body = """
+                {"schema":"kaliv-control-center-vision-enabled/v1","source_id":"other","enabled":true}
+            """.trimIndent().toByteArray()
+            exchange.sendResponseHeaders(200, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        try {
+            val error = runCatching {
+                ControlCenterVisionClient(
+                    "http://127.0.0.1:${server.address.port}",
+                    "desktop-token",
+                ).setEnabled("cam-a", true)
+            }.exceptionOrNull()
+            assertTrue(error is ControlCenterException)
+            assertTrue(error?.message.orEmpty().contains("does not match"))
         } finally {
             server.stop(0)
         }
@@ -125,6 +186,7 @@ class ControlCenterVisionClientTest {
           "available":true,
           "reason":null,
           "sensor_state_revision":12,
+          "control_available":true,
           "consistency":"synced",
           "total":1,
           "sensors_returned":1,
