@@ -551,7 +551,7 @@ fun Agent3TaskScreen(
                             Text(evidence, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
                         }
                     }
-                    if (busy == TaskBusy.READINESS) CircularProgressIndicator()
+                    if (busy == TaskBusy.READINESS) CircularProgressIndicator(color = KalivTheme.colors.cognition)
                 }
                 Spacer(Modifier.height(8.dp))
                 MetaRow("Aktiv surface", presentAgent3TaskReadinessSurface(readiness?.selectedSurface))
