@@ -68,6 +68,37 @@ check(
     "bootstrap keeps the controller root active and hands placement the loader, not itself",
 )
 
+check(
+    "EnsureArRuntime(out var raycastManager)" in bootstrap
+    and "placement.RaycastManager = raycastManager;" in bootstrap,
+    "Android AR bootstrap wires the concrete raycast manager into placement",
+)
+for required in (
+    "ARSession",
+    "ARInputManager",
+    "XROrigin",
+    "ARCameraManager",
+    "ARCameraBackground",
+    "ARPlaneManager",
+    "ARRaycastManager",
+    "TrackedPoseDriver",
+    "<XRHMD>/centerEyePosition",
+    "<XRHMD>/centerEyeRotation",
+    "<XRHMD>/trackingState",
+    "PlaneDetectionMode.Horizontal | PlaneDetectionMode.Vertical",
+):
+    check(required in bootstrap, f"AR runtime bootstrap contains {required}")
+check(
+    "BodyRig: AR runtime bootstrap ready (session+xr-origin+camera+planes+raycast)." in bootstrap
+    and "BodyRig: AR placement runtime ready." in ar,
+    "runtime emits non-secret positive AR readiness markers for physical qualification",
+)
+check(
+    "EnsureArRuntime" in bootstrap
+    and bootstrap.index("#if BODYRIG_AR") < bootstrap.index("EnsureArRuntime"),
+    "AR runtime scene remains compile-bounded behind BODYRIG_AR",
+)
+
 bind = loader.index("renderer.Bind(instance, gazeTarget);")
 bound = loader.index("if (!renderer.IsBound)")
 handoff = loader.index("arPlacement?.BindAvatarRoot(instance.transform);")
