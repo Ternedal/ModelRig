@@ -56,6 +56,7 @@ namespace ModelRig.BodyRig.UnityRenderer
         private long lastTimestampMs = -1;
         private bool connected;
         private bool liveReceiptAttempted;
+        private bool firstAppliedLogged;
 
         public BodyRigVrmRenderer Renderer
         {
@@ -159,6 +160,14 @@ namespace ModelRig.BodyRig.UnityRenderer
             lastTimestampMs = frame.timestamp_ms;
             renderer.Apply(frame);
             FrameApplied?.Invoke(frame);
+            if (!firstAppliedLogged)
+            {
+                firstAppliedLogged = true;
+                Debug.Log(
+                    "BodyRig: first authenticated live frame applied "
+                    + "(state=" + frame.state
+                    + ", timestamp_ms=" + frame.timestamp_ms + ").");
+            }
             WriteLiveReceiptIfRequested(frame);
         }
 
