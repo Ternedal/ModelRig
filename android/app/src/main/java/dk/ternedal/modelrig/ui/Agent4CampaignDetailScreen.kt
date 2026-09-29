@@ -266,7 +266,7 @@ internal fun Agent4CampaignDetailScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(color = KalivTheme.colors.cognition)
                 Spacer(Modifier.height(10.dp))
                 Text("Indlæser canonical detail, tidslinje og evidens…", color = KalivTheme.colors.textMuted)
             }
