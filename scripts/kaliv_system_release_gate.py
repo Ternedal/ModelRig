@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -55,6 +56,52 @@ _MAX_REF_LEN = 512
 
 class SystemReleaseManifestError(RuntimeError):
     """The supplied release manifest is malformed or overclaims authority."""
+
+
+def _git(*args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemReleaseManifestError(
+            "cannot verify ModelRig evidence ancestry/tree equivalence"
+        ) from exc
+    return result.stdout.strip()
+
+
+def _modelrig_evidence_matches_pin(evidence_sha: str, pinned_sha: str) -> bool:
+    if evidence_sha == pinned_sha:
+        return True
+
+    try:
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", evidence_sha, pinned_sha],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode == 1:
+            return False
+        raise SystemReleaseManifestError(
+            "cannot verify ModelRig evidence ancestry"
+        ) from exc
+    except OSError as exc:
+        raise SystemReleaseManifestError(
+            "cannot verify ModelRig evidence ancestry"
+        ) from exc
+
+    evidence_tree = _git("rev-parse", f"{evidence_sha}^{{tree}}")
+    pinned_tree = _git("rev-parse", f"{pinned_sha}^{{tree}}")
+    return evidence_tree == pinned_tree
 
 
 @dataclass(frozen=True)
@@ -193,10 +240,10 @@ def _validate_gates(
                     "consciousness_live_lifecycle PASS requires exact-head-bound "
                     "consciousness-live-lifecycle evidence"
                 )
-            if match.group(1) != modelrig_sha:
+            if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
                 raise SystemReleaseManifestError(
-                    "consciousness_live_lifecycle evidence is bound to a different "
-                    "ModelRig Git SHA"
+                    "consciousness_live_lifecycle evidence is not exact-tree-equivalent "
+                    "to the pinned ModelRig revision"
                 )
         if gate == "visionrig_physical_perception" and status == "PASS":
             if len(refs) != 1:
@@ -227,10 +274,10 @@ def _validate_gates(
                     "bodyrig_android_live_body PASS requires exact-head-bound "
                     "kaliv-body-android-physical-gate evidence refs"
                 )
-            if match.group(1) != modelrig_sha:
+            if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
                 raise SystemReleaseManifestError(
-                    "bodyrig_android_live_body evidence is bound to a different "
-                    "ModelRig Git SHA"
+                    "bodyrig_android_live_body evidence is not exact-tree-equivalent "
+                    "to the pinned ModelRig revision"
                 )
         if status == "PENDING":
             pending.append(gate)
