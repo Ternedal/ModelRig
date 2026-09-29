@@ -261,7 +261,7 @@ namespace Kaliv.VR
             input.lineType = InputField.LineType.SingleLine;
 
             var collider = root.GetComponent<BoxCollider>();
-            collider.size = new Vector3(size.x, size.y, 60f);
+            collider.size = new Vector3(\n                Mathf.Max(size.x, KalivVrBrand.MinWorldButtonWidth),\n                Mathf.Max(size.y, KalivVrBrand.MinWorldButtonHeight),\n                60f);
             return input;
         }
 
