@@ -1,9 +1,11 @@
 # Den første levende krop — rig-runbook
 
 Alt her forudsætter dev-kanalen (`DEV_APPLIANCE.md`): riggen kører fra
-HEAD, telefonen fra CI's APK. Slice A/B og Unity-proofen (#720) er på main;
-#846 (live frame-kilde) er draft mod main og lander, når den er kompileret i
-Unity. Den fysiske gate er ikke kørt endnu — det er dét, afsnit 2 gør.
+HEAD, telefonen fra CI's APK. Slice A/B og Unity-proofen (#720) er på main.
+Det historiske #846-spor med Unity-klientens `BodyRigFrameSource` blev lukket
+23/9 uden merge; worker/backend-live-feedet er på main, og den nyttige
+Unity-klientkerne er nu restacket på current main i #1920. Den fysiske gate er
+ikke kørt endnu.
 
 ## 1. Forberedelse (én gang)
 
@@ -51,13 +53,14 @@ Fra `main`, ren working tree, telefon ikke nødvendig:
     powershell -ExecutionPolicy Bypass -File .\scripts\bodyrig_unity_visual_acceptance.ps1 -StatesDistinct -GazeBlinkBreathVisible -ExplainGestureVisible -SpeechModesDiffer -InterruptionImmediateNeutral
     python scripts\bodyrig_unity_physical_gate.py --expected-sha (git rev-parse HEAD)
 
-Grøn gate = rendereren på main er fysisk bevist. Derefter #846 (kræver at
-den kompilerer i Unity — første import viser det).
+Grøn gate = den nuværende renderer på main er fysisk bevist. Derefter
+kvalificeres #1920 på sin egen exact head; den må ikke behandles som landet,
+før software-gates og den relevante Unity-fysiske proof er grønne.
 
-## 3. Kroppen følger samtalen (#846)
+## 3. Kroppen følger samtalen (#1920-kandidat)
 
-Samme Unity-projekt fra #846-grenen (`git switch feat/unity-frame-source`),
-nu med riggen navngivet — ingen fixture:
+Brug #1920-kandidatens `BodyRigFrameSource` med riggen navngivet — ingen fixture.
+Den gamle `feat/unity-frame-source`-gren er kun kildehistorik, ikke authority:
 
     $env:BODYRIG_VRM_PATH = "C:\Users\admin\Desktop\Kaliv.vrm"
     $env:BODYRIG_RIG_URL = "http://127.0.0.1:8080"
