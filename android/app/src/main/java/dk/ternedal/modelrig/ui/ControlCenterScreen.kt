@@ -237,7 +237,7 @@ fun ControlCenterScreen(
                     CircularProgressIndicator(
                         modifier = Modifier.height(24.dp),
                         strokeWidth = 2.dp,
-                        color = KalivTheme.colors.signal,
+                        color = KalivTheme.colors.cognition,
                     )
                 }
             }
