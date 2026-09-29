@@ -49,14 +49,15 @@ check(
     "live-frame marker remains downstream of validation, monotonicity and renderer binding",
 )
 
+avatar_marker = "BodyRig: active avatar loaded from rig "
 check(
     "await loader.LoadAsync(path);" in avatar
-    and "BodyRig: active avatar loaded from rig (" in avatar,
+    and avatar_marker in avatar,
     "remote-avatar evidence is emitted only after existing loader completes",
 )
 check(
     avatar.index("await loader.LoadAsync(path);")
-    < avatar.index("BodyRig: active avatar loaded from rig ("),
+    < avatar.index(avatar_marker),
     "remote-avatar evidence follows VRM load/bind completion",
 )
 
