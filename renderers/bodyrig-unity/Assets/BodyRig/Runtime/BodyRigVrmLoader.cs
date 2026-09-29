@@ -135,6 +135,14 @@ namespace ModelRig.BodyRig.UnityRenderer
                 throw new InvalidOperationException("BodyRig renderer did not bind the loaded VRM instance.");
             }
 
+#if BODYRIG_AR
+            // AR placement owns only the loaded avatar child. Hand it over
+            // after a successful bind so hiding it cannot disable the loader,
+            // renderer or frame source on this controller GameObject.
+            var arPlacement = GetComponent<BodyRigArPlacement>();
+            arPlacement?.BindAvatarRoot(instance.transform);
+#endif
+
             WriteRuntimeReceiptIfRequested(fullPath);
             return instance;
         }
