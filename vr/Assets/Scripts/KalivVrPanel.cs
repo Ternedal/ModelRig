@@ -15,7 +15,8 @@ namespace Kaliv.VR
         private static readonly Color Border = KalivVrBrand.Border;
         private static readonly Color TextMain = KalivVrBrand.Text;
         private static readonly Color Muted = KalivVrBrand.Muted;
-        private static readonly Color Accent = KalivVrBrand.Ember;\n        private static readonly Color Signal = KalivVrBrand.Signal;
+        private static readonly Color Accent = KalivVrBrand.Ember;
+        private static readonly Color Signal = KalivVrBrand.Signal;
         private static readonly Color Danger = KalivVrBrand.Danger;
         private static readonly Color Ok = KalivVrBrand.Success;
 
@@ -285,7 +286,10 @@ namespace Kaliv.VR
             button.onClick.AddListener(click);
 
             var collider = root.GetComponent<BoxCollider>();
-            collider.size = new Vector3(size.x, size.y, 60f);
+            collider.size = new Vector3(
+                Mathf.Max(size.x, KalivVrBrand.MinWorldButtonWidth),
+                Mathf.Max(size.y, KalivVrBrand.MinWorldButtonHeight),
+                60f);
             return button;
         }
 
