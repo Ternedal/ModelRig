@@ -101,6 +101,16 @@ def run_contract() -> None:
         "bound to a different ModelRig Git SHA",
     )
 
+    android_multiple_refs = copy.deepcopy(valid)
+    android_multiple_refs["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+        "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64,
+        "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "b" * 64,
+    ]
+    _must_reject(
+        android_multiple_refs,
+        "requires exactly one independent physical gate evidence ref",
+    )
+
     failed = copy.deepcopy(valid)
     failed["gates"]["recovery_soak"]["status"] = "FAIL"
     verdict = gate.evaluate_manifest(failed)
