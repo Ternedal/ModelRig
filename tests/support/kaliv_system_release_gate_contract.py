@@ -103,7 +103,7 @@ def run_contract() -> None:
     ]
     _must_reject(
         consciousness_wrong_head,
-        "bound to a different ModelRig Git SHA",
+        "not exact-tree-equivalent to the pinned ModelRig revision",
     )
 
     consciousness_multiple_refs = copy.deepcopy(valid)
@@ -168,8 +168,26 @@ def run_contract() -> None:
     ]
     _must_reject(
         android_wrong_head,
-        "bound to a different ModelRig Git SHA",
+        "not exact-tree-equivalent to the pinned ModelRig revision",
     )
+
+    # A normal GitHub merge commit gets a new commit SHA even when it
+    # preserves the exact qualified tree. The release gate may translate that
+    # identity only through the dedicated ancestry+tree-equivalence helper.
+    original_matcher = gate._modelrig_evidence_matches_pin
+    try:
+        gate._modelrig_evidence_matches_pin = (
+            lambda evidence_sha, pinned_sha:
+            evidence_sha == "a" * 40 and pinned_sha == "1" * 40
+        )
+        merge_equivalent = copy.deepcopy(valid)
+        merge_equivalent["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+            "kaliv-body-android-physical-gate:" + "a" * 40 + ":" + "b" * 64
+        ]
+        verdict = gate.evaluate_manifest(merge_equivalent)
+        assert verdict.release_ready is True
+    finally:
+        gate._modelrig_evidence_matches_pin = original_matcher
 
     android_multiple_refs = copy.deepcopy(valid)
     android_multiple_refs["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
