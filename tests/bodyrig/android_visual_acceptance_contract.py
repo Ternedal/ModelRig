@@ -69,6 +69,11 @@ check(
     "if ([bool]$host.rig_link_token_leak_observed)" in SCRIPT,
     "known RigLink token leakage blocks visual acceptance",
 )
+check(
+    "if ([bool]$host.release_gate_satisfied -ne $false)" in SCRIPT
+    and "if ([bool]$host.visual_acceptance -ne $false)" in SCRIPT,
+    "host receipt cannot self-assert release or visual authority before human acceptance",
+)
 for forbidden in (
     "production_activation = $true",
     "release_gate_satisfied = $true",
