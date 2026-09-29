@@ -59,7 +59,7 @@ The gate intentionally cannot activate production. The manifest must contain:
 ```
 
 and the emitted verdict also keeps `production_activation=false` even when all
-eight gates qualify. Final activation remains owned by the existing explicit
+nine gates qualify. Final activation remains owned by the existing explicit
 release/physical authorities.
 
 This is deliberate: neither this script nor CI may synthesize Photoreal,
