@@ -171,7 +171,22 @@ def test_valid_full_lifecycle_qualifies_exact_candidate():
     assert verdict["consciousness_live_lifecycle_gate_satisfied"] is True
     assert verdict["identity_lineage_preserved"] is True
     assert len(verdict["evidence_refs"]) == 3
+    assert verdict["release_evidence_ref"].startswith(
+        "consciousness-live-lifecycle:" + SHA + ":"
+    )
+    assert len(verdict["release_evidence_ref"].rsplit(":", 1)[1]) == 64
     assert verdict["production_activation"] is False
+
+
+def test_release_evidence_ref_is_deterministic_and_content_addressed():
+    first = qualifier.qualify(evidence())
+    second = qualifier.qualify(evidence())
+    assert first["release_evidence_ref"] == second["release_evidence_ref"]
+
+    mutated = evidence()
+    mutated["model_swap"]["receipt"]["to_cognitive_profile_ref"] = "cognitive-profile:new"
+    changed = qualifier.qualify(mutated)
+    assert changed["release_evidence_ref"] != first["release_evidence_ref"]
 
 
 def test_mismatched_candidate_sha_fails_closed():
@@ -232,6 +247,7 @@ def test_qualifier_never_accepts_production_activation():
 
 if __name__ == "__main__":
     test_valid_full_lifecycle_qualifies_exact_candidate()
+    test_release_evidence_ref_is_deterministic_and_content_addressed()
     test_mismatched_candidate_sha_fails_closed()
     test_restart_must_be_explicitly_proven()
     test_identity_lineage_mismatch_fails_closed()
