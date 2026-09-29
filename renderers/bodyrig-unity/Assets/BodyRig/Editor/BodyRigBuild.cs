@@ -4,7 +4,11 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.SceneManagement;
+using UnityEditor.XR.Management;
+using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.XR.ARCore;
+using UnityEngine.XR.Management;
 
 namespace ModelRig.BodyRig.UnityRenderer.Editor
 {
@@ -12,6 +16,8 @@ namespace ModelRig.BodyRig.UnityRenderer.Editor
     {
         private const string SceneDirectory = "Assets/BodyRig/Scenes";
         private const string ScenePath = SceneDirectory + "/BodyRigDemo.unity";
+        private const string TemporaryAndroidXrSettingsPath =
+            "Assets/BodyRig/XRGeneralSettingsPerBuildTarget.generated.asset";
 
         // UniVRM resolves its shaders by name at load time. In the editor that
         // works; in a player build a shader nothing references is stripped, and
@@ -93,6 +99,7 @@ namespace ModelRig.BodyRig.UnityRenderer.Editor
         {
             var sceneDirectoryExisted = AssetDatabase.IsValidFolder(SceneDirectory);
             var restoreShaders = IncludeRequiredShaders();
+            var restoreAndroidXr = ConfigureTemporaryAndroidArCore();
             try
             {
                 Directory.CreateDirectory(SceneDirectory);
@@ -139,6 +146,10 @@ namespace ModelRig.BodyRig.UnityRenderer.Editor
                 {
                     restoreShaders();
                 }
+                if (restoreAndroidXr != null)
+                {
+                    restoreAndroidXr();
+                }
 
                 EditorSceneManager.NewScene(
                     NewSceneSetup.EmptyScene,
@@ -153,6 +164,93 @@ namespace ModelRig.BodyRig.UnityRenderer.Editor
                 }
                 AssetDatabase.Refresh();
             }
+        }
+
+        /// <summary>
+        /// Ensure an Android ARCore loader is active for the duration of the
+        /// standalone Kaliv Body build without committing generated XR GUID
+        /// assets to the repository. Existing project XR settings are never
+        /// overwritten: if present, they must already contain ARCore.
+        /// </summary>
+        private static Action ConfigureTemporaryAndroidArCore()
+        {
+            XRGeneralSettingsPerBuildTarget existing;
+            if (EditorBuildSettings.TryGetConfigObject(
+                    XRGeneralSettings.k_SettingsKey,
+                    out existing)
+                && existing != null)
+            {
+                var existingGeneral =
+                    existing.SettingsForBuildTarget(BuildTargetGroup.Android);
+                var existingManager = existingGeneral?.Manager;
+                if (existingManager == null)
+                {
+                    throw new InvalidOperationException(
+                        "BodyRig Android XR settings exist but have no manager.");
+                }
+
+                foreach (var loader in existingManager.activeLoaders)
+                {
+                    if (loader is ARCoreLoader)
+                    {
+                        return null;
+                    }
+                }
+
+                throw new InvalidOperationException(
+                    "BodyRig Android XR settings exist but ARCoreLoader is not active.");
+            }
+
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(
+                    TemporaryAndroidXrSettingsPath) != null)
+            {
+                throw new InvalidOperationException(
+                    "BodyRig temporary Android XR settings asset already exists.");
+            }
+
+            var perTarget =
+                ScriptableObject.CreateInstance<XRGeneralSettingsPerBuildTarget>();
+            perTarget.name = "BodyRig Android XR Settings";
+            AssetDatabase.CreateAsset(perTarget, TemporaryAndroidXrSettingsPath);
+
+            perTarget.CreateDefaultSettingsForBuildTarget(BuildTargetGroup.Android);
+            perTarget.CreateDefaultManagerSettingsForBuildTarget(
+                BuildTargetGroup.Android);
+
+            var general =
+                perTarget.SettingsForBuildTarget(BuildTargetGroup.Android);
+            var manager =
+                perTarget.ManagerSettingsForBuildTarget(BuildTargetGroup.Android);
+            if (general == null || manager == null)
+            {
+                throw new InvalidOperationException(
+                    "BodyRig could not create Android XR management settings.");
+            }
+
+            general.InitManagerOnStart = true;
+            var loader = ScriptableObject.CreateInstance<ARCoreLoader>();
+            loader.name = "Google ARCore";
+            AssetDatabase.AddObjectToAsset(loader, perTarget);
+            if (!manager.TryAddLoader(loader))
+            {
+                throw new InvalidOperationException(
+                    "BodyRig could not assign ARCoreLoader to Android XR settings.");
+            }
+
+            EditorBuildSettings.AddConfigObject(
+                XRGeneralSettings.k_SettingsKey,
+                perTarget,
+                true);
+            AssetDatabase.SaveAssets();
+
+            return () =>
+            {
+                EditorBuildSettings.RemoveConfigObject(
+                    XRGeneralSettings.k_SettingsKey);
+                AssetDatabase.DeleteAsset(TemporaryAndroidXrSettingsPath);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+            };
         }
 
         /// <summary>
