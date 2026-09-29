@@ -33,6 +33,7 @@ REQUIRED_GATES = (
     "visionrig_physical_perception",
     "bodyrig_photoreal_likeness",
     "bodyrig_digital_twin_m6",
+    "bodyrig_android_live_body",
     "end_to_end_latency",
     "recovery_soak",
     "repository_authority",
