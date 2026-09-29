@@ -41,7 +41,7 @@ Implement the unified Ember / Signal identity across Android, Windows, Quest and
 - [x] Replace local palette ownership with named Ember/Signal roles.
 - [x] Apply Signal to live model/listening/perception state.
 - [x] Keep primary interaction actions Ember.
-- [ ] Preserve world-space contrast and readable target sizes.
+- [x] Preserve world-space contrast and readable target sizes.
 
 ## Phase 5 — BodyRig
 - [x] Locate current UI authority in BodyRig repo.
