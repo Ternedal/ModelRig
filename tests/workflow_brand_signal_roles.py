@@ -80,7 +80,11 @@ def main() -> int:
     assert "RoundedCornerShape(15.dp)" in control, "Android Control Center cards must use unified shell radius"
     assert "stateBorder" in control, "Android Control Center cards must expose semantic state borders"
     rig_status = need("android/app/src/main/java/dk/ternedal/modelrig/ui/chat/RigStatusList.kt")
+    agent3 = need("android/app/src/main/java/dk/ternedal/modelrig/ui/Agent3Screen.kt")
+    agent3_validation = need("android/app/src/main/java/dk/ternedal/modelrig/ui/Agent3ValidationScreen.kt")
     assert "KalivTheme.colors.cognition" in rig_status, "rig telemetry and active models must use Signal"
+    assert "\"running\", \"planning\", \"executing\"" in agent3 and "KalivTheme.colors.cognition" in agent3
+    assert "KalivTheme.colors.success" in agent3_validation, "ready is semantic success"
 
     desktop = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivScreens.kt")
     light_chrome = need("desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/KalivLightChrome.kt")
