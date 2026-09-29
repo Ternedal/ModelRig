@@ -24,6 +24,13 @@ ModelRig Git SHA:
 The dormancy and model-swap receipts must also agree on the exact Self identity
 and Person revision.
 
+The C31-D/C31-G receipt schemas themselves do not carry a Git SHA. Their
+candidate binding is therefore **operator-envelope binding**, not cryptographic
+receipt-native provenance: the qualification input must be assembled from the
+source artifacts collected on that exact checkout, and the emitted evidence
+references SHA-256-bind the resulting payloads. Do not reinterpret the verdict
+as proof that an arbitrary copied receipt originated from the candidate SHA.
+
 ## Run
 
 Create an evidence JSON bundle and run:
