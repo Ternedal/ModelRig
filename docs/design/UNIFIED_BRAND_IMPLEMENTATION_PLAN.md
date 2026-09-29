@@ -52,7 +52,7 @@ Implement the unified Ember / Signal identity across Android, Windows, Quest and
 
 ## Phase 6 — Gates and documentation
 - [x] CI gate verifies required Signal tokens and bindings.
-- [ ] CI gate rejects duplicated hard-coded canonical Signal hex values.
-- [ ] Update design handoff/readme.
+- [x] CI gate rejects duplicated hard-coded canonical Signal hex values.
+- [x] Update design handoff/readme.
 - [ ] Run available compile/workflow tests.
-- [ ] Open implementation PR and record any unverified visual checks.
+- [x] Open implementation PR and record any unverified visual checks.
