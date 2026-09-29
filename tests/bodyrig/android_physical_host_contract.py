@@ -44,6 +44,8 @@ for required in (
     "shell monkey -p $appId",
     "shell pidof $appId",
     "logcat -d -v threadtime",
+    "logcat_sha256",
+    "logcat_size_bytes",
     'schema = "modelrig.kaliv-body.android-host-qualification/v1"',
     "production_activation = $false",
     "visual_acceptance = $false",
@@ -76,6 +78,11 @@ check(
 check(
     "FATAL EXCEPTION" in SCRIPT and "fatal_package_crash_observed" in SCRIPT,
     "launch evidence rejects a package-scoped fatal crash",
+)
+check(
+    "Get-FileHash -LiteralPath $logcatPath -Algorithm SHA256" in SCRIPT
+    and "logcat_size_bytes" in SCRIPT,
+    "host receipt digest-binds captured logcat bytes",
 )
 
 for forbidden in (
