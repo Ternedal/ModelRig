@@ -5,6 +5,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS = ROOT / "assets/design/kaliv-ui-guide/kaliv-ui-tokens.json"
@@ -53,7 +57,7 @@ def need(path: str) -> str:
     p = ROOT / path
     if not p.is_file():
         raise AssertionError(f"missing brand surface: {path}")
-    return p.read_text(encoding="utf-8")
+    return code_of(p)
 
 
 def main() -> int:
@@ -148,7 +152,7 @@ def main() -> int:
             rel = path.relative_to(ROOT).as_posix()
             if rel in ALLOWED_SIGNAL_LITERAL_PATHS:
                 continue
-            source = path.read_text(encoding="utf-8")
+            source = code_of(path)
             for literal in CANONICAL_SIGNAL_LITERALS:
                 assert literal not in source, f"{rel}: hard-coded canonical Signal literal {literal}"
 
