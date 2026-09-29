@@ -59,7 +59,10 @@ Fysisk acceptance kræver stadig, på samme exact candidate head:
 
 - Android host-build/install/launch receipt (#1939-sporet);
 - token-sikker intent RigLink receipt (#1940-sporet), hvis live rig anvendes;
-- ARCore runtime readiness på den fysiske enhed;
+- ARCore runtime readiness på den fysiske enhed via
+  `run-kaliv-body-android-validation.ps1 -Install -Launch -ProveArCore`; den
+  kræver `ARSessionState.SessionTracking` i logcat og afviser
+  Unsupported/NeedsInstall;
 - rigtig VRM load og live frames fra riggen;
 - tap på et detekteret plan;
 - direkte observation af at avatarens placering ikke stopper blink, gaze,
