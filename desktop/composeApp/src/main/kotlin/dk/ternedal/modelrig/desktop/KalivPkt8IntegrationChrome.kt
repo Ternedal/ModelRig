@@ -170,8 +170,8 @@ private fun Pkt8AuthorityModelCard(status: KalivSidebarStatus, vram: KalivVramTe
 private fun Pkt8AuthorityPrivacySeal(status: KalivSidebarStatus) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
-    val background = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
-    val border = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
+    val background = c.Signal.copy(alpha = if (c.isDark) 0.10f else 0.08f)
+    val border = c.Signal.copy(alpha = if (c.isDark) 0.20f else 0.24f)
 
     Row(
         Modifier
