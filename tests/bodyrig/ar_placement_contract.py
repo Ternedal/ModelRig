@@ -36,6 +36,9 @@ check(ar_path.is_file() and meta_path.is_file(),
 ar = code_of(ar_path)
 bootstrap = code_of(RUNTIME / "BodyRigDemoBootstrap.cs")
 loader = code_of(RUNTIME / "BodyRigVrmLoader.cs")
+evidence_path = RUNTIME / "BodyRigArRuntimeEvidence.cs"
+evidence_meta_path = RUNTIME / "BodyRigArRuntimeEvidence.cs.meta"
+evidence = code_of(evidence_path)
 
 check(
     "#if BODYRIG_AR" in ar
@@ -97,6 +100,30 @@ check(
     "EnsureArRuntime" in bootstrap
     and bootstrap.index("#if BODYRIG_AR") < bootstrap.index("EnsureArRuntime"),
     "AR runtime scene remains compile-bounded behind BODYRIG_AR",
+)
+
+check(
+    evidence_path.is_file() and evidence_meta_path.is_file(),
+    "AR runtime evidence source and Unity metadata both exist",
+)
+check(
+    "root.AddComponent<BodyRigArRuntimeEvidence>();" in bootstrap,
+    "AR runtime evidence component is wired into the generated runtime scene",
+)
+for required in (
+    "ARSession.stateChanged += OnStateChanged;",
+    "ARSession.stateChanged -= OnStateChanged;",
+    "ARSessionState.Unsupported",
+    "ARSessionState.NeedsInstall",
+    "ARSessionState.SessionTracking",
+    "BodyRig: AR session tracking.",
+):
+    check(required in evidence, f"AR runtime evidence contains {required}")
+check(
+    "production_activation" not in evidence
+    and "rig_link_qualified" not in evidence
+    and "release_gate_satisfied" not in evidence,
+    "AR runtime evidence component carries observation only, no authority",
 )
 
 bind = loader.index("renderer.Bind(instance, gazeTarget);")
