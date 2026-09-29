@@ -152,7 +152,7 @@ internal fun DesktopControlCenterScheduleHistorySection(
                 CircularProgressIndicator(
                     modifier = Modifier.height(18.dp),
                     strokeWidth = 2.dp,
-                    color = KalivTheme.colors.Signal,
+                    color = KalivTheme.colors.Cognition,
                 )
             }
         }
