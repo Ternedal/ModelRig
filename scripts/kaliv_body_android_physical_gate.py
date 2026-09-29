@@ -274,7 +274,10 @@ def validate(
         allow_nan=False,
     ).encode("utf-8")
     result["evidence_ref"] = (
-        "kaliv-body-android-physical-gate:" + hashlib.sha256(canonical).hexdigest()
+        "kaliv-body-android-physical-gate:"
+        + expected_sha
+        + ":"
+        + hashlib.sha256(canonical).hexdigest()
     )
     return result
 
