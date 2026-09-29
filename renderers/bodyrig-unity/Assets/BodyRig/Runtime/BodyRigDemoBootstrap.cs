@@ -41,6 +41,13 @@ namespace ModelRig.BodyRig.UnityRenderer
             var placement = root.AddComponent<BodyRigArPlacement>();
             placement.Loader = loader;
             placement.RaycastManager = raycastManager;
+
+            var runtimeProbe = root.AddComponent<BodyRigArRuntimeProbe>();
+            runtimeProbe.CameraManager = camera.GetComponent<ARCameraManager>();
+            runtimeProbe.CameraBackground = camera.GetComponent<ARCameraBackground>();
+            runtimeProbe.PlaneManager =
+                UnityEngine.Object.FindFirstObjectByType<ARPlaneManager>();
+            runtimeProbe.RaycastManager = raycastManager;
 #endif
 
             // Desktop keeps the deterministic fixture unless environment
