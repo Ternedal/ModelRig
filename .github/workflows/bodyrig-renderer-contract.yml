@@ -17,10 +17,12 @@ on:
       - "tests/bodyrig/ar_packages_contract.py"
       - "tests/bodyrig/arcore_loader_build_contract.py"
       - "tests/bodyrig/android_physical_host_contract.py"
+      - "tests/bodyrig/android_visual_acceptance_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
       - "scripts/run-kaliv-body-android-validation.ps1"
+      - "scripts/accept-kaliv-body-android-visual.ps1"
       - ".github/workflows/bodyrig-renderer-contract.yml"
   pull_request:
     paths:
@@ -35,10 +37,12 @@ on:
       - "tests/bodyrig/ar_packages_contract.py"
       - "tests/bodyrig/arcore_loader_build_contract.py"
       - "tests/bodyrig/android_physical_host_contract.py"
+      - "tests/bodyrig/android_visual_acceptance_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
       - "scripts/run-kaliv-body-android-validation.ps1"
+      - "scripts/accept-kaliv-body-android-visual.ps1"
       - ".github/workflows/bodyrig-renderer-contract.yml"
   workflow_dispatch:
 
@@ -98,6 +102,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/bodyrig/android_physical_host_contract.py
+      - name: Validate Kaliv Body Android visual acceptance contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/android_visual_acceptance_contract.py
       - name: Validate BodyRig M2.8 digest-bound renderer handoff
         env:
           PYTHONDONTWRITEBYTECODE: "1"
