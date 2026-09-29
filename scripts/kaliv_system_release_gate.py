@@ -19,7 +19,7 @@ SCHEMA = "kaliv-system-release-manifest/v1"
 VERDICT_SCHEMA = "kaliv-system-release-verdict/v1"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _RELEASE_ID = re.compile(r"^kaliv-rc-[A-Za-z0-9._-]{1,64}$")
-_ANDROID_LIVE_BODY_REF = re.compile(r"^kaliv-body-android-physical-gate:[0-9a-f]{64}$")
+_ANDROID_LIVE_BODY_REF = re.compile(r"^kaliv-body-android-physical-gate:([0-9a-f]{40}):([0-9a-f]{64})$")
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -148,7 +148,7 @@ def _validate_evidence_refs(value: Any, gate: str, *, require: bool) -> tuple[st
     return tuple(refs)
 
 
-def _validate_gates(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _validate_gates(value: Any, *, modelrig_sha: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     gates = _require_mapping(value, "gates")
     expected = set(REQUIRED_GATES)
     _exact_keys(gates, expected, "gates")
@@ -168,15 +168,18 @@ def _validate_gates(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
             gate,
             require=status == "PASS",
         )
-        if (
-            gate == "bodyrig_android_live_body"
-            and status == "PASS"
-            and any(_ANDROID_LIVE_BODY_REF.fullmatch(ref) is None for ref in refs)
-        ):
-            raise SystemReleaseManifestError(
-                "bodyrig_android_live_body PASS requires digest-bound "
-                "kaliv-body-android-physical-gate evidence refs"
-            )
+        if gate == "bodyrig_android_live_body" and status == "PASS":
+            matches = [_ANDROID_LIVE_BODY_REF.fullmatch(ref) for ref in refs]
+            if any(match is None for match in matches):
+                raise SystemReleaseManifestError(
+                    "bodyrig_android_live_body PASS requires exact-head-bound "
+                    "kaliv-body-android-physical-gate evidence refs"
+                )
+            if any(match.group(1) != modelrig_sha for match in matches if match is not None):
+                raise SystemReleaseManifestError(
+                    "bodyrig_android_live_body evidence is bound to a different "
+                    "ModelRig Git SHA"
+                )
         if status == "PENDING":
             pending.append(gate)
         elif status == "FAIL":
@@ -211,7 +214,10 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
         )
 
     pinned = _validate_repositories(root["repositories"])
-    pending, failed = _validate_gates(root["gates"])
+    pending, failed = _validate_gates(
+        root["gates"],
+        modelrig_sha=pinned["Ternedal/ModelRig"],
+    )
     ready = not pending and not failed
     return SystemReleaseVerdict(
         schema=VERDICT_SCHEMA,
