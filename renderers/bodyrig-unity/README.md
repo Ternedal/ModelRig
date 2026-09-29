@@ -144,6 +144,24 @@ During the evidence window, tap a detected physical plane. The receipt sets
 path executed; it still does not prove that the avatar looked correct to a
 human observer.
 
+After that machine-observable receipt is green, record the **human visual
+acceptance** from the same exact clean candidate:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\accept-kaliv-body-android-visual.ps1 `
+  -ExpectedSha $sha `
+  -AvatarVisibleAndStable `
+  -PlacementMatchesTappedPlane `
+  -CameraBackgroundTracksRoom `
+  -BodyAnimationContinuesAfterPlacement `
+  -NoVisibleCredentialOrDebugLeak
+```
+
+The acceptance script re-hashes and binds the host qualification receipt and
+refuses partial observation. Its own rolling receipt still keeps
+`release_gate_satisfied=false` and `production_activation=false`.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
