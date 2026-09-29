@@ -115,6 +115,27 @@ value and fails if it appears, then records only
 `rig_link_qualified=true` / `rig_link_token_leak_observed=false`. The rig URL
 and token themselves are never written to the receipt.
 
+To additionally prove **ARCore runtime tracking** on the physical Android
+device:
+
+```powershell
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveArRuntime
+```
+
+This is stricter than proving that AR packages compile. The qualifier requires
+all three non-secret runtime markers in logcat:
+
+- `BodyRig: AR runtime bootstrap ready (session+xr-origin+camera+planes+raycast).`
+- `BodyRig: AR placement runtime ready.`
+- `BodyRig: ARCore runtime tracking.`
+
+The last marker is emitted only when AR Foundation reports
+`ARSessionState.SessionTracking`. Only then does the rolling receipt set
+`arcore_runtime_qualified=true`. This still does not claim plane-tap visual
+acceptance, release readiness or production activation.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
