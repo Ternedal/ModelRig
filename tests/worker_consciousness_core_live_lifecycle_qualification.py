@@ -192,6 +192,18 @@ def test_identity_lineage_mismatch_fails_closed():
     must_reject(value, "different Self identities")
 
 
+def test_missing_identity_lineage_fails_closed():
+    value = evidence()
+    value["dormancy_restart"]["receipt"]["self_id"] = None
+    value["model_swap"]["receipt"]["self_id"] = None
+    must_reject(value, "requires non-empty self_id")
+
+    value = evidence()
+    value["dormancy_restart"]["receipt"]["person_revision"] = ""
+    value["model_swap"]["receipt"]["person_revision"] = ""
+    must_reject(value, "requires non-empty person_revision")
+
+
 def test_authority_overclaim_fails_closed():
     value = evidence()
     value["dormancy_restart"]["receipt"]["execution_authority"] = True
@@ -223,6 +235,7 @@ if __name__ == "__main__":
     test_mismatched_candidate_sha_fails_closed()
     test_restart_must_be_explicitly_proven()
     test_identity_lineage_mismatch_fails_closed()
+    test_missing_identity_lineage_fails_closed()
     test_authority_overclaim_fails_closed()
     test_model_swap_refs_must_actually_change()
     test_live_cycle_cannot_preclaim_full_lifecycle()
