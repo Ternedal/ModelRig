@@ -98,6 +98,23 @@ That receipt deliberately keeps `rig_link_qualified=false`,
 `release_gate_satisfied=false` and `production_activation=false`.
 Those stronger claims require their own physical evidence.
 
+To additionally prove the Android intent **RigLink** boundary without storing the
+token in the receipt:
+
+```powershell
+$env:KALIV_BODY_RIG_URL = "http://<rig-host>:8080"
+$env:KALIV_BODY_RIG_TOKEN = "<paired-device-token>"
+$sha = (git rev-parse HEAD).Trim()
+powershell -ExecutionPolicy Bypass -File .\scripts\run-kaliv-body-android-validation.ps1 `
+  -ExpectedSha $sha -Install -Launch -ProveRigLink
+```
+
+The qualifier requires the non-secret Unity log marker
+`BodyRig: rig link resolved from intent (...)`, scans logcat for the exact token
+value and fails if it appears, then records only
+`rig_link_qualified=true` / `rig_link_token_leak_observed=false`. The rig URL
+and token themselves are never written to the receipt.
+
 ## Authoritative physical proof path
 
 Run this only from the exact #720 draft candidate on the physical Windows rig with a genuinely selected M2.7 profile.
