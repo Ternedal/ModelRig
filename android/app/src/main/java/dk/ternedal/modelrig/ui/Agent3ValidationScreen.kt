@@ -168,7 +168,7 @@ private fun TaskReadinessCard(readiness: Agent3TaskReadinessClient.Readiness) {
         "Task-UI-evidens er blokeret"
     }
     val headlineColor = if (readiness.eligibleForTaskUi) {
-        KalivTheme.colors.signal
+        KalivTheme.colors.success
     } else {
         KalivTheme.colors.amber
     }
@@ -211,7 +211,7 @@ private fun ValidationSummaryCard(status: Agent3ValidationClient.Status) {
     }
     val headlineColor = when {
         assessment.eligibleForWritePilot -> KalivTheme.colors.success
-        assessment.eligibleForDeveloperPreview -> KalivTheme.colors.signal
+        assessment.eligibleForDeveloperPreview -> KalivTheme.colors.cognition
         else -> KalivTheme.colors.amber
     }
 
