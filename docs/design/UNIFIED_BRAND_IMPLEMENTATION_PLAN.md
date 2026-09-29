@@ -44,11 +44,11 @@ Implement the unified Ember / Signal identity across Android, Windows, Quest and
 - [ ] Preserve world-space contrast and readable target sizes.
 
 ## Phase 5 — BodyRig
-- [ ] Locate current UI authority in BodyRig repo.
-- [ ] Add shared Ember/Signal theme contract.
-- [ ] Signal = tracking/inference/live projection.
-- [ ] Ember = identity/body authority/persisted performer state.
-- [ ] Semantic colors = health only.
+- [x] Locate current UI authority in BodyRig repo.
+- [x] Add shared Ember/Signal theme contract.
+- [x] Signal = tracking/inference/live projection.
+- [x] Ember = identity/body authority/persisted performer state.
+- [x] Semantic colors = health only.
 
 ## Phase 6 — Gates and documentation
 - [x] CI gate verifies required Signal tokens and bindings.
