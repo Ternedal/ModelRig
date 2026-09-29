@@ -82,6 +82,11 @@ check(
     "avatar download has an explicit memory/asset size ceiling",
 )
 check(
+    "MaxBodyprintBytes = 1024 * 1024" in source
+    and "bodyprintBytes.Length > MaxBodyprintBytes" in source,
+    "BodyPrint metadata has an explicit one-megabyte ceiling",
+)
+check(
     "Vrm10." not in source
     and "BodyRigVrmRenderer" not in source
     and "BindAvatarRoot" not in source,
