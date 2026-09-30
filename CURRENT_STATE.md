@@ -77,6 +77,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
+| `KALIV_VISIONRIG_SENSOR_CONTROL` | `0` |
 | `KALIV_VISIONRIG_URL` | `http://127.0.0.1:8110` |
 | `KALIV_VISION_MODEL` | `(unset)` |
 | `KALIV_WEB_RESEARCH_ENABLED` | `` |
@@ -292,7 +293,6 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_experiential_episode.py`
 - `tests/worker_consciousness_core_goals.py`
 - `tests/worker_consciousness_core_live_episode.py`
-- `tests/worker_consciousness_core_live_lifecycle_evidence_assembler.py`
 - `tests/worker_consciousness_core_live_lifecycle_qualification.py`
 - `tests/worker_consciousness_core_lived_continuity.py`
 - `tests/worker_consciousness_core_lived_continuity_operator.py`
