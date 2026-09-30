@@ -27,6 +27,10 @@ from app.consciousness_core.session_bootstrap import (  # noqa: E402
     active_person_binding_from_registry,
     bootstrap_runtime_session,
 )
+from app.consciousness_core.restart_dormancy_evidence import (  # noqa: E402
+    RestartDormancyEvidenceError,
+    build_restart_dormancy_receipt,
+)
 from app.person_registry import PersonRegistry, REVIEW_CHECKS  # noqa: E402
 
 
@@ -295,6 +299,56 @@ class SessionBootstrapTests(unittest.TestCase):
             self.assertEqual(wake.dormancy_kind, "UNPLANNED_DORMANCY")
             self.assertFalse(result.receipt.cognition_during_gap)
             self.assertFalse(result.receipt.prior_workspace_restored)
+
+
+    def test_c19_wake_bootstrap_qualifies_restart_dormancy_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            _, person, revision, *_rest, binding = self.active_person(Path(td))
+            state = self.state(person.person_id, revision.id)
+            wake = self.planned_wake(state)
+            result = bootstrap_runtime_session(
+                persistent_state=state,
+                active_person=binding,
+                bootstrap_source_ref="runtime:wake:restart-evidence",
+                wake_receipt=wake,
+            )
+            receipt = build_restart_dormancy_receipt(
+                wake,
+                result.receipt,
+            )
+            self.assertEqual(
+                receipt.schema,
+                "kaliv-consciousness-core/restart-dormancy-receipt/v1",
+            )
+            self.assertEqual(receipt.bootstrap_kind, "WAKE_REORIENTATION")
+            self.assertEqual(receipt.self_id, state.self_id)
+            self.assertEqual(receipt.person_revision, state.person_revision)
+            self.assertFalse(receipt.cognition_during_gap)
+            self.assertTrue(receipt.explicit_wake_reorientation)
+            self.assertFalse(receipt.prior_world_restored)
+            self.assertFalse(receipt.prior_workspace_restored)
+            self.assertFalse(receipt.execution_authority)
+            self.assertFalse(receipt.scheduling_authority)
+            self.assertFalse(receipt.production_activation)
+
+    def test_plain_runtime_start_cannot_qualify_restart_dormancy(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            _, person, revision, *_rest, binding = self.active_person(Path(td))
+            state = self.state(person.person_id, revision.id)
+            wake = self.planned_wake(state)
+            result = bootstrap_runtime_session(
+                persistent_state=state,
+                active_person=binding,
+                bootstrap_source_ref="runtime:start:not-a-wake",
+            )
+            with self.assertRaisesRegex(
+                RestartDormancyEvidenceError,
+                "WAKE_REORIENTATION",
+            ):
+                build_restart_dormancy_receipt(
+                    wake,
+                    result.receipt,
+                )
 
     def test_active_person_mismatch_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
