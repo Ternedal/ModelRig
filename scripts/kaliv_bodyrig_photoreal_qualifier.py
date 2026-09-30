@@ -140,6 +140,20 @@ def qualify(authority: Mapping[str, Any], *, expected_bodyrig_sha: str) -> dict[
         )
 
     for field in (
+        "person_id",
+        "person_revision",
+        "body_revision",
+        "body_id",
+        "canonical_m6_release_id",
+        "photoreal_m5_link_id",
+        "m4_photoreal_link_id",
+    ):
+        if not isinstance(value[field], str) or not value[field].strip():
+            raise BodyRigPhotorealQualificationError(
+                f"BodyRig Photoreal {field} is invalid"
+            )
+
+    for field in (
         "assembly_fingerprint",
         "body_package_sha256",
         "canonical_m6_release_file_sha256",
