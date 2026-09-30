@@ -48,7 +48,18 @@ evidence reference:
    `Ternedal/VisionRig` revision. A mutable label or inner WorldEvidence ref is
    not sufficient.
 4. `bodyrig_photoreal_likeness` — the real-person Photoreal likeness gate,
-   including required human review, has passed.
+   including required human review, has passed all the way through BodyRig's
+   final Photoreal M6 authority. A PASS must contain exactly one canonical
+   `bodyrig-photoreal-likeness:<bodyrig-sha>:<sha256>` reference emitted by
+   `kaliv_bodyrig_photoreal_qualifier.py`. The qualifier accepts only
+   `bodyrig-digital-twin-photoreal-release` v1 with
+   `visual_authority=photoreal-v2-p3`,
+   `canonical_digital_twin_ready=true`,
+   `photoreal_digital_twin_ready=true`, a recomputed
+   `dtphotorel-...` release id, and the exact pinned BodyRig revision.
+   BodyRig's final authority is production-activating inside BodyRig, but
+   ModelRig's qualifier and system-release verdict remain
+   `production_activation=false`.
 5. `bodyrig_digital_twin_m6` — one coherent Person lineage reaches canonical M6
    with the required physical/human Windows and Quest evidence. A PASS must
    contain exactly one canonical
