@@ -151,7 +151,11 @@ func visionRigControlAPIEnabled() bool {
 }
 
 func decodeControlCenterVisionEnabled(body io.Reader) (bool, int64, error) {
-	decoder := json.NewDecoder(io.LimitReader(body, maxControlCenterControlBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(body, maxControlCenterControlBytes+1))
+	if err != nil || len(raw) > maxControlCenterControlBytes {
+		return false, 0, io.ErrUnexpectedEOF
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var request controlCenterVisionEnabledRequest
 	if err := decoder.Decode(&request); err != nil {
