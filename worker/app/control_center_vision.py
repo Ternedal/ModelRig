@@ -10,11 +10,12 @@ import ipaddress
 import os
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
 SCHEMA = "kaliv-control-center-vision/v1"
+CONTROL_SCHEMA = "kaliv-control-center-vision-control/v1"
 BOOTSTRAP_SCHEMA = "visionrig/sensor-bootstrap-snapshot/v6"
 CATALOG_SCHEMA = "visionrig/sensor-catalog/v8"
 FLEET_SCHEMA = "visionrig/sensor-fleet-summary/v6"
@@ -272,3 +273,73 @@ async def build_control_center_vision() -> dict[str, Any]:
             "sensors": [],
             "production_activation": False,
         }
+
+
+async def set_control_center_vision_enabled(
+    *,
+    source_id: str,
+    enabled: bool,
+    expected_state_revision: int,
+) -> dict[str, Any]:
+    """Apply one bounded VisionRig desired-state change through loopback core.
+
+    This is an operator mutation, not a producer capability. Callers must enforce
+    their own remote/auth boundary before invoking it.
+    """
+    normalized_source_id = source_id.strip()
+    if not normalized_source_id or len(normalized_source_id) > 128:
+        raise ValueError("source_id must contain 1..128 characters")
+    if expected_state_revision < 0:
+        raise ValueError("expected_state_revision must be non-negative")
+
+    base = _visionrig_base_url()
+    safe_source_id = quote(normalized_source_id, safe="")
+    patch_target = f"{base}/api/v1/sensors/{safe_source_id}/metadata"
+    desired_target = f"{base}/api/v1/sensors/{safe_source_id}/desired-state"
+
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        response = await client.patch(
+            patch_target,
+            params={"expected_state_revision": expected_state_revision},
+            json={"enabled": enabled},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, Mapping):
+            raise TypeError("VisionRig metadata response is not an object")
+        if payload.get("schema") != "visionrig/sensor-metadata/v2":
+            raise ValueError("unsupported VisionRig metadata schema")
+        metadata = _mapping(payload.get("metadata"))
+        if metadata.get("source_id") != normalized_source_id:
+            raise ValueError("VisionRig metadata response source mismatch")
+        if metadata.get("enabled") is not enabled:
+            raise ValueError("VisionRig metadata response enabled mismatch")
+        state_revision = payload.get("state_revision")
+        if not isinstance(state_revision, int) or state_revision < 0:
+            raise ValueError("VisionRig metadata response lacks state revision")
+
+        desired_response = await client.get(desired_target)
+        desired_response.raise_for_status()
+        desired = desired_response.json()
+        if not isinstance(desired, Mapping):
+            raise TypeError("VisionRig desired-state response is not an object")
+        if desired.get("schema_id") != "visionrig/sensor-desired-state/v2":
+            raise ValueError("unsupported VisionRig desired-state schema")
+        if desired.get("source_id") != normalized_source_id:
+            raise ValueError("VisionRig desired-state source mismatch")
+        if desired.get("enabled") is not enabled:
+            raise ValueError("VisionRig desired-state did not converge to requested value")
+        desired_revision = desired.get("revision")
+        if not isinstance(desired_revision, int) or desired_revision < 0:
+            raise ValueError("VisionRig desired-state response lacks revision")
+        if desired.get("production_authority") is not False:
+            raise ValueError("VisionRig desired-state unexpectedly grants production authority")
+
+    return {
+        "schema": CONTROL_SCHEMA,
+        "source_id": normalized_source_id,
+        "enabled": enabled,
+        "sensor_state_revision": state_revision,
+        "desired_revision": desired_revision,
+        "production_activation": False,
+    }
