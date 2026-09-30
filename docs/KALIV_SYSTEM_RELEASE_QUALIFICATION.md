@@ -45,6 +45,41 @@ evidence reference:
 A missing or failed gate yields `BLOCKED`. A PASS without evidence is malformed,
 not merely pending.
 
+### Recovery + soak evidence
+
+`recovery_soak` now has a dedicated read-only qualifier:
+
+```powershell
+Copy-Item eval\recovery_soak_observations.example.json validation\recovery-soak-observations.json
+# Fill the exact candidate SHA, Stage-B evidence reference, the AGREED campaign
+# policy, real health samples and the four real recovery-event evidence refs.
+python scripts\kaliv_recovery_soak_qualification.py `
+  validation\recovery-soak-observations.json `
+  --report validation\recovery-soak-latest.json
+```
+
+The qualifier does **not** choose the soak policy and does not operate services.
+The observations file must state the already-agreed
+`required_duration_seconds` and `max_sample_gap_seconds`; qualification only
+proves that the measured campaign satisfied that declared policy. The values in
+the example file are illustrative and are not release authority.
+
+Every sample must be strictly time-ordered and prove backend healthy, worker
+healthy, supervisor looping and no state error. The campaign must also contain
+one successful, evidence-referenced event for each of:
+
+- `reboot`;
+- `backend_restart`;
+- `worker_restart`;
+- `interruption_recovery`.
+
+The receipt SHA-binds the observations file and carries the same exact candidate
+SHA plus a Stage-B evidence reference. It emits the canonical release reference
+`kaliv-recovery-soak:<modelrig-sha>:<sha256>`, where the digest binds the
+qualified receipt fields. It always keeps `production_activation=false`.
+A release manifest may mark `recovery_soak` PASS only by referencing that
+reviewed canonical qualifier evidence (or a strictly stronger reviewed authority).
+
 ## Authority boundary
 
 The gate intentionally cannot activate production. The manifest must contain:
