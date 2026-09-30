@@ -7,6 +7,7 @@ Self/Person ids, model prompts, memory refs, event ids or chain-of-thought.
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,14 @@ from .self_state import SelfStateStore
 from .session_lifecycle import ProductionCognitiveSession
 from .supervisor_lifecycle import ProductionSupervisorBridge
 from .autonomous_scheduler import ScheduledAutonomousCognitionBridge
+
+
+_RUNTIME_INSTANCE_REF = "runtime-instance:" + secrets.token_hex(16)
+
+
+def runtime_instance_ref() -> str:
+    """Opaque process-instance reference; regenerated on worker process start."""
+    return _RUNTIME_INSTANCE_REF
 
 
 def _loopback(request: Request) -> bool:
@@ -78,6 +87,7 @@ def build_consciousness_status_router() -> APIRouter:
         live = isinstance(session, ProductionCognitiveSession)
         return {
             "schema": "kaliv-consciousness-core/runtime-status/v1",
+            "runtime_instance_ref": runtime_instance_ref(),
             "enabled": {
                 "core": _flag("KALIV_CONSCIOUSNESS_CORE_ENABLED"),
                 "supervisor": _flag("KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED"),
