@@ -12,7 +12,7 @@ Den valgte persons krop (Person Revision → `body`-kandidat → `.mrbody`) stå
 brugerens rum på telefonen, bevæger sig og taler i takt med Kaliv, og skifter
 når personen skifter — uden at brugeren forlader Kaliv-appen.
 
-## 2. Hvad der findes (main + samlet kandidat #1964, afstemt 29/9)
+## 2. Hvad der findes (main + samlet kandidat #1976, afstemt 29/9)
 
 | Lag | Status |
 |---|---|
@@ -22,10 +22,10 @@ når personen skifter — uden at brugeren forlader Kaliv-appen.
 | Person Profile-registry med atomisk aktivering; `active_bindings().body` | landet (#752) |
 | **Live frame-feed fra Kalivs faktiske tur og tale** | **landet (#843)** — `/body/frames` SSE fra `BodyRigRuntime`, drevet af chat-faser og TTS |
 | **Server assets + live frames over HTTP** | **landet i L1 (#842–#844)** — backend forwarder aktive assets og `/body/frames` |
-| **Unity live-frame + remote avatar-klient** | **samlet i #1964** — authenticated SSE, digest-bundet aktiv avatar + BodyPrint scale |
-| **Kaliv Body Android-host** | **samlet i #1964** — package-id, ARM64/minSdk, strict batch-build, RigLink og remote avatar |
-| **AR Foundation / ARCore** | **samlet i #1964** — pinned packages, loader, runtime probe, plane/raycast placement |
-| **Fysisk Android live-body gate** | **samlet i #1964** — build/install/launch, live body, detected-plane placement, human visual acceptance og independent gate |
+| **Unity live-frame + remote avatar-klient** | **samlet i #1976** — authenticated SSE, digest-bundet aktiv avatar + BodyPrint scale |
+| **Kaliv Body Android-host** | **samlet i #1976** — package-id, ARM64/minSdk, strict batch-build, RigLink og remote avatar |
+| **AR Foundation / ARCore** | **samlet i #1976** — pinned packages, loader, runtime probe, plane/raycast placement |
+| **Fysisk Android live-body gate** | **samlet i #1976** — build/install/launch, live body, detected-plane placement, human visual acceptance og independent gate |
 | **Unity as a Library i Kaliv** | **V2 / ikke MVP-krav** |
 
 ## 3. Lagene, i rækkefølge
@@ -96,7 +96,7 @@ når personen skifter — uden at brugeren forlader Kaliv-appen.
 ## 7. Næste skridt
 
 1. **L1: landet på main.**
-2. **L2–L4 software:** land #1964, som samler live frames, RigLink, remote avatar,
+2. **L2–L4 software:** land #1976, som samler live frames, RigLink, remote avatar,
    BodyPrint scale, Android-host, ARCore/runtime placement og de fysiske gate-værktøjer.
 3. **Fysisk qualification:** kør exact-head Android live-body proof + human visual
    acceptance + independent physical gate på den samme kandidat.
@@ -118,7 +118,7 @@ til `listening`/`idle` (#852). `KALIV_BODY_STORE` i appliancens env.
 
 **L2's netværkskilde er skrevet og restacket:** det historiske #846 blev lukket
 uden merge; den nyttige kerne (`BodyRigFrameSource` + bootstrap + CI-kontrakt)
-er genoprettet på current main som #1920. Samme `Apply` som fixturen, samme
+er integreret i den aktuelle #1976-kandidat. Samme `Apply` som fixturen, samme
 værn og genforbindelse; bootstrappen vælger den kun med både
 `BODYRIG_RIG_URL` og `BODYRIG_RIG_TOKEN` sat. Unity-kompilering/fysisk proof
 mangler stadig. UaaL-eksportindstillingerne er ikke lavet.
@@ -145,7 +145,7 @@ kroppen er set på Windows.
 
 ## 9. Status 29/9 — samlet Android-kandidat
 
-#1964 erstatter de gamle #1920/#1921–#1925/#1939–#1958 spor som den samlede
+#1976 erstatter #1964 og de gamle #1920/#1921–#1925/#1939–#1958 spor som den samlede
 current-main Android-renderer-kandidat. Den er bevidst fladet ud på seneste
 `main`, så releasebeviset kan bindes til én exact head. Den giver **ingen**
 production authority; fysisk/human evidence skal stadig produceres særskilt.
