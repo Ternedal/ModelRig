@@ -10,9 +10,24 @@ on:
       - "docs/bodyrig/**"
       - "renderers/bodyrig-unity/**"
       - "tests/bodyrig/renderer_contracts.py"
+      - "tests/bodyrig/live_frame_source_contract.py"
+      - "tests/bodyrig/ar_placement_contract.py"
+      - "tests/bodyrig/rig_link_contract.py"
+      - "tests/bodyrig/android_host_contract.py"
+      - "tests/bodyrig/ar_packages_contract.py"
+      - "tests/bodyrig/arcore_loader_build_contract.py"
+      - "tests/bodyrig/arcore_runtime_contract.py"
+      - "tests/bodyrig/remote_avatar_contract.py"
+      - "tests/bodyrig/android_live_body_contract.py"
+      - "tests/bodyrig/android_visual_acceptance_contract.py"
+      - "tests/bodyrig/android_independent_physical_gate_contract.py"
+      - "tests/bodyrig/android_physical_host_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
+      - "scripts/run-kaliv-body-android-validation.ps1"
+      - "scripts/accept-kaliv-body-android-visual.ps1"
+      - "scripts/kaliv_body_android_physical_gate.py"
       - ".github/workflows/bodyrig-renderer-contract.yml"
   pull_request:
     paths:
@@ -20,9 +35,24 @@ on:
       - "docs/bodyrig/**"
       - "renderers/bodyrig-unity/**"
       - "tests/bodyrig/renderer_contracts.py"
+      - "tests/bodyrig/live_frame_source_contract.py"
+      - "tests/bodyrig/ar_placement_contract.py"
+      - "tests/bodyrig/rig_link_contract.py"
+      - "tests/bodyrig/android_host_contract.py"
+      - "tests/bodyrig/ar_packages_contract.py"
+      - "tests/bodyrig/arcore_loader_build_contract.py"
+      - "tests/bodyrig/arcore_runtime_contract.py"
+      - "tests/bodyrig/remote_avatar_contract.py"
+      - "tests/bodyrig/android_live_body_contract.py"
+      - "tests/bodyrig/android_visual_acceptance_contract.py"
+      - "tests/bodyrig/android_independent_physical_gate_contract.py"
+      - "tests/bodyrig/android_physical_host_contract.py"
       - "scripts/bodyrig_renderer_handoff_contract.py"
       - "scripts/bodyrig_prepare_renderer_profile.py"
       - "scripts/bodyrig_unity_physical_*"
+      - "scripts/run-kaliv-body-android-validation.ps1"
+      - "scripts/accept-kaliv-body-android-visual.ps1"
+      - "scripts/kaliv_body_android_physical_gate.py"
       - ".github/workflows/bodyrig-renderer-contract.yml"
   workflow_dispatch:
 
@@ -54,6 +84,58 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 tests/bodyrig/renderer_contracts.py
+      - name: Validate BodyRig live frame source safety contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/live_frame_source_contract.py
+      - name: Validate BodyRig AR placement software contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/ar_placement_contract.py
+      - name: Validate BodyRig rig-link software contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/rig_link_contract.py
+      - name: Validate Kaliv Body Android host contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/android_host_contract.py
+      - name: Validate BodyRig AR package graph
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/ar_packages_contract.py
+      - name: Validate BodyRig ARCore loader build contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/arcore_loader_build_contract.py
+      - name: Validate BodyRig ARCore runtime qualification contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/arcore_runtime_contract.py
+      - name: Validate BodyRig Android remote avatar contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/remote_avatar_contract.py
+      - name: Validate Kaliv Body live-body physical qualifier
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/android_live_body_contract.py
+      - name: Validate Kaliv Body Android visual acceptance contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/android_visual_acceptance_contract.py
+      - name: Validate Kaliv Body independent physical gate contract
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/android_independent_physical_gate_contract.py
+      - name: Validate Kaliv Body independent physical gate CLI surface
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 scripts/kaliv_body_android_physical_gate.py --help
+      - name: Validate Kaliv Body Android physical host qualifier
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/bodyrig/android_physical_host_contract.py
       - name: Validate BodyRig M2.8 digest-bound renderer handoff
         env:
           PYTHONDONTWRITEBYTECODE: "1"
