@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..netguard import is_loopback
 from ..person_api import registry_path
 from ..person_registry import PersonRegistry
-from .profile_source import cognitive_profile_config_path
+from .profile_source import cognitive_profile_config_path, load_cognitive_profile
 from .self_state import SelfStateStore
 from .session_lifecycle import ProductionCognitiveSession
 from .supervisor_lifecycle import ProductionSupervisorBridge
@@ -66,6 +66,47 @@ def build_consciousness_status_router() -> APIRouter:
         prefix="/experimental/consciousness",
         tags=["experimental-consciousness"],
     )
+
+    @router.get("/qualification-snapshot")
+    def qualification_snapshot(request: Request) -> dict[str, Any]:
+        if not _loopback(request):
+            raise HTTPException(
+                status_code=403,
+                detail="Consciousness qualification snapshot is loopback-only",
+            )
+        if not _flag("KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED"):
+            raise HTTPException(
+                status_code=404,
+                detail="Consciousness qualification evidence is disabled",
+            )
+
+        session = getattr(request.app.state, "consciousness_session", None)
+        wake = getattr(
+            request.app.state,
+            "consciousness_sleep_wake_receipt",
+            None,
+        )
+        if not isinstance(session, ProductionCognitiveSession):
+            raise HTTPException(status_code=409, detail="live session unavailable")
+        if wake is None:
+            raise HTTPException(status_code=409, detail="wake evidence unavailable")
+
+        loaded_profile = load_cognitive_profile()
+        if loaded_profile is None:
+            raise HTTPException(status_code=409, detail="cognitive profile unavailable")
+        if session.lived_continuity is None:
+            raise HTTPException(status_code=409, detail="lived continuity unavailable")
+
+        return {
+            "schema": "kaliv-consciousness-core/qualification-snapshot/v1",
+            "runtime_instance_ref": runtime_instance_ref(),
+            "wake_receipt": wake.model_dump(mode="json"),
+            "session_bootstrap_receipt": session.bootstrap_receipt.model_dump(mode="json"),
+            "self_state": session.live_state.state.model_dump(mode="json"),
+            "cognitive_profile": loaded_profile.profile.model_dump(mode="json"),
+            "lived_continuity": session.lived_continuity.model_dump(mode="json"),
+            "production_activation": False,
+        }
 
     @router.get("/status")
     def status(request: Request) -> dict[str, Any]:
