@@ -48,7 +48,14 @@ def _manifest() -> dict:
                                 + ":"
                                 + "e" * 64
                                 if name == "visionrig_physical_perception"
-                                else f"evidence:{name}:1"
+                                else (
+                                    "kaliv-end-to-end-latency:"
+                                    + "1" * 40
+                                    + ":"
+                                    + "9" * 64
+                                    if name == "end_to_end_latency"
+                                    else f"evidence:{name}:1"
+                                )
                             )
                         )
                     )
@@ -229,6 +236,34 @@ def run_contract() -> None:
     _must_reject(
         android_multiple_refs,
         "requires exactly one independent physical gate evidence ref",
+    )
+
+    latency_mutable_ref = copy.deepcopy(valid)
+    latency_mutable_ref["gates"]["end_to_end_latency"]["evidence_refs"] = [
+        "operator-says-latency-is-fine"
+    ]
+    _must_reject(
+        latency_mutable_ref,
+        "requires exact-head-bound kaliv-end-to-end-latency evidence",
+    )
+
+    latency_wrong_head = copy.deepcopy(valid)
+    latency_wrong_head["gates"]["end_to_end_latency"]["evidence_refs"] = [
+        "kaliv-end-to-end-latency:" + "f" * 40 + ":" + "9" * 64
+    ]
+    _must_reject(
+        latency_wrong_head,
+        "not exact-tree-equivalent to the pinned ModelRig revision",
+    )
+
+    latency_multiple_refs = copy.deepcopy(valid)
+    latency_multiple_refs["gates"]["end_to_end_latency"]["evidence_refs"] = [
+        "kaliv-end-to-end-latency:" + "1" * 40 + ":" + "9" * 64,
+        "kaliv-end-to-end-latency:" + "1" * 40 + ":" + "8" * 64,
+    ]
+    _must_reject(
+        latency_multiple_refs,
+        "requires exactly one measurement qualification evidence ref",
     )
 
     failed = copy.deepcopy(valid)
