@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -19,6 +20,15 @@ SCHEMA = "kaliv-system-release-manifest/v1"
 VERDICT_SCHEMA = "kaliv-system-release-verdict/v1"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _RELEASE_ID = re.compile(r"^kaliv-rc-[A-Za-z0-9._-]{1,64}$")
+_ANDROID_LIVE_BODY_REF = re.compile(
+    r"^kaliv-body-android-physical-gate:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
+_CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
+    r"^consciousness-live-lifecycle:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
+_VISIONRIG_PHYSICAL_REF = re.compile(
+    r"^visionrig-physical-perception:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -33,6 +43,7 @@ REQUIRED_GATES = (
     "visionrig_physical_perception",
     "bodyrig_photoreal_likeness",
     "bodyrig_digital_twin_m6",
+    "bodyrig_android_live_body",
     "end_to_end_latency",
     "recovery_soak",
     "repository_authority",
@@ -45,6 +56,51 @@ _MAX_REF_LEN = 512
 
 class SystemReleaseManifestError(RuntimeError):
     """The supplied release manifest is malformed or overclaims authority."""
+
+
+def _git(*args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemReleaseManifestError(
+            "cannot verify ModelRig evidence ancestry/tree equivalence"
+        ) from exc
+    return result.stdout.strip()
+
+
+def _modelrig_evidence_matches_pin(evidence_sha: str, pinned_sha: str) -> bool:
+    if evidence_sha == pinned_sha:
+        return True
+
+    try:
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", evidence_sha, pinned_sha],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        # Non-ancestor and unknown/unavailable commit objects are both
+        # non-equivalent evidence. Fail closed without converting this into an
+        # infrastructure authority error.
+        return False
+    except OSError as exc:
+        raise SystemReleaseManifestError(
+            "cannot verify ModelRig evidence ancestry"
+        ) from exc
+
+    evidence_tree = _git("rev-parse", f"{evidence_sha}^{{tree}}")
+    pinned_tree = _git("rev-parse", f"{pinned_sha}^{{tree}}")
+    return evidence_tree == pinned_tree
 
 
 @dataclass(frozen=True)
@@ -146,7 +202,12 @@ def _validate_evidence_refs(value: Any, gate: str, *, require: bool) -> tuple[st
     return tuple(refs)
 
 
-def _validate_gates(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _validate_gates(
+    value: Any,
+    *,
+    modelrig_sha: str,
+    visionrig_sha: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     gates = _require_mapping(value, "gates")
     expected = set(REQUIRED_GATES)
     _exact_keys(gates, expected, "gates")
@@ -161,11 +222,62 @@ def _validate_gates(value: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
             raise SystemReleaseManifestError(
                 f"{gate}.status must be PASS, PENDING or FAIL"
             )
-        _validate_evidence_refs(
+        refs = _validate_evidence_refs(
             entry["evidence_refs"],
             gate,
             require=status == "PASS",
         )
+        if gate == "consciousness_live_lifecycle" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "consciousness_live_lifecycle PASS requires exactly one "
+                    "lifecycle qualification evidence ref"
+                )
+            match = _CONSCIOUSNESS_LIFECYCLE_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "consciousness_live_lifecycle PASS requires exact-head-bound "
+                    "consciousness-live-lifecycle evidence"
+                )
+            if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
+                raise SystemReleaseManifestError(
+                    "consciousness_live_lifecycle evidence is not exact-tree-equivalent "
+                    "to the pinned ModelRig revision"
+                )
+        if gate == "visionrig_physical_perception" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "visionrig_physical_perception PASS requires exactly one "
+                    "physical qualification evidence ref"
+                )
+            match = _VISIONRIG_PHYSICAL_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "visionrig_physical_perception PASS requires exact-head-bound "
+                    "visionrig-physical-perception evidence"
+                )
+            if match.group(1) != visionrig_sha:
+                raise SystemReleaseManifestError(
+                    "visionrig_physical_perception evidence is bound to a different "
+                    "VisionRig Git SHA"
+                )
+        if gate == "bodyrig_android_live_body" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "bodyrig_android_live_body PASS requires exactly one "
+                    "independent physical gate evidence ref"
+                )
+            match = _ANDROID_LIVE_BODY_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "bodyrig_android_live_body PASS requires exact-head-bound "
+                    "kaliv-body-android-physical-gate evidence refs"
+                )
+            if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
+                raise SystemReleaseManifestError(
+                    "bodyrig_android_live_body evidence is not exact-tree-equivalent "
+                    "to the pinned ModelRig revision"
+                )
         if status == "PENDING":
             pending.append(gate)
         elif status == "FAIL":
@@ -200,7 +312,11 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
         )
 
     pinned = _validate_repositories(root["repositories"])
-    pending, failed = _validate_gates(root["gates"])
+    pending, failed = _validate_gates(
+        root["gates"],
+        modelrig_sha=pinned["Ternedal/ModelRig"],
+        visionrig_sha=pinned["Ternedal/VisionRig"],
+    )
     ready = not pending and not failed
     return SystemReleaseVerdict(
         schema=VERDICT_SCHEMA,
