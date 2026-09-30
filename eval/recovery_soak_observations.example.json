@@ -1,0 +1,52 @@
+{
+  "schema": "kaliv-recovery-soak-observations/v1",
+  "candidate_sha": "FILL_ME_40_LOWER_HEX",
+  "production_activation": false,
+  "policy": {
+    "required_duration_seconds": 21600,
+    "max_sample_gap_seconds": 900
+  },
+  "stage_b_evidence_ref": "validation/stage-b-physical-final-latest.json#sha256=FILL_ME_64_HEX",
+  "samples": [
+    {
+      "observed_at": "2026-09-29T10:00:00+00:00",
+      "backend_healthy": true,
+      "worker_healthy": true,
+      "supervisor_looping": true,
+      "state_error_absent": true
+    },
+    {
+      "observed_at": "2026-09-29T10:15:00+00:00",
+      "backend_healthy": true,
+      "worker_healthy": true,
+      "supervisor_looping": true,
+      "state_error_absent": true
+    }
+  ],
+  "recovery_events": [
+    {
+      "kind": "reboot",
+      "observed_at": "2026-09-29T10:05:00+00:00",
+      "passed": true,
+      "evidence_ref": "validation/appliance-lifecycle-evidence/reboot.log#sha256=FILL_ME_64_HEX"
+    },
+    {
+      "kind": "backend_restart",
+      "observed_at": "2026-09-29T10:10:00+00:00",
+      "passed": true,
+      "evidence_ref": "validation/appliance-lifecycle-evidence/backend-restart.log#sha256=FILL_ME_64_HEX"
+    },
+    {
+      "kind": "worker_restart",
+      "observed_at": "2026-09-29T10:12:00+00:00",
+      "passed": true,
+      "evidence_ref": "validation/appliance-lifecycle-evidence/worker-restart.log#sha256=FILL_ME_64_HEX"
+    },
+    {
+      "kind": "interruption_recovery",
+      "observed_at": "2026-09-29T10:14:00+00:00",
+      "passed": true,
+      "evidence_ref": "validation/appliance-lifecycle-evidence/appliance_interruption.log#sha256=FILL_ME_64_HEX"
+    }
+  ]
+}
