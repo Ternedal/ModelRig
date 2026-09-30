@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.ui
 
 import dk.ternedal.modelrig.net.ControlCenterScheduleGrant
 import dk.ternedal.modelrig.net.ControlCenterScheduleRuntime
+import dk.ternedal.modelrig.net.ControlCenterVisionSensor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -126,4 +127,70 @@ class ControlCenterScreenTest {
         structurallyEligible = eligible,
         blockedReason = if (eligible) null else "blocked",
     )
+
+    @Test
+    fun visionSensorStateNeverPaintsPendingOrOfflineAsHealthy() {
+        fun sensor(
+            lifecycle: String = "active",
+            presence: String = "online",
+            desired: Boolean = true,
+            effective: Boolean? = true,
+            convergence: String = "converged",
+        ) = ControlCenterVisionSensor(
+            sourceId = "kaliv-android",
+            displayName = null,
+            sourceType = "camera",
+            device = null,
+            lifecycle = lifecycle,
+            presence = presence,
+            desiredEnabled = desired,
+            effectiveCaptureActive = effective,
+            convergence = convergence,
+            desiredRevision = 4,
+            appliedRevision = 4,
+            pendingSeconds = null,
+            transportStatus = "normal",
+            capabilityRefreshStatus = "current",
+            lastSeenUtc = null,
+        )
+
+        assertEquals("healthy", controlCenterVisionSensorState(sensor()))
+        assertEquals(
+            "disabled",
+            controlCenterVisionSensorState(
+                sensor(desired = false, effective = false),
+            ),
+        )
+        assertEquals(
+            "unknown",
+            controlCenterVisionSensorState(
+                sensor(convergence = "pending"),
+            ),
+        )
+        assertEquals(
+            "unavailable",
+            controlCenterVisionSensorState(
+                sensor(presence = "offline"),
+            ),
+        )
+        assertEquals(
+            "stale",
+            controlCenterVisionSensorState(
+                sensor(presence = "stale"),
+            ),
+        )
+        assertEquals(
+            "disabled",
+            controlCenterVisionSensorState(
+                sensor(lifecycle = "retired"),
+            ),
+        )
+        assertEquals(
+            "unknown",
+            controlCenterVisionSensorState(
+                sensor(effective = null),
+            ),
+        )
+    }
+
 }
