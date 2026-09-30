@@ -76,6 +76,9 @@ func (s *server) handleControlCenterStatus(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusBadGateway, "control center status unavailable")
 		return
 	}
+	if vision, ok := payload["vision"].(map[string]any); ok {
+		vision["operator_control_available"] = visionRigControlAPIEnabled()
+	}
 
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, payload)
