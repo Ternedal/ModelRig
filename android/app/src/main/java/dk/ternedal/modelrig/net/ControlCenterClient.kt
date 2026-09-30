@@ -1,7 +1,9 @@
 package dk.ternedal.modelrig.net
 
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -17,6 +19,8 @@ class ControlCenterClient(baseUrl: String, private val token: String) {
         const val SCHEMA = "kaliv-control-center-status/v1"
         const val PRIVACY_SCHEMA = "kaliv-control-center-privacy/v1"
         const val DATA_SHARING_SCHEMA = "kaliv-data-sharing-policy/v1"
+        const val VISION_SCHEMA = "kaliv-control-center-vision/v1"
+        const val VISION_CONTROL_SCHEMA = "kaliv-control-center-vision-control/v1"
         private val OVERALL_STATES = setOf("healthy", "attention", "unavailable", "unknown")
         private val COMPONENT_STATES = setOf("healthy", "unavailable", "unknown", "stale", "disabled")
         private val ROUTING_STATES = setOf("healthy", "fallback", "unknown", "stale", "disabled")
@@ -60,6 +64,51 @@ class ControlCenterClient(baseUrl: String, private val token: String) {
         }
     }
 
+    fun setVisionEnabled(
+        sourceId: String,
+        enabled: Boolean,
+        expectedStateRevision: Int,
+    ): ControlCenterVisionControlReceipt {
+        val normalizedSourceId = sourceId.trim()
+        if (normalizedSourceId.isBlank() || normalizedSourceId.length > 128) {
+            throw ModelRigException("invalid VisionRig source id")
+        }
+        if (expectedStateRevision < 0) {
+            throw ModelRigException("invalid VisionRig state revision")
+        }
+        val url = okhttp3.HttpUrl.get(base).newBuilder()
+            .addPathSegments("api/v1/control-center/vision")
+            .addPathSegment(normalizedSourceId)
+            .addPathSegment("enabled")
+            .build()
+        val payload = JSONObject()
+            .put("enabled", enabled)
+            .put("expected_state_revision", expectedStateRevision)
+            .toString()
+            .toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer " + token)
+            .post(payload)
+            .build()
+        http.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val detail = runCatching {
+                    val json = JSONObject(body)
+                    json.optString("detail").ifBlank { json.optString("error") }
+                }.getOrDefault("").ifBlank { body }.take(500)
+                throw ModelRigException(
+                    "VisionRig sensor control failed (" + response.code + "): " + detail,
+                )
+            }
+            if (body.isBlank()) {
+                throw ModelRigException("VisionRig sensor control returned an empty body")
+            }
+            return parseVisionControl(JSONObject(body), normalizedSourceId, enabled)
+        }
+    }
+
     internal fun parse(root: JSONObject): ControlCenterStatus {
         val schema = root.requireString("schema")
         if (schema != SCHEMA) fail("unsupported schema $schema")
@@ -95,6 +144,8 @@ class ControlCenterClient(baseUrl: String, private val token: String) {
         }
         val privacy = root.optJSONObject("privacy")?.let(::parsePrivacy)
             ?: ControlCenterPrivacy.unreported()
+        val vision = root.optJSONObject("vision")?.let(::parseVision)
+            ?: ControlCenterVision.unreported()
 
         return ControlCenterStatus(
             schema = schema,
@@ -106,6 +157,118 @@ class ControlCenterClient(baseUrl: String, private val token: String) {
             routing = routing,
             requiredFailures = requiredFailures,
             privacy = privacy,
+            vision = vision,
+        )
+    }
+
+    private fun parseVision(value: JSONObject): ControlCenterVision {
+        val schema = value.requireStrictString("schema")
+        if (schema != VISION_SCHEMA) fail("unsupported Vision schema " + schema)
+        val available = value.requireBoolean("available")
+        val productionActivation = value.requireBoolean("production_activation")
+        if (productionActivation) fail("Vision production activation must be false")
+
+        val revision = if (value.has("sensor_state_revision") && !value.isNull("sensor_state_revision")) {
+            val parsed = runCatching { value.getInt("sensor_state_revision") }
+                .getOrElse { fail("Vision sensor_state_revision must be integer") }
+            if (parsed < 0) fail("Vision sensor_state_revision must be non-negative")
+            parsed
+        } else {
+            null
+        }
+        if (available && revision == null) fail("available Vision projection lacks state revision")
+
+        val consistency = value.optionalStrictString("consistency") ?: "unknown"
+        if (consistency !in setOf("synced", "registry_ahead", "journal_ahead", "unknown")) {
+            fail("unsupported Vision consistency " + consistency)
+        }
+
+        val sensorsJson = value.optJSONArray("sensors")
+            ?: fail("Vision sensors must be an array")
+        if (sensorsJson.length() > 128) fail("Vision sensors exceed bound")
+        val sensors = (0 until sensorsJson.length()).map { index ->
+            parseVisionSensor(
+                sensorsJson.optJSONObject(index)
+                    ?: fail("Vision sensor must be an object"),
+            )
+        }
+        val returned = value.requireNonNegativeInt("sensors_returned")
+        if (returned != sensors.size) fail("Vision sensors_returned mismatch")
+
+        return ControlCenterVision(
+            schema = schema,
+            available = available,
+            reason = value.optionalStrictString("reason"),
+            sensorStateRevision = revision,
+            consistency = consistency,
+            total = value.requireNonNegativeInt("total"),
+            sensorsTruncated = value.requireBoolean("sensors_truncated"),
+            attentionTotal = value.requireNonNegativeInt("attention_total"),
+            sensors = sensors,
+            productionActivation = productionActivation,
+        )
+    }
+
+    private fun parseVisionSensor(value: JSONObject): ControlCenterVisionSensor {
+        val sourceId = value.requireStrictString("source_id")
+        if (sourceId.length > 128) fail("Vision source id exceeds bound")
+        val lifecycle = value.requireStrictString("lifecycle")
+        if (lifecycle !in setOf("active", "retired")) fail("unsupported Vision lifecycle " + lifecycle)
+        val presence = value.requireStrictString("presence")
+        if (presence !in setOf("online", "stale", "offline", "unknown")) {
+            fail("unsupported Vision presence " + presence)
+        }
+        val convergence = value.requireStrictString("convergence")
+        if (convergence !in setOf("converged", "pending", "unknown")) {
+            fail("unsupported Vision convergence " + convergence)
+        }
+        return ControlCenterVisionSensor(
+            sourceId = sourceId,
+            displayName = value.optionalStrictString("display_name"),
+            sourceType = value.requireStrictString("source_type"),
+            device = value.optionalStrictString("device"),
+            lifecycle = lifecycle,
+            presence = presence,
+            desiredEnabled = value.requireBoolean("desired_enabled"),
+            effectiveCaptureActive = value.optionalBoolean("effective_capture_active"),
+            convergence = convergence,
+            desiredRevision = value.requireNonNegativeInt("desired_revision"),
+            appliedRevision = value.optionalNonNegativeInt("applied_revision"),
+            pendingSeconds = value.optionalFiniteDouble("pending_seconds"),
+            transportStatus = value.requireStrictString("transport_status"),
+            capabilityRefreshStatus = value.requireStrictString("capability_refresh_status"),
+            lastSeenUtc = value.optionalStrictString("last_seen_utc"),
+        )
+    }
+
+    private fun parseVisionControl(
+        value: JSONObject,
+        expectedSourceId: String,
+        expectedEnabled: Boolean,
+    ): ControlCenterVisionControlReceipt {
+        val schema = value.requireStrictString("schema")
+        if (schema != VISION_CONTROL_SCHEMA) {
+            throw ModelRigException("invalid VisionRig control receipt: unsupported schema " + schema)
+        }
+        val sourceId = value.requireStrictString("source_id")
+        if (sourceId != expectedSourceId) {
+            throw ModelRigException("invalid VisionRig control receipt: source mismatch")
+        }
+        val enabled = value.requireBoolean("enabled")
+        if (enabled != expectedEnabled) {
+            throw ModelRigException("invalid VisionRig control receipt: enabled mismatch")
+        }
+        val productionActivation = value.requireBoolean("production_activation")
+        if (productionActivation) {
+            throw ModelRigException("invalid VisionRig control receipt: production activation")
+        }
+        return ControlCenterVisionControlReceipt(
+            schema = schema,
+            sourceId = sourceId,
+            enabled = enabled,
+            sensorStateRevision = value.requireNonNegativeInt("sensor_state_revision"),
+            desiredRevision = value.requireNonNegativeInt("desired_revision"),
+            productionActivation = productionActivation,
         )
     }
 
@@ -275,6 +438,26 @@ class ControlCenterClient(baseUrl: String, private val token: String) {
         return getBoolean(key)
     }
 
+    private fun JSONObject.optionalBoolean(key: String): Boolean? {
+        if (!has(key) || isNull(key)) return null
+        if (get(key) !is Boolean) fail(key + " must be boolean or null")
+        return getBoolean(key)
+    }
+
+    private fun JSONObject.requireNonNegativeInt(key: String): Int {
+        if (!has(key) || isNull(key)) fail("missing " + key)
+        val value = runCatching { getInt(key) }.getOrElse { fail(key + " must be integer") }
+        if (value < 0) fail(key + " must be non-negative")
+        return value
+    }
+
+    private fun JSONObject.optionalNonNegativeInt(key: String): Int? {
+        if (!has(key) || isNull(key)) return null
+        val value = runCatching { getInt(key) }.getOrElse { fail(key + " must be integer or null") }
+        if (value < 0) fail(key + " must be non-negative")
+        return value
+    }
+
     private fun JSONObject.requireFiniteDouble(key: String): Double {
         if (!has(key) || isNull(key)) fail("missing $key")
         val value = runCatching { getDouble(key) }.getOrElse { fail("$key must be numeric") }
@@ -315,6 +498,7 @@ data class ControlCenterStatus(
     val routing: ControlCenterRouting,
     val requiredFailures: List<String>,
     val privacy: ControlCenterPrivacy,
+    val vision: ControlCenterVision,
 )
 
 data class ControlCenterComponent(
@@ -337,6 +521,61 @@ data class ControlCenterRouting(
     val observedAt: Double?,
     val ageSeconds: Double?,
     val reason: String?,
+)
+
+data class ControlCenterVision(
+    val schema: String?,
+    val available: Boolean,
+    val reason: String?,
+    val sensorStateRevision: Int?,
+    val consistency: String,
+    val total: Int,
+    val sensorsTruncated: Boolean,
+    val attentionTotal: Int,
+    val sensors: List<ControlCenterVisionSensor>,
+    val productionActivation: Boolean,
+) {
+    companion object {
+        fun unreported() = ControlCenterVision(
+            schema = null,
+            available = false,
+            reason = "vision_not_reported",
+            sensorStateRevision = null,
+            consistency = "unknown",
+            total = 0,
+            sensorsTruncated = false,
+            attentionTotal = 0,
+            sensors = emptyList(),
+            productionActivation = false,
+        )
+    }
+}
+
+data class ControlCenterVisionSensor(
+    val sourceId: String,
+    val displayName: String?,
+    val sourceType: String,
+    val device: String?,
+    val lifecycle: String,
+    val presence: String,
+    val desiredEnabled: Boolean,
+    val effectiveCaptureActive: Boolean?,
+    val convergence: String,
+    val desiredRevision: Int,
+    val appliedRevision: Int?,
+    val pendingSeconds: Double?,
+    val transportStatus: String,
+    val capabilityRefreshStatus: String,
+    val lastSeenUtc: String?,
+)
+
+data class ControlCenterVisionControlReceipt(
+    val schema: String,
+    val sourceId: String,
+    val enabled: Boolean,
+    val sensorStateRevision: Int,
+    val desiredRevision: Int,
+    val productionActivation: Boolean,
 )
 
 data class ControlCenterPrivacy(
