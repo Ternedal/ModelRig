@@ -258,6 +258,28 @@ def test_invalid_runtime_ref_fails_closed():
         raise AssertionError("invalid runtime ref must fail")
 
 
+def test_nonhex_runtime_ref_fails_closed():
+    value = kwargs()
+    value["after_status"]["runtime_instance_ref"] = "runtime-instance:" + "z" * 32
+    try:
+        assembler.assemble(**value)
+    except assembler.EvidenceAssemblyError as exc:
+        assert "valid runtime_instance_ref" in str(exc)
+    else:
+        raise AssertionError("nonhex runtime ref must fail")
+
+
+def test_mutable_candidate_ref_fails_closed():
+    value = kwargs()
+    value["candidate_git_sha"] = "main"
+    try:
+        assembler.assemble(**value)
+    except assembler.EvidenceAssemblyError as exc:
+        assert "lowercase 40-hex" in str(exc)
+    else:
+        raise AssertionError("mutable candidate ref must fail")
+
+
 def test_assembled_bundle_is_accepted_by_live_lifecycle_qualifier():
     with patch.object(
         assembler,
@@ -286,5 +308,7 @@ if __name__ == "__main__":
     test_live_cycle_candidate_mismatch_fails_closed()
     test_identity_lineage_mismatch_fails_closed()
     test_invalid_runtime_ref_fails_closed()
+    test_nonhex_runtime_ref_fails_closed()
+    test_mutable_candidate_ref_fails_closed()
     test_assembled_bundle_is_accepted_by_live_lifecycle_qualifier()
     print("Consciousness live lifecycle evidence assembler contract: PASS")
