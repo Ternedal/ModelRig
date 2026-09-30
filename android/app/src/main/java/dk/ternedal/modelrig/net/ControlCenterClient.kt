@@ -205,6 +205,7 @@ class ControlCenterClient(baseUrl: String, private val token: String) {
             sensorsTruncated = value.requireBoolean("sensors_truncated"),
             attentionTotal = value.requireNonNegativeInt("attention_total"),
             sensors = sensors,
+            operatorControlAvailable = value.optionalBoolean("operator_control_available") ?: false,
             productionActivation = productionActivation,
         )
     }
@@ -533,6 +534,7 @@ data class ControlCenterVision(
     val sensorsTruncated: Boolean,
     val attentionTotal: Int,
     val sensors: List<ControlCenterVisionSensor>,
+    val operatorControlAvailable: Boolean,
     val productionActivation: Boolean,
 ) {
     companion object {
@@ -546,6 +548,7 @@ data class ControlCenterVision(
             sensorsTruncated = false,
             attentionTotal = 0,
             sensors = emptyList(),
+            operatorControlAvailable = false,
             productionActivation = false,
         )
     }
