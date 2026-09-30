@@ -91,6 +91,7 @@ class ConsciousnessRuntimeStatusTests(unittest.TestCase):
             )
         )
         session._continuity_state = None
+        session._last_lived_continuity = None
 
         app = FastAPI()
         app.state.consciousness_session = session
