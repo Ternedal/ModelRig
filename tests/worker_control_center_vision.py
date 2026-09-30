@@ -78,14 +78,20 @@ PAYLOAD = {
 
 
 class FakeResponse:
+    def __init__(self, payload: dict | None = None) -> None:
+        self._payload = PAYLOAD if payload is None else payload
+
     def raise_for_status(self) -> None:
         return None
 
     def json(self) -> dict:
-        return PAYLOAD
+        return self._payload
 
 
 class FakeClient:
+    patches: list[tuple[str, dict, dict]] = []
+    gets: list[str] = []
+
     def __init__(self, *args, **kwargs) -> None:
         pass
 
@@ -95,8 +101,32 @@ class FakeClient:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         return None
 
-    async def get(self, _target: str) -> FakeResponse:
+    async def get(self, target: str) -> FakeResponse:
+        self.gets.append(target)
+        if target.endswith("/desired-state"):
+            return FakeResponse(
+                {
+                    "schema_id": "visionrig/sensor-desired-state/v2",
+                    "source_id": "kaliv android/1",
+                    "enabled": False,
+                    "revision": 8,
+                    "production_authority": False,
+                }
+            )
         return FakeResponse()
+
+    async def patch(self, target: str, *, params: dict, json: dict) -> FakeResponse:
+        self.patches.append((target, params, json))
+        return FakeResponse(
+            {
+                "schema": "visionrig/sensor-metadata/v2",
+                "state_revision": 10,
+                "metadata": {
+                    "source_id": "kaliv android/1",
+                    "enabled": False,
+                },
+            }
+        )
 
 
 async def run() -> None:
@@ -121,6 +151,42 @@ async def run() -> None:
         "source identifiers are bounded",
     )
     check(payload["production_activation"] is False, "read projection cannot activate production")
+
+    FakeClient.patches.clear()
+    FakeClient.gets.clear()
+    original = vision.httpx.AsyncClient
+    vision.httpx.AsyncClient = FakeClient
+    try:
+        control = await vision.set_control_center_vision_enabled(
+            source_id="kaliv android/1",
+            enabled=False,
+            expected_state_revision=9,
+        )
+    finally:
+        vision.httpx.AsyncClient = original
+
+    check(control["schema"] == vision.CONTROL_SCHEMA, "control response is versioned")
+    check(control["enabled"] is False, "control response binds requested enabled state")
+    check(control["sensor_state_revision"] == 10, "control response exposes new state revision")
+    check(control["desired_revision"] == 8, "control response exposes desired revision")
+    check(control["production_activation"] is False, "control mutation grants no production authority")
+    check(len(FakeClient.patches) == 1, "control issues exactly one VisionRig metadata patch")
+    patch_target, patch_params, patch_json = FakeClient.patches[0]
+    check(
+        patch_target.endswith("/api/v1/sensors/kaliv%20android%2F1/metadata"),
+        "control URL-escapes source id",
+    )
+    check(
+        patch_params == {"expected_state_revision": 9},
+        "control binds optimistic state revision",
+    )
+    check(patch_json == {"enabled": False}, "control patch contains only enabled mutation")
+    check(
+        FakeClient.gets[-1].endswith(
+            "/api/v1/sensors/kaliv%20android%2F1/desired-state"
+        ),
+        "control verifies post-patch desired state",
+    )
 
 
 if __name__ == "__main__":
