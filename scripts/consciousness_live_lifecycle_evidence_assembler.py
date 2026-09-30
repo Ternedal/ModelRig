@@ -15,7 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "worker") not in sys.path:
     sys.path.insert(0, str(ROOT / "worker"))
 
-from app.consciousness_core.dormancy_bridge import build_dormancy_bridge  # noqa: E402
+from app.consciousness_core.dormancy_bridge import (  # noqa: E402
+    build_dormancy_bridge,
+    build_runtime_dormancy_bridge,
+)
 from app.consciousness_core.model_swap_continuity import (  # noqa: E402
     qualify_model_swap_continuity,
 )
@@ -84,7 +87,10 @@ def assemble(
     if before_ref == after_ref:
         raise EvidenceAssemblyError("runtime instance did not change; restart is not proven")
 
-    dormancy = build_dormancy_bridge(wake_receipt, wake_orientation)
+    if wake_orientation.get("schema") == "kaliv-consciousness-core/session-bootstrap-receipt/v1":
+        dormancy = build_runtime_dormancy_bridge(wake_receipt, wake_orientation)
+    else:
+        dormancy = build_dormancy_bridge(wake_receipt, wake_orientation)
     model_swap = qualify_model_swap_continuity(
         before_profile=before_profile,
         after_profile=after_profile,
