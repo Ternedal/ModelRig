@@ -295,6 +295,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_live_episode.py`
 - `tests/worker_consciousness_core_live_lifecycle_evidence_assembler.py`
 - `tests/worker_consciousness_core_live_lifecycle_qualification.py`
+- `tests/worker_consciousness_core_live_lifecycle_snapshots.py`
 - `tests/worker_consciousness_core_lived_continuity.py`
 - `tests/worker_consciousness_core_lived_continuity_operator.py`
 - `tests/worker_consciousness_core_lived_continuity_status.py`
