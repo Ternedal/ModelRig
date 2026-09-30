@@ -416,6 +416,16 @@ fun ControlCenterScreen(
     }
 }
 
+internal fun controlCenterVisionSensorState(sensor: ControlCenterVisionSensor): String = when {
+    sensor.lifecycle == "retired" -> "disabled"
+    sensor.presence == "offline" -> "unavailable"
+    sensor.presence == "stale" -> "stale"
+    sensor.convergence == "pending" -> "unknown"
+    sensor.desiredEnabled && sensor.effectiveCaptureActive == true -> "healthy"
+    !sensor.desiredEnabled && sensor.effectiveCaptureActive == false -> "disabled"
+    else -> "unknown"
+}
+
 @Composable
 private fun VisionSensorCard(
     sensor: ControlCenterVisionSensor,
@@ -423,15 +433,7 @@ private fun VisionSensorCard(
     mutationAvailable: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
-    val state = when {
-        sensor.lifecycle == "retired" -> "disabled"
-        sensor.presence == "offline" -> "unavailable"
-        sensor.presence == "stale" -> "stale"
-        sensor.convergence == "pending" -> "unknown"
-        sensor.desiredEnabled && sensor.effectiveCaptureActive == true -> "healthy"
-        !sensor.desiredEnabled && sensor.effectiveCaptureActive == false -> "disabled"
-        else -> "unknown"
-    }
+    val state = controlCenterVisionSensorState(sensor)
     StatusCard(
         title = sensor.displayName ?: sensor.sourceId,
         state = state,
