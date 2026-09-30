@@ -12,10 +12,12 @@ ModelRig Git SHA:
 
 1. **Live cycle** — a passing
    "kaliv-consciousness-core/live-cycle-probe/v1" report.
-2. **Dormancy/restart** — a C31-D
-   "dormancy-bridge-receipt/v1" collected after an actual process restart,
+2. **Dormancy/restart** — evidence collected after an actual process restart,
    with "restart_proven=true", "cognition_during_gap=false", and explicit
-   wake reorientation.
+   wake reorientation. Two bounded receipt paths are accepted:
+   - C31-D "dormancy-bridge-receipt/v1" for a C17 wake orientation; or
+   - "restart-dormancy-receipt/v1" binding C12 WakeReceipt to the production
+     C19 "WAKE_REORIENTATION" SessionBootstrapReceipt.
 3. **Model swap** — a C31-G
    "model-swap-continuity-receipt/v1" proving the CognitiveProfile changed
    while identity, Person binding, SelfState, durable-memory binding and lived
@@ -92,7 +94,7 @@ with:
       --before-status validation/consciousness-status-before-restart.json ^
       --after-status validation/consciousness-status-after-restart.json ^
       --wake-receipt validation/wake-receipt.json ^
-      --wake-orientation validation/wake-orientation-receipt.json ^
+      --session-bootstrap validation/session-bootstrap-receipt.json ^
       --before-profile validation/profile-before.json ^
       --after-profile validation/profile-after.json ^
       --before-self-state validation/self-state-before.json ^
@@ -113,4 +115,10 @@ through the same Core contract functions used by runtime/tests, cross-checks
 Self/Person lineage, and writes the qualifier input atomically.
 
 "production_activation" remains false throughout.
+The assembler also accepts `--wake-orientation` instead of `--session-bootstrap`
+for the C17 path. Exactly one reorientation source is required. A normal C19
+`RUNTIME_START` receipt never proves restart dormancy; only a bootstrap whose
+`bootstrap_kind` is exactly `WAKE_REORIENTATION` is accepted. This avoids
+fabricating a C17 receipt for a process restart where the previous transient
+workspace is intentionally not restored.
 
