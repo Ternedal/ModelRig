@@ -146,8 +146,19 @@ def _validate_dormancy_restart(
             "dormancy_restart must explicitly prove process restart"
         )
     receipt = _mapping(envelope["receipt"], "dormancy_restart.receipt")
-    if receipt.get("schema") != "kaliv-consciousness-core/dormancy-bridge-receipt/v1":
-        raise LiveLifecycleQualificationError("dormancy bridge schema mismatch")
+    schema = receipt.get("schema")
+    if schema not in {
+        "kaliv-consciousness-core/dormancy-bridge-receipt/v1",
+        "kaliv-consciousness-core/restart-dormancy-receipt/v1",
+    }:
+        raise LiveLifecycleQualificationError("dormancy restart receipt schema mismatch")
+    if (
+        schema == "kaliv-consciousness-core/restart-dormancy-receipt/v1"
+        and receipt.get("bootstrap_kind") != "WAKE_REORIENTATION"
+    ):
+        raise LiveLifecycleQualificationError(
+            "restart dormancy receipt lacks WAKE_REORIENTATION bootstrap"
+        )
     if receipt.get("cognition_during_gap") is not False:
         raise LiveLifecycleQualificationError(
             "dormancy bridge claimed cognition during the gap"
