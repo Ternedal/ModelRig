@@ -26,7 +26,12 @@ All nine gates must be `PASS`, and every PASS must carry at least one explicit
 evidence reference:
 
 1. `software_exact_green` — exact pinned repository revisions qualified by their
-   software checks.
+   software checks. A PASS must contain exactly one canonical
+   `kaliv-software-exact-green:<modelrig-sha>:<bodyrig-sha>:<visionrig-sha>:<voicerig-sha>:<sha256>`
+   reference emitted by `kaliv_software_exact_green_qualifier.py`. All four
+   embedded revisions must exactly match the release manifest pins; mutable
+   branch/tag labels or evidence for only a subset of the core repositories are
+   rejected.
 2. `consciousness_live_lifecycle` — a real live Core lifecycle covering
    continuity, wake/dormancy and model replacement without identity drift.
    A PASS must contain exactly one canonical
