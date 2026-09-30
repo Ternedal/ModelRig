@@ -29,6 +29,9 @@ _CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
 _VISIONRIG_PHYSICAL_REF = re.compile(
     r"^visionrig-physical-perception:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
+_END_TO_END_LATENCY_REF = re.compile(
+    r"^kaliv-end-to-end-latency:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -276,6 +279,23 @@ def _validate_gates(
             if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
                 raise SystemReleaseManifestError(
                     "bodyrig_android_live_body evidence is not exact-tree-equivalent "
+                    "to the pinned ModelRig revision"
+                )
+        if gate == "end_to_end_latency" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "end_to_end_latency PASS requires exactly one "
+                    "measurement qualification evidence ref"
+                )
+            match = _END_TO_END_LATENCY_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "end_to_end_latency PASS requires exact-head-bound "
+                    "kaliv-end-to-end-latency evidence"
+                )
+            if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
+                raise SystemReleaseManifestError(
+                    "end_to_end_latency evidence is not exact-tree-equivalent "
                     "to the pinned ModelRig revision"
                 )
         if status == "PENDING":
