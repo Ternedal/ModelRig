@@ -319,6 +319,7 @@ class ProductionCognitiveSession:
                 "review_observability must be EpisodeReviewObservability or None"
             )
         self._bridge = supervisor_bridge
+        self._bootstrap_receipt = bootstrap_context.receipt
         self._live = live_state_from_bootstrap(bootstrap_context)
         self._continuity_state = bootstrap_context.continuity_state
         self._continuity_window = (
@@ -383,6 +384,11 @@ class ProductionCognitiveSession:
     @property
     def live_state(self) -> LiveCognitiveSessionState:
         return self._live
+
+    @property
+    def bootstrap_receipt(self) -> SessionBootstrapReceipt:
+        """Exact read-only receipt that created this process-local session."""
+        return self._bootstrap_receipt
 
     @property
     def temporal_state(self) -> TemporalState | None:
