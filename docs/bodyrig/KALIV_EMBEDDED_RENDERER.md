@@ -1,9 +1,10 @@
 # Kroppen i Kaliv — den indlejrede renderer
 
-**Besluttet 2/9/2026:** `.mrbody` skal vises, afspilles og afvikles *som en del af
-Kaliv* — ikke som en separat app — og "AR-agtigt". Den rigtige løsning er
-BodyRig V1's reference-renderer (Unity/UniVRM, VRM 1.0) indlejret i Kaliv via
-**Unity as a Library**, med **ARFoundation** til kameraet og rummet.
+**Retning 29/9/2026:** BodyRig V1's reference-renderer er fortsat Unity/UniVRM
+(VRM 1.0) med AR Foundation. Værtsvalget blev revideret 4/9: MVP er den
+separate **Kaliv Body** Android-app (`dk.ternedal.kalivbody`) startet fra Kaliv
+med package-pinnede intent-extras. **Unity as a Library** er fortsat V2-sporet,
+hvis kroppen senere skal indlejres i selve Kaliv-appen.
 
 ## 1. Formål
 
@@ -11,7 +12,7 @@ Den valgte persons krop (Person Revision → `body`-kandidat → `.mrbody`) stå
 brugerens rum på telefonen, bevæger sig og taler i takt med Kaliv, og skifter
 når personen skifter — uden at brugeren forlader Kaliv-appen.
 
-## 2. Hvad der findes (main, afstemt 3/9)
+## 2. Hvad der findes (main + samlet kandidat #1964, afstemt 29/9)
 
 | Lag | Status |
 |---|---|
@@ -20,9 +21,12 @@ når personen skifter — uden at brugeren forlader Kaliv-appen.
 | Unity/VRM-renderer (blink, mund, visemer, emotion, gaze, breath, gesture-router) | landet (#830) |
 | Person Profile-registry med atomisk aktivering; `active_bindings().body` | landet (#752) |
 | **Live frame-feed fra Kalivs faktiske tur og tale** | **landet (#843)** — `/body/frames` SSE fra `BodyRigRuntime`, drevet af chat-faser og TTS |
-| **Server assets + live frames over HTTP** | **landet i L1 (#842–#844)** — backend forwarder aktive assets og `/body/frames`; Unity-klientens `BodyRigFrameSource` restackes i #1920 |
-| **Unity som library i Kaliv Android** | **mangler** — projektet er en Windows-batch-build |
-| **ARFoundation** | **mangler** |
+| **Server assets + live frames over HTTP** | **landet i L1 (#842–#844)** — backend forwarder aktive assets og `/body/frames` |
+| **Unity live-frame + remote avatar-klient** | **samlet i #1964** — authenticated SSE, digest-bundet aktiv avatar + BodyPrint scale |
+| **Kaliv Body Android-host** | **samlet i #1964** — package-id, ARM64/minSdk, strict batch-build, RigLink og remote avatar |
+| **AR Foundation / ARCore** | **samlet i #1964** — pinned packages, loader, runtime probe, plane/raycast placement |
+| **Fysisk Android live-body gate** | **samlet i #1964** — build/install/launch, live body, detected-plane placement, human visual acceptance og independent gate |
+| **Unity as a Library i Kaliv** | **V2 / ikke MVP-krav** |
 
 ## 3. Lagene, i rækkefølge
 
@@ -38,24 +42,30 @@ når personen skifter — uden at brugeren forlader Kaliv-appen.
   sender mening (BodyCue) — aldrig knogler.
 - Alt bag device-token, loopback-worker, lukket allowlist — som `/persons`.
 
-**L2 — Unity-projektet bliver en klient.**
-- `BodyRigNetworkSource`: henter avatar og motions over HTTP med token,
-  abonnerer på frame-feedet; erstatter fixture-afspilleren i runtime.
-- Eksport som **Unity as a Library** (Android: `unityLibrary`-Gradle-modul,
-  IL2CPP, arm64). Windows-desktop senere ad samme vej.
-- ARFoundation: kamera-passthrough, plane-detektion, kroppen placeret på gulvet,
-  skaleret efter bodyprintens højde.
+**L2 — Unity-projektet bliver en rigtig netværksklient.**
+- `BodyRigRemoteAvatarSource` henter den aktive avatar + bodyprint fra riggen
+  med Bearer-token og verificerer body/package/member SHA-256 før load.
+- `BodyRigFrameSource` abonnerer på authenticated `/api/v1/body/frames` SSE
+  med redirect-refusal og monotone frame-timestamps.
+- `BodyRigRigLink` tager authority fra environment eller Kalivs package-pinnede
+  intent-extras; Kaliv Body har ingen selvstændig pairing/token-store.
 
-**L3 — Kaliv Android bærer den.**
-- `Krop`-skærm (⋮ → Krop, `kaliv://body`) der hoster `UnityPlayer` i en
-  fragment; token og rig-URL gives til Unity-siden ved start.
-- `unityLibrary` inkluderes bag et Gradle-flag (`-PkalivUnity=true`), så CI
-  uden Unity stadig bygger appen; uden library viser skærmen ærligt
-  "renderer ikke bygget ind i dette build" frem for at crashe.
+**L3 — separat Kaliv Body Android-host (MVP).**
+- Unity-projektet pinner `dk.ternedal.kalivbody`, ARM64, minSdk 28 og et strict
+  `BuildAndroid()` entrypoint.
+- AR Foundation + ARCore er versionspinnet; buildet aktiverer ARCoreLoader
+  fail-closed og runtime bootstrapper ARSession, XROrigin, tracked camera,
+  plane/raycast managers og BodyRig-placement.
+- Unity as a Library er fortsat V2 og er ikke en blocker for MVP.
 
-**L4 — bevis.** `bodyrig_unity_physical_proof.ps1` (findes) udvides med
-Android-buildet; visuel accept på Pixel: kroppen står i rummet, blinker,
-taler med Kaliv, skifter ved personskift.
+**L4 — fysisk bevis.**
+- `run-kaliv-body-android-validation.ps1` bygger/installere/launcher på én
+  autoriseret ADB-enhed og binder host, RigLink, avatar, live frames, ARCore og
+  plane-placement til exact HEAD.
+- `accept-kaliv-body-android-visual.ps1` registrerer eksplicit menneskelig
+  visuel accept.
+- `kaliv_body_android_physical_gate.py` gen-hasher APK/logcat/receipts og
+  emitterer den content-addressede release-evidence-ref.
 
 ## 4. MVP → V1 → V2
 
@@ -85,10 +95,14 @@ taler med Kaliv, skifter ved personskift.
 
 ## 7. Næste skridt
 
-1. **L1: færdig på main.** Frame-feed, aktive assets/endpoints, Go-forwarding og kontrakttests er landet.
-2. **L2:** land #1920 (`BodyRigFrameSource` som minimal current-main restack af #846-kernen), verificér den fysisk i Unity og færdiggør den valgte Android-host; UaaL er V2-sporet, ikke MVP-krav.
-3. **L3:** Kaliv åbner den valgte Body-host med rig-URL + token; behold host-valget adskilt fra L1/L2-kontrakten.
-4. **L4:** Android-build i den fysiske proof; visuel accept af live krop, tale og personskift.
+1. **L1: landet på main.**
+2. **L2–L4 software:** land #1964, som samler live frames, RigLink, remote avatar,
+   BodyPrint scale, Android-host, ARCore/runtime placement og de fysiske gate-værktøjer.
+3. **Fysisk qualification:** kør exact-head Android live-body proof + human visual
+   acceptance + independent physical gate på den samme kandidat.
+4. **Release:** brug kun den content-addressede
+   `kaliv-body-android-physical-gate:<sha>:<sha256>` evidence-ref i system release-gaten.
+   UaaL forbliver V2 og er ikke nødvendig for denne gate.
 
 ## 8. Status 3/9 — afstemt med `UNITY_RENDERER_ROADMAP.md`
 
@@ -127,3 +141,11 @@ kroppen er set på Windows.
 
 **Første krop og rig-dagen:** `docs/bodyrig/FIRST_LIVE_BODY.md` +
 `scripts/bodyrig_demo_body.py` (#847).
+
+
+## 9. Status 29/9 — samlet Android-kandidat
+
+#1964 erstatter de gamle #1920/#1921–#1925/#1939–#1958 spor som den samlede
+current-main Android-renderer-kandidat. Den er bevidst fladet ud på seneste
+`main`, så releasebeviset kan bindes til én exact head. Den giver **ingen**
+production authority; fysisk/human evidence skal stadig produceres særskilt.
