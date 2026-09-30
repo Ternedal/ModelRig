@@ -114,3 +114,51 @@ Self/Person lineage, and writes the qualifier input atomically.
 
 "production_activation" remains false throughout.
 
+## Runtime snapshot flow
+
+For real production-path evidence, enable the qualification surface only for the
+local operator session:
+
+    $env:KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED="1"
+
+The endpoint is loopback-only and remains disabled unless the exact flag above
+is set. Capture the ordinary privacy-safe status before restarting the worker:
+
+    Invoke-RestMethod http://127.0.0.1:8000/experimental/consciousness/status |
+      ConvertTo-Json -Depth 20 |
+      Set-Content validation/consciousness-status-pre-restart.json -Encoding utf8
+
+After the worker has restarted and produced one lived-continuity receipt, capture
+the first qualification snapshot:
+
+    Invoke-RestMethod http://127.0.0.1:8000/experimental/consciousness/qualification-snapshot |
+      ConvertTo-Json -Depth 30 |
+      Set-Content validation/consciousness-pre-swap.json -Encoding utf8
+
+Replace only the configured CognitiveProfile/model calibration. Do not run
+another cognitive cycle and do not restart the worker. Then capture the second
+snapshot:
+
+    Invoke-RestMethod http://127.0.0.1:8000/experimental/consciousness/qualification-snapshot |
+      ConvertTo-Json -Depth 30 |
+      Set-Content validation/consciousness-post-swap.json -Encoding utf8
+
+Assemble the qualification input directly from those snapshots:
+
+    python scripts/consciousness_live_lifecycle_from_snapshots.py ^
+      --candidate-sha <40-hex-modelrig-sha> ^
+      --live-cycle validation/consciousness-live-cycle-latest.json ^
+      --pre-restart-status validation/consciousness-status-pre-restart.json ^
+      --pre-swap-snapshot validation/consciousness-pre-swap.json ^
+      --post-swap-snapshot validation/consciousness-post-swap.json ^
+      --output validation/consciousness-live-lifecycle-input.json
+
+The adapter requires a changed runtime instance across the restart and the same
+runtime instance across the model swap. The production session bootstrap itself
+is accepted as C31-D v2 wake-reorientation evidence only when it is an exact
+"WAKE_REORIENTATION" receipt bound to the same WakeReceipt, Self and Person
+revision and proves no cognition during the gap, no prior transient world or
+workspace restoration, no model call and no SelfState-store write.
+
+"production_activation" remains false throughout.
+
