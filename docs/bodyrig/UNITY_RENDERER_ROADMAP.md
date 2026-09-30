@@ -4,7 +4,7 @@
 fra `BODYRIG_V1.md` — ikke en web-renderer. Kaliv skal kunne **vise,
 afspille og afvikle** `.mrbody` på Windows, Android (AR) og Quest.
 
-## Hvad der findes (main + samlet Android-kandidat #1964)
+## Hvad der findes (main + samlet Android-kandidat #1976)
 
 | Lag | Status |
 |---|---|
@@ -14,15 +14,15 @@ afspille og afvikle** `.mrbody` på Windows, Android (AR) og Quest.
 | Render-frame wire v0.1 (`bodyrig.render_frame`) | landet i core |
 | Unity `6000.3.21f1` + UniVRM `v0.131.2` proof: VRM-load, blink, envelope-mund, visemes, emotion, gaze, breath, gesture-router, afbrydelse | **på main siden 2/9 21:13** (merget via base-gren uden fysisk gate — gaten er stadig IKKE kørt og skal køres mod main's head) |
 | Worker/backend-udstilling af BodyRig (runtime, frames, assets) | **landet (#842–#844)** |
-| Unity live-frame-klient | **samlet i #1964** |
-| Digest-bundet remote avatar + BodyPrint scale | **samlet i #1964** |
-| Kaliv Body Android-host + RigLink | **samlet i #1964** |
-| AR Foundation / ARCore runtime + detected-plane placement | **samlet i #1964** |
-| Android live-body + visual + independent physical gate | **samlet i #1964** |
-| Quest-host | **separat spor / ikke del af #1964** |
+| Unity live-frame-klient | **samlet i #1976** |
+| Digest-bundet remote avatar + BodyPrint scale | **samlet i #1976** |
+| Kaliv Body Android-host + RigLink | **samlet i #1976** |
+| AR Foundation / ARCore runtime + detected-plane placement | **samlet i #1976** |
+| Android live-body + visual + independent physical gate | **samlet i #1976** |
+| Quest-host | **separat spor / ikke del af #1976** |
 
 Unity-proofen på `main` beholder fixture-vejen som deterministisk desktop-test.
-#1964 tilføjer den Android-specifikke live-path uden at fjerne fixturen: RigLink
+#1976 tilføjer den Android-specifikke live-path uden at fjerne fixturen: RigLink
 → remote active avatar/bodyprint → live frame SSE → ARCore/plane placement.
 
 ## MVP — proofen bevises (BodyRig-spor, Anders på riggen)
@@ -71,8 +71,8 @@ følger med hvert `chunk`-event), så munden forankres til det, der faktisk
 høres. Gamle klienter beholder tilnærmelsen; en rig uden krop svarer 404,
 og appen holder op med at melde for resten af sessionen.
 
-**Slice C/D — integreret Android live-body. SAMLET 29/9 som #1964.** De gamle
-#846/#858/#860/#1920–#1958-grene er kildehistorik. #1964 flader den kvalificerede
+**Slice C/D — integreret Android live-body. SAMLET på foundation-stack som #1976.** De gamle
+#846/#858/#860/#1920–#1958-grene er kildehistorik. #1976 flader den kvalificerede
 runtime/build/test-state ud på seneste main: authenticated live frames, digest-
 bundet remote avatar + BodyPrint scale, package-pinned RigLink, Android host,
 AR Foundation/ARCore loader+runtime probe, detected-plane placement, end-to-end
@@ -95,7 +95,7 @@ VRM-expression-nøgler krydser grænsen — kun v0.1-frames og validerede assets
 
 ## Rækkefølge
 
-A og B er landet. C/D er samlet i #1964 og skal først igennem software
+A og B er landet. C/D er samlet i #1976 og skal først igennem software
 exact-head qualification. Derefter køres Android physical live-body proof,
 human visual acceptance og independent physical gate på samme exact head.
 Først den content-addressede independent-gate evidence-ref må bruges i Kalivs
