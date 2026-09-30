@@ -70,6 +70,19 @@ def run_contract() -> None:
     _reject(x, "release_id does not match exact evidence")
     x = copy.deepcopy(v); x["production_activation"] = False; x["release_id"] = module._release_id(x)
     _reject(x, "production_activation must be true")
+    for field in (
+        "person_id",
+        "person_revision",
+        "body_revision",
+        "body_id",
+        "canonical_m6_release_id",
+        "photoreal_m5_link_id",
+        "m4_photoreal_link_id",
+    ):
+        x = copy.deepcopy(v)
+        x[field] = "   "
+        x["release_id"] = module._release_id(x)
+        _reject(x, f"{field} is invalid")
 
 if __name__ == "__main__":
     run_contract()
