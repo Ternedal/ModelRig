@@ -183,6 +183,7 @@ def kwargs():
         "after_status": status("2"),
         "wake_receipt": {},
         "wake_orientation": {},
+        "session_bootstrap": None,
         "before_profile": {},
         "after_profile": {},
         "before_self_state": {},
@@ -205,6 +206,47 @@ def test_distinct_runtime_instances_assemble_bounded_bundle():
     assert bundle["dormancy_restart"]["candidate_git_sha"] == SHA
     assert bundle["model_swap"]["candidate_git_sha"] == SHA
     assert bundle["production_activation"] is False
+
+
+
+
+def test_c19_session_bootstrap_path_assembles_restart_evidence():
+    value = kwargs()
+    value["wake_orientation"] = None
+    value["session_bootstrap"] = {}
+    with patch.object(
+        assembler,
+        "build_restart_dormancy_receipt",
+        return_value=full_dormancy_receipt(),
+    ), patch.object(
+        assembler,
+        "qualify_model_swap_continuity",
+        return_value=full_model_swap_receipt(),
+    ):
+        bundle = assembler.assemble(**value)
+    assert bundle["dormancy_restart"]["restart_proven"] is True
+    assert bundle["production_activation"] is False
+
+
+def test_reorientation_source_must_be_exactly_one():
+    value = kwargs()
+    value["session_bootstrap"] = {}
+    try:
+        assembler.assemble(**value)
+    except assembler.EvidenceAssemblyError as exc:
+        assert "exactly one" in str(exc)
+    else:
+        raise AssertionError("dual reorientation evidence must fail closed")
+
+    value = kwargs()
+    value["wake_orientation"] = None
+    value["session_bootstrap"] = None
+    try:
+        assembler.assemble(**value)
+    except assembler.EvidenceAssemblyError as exc:
+        assert "exactly one" in str(exc)
+    else:
+        raise AssertionError("missing reorientation evidence must fail closed")
 
 
 def test_same_runtime_instance_fails_closed():
@@ -304,6 +346,8 @@ def test_assembled_bundle_is_accepted_by_live_lifecycle_qualifier():
 
 if __name__ == "__main__":
     test_distinct_runtime_instances_assemble_bounded_bundle()
+    test_c19_session_bootstrap_path_assembles_restart_evidence()
+    test_reorientation_source_must_be_exactly_one()
     test_same_runtime_instance_fails_closed()
     test_live_cycle_candidate_mismatch_fails_closed()
     test_identity_lineage_mismatch_fails_closed()
