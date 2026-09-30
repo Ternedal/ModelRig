@@ -152,6 +152,18 @@ def qualify(authority: Mapping[str, Any], *, expected_bodyrig_sha: str) -> dict[
             "BodyRig M6 authority is bound to a different BodyRig Git SHA"
         )
 
+    for field in (
+        "person_id",
+        "person_revision",
+        "body_revision",
+        "body_id",
+        "composition_authority_id",
+    ):
+        if not isinstance(value[field], str) or not value[field].strip():
+            raise BodyRigM6QualificationError(
+                f"BodyRig M6 {field} is invalid"
+            )
+
     for field in TOP_FIELDS:
         if field.endswith("_sha256"):
             _sha256(value[field], f"BodyRig M6 {field}")
