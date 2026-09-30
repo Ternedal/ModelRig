@@ -59,6 +59,13 @@ evidence reference:
    The Android gate result must still report `production_activation=false`.
 7. `end_to_end_latency` — one correlated real event traverses perception,
    cognition and outward voice/body behavior with measured latency evidence.
+   A PASS must contain exactly one canonical
+   `kaliv-end-to-end-latency:<modelrig-sha>:<sha256>` reference emitted by
+   `kaliv_end_to_end_latency_qualifier.py`. The qualifier uses one monotonic
+   observer clock, rejects simulated/cross-event evidence, and records measured
+   phase/total latency with `threshold_applied=false` until a physical baseline
+   establishes a defensible SLO. The embedded ModelRig SHA follows the same
+   ancestor + exact-tree clean-merge rule as other ModelRig-bound evidence.
 8. `recovery_soak` — the pinned system passes the agreed restart/recovery and
    long-running soak campaign.
 9. `repository_authority` — the repositories used for the release are protected
