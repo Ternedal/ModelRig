@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..netguard import is_loopback
 from ..person_api import registry_path
 from ..person_registry import PersonRegistry
-from .profile_source import cognitive_profile_config_path
+from .profile_source import cognitive_profile_config_path, load_cognitive_profile
 from .self_state import SelfStateStore
 from .session_lifecycle import ProductionCognitiveSession
 from .supervisor_lifecycle import ProductionSupervisorBridge
@@ -59,6 +59,10 @@ def _safe_prerequisites() -> tuple[bool, bool, bool]:
     except Exception:
         pass
     return self_state_present, active_person_available, profile_available
+
+
+def evidence_export_enabled() -> bool:
+    return os.getenv("KALIV_CONSCIOUSNESS_EVIDENCE_EXPORT_ENABLED", "0") == "1"
 
 
 def build_consciousness_status_router() -> APIRouter:
@@ -166,6 +170,70 @@ def build_consciousness_status_router() -> APIRouter:
                 )
                 else None
             ),
+            "production_activation": False,
+        }
+
+
+    @router.get("/evidence-snapshot")
+    def evidence_snapshot(request: Request) -> dict[str, Any]:
+        if not _loopback(request):
+            raise HTTPException(
+                status_code=403,
+                detail="Consciousness evidence export is loopback-only",
+            )
+        if not evidence_export_enabled():
+            raise HTTPException(
+                status_code=404,
+                detail="Consciousness evidence export is disabled",
+            )
+
+        session = getattr(request.app.state, "consciousness_session", None)
+        if not isinstance(session, ProductionCognitiveSession):
+            raise HTTPException(
+                status_code=503,
+                detail="consciousness session unavailable",
+            )
+        wake = getattr(
+            request.app.state,
+            "consciousness_sleep_wake_receipt",
+            None,
+        )
+        try:
+            loaded = load_cognitive_profile()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="consciousness cognitive profile unavailable",
+            ) from exc
+        if loaded is None:
+            raise HTTPException(
+                status_code=503,
+                detail="consciousness cognitive profile unavailable",
+            )
+
+        return {
+            "schema": "kaliv-consciousness-core/runtime-evidence-snapshot/v1",
+            "runtime_instance_ref": runtime_instance_ref(),
+            "wake_receipt": (
+                None
+                if wake is None
+                else wake.model_dump(mode="json")
+            ),
+            "session_bootstrap_receipt": session.bootstrap_receipt.model_dump(
+                mode="json"
+            ),
+            "self_state": session.live_state.state.model_dump(mode="json"),
+            "continuity_state": (
+                None
+                if session.continuity_state is None
+                else session.continuity_state.model_dump(mode="json")
+            ),
+            "cognitive_profile": loaded.profile.model_dump(mode="json"),
+            "model_calls": 0,
+            "self_state_store_write_applied": False,
+            "durable_memory_write_authority": False,
+            "execution_authority": False,
+            "scheduling_authority": False,
             "production_activation": False,
         }
 
