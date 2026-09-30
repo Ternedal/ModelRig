@@ -1,6 +1,6 @@
 # Web research contract v1
 
-**Status:** contract, deterministic fetch engine, pinned transport, isolated BrowserHost, dormant Browser Use adapter, installed-runtime contract, controlled local-Chromium gate, dormant egress ledger and dormant public-peer binding delivered; no ToolGate activation or public-network validation yet.
+**Status:** contract, deterministic fetch engine, pinned transport, isolated BrowserHost, Browser Use adapter/runtime gates, egress/peer-binding components and the canonical default-off ToolGate production caller are delivered; controlled public-network validation and full BrowserHost/CDP evidence convergence remain outstanding.
 
 This contract keeps Browser Use, Playwright and plain HTTP interchangeable. ModelRig owns the safety and evidence model; an adapter only performs retrieval and proposes citations.
 
@@ -14,7 +14,7 @@ This contract keeps Browser Use, Playwright and plain HTTP interchangeable. Mode
 - `Citation` — one numbered answer marker tied to one or more receipts;
 - `ResearchResult` — an answer that must contain every declared citation marker and may only cite included receipts.
 
-`worker/app/web_fetch.py` implements deterministic navigation, redirect handling, content limits and receipts. `worker/app/pinned_http_transport.py` implements one dormant production transport behind the existing `FetchTransport` seam. `worker/app/browser_host.py` defines the one-request process boundary. `worker/app/browser_use_adapter.py` is an optional, lazy-loaded Browser Use backend. `worker/app/browser_use_network_guard.py` owns the Chromium request boundary. `worker/app/research_egress.py` owns the dormant one-use consent, authorization receipt and hash-only audit state machine. `worker/app/research_peer_binding.py` owns the dormant public DNS answer and connected-peer receipt state machine. Nothing is registered in ToolGate or exposed through an API route.
+`worker/app/web_fetch.py` implements deterministic navigation, redirect handling, content limits and receipts. `worker/app/pinned_http_transport.py` implements one dormant production transport behind the existing `FetchTransport` seam. `worker/app/browser_host.py` defines the one-request process boundary. `worker/app/browser_use_adapter.py` is an optional, lazy-loaded Browser Use backend. `worker/app/browser_use_network_guard.py` owns the Chromium request boundary. `worker/app/research_egress.py` owns the dormant one-use consent, authorization receipt and hash-only audit state machine. `worker/app/research_peer_binding.py` owns the public DNS answer and connected-peer receipt state machine. The canonical production surface is the default-off `web_research` ToolGate caller registered only when `KALIV_WEB_RESEARCH_ENABLED=1`; there is deliberately no parallel `/research/fetch` API route.
 
 ## Deterministic fetch invariants
 
@@ -114,7 +114,7 @@ Before activation:
 
 1. wire the delivered peer binding into Browser Use's CDP request boundary so every public request uses and proves the claimed address, then run controlled public-network validation;
 2. wire the delivered egress ledger into BrowserHost confirmation, CDP claim/completion and the user-visible audit trail;
-3. expose the capability through a canonical descriptor and ToolGate only after those gates are green;
+3. keep the existing canonical ToolGate caller single-surface and default-off while the remaining evidence/physical validation gates are completed;
 4. keep authentication, cookies, uploads and downloads outside v1.
 
 ## Planned slices
