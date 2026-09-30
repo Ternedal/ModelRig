@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .sleep import WakeReceipt
+from .session_bootstrap import SessionBootstrapReceipt
 from .wake_cycle import WakeOrientationReceipt, wake_receipt_ref
 
 
@@ -48,6 +49,43 @@ class DormancyBridgeReceipt(StrictModel):
     automatic_goal_resume: Literal[False]
     automatic_loop_resume: Literal[False]
     reference_only: Literal[True]
+    identity_authority: Literal[False]
+    persistent_state_authority: Literal[False]
+    durable_memory_write_authority: Literal[False]
+    execution_authority: Literal[False]
+    scheduling_authority: Literal[False]
+    model_authority: Literal[False]
+    raw_chain_of_thought_persisted: Literal[False]
+    production_activation: Literal[False]
+
+
+class RuntimeDormancyBridgeReceipt(StrictModel):
+    """C31-D v2 bridge using the production WAKE_REORIENTATION bootstrap."""
+
+    schema: Literal["kaliv-consciousness-core/dormancy-bridge-receipt/v2"]
+    bridge_id: Annotated[str, Field(pattern=r"^dormancy-bridge-[a-f0-9]{32}$")]
+    wake_receipt_ref: NonEmptyRef
+    reorientation_evidence_ref: NonEmptyRef
+    reorientation_kind: Literal["SESSION_BOOTSTRAP"]
+    self_id: Annotated[str, Field(pattern=r"^self-[a-f0-9]{32}$")]
+    person_revision: Annotated[str, Field(pattern=r"^person-r[0-9]{4,}$")]
+    dormancy_kind: Literal["PLANNED_SLEEP", "UNPLANNED_DORMANCY"]
+    sleep_id: Annotated[str, Field(pattern=r"^sleep-[a-f0-9]{32}$")] | None
+    entry_anchor_ref: NonEmptyRef | None
+    wake_anchor_ref: NonEmptyRef
+    previous_self_state_ref: NonEmptyRef
+    next_self_state_ref: NonEmptyRef
+    previous_workspace_ref: NonEmptyRef
+    fresh_workspace_ref: NonEmptyRef
+    cognition_during_gap: Literal[False]
+    explicit_wake_reorientation: Literal[True]
+    prior_world_restored: Literal[False]
+    prior_workspace_restored: Literal[False]
+    automatic_goal_resume: Literal[False]
+    automatic_loop_resume: Literal[False]
+    reference_only: Literal[True]
+    model_calls: Literal[0]
+    self_state_store_write_applied: Literal[False]
     identity_authority: Literal[False]
     persistent_state_authority: Literal[False]
     durable_memory_write_authority: Literal[False]
@@ -129,3 +167,89 @@ def build_dormancy_bridge(
         raw_chain_of_thought_persisted=False,
         production_activation=False,
     )
+
+def build_runtime_dormancy_bridge(
+    wake_receipt: WakeReceipt | Mapping[str, Any],
+    bootstrap_receipt: SessionBootstrapReceipt | Mapping[str, Any],
+) -> RuntimeDormancyBridgeReceipt:
+    """Bind C12 wake evidence to the actual production session reorientation."""
+    try:
+        wake = (
+            wake_receipt
+            if isinstance(wake_receipt, WakeReceipt)
+            else WakeReceipt.model_validate(wake_receipt)
+        )
+        bootstrap = (
+            bootstrap_receipt
+            if isinstance(bootstrap_receipt, SessionBootstrapReceipt)
+            else SessionBootstrapReceipt.model_validate(bootstrap_receipt)
+        )
+    except ValidationError as exc:
+        raise DormancyBridgeError("invalid runtime dormancy bridge input") from exc
+
+    expected_wake_ref = wake_receipt_ref(wake)
+    if bootstrap.bootstrap_kind != "WAKE_REORIENTATION":
+        raise DormancyBridgeError("session bootstrap is not a wake reorientation")
+    if bootstrap.wake_receipt_ref != expected_wake_ref:
+        raise DormancyBridgeError("session bootstrap belongs to another WakeReceipt")
+    if bootstrap.self_id != wake.self_id:
+        raise DormancyBridgeError("session bootstrap belongs to another self")
+    if bootstrap.person_revision != wake.person_revision:
+        raise DormancyBridgeError("session bootstrap belongs to another Person Revision")
+    if wake.cognition_during_gap is not False or bootstrap.cognition_during_gap is not False:
+        raise DormancyBridgeError("runtime dormancy bridge cannot claim cognition during gap")
+    if (
+        bootstrap.prior_world_restored is not False
+        or bootstrap.prior_workspace_restored is not False
+        or bootstrap.identity_unchanged is not True
+        or bootstrap.active_goal_bindings_unchanged is not True
+        or bootstrap.active_intention_bindings_unchanged is not True
+        or bootstrap.model_calls != 0
+        or bootstrap.self_state_store_write_applied is not False
+    ):
+        raise DormancyBridgeError("session bootstrap does not prove bounded wake reorientation")
+
+    bootstrap_ref = _ref("session-bootstrap-receipt", bootstrap)
+    seed = {
+        "wake_receipt_ref": expected_wake_ref,
+        "reorientation_evidence_ref": bootstrap_ref,
+        "self_id": wake.self_id,
+        "person_revision": wake.person_revision,
+        "previous_self_state_ref": bootstrap.previous_self_state_ref,
+        "next_self_state_ref": bootstrap.next_self_state_ref,
+    }
+    return RuntimeDormancyBridgeReceipt(
+        schema="kaliv-consciousness-core/dormancy-bridge-receipt/v2",
+        bridge_id="dormancy-bridge-" + hashlib.sha256(_canonical_json(seed)).hexdigest()[:32],
+        wake_receipt_ref=expected_wake_ref,
+        reorientation_evidence_ref=bootstrap_ref,
+        reorientation_kind="SESSION_BOOTSTRAP",
+        self_id=wake.self_id,
+        person_revision=wake.person_revision,
+        dormancy_kind=wake.dormancy_kind,
+        sleep_id=wake.sleep_id,
+        entry_anchor_ref=wake.entry_anchor_ref,
+        wake_anchor_ref="temporal-anchor:" + wake.wake_anchor.anchor_id,
+        previous_self_state_ref=bootstrap.previous_self_state_ref,
+        next_self_state_ref=bootstrap.next_self_state_ref,
+        previous_workspace_ref=bootstrap.previous_workspace_ref,
+        fresh_workspace_ref=bootstrap.fresh_workspace_ref,
+        cognition_during_gap=False,
+        explicit_wake_reorientation=True,
+        prior_world_restored=False,
+        prior_workspace_restored=False,
+        automatic_goal_resume=False,
+        automatic_loop_resume=False,
+        reference_only=True,
+        model_calls=0,
+        self_state_store_write_applied=False,
+        identity_authority=False,
+        persistent_state_authority=False,
+        durable_memory_write_authority=False,
+        execution_authority=False,
+        scheduling_authority=False,
+        model_authority=False,
+        raw_chain_of_thought_persisted=False,
+        production_activation=False,
+    )
+
