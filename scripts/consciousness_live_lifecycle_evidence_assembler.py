@@ -16,6 +16,9 @@ if str(ROOT / "worker") not in sys.path:
     sys.path.insert(0, str(ROOT / "worker"))
 
 from app.consciousness_core.dormancy_bridge import build_dormancy_bridge  # noqa: E402
+from app.consciousness_core.restart_dormancy_evidence import (  # noqa: E402
+    build_restart_dormancy_receipt,
+)
 from app.consciousness_core.model_swap_continuity import (  # noqa: E402
     qualify_model_swap_continuity,
 )
@@ -62,7 +65,8 @@ def assemble(
     before_status: Mapping[str, Any],
     after_status: Mapping[str, Any],
     wake_receipt: Mapping[str, Any],
-    wake_orientation: Mapping[str, Any],
+    wake_orientation: Mapping[str, Any] | None,
+    session_bootstrap: Mapping[str, Any] | None,
     before_profile: Mapping[str, Any],
     after_profile: Mapping[str, Any],
     before_self_state: Mapping[str, Any],
@@ -84,7 +88,20 @@ def assemble(
     if before_ref == after_ref:
         raise EvidenceAssemblyError("runtime instance did not change; restart is not proven")
 
-    dormancy = build_dormancy_bridge(wake_receipt, wake_orientation)
+    if (wake_orientation is None) == (session_bootstrap is None):
+        raise EvidenceAssemblyError(
+            "provide exactly one of wake_orientation or session_bootstrap"
+        )
+    if session_bootstrap is not None:
+        dormancy = build_restart_dormancy_receipt(
+            wake_receipt,
+            session_bootstrap,
+        )
+    else:
+        dormancy = build_dormancy_bridge(
+            wake_receipt,
+            wake_orientation,
+        )
     model_swap = qualify_model_swap_continuity(
         before_profile=before_profile,
         after_profile=after_profile,
@@ -137,7 +154,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--before-status", type=Path, required=True)
     p.add_argument("--after-status", type=Path, required=True)
     p.add_argument("--wake-receipt", type=Path, required=True)
-    p.add_argument("--wake-orientation", type=Path, required=True)
+    reorientation = p.add_mutually_exclusive_group(required=True)
+    reorientation.add_argument("--wake-orientation", type=Path)
+    reorientation.add_argument("--session-bootstrap", type=Path)
     p.add_argument("--before-profile", type=Path, required=True)
     p.add_argument("--after-profile", type=Path, required=True)
     p.add_argument("--before-self-state", type=Path, required=True)
@@ -153,7 +172,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             before_status=_load(a.before_status, "before_status"),
             after_status=_load(a.after_status, "after_status"),
             wake_receipt=_load(a.wake_receipt, "wake_receipt"),
-            wake_orientation=_load(a.wake_orientation, "wake_orientation"),
+            wake_orientation=(
+                _load(a.wake_orientation, "wake_orientation")
+                if a.wake_orientation is not None
+                else None
+            ),
+            session_bootstrap=(
+                _load(a.session_bootstrap, "session_bootstrap")
+                if a.session_bootstrap is not None
+                else None
+            ),
             before_profile=_load(a.before_profile, "before_profile"),
             after_profile=_load(a.after_profile, "after_profile"),
             before_self_state=_load(a.before_self_state, "before_self_state"),
