@@ -175,6 +175,26 @@ def live_cycle():
     }
 
 
+
+def snapshot(ch):
+    return {
+        "schema": assembler.SNAPSHOT_SCHEMA,
+        "runtime_instance_ref": "runtime-instance:" + ch * 32,
+        "wake_receipt": {"schema": "kaliv-consciousness-core/wake-receipt/v1"},
+        "session_bootstrap_receipt": {
+            "schema": "kaliv-consciousness-core/session-bootstrap-receipt/v1"
+        },
+        "self_state": {"schema": "kaliv-consciousness-core/self-state/v1"},
+        "lived_continuity": {
+            "schema": "kaliv-consciousness-core/lived-continuity-receipt/v1"
+        },
+        "cognitive_profile": {
+            "schema": "kaliv-consciousness-core/cognitive-profile/v1"
+        },
+        "production_activation": False,
+    }
+
+
 def kwargs():
     return {
         "candidate_git_sha": SHA,
@@ -302,6 +322,65 @@ def test_assembled_bundle_is_accepted_by_live_lifecycle_qualifier():
     assert verdict["production_activation"] is False
 
 
+def test_runtime_snapshots_assemble_without_fabricating_old_cycle():
+    with patch.object(
+        assembler,
+        "build_dormancy_bridge_from_session_bootstrap",
+        return_value=Receipt(),
+    ), patch.object(
+        assembler,
+        "qualify_model_swap_continuity",
+        return_value=Receipt(),
+    ):
+        bundle = assembler.assemble_runtime_snapshots(
+            candidate_git_sha=SHA,
+            live_cycle=live_cycle(),
+            before_snapshot=snapshot("1"),
+            after_snapshot=snapshot("2"),
+        )
+    assert bundle["dormancy_restart"]["restart_proven"] is True
+    assert bundle["model_swap"]["candidate_git_sha"] == SHA
+    assert bundle["production_activation"] is False
+
+
+def test_runtime_snapshots_require_real_process_change():
+    before = snapshot("1")
+    after = snapshot("1")
+    try:
+        assembler.assemble_runtime_snapshots(
+            candidate_git_sha=SHA,
+            live_cycle=live_cycle(),
+            before_snapshot=before,
+            after_snapshot=after,
+        )
+    except assembler.EvidenceAssemblyError as exc:
+        assert "restart is not proven" in str(exc)
+    else:
+        raise AssertionError("identical runtime snapshots must fail closed")
+
+
+def test_runtime_snapshot_missing_lived_continuity_fails_closed():
+    before = snapshot("1")
+    after = snapshot("2")
+    before["lived_continuity"] = None
+    with patch.object(
+        assembler,
+        "build_dormancy_bridge_from_session_bootstrap",
+        return_value=Receipt(),
+    ):
+        try:
+            assembler.assemble_runtime_snapshots(
+                candidate_git_sha=SHA,
+                live_cycle=live_cycle(),
+                before_snapshot=before,
+                after_snapshot=after,
+            )
+        except assembler.EvidenceAssemblyError as exc:
+            assert "lived_continuity is unavailable" in str(exc)
+        else:
+            raise AssertionError("missing continuity must fail closed")
+
+
 if __name__ == "__main__":
     test_distinct_runtime_instances_assemble_bounded_bundle()
     test_same_runtime_instance_fails_closed()
@@ -311,4 +390,7 @@ if __name__ == "__main__":
     test_nonhex_runtime_ref_fails_closed()
     test_mutable_candidate_ref_fails_closed()
     test_assembled_bundle_is_accepted_by_live_lifecycle_qualifier()
+    test_runtime_snapshots_assemble_without_fabricating_old_cycle()
+    test_runtime_snapshots_require_real_process_change()
+    test_runtime_snapshot_missing_lived_continuity_fails_closed()
     print("Consciousness live lifecycle evidence assembler contract: PASS")
