@@ -103,6 +103,18 @@ def run_contract() -> None:
     bad_hash["windows_realization_sha256"] = "nope"
     _reject(bad_hash, "must be a lowercase SHA-256")
 
+    for field in (
+        "person_id",
+        "person_revision",
+        "body_revision",
+        "body_id",
+        "composition_authority_id",
+    ):
+        blank = copy.deepcopy(valid)
+        blank[field] = "   "
+        blank["release_id"] = module._release_id(blank)
+        _reject(blank, f"{field} is invalid")
+
 
 if __name__ == "__main__":
     run_contract()
