@@ -111,6 +111,22 @@ def vision_snapshot():
     }
 
 
+async def default_vision_control(
+    *,
+    source_id: str,
+    enabled: bool,
+    expected_state_revision: int,
+):
+    return {
+        "schema": "kaliv-control-center-vision-control/v1",
+        "source_id": source_id,
+        "enabled": enabled,
+        "sensor_state_revision": expected_state_revision + 1,
+        "desired_revision": 7,
+        "production_activation": False,
+    }
+
+
 def schedule_history():
     return {
         "schema": "kaliv-control-center-schedule-history/v1",
@@ -156,6 +172,10 @@ def app_for(**kwargs):
             schedule_history_provider=kwargs.get("schedule_history_provider", schedule_history),
             privacy_provider=kwargs.get("privacy_provider", build_control_center_privacy),
             vision_provider=kwargs.get("vision_provider", vision_snapshot),
+            vision_control_provider=kwargs.get(
+                "vision_control_provider",
+                default_vision_control,
+            ),
             loopback_allowed=kwargs.get("loopback_allowed", lambda _request: True),
             clock=lambda: NOW,
         )
@@ -298,12 +318,78 @@ check(history_payload["schema"] == "kaliv-control-center-schedule-history/v1", "
 check(history_payload["items"][0]["terminal_outcome"] == "executed", "history returns durable outcome")
 check(history_payload["production_activation"] is False, "history route cannot authorize production")
 
+# VisionRig operator control is a separate loopback-only worker mutation.
+control_response = client.post(
+    "/control-center/vision/kaliv-android/enabled",
+    json={
+        "enabled": False,
+        "expected_state_revision": 9,
+    },
+)
+check(control_response.status_code == 200, "loopback Vision control succeeds")
+control_payload = control_response.json()
+check(
+    control_payload["schema"] == "kaliv-control-center-vision-control/v1",
+    "Vision control response is versioned",
+)
+check(control_payload["source_id"] == "kaliv-android", "Vision control binds source id")
+check(control_payload["enabled"] is False, "Vision control binds enabled state")
+check(
+    control_payload["sensor_state_revision"] == 10,
+    "Vision control returns updated state revision",
+)
+check(
+    control_payload["production_activation"] is False,
+    "Vision control grants no production authority",
+)
+
+bad_control_body = client.post(
+    "/control-center/vision/kaliv-android/enabled",
+    json={
+        "enabled": True,
+        "expected_state_revision": 9,
+        "unexpected": "nope",
+    },
+)
+check(
+    bad_control_body.status_code == 422,
+    "Vision control rejects unknown request fields",
+)
+
+bad_control_schema_client = app_for(
+    vision_control_provider=lambda **_kwargs: asyncio.sleep(
+        0,
+        result={
+            "schema": "evil/control/v9",
+            "source_id": "kaliv-android",
+            "enabled": True,
+            "production_activation": False,
+        },
+    ),
+)
+bad_control_schema = bad_control_schema_client.post(
+    "/control-center/vision/kaliv-android/enabled",
+    json={
+        "enabled": True,
+        "expected_state_revision": 1,
+    },
+)
+check(
+    bad_control_schema.status_code == 503,
+    "Vision control rejects invalid provider response schema",
+)
+
 # Both routes remain loopback-only even if the wider worker is intentionally LAN-enabled.
 denied_client = app_for(loopback_allowed=lambda _request: False)
 denied = denied_client.get("/control-center/status", headers=headers)
 check(denied.status_code == 403, "non-loopback status caller is rejected")
 denied_history = denied_client.get("/control-center/schedules")
 check(denied_history.status_code == 403, "non-loopback history caller is rejected")
+denied_control = denied_client.post(
+    "/control-center/vision/kaliv-android/enabled",
+    json={"enabled": True, "expected_state_revision": 1},
+)
+check(denied_control.status_code == 403, "non-loopback Vision control caller is rejected")
 
 # Provider failures reveal type only and keep both affected components unknown.
 async def broken_health():
