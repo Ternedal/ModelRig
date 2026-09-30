@@ -362,7 +362,10 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_hardening_stream_disconnect.py`
 - `tests/worker_home_rig_runtime.py`
 - `tests/worker_jobs.py`
+- `tests/worker_kaliv_bodyrig_digital_twin_m6_qualifier.py`
+- `tests/worker_kaliv_bodyrig_photoreal_qualifier.py`
 - `tests/worker_kaliv_end_to_end_latency_qualifier.py`
+- `tests/worker_kaliv_release_manifest_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_migrate.py`
