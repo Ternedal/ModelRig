@@ -36,6 +36,8 @@ class ControlCenterClientTest {
             assertEquals("dormant", status.privacy.commonDataSharing.state)
             assertFalse(status.privacy.scopedPermissions.revocationSupported)
             assertFalse(status.privacy.productionActivation)
+            assertFalse(status.vision.available)
+            assertEquals("vision_not_reported", status.vision.reason)
 
             val request = server.takeRequest()
             assertEquals("GET", request.method)
@@ -44,6 +46,141 @@ class ControlCenterClientTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test
+    fun parserAcceptsBoundedVisionProjection() {
+        val client = ControlCenterClient("http://127.0.0.1:1", "token")
+        val root = validStatus().put(
+            "vision",
+            JSONObject()
+                .put("schema", ControlCenterClient.VISION_SCHEMA)
+                .put("available", true)
+                .put("sensor_state_revision", 12)
+                .put("consistency", "synced")
+                .put("total", 1)
+                .put("sensors_returned", 1)
+                .put("sensors_truncated", false)
+                .put("attention_total", 0)
+                .put(
+                    "sensors",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("source_id", "kaliv-android")
+                            .put("display_name", "Kaliv phone")
+                            .put("source_type", "camera")
+                            .put("device", "Pixel")
+                            .put("lifecycle", "active")
+                            .put("presence", "online")
+                            .put("desired_enabled", true)
+                            .put("effective_capture_active", true)
+                            .put("convergence", "converged")
+                            .put("desired_revision", 7)
+                            .put("applied_revision", 7)
+                            .put("pending_seconds", JSONObject.NULL)
+                            .put("transport_status", "normal")
+                            .put("capability_refresh_status", "current")
+                            .put("last_seen_utc", "2026-09-30T08:00:00+00:00"),
+                    ),
+                )
+                .put("production_activation", false),
+        )
+
+        val status = client.parse(root)
+
+        assertTrue(status.vision.available)
+        assertEquals(12, status.vision.sensorStateRevision)
+        assertEquals(1, status.vision.sensors.size)
+        val sensor = status.vision.sensors.single()
+        assertEquals("kaliv-android", sensor.sourceId)
+        assertTrue(sensor.desiredEnabled)
+        assertEquals("converged", sensor.convergence)
+        assertFalse(status.vision.productionActivation)
+    }
+
+    @Test
+    fun setVisionEnabledUsesBoundedAuthenticatedContract() {
+        val server = MockWebServer()
+        server.enqueue(
+            jsonResponse(
+                JSONObject()
+                    .put("schema", ControlCenterClient.VISION_CONTROL_SCHEMA)
+                    .put("source_id", "kaliv android/1")
+                    .put("enabled", false)
+                    .put("sensor_state_revision", 14)
+                    .put("desired_revision", 9)
+                    .put("production_activation", false)
+                    .toString(),
+            )
+        )
+        server.start()
+        try {
+            val client = ControlCenterClient(server.url("/").toString(), "device-token")
+            val receipt = client.setVisionEnabled(
+                sourceId = "kaliv android/1",
+                enabled = false,
+                expectedStateRevision = 13,
+            )
+
+            assertEquals("kaliv android/1", receipt.sourceId)
+            assertFalse(receipt.enabled)
+            assertEquals(14, receipt.sensorStateRevision)
+            assertEquals(9, receipt.desiredRevision)
+            assertFalse(receipt.productionActivation)
+
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals(
+                "/api/v1/control-center/vision/kaliv%20android%2F1/enabled",
+                request.requestUrl!!.encodedPath,
+            )
+            assertEquals("Bearer device-token", request.getHeader("Authorization"))
+            val body = JSONObject(request.body.readUtf8())
+            assertEquals(2, body.length())
+            assertFalse(body.getBoolean("enabled"))
+            assertEquals(13, body.getInt("expected_state_revision"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun setVisionEnabledRejectsReceiptAuthorityAndBindingMismatch() {
+        val clientUrl = "http://127.0.0.1"
+        fun failureFor(body: JSONObject): Throwable {
+            val server = MockWebServer()
+            server.enqueue(jsonResponse(body.toString()))
+            server.start()
+            return try {
+                val client = ControlCenterClient(server.url("/").toString(), "token")
+                runCatching {
+                    client.setVisionEnabled("kaliv-android", true, 1)
+                }.exceptionOrNull() ?: AssertionError("expected failure")
+            } finally {
+                server.shutdown()
+            }
+        }
+
+        val base = JSONObject()
+            .put("schema", ControlCenterClient.VISION_CONTROL_SCHEMA)
+            .put("source_id", "kaliv-android")
+            .put("enabled", true)
+            .put("sensor_state_revision", 2)
+            .put("desired_revision", 2)
+            .put("production_activation", false)
+
+        assertTrue(
+            failureFor(JSONObject(base.toString()).put("source_id", "other"))
+                .message!!.contains("source mismatch")
+        )
+        assertTrue(
+            failureFor(JSONObject(base.toString()).put("enabled", false))
+                .message!!.contains("enabled mismatch")
+        )
+        assertTrue(
+            failureFor(JSONObject(base.toString()).put("production_activation", true))
+                .message!!.contains("production activation")
+        )
     }
 
     @Test
