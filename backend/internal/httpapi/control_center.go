@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +17,10 @@ import (
 const (
 	controlCenterStatusSchema          = "kaliv-control-center-status/v1"
 	controlCenterScheduleHistorySchema = "kaliv-control-center-schedule-history/v1"
+	controlCenterVisionControlSchema   = "kaliv-control-center-vision-control/v1"
+	visionRigControlAPIFlag            = "KALIV_VISIONRIG_CONTROL_API"
 	maxControlCenterStatusBytes        = 1 << 20
+	maxControlCenterControlBytes       = 4 << 10
 	controlCenterStatusTimeout         = 5 * time.Second
 )
 
@@ -127,6 +133,111 @@ func (s *server) handleControlCenterScheduleHistory(w http.ResponseWriter, r *ht
 	}
 	if payload["schema"] != controlCenterScheduleHistorySchema {
 		writeErr(w, http.StatusBadGateway, "control center schedule history unavailable")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, payload)
+}
+
+
+type controlCenterVisionEnabledRequest struct {
+	Enabled               *bool  `json:"enabled"`
+	ExpectedStateRevision *int64 `json:"expected_state_revision"`
+}
+
+func visionRigControlAPIEnabled() bool {
+	return os.Getenv(visionRigControlAPIFlag) == "1"
+}
+
+func decodeControlCenterVisionEnabled(body io.Reader) (bool, int64, error) {
+	decoder := json.NewDecoder(io.LimitReader(body, maxControlCenterControlBytes+1))
+	decoder.DisallowUnknownFields()
+	var request controlCenterVisionEnabledRequest
+	if err := decoder.Decode(&request); err != nil {
+		return false, 0, err
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return false, 0, io.ErrUnexpectedEOF
+	}
+	if request.Enabled == nil || request.ExpectedStateRevision == nil {
+		return false, 0, io.ErrUnexpectedEOF
+	}
+	if *request.ExpectedStateRevision < 0 {
+		return false, 0, io.ErrUnexpectedEOF
+	}
+	return *request.Enabled, *request.ExpectedStateRevision, nil
+}
+
+func (s *server) handleControlCenterVisionEnabled(w http.ResponseWriter, r *http.Request) {
+	if s.Worker == nil || strings.TrimSpace(s.Worker.BaseURL) == "" {
+		writeErr(w, http.StatusBadGateway, "VisionRig sensor control unavailable")
+		return
+	}
+	sourceID := strings.TrimSpace(r.PathValue("source_id"))
+	if sourceID == "" || len(sourceID) > 128 {
+		writeErr(w, http.StatusUnprocessableEntity, "invalid VisionRig source id")
+		return
+	}
+	enabled, expectedRevision, err := decodeControlCenterVisionEnabled(r.Body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid VisionRig sensor control request")
+		return
+	}
+	upstreamBody, _ := json.Marshal(map[string]any{
+		"enabled":                 enabled,
+		"expected_state_revision": expectedRevision,
+	})
+	target := strings.TrimRight(s.Worker.BaseURL, "/") +
+		"/control-center/vision/" + url.PathEscape(sourceID) + "/enabled"
+	req, err := http.NewRequestWithContext(
+		r.Context(),
+		http.MethodPost,
+		target,
+		bytes.NewReader(upstreamBody),
+	)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "VisionRig sensor control unavailable")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if requestID := r.Header.Get("X-Request-ID"); requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
+
+	client := &http.Client{Timeout: controlCenterStatusTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "VisionRig sensor control unavailable")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity:
+			writeErr(w, resp.StatusCode, "VisionRig sensor control rejected")
+		default:
+			writeErr(w, http.StatusBadGateway, "VisionRig sensor control unavailable")
+		}
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlCenterControlBytes+1))
+	if err != nil || len(body) > maxControlCenterControlBytes {
+		writeErr(w, http.StatusBadGateway, "VisionRig sensor control unavailable")
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeErr(w, http.StatusBadGateway, "VisionRig sensor control unavailable")
+		return
+	}
+	if payload["schema"] != controlCenterVisionControlSchema ||
+		payload["source_id"] != sourceID ||
+		payload["enabled"] != enabled ||
+		payload["production_activation"] != false {
+		writeErr(w, http.StatusBadGateway, "VisionRig sensor control unavailable")
 		return
 	}
 
