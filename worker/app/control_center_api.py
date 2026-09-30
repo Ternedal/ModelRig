@@ -17,12 +17,16 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+import httpx
+from pydantic import BaseModel, ConfigDict, Field
 
 from .control_center_privacy import SCHEMA as PRIVACY_SCHEMA
 from .control_center_privacy import build_control_center_privacy
 from .control_center_schedule_history import build_control_center_schedule_history
 from .control_center_status import build_control_center_status
+from .control_center_vision import CONTROL_SCHEMA as VISION_CONTROL_SCHEMA
 from .control_center_vision import build_control_center_vision
+from .control_center_vision import set_control_center_vision_enabled
 from .netguard import is_loopback
 
 HealthProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
@@ -31,6 +35,14 @@ RoutingProvider = Callable[[], Mapping[str, Any]]
 ScheduleHistoryProvider = Callable[[], Mapping[str, Any]]
 PrivacyProvider = Callable[[], Mapping[str, Any]]
 VisionProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
+VisionControlProvider = Callable[..., Awaitable[Mapping[str, Any]]]
+
+
+class VisionControlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    expected_state_revision: int = Field(ge=0)
 
 
 def _loopback_allowed(request: Request) -> bool:
@@ -296,6 +308,7 @@ def build_control_center_router(
     schedule_history_provider: ScheduleHistoryProvider = build_control_center_schedule_history,
     privacy_provider: PrivacyProvider = build_control_center_privacy,
     vision_provider: VisionProvider = build_control_center_vision,
+    vision_control_provider: VisionControlProvider = set_control_center_vision_enabled,
     loopback_allowed: Callable[[Request], bool] = _loopback_allowed,
     clock: Callable[[], float] = time.time,
 ) -> APIRouter:
@@ -418,6 +431,45 @@ def build_control_center_router(
         payload["privacy"] = privacy
         payload["vision"] = vision
         return payload
+
+    @router.post("/vision/{source_id}/enabled")
+    async def control_center_vision_enabled(
+        source_id: str,
+        body: VisionControlRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        _require_loopback(request, loopback_allowed)
+        try:
+            payload = await vision_control_provider(
+                source_id=source_id,
+                enabled=body.enabled,
+                expected_state_revision=body.expected_state_revision,
+            )
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in {404, 409, 422}:
+                raise HTTPException(
+                    status_code=status,
+                    detail="VisionRig sensor control rejected",
+                ) from None
+            raise HTTPException(
+                status_code=503,
+                detail="VisionRig sensor control unavailable",
+            ) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"VisionRig sensor control unavailable:{type(exc).__name__}",
+            ) from None
+
+        if not isinstance(payload, Mapping) or payload.get("schema") != VISION_CONTROL_SCHEMA:
+            raise HTTPException(
+                status_code=503,
+                detail="VisionRig sensor control unavailable:invalid_response",
+            )
+        return dict(payload)
 
     @router.get("/schedules")
     def control_center_schedules(request: Request) -> dict[str, Any]:
