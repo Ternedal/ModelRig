@@ -43,6 +43,8 @@ def _evidence_ref(name: str) -> str:
             + "4" * 40 + ":"
             + "6" * 64
         )
+    if name == "recovery_soak":
+        return "kaliv-recovery-soak:" + "1" * 40 + ":" + "5" * 64
     return f"evidence:{name}:1"
 
 
@@ -213,6 +215,34 @@ def run_contract() -> None:
     _must_reject(
         repository_multiple_refs,
         "requires exactly one cross-repository authority evidence ref",
+    )
+
+    recovery_mutable_ref = copy.deepcopy(valid)
+    recovery_mutable_ref["gates"]["recovery_soak"]["evidence_refs"] = [
+        "operator-says-soak-passed"
+    ]
+    _must_reject(
+        recovery_mutable_ref,
+        "requires canonical kaliv-recovery-soak evidence",
+    )
+
+    recovery_wrong_head = copy.deepcopy(valid)
+    recovery_wrong_head["gates"]["recovery_soak"]["evidence_refs"] = [
+        "kaliv-recovery-soak:" + "f" * 40 + ":" + "5" * 64
+    ]
+    _must_reject(
+        recovery_wrong_head,
+        "not exact-tree-equivalent to the pinned ModelRig revision",
+    )
+
+    recovery_multiple_refs = copy.deepcopy(valid)
+    recovery_multiple_refs["gates"]["recovery_soak"]["evidence_refs"] = [
+        "kaliv-recovery-soak:" + "1" * 40 + ":" + "5" * 64,
+        "kaliv-recovery-soak:" + "1" * 40 + ":" + "4" * 64,
+    ]
+    _must_reject(
+        recovery_multiple_refs,
+        "requires exactly one qualification evidence ref",
     )
 
     consciousness_mutable_ref = copy.deepcopy(valid)

@@ -33,6 +33,9 @@ _REPOSITORY_AUTHORITY_REF = re.compile(
     r"([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):"
     r"([0-9a-f]{64})$"
 )
+_RECOVERY_SOAK_REF = re.compile(
+    r"^kaliv-recovery-soak:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 _CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
     r"^consciousness-live-lifecycle:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
@@ -287,6 +290,23 @@ def _validate_gates(
                 raise SystemReleaseManifestError(
                     "repository_authority evidence repository SHAs do not match "
                     "the pinned release revisions"
+                )
+        if gate == "recovery_soak" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "recovery_soak PASS requires exactly one "
+                    "qualification evidence ref"
+                )
+            match = _RECOVERY_SOAK_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "recovery_soak PASS requires canonical "
+                    "kaliv-recovery-soak evidence"
+                )
+            if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
+                raise SystemReleaseManifestError(
+                    "recovery_soak evidence is not exact-tree-equivalent "
+                    "to the pinned ModelRig revision"
                 )
         if gate == "consciousness_live_lifecycle" and status == "PASS":
             if len(refs) != 1:
