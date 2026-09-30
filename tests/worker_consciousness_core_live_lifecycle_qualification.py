@@ -163,6 +163,44 @@ def must_reject(value, fragment):
         raise AssertionError(f"expected rejection containing {fragment!r}")
 
 
+
+
+def restart_dormancy_receipt():
+    value = dormancy_receipt()
+    value["schema"] = "kaliv-consciousness-core/restart-dormancy-receipt/v1"
+    value["qualification_id"] = "restart-dormancy-" + "8" * 32
+    value["session_bootstrap_receipt_ref"] = "session-bootstrap-receipt:1"
+    value["bootstrap_kind"] = "WAKE_REORIENTATION"
+    value["previous_self_state_ref"] = "self-state:before"
+    value["next_self_state_ref"] = "self-state:after"
+    value["fresh_world_state_ref"] = "world-state:fresh"
+    value["fresh_workspace_ref"] = "workspace:fresh"
+    value["prior_world_restored"] = False
+    value["prior_workspace_restored"] = False
+    value.pop("bridge_id")
+    value.pop("wake_orientation_ref")
+    value.pop("from_cycle_id")
+    value.pop("oriented_cycle_id")
+    return value
+
+
+def test_c19_restart_dormancy_receipt_qualifies():
+    value = evidence()
+    value["dormancy_restart"]["receipt"] = restart_dormancy_receipt()
+    verdict = qualifier.qualify(value)
+    assert verdict["state"] == "QUALIFIED"
+    assert verdict["dormancy_restart_qualified"] is True
+    assert verdict["production_activation"] is False
+
+
+def test_c19_restart_requires_wake_reorientation_bootstrap():
+    value = evidence()
+    receipt = restart_dormancy_receipt()
+    receipt["bootstrap_kind"] = "RUNTIME_START"
+    value["dormancy_restart"]["receipt"] = receipt
+    must_reject(value, "WAKE_REORIENTATION")
+
+
 def test_valid_full_lifecycle_qualifies_exact_candidate():
     verdict = qualifier.qualify(evidence())
     assert verdict["state"] == "QUALIFIED"
@@ -246,6 +284,8 @@ def test_qualifier_never_accepts_production_activation():
 
 
 if __name__ == "__main__":
+    test_c19_restart_dormancy_receipt_qualifies()
+    test_c19_restart_requires_wake_reorientation_bootstrap()
     test_valid_full_lifecycle_qualifies_exact_candidate()
     test_release_evidence_ref_is_deterministic_and_content_addressed()
     test_mismatched_candidate_sha_fails_closed()
