@@ -16,9 +16,9 @@ import httpx
 
 SCHEMA = "kaliv-control-center-vision/v1"
 CONTROL_SCHEMA = "kaliv-control-center-vision-control/v1"
-BOOTSTRAP_SCHEMA = "visionrig/sensor-bootstrap-snapshot/v6"
-CATALOG_SCHEMA = "visionrig/sensor-catalog/v8"
-FLEET_SCHEMA = "visionrig/sensor-fleet-summary/v6"
+BOOTSTRAP_SCHEMA = "visionrig/sensor-bootstrap-snapshot/v36"
+CATALOG_SCHEMA = "visionrig/sensor-catalog/v15"
+FLEET_SCHEMA = "visionrig/sensor-fleet-summary/v31"
 CONSISTENCY_SCHEMA = "visionrig/sensor-change-consistency/v1"
 MAX_SENSORS = 128
 MAX_CAPABILITIES_PER_SENSOR = 32
