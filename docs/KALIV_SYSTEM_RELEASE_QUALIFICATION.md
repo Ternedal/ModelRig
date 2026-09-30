@@ -50,7 +50,17 @@ evidence reference:
 4. `bodyrig_photoreal_likeness` — the real-person Photoreal likeness gate,
    including required human review, has passed.
 5. `bodyrig_digital_twin_m6` — one coherent Person lineage reaches canonical M6
-   with the required physical/human Windows and Quest evidence.
+   with the required physical/human Windows and Quest evidence. A PASS must
+   contain exactly one canonical
+   `bodyrig-digital-twin-m6:<bodyrig-sha>:<sha256>` reference emitted by
+   `kaliv_bodyrig_digital_twin_m6_qualifier.py`. The qualifier validates
+   BodyRig's canonical `bodyrig-digital-twin-release` v1 authority, recomputes
+   its content-bound `dtrelease-...` id, requires
+   `digital_twin_ready=true` and BodyRig's own
+   `production_activation=true`, and binds `bodyrig_revision` to the pinned
+   `Ternedal/BodyRig` SHA. ModelRig does **not** inherit that activation:
+   the qualifier verdict and system release verdict remain
+   `production_activation=false`.
 6. `bodyrig_android_live_body` — the standalone Kaliv Body Android surface has
    passed its independent exact-head physical gate: authenticated RigLink,
    digest-bound active avatar, live BodyRig frames, ARCore runtime, detected-plane

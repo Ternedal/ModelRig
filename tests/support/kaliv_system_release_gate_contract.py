@@ -26,6 +26,8 @@ def _evidence_ref(name: str) -> str:
             + "4" * 40 + ":"
             + "7" * 64
         )
+    if name == "bodyrig_digital_twin_m6":
+        return "bodyrig-digital-twin-m6:" + "2" * 40 + ":" + "f" * 64
     if name == "bodyrig_android_live_body":
         return "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
     if name == "consciousness_live_lifecycle":
@@ -299,6 +301,34 @@ def run_contract() -> None:
     _must_reject(
         vision_multiple_refs,
         "requires exactly one physical qualification evidence ref",
+    )
+
+    m6_mutable_ref = copy.deepcopy(valid)
+    m6_mutable_ref["gates"]["bodyrig_digital_twin_m6"]["evidence_refs"] = [
+        "operator-says-m6-is-good"
+    ]
+    _must_reject(
+        m6_mutable_ref,
+        "requires canonical bodyrig-digital-twin-m6 evidence",
+    )
+
+    m6_wrong_body = copy.deepcopy(valid)
+    m6_wrong_body["gates"]["bodyrig_digital_twin_m6"]["evidence_refs"] = [
+        "bodyrig-digital-twin-m6:" + "f" * 40 + ":" + "f" * 64
+    ]
+    _must_reject(
+        m6_wrong_body,
+        "bound to a different BodyRig Git SHA",
+    )
+
+    m6_multiple_refs = copy.deepcopy(valid)
+    m6_multiple_refs["gates"]["bodyrig_digital_twin_m6"]["evidence_refs"] = [
+        "bodyrig-digital-twin-m6:" + "2" * 40 + ":" + "f" * 64,
+        "bodyrig-digital-twin-m6:" + "2" * 40 + ":" + "e" * 64,
+    ]
+    _must_reject(
+        m6_multiple_refs,
+        "requires exactly one canonical M6 evidence ref",
     )
 
     android_pending = copy.deepcopy(valid)
