@@ -193,3 +193,22 @@ python scripts/kaliv_system_release_gate.py .\path\to\kaliv-release-manifest.jso
 
 Exit code 0 means all nine evidence gates qualify. Exit code 1 means a valid
 manifest is still blocked. Exit code 2 means the manifest itself is invalid.
+
+## Binding qualified Consciousness evidence
+
+Do not mark the `consciousness_live_lifecycle` gate PASS by hand. Once
+`scripts/consciousness_live_lifecycle_qualifier.py` has produced a QUALIFIED
+verdict for the exact pinned ModelRig SHA, bind it into the release manifest with:
+
+```powershell
+python scripts/kaliv_system_release_bind_consciousness.py \
+  .\kaliv-release-manifest.json \
+  .\consciousness-live-lifecycle-verdict.json \
+  --output .\kaliv-release-manifest.bound.json
+```
+
+The binder validates the exact ModelRig SHA, all lifecycle qualification flags,
+the release evidence reference shape, and all no-authority / `production_activation=false`
+constraints. It may change only the `consciousness_live_lifecycle` gate. An explicit
+FAIL is never overwritten, and an existing PASS is accepted only when it already
+references the exact same qualified evidence.
