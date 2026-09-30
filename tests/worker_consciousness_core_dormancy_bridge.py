@@ -8,8 +8,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "worker") not in sys.path:
     sys.path.insert(0, str(ROOT / "worker"))
 
-from app.consciousness_core.dormancy_bridge import DormancyBridgeError, build_dormancy_bridge
+from app.consciousness_core.dormancy_bridge import (
+    DormancyBridgeError,
+    build_dormancy_bridge,
+    build_dormancy_bridge_from_session_bootstrap,
+)
 from app.consciousness_core.sleep import prepare_sleep, wake_from_sleep
+from app.consciousness_core.session_bootstrap import SessionBootstrapReceipt
 from app.consciousness_core.temporal import TemporalAnchor
 from app.consciousness_core.wake_cycle import WakeOrientationReceipt, wake_receipt_ref
 
@@ -124,3 +129,68 @@ def test_bridge_is_deterministic():
     wake = _wake(True)
     orientation = _orientation(wake)
     assert build_dormancy_bridge(wake, orientation) == build_dormancy_bridge(wake, orientation)
+
+def _bootstrap(wake):
+    return SessionBootstrapReceipt(
+        schema="kaliv-consciousness-core/session-bootstrap-receipt/v1",
+        bootstrap_kind="WAKE_REORIENTATION",
+        bootstrap_source_ref="runtime:test",
+        wake_receipt_ref=wake_receipt_ref(wake),
+        previous_self_state_ref="self-state:before",
+        next_self_state_ref="self-state:after",
+        previous_world_state_ref="world:before",
+        previous_workspace_ref="workspace:before",
+        fresh_world_state_ref="world:after",
+        fresh_workspace_ref="workspace:after",
+        personality_snapshot_ref="personality:test",
+        self_id=SELF,
+        person_id="person-" + "7" * 32,
+        person_revision=PERSON,
+        self_revision_before=7,
+        self_revision_after=8,
+        prior_world_restored=False,
+        prior_workspace_restored=False,
+        identity_unchanged=True,
+        active_goal_bindings_unchanged=True,
+        active_intention_bindings_unchanged=True,
+        affect_unchanged=True,
+        durable_uncertainties_unchanged=True,
+        last_experience_binding_unchanged=True,
+        cognition_during_gap=False,
+        model_calls=0,
+        self_state_store_write_applied=False,
+        durable_memory_write_authority=False,
+        execution_authority=False,
+        scheduling_authority=False,
+        production_activation=False,
+    )
+
+
+def test_runtime_bootstrap_proves_reorientation_without_inventing_old_cycle():
+    wake = _wake(True)
+    receipt = build_dormancy_bridge_from_session_bootstrap(
+        wake,
+        _bootstrap(wake),
+    )
+    assert receipt.orientation_source == "SESSION_BOOTSTRAP"
+    assert receipt.session_bootstrap_receipt_ref is not None
+    assert receipt.wake_orientation_ref is None
+    assert receipt.from_cycle_id is None
+    assert receipt.oriented_cycle_id is None
+    assert receipt.explicit_wake_reorientation is True
+    assert receipt.cognition_during_gap is False
+    assert receipt.production_activation is False
+
+
+def test_runtime_bootstrap_for_another_wake_fails_closed():
+    wake = _wake(True)
+    forged = _bootstrap(wake).model_copy(
+        update={"wake_receipt_ref": "wake-receipt:other"}
+    )
+    try:
+        build_dormancy_bridge_from_session_bootstrap(wake, forged)
+    except DormancyBridgeError:
+        pass
+    else:
+        raise AssertionError("cross-wake runtime bootstrap must fail closed")
+
