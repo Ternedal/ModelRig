@@ -223,10 +223,10 @@ def build_consciousness_status_router() -> APIRouter:
                 mode="json"
             ),
             "self_state": session.live_state.state.model_dump(mode="json"),
-            "continuity_state": (
+            "lived_continuity": (
                 None
-                if session.continuity_state is None
-                else session.continuity_state.model_dump(mode="json")
+                if session.lived_continuity is None
+                else session.lived_continuity.model_dump(mode="json")
             ),
             "cognitive_profile": loaded.profile.model_dump(mode="json"),
             "model_calls": 0,
