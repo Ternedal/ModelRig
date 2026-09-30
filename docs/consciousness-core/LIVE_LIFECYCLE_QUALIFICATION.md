@@ -114,3 +114,27 @@ Self/Person lineage, and writes the qualifier input atomically.
 
 "production_activation" remains false throughout.
 
+## Real restart capture
+
+Use the two-phase operator capture around an actual worker-process restart:
+
+    python scripts/consciousness_restart_capture.py before
+
+Restart the ModelRig worker without changing the checked-out candidate, then run:
+
+    python scripts/consciousness_restart_capture.py after
+
+The before phase records the exact clean Git candidate and the loopback-only
+Consciousness runtime status. The after phase fails closed unless the Git SHA is
+unchanged and the opaque runtime_instance_ref differs, proving that a different
+worker process is serving the same candidate. Neither phase claims cognition
+during the powered-off gap, lifecycle qualification, or production activation.
+
+The resulting files are:
+
+    validation/consciousness-restart/before.json
+    validation/consciousness-restart/after.json
+
+Their nested status objects can be supplied as the before/after status evidence
+to consciousness_live_lifecycle_evidence_assembler.py.
+
