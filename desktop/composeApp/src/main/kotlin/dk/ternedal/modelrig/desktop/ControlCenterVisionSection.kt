@@ -115,6 +115,34 @@ internal fun DesktopControlCenterVisionSection(
                         color = KalivTheme.colors.TextMuted,
                         fontSize = 10.sp,
                     )
+                    val readiness = current.producerReadiness
+                    val heartbeatPct = readiness.heartbeatV6Ratio?.let { (it * 100).toInt() }
+                    val measurementPct = readiness.packetMeasurementCompleteRatio?.let { (it * 100).toInt() }
+                    Text(
+                        "Producer readiness · heartbeat v6 ${heartbeatPct?.let { "$it%" } ?: "ukendt"} · " +
+                            "packet telemetry ${measurementPct?.let { "$it%" } ?: "ukendt"}",
+                        color = KalivTheme.colors.TextMuted,
+                        fontSize = 10.sp,
+                    )
+                    if (readiness.heartbeatUpgradeRequired > 0 || readiness.packetMeasurementGapSources > 0) {
+                        Text(
+                            "${readiness.heartbeatUpgradeRequired} heartbeat upgrade · " +
+                                "${readiness.packetMeasurementGapSources} telemetry gap",
+                            color = KalivTheme.colors.TextMuted,
+                            fontSize = 9.sp,
+                        )
+                    }
+                    current.producerReadinessTransition.changedUtc?.let { changed ->
+                        val heartbeatDelta = current.producerReadinessTransition.heartbeatV6SourcesDelta
+                        val telemetryDelta = current.producerReadinessTransition.packetMeasurementCompleteSourcesDelta
+                        Text(
+                            "Seneste readiness-ændring $changed" +
+                                (heartbeatDelta?.let { " · v6 ${if (it >= 0) "+" else ""}$it" } ?: "") +
+                                (telemetryDelta?.let { " · telemetry ${if (it >= 0) "+" else ""}$it" } ?: ""),
+                            color = KalivTheme.colors.TextMuted,
+                            fontSize = 9.sp,
+                        )
+                    }
                 }
                 current.sensors.forEach { VisionSensorReadCard(it) }
             }
