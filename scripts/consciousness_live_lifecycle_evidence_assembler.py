@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -21,6 +22,8 @@ from app.consciousness_core.model_swap_continuity import (  # noqa: E402
 
 SCHEMA = "kaliv-consciousness-core/live-lifecycle-evidence/v1"
 STATUS_SCHEMA = "kaliv-consciousness-core/runtime-status/v1"
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_RUNTIME_REF = re.compile(r"^runtime-instance:[0-9a-f]{32}$")
 
 
 class EvidenceAssemblyError(RuntimeError):
@@ -47,11 +50,7 @@ def _runtime_ref(status: Mapping[str, Any], name: str) -> str:
     if status.get("schema") != STATUS_SCHEMA:
         raise EvidenceAssemblyError(f"{name} schema mismatch")
     ref = status.get("runtime_instance_ref")
-    if (
-        not isinstance(ref, str)
-        or not ref.startswith("runtime-instance:")
-        or len(ref) != len("runtime-instance:") + 32
-    ):
+    if not isinstance(ref, str) or _RUNTIME_REF.fullmatch(ref) is None:
         raise EvidenceAssemblyError(f"{name} lacks a valid runtime_instance_ref")
     return ref
 
@@ -71,6 +70,11 @@ def assemble(
     before_continuity: Mapping[str, Any],
     after_continuity: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if not isinstance(candidate_git_sha, str) or _SHA40.fullmatch(candidate_git_sha) is None:
+        raise EvidenceAssemblyError(
+            "candidate_git_sha must be a lowercase 40-hex Git SHA"
+        )
+
     candidate = live_cycle.get("candidate")
     if not isinstance(candidate, Mapping) or candidate.get("git_sha") != candidate_git_sha:
         raise EvidenceAssemblyError("live-cycle report is bound to another candidate SHA")
