@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,8 +42,10 @@ import dk.ternedal.modelrig.net.ControlCenterScheduleRuntime
 import dk.ternedal.modelrig.net.ControlCenterScheduleSnapshot
 import dk.ternedal.modelrig.net.ControlCenterSchedulesClient
 import dk.ternedal.modelrig.net.ControlCenterStatus
+import dk.ternedal.modelrig.net.ControlCenterVisionSensor
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import dk.ternedal.modelrig.ui.components.kalivScreenInsets
@@ -138,6 +141,9 @@ fun ControlCenterScreen(
     var capabilityError by remember { mutableStateOf<String?>(null) }
     var scheduleSnapshot by remember { mutableStateOf<ControlCenterScheduleSnapshot?>(null) }
     var scheduleError by remember { mutableStateOf<String?>(null) }
+    var visionControlBusySource by remember { mutableStateOf<String?>(null) }
+    var visionControlError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(baseUrl, token, refreshGeneration) {
         if (baseUrl.isBlank() || token.isBlank()) {
@@ -273,6 +279,75 @@ fun ControlCenterScreen(
                         ComponentCard(component)
                     }
                     item { RoutingCard(current.routing) }
+                    item {
+                        SectionHeading(
+                            "Vision",
+                            "VisionRig sensorer · menneskestyret capture",
+                        )
+                    }
+                    if (!current.vision.available) {
+                        item {
+                            MessageCard(
+                                title = "VisionRig sensorer ikke tilgængelige",
+                                body = current.vision.reason
+                                    ?: "VisionRig-projektionen er ikke tilgængelig.",
+                                state = "unknown",
+                            )
+                        }
+                    } else if (current.vision.sensors.isEmpty()) {
+                        item {
+                            MessageCard(
+                                title = "Ingen VisionRig sensorer",
+                                body = "VisionRig svarer, men har ingen registrerede sensorer.",
+                                state = "unknown",
+                            )
+                        }
+                    } else {
+                        items(
+                            current.vision.sensors,
+                            key = { "vision:" + it.sourceId },
+                        ) { sensor ->
+                            VisionSensorCard(
+                                sensor = sensor,
+                                busy = visionControlBusySource == sensor.sourceId,
+                                mutationAvailable = current.vision.sensorStateRevision != null,
+                                onToggle = { requestedEnabled ->
+                                    val stateRevision = status?.vision?.sensorStateRevision
+                                        ?: return@VisionSensorCard
+                                    visionControlBusySource = sensor.sourceId
+                                    visionControlError = null
+                                    scope.launch {
+                                        val result = withContext(Dispatchers.IO) {
+                                            runCatching {
+                                                ControlCenterClient(baseUrl, token)
+                                                    .setVisionEnabled(
+                                                        sourceId = sensor.sourceId,
+                                                        enabled = requestedEnabled,
+                                                        expectedStateRevision = stateRevision,
+                                                    )
+                                            }
+                                        }
+                                        result.onSuccess {
+                                            refreshGeneration += 1
+                                        }.onFailure {
+                                            visionControlError = it.message
+                                                ?: "VisionRig sensorstyring fejlede."
+                                        }
+                                        visionControlBusySource = null
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    if (visionControlError != null) {
+                        item {
+                            MessageCard(
+                                title = "VisionRig sensorstyring fejlede",
+                                body = visionControlError.orEmpty(),
+                                state = "unavailable",
+                            )
+                        }
+                    }
                     if (current.requiredFailures.isNotEmpty()) {
                         item {
                             MessageCard(
@@ -338,6 +413,82 @@ fun ControlCenterScreen(
                 item { Spacer(Modifier.height(16.dp)) }
             }
         }
+    }
+}
+
+@Composable
+private fun VisionSensorCard(
+    sensor: ControlCenterVisionSensor,
+    busy: Boolean,
+    mutationAvailable: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    val state = when {
+        sensor.lifecycle == "retired" -> "disabled"
+        sensor.presence == "offline" -> "unavailable"
+        sensor.presence == "stale" -> "stale"
+        sensor.convergence == "pending" -> "unknown"
+        sensor.desiredEnabled && sensor.effectiveCaptureActive == true -> "healthy"
+        !sensor.desiredEnabled && sensor.effectiveCaptureActive == false -> "disabled"
+        else -> "unknown"
+    }
+    StatusCard(
+        title = sensor.displayName ?: sensor.sourceId,
+        state = state,
+        badgeSuffix = " · " + sensor.sourceType,
+    ) {
+        Text(
+            "Kilde: " + sensor.sourceId,
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        sensor.device?.let {
+            Text(
+                "Enhed: " + it,
+                color = KalivTheme.colors.textMuted,
+                fontSize = 11.sp,
+            )
+        }
+        Text(
+            "Ønsket: " + if (sensor.desiredEnabled) "aktiv" else "pauset",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 12.sp,
+        )
+        Text(
+            "Capture: " + when (sensor.effectiveCaptureActive) {
+                true -> "aktiv"
+                false -> "stoppet"
+                null -> "ukendt"
+            } + " · convergence: " + sensor.convergence,
+            color = KalivTheme.colors.textMuted,
+            fontSize = 12.sp,
+        )
+        Text(
+            "Presence: " + sensor.presence +
+                " · revision " + sensor.desiredRevision,
+            color = KalivTheme.colors.textMuted,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { onToggle(!sensor.desiredEnabled) },
+            enabled = !busy &&
+                mutationAvailable &&
+                sensor.lifecycle == "active",
+        ) {
+            Text(
+                when {
+                    busy -> "Sender…"
+                    sensor.desiredEnabled -> "Pause capture"
+                    else -> "Aktivér capture"
+                },
+            )
+        }
+        Text(
+            "Styringen går via ModelRig operator-boundary; producer-tokenet kan ikke aktivere sig selv.",
+            color = KalivTheme.colors.textMuted,
+            fontSize = 10.sp,
+        )
     }
 }
 
