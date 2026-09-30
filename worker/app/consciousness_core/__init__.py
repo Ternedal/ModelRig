@@ -20,6 +20,7 @@ from .dormancy_bridge import (
     DormancyBridgeError,
     DormancyBridgeReceipt,
     build_dormancy_bridge,
+    build_dormancy_bridge_from_session_bootstrap,
 )
 from .present_context import (
     PresentContextError,
