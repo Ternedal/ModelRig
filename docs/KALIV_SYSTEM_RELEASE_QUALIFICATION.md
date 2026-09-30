@@ -150,7 +150,42 @@ human-review, physical-rig, soak or production-activation evidence.
 }
 ```
 
-Run:
+## Assemble a fully-qualified manifest
+
+When all nine canonical evidence refs already exist, do not hand-edit the JSON
+shape. `scripts/kaliv_release_manifest_assembler.py` creates the manifest and
+immediately submits the in-memory result to the same
+`kaliv_system_release_gate.evaluate_manifest(...)` authority before writing it.
+
+The assembler **does not create evidence**, downgrade a missing gate to pending,
+or activate production. All nine refs and all four immutable repository SHAs are
+required.
+
+```powershell
+python scripts/kaliv_release_manifest_assembler.py `
+  --release-id kaliv-rc-1 `
+  --modelrig-sha <40-hex> `
+  --bodyrig-sha <40-hex> `
+  --visionrig-sha <40-hex> `
+  --voicerig-sha <40-hex> `
+  --software-exact-green-ref <canonical-ref> `
+  --consciousness-live-lifecycle-ref <canonical-ref> `
+  --visionrig-physical-perception-ref <canonical-ref> `
+  --bodyrig-photoreal-likeness-ref <canonical-ref> `
+  --bodyrig-digital-twin-m6-ref <canonical-ref> `
+  --bodyrig-android-live-body-ref <canonical-ref> `
+  --end-to-end-latency-ref <canonical-ref> `
+  --recovery-soak-ref <canonical-ref> `
+  --repository-authority-ref <canonical-ref> `
+  --manifest .\validation\kaliv-release-manifest.json `
+  --verdict .\validation\kaliv-release-verdict.json
+```
+
+A successful assembler run means only that the exact supplied evidence refs form
+a `QUALIFIED`, `release_ready=true` manifest under the existing final gate.
+Both the manifest and verdict retain `production_activation=false`.
+
+## Evaluate a manifest directly
 
 ```powershell
 python scripts/kaliv_system_release_gate.py .\path\to\kaliv-release-manifest.json
