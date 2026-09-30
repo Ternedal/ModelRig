@@ -114,3 +114,41 @@ Self/Person lineage, and writes the qualifier input atomically.
 
 "production_activation" remains false throughout.
 
+## Runtime snapshot path
+
+For a real worker restart, use the default-off loopback evidence snapshot instead
+of reconstructing a C17 pre-restart transient cycle. Enable only for the local
+operator session:
+
+    KALIV_CONSCIOUSNESS_EVIDENCE_EXPORT_ENABLED=1
+
+Capture the loopback endpoint before the model/profile change:
+
+    GET http://127.0.0.1:<worker-port>/experimental/consciousness/evidence-snapshot
+
+After changing the CognitiveProfile and performing a real worker restart, allow
+the wake reorientation and at least one lived-continuity cycle to complete, then
+capture the same endpoint again. The two snapshots contain an opaque
+runtime_instance_ref, exact C19-A session bootstrap receipt, current SelfState,
+current CognitiveProfile, latest LivedContinuityReceipt, and the WakeReceipt when
+present.
+
+The assembler can then consume the two runtime snapshots directly:
+
+    python scripts/consciousness_live_lifecycle_evidence_assembler.py ^
+      --candidate-sha <40-hex-modelrig-sha> ^
+      --live-cycle validation/consciousness-live-cycle-latest.json ^
+      --before-snapshot validation/consciousness-runtime-before.json ^
+      --after-snapshot validation/consciousness-runtime-after.json ^
+      --output validation/consciousness-live-lifecycle-input.json
+
+This production path does not invent a pre-restart transient cycle id. C19-A is
+the authoritative wake-reorientation proof after process restart because the
+previous WorldState and CognitiveWorkspace are intentionally not restored.
+The dormancy bridge records orientation_source=SESSION_BOOTSTRAP and remains
+reference-only, authority-free, and production_activation=false.
+
+The evidence endpoint is loopback-only, default-off, read-only, performs zero
+model calls, and grants no execution, scheduling, durable-memory-write, or
+production authority.
+
