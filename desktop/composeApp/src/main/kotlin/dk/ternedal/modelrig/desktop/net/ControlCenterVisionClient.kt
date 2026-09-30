@@ -26,8 +26,38 @@ private data class VisionWireSnapshot(
     @SerialName("sensors_truncated") val sensorsTruncated: Boolean = false,
     @SerialName("attention_total") val attentionTotal: Int = 0,
     @SerialName("attention_truncated") val attentionTruncated: Boolean = false,
+    @SerialName("visionrig_schema_versions") val visionRigSchemaVersions: VisionWireSchemaVersions? = null,
+    @SerialName("producer_readiness") val producerReadiness: VisionWireProducerReadiness = VisionWireProducerReadiness(),
+    @SerialName("producer_readiness_transition") val producerReadinessTransition: VisionWireProducerReadinessTransition = VisionWireProducerReadinessTransition(),
     val sensors: List<VisionWireSensor>,
     @SerialName("production_activation") val productionActivation: Boolean,
+)
+
+@Serializable
+private data class VisionWireSchemaVersions(
+    val bootstrap: Int,
+    val catalog: Int,
+    val fleet: Int,
+)
+
+@Serializable
+private data class VisionWireProducerReadiness(
+    @SerialName("runtime_sources") val runtimeSources: Int = 0,
+    @SerialName("heartbeat_v6_sources") val heartbeatV6Sources: Int = 0,
+    @SerialName("heartbeat_upgrade_required") val heartbeatUpgradeRequired: Int = 0,
+    @SerialName("heartbeat_v6_ratio") val heartbeatV6Ratio: Double? = null,
+    @SerialName("packet_measurement_complete_sources") val packetMeasurementCompleteSources: Int = 0,
+    @SerialName("packet_measurement_gap_sources") val packetMeasurementGapSources: Int = 0,
+    @SerialName("packet_measurement_complete_ratio") val packetMeasurementCompleteRatio: Double? = null,
+)
+
+@Serializable
+private data class VisionWireProducerReadinessTransition(
+    @SerialName("changed_utc") val changedUtc: String? = null,
+    @SerialName("heartbeat_v6_sources_delta") val heartbeatV6SourcesDelta: Int? = null,
+    @SerialName("heartbeat_v6_ratio_delta") val heartbeatV6RatioDelta: Double? = null,
+    @SerialName("packet_measurement_complete_sources_delta") val packetMeasurementCompleteSourcesDelta: Int? = null,
+    @SerialName("packet_measurement_complete_ratio_delta") val packetMeasurementCompleteRatioDelta: Double? = null,
 )
 
 @Serializable
@@ -98,6 +128,43 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
             fail("negative summary count")
         }
         wire.sensorStateRevision?.let { if (it < 0) fail("negative state revision") }
+        wire.visionRigSchemaVersions?.let {
+            if (it.bootstrap <= 0 || it.catalog <= 0 || it.fleet <= 0) {
+                fail("invalid VisionRig schema version")
+            }
+        }
+        val readiness = wire.producerReadiness
+        if (
+            readiness.runtimeSources < 0 ||
+            readiness.heartbeatV6Sources < 0 ||
+            readiness.heartbeatUpgradeRequired < 0 ||
+            readiness.packetMeasurementCompleteSources < 0 ||
+            readiness.packetMeasurementGapSources < 0
+        ) {
+            fail("negative producer readiness count")
+        }
+        if (readiness.heartbeatV6Sources + readiness.heartbeatUpgradeRequired != readiness.runtimeSources) {
+            fail("heartbeat readiness counts contradict runtime_sources")
+        }
+        if (
+            readiness.packetMeasurementCompleteSources + readiness.packetMeasurementGapSources
+            != readiness.runtimeSources
+        ) {
+            fail("packet measurement readiness counts contradict runtime_sources")
+        }
+        listOf(
+            readiness.heartbeatV6Ratio,
+            readiness.packetMeasurementCompleteRatio,
+        ).filterNotNull().forEach {
+            if (!it.isFinite() || it < 0.0 || it > 1.0) fail("producer readiness ratio is invalid")
+        }
+        val transition = wire.producerReadinessTransition
+        listOf(
+            transition.heartbeatV6RatioDelta,
+            transition.packetMeasurementCompleteRatioDelta,
+        ).filterNotNull().forEach {
+            if (!it.isFinite() || it < -1.0 || it > 1.0) fail("producer readiness delta is invalid")
+        }
 
         val sensors = wire.sensors.mapIndexed { index, sensor ->
             val path = "sensors[$index]"
@@ -185,6 +252,29 @@ class ControlCenterVisionClient(baseUrl: String, private val bearer: String) {
             sensorsTruncated = wire.sensorsTruncated,
             attentionTotal = wire.attentionTotal,
             attentionTruncated = wire.attentionTruncated,
+            visionRigSchemaVersions = wire.visionRigSchemaVersions?.let {
+                ControlCenterVisionSchemaVersions(
+                    bootstrap = it.bootstrap,
+                    catalog = it.catalog,
+                    fleet = it.fleet,
+                )
+            },
+            producerReadiness = ControlCenterVisionProducerReadiness(
+                runtimeSources = readiness.runtimeSources,
+                heartbeatV6Sources = readiness.heartbeatV6Sources,
+                heartbeatUpgradeRequired = readiness.heartbeatUpgradeRequired,
+                heartbeatV6Ratio = readiness.heartbeatV6Ratio,
+                packetMeasurementCompleteSources = readiness.packetMeasurementCompleteSources,
+                packetMeasurementGapSources = readiness.packetMeasurementGapSources,
+                packetMeasurementCompleteRatio = readiness.packetMeasurementCompleteRatio,
+            ),
+            producerReadinessTransition = ControlCenterVisionProducerReadinessTransition(
+                changedUtc = transition.changedUtc,
+                heartbeatV6SourcesDelta = transition.heartbeatV6SourcesDelta,
+                heartbeatV6RatioDelta = transition.heartbeatV6RatioDelta,
+                packetMeasurementCompleteSourcesDelta = transition.packetMeasurementCompleteSourcesDelta,
+                packetMeasurementCompleteRatioDelta = transition.packetMeasurementCompleteRatioDelta,
+            ),
             sensors = sensors.sortedBy { it.sourceId },
         )
     }
@@ -237,7 +327,34 @@ data class ControlCenterVisionSnapshot(
     val sensorsTruncated: Boolean,
     val attentionTotal: Int,
     val attentionTruncated: Boolean,
+    val visionRigSchemaVersions: ControlCenterVisionSchemaVersions?,
+    val producerReadiness: ControlCenterVisionProducerReadiness,
+    val producerReadinessTransition: ControlCenterVisionProducerReadinessTransition,
     val sensors: List<ControlCenterVisionSensor>,
+)
+
+data class ControlCenterVisionSchemaVersions(
+    val bootstrap: Int,
+    val catalog: Int,
+    val fleet: Int,
+)
+
+data class ControlCenterVisionProducerReadiness(
+    val runtimeSources: Int,
+    val heartbeatV6Sources: Int,
+    val heartbeatUpgradeRequired: Int,
+    val heartbeatV6Ratio: Double?,
+    val packetMeasurementCompleteSources: Int,
+    val packetMeasurementGapSources: Int,
+    val packetMeasurementCompleteRatio: Double?,
+)
+
+data class ControlCenterVisionProducerReadinessTransition(
+    val changedUtc: String?,
+    val heartbeatV6SourcesDelta: Int?,
+    val heartbeatV6RatioDelta: Double?,
+    val packetMeasurementCompleteSourcesDelta: Int?,
+    val packetMeasurementCompleteRatioDelta: Double?,
 )
 
 data class ControlCenterVisionSensor(

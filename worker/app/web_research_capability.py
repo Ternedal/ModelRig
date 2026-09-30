@@ -1,11 +1,11 @@
-"""Capability-kontrakten for web/research (T-034), landet før featuren.
+"""Capability-kontrakten for web/research (T-034).
 
-**Dormant. Bevidst IKKE i REGISTRY.** `ToolGate.is_enabled` bruger en deny-liste,
-ikke en allow-liste -- et værktøj i registret er live i samme øjeblik
-`KALIV_TOOLS_ENABLED=1`. At tilføje web-research dér ville altså åbne fladen som
-en bivirkning af en import, ikke som en beslutning. Samme mønster som
-`read_scope.py` og `data_sharing.py`: kontrakten først, dvalende, med nul
-kaldere.
+**Import-inert.** Selve spec'en har `run=None` og registreres aldrig som en
+eksekverbar capability ved import. `web_research_tool.py` kan først registrere
+en execution-bound kopi i ToolGate, når den eksakte opt-in
+`KALIV_WEB_RESEARCH_ENABLED=1` er aktiv via `mount_web_research`. Dermed kan
+`KALIV_TOOLS_ENABLED=1` alene ikke åbne web-research-fladen, og der findes
+ingen parallel `/research/fetch`-surface.
 
 Hvad D6 betyder her: en offentlig sidehentning bærer ingen lokal information
 udad, så dens `data_class` er `public` og politikken siger `automatic`. Det er
@@ -53,7 +53,7 @@ WEB_RESEARCH_SPEC = Tool(
         # (D4). En ukendt noegle er afvist, ikke ignoreret.
         "additionalProperties": False,
     },
-    run=None,  # dvalende: ingen eksekvering før aktivering er besluttet
+    run=None,  # spec er inert; runtime-tool binder callable kun bag exact opt-in
     sensitivity="public",
     isolate=True,
     env_allow=(),

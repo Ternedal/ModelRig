@@ -7,7 +7,10 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.consciousness_core.status_api import build_consciousness_status_router
+from app.consciousness_core.status_api import (
+    build_consciousness_status_router,
+    runtime_instance_ref,
+)
 
 
 class ConsciousnessRuntimeStatusTests(unittest.TestCase):
@@ -22,6 +25,12 @@ class ConsciousnessRuntimeStatusTests(unittest.TestCase):
             body["schema"],
             "kaliv-consciousness-core/runtime-status/v1",
         )
+        self.assertRegex(
+            body["runtime_instance_ref"],
+            r"^runtime-instance:[0-9a-f]{32}$",
+        )
+        self.assertEqual(body["runtime_instance_ref"], runtime_instance_ref())
+        self.assertEqual(runtime_instance_ref(), runtime_instance_ref())
         self.assertFalse(body["enabled"]["core"])
         self.assertFalse(body["enabled"]["continuous_loop"])
         self.assertFalse(body["enabled"]["autonomous_cognition"])
@@ -43,6 +52,9 @@ class ConsciousnessRuntimeStatusTests(unittest.TestCase):
             "prompt",
             "chain_of_thought",
             "memory_ref",
+            "process_id",
+            "pid",
+            "hostname",
         ):
             self.assertNotIn(forbidden, encoded)
 

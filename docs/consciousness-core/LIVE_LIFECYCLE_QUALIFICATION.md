@@ -80,3 +80,37 @@ The qualifier rejects the bundle if:
 This qualifier proves only the Consciousness lifecycle release gate. It does not
 claim that the full cross-repository Kaliv release is ready; the remaining system
 release gates remain independently required.
+
+## Evidence assembly
+
+The live lifecycle gate is assembled from raw, independently validated evidence
+with:
+
+    python scripts/consciousness_live_lifecycle_evidence_assembler.py ^
+      --candidate-sha <40-hex-modelrig-sha> ^
+      --live-cycle validation/consciousness-live-cycle-latest.json ^
+      --before-status validation/consciousness-status-before-restart.json ^
+      --after-status validation/consciousness-status-after-restart.json ^
+      --wake-receipt validation/wake-receipt.json ^
+      --wake-orientation validation/wake-orientation-receipt.json ^
+      --before-profile validation/profile-before.json ^
+      --after-profile validation/profile-after.json ^
+      --before-self-state validation/self-state-before.json ^
+      --after-self-state validation/self-state-after.json ^
+      --before-continuity validation/continuity-before.json ^
+      --after-continuity validation/continuity-after.json ^
+      --output validation/consciousness-live-lifecycle-input.json
+
+The loopback runtime status now includes an opaque "runtime_instance_ref".
+It is stable for one worker process, contains no PID/host/Self/Person identity,
+and is regenerated when the worker process starts. Evidence assembly requires
+different before/after runtime-instance refs; identical refs fail closed because
+a process restart has not been proven.
+
+The assembler does not trust caller-supplied dormancy or model-swap verdicts. It
+reconstructs the C31-D dormancy bridge and C31-G model-swap continuity receipt
+through the same Core contract functions used by runtime/tests, cross-checks
+Self/Person lineage, and writes the qualifier input atomically.
+
+"production_activation" remains false throughout.
+
