@@ -74,7 +74,11 @@ evidence reference:
 8. `recovery_soak` — the pinned system passes the agreed restart/recovery and
    long-running soak campaign.
 9. `repository_authority` — the repositories used for the release are protected
-   by the accepted exact-green merge authority.
+   by the accepted exact-green merge authority. A PASS must contain exactly one
+   canonical
+   `kaliv-repository-authority:<modelrig-sha>:<bodyrig-sha>:<visionrig-sha>:<voicerig-sha>:<sha256>`
+   reference emitted from reviewed live repository-authority verifier outputs.
+   All four embedded revisions must exactly match the release manifest pins.
 
 A missing or failed gate yields `BLOCKED`. A PASS without evidence is malformed,
 not merely pending.

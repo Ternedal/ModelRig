@@ -28,6 +28,11 @@ _SOFTWARE_EXACT_GREEN_REF = re.compile(
     r"([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):"
     r"([0-9a-f]{64})$"
 )
+_REPOSITORY_AUTHORITY_REF = re.compile(
+    r"^kaliv-repository-authority:"
+    r"([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{40}):"
+    r"([0-9a-f]{64})$"
+)
 _CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
     r"^consciousness-live-lifecycle:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
@@ -258,6 +263,29 @@ def _validate_gates(
             if match.groups()[:4] != expected_pins:
                 raise SystemReleaseManifestError(
                     "software_exact_green evidence repository SHAs do not match "
+                    "the pinned release revisions"
+                )
+        if gate == "repository_authority" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "repository_authority PASS requires exactly one "
+                    "cross-repository authority evidence ref"
+                )
+            match = _REPOSITORY_AUTHORITY_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "repository_authority PASS requires canonical "
+                    "kaliv-repository-authority evidence"
+                )
+            expected_pins = (
+                modelrig_sha,
+                bodyrig_sha,
+                visionrig_sha,
+                voicerig_sha,
+            )
+            if match.groups()[:4] != expected_pins:
+                raise SystemReleaseManifestError(
+                    "repository_authority evidence repository SHAs do not match "
                     "the pinned release revisions"
                 )
         if gate == "consciousness_live_lifecycle" and status == "PASS":

@@ -34,6 +34,15 @@ def _evidence_ref(name: str) -> str:
         return "visionrig-physical-perception:" + "3" * 40 + ":" + "e" * 64
     if name == "end_to_end_latency":
         return "kaliv-end-to-end-latency:" + "1" * 40 + ":" + "9" * 64
+    if name == "repository_authority":
+        return (
+            "kaliv-repository-authority:"
+            + "1" * 40 + ":"
+            + "2" * 40 + ":"
+            + "3" * 40 + ":"
+            + "4" * 40 + ":"
+            + "6" * 64
+        )
     return f"evidence:{name}:1"
 
 
@@ -161,6 +170,49 @@ def run_contract() -> None:
     _must_reject(
         software_multiple_refs,
         "requires exactly one cross-repository qualification evidence ref",
+    )
+
+    repository_mutable_ref = copy.deepcopy(valid)
+    repository_mutable_ref["gates"]["repository_authority"]["evidence_refs"] = [
+        "operator-says-protection-is-good"
+    ]
+    _must_reject(
+        repository_mutable_ref,
+        "requires canonical kaliv-repository-authority evidence",
+    )
+
+    repository_wrong_voice = copy.deepcopy(valid)
+    repository_wrong_voice["gates"]["repository_authority"]["evidence_refs"] = [
+        "kaliv-repository-authority:"
+        + "1" * 40 + ":"
+        + "2" * 40 + ":"
+        + "3" * 40 + ":"
+        + "f" * 40 + ":"
+        + "6" * 64
+    ]
+    _must_reject(
+        repository_wrong_voice,
+        "repository SHAs do not match the pinned release revisions",
+    )
+
+    repository_multiple_refs = copy.deepcopy(valid)
+    repository_multiple_refs["gates"]["repository_authority"]["evidence_refs"] = [
+        "kaliv-repository-authority:"
+        + "1" * 40 + ":"
+        + "2" * 40 + ":"
+        + "3" * 40 + ":"
+        + "4" * 40 + ":"
+        + "6" * 64,
+        "kaliv-repository-authority:"
+        + "1" * 40 + ":"
+        + "2" * 40 + ":"
+        + "3" * 40 + ":"
+        + "4" * 40 + ":"
+        + "5" * 64,
+    ]
+    _must_reject(
+        repository_multiple_refs,
+        "requires exactly one cross-repository authority evidence ref",
     )
 
     consciousness_mutable_ref = copy.deepcopy(valid)
