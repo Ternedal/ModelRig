@@ -22,63 +22,50 @@ identity.
 
 ## Required gates
 
-All eight gates must be `PASS`, and every PASS must carry at least one explicit
+All nine gates must be `PASS`, and every PASS must carry at least one explicit
 evidence reference:
 
 1. `software_exact_green` — exact pinned repository revisions qualified by their
    software checks.
 2. `consciousness_live_lifecycle` — a real live Core lifecycle covering
    continuity, wake/dormancy and model replacement without identity drift.
+   A PASS must contain exactly one canonical
+   `consciousness-live-lifecycle:<modelrig-sha>:<sha256>` reference emitted by
+   the lifecycle qualifier. The embedded SHA must equal the pinned ModelRig
+   revision, or be an ancestor with the exact same Git tree so a clean GitHub
+   merge-commit does not invalidate unchanged physical/runtime evidence.
+   Arbitrary labels and component evidence refs are not sufficient.
 3. `visionrig_physical_perception` — real sensor input reaches bounded
-   WorldEvidence/WorldState through the accepted VisionRig boundary.
+   WorldEvidence/WorldState through the accepted VisionRig boundary. A PASS must
+   contain exactly one canonical
+   `visionrig-physical-perception:<visionrig-sha>:<sha256>` reference emitted
+   by VisionRig's physical qualifier, and the embedded SHA must equal the pinned
+   `Ternedal/VisionRig` revision. A mutable label or inner WorldEvidence ref is
+   not sufficient.
 4. `bodyrig_photoreal_likeness` — the real-person Photoreal likeness gate,
    including required human review, has passed.
 5. `bodyrig_digital_twin_m6` — one coherent Person lineage reaches canonical M6
    with the required physical/human Windows and Quest evidence.
-6. `end_to_end_latency` — one correlated real event traverses perception,
+6. `bodyrig_android_live_body` — the standalone Kaliv Body Android surface has
+   passed its independent exact-head physical gate: authenticated RigLink,
+   digest-bound active avatar, live BodyRig frames, ARCore runtime, detected-plane
+   placement and explicit human visual acceptance are all evidence-bound. A PASS
+   must reference the independent gate's content-addressed
+   `kaliv-body-android-physical-gate:<modelrig-sha>:<sha256>` evidence ref.
+   The embedded ModelRig SHA must either equal the pinned release revision
+   directly, or be its Git ancestor **and resolve to the exact same Git tree**.
+   The latter permits only a clean merge-commit identity change; any content
+   change, squash/rewrite without ancestry, mutable label or path fails closed.
+   The Android gate result must still report `production_activation=false`.
+7. `end_to_end_latency` — one correlated real event traverses perception,
    cognition and outward voice/body behavior with measured latency evidence.
-7. `recovery_soak` — the pinned system passes the agreed restart/recovery and
+8. `recovery_soak` — the pinned system passes the agreed restart/recovery and
    long-running soak campaign.
-8. `repository_authority` — the repositories used for the release are protected
+9. `repository_authority` — the repositories used for the release are protected
    by the accepted exact-green merge authority.
 
 A missing or failed gate yields `BLOCKED`. A PASS without evidence is malformed,
 not merely pending.
-
-### Recovery + soak evidence
-
-`recovery_soak` now has a dedicated read-only qualifier:
-
-```powershell
-Copy-Item eval\recovery_soak_observations.example.json validation\recovery-soak-observations.json
-# Fill the exact candidate SHA, Stage-B evidence reference, the AGREED campaign
-# policy, real health samples and the four real recovery-event evidence refs.
-python scripts\kaliv_recovery_soak_qualification.py `
-  validation\recovery-soak-observations.json `
-  --report validation\recovery-soak-latest.json
-```
-
-The qualifier does **not** choose the soak policy and does not operate services.
-The observations file must state the already-agreed
-`required_duration_seconds` and `max_sample_gap_seconds`; qualification only
-proves that the measured campaign satisfied that declared policy. The values in
-the example file are illustrative and are not release authority.
-
-Every sample must be strictly time-ordered and prove backend healthy, worker
-healthy, supervisor looping and no state error. The campaign must also contain
-one successful, evidence-referenced event for each of:
-
-- `reboot`;
-- `backend_restart`;
-- `worker_restart`;
-- `interruption_recovery`.
-
-The receipt SHA-binds the observations file and carries the same exact candidate
-SHA plus a Stage-B evidence reference. It emits the canonical release reference
-`kaliv-recovery-soak:<modelrig-sha>:<sha256>`, where the digest binds the
-qualified receipt fields. It always keeps `production_activation=false`.
-A release manifest may mark `recovery_soak` PASS only by referencing that
-reviewed canonical qualifier evidence (or a strictly stronger reviewed authority).
 
 ## Authority boundary
 
@@ -89,7 +76,7 @@ The gate intentionally cannot activate production. The manifest must contain:
 ```
 
 and the emitted verdict also keeps `production_activation=false` even when all
-eight gates qualify. Final activation remains owned by the existing explicit
+nine gates qualify. Final activation remains owned by the existing explicit
 release/physical authorities.
 
 This is deliberate: neither this script nor CI may synthesize Photoreal,
@@ -113,6 +100,7 @@ human-review, physical-rig, soak or production-activation evidence.
     "visionrig_physical_perception": {"status": "PENDING", "evidence_refs": []},
     "bodyrig_photoreal_likeness": {"status": "PENDING", "evidence_refs": []},
     "bodyrig_digital_twin_m6": {"status": "PENDING", "evidence_refs": []},
+    "bodyrig_android_live_body": {"status": "PENDING", "evidence_refs": []},
     "end_to_end_latency": {"status": "PENDING", "evidence_refs": []},
     "recovery_soak": {"status": "PENDING", "evidence_refs": []},
     "repository_authority": {"status": "PENDING", "evidence_refs": []}
@@ -127,5 +115,5 @@ Run:
 python scripts/kaliv_system_release_gate.py .\path\to\kaliv-release-manifest.json
 ```
 
-Exit code 0 means all eight evidence gates qualify. Exit code 1 means a valid
+Exit code 0 means all nine evidence gates qualify. Exit code 1 means a valid
 manifest is still blocked. Exit code 2 means the manifest itself is invalid.
