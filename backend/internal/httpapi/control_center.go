@@ -1,12 +1,17 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"modelrig/internal/config"
 )
@@ -14,6 +19,7 @@ import (
 const (
 	controlCenterStatusSchema          = "kaliv-control-center-status/v1"
 	controlCenterScheduleHistorySchema = "kaliv-control-center-schedule-history/v1"
+	visionRigSensorMetadataSchema      = "visionrig/sensor-metadata/v1"
 	maxControlCenterStatusBytes        = 1 << 20
 	controlCenterStatusTimeout         = 5 * time.Second
 )
@@ -69,6 +75,9 @@ func (s *server) handleControlCenterStatus(w http.ResponseWriter, r *http.Reques
 	if payload["schema"] != controlCenterStatusSchema {
 		writeErr(w, http.StatusBadGateway, "control center status unavailable")
 		return
+	}
+	if vision, ok := payload["vision"].(map[string]any); ok {
+		vision["control_available"] = os.Getenv("KALIV_VISIONRIG_SENSOR_CONTROL") == "1"
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
@@ -132,4 +141,131 @@ func (s *server) handleControlCenterScheduleHistory(w http.ResponseWriter, r *ht
 
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, payload)
+}
+
+
+type visionRigEnabledRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+func visionRigLoopbackBaseURL() (string, bool) {
+	raw := strings.TrimSpace(os.Getenv("KALIV_VISIONRIG_URL"))
+	if raw == "" {
+		raw = "http://127.0.0.1:8110"
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.User != nil ||
+		parsed.RawQuery != "" ||
+		parsed.Fragment != "" ||
+		parsed.Hostname() == "" {
+		return "", false
+	}
+	host := parsed.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		// Keep the authority boundary literal. Letting net/http resolve the
+		// hostname later would make a poisoned hosts/DNS mapping capable of
+		// escaping the loopback-only contract.
+		if port := parsed.Port(); port != "" {
+			parsed.Host = net.JoinHostPort("127.0.0.1", port)
+		} else {
+			parsed.Host = "127.0.0.1"
+		}
+	} else {
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return "", false
+		}
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	return strings.TrimRight(parsed.String(), "/"), true
+}
+
+func (s *server) handleControlCenterVisionSensorEnabled(w http.ResponseWriter, r *http.Request) {
+	sourceID := strings.TrimSpace(r.PathValue("sourceID"))
+	if sourceID == "" || utf8.RuneCountInString(sourceID) > 128 {
+		writeErr(w, http.StatusBadRequest, "invalid VisionRig source id")
+		return
+	}
+	base, ok := visionRigLoopbackBaseURL()
+	if !ok {
+		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+	if err != nil || len(body) > 1024 {
+		writeErr(w, http.StatusBadRequest, "invalid VisionRig control request")
+		return
+	}
+	var input visionRigEnabledRequest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil || input.Enabled == nil {
+		writeErr(w, http.StatusBadRequest, "invalid VisionRig control request")
+		return
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		writeErr(w, http.StatusBadRequest, "invalid VisionRig control request")
+		return
+	}
+
+	payload, _ := json.Marshal(map[string]bool{"enabled": *input.Enabled})
+	target := base + "/api/v1/sensors/" + url.PathEscape(sourceID) + "/metadata"
+	req, err := http.NewRequestWithContext(
+		r.Context(),
+		http.MethodPatch,
+		target,
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if requestID := r.Header.Get("X-Request-ID"); requestID != "" {
+		req.Header.Set("X-Request-ID", requestID)
+	}
+
+	client := &http.Client{
+		Timeout: controlCenterStatusTimeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
+		return
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, maxControlCenterStatusBytes+1))
+	if err != nil || len(responseBody) > maxControlCenterStatusBytes {
+		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
+		return
+	}
+	var result map[string]any
+	if err := json.Unmarshal(responseBody, &result); err != nil ||
+		result["schema"] != visionRigSensorMetadataSchema {
+		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
+		return
+	}
+	metadata, ok := result["metadata"].(map[string]any)
+	if !ok || metadata["source_id"] != sourceID || metadata["enabled"] != *input.Enabled {
+		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema":    "kaliv-control-center-vision-enabled/v1",
+		"source_id": sourceID,
+		"enabled":   *input.Enabled,
+	})
 }
