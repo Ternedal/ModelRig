@@ -45,6 +45,9 @@ _VISIONRIG_PHYSICAL_REF = re.compile(
 _END_TO_END_LATENCY_REF = re.compile(
     r"^kaliv-end-to-end-latency:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
+_BODYRIG_M6_REF = re.compile(
+    r"^bodyrig-digital-twin-m6:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 
 REQUIRED_REPOSITORIES = (
     "Ternedal/ModelRig",
@@ -341,6 +344,23 @@ def _validate_gates(
                 raise SystemReleaseManifestError(
                     "visionrig_physical_perception evidence is bound to a different "
                     "VisionRig Git SHA"
+                )
+        if gate == "bodyrig_digital_twin_m6" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "bodyrig_digital_twin_m6 PASS requires exactly one "
+                    "canonical M6 evidence ref"
+                )
+            match = _BODYRIG_M6_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "bodyrig_digital_twin_m6 PASS requires canonical "
+                    "bodyrig-digital-twin-m6 evidence"
+                )
+            if match.group(1) != bodyrig_sha:
+                raise SystemReleaseManifestError(
+                    "bodyrig_digital_twin_m6 evidence is bound to a different "
+                    "BodyRig Git SHA"
                 )
         if gate == "bodyrig_android_live_body" and status == "PASS":
             if len(refs) != 1:
