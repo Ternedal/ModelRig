@@ -16,6 +16,27 @@ sys.modules[SPEC.name] = gate
 SPEC.loader.exec_module(gate)
 
 
+def _evidence_ref(name: str) -> str:
+    if name == "software_exact_green":
+        return (
+            "kaliv-software-exact-green:"
+            + "1" * 40 + ":"
+            + "2" * 40 + ":"
+            + "3" * 40 + ":"
+            + "4" * 40 + ":"
+            + "7" * 64
+        )
+    if name == "bodyrig_android_live_body":
+        return "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
+    if name == "consciousness_live_lifecycle":
+        return "consciousness-live-lifecycle:" + "1" * 40 + ":" + "c" * 64
+    if name == "visionrig_physical_perception":
+        return "visionrig-physical-perception:" + "3" * 40 + ":" + "e" * 64
+    if name == "end_to_end_latency":
+        return "kaliv-end-to-end-latency:" + "1" * 40 + ":" + "9" * 64
+    return f"evidence:{name}:1"
+
+
 def _manifest() -> dict:
     return {
         "schema": gate.SCHEMA,
@@ -32,34 +53,7 @@ def _manifest() -> dict:
         "gates": {
             name: {
                 "status": "PASS",
-                "evidence_refs": [
-                    (
-                        "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
-                        if name == "bodyrig_android_live_body"
-                        else (
-                            "consciousness-live-lifecycle:"
-                            + "1" * 40
-                            + ":"
-                            + "c" * 64
-                            if name == "consciousness_live_lifecycle"
-                            else (
-                                "visionrig-physical-perception:"
-                                + "3" * 40
-                                + ":"
-                                + "e" * 64
-                                if name == "visionrig_physical_perception"
-                                else (
-                                    "kaliv-end-to-end-latency:"
-                                    + "1" * 40
-                                    + ":"
-                                    + "9" * 64
-                                    if name == "end_to_end_latency"
-                                    else f"evidence:{name}:1"
-                                )
-                            )
-                        )
-                    )
-                ],
+                "evidence_refs": [_evidence_ref(name)],
             }
             for name in gate.REQUIRED_GATES
         },
@@ -125,6 +119,49 @@ def run_contract() -> None:
     assert verdict.release_ready is False
     assert verdict.pending_gates == ("bodyrig_photoreal_likeness",)
     assert verdict.production_activation is False
+
+    software_mutable_ref = copy.deepcopy(valid)
+    software_mutable_ref["gates"]["software_exact_green"]["evidence_refs"] = [
+        "operator-says-all-repos-green"
+    ]
+    _must_reject(
+        software_mutable_ref,
+        "requires canonical kaliv-software-exact-green evidence",
+    )
+
+    software_wrong_body = copy.deepcopy(valid)
+    software_wrong_body["gates"]["software_exact_green"]["evidence_refs"] = [
+        "kaliv-software-exact-green:"
+        + "1" * 40 + ":"
+        + "f" * 40 + ":"
+        + "3" * 40 + ":"
+        + "4" * 40 + ":"
+        + "7" * 64
+    ]
+    _must_reject(
+        software_wrong_body,
+        "repository SHAs do not match the pinned release revisions",
+    )
+
+    software_multiple_refs = copy.deepcopy(valid)
+    software_multiple_refs["gates"]["software_exact_green"]["evidence_refs"] = [
+        "kaliv-software-exact-green:"
+        + "1" * 40 + ":"
+        + "2" * 40 + ":"
+        + "3" * 40 + ":"
+        + "4" * 40 + ":"
+        + "7" * 64,
+        "kaliv-software-exact-green:"
+        + "1" * 40 + ":"
+        + "2" * 40 + ":"
+        + "3" * 40 + ":"
+        + "4" * 40 + ":"
+        + "8" * 64,
+    ]
+    _must_reject(
+        software_multiple_refs,
+        "requires exactly one cross-repository qualification evidence ref",
+    )
 
     consciousness_mutable_ref = copy.deepcopy(valid)
     consciousness_mutable_ref["gates"]["consciousness_live_lifecycle"]["evidence_refs"] = [
