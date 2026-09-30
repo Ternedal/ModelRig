@@ -3,7 +3,7 @@
 Alt her forudsætter dev-kanalen (`DEV_APPLIANCE.md`): riggen kører fra
 HEAD, telefonen fra CI's APK. Slice A/B og Unity-proofen (#720) er på main.
 De historiske #846/#1920-stacks er superseded. Worker/backend-live-feedet er på
-main; den aktuelle Android-klient er samlet i **#1964** med live frames,
+main; den aktuelle Android-klient er samlet i **#1976** med live frames,
 digest-bundet remote avatar, RigLink, ARCore, plane placement og de fysiske
 qualification-værktøjer. Fysisk Android evidence er stadig separat fra CI.
 
@@ -54,11 +54,11 @@ Fra `main`, ren working tree, telefon ikke nødvendig:
     python scripts\bodyrig_unity_physical_gate.py --expected-sha (git rev-parse HEAD)
 
 Grøn Windows-gate beviser fortsat den klassiske renderer. Android/live-body har
-sin egen stærkere exact-head gate i #1964 og må ikke arve Windows-beviset.
+sin egen stærkere exact-head gate i #1976 og må ikke arve Windows-beviset.
 
-## 3. Kroppen følger samtalen (#1964 Android-kandidat)
+## 3. Kroppen følger samtalen (#1976 Android-kandidat)
 
-På #1964 kommer avatar, BodyPrint og frames fra riggen over den authenticated
+På #1976 kommer avatar, BodyPrint og frames fra riggen over den authenticated
 BodyRig-flade. Kaliv Body skal startes med RigLink-authority; lokal VRM-path er
 fortsat kun development fallback på desktop:
 
@@ -112,13 +112,13 @@ hendes krop, ikke demo-identitetens. MediaPipe-kravene står i
   lange sætninger får `explain`-gestik under tale, thinking er `curious`
   (lavt), fejl er `concerned`; idle/listening/interrupted nulstiller. Intet
   udledes af ordene selv — ingen sentiment-gætteri. Se `worker/app/body_cues.py`.
-- **Android:** softwarestakken er samlet i #1964, men fysisk build/install/live-body/
+- **Android:** softwarestakken er samlet i #1976, men fysisk build/install/live-body/
   AR/visual evidence skal stadig køres på kandidatens exact head.
 - **Quest:** er fortsat et separat packaging/physical-proof spor.
 - **Demo-identiteten** er en fixture. Den rigtige krop: afsnit 5.
 
 
-## 6. Android live-body qualification (#1964)
+## 6. Android live-body qualification (#1976)
 
 På en ren checkout af kandidat-headen:
 
