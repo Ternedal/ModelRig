@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the retained Stage A one-click contract against candidate 2.0.13."""
+"""Run the retained Stage A one-click contract against candidate 2.0.14."""
 # ruff: noqa: F821 -- retained contract injects wizard/check/ROOT/counters via exec.
 import os
 from pathlib import Path
@@ -7,9 +7,9 @@ from pathlib import Path
 _source_path = Path(__file__).with_name("workflow_stage_a_one_click.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.13"),
-    ("1.58.143", "2.0.13"),
-    ("1.58.142", "2.0.12"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.14"),
+    ("1.58.143", "2.0.14"),
+    ("1.58.142", "2.0.13"),
     ("#150", "#161"),
 ):
     _source = _source.replace(_old, _new)
@@ -74,6 +74,6 @@ check(
     "manual fallback tells the operator to paste into the running wizard",
 )
 
-print(f"2.0.13 Stage A additions: {passed} passed, {failed} failed")
+print(f"2.0.14 Stage A additions: {passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)
