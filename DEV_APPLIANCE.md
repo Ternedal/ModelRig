@@ -62,7 +62,7 @@ Person Revision. Efter stacken er startet, kræver launcheren desuden at
 Som standard starter dev-appliancen også et sibling-checkout af
 `Ternedal/VisionRig` på port 8110 med
 `VISIONRIG_MODELRIG_BRIDGE=1`. Startup bliver først erklæret klar, når
-VisionRig-health bekræfter både `PerceptionEvent/v3` og en aktiveret
+VisionRig-health bekræfter både `PerceptionEvent/v4` og en aktiveret
 ModelRig-bro. Brug `-VisionRigDir <sti>` ved en anden checkout-placering eller
 `-SkipVisionRig` når perception bevidst skal køres separat.
 
