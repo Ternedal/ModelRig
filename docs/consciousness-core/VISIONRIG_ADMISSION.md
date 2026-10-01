@@ -1,12 +1,12 @@
 # VisionRig -> Consciousness Core admission
 
-This adapter connects VisionRig `PerceptionEvent/v3`/`v4` to the existing C20
+This adapter connects VisionRig `PerceptionEvent/v4`/`v4` to the existing C20
 WorldEvidence boundary. It does not create a second world model.
 
 ```mermaid
 flowchart LR
     V["VisionRig<br/>sensor + structured perception"]
-    P["PerceptionEvent/v3 or v4"]
+    P["PerceptionEvent/v4 or v4"]
     G["Admission gate<br/>loopback-only · default-off<br/>strict JSON · 256 KiB"]
     E["WorldEvidenceEvent<br/>epistemic_status=inferred<br/>canonical provenance"]
     W["Transient WorldState"]
