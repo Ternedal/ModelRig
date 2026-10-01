@@ -306,7 +306,7 @@ while ((Get-Date) -lt $deadline -and -not ($backendOk -and $workerOk -and $visio
             $visionRigOk = (
                 $vh.status -eq "ok" -and
                 $vh.service -eq "visionrig" -and
-                $vh.perception_schema -eq "visionrig/perception-event/v3" -and
+                $vh.perception_schema -eq "visionrig/perception-event/v4" -and
                 $vh.modelrig_bridge.enabled -eq $true
             )
         } catch { }
