@@ -284,11 +284,10 @@ into a signed release. A loopback-only
 booleans and aggregate cycle count, and the dev launcher requires it to confirm
 a mounted live session before declaring startup successful. The same dev launcher
 also starts the sibling `VisionRig` checkout by default and forces its ModelRig
-publisher to the loopback worker. VisionRig `main` currently reports
-`PerceptionEvent/v4`, while the ModelRig admission adapter accepts both v3 and
-v4. The current `start-dev-appliance.ps1` readiness comparison still expects
-v3, so integrated dev-start qualification has a known convergence blocker until
-that check is updated to the current v4 health contract.
+publisher to the loopback worker. VisionRig `main` reports
+`PerceptionEvent/v4`; ModelRig's admission adapter remains backward-compatible
+with v3, while the dev-appliance readiness gate now requires the current v4
+health contract before startup is declared green.
 
 **Two cloud roads, and they are not the same thing.**
 
