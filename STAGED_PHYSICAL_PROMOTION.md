@@ -1,7 +1,7 @@
-# Staged physical promotion — 2.0.13
+# Staged physical promotion — 2.0.14
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
-`2.0.13`. Kandidaten ligger på `physical-proof/2.0.14`; den eksakte SHA skal
+`2.0.14`. Kandidaten ligger på `physical-proof/2.0.14`; den eksakte SHA skal
 altid læses fra den fetch'ede `origin/physical-proof/2.0.14`, matches mod lokal
 HEAD og bevises med `candidate_freeze_check.py`. Den må aldrig gættes eller
 kopieres fra ældre evidens.
@@ -9,7 +9,7 @@ kopieres fra ældre evidens.
 ## Ufravigelige grænser
 
 - Stage A kører mod én upubliceret, kvalificeret kandidat-SHA.
-- Samme SHA bruges senere til fast-forward, tag `v2.0.13` og release.
+- Samme SHA bruges senere til fast-forward, tag `v2.0.14` og release.
 - Efter fysisk evidens er begyndt, er squash, rebase, mergecommit, amend og
   enhver anden SHA-ændring forbudt.
 - Enhver bevægelse af kandidatbranch eller `origin/main` kræver ny freeze og ny
@@ -31,14 +31,14 @@ $RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.14).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
 if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.14: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "2.0.13") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.14") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
 `origin/physical-proof/2.0.14`, lokal exact HEAD og den grønne
 `candidate_freeze_check.py` skal alle pege på samme kandidat-SHA. Stop ved
-enhver forskel. Historiske freeze-PR'er og tidligere 2.0.13-heads er ikke
+enhver forskel. Historiske freeze-PR'er og tidligere 2.0.14-heads er ikke
 SHA-authority.
 
 ### A1. Opret en frisk freeze-receipt
@@ -127,30 +127,30 @@ Stop her. Stage A udfører ingen repository- eller releaseoperationer.
 ## Beslutningspunkt
 
 Kun efter en særskilt eksplicit beslutning må `main` fast-forwardes til præcis
-Stage A-SHA'en, samme SHA tagges som `v2.0.13`, og det komplette signerede
+Stage A-SHA'en, samme SHA tagges som `v2.0.14`, og det komplette signerede
 release-sæt publiceres. Ændres SHA'en, er Stage A ugyldig.
 
-## Stage B — publiceret 2.0.13
+## Stage B — publiceret 2.0.14
 
 Følg den operative autoritet i `STAGE_B_UPDATER_EVIDENCE.md`.
 
-Kildereleasen for appliance-transitionen er den signerede `2.0.12`, og målet er
-`2.0.13`. Target-updaterens checksum og provenance verificeres før swap som den
+Kildereleasen for appliance-transitionen er den signerede `2.0.13`, og målet er
+`2.0.14`. Target-updaterens checksum og provenance verificeres før swap som den
 aktuelle bootstrap-grænse. Server, supervisor og worker må ikke kopieres
 manuelt; deres transition skal ske gennem updateren.
 
 Versionsbumpet ændrer ikke automatisk #401's claim. Et særskilt automatisk
 signed-release-to-signed-release self-update-bevis må kun hævdes, hvis #401's
-egen gate faktisk er gennemført. Det blokerer ikke promotion af 2.0.13, medmindre
+egen gate faktisk er gennemført. Det blokerer ikke promotion af 2.0.14, medmindre
 den authority ændres særskilt.
 
 Stage B skal dokumentere:
 
-1. normal update fra 2.0.12 til 2.0.13;
-2. reboot på 2.0.13;
+1. normal update fra 2.0.13 til 2.0.14;
+2. reboot på 2.0.14;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
-5. ugyldig update afvist før swap eller sund rollback til 2.0.13;
+5. ugyldig update afvist før swap eller sund rollback til 2.0.14;
 6. interruption/recovery uden manglende live executables;
 7. bevarede data, credentials og schedules.
 
@@ -211,7 +211,7 @@ obligatoriske og fælder tavst hvis de mangler:
    (1 byte – 1 MB, repository-relativ, ingen symlinks) og notens SHA-256 i
    observationsfilens `evidence_sha256` — skabelonens `FILL_ME_64_HEX` fælder.
 3. **Maskinproben** kører automatisk under valideringen og kræver et parret
-   `MODELRIG_TOKEN` mod den kørende 2.0.13-backend.
+   `MODELRIG_TOKEN` mod den kørende 2.0.14-backend.
 4. Kandidat-triplen i observationsfilen skal matche den friske
    `frozen-candidate.json` — kør `freeze_check.py` FØR filen udfyldes.
 
@@ -238,7 +238,7 @@ springes over; de er obligatoriske og kommer i denne rækkefølge:
 3. `DeviceInfo`-trinnet venter derefter på Pixel-receiptet
    (`a4-25f-device-info.json`) fra den parrede app; udebliver det, er
    parringen ikke lykkedes — kør trinnet igen frem for at fortsætte.
-4. Genkørsler af fixturen kræver `-Agent4ReplaceFixture` (fra 2.0.13) eller
+4. Genkørsler af fixturen kræver `-Agent4ReplaceFixture` (fra 2.0.14) eller
    arkivering af `modelrig-a4-25f-evidence`-mappen først — fixturen nægter
    ærligt at overskrive eksisterende evidens.
 
@@ -247,7 +247,7 @@ springes over; de er obligatoriske og kommer i denne rækkefølge:
 T-023 kan ikke se UI'en og auto-godkender intet: hver case kræver de to
 præcise operatørfraser og et kandidatbundet screenshot, når wizarden beder om
 dem. Stop/fallback-proben tåler planner-varians (op til tre plan-forsøg fra
-2.0.13); selve eksekverings-kontrakterne er uændret strikse.
+2.0.14); selve eksekverings-kontrakterne er uændret strikse.
 
 
 
@@ -293,7 +293,7 @@ Findes der ingen anden konto på riggen, skal den oprettes FØR kampagnen
 startes — ellers står T-033 rød, og `physical_campaign_complete` kan ikke
 blive sand.
 
-## Agent 4 i 2.0.13: brug den kandidatbundne APK
+## Agent 4 i 2.0.14: brug den kandidatbundne APK
 
 CI bygger en a425f-APK pr. push til proof-branchen (workflow `a425f-apk`,
 artefakt `kaliv-a425f-apk-<exact-sha>`). Brug DEN til kampagnen — ikke en
