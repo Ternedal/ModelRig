@@ -13,7 +13,7 @@ kampagnerapport med `production_activation=false`.
 
 Alle rapporter skal binde til samme:
 
-- version `2.0.13`;
+- version `2.0.14`;
 - eksakte 40-tegns kandidat-/release-SHA;
 - worker `code_sha256`, hvor runtime-koden måles;
 - rene checkout og konsistente versionsstempler;
