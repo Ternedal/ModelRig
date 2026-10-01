@@ -63,10 +63,8 @@ Som standard starter dev-appliancen også et sibling-checkout af
 `Ternedal/VisionRig` på port 8110 med
 `VISIONRIG_MODELRIG_BRIDGE=1`. Startup bliver først erklæret klar, når
 VisionRig `main` annoncerer `PerceptionEvent/v4`, og ModelRig-adapteren accepterer
-både v3 og v4. **Kendt convergence-blocker pr. 2026-10-01:** den nuværende
-`scripts/start-dev-appliance.ps1` på ModelRig `main` sammenligner stadig
-`/health.perception_schema` med v3. Den readiness-check skal bringes til v4,
-før den integrerede dev-start kan bruges som exact-current-main qualification. Brug `-VisionRigDir <sti>` ved en anden checkout-placering eller
+fortsat både v3 og v4. Dev-appliancens readiness-check kræver nu eksplicit v4,
+så integrated startup ikke kan erklæres grøn mod en stale v3 health-kontrakt. Brug `-VisionRigDir <sti>` ved en anden checkout-placering eller
 `-SkipVisionRig` når perception bevidst skal køres separat.
 
 `STOP_DEV_APPLIANCE.cmd` (eller `-Stop`) lukker dev-stakken og starter
