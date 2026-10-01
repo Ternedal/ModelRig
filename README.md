@@ -1,5 +1,7 @@
 # ModelRig
 
+_Documentation baseline: 2026-10-01 · V1 convergence / release-candidate preparation._
+
 A local-first AI platform: run models on your own hardware via Ollama, reach them
 from a desktop app (**Kaliv** on Windows), an Android phone (**Kaliv**), and the **Kaliv VR** OpenXR client, with
 Danish voice (ASR→LLM→TTS, streamed sentence-by-sentence), RAG document ingest
@@ -23,7 +25,7 @@ runtime paths stay behind explicit opt-in gates.
 
 ```mermaid
 flowchart LR
-    VIS["VisionRig\nvisual sensing · scene/depth\nstructured perception"] -.-> ADM["Vision admission\nloopback-only · default-off"]
+    VIS["VisionRig\nPerceptionEvent/v4 · scene/depth/IR\nRC baseline · physical qualification pending"] -.-> ADM["Vision admission\nloopback-only · default-off"]
     ADM -.-> WE["WorldEvidence\nepistemic_status=inferred"]
     WE -.-> CC["Consciousness Core\nSelfState · WorldState · time · sleep/wake\nC31 lived continuity\nLANDED · DEV ACTIVE / release default-off"]
 
@@ -33,8 +35,8 @@ flowchart LR
     CC -. "intentions" .-> A3["Agent 3\ngated execution"]
     CC -. "experience / recall refs" .-> M4["Memory 4\ndurable autobiographical memory"]
 
-    MR -->|BodyCue| BR["BodyRig\nbody identity · Motor State\ndigital-twin authority"]
-    MR <--> VR["VoiceRig\nvoice/audio + timing authority"]
+    MR -->|BodyCue| BR["BodyRig\nPhotoreal V2 · body identity · Motor State\ndigital-twin authority · physical gates pending"]
+    MR <--> VR["VoiceRig\nvoice/audio + timing authority\nV1 software path · physical acceptance pending"]
 
     subgraph K["Kaliv product surfaces"]
         KA["Kaliv Android"]
@@ -52,6 +54,32 @@ flowchart LR
     classDef dormant stroke-dasharray:6 4;
     class CC,ADM,A3 dormant;
 ```
+
+## V1 convergence boundary
+
+The V1 candidate is now defined as one exact, cross-repository evidence set rather
+than independent subsystem "green" states:
+
+```mermaid
+flowchart LR
+    MR["ModelRig exact SHA"]
+    BR["BodyRig exact SHA"]
+    VIS["VisionRig exact SHA"]
+    VOI["VoiceRig exact SHA"]
+    SW["software_exact_green\nall four exact revisions"]
+    PHY["physical evidence\nBodyRig · VisionRig · VoiceRig · clients"]
+    REL["Kaliv system release manifest\nall mandatory gates PASS"]
+    SIGN["signed release artifact"]
+
+    MR --> SW
+    BR --> SW
+    VIS --> SW
+    VOI --> SW
+    SW --> PHY --> REL --> SIGN
+```
+
+Software qualification cannot substitute for physical evidence, and subsystem
+production authority does not automatically activate Kaliv as a whole.
 
 See **[docs/KALIV_SYSTEM_DEFINITION.md](docs/KALIV_SYSTEM_DEFINITION.md)** for
 the canonical whole-system definition, authority map, cognitive-continuity model,
@@ -136,9 +164,9 @@ flowchart TB
 
     subgraph Authorities["Independent authorities / engines"]
         direction LR
-        Voice["VoiceRig<br/>voice + timing"]
-        Vision["VisionRig<br/>visual perception + scene/depth hints"]
-        BodyRig["BodyRig<br/>body identity + Motor State"]
+        Voice["VoiceRig<br/>voice + timing<br/>physical acceptance pending"]
+        Vision["VisionRig<br/>PerceptionEvent/v4 · scene/depth/IR<br/>physical qualification pending"]
+        BodyRig["BodyRig<br/>Photoreal V2 · body identity + Motor State<br/>physical likeness/acceptance pending"]
         Sky["SkyPlayer-Engine<br/>XR / media"]
     end
 
@@ -202,7 +230,7 @@ Consciousness Core integration is an explicit bounded evidence path:
 ```mermaid
 flowchart LR
     Sensor["VisionRig sensor / source"]
-    PE["PerceptionEvent/v3"]
+    PE["PerceptionEvent/v4"]
     Gate["Loopback admission gate\nKALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1"]
     WE["WorldEvidenceEvent\ninferred · provenance-bound"]
     WS["Transient WorldState"]
@@ -255,9 +283,11 @@ into a signed release. A loopback-only
 `/experimental/consciousness/status` surface reports only activation/readiness
 booleans and aggregate cycle count, and the dev launcher requires it to confirm
 a mounted live session before declaring startup successful. The same dev launcher
-also starts the sibling `VisionRig` checkout by default, forces its ModelRig
-publisher to the loopback worker, and requires VisionRig health to report the
-`PerceptionEvent/v3` contract plus an enabled bridge before startup is green.
+also starts the sibling `VisionRig` checkout by default and forces its ModelRig
+publisher to the loopback worker. VisionRig `main` reports
+`PerceptionEvent/v4`; ModelRig's admission adapter remains backward-compatible
+with v3, while the dev-appliance readiness gate now requires the current v4
+health contract before startup is declared green.
 
 **Two cloud roads, and they are not the same thing.**
 

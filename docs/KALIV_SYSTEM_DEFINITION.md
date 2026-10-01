@@ -71,7 +71,7 @@ flowchart TB
     C31 -. "bounded cognitive guidance/state" .-> API
     API --> Intent
 
-    Vision -. "PerceptionEvent/v3" .-> Admission
+    Vision -. "PerceptionEvent/v4" .-> Admission
     Admission -.-> WE
     WE --> WS
     WS --> C31

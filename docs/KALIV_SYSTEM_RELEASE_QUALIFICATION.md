@@ -1,5 +1,7 @@
 # Kaliv system release qualification
 
+_Documentation baseline: 2026-10-01 · V1 convergence requires exact repository pins plus independent physical evidence._
+
 A green repository is not the same thing as a finished Kaliv system.
 
 `scripts/kaliv_system_release_gate.py` is the fail-closed final qualification
