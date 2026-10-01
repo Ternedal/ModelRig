@@ -1,4 +1,4 @@
-# RIGDAG_SIMPEL — ModelRig 2.0.13
+# RIGDAG_SIMPEL — ModelRig 2.0.14
 
 Dette er den korte operatorindgang. Den autoritative rækkefølge og alle
 fail-closed grænser står i `STAGED_PHYSICAL_PROMOTION.md`; Stage B-detaljerne
@@ -6,7 +6,7 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
 ## Kandidat
 
-- version: `2.0.13`;
+- version: `2.0.14`;
 - branch: `physical-proof/2.0.14`;
 - freeze: `candidate_freeze_check.py` grøn på exact SHA;
 - exact SHA: læses fra den fetch'ede `origin/physical-proof/2.0.14` og må aldrig gættes eller kopieres fra ældre evidens;
@@ -26,7 +26,7 @@ $CandidateSha = (git rev-parse HEAD).Trim()
 $RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.14).Trim()
 if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.14: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "2.0.13") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.14") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
@@ -78,7 +78,7 @@ Stage A merger, tagger, releaser og aktiverer intet.
 ## Beslutningspunkt
 
 Kun efter en særskilt eksplicit beslutning må præcis Stage A-SHA'en
-fast-forwardes til `main`, tagges `v2.0.13` og publiceres som et komplet
+fast-forwardes til `main`, tagges `v2.0.14` og publiceres som et komplet
 signeret release-sæt.
 
 ## Blok 2 — Stage B
@@ -117,7 +117,7 @@ summary.total=8
 
 Det særskilte automatiske signed-release-to-signed-release self-update-bevis
 forbliver under #401 og må ikke antages ud fra versionsbumpet alene. Det
-blokerer ikke promotion af 2.0.13, medmindre #401's authority ændres særskilt.
+blokerer ikke promotion af 2.0.14, medmindre #401's authority ændres særskilt.
 
 ## Stopregler
 
