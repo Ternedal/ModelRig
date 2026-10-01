@@ -8,8 +8,8 @@ release era before the retained implementation is executed.
 # ruff: noqa: F821 -- main is injected by the retained implementation at runtime.
 from pathlib import Path as _Path
 
-EXPECTED_SOURCE_VERSION = "2.0.12"
-EXPECTED_TARGET_VERSION = "2.0.13"
+EXPECTED_SOURCE_VERSION = "2.0.13"
+EXPECTED_TARGET_VERSION = "2.0.14"
 _RETAINED = _Path(__file__).with_name("stage_b_one_click_v2.retained")
 _source = _RETAINED.read_text(encoding="utf-8")
 _old_source = 'EXPECTED_SOURCE_VERSION = "2.0.11"'
@@ -33,8 +33,8 @@ _name = __name__
 globals()["__name__"] = "_stage_b_one_click_v2_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
 globals()["__name__"] = _name
-EXPECTED_SOURCE_VERSION = "2.0.12"
-EXPECTED_TARGET_VERSION = "2.0.13"
+EXPECTED_SOURCE_VERSION = "2.0.13"
+EXPECTED_TARGET_VERSION = "2.0.14"
 SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
 
 if _name == "__main__":
