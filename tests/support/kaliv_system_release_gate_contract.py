@@ -32,7 +32,27 @@ def _manifest() -> dict:
         "gates": {
             name: {
                 "status": "PASS",
-                "evidence_refs": [f"evidence:{name}:1"],
+                "evidence_refs": [
+                    (
+                        "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64
+                        if name == "bodyrig_android_live_body"
+                        else (
+                            "consciousness-live-lifecycle:"
+                            + "1" * 40
+                            + ":"
+                            + "c" * 64
+                            if name == "consciousness_live_lifecycle"
+                            else (
+                                "visionrig-physical-perception:"
+                                + "3" * 40
+                                + ":"
+                                + "e" * 64
+                                if name == "visionrig_physical_perception"
+                                else f"evidence:{name}:1"
+                            )
+                        )
+                    )
+                ],
             }
             for name in gate.REQUIRED_GATES
         },
@@ -49,7 +69,38 @@ def _must_reject(manifest: dict, fragment: str) -> None:
         raise AssertionError(f"manifest unexpectedly accepted; wanted {fragment!r}")
 
 
+def _test_modelrig_clean_merge_equivalence_helper() -> None:
+    original_run = gate.subprocess.run
+    original_git = gate._git
+
+    class _Result:
+        stdout = ""
+
+    try:
+        gate.subprocess.run = lambda *args, **kwargs: _Result()
+        gate._git = lambda *args: "tree-" + "a" * 40
+        assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is True
+
+        def different_tree(*args):
+            joined = " ".join(args)
+            return "tree-evidence" if ("a" * 40) in joined else "tree-pinned"
+
+        gate._git = different_tree
+        assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is False
+
+        def non_ancestor(*args, **kwargs):
+            raise gate.subprocess.CalledProcessError(1, args[0])
+
+        gate.subprocess.run = non_ancestor
+        gate._git = original_git
+        assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is False
+    finally:
+        gate.subprocess.run = original_run
+        gate._git = original_git
+
+
 def run_contract() -> None:
+    _test_modelrig_clean_merge_equivalence_helper()
     valid = _manifest()
     verdict = gate.evaluate_manifest(valid)
     assert verdict.state == "QUALIFIED"
@@ -67,6 +118,118 @@ def run_contract() -> None:
     assert verdict.release_ready is False
     assert verdict.pending_gates == ("bodyrig_photoreal_likeness",)
     assert verdict.production_activation is False
+
+    consciousness_mutable_ref = copy.deepcopy(valid)
+    consciousness_mutable_ref["gates"]["consciousness_live_lifecycle"]["evidence_refs"] = [
+        "operator-says-consciousness-is-good"
+    ]
+    _must_reject(
+        consciousness_mutable_ref,
+        "requires exact-head-bound consciousness-live-lifecycle evidence",
+    )
+
+    consciousness_wrong_head = copy.deepcopy(valid)
+    consciousness_wrong_head["gates"]["consciousness_live_lifecycle"]["evidence_refs"] = [
+        "consciousness-live-lifecycle:" + "f" * 40 + ":" + "d" * 64
+    ]
+    _must_reject(
+        consciousness_wrong_head,
+        "not exact-tree-equivalent to the pinned ModelRig revision",
+    )
+
+    consciousness_multiple_refs = copy.deepcopy(valid)
+    consciousness_multiple_refs["gates"]["consciousness_live_lifecycle"]["evidence_refs"] = [
+        "consciousness-live-lifecycle:" + "1" * 40 + ":" + "c" * 64,
+        "consciousness-live-lifecycle:" + "1" * 40 + ":" + "d" * 64,
+    ]
+    _must_reject(
+        consciousness_multiple_refs,
+        "requires exactly one lifecycle qualification evidence ref",
+    )
+
+    vision_mutable_ref = copy.deepcopy(valid)
+    vision_mutable_ref["gates"]["visionrig_physical_perception"]["evidence_refs"] = [
+        "operator-says-vision-is-good"
+    ]
+    _must_reject(
+        vision_mutable_ref,
+        "requires exact-head-bound visionrig-physical-perception evidence",
+    )
+
+    vision_wrong_head = copy.deepcopy(valid)
+    vision_wrong_head["gates"]["visionrig_physical_perception"]["evidence_refs"] = [
+        "visionrig-physical-perception:" + "f" * 40 + ":" + "e" * 64
+    ]
+    _must_reject(
+        vision_wrong_head,
+        "bound to a different VisionRig Git SHA",
+    )
+
+    vision_multiple_refs = copy.deepcopy(valid)
+    vision_multiple_refs["gates"]["visionrig_physical_perception"]["evidence_refs"] = [
+        "visionrig-physical-perception:" + "3" * 40 + ":" + "e" * 64,
+        "visionrig-physical-perception:" + "3" * 40 + ":" + "f" * 64,
+    ]
+    _must_reject(
+        vision_multiple_refs,
+        "requires exactly one physical qualification evidence ref",
+    )
+
+    android_pending = copy.deepcopy(valid)
+    android_pending["gates"]["bodyrig_android_live_body"]["status"] = "PENDING"
+    android_pending["gates"]["bodyrig_android_live_body"]["evidence_refs"] = []
+    verdict = gate.evaluate_manifest(android_pending)
+    assert verdict.state == "BLOCKED"
+    assert verdict.release_ready is False
+    assert verdict.pending_gates == ("bodyrig_android_live_body",)
+    assert verdict.production_activation is False
+
+    android_mutable_ref = copy.deepcopy(valid)
+    android_mutable_ref["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+        "operator-says-android-is-good"
+    ]
+    _must_reject(
+        android_mutable_ref,
+        "requires exact-head-bound kaliv-body-android-physical-gate evidence refs",
+    )
+
+    android_wrong_head = copy.deepcopy(valid)
+    android_wrong_head["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+        "kaliv-body-android-physical-gate:" + "f" * 40 + ":" + "b" * 64
+    ]
+    _must_reject(
+        android_wrong_head,
+        "not exact-tree-equivalent to the pinned ModelRig revision",
+    )
+
+    # A normal GitHub merge commit gets a new commit SHA even when it
+    # preserves the exact qualified tree. The release gate may translate that
+    # identity only through the dedicated ancestry+tree-equivalence helper.
+    original_matcher = gate._modelrig_evidence_matches_pin
+    try:
+        gate._modelrig_evidence_matches_pin = (
+            lambda evidence_sha, pinned_sha:
+            evidence_sha == pinned_sha
+            or (evidence_sha == "a" * 40 and pinned_sha == "1" * 40)
+        )
+        merge_equivalent = copy.deepcopy(valid)
+        merge_equivalent["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+            "kaliv-body-android-physical-gate:" + "a" * 40 + ":" + "b" * 64
+        ]
+        verdict = gate.evaluate_manifest(merge_equivalent)
+        assert verdict.release_ready is True
+    finally:
+        gate._modelrig_evidence_matches_pin = original_matcher
+
+    android_multiple_refs = copy.deepcopy(valid)
+    android_multiple_refs["gates"]["bodyrig_android_live_body"]["evidence_refs"] = [
+        "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "a" * 64,
+        "kaliv-body-android-physical-gate:" + "1" * 40 + ":" + "b" * 64,
+    ]
+    _must_reject(
+        android_multiple_refs,
+        "requires exactly one independent physical gate evidence ref",
+    )
 
     failed = copy.deepcopy(valid)
     failed["gates"]["recovery_soak"]["status"] = "FAIL"
@@ -110,7 +273,7 @@ def run_contract() -> None:
     _must_reject(activation, "cannot activate production")
 
     # A software-only manifest must remain blocked even if every repository is
-    # exact-pinned. CI is deliberately only one of eight independent gates.
+    # exact-pinned. CI is deliberately only one of nine independent gates.
     software_only = copy.deepcopy(valid)
     for name in gate.REQUIRED_GATES:
         if name == "software_exact_green":
