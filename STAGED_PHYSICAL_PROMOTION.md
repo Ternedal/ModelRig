@@ -1,8 +1,8 @@
 # Staged physical promotion — 2.0.13
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
-`2.0.13`. Kandidaten ligger på `physical-proof/2.0.13`; den eksakte SHA skal
-altid læses fra den fetch'ede `origin/physical-proof/2.0.13`, matches mod lokal
+`2.0.13`. Kandidaten ligger på `physical-proof/2.0.14`; den eksakte SHA skal
+altid læses fra den fetch'ede `origin/physical-proof/2.0.14`, matches mod lokal
 HEAD og bevises med `candidate_freeze_check.py`. Den må aldrig gættes eller
 kopieres fra ældre evidens.
 
@@ -24,19 +24,19 @@ kopieres fra ældre evidens.
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch physical-proof/2.0.13
-git pull --ff-only origin physical-proof/2.0.13
+git switch physical-proof/2.0.14
+git pull --ff-only origin physical-proof/2.0.14
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.13).Trim()
+$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.14).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.13: local=$CandidateSha remote=$RemoteCandidateSha" }
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.14: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.13") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/physical-proof/2.0.13`, lokal exact HEAD og den grønne
+`origin/physical-proof/2.0.14`, lokal exact HEAD og den grønne
 `candidate_freeze_check.py` skal alle pege på samme kandidat-SHA. Stop ved
 enhver forskel. Historiske freeze-PR'er og tidligere 2.0.13-heads er ikke
 SHA-authority.
