@@ -34,6 +34,8 @@ def _refs() -> dict[str, str]:
             f"consciousness-live-lifecycle:{M}:{D}",
         "visionrig_physical_perception":
             f"visionrig-physical-perception:{V}:{D}",
+        "voicerig_physical_acceptance":
+            f"voicerig-physical-acceptance:{VOICE}:{D}",
         "bodyrig_photoreal_likeness":
             f"bodyrig-photoreal-likeness:{B}:{D}",
         "bodyrig_digital_twin_m6":
