@@ -165,13 +165,13 @@ human-review, physical-rig, soak or production-activation evidence.
 
 ## Assemble a fully-qualified manifest
 
-When all nine canonical evidence refs already exist, do not hand-edit the JSON
+When all ten canonical evidence refs already exist, do not hand-edit the JSON
 shape. `scripts/kaliv_release_manifest_assembler.py` creates the manifest and
 immediately submits the in-memory result to the same
 `kaliv_system_release_gate.evaluate_manifest(...)` authority before writing it.
 
 The assembler **does not create evidence**, downgrade a missing gate to pending,
-or activate production. All nine refs and all four immutable repository SHAs are
+or activate production. All ten refs and all four immutable repository SHAs are
 required.
 
 ```powershell
@@ -205,7 +205,7 @@ Both the manifest and verdict retain `production_activation=false`.
 python scripts/kaliv_system_release_gate.py .\path\to\kaliv-release-manifest.json
 ```
 
-Exit code 0 means all nine evidence gates qualify. Exit code 1 means a valid
+Exit code 0 means all ten evidence gates qualify. Exit code 1 means a valid
 manifest is still blocked. Exit code 2 means the manifest itself is invalid.
 
 ## Binding qualified Consciousness evidence
