@@ -83,9 +83,14 @@ def run(source: str, target: str, reader) -> None:
                 f"{path}: substitution 1.58.14{m.group('old')} -> {want} (found {m.group('new')})",
             )
 
+    rigdag = reader("RIGDAG_SIMPEL.md")
     check(
-        f"origin/physical-proof/{target}" in reader("RIGDAG_SIMPEL.md"),
+        f"origin/physical-proof/{target}" in rigdag,
         f"RIGDAG_SIMPEL.md names origin/physical-proof/{target}",
+    )
+    check(
+        f"Kildereleasen er den signerede {source}; target er {target}." in rigdag,
+        f"RIGDAG_SIMPEL.md names Stage B transition {source} -> {target}",
     )
     staged = reader("STAGED_PHYSICAL_PROMOTION.md")
     check(source in staged and target in staged,
