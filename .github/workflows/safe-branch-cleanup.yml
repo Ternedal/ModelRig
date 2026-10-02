@@ -40,6 +40,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           BASE_BRANCH: main
-          EXECUTE: ${{ inputs.execute }}
+          EXECUTE: ${{ (github.event_name == 'workflow_dispatch' && inputs.execute) || startsWith(github.event.head_commit.message, 'chore(repo): execute verified branch cleanup') }}
           MIN_AGE_DAYS: ${{ inputs.min_age_days }}
         run: bash scripts/safe_branch_cleanup.sh
