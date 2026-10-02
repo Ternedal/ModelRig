@@ -1,6 +1,11 @@
 name: Safe branch cleanup
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/safe-branch-cleanup.yml"
+      - "scripts/safe_branch_cleanup.sh"
   workflow_dispatch:
     inputs:
       execute:
