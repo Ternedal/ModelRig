@@ -370,6 +370,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_release_manifest_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
+- `tests/worker_kaliv_voicerig_physical_qualifier.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
@@ -509,6 +510,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_doc_authority.py`
 - `tests/workflow_doc_candidate_freshness.py`
 - `tests/workflow_era_pins.py`
+- `tests/workflow_exact_head_concurrency.py`
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_gates_read_code.py`
 - `tests/workflow_kaliv_env_parser.py`

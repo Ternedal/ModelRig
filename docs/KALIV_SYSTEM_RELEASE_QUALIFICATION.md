@@ -24,7 +24,7 @@ identity.
 
 ## Required gates
 
-All nine gates must be `PASS`, and every PASS must carry at least one explicit
+All ten gates must be `PASS`, and every PASS must carry at least one explicit
 evidence reference:
 
 1. `software_exact_green` — exact pinned repository revisions qualified by their
@@ -49,7 +49,17 @@ evidence reference:
    by VisionRig's physical qualifier, and the embedded SHA must equal the pinned
    `Ternedal/VisionRig` revision. A mutable label or inner WorldEvidence ref is
    not sufficient.
-4. `bodyrig_photoreal_likeness` — the real-person Photoreal likeness gate,
+4. `voicerig_physical_acceptance` — VoiceRig's final physical release acceptance
+   has passed on the exact pinned VoiceRig revision using real source clips,
+   CUDA-backed synthesis, explicit human listening QA, authenticated ModelRig
+   provider verification, Piper fallback and VoiceRig restore. A PASS must carry
+   exactly one canonical
+   `voicerig-physical-acceptance:<voicerig-sha>:<sha256>` reference emitted by
+   `kaliv_voicerig_physical_qualifier.py`. The embedded VoiceRig SHA must equal
+   the pinned `Ternedal/VoiceRig` revision. CI or software exact-green alone is
+   insufficient.
+
+5. `bodyrig_photoreal_likeness` — the real-person Photoreal likeness gate,
    including required human review, has passed all the way through BodyRig's
    final Photoreal M6 authority. A PASS must contain exactly one canonical
    `bodyrig-photoreal-likeness:<bodyrig-sha>:<sha256>` reference emitted by
@@ -62,7 +72,7 @@ evidence reference:
    BodyRig's final authority is production-activating inside BodyRig, but
    ModelRig's qualifier and system-release verdict remain
    `production_activation=false`.
-5. `bodyrig_digital_twin_m6` — one coherent Person lineage reaches canonical M6
+6. `bodyrig_digital_twin_m6` — one coherent Person lineage reaches canonical M6
    with the required physical/human Windows and Quest evidence. A PASS must
    contain exactly one canonical
    `bodyrig-digital-twin-m6:<bodyrig-sha>:<sha256>` reference emitted by
@@ -74,7 +84,7 @@ evidence reference:
    `Ternedal/BodyRig` SHA. ModelRig does **not** inherit that activation:
    the qualifier verdict and system release verdict remain
    `production_activation=false`.
-6. `bodyrig_android_live_body` — the standalone Kaliv Body Android surface has
+7. `bodyrig_android_live_body` — the standalone Kaliv Body Android surface has
    passed its independent exact-head physical gate: authenticated RigLink,
    digest-bound active avatar, live BodyRig frames, ARCore runtime, detected-plane
    placement and explicit human visual acceptance are all evidence-bound. A PASS
@@ -85,7 +95,7 @@ evidence reference:
    The latter permits only a clean merge-commit identity change; any content
    change, squash/rewrite without ancestry, mutable label or path fails closed.
    The Android gate result must still report `production_activation=false`.
-7. `end_to_end_latency` — one correlated real event traverses perception,
+8. `end_to_end_latency` — one correlated real event traverses perception,
    cognition and outward voice/body behavior with measured latency evidence.
    A PASS must contain exactly one canonical
    `kaliv-end-to-end-latency:<modelrig-sha>:<sha256>` reference emitted by
@@ -94,13 +104,13 @@ evidence reference:
    phase/total latency with `threshold_applied=false` until a physical baseline
    establishes a defensible SLO. The embedded ModelRig SHA follows the same
    ancestor + exact-tree clean-merge rule as other ModelRig-bound evidence.
-8. `recovery_soak` — the pinned system passes the agreed restart/recovery and
+9. `recovery_soak` — the pinned system passes the agreed restart/recovery and
    long-running soak campaign. A PASS must contain exactly one canonical
    `kaliv-recovery-soak:<modelrig-sha>:<sha256>` reference emitted by the
    recovery-soak qualifier. The embedded ModelRig SHA must equal the pinned
    revision or be its ancestor with the exact same Git tree, permitting only a
    clean merge-commit identity change.
-9. `repository_authority` — the repositories used for the release are protected
+10. `repository_authority` — the repositories used for the release are protected
    by the accepted exact-green merge authority. A PASS must contain exactly one
    canonical
    `kaliv-repository-authority:<modelrig-sha>:<bodyrig-sha>:<visionrig-sha>:<voicerig-sha>:<sha256>`
@@ -141,6 +151,7 @@ human-review, physical-rig, soak or production-activation evidence.
     "software_exact_green": {"status": "PASS", "evidence_refs": ["..."]},
     "consciousness_live_lifecycle": {"status": "PENDING", "evidence_refs": []},
     "visionrig_physical_perception": {"status": "PENDING", "evidence_refs": []},
+    "voicerig_physical_acceptance": {"status": "PENDING", "evidence_refs": []},
     "bodyrig_photoreal_likeness": {"status": "PENDING", "evidence_refs": []},
     "bodyrig_digital_twin_m6": {"status": "PENDING", "evidence_refs": []},
     "bodyrig_android_live_body": {"status": "PENDING", "evidence_refs": []},
@@ -173,6 +184,7 @@ python scripts/kaliv_release_manifest_assembler.py `
   --software-exact-green-ref <canonical-ref> `
   --consciousness-live-lifecycle-ref <canonical-ref> `
   --visionrig-physical-perception-ref <canonical-ref> `
+  --voicerig-physical-acceptance-ref <canonical-ref> `
   --bodyrig-photoreal-likeness-ref <canonical-ref> `
   --bodyrig-digital-twin-m6-ref <canonical-ref> `
   --bodyrig-android-live-body-ref <canonical-ref> `

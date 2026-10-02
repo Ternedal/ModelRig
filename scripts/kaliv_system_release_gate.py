@@ -42,6 +42,9 @@ _CONSCIOUSNESS_LIFECYCLE_REF = re.compile(
 _VISIONRIG_PHYSICAL_REF = re.compile(
     r"^visionrig-physical-perception:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
+_VOICERIG_PHYSICAL_REF = re.compile(
+    r"^voicerig-physical-acceptance:([0-9a-f]{40}):([0-9a-f]{64})$"
+)
 _END_TO_END_LATENCY_REF = re.compile(
     r"^kaliv-end-to-end-latency:([0-9a-f]{40}):([0-9a-f]{64})$"
 )
@@ -63,6 +66,7 @@ REQUIRED_GATES = (
     "software_exact_green",
     "consciousness_live_lifecycle",
     "visionrig_physical_perception",
+    "voicerig_physical_acceptance",
     "bodyrig_photoreal_likeness",
     "bodyrig_digital_twin_m6",
     "bodyrig_android_live_body",
@@ -347,6 +351,23 @@ def _validate_gates(
                 raise SystemReleaseManifestError(
                     "visionrig_physical_perception evidence is bound to a different "
                     "VisionRig Git SHA"
+                )
+        if gate == "voicerig_physical_acceptance" and status == "PASS":
+            if len(refs) != 1:
+                raise SystemReleaseManifestError(
+                    "voicerig_physical_acceptance PASS requires exactly one "
+                    "physical acceptance evidence ref"
+                )
+            match = _VOICERIG_PHYSICAL_REF.fullmatch(refs[0])
+            if match is None:
+                raise SystemReleaseManifestError(
+                    "voicerig_physical_acceptance PASS requires canonical "
+                    "voicerig-physical-acceptance evidence"
+                )
+            if match.group(1) != voicerig_sha:
+                raise SystemReleaseManifestError(
+                    "voicerig_physical_acceptance evidence is bound to a different "
+                    "VoiceRig Git SHA"
                 )
         if gate == "bodyrig_photoreal_likeness" and status == "PASS":
             if len(refs) != 1:

@@ -36,6 +36,8 @@ def _evidence_ref(name: str) -> str:
         return "consciousness-live-lifecycle:" + "1" * 40 + ":" + "c" * 64
     if name == "visionrig_physical_perception":
         return "visionrig-physical-perception:" + "3" * 40 + ":" + "e" * 64
+    if name == "voicerig_physical_acceptance":
+        return "voicerig-physical-acceptance:" + "4" * 40 + ":" + "d" * 64
     if name == "end_to_end_latency":
         return "kaliv-end-to-end-latency:" + "1" * 40 + ":" + "9" * 64
     if name == "repository_authority":
