@@ -103,6 +103,37 @@ def qualify(acceptance: Mapping[str, Any], *, expected_voicerig_sha: str) -> dic
             "VoiceRig manual listening quality note is missing"
         )
 
+    modelrig = _mapping(value.get("modelrig"), "VoiceRig ModelRig verification")
+    if modelrig.get("reachable") is not True:
+        raise VoiceRigPhysicalQualificationError(
+            "VoiceRig acceptance did not prove ModelRig reachability"
+        )
+    if modelrig.get("authenticated") is not True:
+        raise VoiceRigPhysicalQualificationError(
+            "VoiceRig acceptance did not prove authenticated ModelRig access"
+        )
+    if modelrig.get("tts") is not True or modelrig.get("provider") != "voicerig":
+        raise VoiceRigPhysicalQualificationError(
+            "VoiceRig acceptance did not prove the active ModelRig VoiceRig TTS provider"
+        )
+    if modelrig.get("package_matches") is not True:
+        raise VoiceRigPhysicalQualificationError(
+            "VoiceRig acceptance did not prove ModelRig used the accepted voice package"
+        )
+
+    gpu = _mapping(value.get("gpu"), "VoiceRig GPU evidence")
+    for phase in ("after_build", "after_synthesis"):
+        sample = _mapping(gpu.get(phase), f"VoiceRig GPU {phase}")
+        peak = sample.get("peak_reserved_gb")
+        if (
+            not isinstance(peak, (int, float))
+            or isinstance(peak, bool)
+            or peak <= 0
+        ):
+            raise VoiceRigPhysicalQualificationError(
+                f"VoiceRig GPU {phase}.peak_reserved_gb must be positive"
+            )
+
     fallback = _mapping(value.get("fallback"), "VoiceRig fallback")
     if (
         fallback.get("before_provider") != "voicerig"
