@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = (ROOT / '.github' / 'workflows' / 'exact-head-qualification.yml').read_text(encoding='utf-8')
+WORKFLOW = code_of(ROOT / '.github' / 'workflows' / 'exact-head-qualification.yml')
 
 assert 'concurrency:' in WORKFLOW
 assert 'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}' in WORKFLOW
