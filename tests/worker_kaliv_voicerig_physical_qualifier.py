@@ -48,6 +48,13 @@ def _acceptance() -> dict:
             "after_build": {"peak_reserved_gb": 8.5},
             "after_synthesis": {"peak_reserved_gb": 9.0},
         },
+        "modelrig": {
+            "reachable": True,
+            "authenticated": True,
+            "tts": True,
+            "provider": "voicerig",
+            "package_matches": True,
+        },
         "fallback": {
             "before_provider": "voicerig",
             "before_package": "voice.mrvoice",
@@ -99,6 +106,14 @@ def run_contract() -> None:
     _reject(x, "package must be revalidated")
     x = copy.deepcopy(value); x["blockers"] = ["bad"]
     _reject(x, "contains blockers")
+    x = copy.deepcopy(value); x["modelrig"]["authenticated"] = False
+    _reject(x, "authenticated ModelRig access")
+    x = copy.deepcopy(value); x["modelrig"]["provider"] = "piper"
+    _reject(x, "active ModelRig VoiceRig TTS provider")
+    x = copy.deepcopy(value); x["modelrig"]["package_matches"] = False
+    _reject(x, "accepted voice package")
+    x = copy.deepcopy(value); x["gpu"]["after_synthesis"]["peak_reserved_gb"] = 0
+    _reject(x, "after_synthesis.peak_reserved_gb must be positive")
 
 
 if __name__ == "__main__":
