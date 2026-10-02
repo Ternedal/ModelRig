@@ -40,6 +40,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           BASE_BRANCH: main
-          EXECUTE: "true"
+          EXECUTE: ${{ inputs.execute }}
           MIN_AGE_DAYS: ${{ inputs.min_age_days }}
         run: bash scripts/safe_branch_cleanup.sh
