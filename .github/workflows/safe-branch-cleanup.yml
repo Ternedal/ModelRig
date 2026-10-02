@@ -1,0 +1,40 @@
+name: Safe branch cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: "Actually delete verified merged branches"
+        required: true
+        type: boolean
+        default: false
+      min_age_days:
+        description: "Only delete branches whose tip is at least this old"
+        required: true
+        default: "7"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: safe-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Run fail-closed cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BASE_BRANCH: main
+          EXECUTE: ${{ inputs.execute }}
+          MIN_AGE_DAYS: ${{ inputs.min_age_days }}
+        run: bash scripts/safe_branch_cleanup.sh
