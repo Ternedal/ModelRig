@@ -21,6 +21,7 @@ GATE_ARGUMENTS = (
     ("software_exact_green", "software-exact-green-ref"),
     ("consciousness_live_lifecycle", "consciousness-live-lifecycle-ref"),
     ("visionrig_physical_perception", "visionrig-physical-perception-ref"),
+    ("voicerig_physical_acceptance", "voicerig-physical-acceptance-ref"),
     ("bodyrig_photoreal_likeness", "bodyrig-photoreal-likeness-ref"),
     ("bodyrig_digital_twin_m6", "bodyrig-digital-twin-m6-ref"),
     ("bodyrig_android_live_body", "bodyrig-android-live-body-ref"),
