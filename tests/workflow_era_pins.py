@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Fail-closed era-pin gate: every era-bearing site must agree with VERSION.
+"""Fail-closed era-pin gate: every era-bearing site must agree with release authority.
 
-The 2.0.12 bump proved why this must live in CI (#757, four identical rig
-blocks; HANDOFF section 4.11): the era lives in a family of manually-shifted
-pins outside version_tool's four code sites. This gate derives the expected
-(source, target) pair from VERSION and checks every site in the 4.11 list,
-so the NEXT bump that misses one fails the PR, not the rig day.
+The target is always VERSION. The Stage B source is an explicit published-release
+authority because release numbers can be skipped: 2.0.13 was never published, so
+deriving source as target-1 would invent a non-existent appliance.
 
-Derivation: target = VERSION; source = target with its last numeric segment
-decremented (patch-era model -- 2.0.11 -> 2.0.12). A future minor/major bump
-changes that relationship and must update this gate in the same commit; the
-gate failing loudly on such a bump is intended, not a defect.
+A future release must update SOURCE_RELEASE_VERSION in the same reviewed change
+that moves Stage B authority. This is deliberately fail-closed: CI checks every
+era-bearing site against the explicit source/target pair.
 """
 
 from __future__ import annotations
@@ -22,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 FAILED = 0
+SOURCE_RELEASE_VERSION = "2.0.12"
 
 
 def check(ok: bool, message: str) -> None:
@@ -35,14 +33,15 @@ def check(ok: bool, message: str) -> None:
 
 def derive_versions() -> tuple[str, str]:
     target = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    parts = target.split(".")
-    if not parts or not parts[-1].isdigit() or int(parts[-1]) == 0:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", target):
+        raise SystemExit(f"FAIL: VERSION {target!r} is not a numeric semver")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", SOURCE_RELEASE_VERSION):
         raise SystemExit(
-            f"FAIL: cannot derive source era from VERSION {target!r} -- "
-            "update this gate's derivation in the same commit as the bump"
+            f"FAIL: SOURCE_RELEASE_VERSION {SOURCE_RELEASE_VERSION!r} is not a numeric semver"
         )
-    source = ".".join(parts[:-1] + [str(int(parts[-1]) - 1)])
-    return source, target
+    if SOURCE_RELEASE_VERSION == target:
+        raise SystemExit("FAIL: Stage B source release must differ from target VERSION")
+    return SOURCE_RELEASE_VERSION, target
 
 
 def text(path: str) -> str:
@@ -97,7 +96,7 @@ def run(source: str, target: str, reader) -> None:
 
 def main() -> int:
     source, target = derive_versions()
-    print(f"era: source {source} -> target {target} (derived from VERSION)")
+    print(f"era: source {source} (explicit published release) -> target {target} (VERSION)")
 
     # Self-test: a stale pin must be detected before the real run counts.
     stale = {"scripts/stage_a_one_click.py": f'BRANCH = "physical-proof/{source}"\n'}
