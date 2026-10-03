@@ -193,7 +193,8 @@ def validate_campaign(
     total = summary.get("total")
     if total != len(EXPECTED_CAMPAIGN_PROOFS):
         errors.append("campaign summary.total is not eight")
-    if tuple(passed) if isinstance(passed, list) else () != EXPECTED_CAMPAIGN_PROOFS:
+    actual_passed = tuple(passed) if isinstance(passed, list) else ()
+    if actual_passed != EXPECTED_CAMPAIGN_PROOFS:
         errors.append("campaign summary.passed is not the canonical eight proofs")
     return {"total": total, "passed": passed}
 
