@@ -190,6 +190,7 @@ def _reject(
             observations_sha256="f" * 64,
             stage_b_report=_stage_b() if stage_b is None else stage_b,
             stage_b_sha256=stage_b_sha256,
+            stage_b_report_path=Path("validation/stage-b-physical-final-latest.json"),
             stage_b_repository_root=COMPONENT_ROOT,
         )
     except gate.RecoverySoakError as exc:
@@ -215,6 +216,7 @@ def run_contract() -> None:
         observations_sha256="f" * 64,
         stage_b_report=_stage_b(),
         stage_b_sha256=STAGE_B_SHA256,
+        stage_b_report_path=Path("validation/stage-b-physical-final-latest.json"),
         stage_b_repository_root=COMPONENT_ROOT,
     )
     assert q.qualified is True
@@ -284,6 +286,12 @@ def run_contract() -> None:
         "validation/stage-b-physical-final-latest.json#sha256=" + "d" * 64
     )
     _reject(bad_stage_b_ref, "digest does not match")
+
+    wrong_stage_b_path_ref = copy.deepcopy(valid)
+    wrong_stage_b_path_ref["stage_b_evidence_ref"] = (
+        "validation/other-stage-b-report.json#sha256=" + STAGE_B_SHA256
+    )
+    _reject(wrong_stage_b_path_ref, "path does not match the loaded Stage-B report")
 
     malformed_stage_b_ref = copy.deepcopy(valid)
     malformed_stage_b_ref["stage_b_evidence_ref"] = "stage-b-report"
@@ -395,6 +403,24 @@ def run_contract() -> None:
     final_meta["sha256"] = hashlib.sha256(final_raw).hexdigest()
     final_meta["bytes"] = len(final_raw)
     _reject(valid, "candidate code_sha256 mismatch", stage_b=wrong_component_code)
+
+    for value in (float("nan"), float("inf"), float("-inf")):
+        try:
+            gate._positive_number(value, "max_age_hours")
+        except gate.RecoverySoakError as exc:
+            assert "finite" in str(exc)
+        else:
+            raise AssertionError(f"non-finite max_age_hours accepted: {value!r}")
+
+    for value in (0.0, 720.0001):
+        try:
+            gate._positive_number(value, "max_age_hours")
+        except gate.RecoverySoakError as exc:
+            assert "at most 720" in str(exc)
+        else:
+            raise AssertionError(f"out-of-range max_age_hours accepted: {value!r}")
+
+    assert gate._positive_number(720.0, "max_age_hours") == 720.0
 
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
 
