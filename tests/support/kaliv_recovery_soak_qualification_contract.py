@@ -24,8 +24,10 @@ STAGE_B_SHA256 = "e" * 64
 COMPONENT_ROOT = Path(tempfile.mkdtemp(prefix="kaliv-recovery-stage-b-contract-"))
 _ORIGINAL_REVALIDATE = gate._revalidate_stage_b_component
 _ORIGINAL_CHECKOUT_CANDIDATE = gate._candidate_identity_from_checkout
+_ORIGINAL_FREEZE_REVALIDATE = gate._revalidate_release_freeze
 _ORIGINAL_LOADER = gate._load_stage_b_validator
 REVALIDATED_COMPONENTS: list[str] = []
+FREEZE_REVALIDATIONS: list[str] = []
 
 
 def _checkout_candidate(**overrides) -> dict:
@@ -216,6 +218,11 @@ def _reject(
 def run_contract() -> None:
     valid = _observations()
     gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate()
+    gate._revalidate_release_freeze = (
+        lambda _root, *, candidate_identity: FREEZE_REVALIDATIONS.append(
+            candidate_identity["git_sha"]
+        )
+    )
 
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
     _reject(
@@ -247,6 +254,19 @@ def run_contract() -> None:
     )
     assert len(q.release_evidence_ref.rsplit(":", 1)[1]) == 64
     assert REVALIDATED_COMPONENTS == list(gate._STAGE_B_COMPONENTS)
+    assert FREEZE_REVALIDATIONS == ["a" * 40]
+
+    gate._revalidate_release_freeze = (
+        lambda _root, *, candidate_identity: (_ for _ in ()).throw(
+            gate.RecoverySoakError("canonical release freeze did not pass")
+        )
+    )
+    _reject(valid, "canonical release freeze did not pass")
+    gate._revalidate_release_freeze = (
+        lambda _root, *, candidate_identity: FREEZE_REVALIDATIONS.append(
+            candidate_identity["git_sha"]
+        )
+    )
 
     short = copy.deepcopy(valid)
     short["policy"]["required_duration_seconds"] = 7201
@@ -451,6 +471,8 @@ def run_contract() -> None:
 
     assert gate._positive_number(720.0, "max_age_hours") == 720.0
 
+    gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
+
     class _CandidateModule:
         def __init__(self, candidate: dict):
             self._candidate = candidate
@@ -476,6 +498,7 @@ def run_contract() -> None:
 
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
     gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
+    gate._revalidate_release_freeze = _ORIGINAL_FREEZE_REVALIDATE
 
 
 if __name__ == "__main__":
@@ -485,5 +508,6 @@ if __name__ == "__main__":
     finally:
         gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
         gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
+        gate._revalidate_release_freeze = _ORIGINAL_FREEZE_REVALIDATE
         gate._load_stage_b_validator = _ORIGINAL_LOADER
         shutil.rmtree(COMPONENT_ROOT, ignore_errors=True)
