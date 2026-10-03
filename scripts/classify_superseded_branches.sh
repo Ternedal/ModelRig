@@ -3,6 +3,7 @@ set -euo pipefail
 
 BASE_BRANCH="${BASE_BRANCH:-main}"
 MIN_AGE_DAYS="${MIN_AGE_DAYS:-7}"
+EXECUTE="${EXECUTE:-false}"
 
 git fetch origin --prune --no-tags '+refs/heads/*:refs/remotes/origin/*'
 
@@ -30,6 +31,16 @@ contributes=0
 conflicts=0
 protected=0
 too_new=0
+deleted=0
+
+delete_branch() {
+  local branch="$1"
+  if [[ "$EXECUTE" == "true" ]]; then
+    git push origin --delete "$branch"
+    printf 'DELETED\t%s\n' "$branch"
+    ((deleted+=1))
+  fi
+}
 
 while IFS= read -r ref; do
   branch="${ref#refs/remotes/origin/}"
@@ -41,12 +52,6 @@ while IFS= read -r ref; do
     continue
   fi
 
-  if git merge-base --is-ancestor "origin/$branch" "origin/$BASE_BRANCH"; then
-    printf 'ANCESTOR_MERGED\t%s\n' "$branch"
-    ((ancestor_merged+=1))
-    continue
-  fi
-
   tip_epoch="$(git show -s --format=%ct "origin/$branch")"
   age_days="$(( (now_epoch - tip_epoch) / 86400 ))"
   if (( age_days < MIN_AGE_DAYS )); then
@@ -55,12 +60,19 @@ while IFS= read -r ref; do
     continue
   fi
 
-  tmp_err="$(mktemp)"
-  if merge_output="$(git merge-tree --write-tree "origin/$BASE_BRANCH" "origin/$branch" 2>"$tmp_err")"; then
+  if git merge-base --is-ancestor "origin/$branch" "origin/$BASE_BRANCH"; then
+    printf 'ANCESTOR_MERGED\t%s\t%sd\n' "$branch" "$age_days"
+    ((ancestor_merged+=1))
+    delete_branch "$branch"
+    continue
+  fi
+
+  if merge_output="$(git merge-tree --write-tree "origin/$BASE_BRANCH" "origin/$branch" 2>/dev/null)"; then
     merged_tree="$(printf '%s\n' "$merge_output" | head -n1)"
     if [[ "$merged_tree" == "$main_tree" ]]; then
       printf 'SUPERSEDED\t%s\t%sd\n' "$branch" "$age_days"
       ((superseded+=1))
+      delete_branch "$branch"
     else
       printf 'CONTRIBUTES\t%s\t%sd\t%s\n' "$branch" "$age_days" "$merged_tree"
       ((contributes+=1))
@@ -69,7 +81,6 @@ while IFS= read -r ref; do
     printf 'CONFLICT\t%s\t%sd\n' "$branch" "$age_days"
     ((conflicts+=1))
   fi
-  rm -f "$tmp_err"
 done < <(git for-each-ref --format='%(refname)' refs/remotes/origin/)
 
-printf '\nSUMMARY ancestor_merged=%s superseded=%s contributes=%s conflicts=%s protected=%s too_new=%s min_age_days=%s\n'   "$ancestor_merged" "$superseded" "$contributes" "$conflicts" "$protected" "$too_new" "$MIN_AGE_DAYS"
+printf '\nSUMMARY ancestor_merged=%s superseded=%s contributes=%s conflicts=%s protected=%s too_new=%s deleted=%s execute=%s min_age_days=%s\n'   "$ancestor_merged" "$superseded" "$contributes" "$conflicts" "$protected" "$too_new" "$deleted" "$EXECUTE" "$MIN_AGE_DAYS"
