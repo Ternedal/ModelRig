@@ -135,7 +135,12 @@ evidence reference:
    re-runs all eight campaign evidence validators against their source
    artifacts, and re-runs the final browser/campaign validator against the
    physical attestation and underlying browser receipt. The stored receipt must
-   remain consistent with that independent revalidation.
+   remain consistent with that independent revalidation. Recovery events are
+   also evidence-bound: reboot, backend restart and worker restart must name
+   the exact path+SHA-256 artifacts from the revalidated lifecycle proof, while
+   interruption recovery must name the exact strict Stage-B interruption
+   artifact. Every recovery-event timestamp must fall inside the recorded soak
+   sample window.
    A caller-supplied label, a recomputed hash over a handcrafted top-level
    Stage-B report, or an unverified Stage-B path is not sufficient. The embedded ModelRig SHA must
    equal the pinned revision or be its ancestor with the exact same Git tree,
