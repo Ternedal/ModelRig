@@ -976,6 +976,7 @@ def qualify(
     if not isinstance(raw_samples, list) or not 2 <= len(raw_samples) <= _MAX_SAMPLES:
         raise RecoverySoakError("samples must contain between 2 and 100000 entries")
 
+    qualification_now = datetime.now(timezone.utc)
     timestamps: list[datetime] = []
     for index, raw in enumerate(raw_samples):
         sample = _mapping(raw, f"samples[{index}]")
@@ -991,6 +992,10 @@ def qualify(
             f"samples[{index}]",
         )
         ts = _timestamp(sample["observed_at"], f"samples[{index}].observed_at")
+        if ts > qualification_now:
+            raise RecoverySoakError(
+                f"samples[{index}].observed_at must not be in the future"
+            )
         if timestamps and ts <= timestamps[-1]:
             raise RecoverySoakError("sample timestamps must be strictly increasing")
         timestamps.append(ts)
