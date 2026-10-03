@@ -23,7 +23,20 @@ SPEC.loader.exec_module(gate)
 STAGE_B_SHA256 = "e" * 64
 COMPONENT_ROOT = Path(tempfile.mkdtemp(prefix="kaliv-recovery-stage-b-contract-"))
 _ORIGINAL_REVALIDATE = gate._revalidate_stage_b_component
+_ORIGINAL_CHECKOUT_CANDIDATE = gate._candidate_identity_from_checkout
 REVALIDATED_COMPONENTS: list[str] = []
+
+
+def _checkout_candidate(**overrides) -> dict:
+    value = {
+        "version": "2.0.14",
+        "git_sha": "a" * 40,
+        "code_sha256": "c" * 64,
+        "working_tree_clean": True,
+        "version_stamps_consistent": True,
+    }
+    value.update(overrides)
+    return value
 
 
 def _stub_revalidate(
@@ -201,6 +214,7 @@ def _reject(
 
 def run_contract() -> None:
     valid = _observations()
+    gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate()
 
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
     _reject(
@@ -299,7 +313,21 @@ def run_contract() -> None:
 
     wrong_candidate = _stage_b()
     wrong_candidate["candidate"]["git_sha"] = "b" * 40
-    _reject(valid, "candidate Git SHA does not match", stage_b=wrong_candidate)
+    _reject(valid, "candidate git_sha does not match repository checkout", stage_b=wrong_candidate)
+
+    gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate(
+        git_sha="b" * 40
+    )
+    _reject(valid, "candidate git_sha does not match repository checkout")
+    gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate(
+        code_sha256="d" * 64
+    )
+    _reject(valid, "candidate code_sha256 does not match repository checkout")
+    gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate(
+        version="9.9.9"
+    )
+    _reject(valid, "candidate version does not match repository checkout")
+    gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate()
 
     dirty_candidate = _stage_b()
     dirty_candidate["candidate"]["working_tree_clean"] = False
@@ -423,6 +451,7 @@ def run_contract() -> None:
     assert gate._positive_number(720.0, "max_age_hours") == 720.0
 
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
+    gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
 
 
 if __name__ == "__main__":
@@ -431,4 +460,5 @@ if __name__ == "__main__":
         print("Kaliv recovery soak qualification contract: PASS")
     finally:
         gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
+        gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
         shutil.rmtree(COMPONENT_ROOT, ignore_errors=True)
