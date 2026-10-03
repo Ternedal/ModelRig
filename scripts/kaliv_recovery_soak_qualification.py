@@ -776,7 +776,14 @@ def _validate_stage_b_report(
 
     candidate = _mapping(report.get("candidate"), "stage_b_report.candidate")
     checkout_candidate = _candidate_identity_from_checkout(repository_root)
-    for field in ("version", "git_sha", "code_sha256"):
+    for field in (
+        "version",
+        "git_sha",
+        "code_sha256",
+        "identity_source",
+        "working_tree_clean",
+        "version_stamps_consistent",
+    ):
         if candidate.get(field) != checkout_candidate.get(field):
             raise RecoverySoakError(
                 f"Stage-B report candidate {field} does not match repository checkout"
@@ -796,8 +803,11 @@ def _validate_stage_b_report(
         candidate.get("code_sha256")
     ) is None:
         raise RecoverySoakError("Stage-B report candidate code_sha256 is invalid")
-    if candidate.get("working_tree_clean") is not True:
-        raise RecoverySoakError("Stage-B report candidate checkout is not clean")
+    if (
+        checkout_candidate.get("identity_source") == "git"
+        and candidate.get("working_tree_clean") is not True
+    ):
+        raise RecoverySoakError("Stage-B report candidate source checkout is not clean")
 
     evidence = _mapping(report.get("evidence"), "stage_b_report.evidence")
     _exact_keys(
