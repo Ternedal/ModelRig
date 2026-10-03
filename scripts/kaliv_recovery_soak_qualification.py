@@ -14,6 +14,7 @@ import importlib.util
 import json
 import math
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -301,6 +302,51 @@ def _candidate_identity_from_checkout(repository_root: Path) -> Mapping[str, Any
     if candidate.get("version_stamps_consistent") is not True:
         raise RecoverySoakError("Stage-B checkout version stamps are inconsistent")
     return candidate
+
+
+def _revalidate_release_freeze(
+    repository_root: Path,
+    *,
+    candidate_identity: Mapping[str, Any],
+) -> None:
+    root = repository_root.resolve()
+    script = root / "scripts" / "freeze_check.py"
+    if not script.is_file():
+        raise RecoverySoakError("canonical release freeze validator is missing")
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RecoverySoakError(
+            "canonical release freeze validation could not run"
+        ) from exc
+    if completed.returncode != 0:
+        detail = (completed.stdout or completed.stderr or "").strip()
+        raise RecoverySoakError(
+            "canonical release freeze did not pass"
+            + (f": {detail[-500:]}" if detail else "")
+        )
+
+    after = _candidate_identity_from_checkout(root)
+    for field in ("version", "git_sha", "code_sha256"):
+        if after.get(field) != candidate_identity.get(field):
+            raise RecoverySoakError(
+                f"checkout candidate {field} changed during release freeze validation"
+            )
+    if after.get("working_tree_clean") is not True:
+        raise RecoverySoakError(
+            "checkout became dirty during release freeze validation"
+        )
+    if after.get("version_stamps_consistent") is not True:
+        raise RecoverySoakError(
+            "checkout version stamps became inconsistent during release freeze validation"
+        )
 
 
 def _positive_number(value: Any, name: str) -> float:
@@ -597,6 +643,11 @@ def _validate_stage_b_report(
             raise RecoverySoakError(
                 f"Stage-B report candidate {field} does not match repository checkout"
             )
+
+    _revalidate_release_freeze(
+        repository_root,
+        candidate_identity=checkout_candidate,
+    )
     if candidate.get("git_sha") != candidate_sha:
         raise RecoverySoakError(
             "Stage-B report candidate Git SHA does not match recovery candidate"
