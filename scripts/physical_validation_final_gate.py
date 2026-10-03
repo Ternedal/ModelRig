@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Combine the seven-proof physical campaign with physical T-032 peer evidence.
+"""Combine the eight-proof physical campaign with physical T-032 peer evidence.
 
 This script performs no network request. It validates the existing campaign
 receipt, the interactive-Windows attestation and the exact underlying browser
-peer receipt against one current clean candidate, then writes an eighth-proof
+peer receipt against one current clean candidate, then writes a ninth-proof
 final receipt with production_activation=false.
 """
 from __future__ import annotations
@@ -34,6 +34,16 @@ DEFAULT_REPORT = Path("validation/physical-validation-final-latest.json")
 MAX_EVIDENCE_BYTES = 32 * 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GITSHA = re.compile(r"^[0-9a-f]{40}$")
+EXPECTED_CAMPAIGN_PROOFS = (
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "lifecycle",
+    "scheduler_pilot",
+    "task_ui",
+)
 
 
 class FinalGateError(RuntimeError):
@@ -166,7 +176,7 @@ def validate_campaign(
     if _nested(report, "gate", "passed") is not True:
         errors.append("campaign gate.passed is not true")
     if _nested(report, "gate", "physical_campaign_complete") is not True:
-        errors.append("six-proof physical campaign is incomplete")
+        errors.append("eight-proof physical campaign is incomplete")
     if _nested(report, "gate", "production_activation") is not False:
         errors.append("campaign did not preserve production_activation=false")
     summary = report.get("summary")
@@ -181,8 +191,10 @@ def validate_campaign(
         errors.append("campaign contains candidate errors")
     passed = summary.get("passed")
     total = summary.get("total")
-    if not isinstance(passed, list) or not isinstance(total, int) or len(passed) != total:
-        errors.append("campaign pass count does not equal total")
+    if total != len(EXPECTED_CAMPAIGN_PROOFS):
+        errors.append("campaign summary.total is not eight")
+    if tuple(passed) if isinstance(passed, list) else () != EXPECTED_CAMPAIGN_PROOFS:
+        errors.append("campaign summary.passed is not the canonical eight proofs")
     return {"total": total, "passed": passed}
 
 
