@@ -20,6 +20,8 @@ from typing import Any, Mapping, Sequence
 OBS_SCHEMA = "kaliv-recovery-soak-observations/v1"
 RECEIPT_SCHEMA = "kaliv-recovery-soak-qualification/v1"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_STAGE_B_FINAL_SCHEMA = "kaliv-stage-b-physical-final/v1"
 _REQUIRED_RECOVERY_KINDS = (
     "reboot",
     "backend_restart",
@@ -126,7 +128,66 @@ def _evidence_ref(value: Any, name: str) -> str:
     return ref
 
 
-def qualify(observations: Mapping[str, Any], *, observations_sha256: str) -> Qualification:
+def _stage_b_evidence_ref(value: Any, *, stage_b_sha256: str) -> str:
+    ref = _evidence_ref(value, "stage_b_evidence_ref")
+    marker = "#sha256="
+    if marker not in ref:
+        raise RecoverySoakError(
+            "stage_b_evidence_ref must end with #sha256=<64 lowercase hex>"
+        )
+    prefix, digest = ref.rsplit(marker, 1)
+    if not prefix or _SHA256.fullmatch(digest) is None:
+        raise RecoverySoakError(
+            "stage_b_evidence_ref must end with #sha256=<64 lowercase hex>"
+        )
+    if digest != stage_b_sha256:
+        raise RecoverySoakError(
+            "stage_b_evidence_ref digest does not match the Stage-B report bytes"
+        )
+    return ref
+
+
+def _validate_stage_b_report(value: Mapping[str, Any], *, candidate_sha: str) -> None:
+    report = _mapping(value, "stage_b_report")
+    if report.get("schema") != _STAGE_B_FINAL_SCHEMA:
+        raise RecoverySoakError("Stage-B report schema mismatch")
+    if report.get("status") != "complete":
+        raise RecoverySoakError("Stage-B report status must be complete")
+
+    candidate = _mapping(report.get("candidate"), "stage_b_report.candidate")
+    if candidate.get("git_sha") != candidate_sha:
+        raise RecoverySoakError(
+            "Stage-B report candidate Git SHA does not match recovery candidate"
+        )
+    if candidate.get("working_tree_clean") is not True:
+        raise RecoverySoakError("Stage-B report candidate checkout is not clean")
+
+    gate = _mapping(report.get("gate"), "stage_b_report.gate")
+    required_true = (
+        "passed",
+        "release_freeze_complete",
+        "updater_chain_complete",
+        "strict_evidence_complete",
+        "physical_campaign_complete",
+        "browser_peer_physical_complete",
+        "all_physical_evidence_complete",
+    )
+    for field in required_true:
+        if gate.get(field) is not True:
+            raise RecoverySoakError(f"Stage-B report gate.{field} must be true")
+    if gate.get("production_activation") is not False:
+        raise RecoverySoakError(
+            "Stage-B report must preserve production_activation=false"
+        )
+
+
+def qualify(
+    observations: Mapping[str, Any],
+    *,
+    observations_sha256: str,
+    stage_b_report: Mapping[str, Any],
+    stage_b_sha256: str,
+) -> Qualification:
     root = _mapping(observations, "observations")
     _exact_keys(
         root,
@@ -163,7 +224,10 @@ def qualify(observations: Mapping[str, Any], *, observations_sha256: str) -> Qua
         policy["max_sample_gap_seconds"], "policy.max_sample_gap_seconds"
     )
 
-    stage_b_ref = _evidence_ref(root["stage_b_evidence_ref"], "stage_b_evidence_ref")
+    _validate_stage_b_report(stage_b_report, candidate_sha=candidate_sha)
+    stage_b_ref = _stage_b_evidence_ref(
+        root["stage_b_evidence_ref"], stage_b_sha256=stage_b_sha256
+    )
 
     raw_samples = root["samples"]
     if not isinstance(raw_samples, list) or not 2 <= len(raw_samples) <= _MAX_SAMPLES:
@@ -290,15 +354,37 @@ def load(path: Path) -> tuple[Mapping[str, Any], str]:
     return _mapping(parsed, "observations"), digest
 
 
+def _load_stage_b(path: Path) -> tuple[Mapping[str, Any], str]:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise RecoverySoakError("Stage-B report file cannot be read") from exc
+    if not raw or len(raw) > 32 * 1024 * 1024:
+        raise RecoverySoakError("Stage-B report file size is invalid")
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RecoverySoakError("Stage-B report is not valid UTF-8 JSON") from exc
+    return _mapping(parsed, "stage_b_report"), digest
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("observations", type=Path)
+    parser.add_argument("--stage-b-report", type=Path, required=True)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
 
     try:
         observations, digest = load(args.observations)
-        receipt = qualify(observations, observations_sha256=digest).as_dict()
+        stage_b_report, stage_b_digest = _load_stage_b(args.stage_b_report)
+        receipt = qualify(
+            observations,
+            observations_sha256=digest,
+            stage_b_report=stage_b_report,
+            stage_b_sha256=stage_b_digest,
+        ).as_dict()
     except RecoverySoakError as exc:
         print(json.dumps({"schema": RECEIPT_SCHEMA, "qualified": False, "error": str(exc)}))
         return 2
