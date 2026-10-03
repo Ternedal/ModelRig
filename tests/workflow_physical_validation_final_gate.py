@@ -93,7 +93,7 @@ def fixtures(root: Path, now: datetime) -> tuple[dict, Path, Path]:
         "mode": "verify",
         "candidate": candidate,
         "summary": {
-            "total": 7,
+            "total": 8,
             "passed": [
                 "preflight",
                 "agent3",
@@ -102,6 +102,7 @@ def fixtures(root: Path, now: datetime) -> tuple[dict, Path, Path]:
                 "rag",
                 "lifecycle",
                 "scheduler_pilot",
+                "task_ui",
             ],
             "failed": [],
             "missing": [],
@@ -761,8 +762,9 @@ def main() -> None:
         report, code = evaluate(module, root, candidate, campaign, attestation, now)
         assert code == 0
         assert report["gate"]["all_physical_evidence_complete"] is True
-        assert report["summary"]["total"] == 8
+        assert report["summary"]["total"] == 9
         assert "scheduler_pilot" in report["summary"]["passed"]
+        assert "task_ui" in report["summary"]["passed"]
         assert report["summary"]["passed"][-1] == "browser_peer_physical"
         assert report["gate"]["production_activation"] is False
 
