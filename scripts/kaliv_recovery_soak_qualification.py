@@ -479,6 +479,15 @@ def _revalidate_stage_b_component(
                             f"Stage-B physical campaign {proof_name}.{field} "
                             "does not match canonical revalidation"
                         )
+                if stored.get("status") != "pass":
+                    raise RecoverySoakError(
+                        f"Stage-B physical campaign {proof_name}.status must be pass"
+                    )
+                if result.get("summary") != stored.get("summary"):
+                    raise RecoverySoakError(
+                        f"Stage-B physical campaign {proof_name}.summary "
+                        "does not match canonical revalidation"
+                    )
         finally:
             module._core.VALIDATORS = previous_validators
         return
@@ -551,7 +560,7 @@ def _validate_stage_b_component(
     meta_value: Any,
     *,
     candidate_identity: Mapping[str, Any],
-) -> None:
+) -> Mapping[str, Any]:
     expected_schema, required_gate_true = _STAGE_B_COMPONENTS[name]
     meta = _mapping(meta_value, f"stage_b_report.evidence.{name}")
     _exact_keys(meta, {"path", "sha256", "bytes", "schema"}, f"stage_b_report.evidence.{name}")
@@ -618,13 +627,98 @@ def _validate_stage_b_component(
         if summary.get("total") != 9 or tuple(summary.get("passed") or ()) != _EXPECTED_STAGE_B_PROOFS:
             raise RecoverySoakError("Stage-B component final must contain canonical nine proofs")
 
+    return receipt
+
+
+def _recovery_artifact_ref(meta_value: Any, label: str) -> str:
+    meta = _mapping(meta_value, label)
+    path_value = meta.get("path")
+    digest = meta.get("sha256")
+    byte_count = meta.get("bytes")
+    if not isinstance(path_value, str) or not path_value:
+        raise RecoverySoakError(f"{label}.path must be nonblank")
+    relative = Path(path_value)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RecoverySoakError(f"{label}.path must be repository-relative")
+    if relative.parts[:2] != ("validation", "appliance-lifecycle-evidence"):
+        raise RecoverySoakError(
+            f"{label}.path must be under validation/appliance-lifecycle-evidence"
+        )
+    if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
+        raise RecoverySoakError(f"{label}.sha256 must be lowercase SHA-256")
+    if (
+        isinstance(byte_count, bool)
+        or not isinstance(byte_count, int)
+        or byte_count <= 0
+        or byte_count > _MAX_COMPONENT_BYTES
+    ):
+        raise RecoverySoakError(f"{label}.bytes is invalid")
+    return f"{relative.as_posix()}#sha256={digest}"
+
+
+def _recovery_authority_from_components(
+    components: Mapping[str, Mapping[str, Any]],
+) -> dict[str, str]:
+    campaign = _mapping(
+        components.get("physical_campaign"),
+        "Stage-B physical campaign receipt",
+    )
+    campaign_evidence = _mapping(
+        campaign.get("evidence"),
+        "Stage-B physical campaign evidence",
+    )
+    lifecycle = _mapping(
+        campaign_evidence.get("lifecycle"),
+        "Stage-B physical campaign lifecycle evidence",
+    )
+    if lifecycle.get("status") != "pass":
+        raise RecoverySoakError(
+            "Stage-B physical campaign lifecycle evidence must be pass"
+        )
+    lifecycle_summary = _mapping(
+        lifecycle.get("summary"),
+        "Stage-B physical campaign lifecycle summary",
+    )
+    artifacts = _mapping(
+        lifecycle_summary.get("artifacts"),
+        "Stage-B physical campaign lifecycle artifacts",
+    )
+
+    strict = _mapping(
+        components.get("strict_stage_b"),
+        "Stage-B strict evidence receipt",
+    )
+    strict_evidence = _mapping(
+        strict.get("evidence"),
+        "Stage-B strict evidence",
+    )
+
+    return {
+        "reboot": _recovery_artifact_ref(
+            artifacts.get("reboot"),
+            "Stage-B lifecycle artifact reboot",
+        ),
+        "backend_restart": _recovery_artifact_ref(
+            artifacts.get("supervisor_backend"),
+            "Stage-B lifecycle artifact supervisor_backend",
+        ),
+        "worker_restart": _recovery_artifact_ref(
+            artifacts.get("supervisor_worker"),
+            "Stage-B lifecycle artifact supervisor_worker",
+        ),
+        "interruption_recovery": _recovery_artifact_ref(
+            strict_evidence.get("appliance_interruption"),
+            "Stage-B strict artifact appliance_interruption",
+        ),
+    }
+
 
 def _validate_stage_b_report(
     value: Mapping[str, Any],
     *,
     candidate_sha: str,
     repository_root: Path,
-) -> None:
+) -> dict[str, str]:
     report = _mapping(value, "stage_b_report")
     if report.get("schema") != _STAGE_B_FINAL_SCHEMA:
         raise RecoverySoakError("Stage-B report schema mismatch")
@@ -662,13 +756,16 @@ def _validate_stage_b_report(
         set(_STAGE_B_COMPONENTS),
         "stage_b_report.evidence",
     )
+    components: dict[str, Mapping[str, Any]] = {}
     for component_name in _STAGE_B_COMPONENTS:
-        _validate_stage_b_component(
+        components[component_name] = _validate_stage_b_component(
             repository_root,
             component_name,
             evidence.get(component_name),
             candidate_identity=checkout_candidate,
         )
+
+    recovery_authority = _recovery_authority_from_components(components)
 
     steps = report.get("steps")
     if not isinstance(steps, list):
@@ -740,6 +837,8 @@ def _validate_stage_b_report(
             "Stage-B report must preserve production_activation=false"
         )
 
+    return recovery_authority
+
 
 def qualify(
     observations: Mapping[str, Any],
@@ -786,7 +885,7 @@ def qualify(
         policy["max_sample_gap_seconds"], "policy.max_sample_gap_seconds"
     )
 
-    _validate_stage_b_report(
+    recovery_authority = _validate_stage_b_report(
         stage_b_report,
         candidate_sha=candidate_sha,
         repository_root=stage_b_repository_root,
@@ -860,10 +959,26 @@ def qualify(
         kind = event["kind"]
         if kind not in _REQUIRED_RECOVERY_KINDS:
             raise RecoverySoakError(f"recovery_events[{index}].kind is not allowed")
-        _timestamp(event["observed_at"], f"recovery_events[{index}].observed_at")
+        event_ts = _timestamp(
+            event["observed_at"],
+            f"recovery_events[{index}].observed_at",
+        )
+        if event_ts < timestamps[0] or event_ts > timestamps[-1]:
+            raise RecoverySoakError(
+                f"recovery event {kind} must occur inside the soak sample window"
+            )
         if event["passed"] is not True:
             raise RecoverySoakError(f"recovery event {kind} did not pass")
-        _evidence_ref(event["evidence_ref"], f"recovery_events[{index}].evidence_ref")
+        event_ref = _evidence_ref(
+            event["evidence_ref"],
+            f"recovery_events[{index}].evidence_ref",
+        )
+        expected_ref = recovery_authority.get(kind)
+        if event_ref != expected_ref:
+            raise RecoverySoakError(
+                f"recovery event {kind} evidence_ref does not match "
+                "canonical Stage-B lifecycle evidence"
+            )
         if kind in seen:
             raise RecoverySoakError(f"duplicate recovery event kind: {kind}")
         seen.add(kind)
