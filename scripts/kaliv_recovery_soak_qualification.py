@@ -169,6 +169,39 @@ def _evidence_ref(value: Any, name: str) -> str:
     return ref
 
 
+def _resolve_stage_b_report_path(
+    repository_root: Path,
+    raw_path: Path,
+) -> tuple[Path, str]:
+    root = repository_root.resolve()
+    if raw_path.is_absolute():
+        try:
+            relative = raw_path.relative_to(root)
+        except ValueError as exc:
+            raise RecoverySoakError(
+                "Stage-B report path must remain under repository root"
+            ) from exc
+    else:
+        relative = raw_path
+
+    probe = root
+    for part in relative.parts:
+        probe = probe / part
+        if probe.is_symlink():
+            raise RecoverySoakError(
+                "Stage-B report path must not traverse symlinks"
+            )
+
+    resolved = (root / relative).resolve()
+    try:
+        normalized = resolved.relative_to(root)
+    except ValueError as exc:
+        raise RecoverySoakError(
+            "Stage-B report path must remain under repository root"
+        ) from exc
+    return resolved, normalized.as_posix()
+
+
 def _stage_b_evidence_ref(
     value: Any,
     *,
@@ -192,19 +225,10 @@ def _stage_b_evidence_ref(
             "stage_b_evidence_ref digest does not match the Stage-B report bytes"
         )
 
-    root = repository_root.resolve()
-    raw_report_path = stage_b_report_path
-    candidate = raw_report_path if raw_report_path.is_absolute() else root / raw_report_path
-    if candidate.is_symlink():
-        raise RecoverySoakError("Stage-B report path must not be a symlink")
-    resolved = candidate.resolve()
-    try:
-        relative = resolved.relative_to(root)
-    except ValueError as exc:
-        raise RecoverySoakError(
-            "Stage-B report path must remain under repository root"
-        ) from exc
-    expected_prefix = relative.as_posix()
+    _, expected_prefix = _resolve_stage_b_report_path(
+        repository_root,
+        stage_b_report_path,
+    )
     if prefix != expected_prefix:
         raise RecoverySoakError(
             "stage_b_evidence_ref path does not match the loaded Stage-B report"
@@ -852,14 +876,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         observations, digest = load(args.observations)
-        stage_b_report, stage_b_digest = _load_stage_b(args.stage_b_report)
+        repository_root = args.repository_root.resolve()
+        stage_b_report_file, _ = _resolve_stage_b_report_path(
+            repository_root,
+            args.stage_b_report,
+        )
+        stage_b_report, stage_b_digest = _load_stage_b(stage_b_report_file)
         receipt = qualify(
             observations,
             observations_sha256=digest,
             stage_b_report=stage_b_report,
             stage_b_sha256=stage_b_digest,
-            stage_b_report_path=args.stage_b_report,
-            stage_b_repository_root=args.repository_root.resolve(),
+            stage_b_report_path=stage_b_report_file,
+            stage_b_repository_root=repository_root,
         ).as_dict()
     except RecoverySoakError as exc:
         print(json.dumps({"schema": RECEIPT_SCHEMA, "qualified": False, "error": str(exc)}))
