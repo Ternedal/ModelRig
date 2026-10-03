@@ -120,7 +120,11 @@ evidence reference:
    physical-campaign candidate identity: version, Git HEAD and code fingerprint
    must match the Stage-B report, the checkout must be clean, version stamps must
    be consistent, and the same Git SHA must be present in the recovery
-   observations.
+   observations. Before accepting Stage-B authority, the qualifier also re-runs
+   the canonical `scripts/freeze_check.py` from that checkout and requires a
+   successful FROZEN verdict, including its exact-head CI and published-release
+   checks. The sanctioned `validation/frozen-candidate.json` written by a
+   successful freeze is evidence output and is not treated as source drift.
    It also requires the Stage-B report's exact four component receipts
    (`strict_stage_b`, `updater_chain`, `physical_campaign`,
    `component_final_gate`), resolves their repository-relative paths under
