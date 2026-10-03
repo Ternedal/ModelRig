@@ -4,6 +4,7 @@ from collections import defaultdict
 
 BASE = os.environ.get("BASE_BRANCH", "main")
 MIN_AGE_DAYS = int(os.environ.get("MIN_AGE_DAYS", "7"))
+EXECUTE = os.environ.get("EXECUTE", "false").lower() == "true"
 
 subprocess.run(
     ["git", "fetch", "origin", "--prune", "--no-tags", "+refs/heads/*:refs/remotes/origin/*"],
@@ -40,6 +41,7 @@ for row in rows:
 
 now = int(time.time())
 candidate_count = 0
+deleted_count = 0
 group_count = 0
 protected_count = 0
 too_new_count = 0
@@ -84,9 +86,13 @@ for sha, names in sorted(groups.items()):
 
         print(f"DUPLICATE_ALIAS\t{name}\t{sha}\tKEEP={keeper}\t{age_days}d")
         candidate_count += 1
+        if EXECUTE:
+            subprocess.run(["git", "push", "origin", "--delete", name], check=True)
+            print(f"DELETED\t{name}\t{sha}\tKEEP={keeper}")
+            deleted_count += 1
 
 print(
     f"SUMMARY duplicate_groups={group_count} duplicate_alias_candidates={candidate_count} "
     f"protected_aliases={protected_count} too_new_aliases={too_new_count} "
-    f"min_age_days={MIN_AGE_DAYS}"
+    f"deleted={deleted_count} execute={str(EXECUTE).lower()} min_age_days={MIN_AGE_DAYS}"
 )
