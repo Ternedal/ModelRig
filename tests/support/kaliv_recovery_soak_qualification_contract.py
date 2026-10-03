@@ -24,6 +24,7 @@ STAGE_B_SHA256 = "e" * 64
 COMPONENT_ROOT = Path(tempfile.mkdtemp(prefix="kaliv-recovery-stage-b-contract-"))
 _ORIGINAL_REVALIDATE = gate._revalidate_stage_b_component
 _ORIGINAL_CHECKOUT_CANDIDATE = gate._candidate_identity_from_checkout
+_ORIGINAL_LOADER = gate._load_stage_b_validator
 REVALIDATED_COMPONENTS: list[str] = []
 
 
@@ -450,8 +451,6 @@ def run_contract() -> None:
 
     assert gate._positive_number(720.0, "max_age_hours") == 720.0
 
-    original_loader = gate._load_stage_b_validator
-
     class _CandidateModule:
         def __init__(self, candidate: dict):
             self._candidate = candidate
@@ -473,7 +472,7 @@ def run_contract() -> None:
             assert fragment in str(exc), (fragment, str(exc))
         else:
             raise AssertionError(f"invalid checkout candidate accepted: {candidate!r}")
-    gate._load_stage_b_validator = original_loader
+    gate._load_stage_b_validator = _ORIGINAL_LOADER
 
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
     gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
@@ -486,5 +485,5 @@ if __name__ == "__main__":
     finally:
         gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
         gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
-        gate._load_stage_b_validator = globals().get("original_loader", gate._load_stage_b_validator)
+        gate._load_stage_b_validator = _ORIGINAL_LOADER
         shutil.rmtree(COMPONENT_ROOT, ignore_errors=True)
