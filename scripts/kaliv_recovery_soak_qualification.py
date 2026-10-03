@@ -50,6 +50,25 @@ _REQUIRED_RECOVERY_KINDS = (
 _MAX_SAMPLES = 100_000
 _MAX_RECOVERY_EVENTS = 128
 _MAX_EVIDENCE_REF = 512
+_MAX_COMPONENT_BYTES = 32 * 1024 * 1024
+_STAGE_B_COMPONENTS = {
+    "updater_chain": (
+        "kaliv-appliance-lifecycle-updater-chain/v1",
+        ("passed", "updater_chain_complete"),
+    ),
+    "physical_campaign": (
+        "kaliv-physical-validation-campaign/v1",
+        ("passed", "physical_campaign_complete"),
+    ),
+    "component_final_gate": (
+        "kaliv-physical-validation-final/v1",
+        ("passed", "all_physical_evidence_complete"),
+    ),
+    "strict_stage_b": (
+        "kaliv-stage-b-strict-evidence/v1",
+        ("passed", "strict_evidence_complete"),
+    ),
+}
 
 
 class RecoverySoakError(RuntimeError):
@@ -166,7 +185,99 @@ def _stage_b_evidence_ref(value: Any, *, stage_b_sha256: str) -> str:
     return ref
 
 
-def _validate_stage_b_report(value: Mapping[str, Any], *, candidate_sha: str) -> None:
+def _component_path(root: Path, raw: Any, name: str) -> Path:
+    if not isinstance(raw, str) or not raw.strip():
+        raise RecoverySoakError(f"Stage-B evidence {name}.path must be nonblank")
+    relative = Path(raw)
+    if relative.is_absolute():
+        raise RecoverySoakError(f"Stage-B evidence {name}.path must be repository-relative")
+    root = root.resolve()
+    candidate = root / relative
+    probe = root
+    for part in relative.parts:
+        probe = probe / part
+        if probe.is_symlink():
+            raise RecoverySoakError(f"Stage-B evidence {name}.path must not traverse symlinks")
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise RecoverySoakError(
+            f"Stage-B evidence {name}.path escapes repository root"
+        ) from exc
+    return resolved
+
+
+def _validate_stage_b_component(
+    repository_root: Path,
+    name: str,
+    meta_value: Any,
+    *,
+    candidate_sha: str,
+) -> None:
+    expected_schema, required_gate_true = _STAGE_B_COMPONENTS[name]
+    meta = _mapping(meta_value, f"stage_b_report.evidence.{name}")
+    _exact_keys(meta, {"path", "sha256", "bytes", "schema"}, f"stage_b_report.evidence.{name}")
+    if meta.get("schema") != expected_schema:
+        raise RecoverySoakError(f"Stage-B evidence {name} schema metadata mismatch")
+    digest = meta.get("sha256")
+    if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
+        raise RecoverySoakError(f"Stage-B evidence {name}.sha256 must be lowercase SHA-256")
+    byte_count = meta.get("bytes")
+    if (
+        isinstance(byte_count, bool)
+        or not isinstance(byte_count, int)
+        or byte_count <= 0
+        or byte_count > _MAX_COMPONENT_BYTES
+    ):
+        raise RecoverySoakError(f"Stage-B evidence {name}.bytes is invalid")
+
+    path = _component_path(repository_root, meta.get("path"), name)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise RecoverySoakError(f"Stage-B evidence {name} file cannot be read") from exc
+    if len(raw) != byte_count:
+        raise RecoverySoakError(f"Stage-B evidence {name} byte count does not match file")
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise RecoverySoakError(f"Stage-B evidence {name} SHA-256 does not match file")
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RecoverySoakError(f"Stage-B evidence {name} is not valid UTF-8 JSON") from exc
+    receipt = _mapping(parsed, f"Stage-B evidence {name}")
+    if receipt.get("schema") != expected_schema:
+        raise RecoverySoakError(f"Stage-B evidence {name} embedded schema mismatch")
+    candidate = _mapping(receipt.get("candidate"), f"Stage-B evidence {name}.candidate")
+    if candidate.get("git_sha") != candidate_sha:
+        raise RecoverySoakError(f"Stage-B evidence {name} candidate Git SHA mismatch")
+    gate = _mapping(receipt.get("gate"), f"Stage-B evidence {name}.gate")
+    for field in required_gate_true:
+        if gate.get(field) is not True:
+            raise RecoverySoakError(f"Stage-B evidence {name} gate.{field} must be true")
+    if gate.get("production_activation") is not False:
+        raise RecoverySoakError(
+            f"Stage-B evidence {name} must preserve production_activation=false"
+        )
+
+    if name == "physical_campaign":
+        if receipt.get("mode") != "verify":
+            raise RecoverySoakError("Stage-B physical campaign must be verify mode")
+        summary = _mapping(receipt.get("summary"), "Stage-B physical campaign summary")
+        if summary.get("total") != 8 or tuple(summary.get("passed") or ()) != _EXPECTED_STAGE_B_PROOFS[:-1]:
+            raise RecoverySoakError("Stage-B physical campaign must contain canonical eight proofs")
+    elif name == "component_final_gate":
+        summary = _mapping(receipt.get("summary"), "Stage-B component final summary")
+        if summary.get("total") != 9 or tuple(summary.get("passed") or ()) != _EXPECTED_STAGE_B_PROOFS:
+            raise RecoverySoakError("Stage-B component final must contain canonical nine proofs")
+
+
+def _validate_stage_b_report(
+    value: Mapping[str, Any],
+    *,
+    candidate_sha: str,
+    repository_root: Path,
+) -> None:
     report = _mapping(value, "stage_b_report")
     if report.get("schema") != _STAGE_B_FINAL_SCHEMA:
         raise RecoverySoakError("Stage-B report schema mismatch")
@@ -180,6 +291,20 @@ def _validate_stage_b_report(value: Mapping[str, Any], *, candidate_sha: str) ->
         )
     if candidate.get("working_tree_clean") is not True:
         raise RecoverySoakError("Stage-B report candidate checkout is not clean")
+
+    evidence = _mapping(report.get("evidence"), "stage_b_report.evidence")
+    _exact_keys(
+        evidence,
+        set(_STAGE_B_COMPONENTS),
+        "stage_b_report.evidence",
+    )
+    for component_name in _STAGE_B_COMPONENTS:
+        _validate_stage_b_component(
+            repository_root,
+            component_name,
+            evidence.get(component_name),
+            candidate_sha=candidate_sha,
+        )
 
     steps = report.get("steps")
     if not isinstance(steps, list):
@@ -258,6 +383,7 @@ def qualify(
     observations_sha256: str,
     stage_b_report: Mapping[str, Any],
     stage_b_sha256: str,
+    stage_b_repository_root: Path,
 ) -> Qualification:
     root = _mapping(observations, "observations")
     _exact_keys(
@@ -295,7 +421,11 @@ def qualify(
         policy["max_sample_gap_seconds"], "policy.max_sample_gap_seconds"
     )
 
-    _validate_stage_b_report(stage_b_report, candidate_sha=candidate_sha)
+    _validate_stage_b_report(
+        stage_b_report,
+        candidate_sha=candidate_sha,
+        repository_root=stage_b_repository_root,
+    )
     stage_b_ref = _stage_b_evidence_ref(
         root["stage_b_evidence_ref"], stage_b_sha256=stage_b_sha256
     )
@@ -444,6 +574,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("observations", type=Path)
     parser.add_argument("--stage-b-report", type=Path, required=True)
+    parser.add_argument(
+        "--repository-root",
+        type=Path,
+        default=Path.cwd(),
+        help="ModelRig checkout root used to resolve Stage-B component evidence paths",
+    )
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
 
@@ -455,6 +591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             observations_sha256=digest,
             stage_b_report=stage_b_report,
             stage_b_sha256=stage_b_digest,
+            stage_b_repository_root=args.repository_root.resolve(),
         ).as_dict()
     except RecoverySoakError as exc:
         print(json.dumps({"schema": RECEIPT_SCHEMA, "qualified": False, "error": str(exc)}))
