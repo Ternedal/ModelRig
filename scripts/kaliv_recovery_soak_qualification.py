@@ -285,13 +285,6 @@ def _revalidate_stage_b_component(
                 )
         return
 
-    _revalidate_stage_b_component(
-        repository_root,
-        name,
-        receipt,
-        candidate_identity=candidate_identity,
-    )
-
     if name == "physical_campaign":
         configuration = _mapping(
             receipt.get("configuration"),
@@ -488,6 +481,13 @@ def _validate_stage_b_component(
         raise RecoverySoakError(
             f"Stage-B evidence {name} must preserve production_activation=false"
         )
+
+    _revalidate_stage_b_component(
+        repository_root,
+        name,
+        receipt,
+        candidate_identity=candidate_identity,
+    )
 
     if name == "physical_campaign":
         if receipt.get("mode") != "verify":
