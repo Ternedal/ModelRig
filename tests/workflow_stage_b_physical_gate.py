@@ -217,6 +217,40 @@ try:
           "cross-SHA component reports cannot be bundled")
 
     chain_path, campaign_path, final_path = components(temp)
+    campaign = json.loads(campaign_path.read_text(encoding="utf-8"))
+    campaign["summary"]["passed"].remove("task_ui")
+    write(campaign_path, campaign)
+    report, code = module.evaluate_bundle(
+        ROOT,
+        candidate=CANDIDATE,
+        chain_path=chain_path.relative_to(ROOT),
+        campaign_path=campaign_path.relative_to(ROOT),
+        component_final_path=final_path.relative_to(ROOT),
+        steps=steps,
+        now=NOW,
+    )
+    check(code == 1 and any("canonical eight proofs" in error
+                            for error in report["summary"]["errors"]),
+          "Stage B rejects a campaign missing task_ui proof")
+
+    chain_path, campaign_path, final_path = components(temp)
+    final = json.loads(final_path.read_text(encoding="utf-8"))
+    final["summary"]["passed"][-1] = "preflight"
+    write(final_path, final)
+    report, code = module.evaluate_bundle(
+        ROOT,
+        candidate=CANDIDATE,
+        chain_path=chain_path.relative_to(ROOT),
+        campaign_path=campaign_path.relative_to(ROOT),
+        component_final_path=final_path.relative_to(ROOT),
+        steps=steps,
+        now=NOW,
+    )
+    check(code == 1 and any("canonical nine proofs" in error
+                            for error in report["summary"]["errors"]),
+          "Stage B rejects a duplicated/missing final proof identity")
+
+    chain_path, campaign_path, final_path = components(temp)
     failed_steps = list(steps)
     failed_steps[1] = {"label": "updater-chain gate", "exit_code": 7}
     report, code = module.evaluate_bundle(
