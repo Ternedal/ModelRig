@@ -705,9 +705,25 @@ def _recovery_artifact_ref(meta_value: Any, label: str) -> str:
     return f"{relative.as_posix()}#sha256={digest}"
 
 
+def _recovery_artifact_authority(
+    meta_value: Any,
+    label: str,
+) -> dict[str, str]:
+    meta = _mapping(meta_value, label)
+    ref = _recovery_artifact_ref(meta, label)
+    observed_at = _timestamp(
+        meta.get("observed_at"),
+        f"{label}.observed_at",
+    )
+    return {
+        "evidence_ref": ref,
+        "observed_at": observed_at.isoformat(),
+    }
+
+
 def _recovery_authority_from_components(
     components: Mapping[str, Mapping[str, Any]],
-) -> dict[str, str]:
+) -> dict[str, dict[str, str]]:
     campaign = _mapping(
         components.get("physical_campaign"),
         "Stage-B physical campaign receipt",
@@ -743,19 +759,19 @@ def _recovery_authority_from_components(
     )
 
     return {
-        "reboot": _recovery_artifact_ref(
+        "reboot": _recovery_artifact_authority(
             artifacts.get("reboot"),
             "Stage-B lifecycle artifact reboot",
         ),
-        "backend_restart": _recovery_artifact_ref(
+        "backend_restart": _recovery_artifact_authority(
             artifacts.get("supervisor_backend"),
             "Stage-B lifecycle artifact supervisor_backend",
         ),
-        "worker_restart": _recovery_artifact_ref(
+        "worker_restart": _recovery_artifact_authority(
             artifacts.get("supervisor_worker"),
             "Stage-B lifecycle artifact supervisor_worker",
         ),
-        "interruption_recovery": _recovery_artifact_ref(
+        "interruption_recovery": _recovery_artifact_authority(
             strict_evidence.get("appliance_interruption"),
             "Stage-B strict artifact appliance_interruption",
         ),
@@ -767,7 +783,7 @@ def _validate_stage_b_report(
     *,
     candidate_sha: str,
     repository_root: Path,
-) -> dict[str, str]:
+) -> dict[str, dict[str, str]]:
     report = _mapping(value, "stage_b_report")
     if report.get("schema") != _STAGE_B_FINAL_SCHEMA:
         raise RecoverySoakError("Stage-B report schema mismatch")
@@ -1022,21 +1038,35 @@ def qualify(
             event["observed_at"],
             f"recovery_events[{index}].observed_at",
         )
-        if event_ts < timestamps[0] or event_ts > timestamps[-1]:
-            raise RecoverySoakError(
-                f"recovery event {kind} must occur inside the soak sample window"
-            )
         if event["passed"] is not True:
             raise RecoverySoakError(f"recovery event {kind} did not pass")
         event_ref = _evidence_ref(
             event["evidence_ref"],
             f"recovery_events[{index}].evidence_ref",
         )
-        expected_ref = recovery_authority.get(kind)
+        expected = _mapping(
+            recovery_authority.get(kind),
+            f"canonical recovery authority for {kind}",
+        )
+        expected_ref = expected.get("evidence_ref")
         if event_ref != expected_ref:
             raise RecoverySoakError(
                 f"recovery event {kind} evidence_ref does not match "
                 "canonical Stage-B lifecycle evidence"
+            )
+        expected_ts = _timestamp(
+            expected.get("observed_at"),
+            f"canonical recovery authority for {kind}.observed_at",
+        )
+        if event_ts != expected_ts:
+            raise RecoverySoakError(
+                f"recovery event {kind} observed_at does not match "
+                "canonical Stage-B lifecycle evidence"
+            )
+        if expected_ts < timestamps[0] or expected_ts > timestamps[-1]:
+            raise RecoverySoakError(
+                f"recovery event {kind} canonical evidence occurred outside "
+                "the soak sample window"
             )
         if kind in seen:
             raise RecoverySoakError(f"duplicate recovery event kind: {kind}")
