@@ -117,7 +117,13 @@ evidence reference:
    (`strict_stage_b`, `updater_chain`, `physical_campaign`,
    `component_final_gate`), resolves their repository-relative paths under
    `--repository-root`, and verifies file size, SHA-256, embedded schema,
-   candidate SHA, gate state, and the canonical eight-/nine-proof summaries.
+   full candidate identity, gate state, and the canonical eight-/nine-proof
+   summaries. Receipt booleans are not sufficient: the qualifier re-runs the
+   canonical strict/updater evaluators against the lifecycle source and logs,
+   re-runs all eight campaign evidence validators against their source
+   artifacts, and re-runs the final browser/campaign validator against the
+   physical attestation and underlying browser receipt. The stored receipt must
+   remain consistent with that independent revalidation.
    A caller-supplied label, a recomputed hash over a handcrafted top-level
    Stage-B report, or an unverified Stage-B path is not sufficient. The embedded ModelRig SHA must
    equal the pinned revision or be its ancestor with the exact same Git tree,
