@@ -287,6 +287,34 @@ def _load_stage_b_validator(script_name: str):
     return module
 
 
+def _git_source_drift(repository_root: Path) -> list[str]:
+    freeze_module = _load_stage_b_validator("freeze_check.py")
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(repository_root.resolve()),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RecoverySoakError(
+            "Stage-B checkout source cleanliness cannot be verified"
+        ) from exc
+    if completed.returncode != 0:
+        raise RecoverySoakError(
+            "Stage-B checkout source cleanliness cannot be verified"
+        )
+    splitter = getattr(freeze_module, "_split_git_status_authority", None)
+    if not callable(splitter):
+        raise RecoverySoakError(
+            "canonical freeze cleanliness helper is unavailable"
+        )
+    source_drift, _local_evidence = splitter(completed.stdout)
+    return list(source_drift)
+
+
 def _candidate_identity_from_checkout(repository_root: Path) -> Mapping[str, Any]:
     module = _load_stage_b_validator("physical_validation_campaign.py")
     try:
@@ -307,36 +335,7 @@ def _candidate_identity_from_checkout(repository_root: Path) -> Mapping[str, Any
         raise RecoverySoakError("Stage-B checkout candidate code_sha256 is invalid")
     identity_source = candidate.get("identity_source")
     if identity_source == "git":
-        freeze_module = _load_stage_b_validator("freeze_check.py")
-        try:
-            completed = subprocess.run(
-                [
-                    "git",
-                    "status",
-                    "--porcelain",
-                    "--untracked-files=all",
-                ],
-                cwd=str(repository_root.resolve()),
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise RecoverySoakError(
-                "Stage-B checkout source cleanliness cannot be verified"
-            ) from exc
-        if completed.returncode != 0:
-            raise RecoverySoakError(
-                "Stage-B checkout source cleanliness cannot be verified"
-            )
-        splitter = getattr(freeze_module, "_split_git_status_authority", None)
-        if not callable(splitter):
-            raise RecoverySoakError(
-                "canonical freeze cleanliness helper is unavailable"
-            )
-        source_drift, _local_evidence = splitter(completed.stdout)
-        if source_drift:
+        if _git_source_drift(repository_root):
             raise RecoverySoakError(
                 "Stage-B checkout contains unsanctioned source changes"
             )
