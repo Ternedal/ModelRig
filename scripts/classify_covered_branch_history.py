@@ -3,6 +3,7 @@ import json, os, subprocess, time
 
 BASE = os.environ.get("BASE_BRANCH", "main")
 MIN_AGE_DAYS = int(os.environ.get("MIN_AGE_DAYS", "7"))
+EXECUTE = os.environ.get("EXECUTE", "false").lower() == "true"
 repo = os.environ["GITHUB_REPOSITORY"]
 
 subprocess.run(
@@ -39,6 +40,7 @@ for row in rows:
 
 now = int(time.time())
 covered = 0
+deleted = 0
 leaf = 0
 protected_count = 0
 too_new = 0
@@ -84,8 +86,12 @@ for name in sorted(branches):
     keeper = sorted(covering, key=keeper_score)[0]
     print(f"COVERED_BY_BRANCH\t{name}\tKEEP={keeper}\t{age_days}d\tcovering={len(covering)}")
     covered += 1
+    if EXECUTE:
+        subprocess.run(["git", "push", "origin", "--delete", name], check=True)
+        print(f"DELETED\t{name}\tKEEP={keeper}")
+        deleted += 1
 
 print(
     f"SUMMARY covered={covered} leaf={leaf} protected={protected_count} "
-    f"too_new={too_new} min_age_days={MIN_AGE_DAYS}"
+    f"too_new={too_new} deleted={deleted} execute={str(EXECUTE).lower()} min_age_days={MIN_AGE_DAYS}"
 )
