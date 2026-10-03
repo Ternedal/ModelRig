@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import re
 import sys
 from dataclasses import dataclass
@@ -168,7 +169,13 @@ def _evidence_ref(value: Any, name: str) -> str:
     return ref
 
 
-def _stage_b_evidence_ref(value: Any, *, stage_b_sha256: str) -> str:
+def _stage_b_evidence_ref(
+    value: Any,
+    *,
+    stage_b_sha256: str,
+    stage_b_report_path: Path,
+    repository_root: Path,
+) -> str:
     ref = _evidence_ref(value, "stage_b_evidence_ref")
     marker = "#sha256="
     if marker not in ref:
@@ -183,6 +190,24 @@ def _stage_b_evidence_ref(value: Any, *, stage_b_sha256: str) -> str:
     if digest != stage_b_sha256:
         raise RecoverySoakError(
             "stage_b_evidence_ref digest does not match the Stage-B report bytes"
+        )
+
+    root = repository_root.resolve()
+    raw_report_path = stage_b_report_path
+    candidate = raw_report_path if raw_report_path.is_absolute() else root / raw_report_path
+    if candidate.is_symlink():
+        raise RecoverySoakError("Stage-B report path must not be a symlink")
+    resolved = candidate.resolve()
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError as exc:
+        raise RecoverySoakError(
+            "Stage-B report path must remain under repository root"
+        ) from exc
+    expected_prefix = relative.as_posix()
+    if prefix != expected_prefix:
+        raise RecoverySoakError(
+            "stage_b_evidence_ref path does not match the loaded Stage-B report"
         )
     return ref
 
@@ -233,8 +258,12 @@ def _positive_number(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RecoverySoakError(f"{name} must be numeric")
     result = float(value)
-    if result <= 0:
-        raise RecoverySoakError(f"{name} must be positive")
+    if not math.isfinite(result):
+        raise RecoverySoakError(f"{name} must be finite")
+    if result <= 0 or result > 720:
+        raise RecoverySoakError(
+            f"{name} must be greater than 0 and at most 720"
+        )
     return result
 
 
@@ -617,6 +646,7 @@ def qualify(
     observations_sha256: str,
     stage_b_report: Mapping[str, Any],
     stage_b_sha256: str,
+    stage_b_report_path: Path,
     stage_b_repository_root: Path,
 ) -> Qualification:
     root = _mapping(observations, "observations")
@@ -661,7 +691,10 @@ def qualify(
         repository_root=stage_b_repository_root,
     )
     stage_b_ref = _stage_b_evidence_ref(
-        root["stage_b_evidence_ref"], stage_b_sha256=stage_b_sha256
+        root["stage_b_evidence_ref"],
+        stage_b_sha256=stage_b_sha256,
+        stage_b_report_path=stage_b_report_path,
+        repository_root=stage_b_repository_root,
     )
 
     raw_samples = root["samples"]
@@ -825,6 +858,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             observations_sha256=digest,
             stage_b_report=stage_b_report,
             stage_b_sha256=stage_b_digest,
+            stage_b_report_path=args.stage_b_report,
             stage_b_repository_root=args.repository_root.resolve(),
         ).as_dict()
     except RecoverySoakError as exc:
