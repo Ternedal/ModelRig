@@ -118,6 +118,41 @@ def _load_candidate_identity(root: Path) -> dict[str, Any]:
     value = module.candidate_identity(root)
     if not isinstance(value, dict):
         raise StageBGateError("candidate identity is invalid")
+
+    identity_source = value.get("identity_source")
+    if identity_source == "git":
+        freeze_path = root / "scripts" / "freeze_check.py"
+        freeze_spec = importlib.util.spec_from_file_location(
+            "stage_b_freeze_cleanliness",
+            freeze_path,
+        )
+        if freeze_spec is None or freeze_spec.loader is None:
+            raise StageBGateError("freeze cleanliness module cannot be loaded")
+        freeze_module = importlib.util.module_from_spec(freeze_spec)
+        sys.modules[freeze_spec.name] = freeze_module
+        freeze_spec.loader.exec_module(freeze_module)
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise StageBGateError("candidate source cleanliness cannot be verified")
+        source_drift, _local_evidence = freeze_module._split_git_status_authority(
+            result.stdout
+        )
+        value = dict(value)
+        value["working_tree_clean"] = not bool(source_drift)
+        value["dirty_entries"] = len(source_drift)
+    elif identity_source == "frozen-candidate-attestation":
+        # The campaign identity reached this mode only via the strict frozen
+        # attestation reader. Git cleanliness is unavailable by design.
+        value = dict(value)
+    else:
+        raise StageBGateError("candidate identity source is invalid")
     return value
 
 
