@@ -42,6 +42,17 @@ DEFAULT_CAMPAIGN = Path("validation/physical-validation-campaign-latest.json")
 DEFAULT_BROWSER = Path("validation/browser-peer-public-validation-physical-latest.json")
 DEFAULT_COMPONENT_FINAL = Path("validation/physical-validation-final-latest.json")
 DEFAULT_REPORT = Path("validation/stage-b-physical-final-latest.json")
+EXPECTED_CAMPAIGN_PROOFS = (
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "lifecycle",
+    "scheduler_pilot",
+    "task_ui",
+)
+EXPECTED_FINAL_PROOFS = EXPECTED_CAMPAIGN_PROOFS + ("browser_peer_physical",)
 MAX_BYTES = 32 * 1024 * 1024
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
@@ -176,8 +187,13 @@ def evaluate_bundle(
         errors.append("seven-proof release campaign is incomplete")
     if campaign.get("gate", {}).get("production_activation") is not False:
         errors.append("release campaign did not preserve production_activation=false")
-    if campaign.get("summary", {}).get("total") != 8:
+    campaign_summary = (
+        campaign.get("summary") if isinstance(campaign.get("summary"), Mapping) else {}
+    )
+    if campaign_summary.get("total") != len(EXPECTED_CAMPAIGN_PROOFS):
         errors.append("release campaign summary.total is not eight")
+    if tuple(campaign_summary.get("passed") or ()) != EXPECTED_CAMPAIGN_PROOFS:
+        errors.append("release campaign summary.passed is not the canonical eight proofs")
 
     if final.get("schema") != FINAL_SCHEMA:
         errors.append("component final-gate schema mismatch")
@@ -188,8 +204,13 @@ def evaluate_bundle(
         errors.append("component final gate is not physically complete")
     if final_gate.get("production_activation") is not False:
         errors.append("component final gate did not preserve production_activation=false")
-    if final.get("summary", {}).get("total") != 9:
+    final_summary = (
+        final.get("summary") if isinstance(final.get("summary"), Mapping) else {}
+    )
+    if final_summary.get("total") != len(EXPECTED_FINAL_PROOFS):
         errors.append("component final summary.total is not nine")
+    if tuple(final_summary.get("passed") or ()) != EXPECTED_FINAL_PROOFS:
+        errors.append("component final summary.passed is not the canonical nine proofs")
 
     for label, value in (
         ("updater-chain", chain),
