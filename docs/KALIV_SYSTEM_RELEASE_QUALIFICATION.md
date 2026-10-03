@@ -112,9 +112,14 @@ evidence reference:
    requires `status=complete`, all recorded Stage-B command exit codes to
    be zero, `summary.total=9` with an empty `summary.errors`, all final/strict
    physical gates PASS, `production_activation=false`, a clean candidate
-   checkout, and the same candidate Git SHA as the recovery observations. A
-   caller-supplied label or
-   unverified Stage-B path is not sufficient. The embedded ModelRig SHA must
+   checkout, and the same candidate Git SHA as the recovery observations.
+   It also requires the Stage-B report's exact four component receipts
+   (`strict_stage_b`, `updater_chain`, `physical_campaign`,
+   `component_final_gate`), resolves their repository-relative paths under
+   `--repository-root`, and verifies file size, SHA-256, embedded schema,
+   candidate SHA, gate state, and the canonical eight-/nine-proof summaries.
+   A caller-supplied label, a recomputed hash over a handcrafted top-level
+   Stage-B report, or an unverified Stage-B path is not sufficient. The embedded ModelRig SHA must
    equal the pinned revision or be its ancestor with the exact same Git tree,
    permitting only a clean merge-commit identity change.
 10. `repository_authority` — the repositories used for the release are protected
