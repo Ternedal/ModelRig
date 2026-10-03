@@ -176,8 +176,8 @@ def evaluate_bundle(
         errors.append("seven-proof release campaign is incomplete")
     if campaign.get("gate", {}).get("production_activation") is not False:
         errors.append("release campaign did not preserve production_activation=false")
-    if campaign.get("summary", {}).get("total") != 7:
-        errors.append("release campaign summary.total is not seven")
+    if campaign.get("summary", {}).get("total") != 8:
+        errors.append("release campaign summary.total is not eight")
 
     if final.get("schema") != FINAL_SCHEMA:
         errors.append("component final-gate schema mismatch")
@@ -188,8 +188,8 @@ def evaluate_bundle(
         errors.append("component final gate is not physically complete")
     if final_gate.get("production_activation") is not False:
         errors.append("component final gate did not preserve production_activation=false")
-    if final.get("summary", {}).get("total") != 8:
-        errors.append("component final summary.total is not eight")
+    if final.get("summary", {}).get("total") != 9:
+        errors.append("component final summary.total is not nine")
 
     for label, value in (
         ("updater-chain", chain),
@@ -221,7 +221,7 @@ def evaluate_bundle(
             ),
         },
         "summary": {
-            "total": 8,
+            "total": 9,
             "passed": final.get("summary", {}).get("passed", []),
             "errors": errors,
         },
@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         if steps[-1]["exit_code"] == 0:
             steps.append(
                 _run(
-                    "seven-proof release campaign",
+                    "eight-proof release campaign",
                     [
                         sys.executable,
                         str(ROOT / "scripts" / "physical_validation_campaign.py"),
@@ -297,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         if steps[-1]["exit_code"] == 0:
             steps.append(
                 _run(
-                    "eight-proof component final gate",
+                    "nine-proof component final gate",
                     [
                         sys.executable,
                         str(ROOT / "scripts" / "physical_validation_final_gate.py"),
@@ -334,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
                 "type": type(exc).__name__,
                 "message": str(exc).replace("\r", " ").replace("\n", " ")[:500],
             },
-            "summary": {"total": 8, "passed": [], "errors": [str(exc)[:500]]},
+            "summary": {"total": 9, "passed": [], "errors": [str(exc)[:500]]},
             "gate": {
                 "passed": False,
                 "release_freeze_complete": False,
