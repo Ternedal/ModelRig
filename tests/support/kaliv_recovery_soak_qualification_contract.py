@@ -293,6 +293,7 @@ def run_contract() -> None:
         stage_b=_stage_b(),
     )
 
+    FREEZE_REVALIDATIONS.clear()
     REVALIDATED_COMPONENTS.clear()
     gate._revalidate_stage_b_component = _stub_revalidate
     q = gate.qualify(
