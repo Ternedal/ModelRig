@@ -315,9 +315,8 @@ def _revalidate_stage_b_component(
             "Stage-B physical campaign evidence",
         )
         module = _load_stage_b_validator("physical_validation_campaign.py")
-        validator_root = Path(__file__).resolve().parents[1]
         try:
-            assessor = module._load_agent3_assessor(validator_root)
+            assessor = module._load_agent3_assessor(repository_root)
         except Exception as exc:
             raise RecoverySoakError(
                 "Stage-B physical campaign Agent 3 validator cannot be loaded"
