@@ -22,6 +22,21 @@ SPEC.loader.exec_module(gate)
 
 STAGE_B_SHA256 = "e" * 64
 COMPONENT_ROOT = Path(tempfile.mkdtemp(prefix="kaliv-recovery-stage-b-contract-"))
+_ORIGINAL_REVALIDATE = gate._revalidate_stage_b_component
+REVALIDATED_COMPONENTS: list[str] = []
+
+
+def _stub_revalidate(
+    _repository_root: Path,
+    name: str,
+    _receipt: dict,
+    *,
+    candidate_identity: dict,
+) -> None:
+    assert candidate_identity["git_sha"] == "a" * 40
+    assert candidate_identity["version"] == "2.0.14"
+    assert candidate_identity["code_sha256"] == "c" * 64
+    REVALIDATED_COMPONENTS.append(name)
 
 
 def _write_component(name: str, schema: str, gate_fields: dict, *, extra: dict | None = None) -> dict:
@@ -185,6 +200,16 @@ def _reject(
 
 def run_contract() -> None:
     valid = _observations()
+
+    gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
+    _reject(
+        valid,
+        "Stage-B evidence updater_chain.source must be an object",
+        stage_b=_stage_b(),
+    )
+
+    REVALIDATED_COMPONENTS.clear()
+    gate._revalidate_stage_b_component = _stub_revalidate
     q = gate.qualify(
         valid,
         observations_sha256="f" * 64,
@@ -204,6 +229,7 @@ def run_contract() -> None:
         "kaliv-recovery-soak:" + "a" * 40 + ":"
     )
     assert len(q.release_evidence_ref.rsplit(":", 1)[1]) == 64
+    assert REVALIDATED_COMPONENTS == list(gate._STAGE_B_COMPONENTS)
 
     short = copy.deepcopy(valid)
     short["policy"]["required_duration_seconds"] = 7201
@@ -376,4 +402,5 @@ if __name__ == "__main__":
         run_contract()
         print("Kaliv recovery soak qualification contract: PASS")
     finally:
+        gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
         shutil.rmtree(COMPONENT_ROOT, ignore_errors=True)
