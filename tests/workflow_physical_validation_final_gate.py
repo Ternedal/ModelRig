@@ -753,8 +753,8 @@ def reservation_contract() -> None:
 def main() -> None:
     module = load_module()
     doc = " ".join((module.__doc__ or "").split())
-    assert "seven-proof physical campaign" in doc
-    assert "eighth-proof final receipt" in doc
+    assert "eight-proof physical campaign" in doc
+    assert "ninth-proof final receipt" in doc
     now = datetime(2026, 7, 20, 18, 30, tzinfo=timezone.utc)
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -768,6 +768,22 @@ def main() -> None:
         assert report["summary"]["passed"][-1] == "browser_peer_physical"
         assert report["gate"]["production_activation"] is False
 
+        campaign_file = root / campaign
+        campaign_value = json.loads(campaign_file.read_text(encoding="utf-8"))
+        campaign_value["summary"]["passed"].remove("task_ui")
+        campaign_value["summary"]["total"] = 7
+        write_json(campaign_file, campaign_value)
+        rejected, rejected_code = evaluate(
+            module, root, candidate, campaign, attestation, now
+        )
+        assert rejected_code == 1
+        assert any(
+            "canonical eight proofs" in error
+            or "summary.total is not eight" in error
+            for error in rejected["summary"]["errors"]
+        )
+
+        candidate, campaign, attestation = fixtures(root, now)
         attestation_file = root / attestation
         value = json.loads(attestation_file.read_text(encoding="utf-8"))
         value["host"]["system"] = "Linux"
@@ -806,7 +822,7 @@ def main() -> None:
         assert any("candidate.git_sha" in error for error in report["summary"]["errors"])
 
     reservation_contract()
-    print("physical validation final eight-proof gate + RSI host-local reservation: PASS")
+    print("physical validation final nine-proof gate + RSI host-local reservation: PASS")
 
 
 if __name__ == "__main__":
