@@ -1,0 +1,35 @@
+name: Classify superseded branches
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/classify-superseded-branches.yml"
+      - "scripts/classify_superseded_branches.sh"
+  workflow_dispatch:
+    inputs:
+      min_age_days:
+        description: "Only classify unmerged branches at least this old"
+        required: true
+        default: "7"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Classify branches by merge result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BASE_BRANCH: main
+          MIN_AGE_DAYS: ${{ inputs.min_age_days || '7' }}
+        run: bash scripts/classify_superseded_branches.sh
