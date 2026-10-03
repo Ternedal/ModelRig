@@ -223,6 +223,11 @@ physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
 production_activation=false
+
+### Recovery-event timestamps
+
+Recovery/soak qualification treats the lifecycle event time as evidence, not operator input. The Stage B collector writes one UTC `observed_at` for reboot and supervisor restarts into both the lifecycle observation and its hash-bound log. The strict interruption path likewise writes and validates `recovery_observed_at`. A recovery-soak observation must use exactly those validated timestamps; changing only the soak JSON cannot move historical recovery evidence into a later soak window.
+
 summary.total=9
 ```
 
