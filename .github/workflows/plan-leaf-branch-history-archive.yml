@@ -1,0 +1,35 @@
+name: Plan leaf branch history archive
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/plan-leaf-branch-history-archive.yml"
+      - "scripts/plan_leaf_branch_history_archive.py"
+  workflow_dispatch:
+    inputs:
+      min_age_days:
+        description: "Only plan archive for leaf branches at least this old"
+        required: true
+        default: "7"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Build and verify local archive commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BASE_BRANCH: main
+          MIN_AGE_DAYS: ${{ inputs.min_age_days || '7' }}
+        run: python3 scripts/plan_leaf_branch_history_archive.py
