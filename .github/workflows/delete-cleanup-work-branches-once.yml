@@ -1,4 +1,4 @@
-name: Delete final cleanup work branch
+name: Delete final redundant branch aliases
 
 on:
   push:
@@ -19,22 +19,56 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Delete final exact cleanup branch
+      - name: Delete exact redundant refs
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          branch="chore/delete-cleanup-work-branches-20261003"
-          open_count="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$branch" --json number --jq 'length')"
-          if [[ "$open_count" != "0" ]]; then
-            echo "OPEN_PR_SKIP $branch count=$open_count"
-            exit 1
-          fi
-          if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+          branches=(
+            "chore/delete-cleanup-work-branches-20261003"
+            "release/voicerig-v1-e2e-rc2"
+            "release/voicerig-v1-e2e-rc3"
+            "release/voicerig-v1-e2e-rc4"
+            "release/voicerig-v1-e2e-rc5"
+            "release/voicerig-v1-e2e-rc6"
+            "release/voicerig-v1-e2e-rc7"
+            "release/voicerig-v1-e2e-rc8"
+            "release/voicerig-v1-e2e-rc9"
+            "release/voicerig-v1-e2e-rc10"
+            "release/voicerig-v1-e2e-rc11"
+          )
+          canonical="release/voicerig-v1-e2e-rc12"
+          canonical_sha="$(git ls-remote --heads origin "refs/heads/$canonical" | awk '{print $1}')"
+          [[ -n "$canonical_sha" ]] || { echo "missing canonical $canonical"; exit 1; }
+
+          deleted=0
+          skipped=0
+          for branch in "${branches[@]}"; do
+            open_count="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$branch" --json number --jq 'length')"
+            if [[ "$open_count" != "0" ]]; then
+              echo "OPEN_PR_SKIP $branch count=$open_count"
+              ((skipped+=1))
+              continue
+            fi
+
+            sha="$(git ls-remote --heads origin "refs/heads/$branch" | awk '{print $1}')"
+            if [[ -z "$sha" ]]; then
+              echo "MISSING_SKIP $branch"
+              ((skipped+=1))
+              continue
+            fi
+
+            if [[ "$branch" == release/voicerig-v1-e2e-rc* && "$sha" != "$canonical_sha" ]]; then
+              echo "SHA_MISMATCH_SKIP $branch sha=$sha canonical=$canonical_sha"
+              ((skipped+=1))
+              continue
+            fi
+
             git push origin --delete "$branch"
             echo "DELETED $branch"
-          else
-            echo "MISSING $branch"
-          fi
+            ((deleted+=1))
+          done
+
+          echo "SUMMARY deleted=$deleted skipped=$skipped total=${#branches[@]} canonical=$canonical canonical_sha=$canonical_sha"
