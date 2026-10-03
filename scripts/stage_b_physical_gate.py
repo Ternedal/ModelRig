@@ -7,8 +7,8 @@ merge, tag, release, update, restart or activation. It verifies:
 
 1. the published-release freeze;
 2. semantic updater-chain evidence;
-3. the seven-proof release campaign;
-4. the physical browser attestation and existing eight-proof final gate.
+3. the eight-proof release campaign;
+4. the physical browser attestation and resulting nine-proof final gate.
 
 Only the resulting ``kaliv-stage-b-physical-final/v1`` receipt represents the
 fully hardened Stage B evidence bundle. ``production_activation`` is always false.
@@ -184,7 +184,7 @@ def evaluate_bundle(
     if campaign.get("gate", {}).get("passed") is not True:
         errors.append("release campaign gate.passed is not true")
     if campaign.get("gate", {}).get("physical_campaign_complete") is not True:
-        errors.append("seven-proof release campaign is incomplete")
+        errors.append("eight-proof release campaign is incomplete")
     if campaign.get("gate", {}).get("production_activation") is not False:
         errors.append("release campaign did not preserve production_activation=false")
     campaign_summary = (
