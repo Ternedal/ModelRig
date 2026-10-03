@@ -450,6 +450,31 @@ def run_contract() -> None:
 
     assert gate._positive_number(720.0, "max_age_hours") == 720.0
 
+    original_loader = gate._load_stage_b_validator
+
+    class _CandidateModule:
+        def __init__(self, candidate: dict):
+            self._candidate = candidate
+
+        def candidate_identity(self, _root: Path) -> dict:
+            return dict(self._candidate)
+
+    for candidate, fragment in (
+        (_checkout_candidate(working_tree_clean=False), "working tree is not clean"),
+        (
+            _checkout_candidate(version_stamps_consistent=False),
+            "version stamps are inconsistent",
+        ),
+    ):
+        gate._load_stage_b_validator = lambda _name, candidate=candidate: _CandidateModule(candidate)
+        try:
+            gate._candidate_identity_from_checkout(COMPONENT_ROOT)
+        except gate.RecoverySoakError as exc:
+            assert fragment in str(exc), (fragment, str(exc))
+        else:
+            raise AssertionError(f"invalid checkout candidate accepted: {candidate!r}")
+    gate._load_stage_b_validator = original_loader
+
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
     gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
 
@@ -461,4 +486,5 @@ if __name__ == "__main__":
     finally:
         gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
         gate._candidate_identity_from_checkout = _ORIGINAL_CHECKOUT_CANDIDATE
+        gate._load_stage_b_validator = globals().get("original_loader", gate._load_stage_b_validator)
         shutil.rmtree(COMPONENT_ROOT, ignore_errors=True)
