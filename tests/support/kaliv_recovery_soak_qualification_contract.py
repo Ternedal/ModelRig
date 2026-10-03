@@ -16,6 +16,30 @@ sys.modules[SPEC.name] = gate
 SPEC.loader.exec_module(gate)
 
 
+STAGE_B_SHA256 = "e" * 64
+
+
+def _stage_b() -> dict:
+    return {
+        "schema": gate._STAGE_B_FINAL_SCHEMA,
+        "status": "complete",
+        "candidate": {
+            "git_sha": "a" * 40,
+            "working_tree_clean": True,
+        },
+        "gate": {
+            "passed": True,
+            "release_freeze_complete": True,
+            "updater_chain_complete": True,
+            "strict_evidence_complete": True,
+            "physical_campaign_complete": True,
+            "browser_peer_physical_complete": True,
+            "all_physical_evidence_complete": True,
+            "production_activation": False,
+        },
+    }
+
+
 def _observations() -> dict:
     return {
         "schema": gate.OBS_SCHEMA,
@@ -25,7 +49,10 @@ def _observations() -> dict:
             "required_duration_seconds": 7200,
             "max_sample_gap_seconds": 3600,
         },
-        "stage_b_evidence_ref": "validation/stage-b-physical-final-latest.json#sha256=abc",
+        "stage_b_evidence_ref": (
+            "validation/stage-b-physical-final-latest.json#sha256="
+            + STAGE_B_SHA256
+        ),
         "samples": [
             {
                 "observed_at": "2026-09-29T10:00:00+00:00",
@@ -61,9 +88,20 @@ def _observations() -> dict:
     }
 
 
-def _reject(doc: dict, fragment: str) -> None:
+def _reject(
+    doc: dict,
+    fragment: str,
+    *,
+    stage_b: dict | None = None,
+    stage_b_sha256: str = STAGE_B_SHA256,
+) -> None:
     try:
-        gate.qualify(doc, observations_sha256="f" * 64)
+        gate.qualify(
+            doc,
+            observations_sha256="f" * 64,
+            stage_b_report=_stage_b() if stage_b is None else stage_b,
+            stage_b_sha256=stage_b_sha256,
+        )
     except gate.RecoverySoakError as exc:
         assert fragment in str(exc), (fragment, str(exc))
     else:
@@ -72,7 +110,12 @@ def _reject(doc: dict, fragment: str) -> None:
 
 def run_contract() -> None:
     valid = _observations()
-    q = gate.qualify(valid, observations_sha256="f" * 64)
+    q = gate.qualify(
+        valid,
+        observations_sha256="f" * 64,
+        stage_b_report=_stage_b(),
+        stage_b_sha256=STAGE_B_SHA256,
+    )
     assert q.qualified is True
     assert q.production_activation is False
     assert q.candidate_sha == "a" * 40
@@ -133,6 +176,40 @@ def run_contract() -> None:
     no_stage_b = copy.deepcopy(valid)
     no_stage_b["stage_b_evidence_ref"] = ""
     _reject(no_stage_b, "bounded nonblank reference")
+
+    bad_stage_b_ref = copy.deepcopy(valid)
+    bad_stage_b_ref["stage_b_evidence_ref"] = (
+        "validation/stage-b-physical-final-latest.json#sha256=" + "d" * 64
+    )
+    _reject(bad_stage_b_ref, "digest does not match")
+
+    malformed_stage_b_ref = copy.deepcopy(valid)
+    malformed_stage_b_ref["stage_b_evidence_ref"] = "stage-b-report"
+    _reject(malformed_stage_b_ref, "must end with #sha256")
+
+    wrong_candidate = _stage_b()
+    wrong_candidate["candidate"]["git_sha"] = "b" * 40
+    _reject(valid, "candidate Git SHA does not match", stage_b=wrong_candidate)
+
+    dirty_candidate = _stage_b()
+    dirty_candidate["candidate"]["working_tree_clean"] = False
+    _reject(valid, "checkout is not clean", stage_b=dirty_candidate)
+
+    blocked_stage_b = _stage_b()
+    blocked_stage_b["status"] = "blocked"
+    _reject(valid, "status must be complete", stage_b=blocked_stage_b)
+
+    incomplete_stage_b = _stage_b()
+    incomplete_stage_b["gate"]["strict_evidence_complete"] = False
+    _reject(valid, "strict_evidence_complete must be true", stage_b=incomplete_stage_b)
+
+    activating_stage_b = _stage_b()
+    activating_stage_b["gate"]["production_activation"] = True
+    _reject(
+        valid,
+        "preserve production_activation=false",
+        stage_b=activating_stage_b,
+    )
 
 
 if __name__ == "__main__":
