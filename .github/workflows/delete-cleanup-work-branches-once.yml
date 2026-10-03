@@ -1,4 +1,4 @@
-name: Delete completed cleanup work branches
+name: Delete final cleanup work branch
 
 on:
   push:
@@ -19,61 +19,22 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Delete exact completed cleanup branches
+      - name: Delete final exact cleanup branch
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          branches=(
-            "chore/branch-cleanup-auto-dry-run-20261002"
-            "chore/classify-covered-branch-history-20261003"
-            "chore/classify-duplicate-branch-aliases-20261003"
-            "chore/classify-patch-equivalent-branches-20261003"
-            "chore/classify-superseded-branches-20261003"
-            "chore/execute-cleanup-simple-20261002"
-            "chore/execute-covered-branch-cleanup-20261003"
-            "chore/execute-duplicate-alias-cleanup-20261003"
-            "chore/execute-leaf-history-archive-20261003"
-            "chore/execute-patch-equivalent-cleanup-20261003"
-            "chore/execute-safe-branch-cleanup-20261002"
-            "chore/execute-superseded-cleanup-20261003"
-            "chore/execute-verified-branch-cleanup-20261002"
-            "chore/finalize-branch-cleanup-20261002"
-            "chore/plan-leaf-history-archive-20261003"
-            "chore/remove-leaf-archive-executor-20261003"
-            "chore/restore-covered-classifier-readonly-20261003"
-            "chore/restore-duplicate-classifier-readonly-20261003"
-            "chore/restore-patch-classifier-readonly-20261003"
-            "chore/restore-superseded-classifier-readonly-20261003"
-            "chore/safe-branch-cleanup-20261002"
-          )
-
-          deleted=0
-          skipped=0
-          for branch in "${branches[@]}"; do
-            if [[ "$branch" == "main" || "$branch" == archive/* ]]; then
-              echo "PROTECTED $branch"
-              ((skipped+=1))
-              continue
-            fi
-
-            open_count="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$branch" --json number --jq 'length')"
-            if [[ "$open_count" != "0" ]]; then
-              echo "OPEN_PR_SKIP $branch count=$open_count"
-              ((skipped+=1))
-              continue
-            fi
-
-            if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
-              git push origin --delete "$branch"
-              echo "DELETED $branch"
-              ((deleted+=1))
-            else
-              echo "MISSING_SKIP $branch"
-              ((skipped+=1))
-            fi
-          done
-
-          echo "SUMMARY deleted=$deleted skipped=$skipped total=${#branches[@]}"
+          branch="chore/delete-cleanup-work-branches-20261003"
+          open_count="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$branch" --json number --jq 'length')"
+          if [[ "$open_count" != "0" ]]; then
+            echo "OPEN_PR_SKIP $branch count=$open_count"
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+            git push origin --delete "$branch"
+            echo "DELETED $branch"
+          else
+            echo "MISSING $branch"
+          fi
