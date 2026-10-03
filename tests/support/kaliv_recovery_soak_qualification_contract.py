@@ -27,7 +27,11 @@ COMPONENT_ROOT = Path(tempfile.mkdtemp(prefix="kaliv-recovery-stage-b-contract-"
 def _write_component(name: str, schema: str, gate_fields: dict, *, extra: dict | None = None) -> dict:
     value = {
         "schema": schema,
-        "candidate": {"git_sha": "a" * 40},
+        "candidate": {
+            "version": "2.0.14",
+            "git_sha": "a" * 40,
+            "code_sha256": "c" * 64,
+        },
         "gate": {**gate_fields, "production_activation": False},
     }
     if extra:
@@ -82,7 +86,9 @@ def _stage_b() -> dict:
         "schema": gate._STAGE_B_FINAL_SCHEMA,
         "status": "complete",
         "candidate": {
+            "version": "2.0.14",
             "git_sha": "a" * 40,
+            "code_sha256": "c" * 64,
             "working_tree_clean": True,
         },
         "evidence": _component_evidence(),
@@ -351,7 +357,18 @@ def run_contract() -> None:
     strict_meta = wrong_component_candidate["evidence"]["strict_stage_b"]
     strict_meta["sha256"] = hashlib.sha256(strict_raw).hexdigest()
     strict_meta["bytes"] = len(strict_raw)
-    _reject(valid, "candidate Git SHA mismatch", stage_b=wrong_component_candidate)
+    _reject(valid, "candidate git_sha mismatch", stage_b=wrong_component_candidate)
+
+    wrong_component_code = _stage_b()
+    final_path = COMPONENT_ROOT / wrong_component_code["evidence"]["component_final_gate"]["path"]
+    final_value = json.loads(final_path.read_text(encoding="utf-8"))
+    final_value["candidate"]["code_sha256"] = "d" * 64
+    final_raw = (json.dumps(final_value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    final_path.write_bytes(final_raw)
+    final_meta = wrong_component_code["evidence"]["component_final_gate"]
+    final_meta["sha256"] = hashlib.sha256(final_raw).hexdigest()
+    final_meta["bytes"] = len(final_raw)
+    _reject(valid, "candidate code_sha256 mismatch", stage_b=wrong_component_code)
 
 
 if __name__ == "__main__":
