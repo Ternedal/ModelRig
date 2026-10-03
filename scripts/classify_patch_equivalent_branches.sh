@@ -3,6 +3,7 @@ set -euo pipefail
 
 BASE_BRANCH="${BASE_BRANCH:-main}"
 MIN_AGE_DAYS="${MIN_AGE_DAYS:-7}"
+EXECUTE="${EXECUTE:-false}"
 
 git fetch origin --prune --no-tags '+refs/heads/*:refs/remotes/origin/*'
 
@@ -23,6 +24,7 @@ is_protected_pattern() {
 
 now_epoch="$(date +%s)"
 patch_equivalent=0
+deleted=0
 has_unique_patch=0
 unique_merges=0
 protected=0
@@ -79,6 +81,11 @@ while IFS= read -r ref; do
   if (( plus == 0 && minus > 0 )); then
     printf 'PATCH_EQUIVALENT\t%s\t%sd\t%s\n' "$branch" "$age_days" "$minus"
     ((patch_equivalent+=1))
+    if [[ "$EXECUTE" == "true" ]]; then
+      git push origin --delete "$branch"
+      printf 'DELETED\t%s\n' "$branch"
+      ((deleted+=1))
+    fi
   else
     printf 'UNIQUE_PATCH\t%s\t%sd\tplus=%s\tminus=%s\n' "$branch" "$age_days" "$plus" "$minus"
     ((has_unique_patch+=1))
