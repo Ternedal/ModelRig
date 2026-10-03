@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
+import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +21,60 @@ SPEC.loader.exec_module(gate)
 
 
 STAGE_B_SHA256 = "e" * 64
+COMPONENT_ROOT = Path(tempfile.mkdtemp(prefix="kaliv-recovery-stage-b-contract-"))
+
+
+def _write_component(name: str, schema: str, gate_fields: dict, *, extra: dict | None = None) -> dict:
+    value = {
+        "schema": schema,
+        "candidate": {"git_sha": "a" * 40},
+        "gate": {**gate_fields, "production_activation": False},
+    }
+    if extra:
+        value.update(extra)
+    relative = Path("validation") / f"{name}.json"
+    path = COMPONENT_ROOT / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    path.write_bytes(raw)
+    return {
+        "path": str(relative),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "bytes": len(raw),
+        "schema": schema,
+    }
+
+
+def _component_evidence() -> dict:
+    campaign_passed = list(gate._EXPECTED_STAGE_B_PROOFS[:-1])
+    final_passed = list(gate._EXPECTED_STAGE_B_PROOFS)
+    return {
+        "updater_chain": _write_component(
+            "updater-chain",
+            gate._STAGE_B_COMPONENTS["updater_chain"][0],
+            {"passed": True, "updater_chain_complete": True},
+        ),
+        "physical_campaign": _write_component(
+            "physical-campaign",
+            gate._STAGE_B_COMPONENTS["physical_campaign"][0],
+            {"passed": True, "physical_campaign_complete": True},
+            extra={
+                "mode": "verify",
+                "summary": {"total": 8, "passed": campaign_passed},
+            },
+        ),
+        "component_final_gate": _write_component(
+            "component-final",
+            gate._STAGE_B_COMPONENTS["component_final_gate"][0],
+            {"passed": True, "all_physical_evidence_complete": True},
+            extra={"summary": {"total": 9, "passed": final_passed}},
+        ),
+        "strict_stage_b": _write_component(
+            "strict-stage-b",
+            gate._STAGE_B_COMPONENTS["strict_stage_b"][0],
+            {"passed": True, "strict_evidence_complete": True},
+        ),
+    }
 
 
 def _stage_b() -> dict:
@@ -27,6 +85,7 @@ def _stage_b() -> dict:
             "git_sha": "a" * 40,
             "working_tree_clean": True,
         },
+        "evidence": _component_evidence(),
         "steps": [
             {"label": label, "command": ["python", script], "exit_code": 0}
             for label, script in gate._EXPECTED_STAGE_B_STEPS
@@ -110,6 +169,7 @@ def _reject(
             observations_sha256="f" * 64,
             stage_b_report=_stage_b() if stage_b is None else stage_b,
             stage_b_sha256=stage_b_sha256,
+            stage_b_repository_root=COMPONENT_ROOT,
         )
     except gate.RecoverySoakError as exc:
         assert fragment in str(exc), (fragment, str(exc))
@@ -124,6 +184,7 @@ def run_contract() -> None:
         observations_sha256="f" * 64,
         stage_b_report=_stage_b(),
         stage_b_sha256=STAGE_B_SHA256,
+        stage_b_repository_root=COMPONENT_ROOT,
     )
     assert q.qualified is True
     assert q.production_activation is False
@@ -256,7 +317,46 @@ def run_contract() -> None:
     duplicated_proof["summary"]["passed"][-1] = duplicated_proof["summary"]["passed"][0]
     _reject(valid, "all nine canonical proofs", stage_b=duplicated_proof)
 
+    no_components = _stage_b()
+    del no_components["evidence"]
+    _reject(valid, "stage_b_report.evidence must be an object", stage_b=no_components)
+
+    missing_component = _stage_b()
+    del missing_component["evidence"]["strict_stage_b"]
+    _reject(valid, "missing strict_stage_b", stage_b=missing_component)
+
+    tampered_component = _stage_b()
+    tampered_path = COMPONENT_ROOT / tampered_component["evidence"]["updater_chain"]["path"]
+    tampered_path.write_text("{}\n", encoding="utf-8")
+    _reject(valid, "byte count does not match file", stage_b=tampered_component)
+
+    wrong_component_hash = _stage_b()
+    wrong_component_hash["evidence"]["physical_campaign"]["sha256"] = "0" * 64
+    _reject(valid, "SHA-256 does not match file", stage_b=wrong_component_hash)
+
+    escaping_component = _stage_b()
+    escaping_component["evidence"]["component_final_gate"]["path"] = "../outside.json"
+    _reject(valid, "escapes repository root", stage_b=escaping_component)
+
+    wrong_component_schema = _stage_b()
+    wrong_component_schema["evidence"]["strict_stage_b"]["schema"] = "wrong/v1"
+    _reject(valid, "schema metadata mismatch", stage_b=wrong_component_schema)
+
+    wrong_component_candidate = _stage_b()
+    strict_path = COMPONENT_ROOT / wrong_component_candidate["evidence"]["strict_stage_b"]["path"]
+    strict_value = json.loads(strict_path.read_text(encoding="utf-8"))
+    strict_value["candidate"]["git_sha"] = "b" * 40
+    strict_raw = (json.dumps(strict_value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    strict_path.write_bytes(strict_raw)
+    strict_meta = wrong_component_candidate["evidence"]["strict_stage_b"]
+    strict_meta["sha256"] = hashlib.sha256(strict_raw).hexdigest()
+    strict_meta["bytes"] = len(strict_raw)
+    _reject(valid, "candidate Git SHA mismatch", stage_b=wrong_component_candidate)
+
 
 if __name__ == "__main__":
-    run_contract()
-    print("Kaliv recovery soak qualification contract: PASS")
+    try:
+        run_contract()
+        print("Kaliv recovery soak qualification contract: PASS")
+    finally:
+        shutil.rmtree(COMPONENT_ROOT, ignore_errors=True)
