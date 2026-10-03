@@ -28,12 +28,12 @@ def _stage_b() -> dict:
             "working_tree_clean": True,
         },
         "steps": [
-            {"label": "strict source/bootstrap/interruption gate", "exit_code": 0},
-            {"label": "base Stage B physical gate", "exit_code": 0},
+            {"label": label, "command": ["python", script], "exit_code": 0}
+            for label, script in gate._EXPECTED_STAGE_B_STEPS
         ],
         "summary": {
-            "total": 8,
-            "passed": ["release_freeze", "updater_chain"],
+            "total": len(gate._EXPECTED_STAGE_B_PROOFS),
+            "passed": list(gate._EXPECTED_STAGE_B_PROOFS),
             "errors": [],
         },
         "gate": {
@@ -233,8 +233,28 @@ def run_contract() -> None:
     _reject(valid, "summary.errors must be empty", stage_b=stage_b_errors)
 
     wrong_total = _stage_b()
-    wrong_total["summary"]["total"] = 7
-    _reject(valid, "summary.total must be eight", stage_b=wrong_total)
+    wrong_total["summary"]["total"] = 8
+    _reject(valid, "summary.total must be nine", stage_b=wrong_total)
+
+    truncated_steps = _stage_b()
+    truncated_steps["steps"] = truncated_steps["steps"][:-1]
+    _reject(valid, "complete six-step execution sequence", stage_b=truncated_steps)
+
+    wrong_step = _stage_b()
+    wrong_step["steps"][2]["label"] = "release maybe"
+    _reject(valid, "label does not match canonical sequence", stage_b=wrong_step)
+
+    wrong_command = _stage_b()
+    wrong_command["steps"][2]["command"][1] = "not_freeze_check.py"
+    _reject(valid, "command does not match canonical script", stage_b=wrong_command)
+
+    missing_proof = _stage_b()
+    missing_proof["summary"]["passed"] = missing_proof["summary"]["passed"][:-1]
+    _reject(valid, "all nine canonical proofs", stage_b=missing_proof)
+
+    duplicated_proof = _stage_b()
+    duplicated_proof["summary"]["passed"][-1] = duplicated_proof["summary"]["passed"][0]
+    _reject(valid, "all nine canonical proofs", stage_b=duplicated_proof)
 
 
 if __name__ == "__main__":
