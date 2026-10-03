@@ -163,7 +163,9 @@ def _stage_b() -> dict:
             "version": "2.0.14",
             "git_sha": "a" * 40,
             "code_sha256": "c" * 64,
+            "identity_source": "git",
             "working_tree_clean": True,
+            "version_stamps_consistent": True,
         },
         "evidence": _component_evidence(),
         "steps": [
@@ -360,6 +362,10 @@ def run_contract() -> None:
     non_monotonic = copy.deepcopy(valid)
     non_monotonic["samples"][1]["observed_at"] = valid["samples"][0]["observed_at"]
     _reject(non_monotonic, "strictly increasing")
+
+    future_sample = copy.deepcopy(valid)
+    future_sample["samples"][2]["observed_at"] = "2999-01-01T00:00:00+00:00"
+    _reject(future_sample, "must not be in the future")
 
     missing = copy.deepcopy(valid)
     missing["recovery_events"] = missing["recovery_events"][:-1]
