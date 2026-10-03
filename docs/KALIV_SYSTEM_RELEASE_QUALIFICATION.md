@@ -107,9 +107,14 @@ evidence reference:
 9. `recovery_soak` — the pinned system passes the agreed restart/recovery and
    long-running soak campaign. A PASS must contain exactly one canonical
    `kaliv-recovery-soak:<modelrig-sha>:<sha256>` reference emitted by the
-   recovery-soak qualifier. The embedded ModelRig SHA must equal the pinned
-   revision or be its ancestor with the exact same Git tree, permitting only a
-   clean merge-commit identity change.
+   recovery-soak qualifier. The qualifier must be given the actual Stage-B final
+   report with `--stage-b-report`; it SHA-256-binds the exact report bytes,
+   requires `status=complete`, all final/strict physical gates PASS,
+   `production_activation=false`, a clean candidate checkout, and the same
+   candidate Git SHA as the recovery observations. A caller-supplied label or
+   unverified Stage-B path is not sufficient. The embedded ModelRig SHA must
+   equal the pinned revision or be its ancestor with the exact same Git tree,
+   permitting only a clean merge-commit identity change.
 10. `repository_authority` — the repositories used for the release are protected
    by the accepted exact-green merge authority. A PASS must contain exactly one
    canonical
