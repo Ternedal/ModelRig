@@ -138,7 +138,7 @@ internal fun DesktopControlCenterGitHubConnectorSection(
             fontSize = 10.sp,
         )
         if (loading) {
-            CircularProgressIndicator(strokeWidth = 2.dp, color = KalivTheme.colors.Signal)
+            CircularProgressIndicator(strokeWidth = 2.dp, color = KalivTheme.colors.Cognition)
         }
 
         error?.let {

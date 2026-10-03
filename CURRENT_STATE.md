@@ -490,6 +490,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_bodyrig_contracts.py`
 - `tests/workflow_bodyrig_demo_body.py`
 - `tests/workflow_brand_no_token_duplicates.py`
+- `tests/workflow_brand_signal_roles.py`
 - `tests/workflow_browser_peer_public_validation.py`
 - `tests/workflow_browser_peer_public_validation_operator.py`
 - `tests/workflow_candidate_campaign.py`

@@ -216,7 +216,7 @@ internal fun MetaBar(fraction: Float, modifier: Modifier = Modifier, height: Int
                 .fillMaxHeight()
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .clip(RoundedCornerShape(999.dp))
-                .background(Brush.horizontalGradient(listOf(KalivTheme.colors.Signal, KalivTheme.colors.Highlight))),
+                .background(Brush.horizontalGradient(listOf(KalivTheme.colors.Cognition, KalivTheme.colors.CognitionLight))),
         )
     }
 }
@@ -276,10 +276,10 @@ fun KalivTitleBar(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(7.dp).clip(CircleShape)
-                        .background(KalivTheme.colors.Warning),
+                        .background(KalivTheme.colors.Cognition),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text(live, fontSize = 11.sp, color = Color(0xFFD09A55))
+                Text(live, fontSize = 11.sp, color = KalivTheme.colors.CognitionLight)
             }
         }
         Spacer(Modifier.weight(1f))
@@ -376,7 +376,7 @@ fun KalivNavRail(
         modifier
             .width(246.dp)
             .fillMaxHeight()
-            .background(Color(0x8C14110E)) // rgba(20,17,14,.55)
+            .background(KalivTheme.colors.ShellRail)
             .padding(horizontal = 14.dp, vertical = 16.dp),
     ) {
         // No brand row here: the 40dp KalivTitleBar above owns the ankh and
@@ -407,8 +407,8 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
         .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
     val bg = if (active) {
         base.background(
-            Brush.horizontalGradient(listOf(Color(0x389A7136), Color(0x0F9A7136))), // .22 → .06
-        ).border(1.dp, Color(0x599A7136), shape) // .35
+            Brush.horizontalGradient(listOf(KalivTheme.colors.Signal.copy(alpha = 0.22f), KalivTheme.colors.Signal.copy(alpha = 0.06f))),
+        ).border(1.dp, KalivTheme.colors.Signal.copy(alpha = 0.35f), shape)
     } else {
         base
     }
@@ -425,7 +425,7 @@ private fun NavRow(item: NavItem, active: Boolean, onClick: () -> Unit) {
         Spacer(Modifier.width(6.dp))
         Text(
             item.label,
-            color = if (active) KalivTheme.colors.TextHigh else Color(0xFFC3B8A8),
+            color = if (active) KalivTheme.colors.TextHigh else KalivTheme.colors.ShellInactiveText,
             fontSize = 13.5.sp,
             fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
         )
@@ -438,18 +438,18 @@ private fun ActiveModelCard(modelName: String, usedGb: Double, totalGb: Double, 
     Column(
         Modifier.fillMaxWidth().clip(shape)
             .background(KalivTheme.colors.SurfaceHigh)
-            .border(1.dp, Color(0x33785A37), shape)
+            .border(1.dp, KalivTheme.colors.Cognition.copy(alpha = 0.20f), shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
     ) {
         SectionLabel("Aktiv model")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Success))
+            Box(Modifier.size(7.dp).clip(RoundedCornerShape(999.dp)).background(KalivTheme.colors.Cognition))
             Spacer(Modifier.width(7.dp))
             Text(modelName, color = KalivTheme.colors.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = KalivTheme.colors.TextMuted, fontSize = 11.5.sp)
+        Text("Lokal \u00b7 $backend", color = KalivTheme.colors.CognitionLight, fontSize = 11.5.sp)
         Spacer(Modifier.height(9.dp))
         val frac = if (totalGb > 0) (usedGb / totalGb).toFloat() else 0f
         MetaBar(frac)
@@ -468,15 +468,15 @@ private fun PrivacySeal() {
     val shape = RoundedCornerShape(11.dp)
     Row(
         Modifier.fillMaxWidth().clip(shape)
-            .background(Color(0x1A9A7136)) // rgba(154,113,54,.1)
-            .border(1.dp, Color(0x339A7136), shape)
+            .background(KalivTheme.colors.Signal.copy(alpha = 0.10f))
+            .border(1.dp, KalivTheme.colors.Signal.copy(alpha = 0.20f), shape)
             .padding(horizontal = 13.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("\uD83D\uDD12", color = KalivTheme.colors.Highlight, fontSize = 15.sp) // 🔒
         Spacer(Modifier.width(9.dp))
         Column {
-            Text("100 % lokal", color = Color(0xFFE9DFCE), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text("100 % lokal", color = KalivTheme.colors.TextHigh, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             Text("Intet forlader maskinen", color = KalivTheme.colors.TextMuted, fontSize = 10.5.sp)
         }
     }

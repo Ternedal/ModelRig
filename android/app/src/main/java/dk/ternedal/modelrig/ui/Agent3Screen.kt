@@ -492,6 +492,16 @@ private fun Agent3PlanCard(
 }
 
 @Composable
+private fun agent3RunStateColor(state: String): androidx.compose.ui.graphics.Color = when (state) {
+    "running", "planning", "executing", "resuming", "starting" -> KalivTheme.colors.cognition
+    "completed", "succeeded" -> KalivTheme.colors.success
+    "waiting_confirmation", "paused" -> KalivTheme.colors.amber
+    "failed", "blocked" -> KalivTheme.colors.danger
+    "cancelled", "stopped" -> KalivTheme.colors.textMuted
+    else -> KalivTheme.colors.textMuted
+}
+
+@Composable
 private fun Agent3RunCard(
     run: Agent3Client.Run,
     busy: Boolean,
@@ -515,7 +525,7 @@ private fun Agent3RunCard(
                     Text("Run", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KalivTheme.colors.textHigh)
                     Text(run.id, fontSize = 10.sp, color = KalivTheme.colors.textMuted)
                 }
-                Text(run.state, fontSize = 12.sp, color = KalivTheme.colors.signal)
+                Text(run.state, fontSize = 12.sp, color = agent3RunStateColor(run.state))
             }
             Spacer(Modifier.height(8.dp))
             run.steps.forEachIndexed { index, step ->
@@ -634,6 +644,7 @@ private fun Agent3StepCard(
     Surface(
         color = if (active) KalivTheme.colors.background else KalivTheme.colors.surface,
         shape = RoundedCornerShape(10.dp),
+        border = if (active) androidx.compose.foundation.BorderStroke(1.dp, KalivTheme.colors.cognition.copy(alpha = 0.34f)) else null,
         tonalElevation = if (active) 2.dp else 0.dp,
     ) {
         Column(Modifier.fillMaxWidth().padding(10.dp)) {

@@ -99,16 +99,16 @@ private fun Pkt8NavRow(item: Pkt8NavItem, active: Boolean, onClick: () -> Unit) 
         .clip(shape)
         .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
     val decorated = if (active) {
-        val start = if (c.isDark) Color(0x389A7136) else c.Signal.copy(alpha = 0.12f)
-        val end = if (c.isDark) Color(0x0F9A7136) else c.Signal.copy(alpha = 0.04f)
-        val border = if (c.isDark) Color(0x599A7136) else c.Signal.copy(alpha = 0.30f)
+        val start = c.Signal.copy(alpha = if (c.isDark) 0.22f else 0.12f)
+        val end = c.Signal.copy(alpha = if (c.isDark) 0.06f else 0.04f)
+        val border = c.Signal.copy(alpha = if (c.isDark) 0.35f else 0.30f)
         base
             .background(Brush.horizontalGradient(listOf(start, end)))
             .border(1.dp, border, shape)
     } else {
         base
     }
-    val inactiveInk = if (c.isDark) Color(0xFFC3B8A8) else c.TextMuted
+    val inactiveInk = c.ShellInactiveText
 
     Row(
         decorated.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -130,7 +130,7 @@ private fun Pkt8AuthorityModelCard(status: KalivSidebarStatus, vram: KalivVramTe
     val c = KalivTheme.colors
     val presentation = presentVram(vram)
     val shape = RoundedCornerShape(11.dp)
-    val border = if (c.isDark) Color(0x33785A37) else c.Border
+    val border = c.Cognition.copy(alpha = 0.20f)
 
     Column(
         Modifier
@@ -170,8 +170,8 @@ private fun Pkt8AuthorityModelCard(status: KalivSidebarStatus, vram: KalivVramTe
 private fun Pkt8AuthorityPrivacySeal(status: KalivSidebarStatus) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
-    val background = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
-    val border = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
+    val background = c.Signal.copy(alpha = if (c.isDark) 0.10f else 0.08f)
+    val border = c.Signal.copy(alpha = if (c.isDark) 0.20f else 0.24f)
 
     Row(
         Modifier

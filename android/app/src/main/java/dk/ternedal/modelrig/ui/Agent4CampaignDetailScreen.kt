@@ -266,7 +266,7 @@ internal fun Agent4CampaignDetailScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(color = KalivTheme.colors.cognition)
                 Spacer(Modifier.height(10.dp))
                 Text("Indlæser canonical detail, tidslinje og evidens…", color = KalivTheme.colors.textMuted)
             }
@@ -308,7 +308,7 @@ private fun Agent4DetailContent(
         item {
             Agent4DetailCard("Kampagne") {
                 Text(data.campaign.name, color = KalivTheme.colors.textHigh, fontWeight = FontWeight.Bold)
-                Text("Status: ${data.campaign.status.wireValue}", color = KalivTheme.colors.signal)
+                Text("Status: ${data.campaign.status.wireValue}", color = KalivTheme.colors.cognition)
                 Text("Workflow: ${data.detail.workflow}", color = KalivTheme.colors.textMuted)
                 Text("Oprettet: ${data.detail.createdAt}", color = KalivTheme.colors.textMuted, fontSize = 12.sp)
                 Text("Forsøg ${data.detail.attempt}/${data.detail.maxAttempts} · revision ${data.detail.revision} · prioritet ${data.detail.priority}", color = KalivTheme.colors.textMuted, fontSize = 12.sp)
@@ -347,7 +347,7 @@ private fun Agent4DetailContent(
         }
         items(data.evidence, key = { "evidence-${it.sequence}-${it.evidenceId}" }) { row ->
             Agent4DetailCard("#${row.sequence} · ${row.evidenceId}") {
-                Text(row.mediaType, color = KalivTheme.colors.signal, fontSize = 12.sp)
+                Text(row.mediaType, color = KalivTheme.colors.cognition, fontSize = 12.sp)
                 Text(row.location, color = KalivTheme.colors.textMuted, fontSize = 12.sp)
                 Text("${row.sizeBytes} bytes · ${row.recordedAt}", color = KalivTheme.colors.textMuted, fontSize = 11.sp)
                 Text(row.recordHash, color = KalivTheme.colors.textMuted, fontSize = 9.sp, maxLines = 1)

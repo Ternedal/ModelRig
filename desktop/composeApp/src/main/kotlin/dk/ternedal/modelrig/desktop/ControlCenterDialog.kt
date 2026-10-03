@@ -1,6 +1,8 @@
 package dk.ternedal.modelrig.desktop
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -246,7 +248,7 @@ fun DesktopControlCenterDialog(
                         CircularProgressIndicator(
                             modifier = Modifier.height(22.dp),
                             strokeWidth = 2.dp,
-                            color = KalivTheme.colors.Signal,
+                            color = KalivTheme.colors.Cognition,
                         )
                     }
                     Text(
@@ -493,8 +495,9 @@ private fun DesktopControlCenterNeutralCard(content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(KalivTheme.colors.Surface, RoundedCornerShape(12.dp))
-            .padding(12.dp),
+            .background(KalivTheme.colors.Surface, RoundedCornerShape(15.dp))
+            .border(1.dp, KalivTheme.colors.Border, RoundedCornerShape(15.dp))
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         content()
@@ -511,8 +514,17 @@ private fun DesktopControlCenterCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(KalivTheme.colors.Surface, RoundedCornerShape(12.dp))
-            .padding(12.dp),
+            .background(KalivTheme.colors.Surface, RoundedCornerShape(15.dp))
+            .border(
+                1.dp,
+                when (state) {
+                    "unavailable" -> KalivTheme.colors.Danger.copy(alpha = 0.34f)
+                    "attention", "fallback" -> KalivTheme.colors.Warning.copy(alpha = 0.30f)
+                    else -> KalivTheme.colors.Border
+                },
+                RoundedCornerShape(15.dp),
+            )
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(
@@ -538,7 +550,7 @@ private fun DesktopControlCenterCard(
 
 @Composable
 private fun desktopControlCenterStateColor(state: String): Color = when (state) {
-    "healthy" -> KalivTheme.colors.Signal
+    "healthy" -> KalivTheme.colors.Success
     "unavailable" -> KalivTheme.colors.Danger
     "attention", "fallback" -> KalivTheme.colors.TextHigh
     else -> KalivTheme.colors.TextMuted

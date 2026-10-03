@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.sp
 
 /** Single source of truth for the Kaliv design tokens. */
 object KalivTokens {
-    const val VERSION: String = "2.0"
+    const val VERSION: String = "2.1"
     val BASE_GRID: Dp = 8.dp
 
     object Dark {
@@ -71,6 +71,14 @@ object KalivTokens {
         val fill: Color = Color(0xFFB08A3E)
         val on: Color = Color(0xFF2B1C05)
         val tint: Color = Color(0x29D4AB52)
+    }
+
+    object Signal {
+        val primary: Color = Color(0xFF48C7FF)
+        val light: Color = Color(0xFF73D6FF)
+        val strong: Color = Color(0xFF159FDB)
+        val deep: Color = Color(0xFF0B5F8C)
+        val glow: Color = Color(0x3848C7FF)
     }
 
     object Brand {

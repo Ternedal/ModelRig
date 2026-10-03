@@ -6,18 +6,19 @@ using UnityEngine.UI;
 
 namespace Kaliv.VR
 {
-    /// <summary>Code-driven world-space UI using the shared Kaliv dark/gold design language.</summary>
+    /// <summary>Code-driven world-space UI using the shared Kaliv Ember/Signal design language.</summary>
     public sealed class KalivVrPanel : MonoBehaviour
     {
-        private static readonly Color CanvasBg = Hex("#0B0A09");
-        private static readonly Color Surface = Hex("#171411");
-        private static readonly Color Elevated = Hex("#211B16");
-        private static readonly Color Border = Hex("#2A2521");
-        private static readonly Color TextMain = Hex("#F3EFE6");
-        private static readonly Color Muted = Hex("#A89D90");
-        private static readonly Color Accent = Hex("#D4AB52");
-        private static readonly Color Danger = Hex("#C96B5D");
-        private static readonly Color Ok = Hex("#77836D");
+        private static readonly Color CanvasBg = KalivVrBrand.Canvas;
+        private static readonly Color Surface = KalivVrBrand.Surface;
+        private static readonly Color Elevated = KalivVrBrand.Elevated;
+        private static readonly Color Border = KalivVrBrand.Border;
+        private static readonly Color TextMain = KalivVrBrand.Text;
+        private static readonly Color Muted = KalivVrBrand.Muted;
+        private static readonly Color Accent = KalivVrBrand.Ember;
+        private static readonly Color Signal = KalivVrBrand.Signal;
+        private static readonly Color Danger = KalivVrBrand.Danger;
+        private static readonly Color Ok = KalivVrBrand.Success;
 
         private KalivVrApp _app;
         private Canvas _canvas;
@@ -101,7 +102,7 @@ namespace Kaliv.VR
             _transcript.horizontalOverflow = HorizontalWrapMode.Wrap;
             _transcript.verticalOverflow = VerticalWrapMode.Truncate;
 
-            _modelLabel = AddText(_chatGroup.transform, "MODEL", 14, Accent, TextAnchor.MiddleLeft,
+            _modelLabel = AddText(_chatGroup.transform, "MODEL", 14, Signal, TextAnchor.MiddleLeft,
                 new Vector2(520, 42), new Vector2(-280, 278), FontStyle.Bold);
             _bodyStatus = AddText(_chatGroup.transform, "KROP · initialiserer", 13, Muted, TextAnchor.MiddleLeft,
                 new Vector2(430, 42), new Vector2(210, 278), FontStyle.Normal);
@@ -261,7 +262,7 @@ namespace Kaliv.VR
             input.lineType = InputField.LineType.SingleLine;
 
             var collider = root.GetComponent<BoxCollider>();
-            collider.size = new Vector3(size.x, size.y, 60f);
+            collider.size = new Vector3(\n                Mathf.Max(size.x, KalivVrBrand.MinWorldButtonWidth),\n                Mathf.Max(size.y, KalivVrBrand.MinWorldButtonHeight),\n                60f);
             return input;
         }
 
@@ -277,7 +278,7 @@ namespace Kaliv.VR
             rt.anchoredPosition = pos;
 
             AddText(root.transform, label, 15,
-                color == Accent ? Hex("#2B1C05") : TextMain,
+                color == Accent ? KalivVrBrand.OnEmber : TextMain,
                 TextAnchor.MiddleCenter, size, Vector2.zero, FontStyle.Bold);
 
             var button = root.GetComponent<Button>();
@@ -285,7 +286,10 @@ namespace Kaliv.VR
             button.onClick.AddListener(click);
 
             var collider = root.GetComponent<BoxCollider>();
-            collider.size = new Vector3(size.x, size.y, 60f);
+            collider.size = new Vector3(
+                Mathf.Max(size.x, KalivVrBrand.MinWorldButtonWidth),
+                Mathf.Max(size.y, KalivVrBrand.MinWorldButtonHeight),
+                60f);
             return button;
         }
 

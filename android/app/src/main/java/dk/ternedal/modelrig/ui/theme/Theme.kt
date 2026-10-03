@@ -35,7 +35,9 @@ data class KalivColors(
     val surface: Color,
     val surfaceHigh: Color,
     val codeSurface: Color,
-    val signal: Color,         // filled button fill (guld, jf. DDR-001)
+    val signal: Color,         // Ember: filled primary action (guld, jf. DDR-001)
+    val cognition: Color,      // Signal: live inference/listening/perception/runtime
+    val cognitionSoft: Color,  // Signal glow/tint for active-system surfaces
     val accent: Color,         // guld tekst/links/fokus (paa background)
     val amber: Color,
     val textHigh: Color,
@@ -71,6 +73,8 @@ val KalivDarkColors = KalivColors(
     // redesignes (fase 2); indtil da er literalen bevidst.
     codeSurface = Color(0xFF080706),
     signal = KalivTokens.Gold.fill,
+    cognition = KalivTokens.Signal.primary,
+    cognitionSoft = KalivTokens.Signal.glow,
     accent = KalivTokens.Dark.accent,
     // amber var brandpakkens sekundaere guld; redesignet har EN guld-accent.
     // Midlertidigt = accent; konsolideres naar komponentbiblioteket lander.
@@ -106,6 +110,8 @@ val KalivLightColors = KalivColors(
     surfaceHigh = KalivTokens.Light.elevated,
     codeSurface = Color(0xFFEAE3D5), // uden for tokensaettet, se noten ovenfor
     signal = KalivTokens.Gold.fill,
+    cognition = KalivTokens.Signal.deep,
+    cognitionSoft = KalivTokens.Signal.glow,
     accent = KalivTokens.Light.accent,
     amber = KalivTokens.Light.accent,
     textHigh = KalivTokens.Light.text,
@@ -132,7 +138,7 @@ val KalivLightColors = KalivColors(
     isDark = false,
 )
 
-/** Reach the active palette anywhere: KalivTheme.colors.signal etc. */
+/** Reach the active palette anywhere. `signal` is Ember/action; `cognition` is live-system Signal blue. */
 val LocalKalivColors = staticCompositionLocalOf { KalivDarkColors }
 
 object KalivTheme {

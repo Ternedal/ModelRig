@@ -24,6 +24,7 @@ from kaliv_dev_control import catalog  # noqa: E402
 HANDOFF = ROOT / "docs/devcontrol/dc-l16/product-ui-observer-handoff.json"
 SCHEMA = ROOT / "devcontrol/schemas/rsi-pilot-product-ui-observer-handoff-v1.schema.json"
 DESKTOP = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
+ANDROID = ROOT / "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
 CLIENT = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClient.kt"
 SECTION = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/DevControlPilotStatusSection.kt"
 CLIENT_TEST = ROOT / "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClientTest.kt"
@@ -67,9 +68,17 @@ def run_contract() -> None:
     assert transition == {
         "path": "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt",
         "from_git_blob_sha": "0a9498ac0fe61ea742a47c1d6be1cf7886992321",
-        "to_git_blob_sha": "ccf605762dfcdf95c9f2f1a60de0986a3c84564c",
+        "to_git_blob_sha": "3a2b9ad372a758d5b2cfff1bc1e29fecd60c065c",
     }
     assert _git_blob_sha(DESKTOP) == transition["to_git_blob_sha"]
+
+    android_transition = handoff["android_tracked_source_transition"]
+    assert android_transition == {
+        "path": "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt",
+        "from_git_blob_sha": "82643d7cefe9a9c249e8e7cc8b480d9989b38606",
+        "to_git_blob_sha": "29d27d1bde67c4e461a648424f846173572ac98b",
+    }
+    assert _git_blob_sha(ANDROID) == android_transition["to_git_blob_sha"]
 
     expected_files = [
         (CLIENT, "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/net/DevControlPilotStatusClient.kt", "0e9b16b565cad721de7532d681abd89e7850a4f1"),
@@ -124,6 +133,7 @@ def run_contract() -> None:
 
     assert schema["properties"]["source_product_status_head_sha"]["const"] == handoff["source_product_status_head_sha"]
     assert schema["properties"]["tracked_source_transition"]["properties"]["to_git_blob_sha"]["const"] == transition["to_git_blob_sha"]
+    assert schema["properties"]["android_tracked_source_transition"]["properties"]["to_git_blob_sha"]["const"] == android_transition["to_git_blob_sha"]
     assert schema["properties"]["implementation_choice"]["properties"]["executor_wired"]["const"] is False
     assert schema["properties"]["implementation_choice"]["properties"]["start_control_present"]["const"] is False
     assert schema["properties"]["implementation_choice"]["properties"]["human_pilot_go_verified"]["const"] is False

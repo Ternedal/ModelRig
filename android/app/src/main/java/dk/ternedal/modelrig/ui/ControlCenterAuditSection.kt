@@ -164,7 +164,7 @@ internal fun ControlCenterAuditSection(
                         .padding(top = 6.dp)
                         .height(20.dp),
                     strokeWidth = 2.dp,
-                    color = KalivTheme.colors.signal,
+                    color = KalivTheme.colors.cognition,
                 )
             }
         }

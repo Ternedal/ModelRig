@@ -224,6 +224,14 @@ def run_contract() -> None:
         )
         transitions.setdefault(sensor_transition["path"], []).append(sensor_transition)
 
+        android_transition = ui_handoff["android_tracked_source_transition"]
+        assert android_transition["path"] == (
+            "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
+        )
+        assert android_transition["from_git_blob_sha"] == "82643d7cefe9a9c249e8e7cc8b480d9989b38606"
+        assert android_transition["path"] not in transitions
+        transitions[android_transition["path"]] = android_transition
+
     candidates = inventory["candidate_surfaces"]
     assert len(candidates) == len(EXPECTED) == 3
     for item, (candidate_id, relative_path, expected_sha) in zip(candidates, EXPECTED, strict=True):

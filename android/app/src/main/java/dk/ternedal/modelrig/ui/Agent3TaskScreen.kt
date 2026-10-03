@@ -525,7 +525,7 @@ fun Agent3TaskScreen(
                         fontSize = 12.sp,
                     )
                 }
-                TextButton(onClick = onClose) { Text("Luk", color = KalivTheme.colors.signal) }
+                TextButton(onClick = onClose) { Text("Luk", color = KalivTheme.colors.cognition) }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -551,7 +551,7 @@ fun Agent3TaskScreen(
                             Text(evidence, color = KalivTheme.colors.textMuted, fontSize = 10.sp)
                         }
                     }
-                    if (busy == TaskBusy.READINESS) CircularProgressIndicator()
+                    if (busy == TaskBusy.READINESS) CircularProgressIndicator(color = KalivTheme.colors.cognition)
                 }
                 Spacer(Modifier.height(8.dp))
                 MetaRow("Aktiv surface", presentAgent3TaskReadinessSurface(readiness?.selectedSurface))
@@ -902,7 +902,7 @@ private fun TaskRunCard(
                 Spacer(Modifier.height(5.dp))
                 Text(
                     presentAgent3TaskEventKind(event.kind),
-                    color = KalivTheme.colors.signal,
+                    color = KalivTheme.colors.cognition,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                 )

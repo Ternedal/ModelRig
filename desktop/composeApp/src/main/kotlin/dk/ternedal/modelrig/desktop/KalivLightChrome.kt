@@ -148,16 +148,16 @@ private fun LightShellNavRow(
         .clip(shape)
         .clickable(onClickLabel = item.label, role = Role.Tab, onClick = onClick)
     val decorated = if (active) {
-        val start = if (c.isDark) Color(0x389A7136) else c.Signal.copy(alpha = 0.12f)
-        val end = if (c.isDark) Color(0x0F9A7136) else c.Signal.copy(alpha = 0.04f)
-        val border = if (c.isDark) Color(0x599A7136) else c.Signal.copy(alpha = 0.30f)
+        val start = c.Signal.copy(alpha = if (c.isDark) 0.22f else 0.12f)
+        val end = c.Signal.copy(alpha = if (c.isDark) 0.06f else 0.04f)
+        val border = c.Signal.copy(alpha = if (c.isDark) 0.35f else 0.30f)
         base
             .background(Brush.horizontalGradient(listOf(start, end)))
             .border(1.dp, border, shape)
     } else {
         base
     }
-    val inactiveInk = if (c.isDark) Color(0xFFC3B8A8) else c.TextMuted
+    val inactiveInk = c.ShellInactiveText
 
     Row(
         decorated.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -188,7 +188,7 @@ private fun LightShellActiveModelCard(
 ) {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
-    val border = if (c.isDark) Color(0x33785A37) else c.Border
+    val border = c.Cognition.copy(alpha = 0.20f)
     Column(
         Modifier
             .fillMaxWidth()
@@ -200,12 +200,12 @@ private fun LightShellActiveModelCard(
         SectionLabel("Aktiv model")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(c.Success))
+            Box(Modifier.size(7.dp).clip(CircleShape).background(c.Cognition))
             Spacer(Modifier.width(7.dp))
             Text(modelName, color = c.TextHigh, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(3.dp))
-        Text("Lokal \u00b7 $backend", color = c.TextMuted, fontSize = 11.5.sp)
+        Text("Lokal \u00b7 $backend", color = c.CognitionLight, fontSize = 11.5.sp)
         Spacer(Modifier.height(9.dp))
         val fraction = if (totalGb > 0.0) (usedGb / totalGb).toFloat() else 0f
         LightShellMetaBar(fraction)
@@ -235,7 +235,7 @@ private fun LightShellMetaBar(fraction: Float) {
                 .fillMaxHeight()
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
                 .clip(CircleShape)
-                .background(Brush.horizontalGradient(listOf(c.Signal, c.Highlight))),
+                .background(Brush.horizontalGradient(listOf(c.Cognition, c.CognitionLight))),
         )
     }
 }
@@ -244,9 +244,9 @@ private fun LightShellMetaBar(fraction: Float) {
 private fun LightShellPrivacySeal() {
     val c = KalivTheme.colors
     val shape = RoundedCornerShape(11.dp)
-    val background = if (c.isDark) Color(0x1A9A7136) else c.Signal.copy(alpha = 0.08f)
-    val border = if (c.isDark) Color(0x339A7136) else c.Signal.copy(alpha = 0.24f)
-    val headline = if (c.isDark) Color(0xFFE9DFCE) else c.TextHigh
+    val background = c.Signal.copy(alpha = if (c.isDark) 0.10f else 0.08f)
+    val border = c.Signal.copy(alpha = if (c.isDark) 0.20f else 0.24f)
+    val headline = c.TextHigh
 
     Row(
         Modifier
