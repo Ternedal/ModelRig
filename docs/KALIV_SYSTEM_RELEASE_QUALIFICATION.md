@@ -115,8 +115,12 @@ evidence reference:
    `0 < max_age_hours <= 720`. It also
    requires `status=complete`, all recorded Stage-B command exit codes to
    be zero, `summary.total=9` with an empty `summary.errors`, all final/strict
-   physical gates PASS, `production_activation=false`, a clean candidate
-   checkout, and the same candidate Git SHA as the recovery observations.
+   physical gates PASS, and `production_activation=false`. Candidate authority
+   is derived independently from `--repository-root` using the canonical
+   physical-campaign candidate identity: version, Git HEAD and code fingerprint
+   must match the Stage-B report, the checkout must be clean, version stamps must
+   be consistent, and the same Git SHA must be present in the recovery
+   observations.
    It also requires the Stage-B report's exact four component receipts
    (`strict_stage_b`, `updater_chain`, `physical_campaign`,
    `component_final_gate`), resolves their repository-relative paths under
