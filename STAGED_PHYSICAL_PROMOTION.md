@@ -134,7 +134,7 @@ release-sæt publiceres. Ændres SHA'en, er Stage A ugyldig.
 
 Følg den operative autoritet i `STAGE_B_UPDATER_EVIDENCE.md`.
 
-Kildereleasen for appliance-transitionen er den signerede `2.0.13`, og målet er
+Kildereleasen for appliance-transitionen er den signerede `2.0.12`, og målet er
 `2.0.14`. Target-updaterens checksum og provenance verificeres før swap som den
 aktuelle bootstrap-grænse. Server, supervisor og worker må ikke kopieres
 manuelt; deres transition skal ske gennem updateren.
@@ -146,7 +146,7 @@ den authority ændres særskilt.
 
 Stage B skal dokumentere:
 
-1. normal update fra 2.0.13 til 2.0.14;
+1. normal update fra 2.0.12 til 2.0.14;
 2. reboot på 2.0.14;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
@@ -190,7 +190,7 @@ physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
 production_activation=false
-summary.total=8
+summary.total=9
 ```
 
 Kun denne schema-distinkte kvittering kan indgå i en senere separat

@@ -9,7 +9,7 @@ aktiverer produktion.
 
 Stage B håndhæver denne præcise transition:
 
-- source appliance: signeret `2.0.13`;
+- source appliance: signeret `2.0.12`;
 - target appliance: signeret `2.0.14`;
 - updateren fra `v2.0.14` verificeres én gang som bootstrap-grænse;
 - bootstrap-binarien verificeres mod samme releases `SHA256SUMS.txt`, target-
@@ -18,7 +18,7 @@ Stage B håndhæver denne præcise transition:
 
 ### Åbent punkt: #401's forudsætning er nu til stede, men beviset er separat
 
-`2.0.13` er en signeret source med updater self-update-support, og `2.0.14` er
+`2.0.12` er en signeret source med updater self-update-support, og `2.0.14` er
 en senere signeret target, når denne runbook må køres. Dermed er den historiske
 forudsætning for issue **#401** til stede i denne æra.
 
@@ -42,7 +42,7 @@ alene certificere Stage B.
 
 Strict-wrapperen:
 
-1. kræver backend og worker på præcis `2.0.13`;
+1. kræver backend og worker på præcis `2.0.12`;
 2. måler live-updaterens SHA-256 mod `v2.0.14/SHA256SUMS.txt`;
 3. kører `gh attestation verify` med repository, target-commit, tagref og
    signer-workflow bundet til samme release;
@@ -53,14 +53,14 @@ Strict-wrapperen:
 8. afbryder først, når netop den transaktion viser `state=swapping` og mindst ét
    live swap er registreret;
 9. kører updateren med `-recover`;
-10. kræver backend og worker tilbage på 2.0.13, alle fire live executables
+10. kræver backend og worker tilbage på 2.0.12, alle fire live executables
     til stede og ingen aktiv journal;
 11. kører derefter den normale gode update, reboot, supervisor-restarts og den
     ugyldige update.
 
 Fremdriften checkpointes i `validation/stage-b-easy-state.json`. Hvis en god
 update allerede er gennemført uden interruption-beviset, stopper wrapperen og
-kræver source 2.0.13 gendannet før en ny kampagne.
+kræver source 2.0.12 gendannet før en ny kampagne.
 
 ## Release-checkout
 
@@ -122,7 +122,7 @@ Wrapperen må først terminere den updaterproces, den selv startede, når samme 
 transaktion viser:
 
 ```text
-from=2.0.13
+from=2.0.12
 to=v2.0.14
 state=swapping
 swapped_count>=1
@@ -134,8 +134,8 @@ Derefter kører wrapperen `modelrig-updater-windows-x64.exe -recover` og kræver
 
 ```text
 recovery_exit_code=0
-backend_version=2.0.13
-worker_version=2.0.13
+backend_version=2.0.12
+worker_version=2.0.12
 live_executables_present=true
 journal_absent=true
 ```
@@ -158,7 +158,7 @@ fortsat under #401, ikke under versionsbumpets egen promotion-authority.
 
 Når interruption-recovery er grøn, gennemføres:
 
-1. god appliance-update 2.0.13 → 2.0.14;
+1. god appliance-update 2.0.12 → 2.0.14;
 2. reboot til ready på 2.0.14;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
@@ -168,7 +168,7 @@ Når interruption-recovery er grøn, gennemføres:
 Den gode updater-log skal blandt andet indeholde:
 
 ```text
-update available: 2.0.13 -> v2.0.14
+update available: 2.0.12 -> v2.0.14
 downloading modelrig-server-windows-x64.exe
 downloading modelrig-supervisor-windows-x64.exe
 downloading modelrig-worker-windows-x64.exe
@@ -223,7 +223,7 @@ physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
 production_activation=false
-summary.total=8
+summary.total=9
 ```
 
 Review hashes for strict-, updater-chain-, campaign- og component-final-

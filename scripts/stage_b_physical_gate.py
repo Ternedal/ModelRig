@@ -7,8 +7,8 @@ merge, tag, release, update, restart or activation. It verifies:
 
 1. the published-release freeze;
 2. semantic updater-chain evidence;
-3. the seven-proof release campaign;
-4. the physical browser attestation and existing eight-proof final gate.
+3. the eight-proof release campaign;
+4. the physical browser attestation and resulting nine-proof final gate.
 
 Only the resulting ``kaliv-stage-b-physical-final/v1`` receipt represents the
 fully hardened Stage B evidence bundle. ``production_activation`` is always false.
@@ -42,6 +42,17 @@ DEFAULT_CAMPAIGN = Path("validation/physical-validation-campaign-latest.json")
 DEFAULT_BROWSER = Path("validation/browser-peer-public-validation-physical-latest.json")
 DEFAULT_COMPONENT_FINAL = Path("validation/physical-validation-final-latest.json")
 DEFAULT_REPORT = Path("validation/stage-b-physical-final-latest.json")
+EXPECTED_CAMPAIGN_PROOFS = (
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "lifecycle",
+    "scheduler_pilot",
+    "task_ui",
+)
+EXPECTED_FINAL_PROOFS = EXPECTED_CAMPAIGN_PROOFS + ("browser_peer_physical",)
 MAX_BYTES = 32 * 1024 * 1024
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
@@ -173,11 +184,16 @@ def evaluate_bundle(
     if campaign.get("gate", {}).get("passed") is not True:
         errors.append("release campaign gate.passed is not true")
     if campaign.get("gate", {}).get("physical_campaign_complete") is not True:
-        errors.append("seven-proof release campaign is incomplete")
+        errors.append("eight-proof release campaign is incomplete")
     if campaign.get("gate", {}).get("production_activation") is not False:
         errors.append("release campaign did not preserve production_activation=false")
-    if campaign.get("summary", {}).get("total") != 7:
-        errors.append("release campaign summary.total is not seven")
+    campaign_summary = (
+        campaign.get("summary") if isinstance(campaign.get("summary"), Mapping) else {}
+    )
+    if campaign_summary.get("total") != len(EXPECTED_CAMPAIGN_PROOFS):
+        errors.append("release campaign summary.total is not eight")
+    if tuple(campaign_summary.get("passed") or ()) != EXPECTED_CAMPAIGN_PROOFS:
+        errors.append("release campaign summary.passed is not the canonical eight proofs")
 
     if final.get("schema") != FINAL_SCHEMA:
         errors.append("component final-gate schema mismatch")
@@ -188,8 +204,13 @@ def evaluate_bundle(
         errors.append("component final gate is not physically complete")
     if final_gate.get("production_activation") is not False:
         errors.append("component final gate did not preserve production_activation=false")
-    if final.get("summary", {}).get("total") != 8:
-        errors.append("component final summary.total is not eight")
+    final_summary = (
+        final.get("summary") if isinstance(final.get("summary"), Mapping) else {}
+    )
+    if final_summary.get("total") != len(EXPECTED_FINAL_PROOFS):
+        errors.append("component final summary.total is not nine")
+    if tuple(final_summary.get("passed") or ()) != EXPECTED_FINAL_PROOFS:
+        errors.append("component final summary.passed is not the canonical nine proofs")
 
     for label, value in (
         ("updater-chain", chain),
@@ -221,7 +242,7 @@ def evaluate_bundle(
             ),
         },
         "summary": {
-            "total": 8,
+            "total": 9,
             "passed": final.get("summary", {}).get("passed", []),
             "errors": errors,
         },
@@ -277,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         if steps[-1]["exit_code"] == 0:
             steps.append(
                 _run(
-                    "seven-proof release campaign",
+                    "eight-proof release campaign",
                     [
                         sys.executable,
                         str(ROOT / "scripts" / "physical_validation_campaign.py"),
@@ -297,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         if steps[-1]["exit_code"] == 0:
             steps.append(
                 _run(
-                    "eight-proof component final gate",
+                    "nine-proof component final gate",
                     [
                         sys.executable,
                         str(ROOT / "scripts" / "physical_validation_final_gate.py"),
@@ -334,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
                 "type": type(exc).__name__,
                 "message": str(exc).replace("\r", " ").replace("\n", " ")[:500],
             },
-            "summary": {"total": 8, "passed": [], "errors": [str(exc)[:500]]},
+            "summary": {"total": 9, "passed": [], "errors": [str(exc)[:500]]},
             "gate": {
                 "passed": False,
                 "release_freeze_complete": False,

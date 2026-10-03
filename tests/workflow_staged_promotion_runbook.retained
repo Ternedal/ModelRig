@@ -74,7 +74,7 @@ if runbook_path.exists():
         "updater_chain_complete=true",
         "all_physical_evidence_complete=true",
         "summary.total=7",
-        "summary.total=8",
+        "summary.total=9",
     )
     check(
         all(item in runbook for item in required),
