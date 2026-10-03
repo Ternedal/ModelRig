@@ -80,9 +80,28 @@ def _write_component(name: str, schema: str, gate_fields: dict, *, extra: dict |
     }
 
 
+def _artifact(path: str, digit: str) -> dict:
+    return {
+        "path": path,
+        "sha256": digit * 64,
+        "bytes": 128,
+    }
+
+
 def _component_evidence() -> dict:
     campaign_passed = list(gate._EXPECTED_STAGE_B_PROOFS[:-1])
     final_passed = list(gate._EXPECTED_STAGE_B_PROOFS)
+    lifecycle_artifacts = {
+        "reboot": _artifact(
+            "validation/appliance-lifecycle-evidence/reboot.log", "1"
+        ),
+        "supervisor_backend": _artifact(
+            "validation/appliance-lifecycle-evidence/supervisor_backend.log", "2"
+        ),
+        "supervisor_worker": _artifact(
+            "validation/appliance-lifecycle-evidence/supervisor_worker.log", "3"
+        ),
+    }
     return {
         "updater_chain": _write_component(
             "updater-chain",
@@ -96,6 +115,12 @@ def _component_evidence() -> dict:
             extra={
                 "mode": "verify",
                 "summary": {"total": 8, "passed": campaign_passed},
+                "evidence": {
+                    "lifecycle": {
+                        "status": "pass",
+                        "summary": {"artifacts": lifecycle_artifacts},
+                    }
+                },
             },
         ),
         "component_final_gate": _write_component(
@@ -108,6 +133,14 @@ def _component_evidence() -> dict:
             "strict-stage-b",
             gate._STAGE_B_COMPONENTS["strict_stage_b"][0],
             {"passed": True, "strict_evidence_complete": True},
+            extra={
+                "evidence": {
+                    "appliance_interruption": _artifact(
+                        "validation/appliance-lifecycle-evidence/appliance_interruption.log",
+                        "4",
+                    )
+                }
+            },
         ),
     }
 
@@ -183,12 +216,41 @@ def _observations() -> dict:
         ],
         "recovery_events": [
             {
-                "kind": kind,
-                "observed_at": f"2026-09-29T1{index}:05:00+00:00",
+                "kind": "reboot",
+                "observed_at": "2026-09-29T10:05:00+00:00",
                 "passed": True,
-                "evidence_ref": f"validation/evidence/{kind}.json#sha256={index}",
-            }
-            for index, kind in enumerate(gate._REQUIRED_RECOVERY_KINDS)
+                "evidence_ref": (
+                    "validation/appliance-lifecycle-evidence/reboot.log#sha256="
+                    + "1" * 64
+                ),
+            },
+            {
+                "kind": "backend_restart",
+                "observed_at": "2026-09-29T10:10:00+00:00",
+                "passed": True,
+                "evidence_ref": (
+                    "validation/appliance-lifecycle-evidence/supervisor_backend.log#sha256="
+                    + "2" * 64
+                ),
+            },
+            {
+                "kind": "worker_restart",
+                "observed_at": "2026-09-29T10:12:00+00:00",
+                "passed": True,
+                "evidence_ref": (
+                    "validation/appliance-lifecycle-evidence/supervisor_worker.log#sha256="
+                    + "3" * 64
+                ),
+            },
+            {
+                "kind": "interruption_recovery",
+                "observed_at": "2026-09-29T10:14:00+00:00",
+                "passed": True,
+                "evidence_ref": (
+                    "validation/appliance-lifecycle-evidence/appliance_interruption.log#sha256="
+                    + "4" * 64
+                ),
+            },
         ],
     }
 
@@ -299,6 +361,19 @@ def run_contract() -> None:
     failed = copy.deepcopy(valid)
     failed["recovery_events"][0]["passed"] = False
     _reject(failed, "did not pass")
+
+    wrong_event_ref = copy.deepcopy(valid)
+    wrong_event_ref["recovery_events"][1]["evidence_ref"] = (
+        "validation/appliance-lifecycle-evidence/supervisor_backend.log#sha256="
+        + "9" * 64
+    )
+    _reject(wrong_event_ref, "does not match canonical Stage-B lifecycle evidence")
+
+    outside_window = copy.deepcopy(valid)
+    outside_window["recovery_events"][0]["observed_at"] = (
+        "2026-09-29T09:59:59+00:00"
+    )
+    _reject(outside_window, "must occur inside the soak sample window")
 
     extra_kind = copy.deepcopy(valid)
     extra_kind["recovery_events"][0]["kind"] = "magic_recovery"
