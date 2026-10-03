@@ -278,6 +278,31 @@ def _load_stage_b_validator(script_name: str):
     return module
 
 
+def _candidate_identity_from_checkout(repository_root: Path) -> Mapping[str, Any]:
+    module = _load_stage_b_validator("physical_validation_campaign.py")
+    try:
+        candidate = module.candidate_identity(repository_root)
+    except Exception as exc:
+        raise RecoverySoakError(
+            "Stage-B checkout candidate identity cannot be derived"
+        ) from exc
+    candidate = _mapping(candidate, "Stage-B checkout candidate")
+    version = candidate.get("version")
+    git_sha = candidate.get("git_sha")
+    code_sha256 = candidate.get("code_sha256")
+    if not isinstance(version, str) or not version:
+        raise RecoverySoakError("Stage-B checkout candidate version is invalid")
+    if not isinstance(git_sha, str) or _SHA40.fullmatch(git_sha) is None:
+        raise RecoverySoakError("Stage-B checkout candidate Git SHA is invalid")
+    if not isinstance(code_sha256, str) or _SHA256.fullmatch(code_sha256) is None:
+        raise RecoverySoakError("Stage-B checkout candidate code_sha256 is invalid")
+    if candidate.get("working_tree_clean") is not True:
+        raise RecoverySoakError("Stage-B checkout working tree is not clean")
+    if candidate.get("version_stamps_consistent") is not True:
+        raise RecoverySoakError("Stage-B checkout version stamps are inconsistent")
+    return candidate
+
+
 def _positive_number(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RecoverySoakError(f"{name} must be numeric")
@@ -566,6 +591,12 @@ def _validate_stage_b_report(
         raise RecoverySoakError("Stage-B report status must be complete")
 
     candidate = _mapping(report.get("candidate"), "stage_b_report.candidate")
+    checkout_candidate = _candidate_identity_from_checkout(repository_root)
+    for field in ("version", "git_sha", "code_sha256"):
+        if candidate.get(field) != checkout_candidate.get(field):
+            raise RecoverySoakError(
+                f"Stage-B report candidate {field} does not match repository checkout"
+            )
     if candidate.get("git_sha") != candidate_sha:
         raise RecoverySoakError(
             "Stage-B report candidate Git SHA does not match recovery candidate"
@@ -590,7 +621,7 @@ def _validate_stage_b_report(
             repository_root,
             component_name,
             evidence.get(component_name),
-            candidate_identity=candidate,
+            candidate_identity=checkout_candidate,
         )
 
     steps = report.get("steps")
