@@ -80,12 +80,15 @@ def _write_component(name: str, schema: str, gate_fields: dict, *, extra: dict |
     }
 
 
-def _artifact(path: str, digit: str) -> dict:
-    return {
+def _artifact(path: str, digit: str, observed_at: str | None = None) -> dict:
+    value = {
         "path": path,
         "sha256": digit * 64,
         "bytes": 128,
     }
+    if observed_at is not None:
+        value["observed_at"] = observed_at
+    return value
 
 
 def _component_evidence() -> dict:
@@ -93,13 +96,19 @@ def _component_evidence() -> dict:
     final_passed = list(gate._EXPECTED_STAGE_B_PROOFS)
     lifecycle_artifacts = {
         "reboot": _artifact(
-            "validation/appliance-lifecycle-evidence/reboot.log", "1"
+            "validation/appliance-lifecycle-evidence/reboot.log",
+            "1",
+            "2026-09-29T10:05:00+00:00",
         ),
         "supervisor_backend": _artifact(
-            "validation/appliance-lifecycle-evidence/supervisor_backend.log", "2"
+            "validation/appliance-lifecycle-evidence/supervisor_backend.log",
+            "2",
+            "2026-09-29T10:10:00+00:00",
         ),
         "supervisor_worker": _artifact(
-            "validation/appliance-lifecycle-evidence/supervisor_worker.log", "3"
+            "validation/appliance-lifecycle-evidence/supervisor_worker.log",
+            "3",
+            "2026-09-29T10:12:00+00:00",
         ),
     }
     return {
@@ -138,6 +147,7 @@ def _component_evidence() -> dict:
                     "appliance_interruption": _artifact(
                         "validation/appliance-lifecycle-evidence/appliance_interruption.log",
                         "4",
+                        "2026-09-29T10:14:00+00:00",
                     )
                 }
             },
@@ -370,11 +380,23 @@ def run_contract() -> None:
     )
     _reject(wrong_event_ref, "does not match canonical Stage-B lifecycle evidence")
 
-    outside_window = copy.deepcopy(valid)
-    outside_window["recovery_events"][0]["observed_at"] = (
-        "2026-09-29T09:59:59+00:00"
+    wrong_event_time = copy.deepcopy(valid)
+    wrong_event_time["recovery_events"][0]["observed_at"] = (
+        "2026-09-29T10:06:00+00:00"
     )
-    _reject(outside_window, "must occur inside the soak sample window")
+    _reject(
+        wrong_event_time,
+        "observed_at does not match canonical Stage-B lifecycle evidence",
+    )
+
+    outside_window = copy.deepcopy(valid)
+    outside_window["samples"][0]["observed_at"] = "2026-09-29T10:06:00+00:00"
+    outside_window["samples"][1]["observed_at"] = "2026-09-29T11:06:00+00:00"
+    outside_window["samples"][2]["observed_at"] = "2026-09-29T12:06:00+00:00"
+    _reject(
+        outside_window,
+        "canonical evidence occurred outside the soak sample window",
+    )
 
     extra_kind = copy.deepcopy(valid)
     extra_kind["recovery_events"][0]["kind"] = "magic_recovery"
