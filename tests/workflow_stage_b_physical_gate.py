@@ -107,7 +107,7 @@ def components(temp: Path) -> tuple[Path, Path, Path]:
         "mode": "verify",
         "candidate": common,
         "summary": {
-            "total": 7,
+            "total": 8,
             "passed": [
                 "preflight",
                 "agent3",
@@ -116,6 +116,7 @@ def components(temp: Path) -> tuple[Path, Path, Path]:
                 "rag",
                 "lifecycle",
                 "scheduler_pilot",
+                "task_ui",
             ],
             "failed": [],
             "missing": [],
@@ -131,7 +132,7 @@ def components(temp: Path) -> tuple[Path, Path, Path]:
         "schema": module.FINAL_SCHEMA,
         "candidate": common,
         "summary": {
-            "total": 8,
+            "total": 9,
             "passed": campaign["summary"]["passed"] + ["browser_peer_physical"],
             "errors": [],
         },
@@ -160,8 +161,8 @@ try:
     steps = [
         {"label": "release freeze", "exit_code": 0},
         {"label": "updater-chain gate", "exit_code": 0},
-        {"label": "seven-proof release campaign", "exit_code": 0},
-        {"label": "eight-proof component final gate", "exit_code": 0},
+        {"label": "eight-proof release campaign", "exit_code": 0},
+        {"label": "nine-proof component final gate", "exit_code": 0},
     ]
     report, code = module.evaluate_bundle(
         ROOT,
@@ -176,8 +177,8 @@ try:
           "all Stage B component gates produce one green final receipt")
     check(report["gate"]["all_physical_evidence_complete"] is True,
           "Stage B wrapper is the complete physical evidence verdict")
-    check(report["summary"]["total"] == 8,
-          "semantic updater hardening does not invent a ninth physical proof")
+    check(report["summary"]["total"] == 9,
+          "Stage B preserves eight campaign proofs plus browser peer")
     check(report["gate"]["production_activation"] is False,
           "Stage B wrapper cannot activate production")
 
@@ -237,8 +238,8 @@ source = SCRIPT.read_text(encoding="utf-8")
 check(
     source.index('"release freeze"')
     < source.index('"updater-chain gate"')
-    < source.index('"seven-proof release campaign"')
-    < source.index('"eight-proof component final gate"'),
+    < source.index('"eight-proof release campaign"')
+    < source.index('"nine-proof component final gate"'),
     "Stage B executes freeze, updater chain, campaign and final gate in order",
 )
 for forbidden in (
