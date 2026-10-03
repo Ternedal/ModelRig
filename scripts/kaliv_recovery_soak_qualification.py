@@ -8,6 +8,15 @@ the explicitly declared campaign policy.
 """
 from __future__ import annotations
 
+import os
+import sys
+
+# This qualifier dynamically imports the canonical Stage-B validators before it
+# reruns freeze_check. Never contaminate the candidate checkout with bytecode
+# that the canonical freeze gate correctly treats as unsanctioned runtime state.
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 import argparse
 import hashlib
 import importlib.util
@@ -15,7 +24,6 @@ import json
 import math
 import re
 import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -297,8 +305,50 @@ def _candidate_identity_from_checkout(repository_root: Path) -> Mapping[str, Any
         raise RecoverySoakError("Stage-B checkout candidate Git SHA is invalid")
     if not isinstance(code_sha256, str) or _SHA256.fullmatch(code_sha256) is None:
         raise RecoverySoakError("Stage-B checkout candidate code_sha256 is invalid")
-    if candidate.get("working_tree_clean") is not True:
-        raise RecoverySoakError("Stage-B checkout working tree is not clean")
+    identity_source = candidate.get("identity_source")
+    if identity_source == "git":
+        freeze_module = _load_stage_b_validator("freeze_check.py")
+        try:
+            completed = subprocess.run(
+                [
+                    "git",
+                    "status",
+                    "--porcelain",
+                    "--untracked-files=all",
+                ],
+                cwd=str(repository_root.resolve()),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RecoverySoakError(
+                "Stage-B checkout source cleanliness cannot be verified"
+            ) from exc
+        if completed.returncode != 0:
+            raise RecoverySoakError(
+                "Stage-B checkout source cleanliness cannot be verified"
+            )
+        splitter = getattr(freeze_module, "_split_git_status_authority", None)
+        if not callable(splitter):
+            raise RecoverySoakError(
+                "canonical freeze cleanliness helper is unavailable"
+            )
+        source_drift, _local_evidence = splitter(completed.stdout)
+        if source_drift:
+            raise RecoverySoakError(
+                "Stage-B checkout contains unsanctioned source changes"
+            )
+    elif identity_source == "frozen-candidate-attestation":
+        # candidate_identity() reaches this mode only through the strict
+        # frozen_attestation reader, which verifies the downloaded release
+        # tree and attestation continuity. Git cleanliness is intentionally
+        # unavailable on the official gitless rig path.
+        pass
+    else:
+        raise RecoverySoakError("Stage-B checkout identity source is invalid")
+
     if candidate.get("version_stamps_consistent") is not True:
         raise RecoverySoakError("Stage-B checkout version stamps are inconsistent")
     return candidate
