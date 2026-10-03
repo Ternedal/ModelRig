@@ -110,7 +110,7 @@ evidence reference:
    recovery-soak qualifier. The qualifier must be given the actual Stage-B final
    report with `--stage-b-report`; it SHA-256-binds the exact report bytes,
    requires `status=complete`, all recorded Stage-B command exit codes to
-   be zero, `summary.total=8` with an empty `summary.errors`, all final/strict
+   be zero, `summary.total=9` with an empty `summary.errors`, all final/strict
    physical gates PASS, `production_activation=false`, a clean candidate
    checkout, and the same candidate Git SHA as the recovery observations. A
    caller-supplied label or
