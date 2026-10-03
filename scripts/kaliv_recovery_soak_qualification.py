@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import re
+import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -206,6 +208,230 @@ def _component_path(root: Path, raw: Any, name: str) -> Path:
             f"Stage-B evidence {name}.path escapes repository root"
         ) from exc
     return resolved
+
+
+def _load_stage_b_validator(script_name: str):
+    script = Path(__file__).resolve().parent / script_name
+    module_name = "_recovery_soak_" + script.stem.replace("-", "_")
+    spec = importlib.util.spec_from_file_location(module_name, script)
+    if spec is None or spec.loader is None:
+        raise RecoverySoakError(
+            f"canonical Stage-B validator cannot be loaded: {script_name}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise RecoverySoakError(
+            f"canonical Stage-B validator failed to load: {script_name}"
+        ) from exc
+    return module
+
+
+def _positive_number(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RecoverySoakError(f"{name} must be numeric")
+    result = float(value)
+    if result <= 0:
+        raise RecoverySoakError(f"{name} must be positive")
+    return result
+
+
+def _revalidate_stage_b_component(
+    repository_root: Path,
+    name: str,
+    receipt: Mapping[str, Any],
+    *,
+    candidate_identity: Mapping[str, Any],
+) -> None:
+    now = datetime.now(timezone.utc)
+
+    if name in {"strict_stage_b", "updater_chain"}:
+        source = _mapping(
+            receipt.get("source"),
+            f"Stage-B evidence {name}.source",
+        )
+        source_path = source.get("path")
+        if not isinstance(source_path, str) or not source_path:
+            raise RecoverySoakError(
+                f"Stage-B evidence {name}.source.path must be nonblank"
+            )
+        script_name = (
+            "stage_b_strict_evidence.py"
+            if name == "strict_stage_b"
+            else "appliance_lifecycle_updater_chain.py"
+        )
+        module = _load_stage_b_validator(script_name)
+        try:
+            regenerated, code = module.evaluate(
+                repository_root,
+                Path(source_path),
+                candidate=candidate_identity,
+                now=now,
+            )
+        except Exception as exc:
+            raise RecoverySoakError(
+                f"Stage-B evidence {name} canonical revalidation failed"
+            ) from exc
+        if code != 0:
+            raise RecoverySoakError(
+                f"Stage-B evidence {name} underlying evidence did not revalidate"
+            )
+        for section in ("source", "evidence", "summary", "gate"):
+            if regenerated.get(section) != receipt.get(section):
+                raise RecoverySoakError(
+                    f"Stage-B evidence {name} does not match canonical revalidation"
+                )
+        return
+
+    _revalidate_stage_b_component(
+        repository_root,
+        name,
+        receipt,
+        candidate_identity=candidate_identity,
+    )
+
+    if name == "physical_campaign":
+        configuration = _mapping(
+            receipt.get("configuration"),
+            "Stage-B physical campaign configuration",
+        )
+        max_age_hours = _positive_number(
+            configuration.get("max_age_hours"),
+            "Stage-B physical campaign configuration.max_age_hours",
+        )
+        min_model_exact_raw = configuration.get("min_model_exact")
+        if (
+            isinstance(min_model_exact_raw, bool)
+            or not isinstance(min_model_exact_raw, (int, float))
+            or not 0 <= float(min_model_exact_raw) <= 1
+        ):
+            raise RecoverySoakError(
+                "Stage-B physical campaign configuration.min_model_exact is invalid"
+            )
+        min_model_exact = float(min_model_exact_raw)
+        evidence = _mapping(
+            receipt.get("evidence"),
+            "Stage-B physical campaign evidence",
+        )
+        expected_names = _EXPECTED_STAGE_B_PROOFS[:-1]
+        _exact_keys(
+            evidence,
+            set(expected_names),
+            "Stage-B physical campaign evidence",
+        )
+        module = _load_stage_b_validator("physical_validation_campaign.py")
+        validator_root = Path(__file__).resolve().parents[1]
+        try:
+            assessor = module._load_agent3_assessor(validator_root)
+        except Exception as exc:
+            raise RecoverySoakError(
+                "Stage-B physical campaign Agent 3 validator cannot be loaded"
+            ) from exc
+        thresholds = {
+            "min_model_exact": min_model_exact,
+            "agent3_assessor": assessor,
+            "root": repository_root,
+        }
+        previous_validators = module._core.VALIDATORS
+        module._core.VALIDATORS = module.EXTENDED_VALIDATORS
+        try:
+            for proof_name in expected_names:
+                stored = _mapping(
+                    evidence.get(proof_name),
+                    f"Stage-B physical campaign evidence.{proof_name}",
+                )
+                stored_path = stored.get("path")
+                if not isinstance(stored_path, str) or not stored_path:
+                    raise RecoverySoakError(
+                        f"Stage-B physical campaign evidence.{proof_name}.path must be nonblank"
+                    )
+                result = module.validate_evidence(
+                    repository_root,
+                    proof_name,
+                    Path(stored_path),
+                    candidate=dict(candidate_identity),
+                    thresholds=thresholds,
+                    now=now,
+                    max_age_hours=max_age_hours,
+                )
+                if result.get("status") != "pass":
+                    detail = "; ".join(result.get("errors") or [])
+                    raise RecoverySoakError(
+                        f"Stage-B physical campaign {proof_name} did not revalidate"
+                        + (f": {detail[:300]}" if detail else "")
+                    )
+                for field in ("path", "sha256", "bytes"):
+                    if result.get(field) != stored.get(field):
+                        raise RecoverySoakError(
+                            f"Stage-B physical campaign {proof_name}.{field} "
+                            "does not match canonical revalidation"
+                        )
+        finally:
+            module._core.VALIDATORS = previous_validators
+        return
+
+    if name == "component_final_gate":
+        configuration = _mapping(
+            receipt.get("configuration"),
+            "Stage-B component final configuration",
+        )
+        max_age_hours = _positive_number(
+            configuration.get("max_age_hours"),
+            "Stage-B component final configuration.max_age_hours",
+        )
+        evidence = _mapping(
+            receipt.get("evidence"),
+            "Stage-B component final evidence",
+        )
+        campaign_meta = _mapping(
+            evidence.get("physical_campaign"),
+            "Stage-B component final evidence.physical_campaign",
+        )
+        browser_meta = _mapping(
+            evidence.get("browser_peer_physical_attestation"),
+            "Stage-B component final evidence.browser_peer_physical_attestation",
+        )
+        campaign_path = campaign_meta.get("path")
+        browser_path = browser_meta.get("path")
+        if not isinstance(campaign_path, str) or not campaign_path:
+            raise RecoverySoakError(
+                "Stage-B component final physical campaign path is missing"
+            )
+        if not isinstance(browser_path, str) or not browser_path:
+            raise RecoverySoakError(
+                "Stage-B component final browser attestation path is missing"
+            )
+        module = _load_stage_b_validator("physical_validation_final_gate.py")
+        try:
+            regenerated, code = module.evaluate_final_gate(
+                repository_root,
+                Path(campaign_path),
+                Path(browser_path),
+                candidate=candidate_identity,
+                now=now,
+                max_age_hours=max_age_hours,
+            )
+        except Exception as exc:
+            raise RecoverySoakError(
+                "Stage-B component final canonical revalidation failed"
+            ) from exc
+        if code != 0:
+            detail = "; ".join(regenerated.get("summary", {}).get("errors") or [])
+            raise RecoverySoakError(
+                "Stage-B component final underlying browser/campaign evidence "
+                "did not revalidate"
+                + (f": {detail[:300]}" if detail else "")
+            )
+        for section in ("evidence", "summary", "gate"):
+            if regenerated.get(section) != receipt.get(section):
+                raise RecoverySoakError(
+                    "Stage-B component final does not match canonical revalidation"
+                )
+        return
+
+    raise RecoverySoakError(f"unsupported Stage-B component: {name}")
 
 
 def _validate_stage_b_component(
