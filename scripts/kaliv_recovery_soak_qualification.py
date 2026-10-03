@@ -22,6 +22,25 @@ RECEIPT_SCHEMA = "kaliv-recovery-soak-qualification/v1"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _STAGE_B_FINAL_SCHEMA = "kaliv-stage-b-physical-final/v1"
+_EXPECTED_STAGE_B_STEPS = (
+    ("strict source/bootstrap/interruption gate", "stage_b_strict_evidence.py"),
+    ("base Stage B physical gate", "stage_b_physical_gate.py"),
+    ("release freeze", "freeze_check.py"),
+    ("updater-chain gate", "appliance_lifecycle_updater_chain.py"),
+    ("eight-proof release campaign", "physical_validation_campaign.py"),
+    ("nine-proof component final gate", "physical_validation_final_gate.py"),
+)
+_EXPECTED_STAGE_B_PROOFS = (
+    "preflight",
+    "agent3",
+    "model_eval",
+    "voice",
+    "rag",
+    "lifecycle",
+    "scheduler_pilot",
+    "task_ui",
+    "browser_peer_physical",
+)
 _REQUIRED_RECOVERY_KINDS = (
     "reboot",
     "backend_restart",
@@ -163,10 +182,31 @@ def _validate_stage_b_report(value: Mapping[str, Any], *, candidate_sha: str) ->
         raise RecoverySoakError("Stage-B report candidate checkout is not clean")
 
     steps = report.get("steps")
-    if not isinstance(steps, list) or not steps:
-        raise RecoverySoakError("Stage-B report steps must be a non-empty list")
-    for index, raw_step in enumerate(steps):
+    if not isinstance(steps, list):
+        raise RecoverySoakError("Stage-B report steps must be a list")
+    if len(steps) != len(_EXPECTED_STAGE_B_STEPS):
+        raise RecoverySoakError(
+            "Stage-B report must contain the complete six-step execution sequence"
+        )
+    for index, (raw_step, expected) in enumerate(
+        zip(steps, _EXPECTED_STAGE_B_STEPS)
+    ):
         step = _mapping(raw_step, f"stage_b_report.steps[{index}]")
+        expected_label, expected_script = expected
+        if step.get("label") != expected_label:
+            raise RecoverySoakError(
+                f"Stage-B report steps[{index}].label does not match canonical sequence"
+            )
+        command = step.get("command")
+        if not isinstance(command, list) or len(command) < 2:
+            raise RecoverySoakError(
+                f"Stage-B report steps[{index}].command must be a command list"
+            )
+        script = command[1]
+        if not isinstance(script, str) or Path(script).name != expected_script:
+            raise RecoverySoakError(
+                f"Stage-B report steps[{index}].command does not match canonical script"
+            )
         exit_code = step.get("exit_code")
         if isinstance(exit_code, bool) or not isinstance(exit_code, int):
             raise RecoverySoakError(
@@ -178,8 +218,8 @@ def _validate_stage_b_report(value: Mapping[str, Any], *, candidate_sha: str) ->
             )
 
     summary = _mapping(report.get("summary"), "stage_b_report.summary")
-    if summary.get("total") != 8:
-        raise RecoverySoakError("Stage-B report summary.total must be eight")
+    if summary.get("total") != len(_EXPECTED_STAGE_B_PROOFS):
+        raise RecoverySoakError("Stage-B report summary.total must be nine")
     errors = summary.get("errors")
     if not isinstance(errors, list):
         raise RecoverySoakError("Stage-B report summary.errors must be a list")
@@ -188,6 +228,10 @@ def _validate_stage_b_report(value: Mapping[str, Any], *, candidate_sha: str) ->
     passed = summary.get("passed")
     if not isinstance(passed, list):
         raise RecoverySoakError("Stage-B report summary.passed must be a list")
+    if tuple(passed) != _EXPECTED_STAGE_B_PROOFS:
+        raise RecoverySoakError(
+            "Stage-B report summary.passed must contain all nine canonical proofs"
+        )
 
     gate = _mapping(report.get("gate"), "stage_b_report.gate")
     required_true = (
