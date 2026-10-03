@@ -396,6 +396,8 @@ def run_contract() -> None:
     final_meta["bytes"] = len(final_raw)
     _reject(valid, "candidate code_sha256 mismatch", stage_b=wrong_component_code)
 
+    gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE
+
 
 if __name__ == "__main__":
     try:
