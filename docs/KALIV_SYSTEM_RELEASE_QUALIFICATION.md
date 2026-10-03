@@ -141,6 +141,11 @@ evidence reference:
    interruption recovery must name the exact strict Stage-B interruption
    artifact. Every recovery-event timestamp must fall inside the recorded soak
    sample window.
+   Recovery-event timestamps are also authority-bound: reboot and supervisor
+   restart times must match the timestamps carried by their hash-validated
+   lifecycle artifacts, and interruption-recovery must match the timestamp
+   carried by the strict interruption receipt/log. A caller may not move old
+   recovery evidence into a newer soak window by editing `observed_at`.
    A caller-supplied label, a recomputed hash over a handcrafted top-level
    Stage-B report, or an unverified Stage-B path is not sufficient. The embedded ModelRig SHA must
    equal the pinned revision or be its ancestor with the exact same Git tree,
