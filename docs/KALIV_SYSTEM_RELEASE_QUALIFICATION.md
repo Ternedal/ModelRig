@@ -108,7 +108,11 @@ evidence reference:
    long-running soak campaign. A PASS must contain exactly one canonical
    `kaliv-recovery-soak:<modelrig-sha>:<sha256>` reference emitted by the
    recovery-soak qualifier. The qualifier must be given the actual Stage-B final
-   report with `--stage-b-report`; it SHA-256-binds the exact report bytes,
+   report with `--stage-b-report`; it resolves that exact path under
+   `--repository-root`, requires the canonical `stage_b_evidence_ref` path
+   prefix to name the same loaded file, and SHA-256-binds its exact bytes.
+   Component freshness limits must be finite and preserve the Stage-B CLI bound
+   `0 < max_age_hours <= 720`. It also
    requires `status=complete`, all recorded Stage-B command exit codes to
    be zero, `summary.total=9` with an empty `summary.errors`, all final/strict
    physical gates PASS, `production_activation=false`, a clean candidate
@@ -147,7 +151,7 @@ The gate intentionally cannot activate production. The manifest must contain:
 ```
 
 and the emitted verdict also keeps `production_activation=false` even when all
-nine gates qualify. Final activation remains owned by the existing explicit
+ten gates qualify. Final activation remains owned by the existing explicit
 release/physical authorities.
 
 This is deliberate: neither this script nor CI may synthesize Photoreal,
