@@ -1,6 +1,8 @@
 name: exact-head-qualification
 
 on:
+  push:
+    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, closed]
   workflow_dispatch:

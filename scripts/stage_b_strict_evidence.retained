@@ -98,6 +98,30 @@ def _load_json(root: Path, raw: Path) -> tuple[dict[str, Any], bytes, Path]:
     return value, body, path
 
 
+def _event_timestamp(
+    value: Any,
+    label: str,
+    errors: list[str],
+    *,
+    now: datetime,
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{label} is missing")
+        return ""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        errors.append(f"{label} is not valid ISO-8601")
+        return ""
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        errors.append(f"{label} must be timezone-aware")
+        return ""
+    normalized = parsed.astimezone(timezone.utc)
+    if normalized > now:
+        errors.append(f"{label} is in the future")
+    return normalized.isoformat()
+
+
 def _candidate_identity(root: Path) -> dict[str, Any]:
     path = root / "scripts" / "physical_validation_campaign.py"
     spec = importlib.util.spec_from_file_location("strict_stage_b_candidate", path)
@@ -321,6 +345,12 @@ def evaluate(
         interruption,
         errors,
     )
+    interruption_observed_at = _event_timestamp(
+        interruption.get("observed_at"),
+        "appliance_interruption.observed_at",
+        errors,
+        now=now,
+    )
     transaction_id = str(
         interruption.get("observed_transaction_id") or ""
     )
@@ -416,6 +446,7 @@ def evaluate(
         "appliance_interruption",
         interruption_text,
         (
+            f"recovery_observed_at={interruption_observed_at}",
             f"observed_transaction_id={transaction_id}",
             f"observed_revision={revision}",
             f"observed_journal_from={EXPECTED_SOURCE_VERSION}",
@@ -467,6 +498,7 @@ def evaluate(
             },
             "appliance_interruption": {
                 **interruption_meta,
+                "observed_at": interruption_observed_at,
                 "missing_markers": interruption_missing,
             },
         },

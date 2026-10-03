@@ -83,7 +83,7 @@ signeret release-sæt.
 
 ## Blok 2 — Stage B
 
-Kildereleasen er den signerede 2.0.12; target er 2.0.13. Target-updaterens
+Kildereleasen er den signerede 2.0.12; target er 2.0.14. Target-updaterens
 checksum og provenance verificeres som den autoritative bootstrap-grænse, før
 server, supervisor og worker må flyttes gennem updateren. Stage B-runbooken er
 autoritet for den præcise updater-/self-update-semantik; der må ikke håndkopieres
@@ -112,7 +112,7 @@ physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
 production_activation=false
-summary.total=8
+summary.total=9
 ```
 
 Det særskilte automatiske signed-release-to-signed-release self-update-bevis
