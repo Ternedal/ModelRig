@@ -213,7 +213,7 @@ def _validate_stage_b_component(
     name: str,
     meta_value: Any,
     *,
-    candidate_sha: str,
+    candidate_identity: Mapping[str, Any],
 ) -> None:
     expected_schema, required_gate_true = _STAGE_B_COMPONENTS[name]
     meta = _mapping(meta_value, f"stage_b_report.evidence.{name}")
@@ -249,8 +249,11 @@ def _validate_stage_b_component(
     if receipt.get("schema") != expected_schema:
         raise RecoverySoakError(f"Stage-B evidence {name} embedded schema mismatch")
     candidate = _mapping(receipt.get("candidate"), f"Stage-B evidence {name}.candidate")
-    if candidate.get("git_sha") != candidate_sha:
-        raise RecoverySoakError(f"Stage-B evidence {name} candidate Git SHA mismatch")
+    for field in ("version", "git_sha", "code_sha256"):
+        if candidate.get(field) != candidate_identity.get(field):
+            raise RecoverySoakError(
+                f"Stage-B evidence {name} candidate {field} mismatch"
+            )
     gate = _mapping(receipt.get("gate"), f"Stage-B evidence {name}.gate")
     for field in required_gate_true:
         if gate.get(field) is not True:
@@ -289,6 +292,12 @@ def _validate_stage_b_report(
         raise RecoverySoakError(
             "Stage-B report candidate Git SHA does not match recovery candidate"
         )
+    if not isinstance(candidate.get("version"), str) or not candidate.get("version"):
+        raise RecoverySoakError("Stage-B report candidate version is invalid")
+    if not isinstance(candidate.get("code_sha256"), str) or _SHA256.fullmatch(
+        candidate.get("code_sha256")
+    ) is None:
+        raise RecoverySoakError("Stage-B report candidate code_sha256 is invalid")
     if candidate.get("working_tree_clean") is not True:
         raise RecoverySoakError("Stage-B report candidate checkout is not clean")
 
@@ -303,7 +312,7 @@ def _validate_stage_b_report(
             repository_root,
             component_name,
             evidence.get(component_name),
-            candidate_sha=candidate_sha,
+            candidate_identity=candidate,
         )
 
     steps = report.get("steps")
