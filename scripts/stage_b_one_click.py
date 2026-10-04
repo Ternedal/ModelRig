@@ -459,6 +459,7 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     note("Venter på at supervisoren bringer backend + worker op...")
     ready_ms = wait_ready()
     versions = live_versions()
+    observed_at = datetime.now(timezone.utc).isoformat()
     # ready_ms is the wait from THIS moment until both services answer -- so it
     # is ~0 whenever the operator presses Enter after the rig is already up,
     # which is the normal case. Runs have recorded 0 ms and 31 ms, and both were
@@ -466,7 +467,7 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     # boot age is recorded alongside so the number cannot be misread: it says
     # how long ago the machine actually started.
     lines = [
-        f"stage-b reboot trial at {datetime.now(timezone.utc).isoformat()}",
+        f"stage-b reboot trial at {observed_at}",
         f"ready_ms={ready_ms}  # wait from operator confirmation, NOT boot duration",
         f"seconds_since_boot={seconds_since_boot()}",
         f"backend_version={versions['backend_version']}",
@@ -481,6 +482,7 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     trial.update(
         {
             "performed": True,
+            "observed_at": observed_at,
             "ready": ready_ms is not None,
             "ready_ms": ready_ms,
             "backend_version": versions["backend_version"],
@@ -538,13 +540,14 @@ def trial_supervisor(
         wait_ready()
     versions = live_versions()
     active_version = versions["backend_version"] if which == "backend" else versions["worker_version"]
+    observed_at = datetime.now(timezone.utc).isoformat()
 
     log = EVIDENCE / f"supervisor_{which}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(
         "\n".join(
             [
-                f"stage-b supervisor_{which} trial at {datetime.now(timezone.utc).isoformat()}",
+                f"stage-b supervisor_{which} trial at {observed_at}",
                 f"stopped_pid={before}",
                 f"restarted_pid={after}",
                 f"restart_ms={restart_ms}",
@@ -561,6 +564,7 @@ def trial_supervisor(
     trial.update(
         {
             "performed": True,
+            "observed_at": observed_at,
             "restarted": after is not None,
             "ready": after is not None,
             "restart_ms": restart_ms,
