@@ -1,4 +1,5 @@
 name: Classify covered branch history
+# audit-trigger: 2026-10-04-final
 
 on:
   push:
