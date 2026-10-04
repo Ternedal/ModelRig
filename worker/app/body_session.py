@@ -28,7 +28,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -159,6 +159,7 @@ class BodySession:
         runtime_epoch: str,
         observer_id: str,
         outward_receipt_path: str | None = None,
+        outward_clock_sample: Callable[[], Any] | None = None,
     ) -> bool:
         """Bind one worker-authored cognition event to one synthesized utterance.
 
@@ -184,12 +185,15 @@ class BodySession:
                 if not isinstance(outward_receipt_path, str) or not outward_receipt_path.strip():
                     raise ValueError("outward_receipt_path must be nonblank")
                 receipt_path = str(Path(outward_receipt_path).resolve())
+            if outward_clock_sample is None or not callable(outward_clock_sample):
+                raise ValueError("outward_clock_sample must be callable")
             binding = {
                 "candidate_git_sha": candidate_git_sha,
                 "event_id": cognition_event_id,
                 "runtime_epoch": runtime_epoch,
                 "observer_id": observer_id,
                 "outward_receipt_path": receipt_path,
+                "outward_clock_sample": outward_clock_sample,
             }
             if existing is not None and existing != binding:
                 raise ValueError("utterance already bound to another qualification event")
@@ -218,6 +222,13 @@ class BodySession:
             self._utterance_ends[utterance_id] = now + track.duration_ms
             binding = self._e2e_outward_bindings.get(utterance_id)
             if binding is not None:
+                sample = binding["outward_clock_sample"]()
+                sample_epoch = getattr(sample, "runtime_epoch_id", None)
+                sample_ms = getattr(sample, "monotonic_ms", None)
+                if sample_epoch != binding["runtime_epoch"]:
+                    raise RuntimeError("qualification outward clock epoch changed")
+                if isinstance(sample_ms, bool) or not isinstance(sample_ms, int) or sample_ms < 0:
+                    raise RuntimeError("qualification outward clock sample invalid")
                 receipt = {
                     "schema": _E2E_SOURCE_SCHEMA,
                     "phase": "outward_started",
@@ -230,7 +241,7 @@ class BodySession:
                         "unit": "milliseconds",
                         "origin": "single-observer",
                     },
-                    "observed_at_ms": now,
+                    "observed_at_ms": sample_ms,
                     "real_event": True,
                     "simulated": False,
                     "replay": False,
