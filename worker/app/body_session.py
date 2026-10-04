@@ -158,6 +158,7 @@ class BodySession:
         cognition_event_id: str,
         runtime_epoch: str,
         observer_id: str,
+        outward_receipt_path: str | None = None,
     ) -> bool:
         """Bind one worker-authored cognition event to one synthesized utterance.
 
@@ -178,11 +179,17 @@ class BodySession:
             if utterance_id not in self._tracks:
                 return False
             existing = self._e2e_outward_bindings.get(utterance_id)
+            receipt_path = None
+            if outward_receipt_path is not None:
+                if not isinstance(outward_receipt_path, str) or not outward_receipt_path.strip():
+                    raise ValueError("outward_receipt_path must be nonblank")
+                receipt_path = str(Path(outward_receipt_path).resolve())
             binding = {
                 "candidate_git_sha": candidate_git_sha,
                 "event_id": cognition_event_id,
                 "runtime_epoch": runtime_epoch,
                 "observer_id": observer_id,
+                "outward_receipt_path": receipt_path,
             }
             if existing is not None and existing != binding:
                 raise ValueError("utterance already bound to another qualification event")
@@ -211,7 +218,7 @@ class BodySession:
             self._utterance_ends[utterance_id] = now + track.duration_ms
             binding = self._e2e_outward_bindings.get(utterance_id)
             if binding is not None:
-                self._e2e_outward_receipts[utterance_id] = {
+                receipt = {
                     "schema": _E2E_SOURCE_SCHEMA,
                     "phase": "outward_started",
                     "candidate_git_sha": binding["candidate_git_sha"],
@@ -235,6 +242,17 @@ class BodySession:
                     },
                     "production_activation": False,
                 }
+                self._e2e_outward_receipts[utterance_id] = receipt
+                receipt_path = binding.get("outward_receipt_path")
+                if receipt_path:
+                    path = Path(receipt_path)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = path.with_name(path.name + ".tmp-" + uuid.uuid4().hex)
+                    tmp.write_text(
+                        json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                    os.replace(tmp, path)
             return True
 
     def playback_ended(self, utterance_id: str) -> bool:
