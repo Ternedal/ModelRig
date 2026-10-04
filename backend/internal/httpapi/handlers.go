@@ -379,12 +379,6 @@ func (s *server) handleVoiceConverseStream(w http.ResponseWriter, r *http.Reques
 
 // handleVoiceStatus proxies the worker's ASR/TTS availability so the app can
 // show whether voice is usable on this rig before recording.
-func (s *server) handleE2ELatencyVoice(w http.ResponseWriter, r *http.Request) {
-	// Release-qualification only. The worker owns the causal evidence chain;
-	// the backend only preserves authenticated transport and the long timeout.
-	s.WorkerSlow.Forward(w, r, "/experimental/e2e-latency/voice")
-}
-
 func (s *server) handleVoiceStatus(w http.ResponseWriter, r *http.Request) {
 	s.Worker.Forward(w, r, "/voice/asr/status")
 }
