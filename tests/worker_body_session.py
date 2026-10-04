@@ -198,6 +198,7 @@ class BodySessionTests(unittest.TestCase):
         self._select()
         session = body_session.current_session()
         session.speak(utterance_id="q-off", wav_bytes=tone_wav(300))
+        clock = self._trusted_clock()
         self.assertFalse(
             session.bind_e2e_outward(
                 utterance_id="q-off",
