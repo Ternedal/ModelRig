@@ -222,6 +222,42 @@ try:
 except freeze.CandidateFreezeError:
     check(True, "missing software gate fails closed")
 
+# GitHub emits pull_request/closed workflow runs whose jobs are intentionally
+# skipped. Those metadata-only runs must not hide the latest real execution on
+# the same exact SHA.
+skipped_over_green = [
+    {"name": "codeql", "status": "completed", "conclusion": "skipped", "id": 3},
+    {"name": "codeql", "status": "completed", "conclusion": "success", "id": 2},
+] + [
+    {"name": name, "status": "completed", "conclusion": "success", "id": 1}
+    for name in freeze.REQUIRED_WORKFLOWS
+    if name != "codeql"
+]
+check(
+    freeze._workflow_checks(skipped_over_green)["codeql"] == "success",
+    "a newer skipped metadata run does not hide the latest real green run",
+)
+
+# Filtering skipped metadata must not weaken fail-closed ordering: the newest
+# non-skipped execution is still authoritative, even when an older run passed.
+skipped_over_running = [
+    {"name": "codeql", "status": "completed", "conclusion": "skipped", "id": 4},
+    {"name": "codeql", "status": "in_progress", "conclusion": None, "id": 3},
+    {"name": "codeql", "status": "completed", "conclusion": "success", "id": 2},
+] + [
+    {"name": name, "status": "completed", "conclusion": "success", "id": 1}
+    for name in freeze.REQUIRED_WORKFLOWS
+    if name != "codeql"
+]
+try:
+    freeze._workflow_checks(skipped_over_running)
+    check(False, "newest real in-progress run must still block freeze")
+except freeze.CandidateFreezeError as exc:
+    check(
+        "codeql is not complete" in str(exc),
+        "skipped-run filtering still blocks on the newest real in-progress run",
+    )
+
 (repo / "candidate.txt").write_text("tampered\n", encoding="utf-8")
 try:
     freeze.load_receipt(repo, now=now)
