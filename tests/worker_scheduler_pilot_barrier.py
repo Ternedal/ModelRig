@@ -43,7 +43,26 @@ def check(condition, message):
 
 
 def write_json(path: Path, value: dict) -> None:
-    path.write_text(json.dumps(value), encoding="utf-8")
+    # The production pilot operator publishes control receipts atomically.
+    # Mirror that contract in the fixture so the polling controller can never
+    # observe a partially-written JSON file and fail closed spuriously.
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            json.dump(value, handle)
+            tmp_path = Path(handle.name)
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
 
 def arm(directory: Path, schedule_id: str, challenge: str, *, mode="pause_before_guard", timeout=2.0):
