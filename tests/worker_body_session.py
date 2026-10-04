@@ -36,6 +36,7 @@ from bodyrig_fixtures import png_fixture, tracking_fixture, vrm_fixture  # noqa:
 from app import body_session  # noqa: E402
 from app.body_assets import BODY_STORE_ENV  # noqa: E402
 from app.body_session import build_body_session_router  # noqa: E402
+from app.consciousness_core.production_lifecycle import TrustedRuntimeClock  # noqa: E402
 
 RENDER_FRAME_SCHEMA = ROOT / "docs" / "bodyrig" / "schemas" / "render-frame.schema.json"
 
@@ -190,6 +191,9 @@ class BodySessionTests(unittest.TestCase):
         self.assertEqual(session.frame()["state"], "idle")
         self.assertEqual(self.c.post("/body/speech/never-synthesized/started").status_code, 404)
 
+    def _trusted_clock(self):
+        return TrustedRuntimeClock()
+
     def test_e2e_outward_binding_is_default_off_and_not_client_authored(self) -> None:
         self._select()
         session = body_session.current_session()
@@ -201,6 +205,7 @@ class BodySessionTests(unittest.TestCase):
                 cognition_event_id="cevt-" + "b" * 32,
                 runtime_epoch="epoch-test",
                 observer_id="observer-test",
+                outward_clock_sample=self._trusted_clock().sample,
             )
         )
         r = self.c.post("/body/speech/q-off/started")
@@ -219,6 +224,7 @@ class BodySessionTests(unittest.TestCase):
                 cognition_event_id="cevt-" + "b" * 32,
                 runtime_epoch="epoch-test",
                 observer_id="observer-test",
+                outward_clock_sample=self._trusted_clock().sample,
             )
         )
         before = body_session._now_ms()
@@ -270,6 +276,7 @@ class BodySessionTests(unittest.TestCase):
                 runtime_epoch="epoch-test",
                 observer_id="observer-test",
                 outward_receipt_path=str(receipt_path),
+                outward_clock_sample=self._trusted_clock().sample,
             )
         )
         self.assertFalse(receipt_path.exists())
@@ -296,6 +303,7 @@ class BodySessionTests(unittest.TestCase):
                 cognition_event_id="cevt-" + "b" * 32,
                 runtime_epoch="epoch-test",
                 observer_id="observer-test",
+                outward_clock_sample=self._trusted_clock().sample,
             )
         with self.assertRaisesRegex(ValueError, "cognition_event_id"):
             session.bind_e2e_outward(
@@ -304,6 +312,7 @@ class BodySessionTests(unittest.TestCase):
                 cognition_event_id="client-picked",
                 runtime_epoch="epoch-test",
                 observer_id="observer-test",
+                outward_clock_sample=self._trusted_clock().sample,
             )
         self.assertTrue(
             session.bind_e2e_outward(
@@ -312,6 +321,7 @@ class BodySessionTests(unittest.TestCase):
                 cognition_event_id="cevt-" + "b" * 32,
                 runtime_epoch="epoch-test",
                 observer_id="observer-test",
+                outward_clock_sample=self._trusted_clock().sample,
             )
         )
         with self.assertRaisesRegex(ValueError, "another qualification event"):
@@ -321,6 +331,7 @@ class BodySessionTests(unittest.TestCase):
                 cognition_event_id="cevt-" + "c" * 32,
                 runtime_epoch="epoch-test",
                 observer_id="observer-test",
+                outward_clock_sample=self._trusted_clock().sample,
             )
 
     def test_interrupt_forgets_pending_tracks(self) -> None:
