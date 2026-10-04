@@ -175,6 +175,9 @@ func (s *server) routes() {
 	s.mux.Handle("GET /api/v1/voice/status", s.authMW(http.HandlerFunc(s.handleVoiceStatus)))
 	s.mux.Handle("POST /api/v1/voice/converse", s.authMW(http.HandlerFunc(s.handleVoiceConverse)))
 	s.mux.Handle("POST /api/v1/voice/converse/stream", s.authMW(http.HandlerFunc(s.handleVoiceConverseStream)))
+	if os.Getenv("KALIV_E2E_LATENCY_QUALIFICATION_ENABLED") == "1" {
+		s.mux.Handle("POST /api/v1/experimental/e2e-latency/voice", s.authMW(http.HandlerFunc(s.handleE2ELatencyVoice)))
+	}
 
 	// Agent 4 operator reads (ADR-A4-007): default-off, GET-only, proxied to
 	// the loopback worker, and additionally gated by the explicit per-device
