@@ -264,6 +264,10 @@ valid_snapshots = [
 observations, state, process, _ = run_interruption(valid_snapshots)
 trial = observations["trials"]["appliance_interruption"]
 check(trial["observed_transaction_id"] == "tx-new" and trial["observed_revision"] == 3, "collector binds the newly observed transaction and revision")
+check(
+    isinstance(trial.get("observed_at"), str) and trial["observed_at"],
+    "collector records authoritative interruption recovery time",
+)
 check(trial["updater_process_pid"] == 4321 and process.killed, "collector binds and kills the launched updater process")
 check(state.get("appliance_interruption_done") is True, "collector checkpoints only a recovered interruption")
 
@@ -327,6 +331,7 @@ interruption_path, interruption_digest = write_log(
     strict_root,
     "appliance_interruption.log",
     "\n".join((
+        "recovery_observed_at=2026-08-08T00:00:00+00:00",
         "observed_transaction_id=tx-new",
         "observed_revision=3",
         "observed_journal_from=1.58.149",
@@ -371,6 +376,7 @@ strict_lifecycle = {
         },
         "appliance_interruption": {
             "performed": True,
+            "observed_at": "2026-08-08T00:00:00+00:00",
             "source_version": "1.58.149",
             "observed_transaction_id": "tx-new",
             "observed_revision": 3,
