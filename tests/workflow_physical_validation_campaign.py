@@ -193,6 +193,7 @@ def valid_reports() -> dict[str, dict]:
             "trials": {
                 "reboot": {
                     "performed": True,
+                    "observed_at": (NOW - timedelta(minutes=15)).isoformat(),
                     "ready": True,
                     "ready_ms": 65000,
                     "backend_version": CANDIDATE["version"],
@@ -201,6 +202,7 @@ def valid_reports() -> dict[str, dict]:
                 },
                 "supervisor_backend": {
                     "performed": True,
+                    "observed_at": (NOW - timedelta(minutes=10)).isoformat(),
                     "restarted": True,
                     "ready": True,
                     "restart_ms": 3000,
@@ -209,6 +211,7 @@ def valid_reports() -> dict[str, dict]:
                 },
                 "supervisor_worker": {
                     "performed": True,
+                    "observed_at": (NOW - timedelta(minutes=5)).isoformat(),
                     "restarted": True,
                     "ready": True,
                     "restart_ms": 4000,
@@ -353,9 +356,20 @@ def valid_reports() -> dict[str, dict]:
 
 def reports_with_artifacts(temp: Path) -> dict[str, dict]:
     reports = valid_reports()
+    recovery_markers = {
+        "reboot": "stage-b reboot trial at ",
+        "supervisor_backend": "stage-b supervisor_backend trial at ",
+        "supervisor_worker": "stage-b supervisor_worker trial at ",
+    }
     for name, trial in reports["lifecycle"]["trials"].items():
         artifact = temp / f"{name}.log"
-        raw = f"{name} physical lifecycle evidence\n".encode("utf-8")
+        marker = recovery_markers.get(name)
+        text = (
+            f"{marker}{trial['observed_at']}\n{name} physical lifecycle evidence\n"
+            if marker is not None
+            else f"{name} physical lifecycle evidence\n"
+        )
+        raw = text.encode("utf-8")
         artifact.write_bytes(raw)
         trial["evidence_path"] = str(artifact.relative_to(ROOT))
         trial["evidence_sha256"] = hashlib.sha256(raw).hexdigest()
@@ -545,6 +559,24 @@ try:
         check(
             "bad_update.attempted_version must be a non-empty string" in metadata_errors,
             "bad update identifies the attempted build",
+        )
+
+        reports = reports_with_artifacts(temp)
+        reports["lifecycle"]["trials"]["reboot"]["observed_at"] = (
+            NOW - timedelta(minutes=14)
+        ).isoformat()
+        write(temp / "lifecycle.json", reports["lifecycle"])
+        timestamp_mismatch, timestamp_mismatch_exit = campaign.campaign_report(
+            args_for(temp, "verify")
+        )
+        check(
+            timestamp_mismatch_exit == 1,
+            "lifecycle recovery timestamp drift blocks campaign",
+        )
+        check(
+            "reboot.evidence artifact timestamp marker mismatch"
+            in timestamp_mismatch["evidence"]["lifecycle"]["errors"],
+            "lifecycle recovery timestamp is bound to the hashed artifact",
         )
 
         reports = reports_with_artifacts(temp)
