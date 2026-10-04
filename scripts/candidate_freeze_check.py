@@ -189,7 +189,15 @@ def _workflow_checks(runs: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     verdicts: dict[str, str] = {}
     errors: list[str] = []
     for name in REQUIRED_WORKFLOWS:
-        matching = [run for run in runs if run.get("name") == name]
+        # GitHub can emit a newer all-skipped run for the same SHA when a PR is
+        # closed. That run executed no gate and therefore is not evidence. Skip
+        # only conclusion=skipped; queued/in-progress, failure and cancelled
+        # runs remain authoritative and must still block an older green run.
+        matching = [
+            run
+            for run in runs
+            if run.get("name") == name and run.get("conclusion") != "skipped"
+        ]
         if not matching:
             errors.append(f"no {name} run found for this exact candidate SHA")
             continue
