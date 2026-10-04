@@ -10,15 +10,24 @@ without claiming that the measured value is "fast enough".
 
 ## Required event
 
-The input evidence must represent one real, non-simulated event observed by one
-monotonic clock. The same bounded `event_id` must appear at all three phases:
+The qualifier does **not** accept a caller-authored envelope as release
+authority. It reads three concrete source receipt files from one evidence root:
 
 1. `perception_received`
 2. `cognition_completed`
 3. `outward_started`
 
-Each phase carries its own nonblank evidence reference. The references must be
-distinct so one artifact cannot be reused to impersonate multiple stages.
+Each source receipt is bounded, regular, non-symlink UTF-8 JSON and is hashed
+with SHA-256 from its exact bytes. All three receipts must bind the same
+`candidate_git_sha`, `event_id`, `runtime_epoch` and `observer_id`.
+The files and their byte digests must be distinct.
+
+The perception receipt binds a concrete real input identity. The cognition
+receipt must bind the canonical cognition event id, a nonblank transition
+receipt and at least one completed real cycle. The outward receipt must state
+`started=true` and carry the required runtime identity: `utterance_id` for
+voice, `body_runtime_id` for body, or both for `voice+body`. A queued
+request is not outward-start evidence.
 
 The clock contract is exact:
 
@@ -75,11 +84,25 @@ or infer a threshold.
 
 ## Run
 
+Store all three receipts below one evidence directory and invoke the qualifier
+with explicit paths:
+
 ```powershell
-python scripts/kaliv_end_to_end_latency_qualifier.py .\latency-evidence.json `
+python scripts/kaliv_end_to_end_latency_qualifier.py `
+  --evidence-root .\validation\latency-event-001 `
+  --perception perception_received.json `
+  --cognition cognition_completed.json `
+  --outward outward_started.json `
   --report .\validation\kaliv-end-to-end-latency-latest.json
 ```
 
 A successful run exits 0 and emits a content-addressed
-`release_evidence_ref`. Invalid, simulated, cross-event, non-monotone, or
-overclaiming evidence exits 2.
+`release_evidence_ref` plus the relative path and SHA-256 of every validated
+source receipt. Missing/unreadable/oversized/path-escaped/symlinked receipts,
+hash-content substitution via reused receipt bytes, mixed candidate/event/
+runtime-epoch/observer identity, replay/simulation, incomplete cognition,
+queued-but-not-started outward behavior, non-monotone timing, or authority
+overclaim exits 2.
+
+Legacy hand-authored v1 latency envelopes are intentionally no longer accepted
+as release evidence.
