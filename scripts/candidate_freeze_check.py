@@ -189,9 +189,15 @@ def _workflow_checks(runs: Sequence[Mapping[str, Any]]) -> dict[str, str]:
     verdicts: dict[str, str] = {}
     errors: list[str] = []
     for name in REQUIRED_WORKFLOWS:
-        matching = [run for run in runs if run.get("name") == name]
+        matching = [
+            run
+            for run in runs
+            if run.get("name") == name and run.get("conclusion") != "skipped"
+        ]
         if not matching:
-            errors.append(f"no {name} run found for this exact candidate SHA")
+            errors.append(
+                f"no executable {name} run found for this exact candidate SHA"
+            )
             continue
         latest = matching[0]
         status = latest.get("status")
