@@ -20,7 +20,6 @@ from typing import Any, Mapping, Sequence
 SOURCE_SCHEMA = "kaliv-system/end-to-end-latency-source/v1"
 VERDICT_SCHEMA = "kaliv-system/end-to-end-latency-verdict/v2"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _TOKEN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _ALLOWED_OUTWARD = {"voice", "body", "voice+body"}
@@ -113,22 +112,34 @@ def _clock(value: Any) -> Mapping[str, Any]:
 
 def _resolve_receipt(root: Path, raw_path: Path, label: str) -> tuple[Path, str]:
     root = root.resolve()
-    path = raw_path if raw_path.is_absolute() else root / raw_path
+    if ".." in raw_path.parts:
+        raise EndToEndLatencyQualificationError(
+            f"{label} must exist under evidence root"
+        )
+
+    candidate = raw_path if raw_path.is_absolute() else root / raw_path
     try:
-        relative = path.resolve(strict=True).relative_to(root)
-    except (OSError, ValueError) as exc:
+        lexical_relative = candidate.relative_to(root)
+    except ValueError as exc:
         raise EndToEndLatencyQualificationError(
             f"{label} must exist under evidence root"
         ) from exc
 
     probe = root
-    for part in relative.parts:
+    for part in lexical_relative.parts:
         probe = probe / part
         if probe.is_symlink():
             raise EndToEndLatencyQualificationError(
                 f"{label} must not traverse symlinks"
             )
-    resolved = root / relative
+
+    try:
+        resolved = candidate.resolve(strict=True)
+        relative = resolved.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise EndToEndLatencyQualificationError(
+            f"{label} must exist under evidence root"
+        ) from exc
     if not resolved.is_file():
         raise EndToEndLatencyQualificationError(
             f"{label} must be a regular receipt file"
