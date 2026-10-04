@@ -89,6 +89,28 @@ def _load_frozen_attestation():
     return module
 
 
+def _split_git_status_authority(raw: str) -> tuple[list[str], list[str]]:
+    """Separate source drift from sanctioned local validation evidence.
+
+    Only untracked paths below validation/ are local evidence outputs. Tracked
+    modifications/deletions (including under validation/) and every untracked
+    path elsewhere remain source-authority blockers.
+    """
+    blockers: list[str] = []
+    sanctioned: list[str] = []
+    for line in raw.splitlines():
+        if not line:
+            continue
+        status = line[:2]
+        path = line[3:] if len(line) > 3 else ""
+        normalized = path.replace("\\", "/")
+        if status == "??" and normalized.startswith("validation/"):
+            sanctioned.append(normalized)
+        else:
+            blockers.append(line)
+    return blockers, sanctioned
+
+
 def _run(*args: str) -> tuple[int, str]:
     # A missing executable raises FileNotFoundError -- on a gitless rig (the
     # normal case: sources arrive as a ZIP, git is not installed) the very
@@ -339,15 +361,25 @@ def main() -> int:
         print("           accepted, not silently greened.")
         warns += 1
     else:
-        _, dirty = _run("git", "status", "--porcelain")
-        if dirty:
-            n = len(dirty.splitlines())
-            print(f"  FAIL  working tree not clean ({n} uncommitted change(s))")
-            print("         -> Commit or discard changes so the candidate is exactly")
-            print("            what is on this commit, then re-run.")
+        _, dirty = _run(
+            "git", "status", "--porcelain", "--untracked-files=all"
+        )
+        source_drift, local_evidence = _split_git_status_authority(dirty)
+        if source_drift:
+            n = len(source_drift)
+            print(f"  FAIL  working tree not clean ({n} source change(s))")
+            for entry in source_drift[:5]:
+                print(f"         - {entry}")
+            print("         -> Commit or discard source changes so the candidate is")
+            print("            exactly the published commit, then re-run.")
             blockers += 1
         else:
-            print("  OK    working tree clean")
+            print("  OK    source working tree clean")
+            if local_evidence:
+                print(
+                    f"  NOTE  {len(local_evidence)} untracked validation "
+                    "evidence file(s) are sanctioned local outputs"
+                )
         # F-1502: .pyc/__pycache__ are gitignored, so `git status` above
         # cannot see them -- but bytecode must not exist at candidate-freeze
         # in EITHER mode. The gitless branch scans via the blob set; git-mode
