@@ -13,6 +13,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ FLAG = "KALIV_E2E_LATENCY_QUALIFICATION_ENABLED"
 SHA_ENV = "KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA"
 ROOT_ENV = "KALIV_E2E_LATENCY_EVIDENCE_ROOT"
 _MOUNTED = "e2e_latency_voice_mounted"
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 class QualificationBody(BaseModel):
@@ -55,7 +57,7 @@ def build_router() -> APIRouter:
     async def qualify_voice(body: QualificationBody, request: Request) -> dict[str, Any]:
         candidate = os.getenv(SHA_ENV, "")
         root_raw = os.getenv(ROOT_ENV, "")
-        if not candidate or not root_raw:
+        if _SHA40.fullmatch(candidate) is None or not root_raw:
             raise HTTPException(status_code=503, detail="qualification environment unavailable")
         root = Path(root_raw).resolve()
         if not voice_asr.is_available() or not voice_tts.is_available():
@@ -64,6 +66,11 @@ def build_router() -> APIRouter:
         cognitive = getattr(request.app.state, "consciousness_session", None)
         if not isinstance(cognitive, ProductionCognitiveSession):
             raise HTTPException(status_code=503, detail="consciousness session unavailable")
+        loaded = load_cognitive_profile()
+        if loaded is None:
+            raise HTTPException(status_code=503, detail="qualification cognitive profile unavailable")
+        if body_session.current_session(create=True) is None:
+            raise HTTPException(status_code=503, detail="qualification body session unavailable")
 
         try:
             audio = base64.b64decode(body.audio_base64, validate=True)
@@ -73,13 +80,16 @@ def build_router() -> APIRouter:
             raise HTTPException(status_code=422, detail="invalid qualification audio")
 
         qid = "e2e-" + uuid.uuid4().hex
+        # The end-to-end clock starts when one bounded real audio input has been
+        # accepted by the worker, before evidence-file IO, ASR, cognition or TTS.
+        # Sampling after ASR would under-report the user-visible latency.
+        perception_sample = cognitive.trusted_clock.sample()
+
         evidence_dir = root / qid
         audio_path = evidence_dir / "input.wav"
         audio_path.parent.mkdir(parents=True, exist_ok=False)
         audio_path.write_bytes(audio)
 
-        # Perception truth is captured immediately after real ASR completes and
-        # before the event is admitted or any cognition is run.
         try:
             asr = await asyncio.to_thread(voice_asr.transcribe_wav, str(audio_path), body.language)
         except Exception as exc:
@@ -87,7 +97,6 @@ def build_router() -> APIRouter:
         transcript = str(asr.get("text") or "").strip()
         if not transcript:
             raise HTTPException(status_code=409, detail="qualification ASR produced no speech")
-        perception_sample = cognitive.trusted_clock.sample()
 
         admission = cognitive.submit_reported_user_turn(
             turn_id=qid,
@@ -105,14 +114,11 @@ def build_router() -> APIRouter:
             clock=cognitive.trusted_clock,
         )
         perception = observer.perception_received(
-            input_kind="voice-asr",
+            input_kind="voice-audio",
             input_id=qid,
             sample=perception_sample,
         )
 
-        loaded = load_cognitive_profile()
-        if loaded is None:
-            raise HTTPException(status_code=503, detail="qualification cognitive profile unavailable")
         try:
             step = await cognitive.step(
                 profile=loaded.profile,
