@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import body_session, voice_asr, voice_tts
@@ -52,7 +52,7 @@ def build_router() -> APIRouter:
     router = APIRouter(prefix="/experimental/e2e-latency", tags=["experimental-e2e-latency"])
 
     @router.post("/voice")
-    async def qualify_voice(body: QualificationBody) -> dict[str, Any]:
+    async def qualify_voice(body: QualificationBody, request: Request) -> dict[str, Any]:
         candidate = os.getenv(SHA_ENV, "")
         root_raw = os.getenv(ROOT_ENV, "")
         if not candidate or not root_raw:
@@ -61,9 +61,7 @@ def build_router() -> APIRouter:
         if not voice_asr.is_available() or not voice_tts.is_available():
             raise HTTPException(status_code=503, detail="voice qualification backend unavailable")
 
-        session = getattr(router, "_modelrig_app", None)
-        app_state = getattr(session, "state", None)
-        cognitive = getattr(app_state, "consciousness_session", None)
+        cognitive = getattr(request.app.state, "consciousness_session", None)
         if not isinstance(cognitive, ProductionCognitiveSession):
             raise HTTPException(status_code=503, detail="consciousness session unavailable")
 
@@ -192,8 +190,6 @@ def mount(app: FastAPI) -> bool:
         return False
     if getattr(app.state, _MOUNTED, False):
         return True
-    router = build_router()
-    setattr(router, "_modelrig_app", app)
-    app.include_router(router)
+    app.include_router(build_router())
     setattr(app.state, _MOUNTED, True)
     return True
