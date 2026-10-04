@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .consciousness_core.production_lifecycle import TrustedRuntimeClock
+from .consciousness_core.temporal import ClockSample
 
 SOURCE_SCHEMA = "kaliv-system/end-to-end-latency-source/v1"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -44,8 +45,17 @@ class EndToEndLatencyObserver:
     def runtime_epoch(self) -> str:
         return self.clock.runtime_epoch_id
 
-    def _base(self, phase: str) -> tuple[dict[str, Any], int]:
-        sample = self.clock.sample()
+    def _base(
+        self,
+        phase: str,
+        *,
+        sample: ClockSample | None = None,
+    ) -> tuple[dict[str, Any], int]:
+        sample = self.clock.sample() if sample is None else sample
+        if not isinstance(sample, ClockSample):
+            raise TypeError("sample must be ClockSample")
+        if sample.runtime_epoch_id != self.clock.runtime_epoch_id:
+            raise ValueError("sample belongs to another runtime epoch")
         receipt = {
             "schema": SOURCE_SCHEMA,
             "phase": phase,
@@ -72,8 +82,9 @@ class EndToEndLatencyObserver:
         *,
         input_kind: str,
         input_id: str,
+        sample: ClockSample | None = None,
     ) -> dict[str, Any]:
-        receipt, _ = self._base("perception_received")
+        receipt, _ = self._base("perception_received", sample=sample)
         receipt["details"] = {
             "input_kind": _token(input_kind, "input_kind"),
             "input_id": _token(input_id, "input_id"),
