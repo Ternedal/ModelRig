@@ -203,9 +203,9 @@ class BodySessionTests(unittest.TestCase):
                 utterance_id="q-off",
                 candidate_git_sha="a" * 40,
                 cognition_event_id="cevt-" + "b" * 32,
-                runtime_epoch="epoch-test",
+                runtime_epoch=clock.runtime_epoch_id,
                 observer_id="observer-test",
-                outward_clock_sample=self._trusted_clock().sample,
+                outward_clock_sample=clock.sample,
             )
         )
         r = self.c.post("/body/speech/q-off/started")
@@ -217,14 +217,15 @@ class BodySessionTests(unittest.TestCase):
         os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
         session = body_session.current_session()
         session.speak(utterance_id="q1", wav_bytes=tone_wav(300))
+        clock = self._trusted_clock()
         self.assertTrue(
             session.bind_e2e_outward(
                 utterance_id="q1",
                 candidate_git_sha="a" * 40,
                 cognition_event_id="cevt-" + "b" * 32,
-                runtime_epoch="epoch-test",
+                runtime_epoch=clock.runtime_epoch_id,
                 observer_id="observer-test",
-                outward_clock_sample=self._trusted_clock().sample,
+                outward_clock_sample=clock.sample,
             )
         )
         before = body_session._now_ms()
@@ -236,7 +237,7 @@ class BodySessionTests(unittest.TestCase):
         self.assertEqual(receipt["phase"], "outward_started")
         self.assertEqual(receipt["candidate_git_sha"], "a" * 40)
         self.assertEqual(receipt["event_id"], "cevt-" + "b" * 32)
-        self.assertEqual(receipt["runtime_epoch"], "epoch-test")
+        self.assertEqual(receipt["runtime_epoch"], clock.runtime_epoch_id)
         self.assertEqual(receipt["observer_id"], "observer-test")
         self.assertEqual(
             receipt["clock"],
@@ -268,15 +269,16 @@ class BodySessionTests(unittest.TestCase):
         session = body_session.current_session()
         session.speak(utterance_id="q-file", wav_bytes=tone_wav(300))
         receipt_path = Path(self.dir.name) / "evidence" / "outward.json"
+        clock = self._trusted_clock()
         self.assertTrue(
             session.bind_e2e_outward(
                 utterance_id="q-file",
                 candidate_git_sha="a" * 40,
                 cognition_event_id="cevt-" + "b" * 32,
-                runtime_epoch="epoch-test",
+                runtime_epoch=clock.runtime_epoch_id,
                 observer_id="observer-test",
                 outward_receipt_path=str(receipt_path),
-                outward_clock_sample=self._trusted_clock().sample,
+                outward_clock_sample=clock.sample,
             )
         )
         self.assertFalse(receipt_path.exists())
@@ -296,32 +298,33 @@ class BodySessionTests(unittest.TestCase):
         os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
         session = body_session.current_session()
         session.speak(utterance_id="q2", wav_bytes=tone_wav(300))
+        clock = self._trusted_clock()
         with self.assertRaisesRegex(ValueError, "candidate_git_sha"):
             session.bind_e2e_outward(
                 utterance_id="q2",
                 candidate_git_sha="not-a-sha",
                 cognition_event_id="cevt-" + "b" * 32,
-                runtime_epoch="epoch-test",
+                runtime_epoch=clock.runtime_epoch_id,
                 observer_id="observer-test",
-                outward_clock_sample=self._trusted_clock().sample,
+                outward_clock_sample=clock.sample,
             )
         with self.assertRaisesRegex(ValueError, "cognition_event_id"):
             session.bind_e2e_outward(
                 utterance_id="q2",
                 candidate_git_sha="a" * 40,
                 cognition_event_id="client-picked",
-                runtime_epoch="epoch-test",
+                runtime_epoch=clock.runtime_epoch_id,
                 observer_id="observer-test",
-                outward_clock_sample=self._trusted_clock().sample,
+                outward_clock_sample=clock.sample,
             )
         self.assertTrue(
             session.bind_e2e_outward(
                 utterance_id="q2",
                 candidate_git_sha="a" * 40,
                 cognition_event_id="cevt-" + "b" * 32,
-                runtime_epoch="epoch-test",
+                runtime_epoch=clock.runtime_epoch_id,
                 observer_id="observer-test",
-                outward_clock_sample=self._trusted_clock().sample,
+                outward_clock_sample=clock.sample,
             )
         )
         with self.assertRaisesRegex(ValueError, "another qualification event"):
@@ -329,9 +332,9 @@ class BodySessionTests(unittest.TestCase):
                 utterance_id="q2",
                 candidate_git_sha="a" * 40,
                 cognition_event_id="cevt-" + "c" * 32,
-                runtime_epoch="epoch-test",
+                runtime_epoch=clock.runtime_epoch_id,
                 observer_id="observer-test",
-                outward_clock_sample=self._trusted_clock().sample,
+                outward_clock_sample=clock.sample,
             )
 
     def test_interrupt_forgets_pending_tracks(self) -> None:
