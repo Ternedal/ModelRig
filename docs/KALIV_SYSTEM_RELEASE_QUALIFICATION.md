@@ -107,9 +107,49 @@ evidence reference:
 9. `recovery_soak` — the pinned system passes the agreed restart/recovery and
    long-running soak campaign. A PASS must contain exactly one canonical
    `kaliv-recovery-soak:<modelrig-sha>:<sha256>` reference emitted by the
-   recovery-soak qualifier. The embedded ModelRig SHA must equal the pinned
-   revision or be its ancestor with the exact same Git tree, permitting only a
-   clean merge-commit identity change.
+   recovery-soak qualifier. The qualifier must be given the actual Stage-B final
+   report with `--stage-b-report`; it resolves that exact path under
+   `--repository-root`, requires the canonical `stage_b_evidence_ref` path
+   prefix to name the same loaded file, and SHA-256-binds its exact bytes.
+   Component freshness limits must be finite and preserve the Stage-B CLI bound
+   `0 < max_age_hours <= 720`. It also
+   requires `status=complete`, all recorded Stage-B command exit codes to
+   be zero, `summary.total=9` with an empty `summary.errors`, all final/strict
+   physical gates PASS, and `production_activation=false`. Candidate authority
+   is derived independently from `--repository-root` using the canonical
+   physical-campaign candidate identity: version, Git HEAD and code fingerprint
+   must match the Stage-B report, the checkout must be clean, version stamps must
+   be consistent, and the same Git SHA must be present in the recovery
+   observations. Before accepting Stage-B authority, the qualifier also re-runs
+   the canonical `scripts/freeze_check.py` from that checkout and requires a
+   successful FROZEN verdict, including its exact-head CI and published-release
+   checks. The sanctioned `validation/frozen-candidate.json` written by a
+   successful freeze is evidence output and is not treated as source drift.
+   It also requires the Stage-B report's exact four component receipts
+   (`strict_stage_b`, `updater_chain`, `physical_campaign`,
+   `component_final_gate`), resolves their repository-relative paths under
+   `--repository-root`, and verifies file size, SHA-256, embedded schema,
+   full candidate identity, gate state, and the canonical eight-/nine-proof
+   summaries. Receipt booleans are not sufficient: the qualifier re-runs the
+   canonical strict/updater evaluators against the lifecycle source and logs,
+   re-runs all eight campaign evidence validators against their source
+   artifacts, and re-runs the final browser/campaign validator against the
+   physical attestation and underlying browser receipt. The stored receipt must
+   remain consistent with that independent revalidation. Recovery events are
+   also evidence-bound: reboot, backend restart and worker restart must name
+   the exact path+SHA-256 artifacts from the revalidated lifecycle proof, while
+   interruption recovery must name the exact strict Stage-B interruption
+   artifact. Every recovery-event timestamp must fall inside the recorded soak
+   sample window.
+   Recovery-event timestamps are also authority-bound: reboot and supervisor
+   restart times must match the timestamps carried by their hash-validated
+   lifecycle artifacts, and interruption-recovery must match the timestamp
+   carried by the strict interruption receipt/log. A caller may not move old
+   recovery evidence into a newer soak window by editing `observed_at`.
+   A caller-supplied label, a recomputed hash over a handcrafted top-level
+   Stage-B report, or an unverified Stage-B path is not sufficient. The embedded ModelRig SHA must
+   equal the pinned revision or be its ancestor with the exact same Git tree,
+   permitting only a clean merge-commit identity change.
 10. `repository_authority` — the repositories used for the release are protected
    by the accepted exact-green merge authority. A PASS must contain exactly one
    canonical
@@ -129,7 +169,7 @@ The gate intentionally cannot activate production. The manifest must contain:
 ```
 
 and the emitted verdict also keeps `production_activation=false` even when all
-nine gates qualify. Final activation remains owned by the existing explicit
+ten gates qualify. Final activation remains owned by the existing explicit
 release/physical authorities.
 
 This is deliberate: neither this script nor CI may synthesize Photoreal,
@@ -165,13 +205,13 @@ human-review, physical-rig, soak or production-activation evidence.
 
 ## Assemble a fully-qualified manifest
 
-When all nine canonical evidence refs already exist, do not hand-edit the JSON
+When all ten canonical evidence refs already exist, do not hand-edit the JSON
 shape. `scripts/kaliv_release_manifest_assembler.py` creates the manifest and
 immediately submits the in-memory result to the same
 `kaliv_system_release_gate.evaluate_manifest(...)` authority before writing it.
 
 The assembler **does not create evidence**, downgrade a missing gate to pending,
-or activate production. All nine refs and all four immutable repository SHAs are
+or activate production. All ten refs and all four immutable repository SHAs are
 required.
 
 ```powershell
@@ -205,7 +245,7 @@ Both the manifest and verdict retain `production_activation=false`.
 python scripts/kaliv_system_release_gate.py .\path\to\kaliv-release-manifest.json
 ```
 
-Exit code 0 means all nine evidence gates qualify. Exit code 1 means a valid
+Exit code 0 means all ten evidence gates qualify. Exit code 1 means a valid
 manifest is still blocked. Exit code 2 means the manifest itself is invalid.
 
 ## Binding qualified Consciousness evidence

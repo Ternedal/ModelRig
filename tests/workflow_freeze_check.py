@@ -170,6 +170,50 @@ check(_code == 1,
 check("working tree not clean" in _out,
       "and the reason is legible")
 
+# --- only untracked validation/** is sanctioned local evidence --------------
+_status_bad, _status_ok = fc._split_git_status_authority(
+    "?? validation/stage-b-physical-final-latest.json\n"
+    " M validation/tracked-proof.json\n"
+    "?? outside.txt\n"
+)
+check(
+    _status_ok == ["validation/stage-b-physical-final-latest.json"]
+    and _status_bad == [" M validation/tracked-proof.json", "?? outside.txt"],
+    "cleanliness helper sanctions only untracked validation evidence; tracked "
+    "drift and untracked files elsewhere remain blockers",
+)
+
+_evidence_only = _make_repo(clean=True)
+(_evidence_only / "validation").mkdir(exist_ok=True)
+(_evidence_only / "validation" / "stage-b-physical-final-latest.json"
+ ).write_text("{}\n", encoding="utf-8")
+_code, _out = run_in(
+    _evidence_only,
+    token="tkn",
+    api=lambda url, token: _runs(
+        ci=("completed", "success"),
+        codeql=("completed", "success"),
+    ),
+)
+check(
+    _code == 0 and "sanctioned local outputs" in _out and "FROZEN" in _out,
+    "untracked Stage-B evidence under validation/ does not dirty source "
+    "authority",
+)
+
+_tracked_validation = _make_repo(clean=True)
+(_tracked_validation / "validation").mkdir(exist_ok=True)
+_tracked_proof = _tracked_validation / "validation" / "tracked-proof.json"
+_tracked_proof.write_text('{"v":1}\n', encoding="utf-8")
+_git(_tracked_validation, "add", "validation/tracked-proof.json")
+_git(_tracked_validation, "commit", "-q", "-m", "track validation proof")
+_tracked_proof.write_text('{"v":2}\n', encoding="utf-8")
+_code, _out = run_in(_tracked_validation, token=None)
+check(
+    _code == 1 and "working tree not clean" in _out,
+    "a tracked validation file modified after commit is still source drift",
+)
+
 # --- inconsistent version stamps are a hard blocker -------------------------
 _badvt = _make_repo(clean=True)
 old = dict(os.environ)
