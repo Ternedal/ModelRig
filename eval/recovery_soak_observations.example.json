@@ -34,13 +34,13 @@
       "kind": "backend_restart",
       "observed_at": "2026-09-29T10:10:00+00:00",
       "passed": true,
-      "evidence_ref": "validation/appliance-lifecycle-evidence/backend-restart.log#sha256=FILL_ME_64_HEX"
+      "evidence_ref": "validation/appliance-lifecycle-evidence/supervisor_backend.log#sha256=FILL_ME_64_HEX"
     },
     {
       "kind": "worker_restart",
       "observed_at": "2026-09-29T10:12:00+00:00",
       "passed": true,
-      "evidence_ref": "validation/appliance-lifecycle-evidence/worker-restart.log#sha256=FILL_ME_64_HEX"
+      "evidence_ref": "validation/appliance-lifecycle-evidence/supervisor_worker.log#sha256=FILL_ME_64_HEX"
     },
     {
       "kind": "interruption_recovery",
