@@ -643,7 +643,9 @@ def _run_interruption(
         and live_present
         and journal_absent
     )
+    observed_at = datetime.now(timezone.utc).isoformat()
     with log.open("a", encoding="utf-8") as handle:
+        handle.write(f"recovery_observed_at={observed_at}\n")
         handle.write(
             f"recovery_succeeded="
             f"{'true' if recovered else 'false'}\n"
@@ -667,6 +669,7 @@ def _run_interruption(
 
     observations["trials"]["appliance_interruption"] = {
         "performed": True,
+        "observed_at": observed_at,
         "source_version": EXPECTED_SOURCE_VERSION,
         "observed_transaction_id": observed_id,
         "observed_revision": observed_revision,

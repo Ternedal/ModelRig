@@ -745,6 +745,12 @@ def _validate_lifecycle(
     if not isinstance(root, Path):
         errors.append("campaign root is unavailable for lifecycle artifacts")
 
+    recovery_markers = {
+        "reboot": "stage-b reboot trial at ",
+        "supervisor_backend": "stage-b supervisor_backend trial at ",
+        "supervisor_worker": "stage-b supervisor_worker trial at ",
+    }
+
     def capture_artifact(name: str, trial: dict[str, Any]) -> None:
         if isinstance(root, Path):
             artifact = _validate_lifecycle_artifact(
@@ -755,6 +761,42 @@ def _validate_lifecycle(
                 trial.get("evidence_sha256"),
             )
             if artifact is not None:
+                marker_prefix = recovery_markers.get(name)
+                if marker_prefix is not None:
+                    raw_observed_at = trial.get("observed_at")
+                    observed_at = _iso_datetime(raw_observed_at)
+                    if observed_at is None:
+                        errors.append(f"{name}.observed_at is invalid")
+                    else:
+                        if started_at is not None and observed_at < started_at:
+                            errors.append(
+                                f"{name}.observed_at is before lifecycle started_at"
+                            )
+                        if finished_at is not None and observed_at > finished_at:
+                            errors.append(
+                                f"{name}.observed_at is after lifecycle finished_at"
+                            )
+                        artifact_path = root / artifact["path"]
+                        try:
+                            text = artifact_path.read_text(encoding="utf-8")
+                        except (OSError, UnicodeDecodeError) as exc:
+                            errors.append(
+                                f"{name}.evidence artifact timestamp cannot be read: "
+                                f"{type(exc).__name__}"
+                            )
+                        else:
+                            expected_marker = marker_prefix + str(raw_observed_at)
+                            matches = [
+                                line.strip()
+                                for line in text.splitlines()
+                                if line.strip().startswith(marker_prefix)
+                            ]
+                            if matches != [expected_marker]:
+                                errors.append(
+                                    f"{name}.evidence artifact timestamp marker mismatch"
+                                )
+                            else:
+                                artifact["observed_at"] = observed_at.isoformat()
                 artifacts[name] = artifact
 
     reboot = trials.get("reboot")
