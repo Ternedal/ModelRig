@@ -96,10 +96,13 @@ def _exact_main_runs(sha: str, token: str) -> list[dict[str, Any]]:
 
 
 def _latest_by_name(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    # GitHub returnerer runs newest-first. Bevar derfor foerste match pr. navn;
-    # et aeldre success-run maa ikke overskrive en nyere failed/in-progress run.
+    # GitHub returnerer runs newest-first. Et all-skipped PR-close run har ikke
+    # eksekveret nogen gate og er derfor ikke evidens. Ignorer kun skipped;
+    # nyere queued/in-progress/failed/cancelled maa stadig blokere aeldre green.
     latest: dict[str, dict[str, Any]] = {}
     for run in runs:
+        if run.get("conclusion") == "skipped":
+            continue
         name = run.get("name")
         if isinstance(name, str) and name in VENTER_PAA and name not in latest:
             latest[name] = run
