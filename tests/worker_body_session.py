@@ -72,6 +72,7 @@ class BodySessionTests(unittest.TestCase):
         self.store_root = Path(self.dir.name) / "bodyrig-profiles"
         os.environ[BODY_STORE_ENV] = str(self.store_root)
         os.environ.pop("KALIV_PERSONS_STORE", None)
+        os.environ.pop(body_session.E2E_LATENCY_QUALIFICATION_FLAG, None)
         body_session._session = None
         identity = build_identity_bundle(tracking_fixture())
         self.body_id = identity["id"]
@@ -86,6 +87,7 @@ class BodySessionTests(unittest.TestCase):
     def tearDown(self) -> None:
         body_session._session = None
         os.environ.pop(BODY_STORE_ENV, None)
+        os.environ.pop(body_session.E2E_LATENCY_QUALIFICATION_FLAG, None)
         self.dir.cleanup()
 
     def _select(self) -> None:
@@ -187,6 +189,111 @@ class BodySessionTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(session.frame()["state"], "idle")
         self.assertEqual(self.c.post("/body/speech/never-synthesized/started").status_code, 404)
+
+    def test_e2e_outward_binding_is_default_off_and_not_client_authored(self) -> None:
+        self._select()
+        session = body_session.current_session()
+        session.speak(utterance_id="q-off", wav_bytes=tone_wav(300))
+        self.assertFalse(
+            session.bind_e2e_outward(
+                utterance_id="q-off",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch="epoch-test",
+                observer_id="observer-test",
+            )
+        )
+        r = self.c.post("/body/speech/q-off/started")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("qualification_outward_receipt", r.json())
+
+    def test_e2e_outward_receipt_uses_worker_binding_and_actual_playback_start(self) -> None:
+        self._select()
+        os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
+        session = body_session.current_session()
+        session.speak(utterance_id="q1", wav_bytes=tone_wav(300))
+        self.assertTrue(
+            session.bind_e2e_outward(
+                utterance_id="q1",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch="epoch-test",
+                observer_id="observer-test",
+            )
+        )
+        before = body_session._now_ms()
+        r = self.c.post("/body/speech/q1/started")
+        after = body_session._now_ms()
+        self.assertEqual(r.status_code, 200)
+        receipt = r.json()["qualification_outward_receipt"]
+        self.assertEqual(receipt["schema"], "kaliv-system/end-to-end-latency-source/v1")
+        self.assertEqual(receipt["phase"], "outward_started")
+        self.assertEqual(receipt["candidate_git_sha"], "a" * 40)
+        self.assertEqual(receipt["event_id"], "cevt-" + "b" * 32)
+        self.assertEqual(receipt["runtime_epoch"], "epoch-test")
+        self.assertEqual(receipt["observer_id"], "observer-test")
+        self.assertEqual(
+            receipt["clock"],
+            {
+                "kind": "monotonic",
+                "unit": "milliseconds",
+                "origin": "single-observer",
+            },
+        )
+        self.assertGreaterEqual(receipt["observed_at_ms"], before)
+        self.assertLessEqual(receipt["observed_at_ms"], after)
+        self.assertIs(receipt["real_event"], True)
+        self.assertIs(receipt["simulated"], False)
+        self.assertIs(receipt["replay"], False)
+        self.assertIs(receipt["production_activation"], False)
+        self.assertEqual(
+            receipt["details"],
+            {
+                "outward_kind": "voice+body",
+                "started": True,
+                "utterance_id": "q1",
+                "body_runtime_id": session.session_id,
+            },
+        )
+
+    def test_e2e_outward_binding_fails_closed_on_invalid_or_conflicting_identity(self) -> None:
+        self._select()
+        os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
+        session = body_session.current_session()
+        session.speak(utterance_id="q2", wav_bytes=tone_wav(300))
+        with self.assertRaisesRegex(ValueError, "candidate_git_sha"):
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="not-a-sha",
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch="epoch-test",
+                observer_id="observer-test",
+            )
+        with self.assertRaisesRegex(ValueError, "cognition_event_id"):
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="client-picked",
+                runtime_epoch="epoch-test",
+                observer_id="observer-test",
+            )
+        self.assertTrue(
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch="epoch-test",
+                observer_id="observer-test",
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "another qualification event"):
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "c" * 32,
+                runtime_epoch="epoch-test",
+                observer_id="observer-test",
+            )
 
     def test_interrupt_forgets_pending_tracks(self) -> None:
         self._select()
