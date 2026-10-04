@@ -161,6 +161,7 @@ def build_router() -> APIRouter:
         if not body_runtime.bind_e2e_outward(
             utterance_id=utterance_id,
             outward_receipt_path=str(outward_path),
+            outward_clock_sample=cognitive.trusted_clock.sample,
             **observer.outward_binding(),
         ):
             raise HTTPException(status_code=503, detail="qualification outward binding unavailable")
