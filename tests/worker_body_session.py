@@ -256,6 +256,34 @@ class BodySessionTests(unittest.TestCase):
             },
         )
 
+    def test_e2e_outward_receipt_is_persisted_only_on_actual_playback_start(self) -> None:
+        self._select()
+        os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
+        session = body_session.current_session()
+        session.speak(utterance_id="q-file", wav_bytes=tone_wav(300))
+        receipt_path = Path(self.dir.name) / "evidence" / "outward.json"
+        self.assertTrue(
+            session.bind_e2e_outward(
+                utterance_id="q-file",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch="epoch-test",
+                observer_id="observer-test",
+                outward_receipt_path=str(receipt_path),
+            )
+        )
+        self.assertFalse(receipt_path.exists())
+        r = self.c.post("/body/speech/q-file/started")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(receipt_path.is_file())
+        persisted = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            persisted,
+            r.json()["qualification_outward_receipt"],
+        )
+        self.assertEqual(persisted["phase"], "outward_started")
+        self.assertEqual(persisted["event_id"], "cevt-" + "b" * 32)
+
     def test_e2e_outward_binding_fails_closed_on_invalid_or_conflicting_identity(self) -> None:
         self._select()
         os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
