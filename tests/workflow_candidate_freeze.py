@@ -147,6 +147,39 @@ check(
     "newer incomplete run cannot be hidden by an older green run",
 )
 
+skipped = {
+    "name": "ci",
+    "head_sha": "a" * 40,
+    "status": "completed",
+    "conclusion": "skipped",
+    "id": 3,
+}
+check(
+    anchor._latest_by_name([skipped, newest, older])["ci"]["id"] == 2,
+    "a newer skipped no-op run does not hide the latest executable run",
+)
+
+runs_with_skipped_codeql = green_runs()["workflow_runs"]
+runs_with_skipped_codeql.insert(
+    0, {"name": "codeql", "status": "completed", "conclusion": "skipped"}
+)
+check(
+    freeze._workflow_checks(runs_with_skipped_codeql)["codeql"] == "success",
+    "candidate freeze ignores a newer skipped no-op and accepts older exact-SHA success",
+)
+
+skipped_only_codeql = [
+    run for run in green_runs()["workflow_runs"] if run["name"] != "codeql"
+]
+skipped_only_codeql.insert(
+    0, {"name": "codeql", "status": "completed", "conclusion": "skipped"}
+)
+try:
+    freeze._workflow_checks(skipped_only_codeql)
+    check(False, "skipped-only workflow evidence must not satisfy candidate freeze")
+except freeze.CandidateFreezeError:
+    check(True, "skipped-only workflow evidence fails closed")
+
 repo, main_sha, candidate_sha = fixture()
 now = datetime(2026, 7, 20, 20, 0, tzinfo=timezone.utc)
 receipt = freeze.create_receipt(
