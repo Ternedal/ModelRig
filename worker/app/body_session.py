@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import sys
 import threading
 import time
@@ -44,6 +46,22 @@ from . import body_cues  # noqa: E402
 
 FRAME_INTERVAL_S = 1 / 20
 CLIENT_REPORTABLE_STATES = frozenset({"listening", "idle"})
+E2E_LATENCY_QUALIFICATION_FLAG = "KALIV_E2E_LATENCY_QUALIFICATION_ENABLED"
+_E2E_SOURCE_SCHEMA = "kaliv-system/end-to-end-latency-source/v1"
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_EVENT_ID = re.compile(r"^cevt-[a-f0-9]{32}$")
+_TOKEN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
+
+
+def e2e_latency_qualification_enabled() -> bool:
+    """Only exact opt-in permits runtime correlation evidence."""
+    return os.getenv(E2E_LATENCY_QUALIFICATION_FLAG, "0") == "1"
+
+
+def _bounded_token(value: str, label: str) -> str:
+    if not isinstance(value, str) or _TOKEN.fullmatch(value) is None:
+        raise ValueError(f"{label} must be a bounded token")
+    return value
 
 
 def _now_ms() -> int:
@@ -75,6 +93,11 @@ class BodySession:
         # there. Bounded; a few sentences is all a turn ever needs in flight.
         self._tracks: dict[str, Any] = {}
         self._max_tracks = 16
+        # Qualification-only correlation. Normal voice/body behavior never
+        # consults this map. The worker qualification path may bind a canonical
+        # cognition event to an utterance before the phone can report playback.
+        self._e2e_outward_bindings: dict[str, dict[str, Any]] = {}
+        self._e2e_outward_receipts: dict[str, dict[str, Any]] = {}
 
     def _next(self) -> int:
         self._sequence += 1
@@ -127,6 +150,50 @@ class BodySession:
         while len(self._tracks) > self._max_tracks:
             self._tracks.pop(next(iter(self._tracks)))
 
+    def bind_e2e_outward(
+        self,
+        *,
+        utterance_id: str,
+        candidate_git_sha: str,
+        cognition_event_id: str,
+        runtime_epoch: str,
+        observer_id: str,
+    ) -> bool:
+        """Bind one worker-authored cognition event to one synthesized utterance.
+
+        This is deliberately not an HTTP surface. Android reports only playback
+        truth; it never supplies candidate/event/observer identity.
+        """
+        if not e2e_latency_qualification_enabled():
+            return False
+        if utterance_id not in self._tracks:
+            return False
+        if _SHA40.fullmatch(candidate_git_sha) is None:
+            raise ValueError("candidate_git_sha must be lowercase 40-hex")
+        if _EVENT_ID.fullmatch(cognition_event_id) is None:
+            raise ValueError("cognition_event_id must be canonical")
+        _bounded_token(runtime_epoch, "runtime_epoch")
+        _bounded_token(observer_id, "observer_id")
+        with self._lock:
+            if utterance_id not in self._tracks:
+                return False
+            existing = self._e2e_outward_bindings.get(utterance_id)
+            binding = {
+                "candidate_git_sha": candidate_git_sha,
+                "event_id": cognition_event_id,
+                "runtime_epoch": runtime_epoch,
+                "observer_id": observer_id,
+            }
+            if existing is not None and existing != binding:
+                raise ValueError("utterance already bound to another qualification event")
+            self._e2e_outward_bindings[utterance_id] = binding
+            return True
+
+    def e2e_outward_receipt(self, utterance_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            receipt = self._e2e_outward_receipts.get(utterance_id)
+            return None if receipt is None else dict(receipt)
+
     def playback_started(self, utterance_id: str) -> bool:
         """The client began playing this sentence NOW: restart its mouth track
         from this instant. Returns False for an utterance the session does not
@@ -142,6 +209,32 @@ class BodySession:
             except EventRejected:
                 return False
             self._utterance_ends[utterance_id] = now + track.duration_ms
+            binding = self._e2e_outward_bindings.get(utterance_id)
+            if binding is not None:
+                self._e2e_outward_receipts[utterance_id] = {
+                    "schema": _E2E_SOURCE_SCHEMA,
+                    "phase": "outward_started",
+                    "candidate_git_sha": binding["candidate_git_sha"],
+                    "event_id": binding["event_id"],
+                    "runtime_epoch": binding["runtime_epoch"],
+                    "observer_id": binding["observer_id"],
+                    "clock": {
+                        "kind": "monotonic",
+                        "unit": "milliseconds",
+                        "origin": "single-observer",
+                    },
+                    "observed_at_ms": now,
+                    "real_event": True,
+                    "simulated": False,
+                    "replay": False,
+                    "details": {
+                        "outward_kind": "voice+body",
+                        "started": True,
+                        "utterance_id": utterance_id,
+                        "body_runtime_id": self.session_id,
+                    },
+                    "production_activation": False,
+                }
             return True
 
     def playback_ended(self, utterance_id: str) -> bool:
@@ -149,6 +242,7 @@ class BodySession:
             known = utterance_id in self._tracks
             self._utterance_ends.pop(utterance_id, None)
             self._tracks.pop(utterance_id, None)
+            self._e2e_outward_bindings.pop(utterance_id, None)
             try:
                 self._runtime.end_speech(sequence=self._next(), utterance_id=utterance_id)
             except EventRejected:
@@ -170,6 +264,7 @@ class BodySession:
                 self._scheduler.cancel_utterance(utterance_id)
             self._utterance_ends.clear()
             self._tracks.clear()
+            self._e2e_outward_bindings.clear()
             try:
                 self._runtime.cancel(sequence=self._next(), scope=CancelScope.ALL)
             except EventRejected:
@@ -304,7 +399,11 @@ def build_body_session_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="no active body session")
         if not session.playback_started(utterance_id):
             raise HTTPException(status_code=404, detail="unknown utterance")
-        return JSONResponse({"ok": True, "state": session.frame()["state"]})
+        payload: dict[str, Any] = {"ok": True, "state": session.frame()["state"]}
+        receipt = session.e2e_outward_receipt(utterance_id)
+        if receipt is not None:
+            payload["qualification_outward_receipt"] = receipt
+        return JSONResponse(payload)
 
     @router.post("/speech/{utterance_id}/ended")
     def speech_ended(utterance_id: str) -> JSONResponse:
