@@ -36,6 +36,7 @@ from bodyrig_fixtures import png_fixture, tracking_fixture, vrm_fixture  # noqa:
 from app import body_session  # noqa: E402
 from app.body_assets import BODY_STORE_ENV  # noqa: E402
 from app.body_session import build_body_session_router  # noqa: E402
+from app.consciousness_core.production_lifecycle import TrustedRuntimeClock  # noqa: E402
 
 RENDER_FRAME_SCHEMA = ROOT / "docs" / "bodyrig" / "schemas" / "render-frame.schema.json"
 
@@ -72,6 +73,7 @@ class BodySessionTests(unittest.TestCase):
         self.store_root = Path(self.dir.name) / "bodyrig-profiles"
         os.environ[BODY_STORE_ENV] = str(self.store_root)
         os.environ.pop("KALIV_PERSONS_STORE", None)
+        os.environ.pop(body_session.E2E_LATENCY_QUALIFICATION_FLAG, None)
         body_session._session = None
         identity = build_identity_bundle(tracking_fixture())
         self.body_id = identity["id"]
@@ -86,6 +88,7 @@ class BodySessionTests(unittest.TestCase):
     def tearDown(self) -> None:
         body_session._session = None
         os.environ.pop(BODY_STORE_ENV, None)
+        os.environ.pop(body_session.E2E_LATENCY_QUALIFICATION_FLAG, None)
         self.dir.cleanup()
 
     def _select(self) -> None:
@@ -187,6 +190,153 @@ class BodySessionTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(session.frame()["state"], "idle")
         self.assertEqual(self.c.post("/body/speech/never-synthesized/started").status_code, 404)
+
+    def _trusted_clock(self):
+        return TrustedRuntimeClock()
+
+    def test_e2e_outward_binding_is_default_off_and_not_client_authored(self) -> None:
+        self._select()
+        session = body_session.current_session()
+        session.speak(utterance_id="q-off", wav_bytes=tone_wav(300))
+        clock = self._trusted_clock()
+        self.assertFalse(
+            session.bind_e2e_outward(
+                utterance_id="q-off",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch=clock.runtime_epoch_id,
+                observer_id="observer-test",
+                outward_clock_sample=clock.sample,
+            )
+        )
+        r = self.c.post("/body/speech/q-off/started")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("qualification_outward_receipt", r.json())
+
+    def test_e2e_outward_receipt_uses_worker_binding_and_actual_playback_start(self) -> None:
+        self._select()
+        os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
+        session = body_session.current_session()
+        session.speak(utterance_id="q1", wav_bytes=tone_wav(300))
+        clock = self._trusted_clock()
+        self.assertTrue(
+            session.bind_e2e_outward(
+                utterance_id="q1",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch=clock.runtime_epoch_id,
+                observer_id="observer-test",
+                outward_clock_sample=clock.sample,
+            )
+        )
+        before = body_session._now_ms()
+        r = self.c.post("/body/speech/q1/started")
+        after = body_session._now_ms()
+        self.assertEqual(r.status_code, 200)
+        receipt = r.json()["qualification_outward_receipt"]
+        self.assertEqual(receipt["schema"], "kaliv-system/end-to-end-latency-source/v1")
+        self.assertEqual(receipt["phase"], "outward_started")
+        self.assertEqual(receipt["candidate_git_sha"], "a" * 40)
+        self.assertEqual(receipt["event_id"], "cevt-" + "b" * 32)
+        self.assertEqual(receipt["runtime_epoch"], clock.runtime_epoch_id)
+        self.assertEqual(receipt["observer_id"], "observer-test")
+        self.assertEqual(
+            receipt["clock"],
+            {
+                "kind": "monotonic",
+                "unit": "milliseconds",
+                "origin": "single-observer",
+            },
+        )
+        self.assertGreaterEqual(receipt["observed_at_ms"], before)
+        self.assertLessEqual(receipt["observed_at_ms"], after)
+        self.assertIs(receipt["real_event"], True)
+        self.assertIs(receipt["simulated"], False)
+        self.assertIs(receipt["replay"], False)
+        self.assertIs(receipt["production_activation"], False)
+        self.assertEqual(
+            receipt["details"],
+            {
+                "outward_kind": "voice+body",
+                "started": True,
+                "utterance_id": "q1",
+                "body_runtime_id": session.session_id,
+            },
+        )
+
+    def test_e2e_outward_receipt_is_persisted_only_on_actual_playback_start(self) -> None:
+        self._select()
+        os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
+        session = body_session.current_session()
+        session.speak(utterance_id="q-file", wav_bytes=tone_wav(300))
+        receipt_path = Path(self.dir.name) / "evidence" / "outward.json"
+        clock = self._trusted_clock()
+        self.assertTrue(
+            session.bind_e2e_outward(
+                utterance_id="q-file",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch=clock.runtime_epoch_id,
+                observer_id="observer-test",
+                outward_receipt_path=str(receipt_path),
+                outward_clock_sample=clock.sample,
+            )
+        )
+        self.assertFalse(receipt_path.exists())
+        r = self.c.post("/body/speech/q-file/started")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(receipt_path.is_file())
+        persisted = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            persisted,
+            r.json()["qualification_outward_receipt"],
+        )
+        self.assertEqual(persisted["phase"], "outward_started")
+        self.assertEqual(persisted["event_id"], "cevt-" + "b" * 32)
+
+    def test_e2e_outward_binding_fails_closed_on_invalid_or_conflicting_identity(self) -> None:
+        self._select()
+        os.environ[body_session.E2E_LATENCY_QUALIFICATION_FLAG] = "1"
+        session = body_session.current_session()
+        session.speak(utterance_id="q2", wav_bytes=tone_wav(300))
+        clock = self._trusted_clock()
+        with self.assertRaisesRegex(ValueError, "candidate_git_sha"):
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="not-a-sha",
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch=clock.runtime_epoch_id,
+                observer_id="observer-test",
+                outward_clock_sample=clock.sample,
+            )
+        with self.assertRaisesRegex(ValueError, "cognition_event_id"):
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="client-picked",
+                runtime_epoch=clock.runtime_epoch_id,
+                observer_id="observer-test",
+                outward_clock_sample=clock.sample,
+            )
+        self.assertTrue(
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "b" * 32,
+                runtime_epoch=clock.runtime_epoch_id,
+                observer_id="observer-test",
+                outward_clock_sample=clock.sample,
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "another qualification event"):
+            session.bind_e2e_outward(
+                utterance_id="q2",
+                candidate_git_sha="a" * 40,
+                cognition_event_id="cevt-" + "c" * 32,
+                runtime_epoch=clock.runtime_epoch_id,
+                observer_id="observer-test",
+                outward_clock_sample=clock.sample,
+            )
 
     def test_interrupt_forgets_pending_tracks(self) -> None:
         self._select()

@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 37 feature-switches er tændt som default.** (36 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 39 feature-switches er tændt som default.** (37 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -102,6 +102,9 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_DATA_DIR` | `(unset)` | indstilling |
 | `KALIV_DESKTOP_ALLOWLIST_FILE` | `(tom)` | indstilling |
 | `KALIV_DEVCONTROL_PILOT` | `0` | slukket |
+| `KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA` | `(tom)` | slukket |
+| `KALIV_E2E_LATENCY_EVIDENCE_ROOT` | `(tom)` | indstilling |
+| `KALIV_E2E_LATENCY_QUALIFICATION_ENABLED` | `0` | slukket |
 | `KALIV_EGRESS_GATE` | `(tom)` | slukket |
 | `KALIV_FILE_CAPABILITIES_ENABLED` | `(tom)` | slukket |
 | `KALIV_FILE_WORKSPACE_ID` | `(tom)` | indstilling |
