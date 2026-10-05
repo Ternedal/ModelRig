@@ -174,14 +174,26 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		"upstream": map[string]any{
 			"ollama": s.Ollama.Reachable(),
+			"llm":    s.LLM != nil && s.LLM.Reachable(),
 			"worker": s.Worker.Reachable(),
 		},
+		"model_provider": func() string {
+			if s.LLM == nil {
+				return "unavailable"
+			}
+			return s.LLM.Name()
+		}(),
 	})
 }
 
-// handleModels proxies Ollama's model list (GET /api/tags).
+// handleModels preserves the existing ModelRig/Ollama-shaped model-list
+// contract while delegating discovery to the selected LLM runtime.
 func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
-	s.Ollama.Forward(w, r, "/api/tags")
+	if s.LLM == nil {
+		writeErr(w, http.StatusServiceUnavailable, "model provider unavailable")
+		return
+	}
+	s.LLM.Models(w, r)
 }
 
 // handleModelsRunning proxies Ollama's list of currently loaded models
@@ -321,9 +333,14 @@ func (s *server) handleTokenRotate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleChat proxies Ollama chat (POST /api/chat), streaming NDJSON through.
+// handleChat keeps the public Ollama-shaped chat contract stable while the
+// selected provider may be Ollama itself or an OpenAI-compatible runtime.
 func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
-	s.Ollama.Forward(w, r, "/api/chat")
+	if s.LLM == nil {
+		writeErr(w, http.StatusServiceUnavailable, "chat model provider unavailable")
+		return
+	}
+	s.LLM.Chat(w, r)
 }
 
 func (s *server) handleRagQuery(w http.ResponseWriter, r *http.Request) {
