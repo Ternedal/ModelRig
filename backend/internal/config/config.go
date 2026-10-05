@@ -18,6 +18,9 @@ type Config struct {
 	ServerPort     int
 	OllamaBaseURL  string
 	OllamaKey      string // Ollama API key; set for Ollama Cloud, empty for local
+	LLMProvider    string // ollama (default), jan, or openai-compatible
+	LLMBaseURL     string // OpenAI-compatible /v1 base URL when LLMProvider != ollama
+	LLMKey         string // optional bearer token for OpenAI-compatible provider
 	WorkerBaseURL  string
 	PairingTTL     time.Duration
 	DataPath       string
@@ -34,6 +37,11 @@ type fileConfig struct {
 		BaseURL string `json:"base_url"`
 		APIKey  string `json:"api_key"`
 	} `json:"ollama"`
+	LLM struct {
+		Provider string `json:"provider"`
+		BaseURL  string `json:"base_url"`
+		APIKey   string `json:"api_key"`
+	} `json:"llm"`
 	Worker struct {
 		BaseURL string `json:"base_url"`
 	} `json:"worker"`
@@ -56,6 +64,8 @@ func Default() Config {
 		ServerHost:     "127.0.0.1",
 		ServerPort:     8080,
 		OllamaBaseURL:  "http://127.0.0.1:11434",
+		LLMProvider:    "ollama",
+		LLMBaseURL:     "http://127.0.0.1:1337/v1",
 		WorkerBaseURL:  "http://127.0.0.1:8099",
 		PairingTTL:     5 * time.Minute,
 		DataPath:       "./modelrig-data.json",
@@ -98,6 +108,15 @@ func applyFile(c *Config, path string) error {
 	if fc.Ollama.APIKey != "" {
 		c.OllamaKey = fc.Ollama.APIKey
 	}
+	if fc.LLM.Provider != "" {
+		c.LLMProvider = strings.ToLower(strings.TrimSpace(fc.LLM.Provider))
+	}
+	if fc.LLM.BaseURL != "" {
+		c.LLMBaseURL = strings.TrimRight(strings.TrimSpace(fc.LLM.BaseURL), "/")
+	}
+	if fc.LLM.APIKey != "" {
+		c.LLMKey = fc.LLM.APIKey
+	}
 	if fc.Worker.BaseURL != "" {
 		c.WorkerBaseURL = fc.Worker.BaseURL
 	}
@@ -124,6 +143,15 @@ func applyEnv(c *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("MODELRIG_OLLAMA_KEY")); v != "" {
 		c.OllamaKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_LLM_PROVIDER")); v != "" {
+		c.LLMProvider = strings.ToLower(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_LLM_URL")); v != "" {
+		c.LLMBaseURL = strings.TrimRight(v, "/")
+	}
+	if v := strings.TrimSpace(os.Getenv("MODELRIG_LLM_KEY")); v != "" {
+		c.LLMKey = v
 	}
 	if v := strings.TrimSpace(os.Getenv("MODELRIG_WORKER_URL")); v != "" {
 		c.WorkerBaseURL = v
