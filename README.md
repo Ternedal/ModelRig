@@ -387,12 +387,11 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
 - **tools/** — `modelrig-cli.py`, a dependency-free reference client (pair, chat,
   RAG, device mgmt, `doctor` health check, token `rotate`). Runnable today; used
   to drive the e2e test.
-- **languagerig/** — separately installable, optional Python training tooling:
-  EPUB/text-PDF import, work-bound corpus splits, a one-GPU QLoRA pilot,
-  checkpoints, model comparison and Ollama/RAG handoff. It has no automatic
-  runtime activation. Real GPU training and model-quality qualification are
-  pending; see [languagerig/README.md](languagerig/README.md) and
-  [docs/LANGUAGERIG.md](docs/LANGUAGERIG.md).
+- **[LanguageRig](https://github.com/Ternedal/LanguageRig)** — separate, optional
+  training project for Danish EPUB/text-PDF material, work-bound corpus splits,
+  a one-GPU QLoRA pilot, checkpoints and model comparison. It hands off candidates
+  through the existing local Ollama and RAG interfaces. GPU execution and model
+  quality still need qualification; see [docs/LANGUAGERIG.md](docs/LANGUAGERIG.md).
 - **tests/** — worker unit + RAG tests, backend smoke + V1 tests, and an
   end-to-end integration test. `sh tests/run_tests.sh` runs the full suite (see CI for the current counts).
 - **deploy/** — env reference, a Windows launcher (`run-windows.ps1`), and systemd
