@@ -1,5 +1,5 @@
 {
-  "model_id": "danish-foundation-models/munin-ministral3-8B",
+  "model_id": "danish-foundation-models/munin-apertus-8b",
   "model_revision": "main",
   "dataset": "../data/datasets/dansk-pilot",
   "output_dir": "../data/runs/dansk-pilot",

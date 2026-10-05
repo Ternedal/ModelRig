@@ -297,7 +297,7 @@ class TrainingTests(WorkspaceCase):
         self.assertEqual(plan["status"], "planned")
         self.assertFalse(plan["model_downloaded"])
         self.assertFalse(plan["training_executed"])
-        self.assertEqual(Path(plan["config"]["dataset"]), self.workspace / "datasets/pilot")
+        self.assertEqual(Path(plan["config"]["dataset"]), (self.workspace / "datasets/pilot").resolve())
         self.assertFalse((self.workspace / "runs/pilot").exists())
 
     def test_training_rejects_unknown_configuration_and_changed_dataset(self):

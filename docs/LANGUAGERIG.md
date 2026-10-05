@@ -48,7 +48,10 @@ Trained, registered og completed comparison er forskellige tilstande.
 Ingen af dem er i sig selv en modelkvalitetsdom eller en systemrelease.
 ModelRig ændrer ikke standardmodel automatisk.
 
-Munin Ministral 8B er kun pilotkonfigurationens kandidat. Munin 1.0 har danske
+Munin Apertus 8B er kun pilotkonfigurationens kandidat. Dens arkitektur passer
+til AutoModelForCausalLM; Munin Ministral 8B bruger derimod
+Mistral3ForConditionalGeneration og kræver en særskilt integration.
+Munin 1.0 har danske
 gevinster i nogle opgavegrupper, men dens officielle evaluering viser også
 tab på nogle engelske/agentiske opgaver. Udvælgelsen bør derfor sammenligne
 dansk kvalitet, faglige svar, ressourceforbrug og ModelRig-relevante værktøjskald.
@@ -58,6 +61,8 @@ generiske AutoModelForCausalLM-forløb.
 ## Kilder og reproduktion
 
 - [Munin 1.0-udgivelse](https://www.foundationmodels.dk/da/news/2026/06/11/munin-10-udgivelsesnote.html)
+- [Munin Apertus 8B-modelkort](https://huggingface.co/danish-foundation-models/munin-apertus-8b)
+- [Munin Ministral 8B-modelkonfiguration](https://huggingface.co/danish-foundation-models/munin-ministral3-8B/blob/main/config.json)
 - [PEFT: kvantisering og QLoRA](https://huggingface.co/docs/peft/developer_guides/quantization)
 - [Transformers Trainer](https://huggingface.co/docs/transformers/main_classes/trainer)
 - [Ollama-modelimport](https://docs.ollama.com/import)

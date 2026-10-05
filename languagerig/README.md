@@ -65,8 +65,10 @@ Datasæt er navngivne snapshots med kildeopdeling og checksums; en ny version
 skal have et nyt navn. Ændrede data afvises før træning.
 
 Plan-kommandoen downloader ingen modeller og starter ingen GPU-job.
-Eksemplet bruger Munin Ministral 8B som kandidat, ikke som en dokumenteret
-vinder eller en kvalificeret 12 GB-træningsprofil.
+Eksemplet bruger Munin Apertus 8B som kandidat, ikke som en dokumenteret
+vinder eller en kvalificeret 12 GB-træningsprofil. Dens ApertusForCausalLM-
+arkitektur passer til runnerens AutoModelForCausalLM. Munin Ministral 8B bruger
+Mistral3ForConditionalGeneration og kræver en særskilt modelintegration.
 
 Konfigurationsstier er relative til JSON-filens mappe. Ved brug af en anden
 datamappe skal dataset/output_dir derfor ændres i en kopi af konfigurationen.
@@ -170,7 +172,7 @@ forskellige modeldigests:
 
 ~~~bash
 languagerig evaluate examples/basic-cases.jsonl data/evaluation/pilot \
-  --baseline munin-ministral3:baseline --candidate kaliv-dansk:pilot \
+  --baseline munin-apertus:baseline --candidate kaliv-dansk:pilot \
   --url http://127.0.0.1:11435 --dataset data/datasets/dansk-pilot
 ~~~
 

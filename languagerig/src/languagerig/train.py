@@ -12,7 +12,7 @@ from .core import LanguageRigError, digest, now, read_json, write_json
 from .corpus import verify_dataset
 
 DEFAULTS = {
-    "model_id": "danish-foundation-models/munin-ministral3-8B",
+    "model_id": "danish-foundation-models/munin-apertus-8b",
     "model_revision": "main", "max_seq_length": 1024, "lora_rank": 16,
     "learning_rate": 0.00002, "epochs": 1.0, "max_steps": 100,
     "gradient_accumulation_steps": 16, "save_steps": 20, "seed": 42,
