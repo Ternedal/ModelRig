@@ -200,6 +200,10 @@ func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 // (GET /api/ps) -- shows VRAM usage and expiry, for a "what's actually
 // running right now" view distinct from "what's installed" (handleModels).
 func (s *server) handleModelsRunning(w http.ResponseWriter, r *http.Request) {
+	if s.LLM != nil && s.LLM.Name() != "ollama" {
+		writeErr(w, http.StatusNotImplemented, "running-model inspection is currently Ollama-only")
+		return
+	}
 	s.Ollama.Forward(w, r, "/api/ps")
 }
 
@@ -209,6 +213,10 @@ func (s *server) handleModelsRunning(w http.ResponseWriter, r *http.Request) {
 // flushes as bytes arrive, so progress reaches the client live, same as
 // streaming chat.
 func (s *server) handleModelsPull(w http.ResponseWriter, r *http.Request) {
+	if s.LLM != nil && s.LLM.Name() != "ollama" {
+		writeErr(w, http.StatusNotImplemented, "model pull is currently Ollama-only")
+		return
+	}
 	// A pull can legitimately run far past the chat timeout (a ~9 GB model on
 	// a home line is 15+ minutes; http.Client.Timeout bounds the WHOLE
 	// exchange incl. the streamed body). With the default timeout the stream
@@ -223,6 +231,10 @@ func (s *server) handleModelsPull(w http.ResponseWriter, r *http.Request) {
 // {"model":"<name>"}). Irreversible on the Ollama side -- the client is
 // expected to confirm with the user before calling this.
 func (s *server) handleModelsDelete(w http.ResponseWriter, r *http.Request) {
+	if s.LLM != nil && s.LLM.Name() != "ollama" {
+		writeErr(w, http.StatusNotImplemented, "model deletion is currently Ollama-only")
+		return
+	}
 	s.Ollama.Forward(w, r, "/api/delete")
 }
 
