@@ -13,6 +13,7 @@ from .agent3.cancellation_status import install_termination_contract
 from .agent3.production_mount import mount_agent3
 from .control_center_api import build_control_center_router
 from .file_capabilities_mount import mount_file_capabilities
+from .e2e_latency_voice import mount as mount_e2e_latency_voice
 from .hardening import harden
 from .main import app as fastapi_app
 from .memory.context_mount import (
@@ -113,6 +114,11 @@ mount_memory4_write(fastapi_app)
 # it only admits reported user-turn evidence into an already-live C19/C20
 # session, and the route is absent unless its own exact opt-in is set.
 mount_consciousness_user_turn(fastapi_app)
+
+# Release qualification only: one separately gated real voice event may traverse
+# ASR -> exact Consciousness cognition -> response-intent TTS -> phone playback
+# truth. With the flag off no route is mounted.
+mount_e2e_latency_voice(fastapi_app)
 
 # VisionRig perception is a separately gated, loopback-only C20 event-source
 # adapter. It projects PerceptionEvent/v3 into inferred world evidence and
