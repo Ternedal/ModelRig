@@ -1,0 +1,6 @@
+{"id":"kort-instruktion","category":"instruction","prompt":"Svar kun med ordet Klar og uden tegnsætning.","checks":[{"kind":"exact","value":"Klar"}]}
+{"id":"danske-tegn","category":"language","prompt":"Skriv kun de tre sidste bogstaver i det danske alfabet som små bogstaver uden mellemrum.","checks":[{"kind":"exact","value":"æøå"}]}
+{"id":"json-format","category":"format","prompt":"Svar som gyldig JSON med præcis to felter: titel og forklaring. Forklar hvad et checkpoint er under modeltræning. Brug dansk.","checks":[{"kind":"json_keys","value":["titel","forklaring"]}]}
+{"id":"faglig-forklaring","category":"domain","prompt":"Forklar forskellen på træning af en sprogmodel og dokumentopslag med RAG. Brug et konkret eksempel med en dansk fagbog.","checks":[]}
+{"id":"naturlig-dialog","category":"language","prompt":"Skriv fire korte replikker i en naturlig dansk samtale mellem to venner, der vælger en bog til en fælles læseklub.","checks":[]}
+{"id":"tekstgrundlag","category":"grounding","prompt":"Tekst: Biblioteket har åbent mandag fra klokken 10 til 17 og lørdag fra klokken 10 til 13. Spørgsmål: Hvornår lukker biblioteket lørdag? Svar kun med klokkeslættet i formatet HH:MM.","checks":[{"kind":"exact","value":"13:00"}]}

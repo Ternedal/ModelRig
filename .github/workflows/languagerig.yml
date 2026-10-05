@@ -1,0 +1,38 @@
+name: LanguageRig
+
+on:
+  pull_request:
+    paths: ["languagerig/**", "docs/LANGUAGERIG.md", ".github/workflows/languagerig.yml"]
+  push:
+    branches: [main]
+    paths: ["languagerig/**", "docs/LANGUAGERIG.md", ".github/workflows/languagerig.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  corpus-and-handoff:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install LanguageRig without GPU dependencies
+        run: python -m pip install -e ./languagerig
+      - name: Test ebook import, leakage prevention and service handoff
+        run: python -m unittest discover -s languagerig/tests -v
+      - name: Check CLI
+        run: languagerig --help

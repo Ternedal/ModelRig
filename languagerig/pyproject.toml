@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "languagerig"
+version = "0.1.0"
+description = "Local Danish ebook corpus, model adaptation and ModelRig handoff"
+requires-python = ">=3.11"
+dependencies = ["pypdf>=5,<7"]
+
+[project.optional-dependencies]
+train = [
+  "torch>=2.4",
+  "transformers>=5,<6",
+  "peft>=0.18,<1",
+  "accelerate>=1.2,<2",
+  "bitsandbytes>=0.45,<1",
+  "datasets>=3,<5",
+]
+
+[project.scripts]
+languagerig = "languagerig.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
