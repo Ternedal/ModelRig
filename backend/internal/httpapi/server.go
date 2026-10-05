@@ -12,6 +12,7 @@ import (
 
 	"modelrig/internal/auth"
 	"modelrig/internal/config"
+	"modelrig/internal/llmprovider"
 	"modelrig/internal/proxy"
 	"modelrig/internal/store"
 )
@@ -21,6 +22,7 @@ type Deps struct {
 	Cfg    config.Config
 	Store  *store.Store
 	Ollama *proxy.Client
+	LLM    llmprovider.Provider
 	Worker *proxy.Client
 	// WorkerSlow is the same worker upstream with a long timeout, for
 	// requests that legitimately take minutes: voice turns (Whisper loads
