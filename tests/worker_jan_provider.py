@@ -57,6 +57,8 @@ class FakeClient:
 
     async def post(self, url, json=None, headers=None):
         self.calls.append(("post", url, json, headers or {}))
+        if url.endswith("/api/embed"):
+            return FakeResponse({"embeddings": [[0.1, 0.2, 0.3]]})
         tool_calls = []
         if json and json.get("tools"):
             tool_calls = [{
