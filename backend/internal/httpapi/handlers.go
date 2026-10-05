@@ -174,14 +174,22 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		"upstream": map[string]any{
 			"ollama": s.Ollama.Reachable(),
-			"llm":    s.LLM != nil && s.LLM.Reachable(),
+			"llm":    func() bool {
+			if s.LLM != nil {
+				return s.LLM.Reachable()
+			}
+			return s.Ollama != nil && s.Ollama.Reachable()
+		}(),
 			"worker": s.Worker.Reachable(),
 		},
 		"model_provider": func() string {
-			if s.LLM == nil {
-				return "unavailable"
+			if s.LLM != nil {
+				return s.LLM.Name()
 			}
-			return s.LLM.Name()
+			if s.Ollama != nil {
+				return "ollama"
+			}
+			return "unavailable"
 		}(),
 	})
 }
@@ -189,11 +197,17 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 // handleModels preserves the existing ModelRig/Ollama-shaped model-list
 // contract while delegating discovery to the selected LLM runtime.
 func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
-	if s.LLM == nil {
-		writeErr(w, http.StatusServiceUnavailable, "model provider unavailable")
+	if s.LLM != nil {
+		s.LLM.Models(w, r)
 		return
 	}
-	s.LLM.Models(w, r)
+	// Backward-compatible fallback for legacy tests/embedders that construct a
+	// server directly instead of through New(). Ollama remains the baseline.
+	if s.Ollama != nil {
+		s.Ollama.Forward(w, r, "/api/tags")
+		return
+	}
+	writeErr(w, http.StatusServiceUnavailable, "model provider unavailable")
 }
 
 // handleModelsRunning proxies Ollama's list of currently loaded models
@@ -348,11 +362,17 @@ func (s *server) handleTokenRotate(w http.ResponseWriter, r *http.Request) {
 // handleChat keeps the public Ollama-shaped chat contract stable while the
 // selected provider may be Ollama itself or an OpenAI-compatible runtime.
 func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
-	if s.LLM == nil {
-		writeErr(w, http.StatusServiceUnavailable, "chat model provider unavailable")
+	if s.LLM != nil {
+		s.LLM.Chat(w, r)
 		return
 	}
-	s.LLM.Chat(w, r)
+	// Keep the pre-provider contract intact for direct server fixtures and
+	// embedders. Runtime-created servers still receive an explicit provider.
+	if s.Ollama != nil {
+		s.Ollama.Forward(w, r, "/api/chat")
+		return
+	}
+	writeErr(w, http.StatusServiceUnavailable, "chat model provider unavailable")
 }
 
 func (s *server) handleRagQuery(w http.ResponseWriter, r *http.Request) {
