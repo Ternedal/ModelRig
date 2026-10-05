@@ -16,6 +16,7 @@ HANDOFF = ROOT / "docs/devcontrol/dc-l16/visionrig-sensor-control-handoff.json"
 SCHEMA = ROOT / "devcontrol/schemas/rsi-pilot-visionrig-sensor-control-handoff-v1.schema.json"
 SERVER = ROOT / "backend/internal/httpapi/server.go"
 CONTROL_CENTER = ROOT / "backend/internal/httpapi/control_center.go"
+LLM_PROVIDER_HANDOFF = ROOT / "docs/devcontrol/dc-l16/llm-provider-source-transition.json"
 
 PREDECESSOR_SHA = "582b163d7a71a934b43671ddad62a5644df3087e"
 SUCCESSOR_SHA = "f9b646350c70900ec256387b7a7e544d2de3eb0b"
@@ -59,7 +60,29 @@ def run_contract() -> None:
         "from_git_blob_sha": PREDECESSOR_SHA,
         "to_git_blob_sha": SUCCESSOR_SHA,
     }
-    assert _git_blob_sha(SERVER) == SUCCESSOR_SHA
+    server_sha = _git_blob_sha(SERVER)
+    if server_sha == SUCCESSOR_SHA:
+        pass
+    else:
+        assert LLM_PROVIDER_HANDOFF.is_file()
+        llm_handoff = _load(LLM_PROVIDER_HANDOFF)
+        llm_transition = llm_handoff["tracked_source_transition"]
+        assert llm_handoff["schema"] == (
+            "kaliv-rsi-dc-l16-llm-provider-source-transition/v1"
+        )
+        assert llm_handoff["repository"] == "Ternedal/ModelRig"
+        assert llm_transition == {
+            "path": "backend/internal/httpapi/server.go",
+            "from_git_blob_sha": SUCCESSOR_SHA,
+            "to_git_blob_sha": server_sha,
+        }
+        assert llm_handoff["authority_state"] == {
+            "runtime_provider_selection_only": True,
+            "production_activation_authorized": False,
+            "merge_authorized": False,
+            "release_authorized": False,
+            "authority": "llm-provider-source-transition-only",
+        }
 
     server = code_of(SERVER)
     control = code_of(CONTROL_CENTER)
