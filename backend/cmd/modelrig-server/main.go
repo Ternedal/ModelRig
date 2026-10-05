@@ -18,6 +18,7 @@ import (
 
 	"modelrig/internal/config"
 	"modelrig/internal/httpapi"
+	"modelrig/internal/llmprovider"
 	"modelrig/internal/proxy"
 	"modelrig/internal/store"
 )
@@ -50,6 +51,15 @@ func main() {
 	}
 
 	ollamaClient := proxy.New(cfg.OllamaBaseURL, cfg.RequestTimeout).WithHealthPath("/api/tags").WithAuthToken(cfg.OllamaKey)
+	var modelProvider llmprovider.Provider
+	switch strings.ToLower(strings.TrimSpace(cfg.LLMProvider)) {
+	case "", "ollama":
+		modelProvider = llmprovider.NewOllama(ollamaClient)
+	case "jan", "openai-compatible":
+		modelProvider = llmprovider.NewOpenAICompatible(cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMKey, cfg.RequestTimeout)
+	default:
+		log.Fatalf("config: unsupported LLM provider %q (expected ollama, jan, or openai-compatible)", cfg.LLMProvider)
+	}
 	workerClient := proxy.New(cfg.WorkerBaseURL, cfg.RequestTimeout).WithHealthPath("/healthz")
 	// Voice turns and large ingests legitimately exceed the chat timeout:
 	// the first voice turn loads Whisper large-v3 into VRAM before the LLM
@@ -61,6 +71,7 @@ func main() {
 		Cfg:        cfg,
 		Store:      st,
 		Ollama:     ollamaClient,
+		LLM:        modelProvider,
 		Worker:     workerClient,
 		WorkerSlow: workerSlowClient,
 	})
@@ -77,6 +88,11 @@ func main() {
 	go func() {
 		log.Printf("ModelRig server %s listening on http://%s", config.Version, cfg.Addr())
 		log.Printf("  ollama upstream: %s", cfg.OllamaBaseURL)
+		if modelProvider.Name() == "ollama" {
+			log.Printf("  model provider: ollama")
+		} else {
+			log.Printf("  model provider: %s (%s)", modelProvider.Name(), cfg.LLMBaseURL)
+		}
 		log.Printf("  worker upstream: %s", cfg.WorkerBaseURL)
 		if cfg.IsLoopback() {
 			log.Printf("WARNING: bound to loopback (%s). Android/LAN clients CANNOT reach this.", cfg.ServerHost)
