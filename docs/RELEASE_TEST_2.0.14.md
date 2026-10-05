@@ -8,12 +8,14 @@ authority gates remain fail-closed unless their own evidence says otherwise.
 
 The release manifest must pin exact revisions. For this test release, use:
 
-- ModelRig: the exact commit tagged `v2.0.14` after the release-prep PR lands on `main`
-- BodyRig: `14dc1797ff328ca075ec70db656edab89e193b2c`
-- VisionRig: `7a3d2ec9d1d6ba2f05f85f22a35041e1e354a3e8`
-- VoiceRig: `308967d62d49fceb63f3f749234f422e40d92033`
+- ModelRig: the exact commit tagged `v2.0.14` after this final closure PR lands on `main`
+- BodyRig: `360844a5acf94876306447f2d86a7b22a487f4a8`
+- VisionRig: `66ea9bfce1c4d219e4bac1d85324a0e6e3f042e5`
+- VoiceRig: `9f3e594996db7eb2c6e035247ecb168bf17c1dae`
 
 Do not replace those external pins with floating branch names during qualification.
+
+`v2.0.14` is not a valid candidate until the final ModelRig merge commit has full CI/exact-head qualification and the release tag points to that exact commit. If any of the four pinned revisions changes, re-freeze and re-run the cross-repository software exact-green qualification before physical acceptance.
 
 ## What the GitHub release must contain
 
@@ -63,7 +65,7 @@ A release missing an expected asset is not a valid test candidate.
 
 Use the pinned VisionRig revision above.
 
-Verify health and the expected `PerceptionEvent/v3` contract before enabling the
+Verify health and the expected `PerceptionEvent/v4` contract before enabling the
 ModelRig bridge. Then test one bounded perception flow into ModelRig. VisionRig
 must not gain identity, durable-memory or action authority from the integration.
 
