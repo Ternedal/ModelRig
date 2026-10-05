@@ -112,7 +112,7 @@ physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
 production_activation=false
-summary.total=8
+summary.total=9
 ```
 
 Det særskilte automatiske signed-release-to-signed-release self-update-bevis

@@ -29,6 +29,7 @@
     },
     "appliance_interruption": {
       "performed": false,
+      "observed_at": "FILL_ME_ISO8601",
       "source_version": "FILL_ME",
       "observed_transaction_id": "FILL_ME",
       "observed_revision": 0,
@@ -51,6 +52,7 @@
     },
     "reboot": {
       "performed": false,
+      "observed_at": "FILL_ME_ISO8601",
       "ready": false,
       "ready_ms": null,
       "backend_version": "FILL_ME",
@@ -63,6 +65,7 @@
     },
     "supervisor_backend": {
       "performed": false,
+      "observed_at": "FILL_ME_ISO8601",
       "restarted": false,
       "ready": false,
       "restart_ms": null,
@@ -75,6 +78,7 @@
     },
     "supervisor_worker": {
       "performed": false,
+      "observed_at": "FILL_ME_ISO8601",
       "restarted": false,
       "ready": false,
       "restart_ms": null,

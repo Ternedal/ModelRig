@@ -8,6 +8,8 @@ from source_code import code_of  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = code_of(ROOT / '.github' / 'workflows' / 'exact-head-qualification.yml')
 
+assert 'push:' in WORKFLOW
+assert 'branches: [main]' in WORKFLOW
 assert 'concurrency:' in WORKFLOW
 assert 'group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}' in WORKFLOW
 assert 'cancel-in-progress: false' in WORKFLOW
