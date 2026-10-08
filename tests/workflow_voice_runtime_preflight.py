@@ -56,10 +56,9 @@ def assert_restricted_loopback() -> None:
 
 
 def assert_remote_contract() -> None:
-    def opener(request, timeout: int):
+    def opener(request):
         assert request.full_url == "http://127.0.0.1:8099/voice/asr/status"
         assert request.get_method() == "GET"
-        assert timeout == 4
         return Response(b'{"available":true,"device":"cuda"}')
 
     with patch.object(tool, "_open_worker_status", opener):
