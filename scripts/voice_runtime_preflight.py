@@ -90,55 +90,63 @@ def query_worker(base: str, path: str) -> dict:
 
 
 def assess(*, asr: dict | None, tts: dict | None, local_asr: bool,
-           local_piper: bool, error: str | None, executable: str) -> dict:
-    # The RUNNING worker is authority. A local package check is diagnostic only:
-    # the operator may have started this script from a different virtualenv.
+           local_piper: bool, errors: dict[str, str], executable: str) -> dict:
+    # The RUNNING worker is authority. An interpreter import is only diagnostic.
+    # Probe failures are different from a backend explicitly reporting 'false':
+    # never recommend an installation just because a status route returned 401/503.
     asr_ok = asr is not None and asr["available"] is True
     tts_ok = tts is not None and tts["available"] is True
     guidance: list[str] = []
-    if error:
-        guidance.append("Check that the worker is listening on 127.0.0.1:8099 (or pass --worker-url).")
-    else:
-        if not asr_ok:
-            if local_asr:
-                guidance.append(
-                    "ASR exists in the inspected Python, but NOT the running worker. "
-                    "Check the worker PID/interpreter and restart only that worker after verifying its environment."
-                )
-            else:
-                guidance.append(
-                    f'Install ASR in the WORKER virtualenv (not another Python): '
-                    f'"{executable}" -m pip install faster-whisper'
-                )
-        if not tts_ok:
-            if local_piper:
-                guidance.append(
-                    "Piper imports locally but running worker TTS is unavailable; "
-                    "check worker interpreter, VoiceRig selection and voice model configuration."
-                )
-            else:
-                guidance.append(
-                    f'For a Piper fallback, in the WORKER virtualenv: '
-                    f'"{executable}" -m pip install piper-tts'
-                )
-                guidance.append(
-                    "If using VoiceRig instead of Piper, verify its selected provider and running sidecar."
-                )
-        if asr_ok and tts_ok:
+    for name in ("asr", "tts"):
+        if name in errors:
             guidance.append(
-                "Dependencies are visible in the running worker. Next: run a REAL "
-                "WAV transcription and voice baseline; this probe never loads ASR/TTS models."
+                f"{name.upper()} status probe failed: {errors[name]}. "
+                "Check the worker listener, endpoint and logs before changing packages."
             )
+    if asr is not None and not asr_ok:
+        if local_asr:
+            guidance.append(
+                "ASR exists in the inspected Python, but NOT the running worker. "
+                "Check the worker PID/interpreter and restart only that worker "
+                "after verifying its environment."
+            )
+        else:
+            guidance.append(
+                f'Install ASR in the WORKER virtualenv (not another Python): '
+                f'"{executable}" -m pip install faster-whisper'
+            )
+    if tts is not None and not tts_ok:
+        if local_piper:
+            guidance.append(
+                "Piper imports locally but running worker TTS is unavailable; "
+                "check worker interpreter, VoiceRig selection and voice model configuration."
+            )
+        else:
+            guidance.append(
+                f'For a Piper fallback, in the WORKER virtualenv: '
+                f'"{executable}" -m pip install piper-tts'
+            )
+            guidance.append(
+                "If using VoiceRig instead of Piper, verify its selected provider and running sidecar."
+            )
+    if asr_ok and tts_ok and not errors:
+        guidance.append(
+            "Dependencies are visible in the running worker. Next: run a REAL "
+            "WAV transcription and voice baseline; this probe never loads ASR/TTS models."
+        )
     return {
         "schema": "kaliv-voice-runtime-preflight/v1",
-        "worker_reachable": error is None,
-        "worker_error": error,
+        # At least one valid status response proves the worker can answer us.
+        "worker_reachable": asr is not None or tts is not None,
+        "worker_error": "; ".join(f"{k}: {v}" for k, v in errors.items()) or None,
+        "worker_asr_probe_error": errors.get("asr"),
+        "worker_tts_probe_error": errors.get("tts"),
         "worker_asr_available": asr_ok,
         "worker_tts_available": tts_ok,
         "inspected_python": executable,
         "inspected_python_has_faster_whisper": local_asr,
         "inspected_python_has_piper": local_piper,
-        "ready_for_live_voice_smoke": error is None and asr_ok and tts_ok,
+        "ready_for_live_voice_smoke": not errors and asr_ok and tts_ok,
         "release_gate_satisfied": False,
         "production_activation": False,
         "next_steps": guidance,
@@ -155,17 +163,18 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
-    asr = tts = None
-    error = None
-    try:
-        asr = query_worker(base, ENDPOINTS["asr"])
-        tts = query_worker(base, ENDPOINTS["tts"])
-    except ValueError as exc:
-        error = str(exc)
+    status: dict[str, dict] = {}
+    errors: dict[str, str] = {}
+    for name, path in ENDPOINTS.items():
+        try:
+            status[name] = query_worker(base, path)
+        except ValueError as exc:
+            errors[name] = str(exc)
 
     verdict = assess(
-        asr=asr, tts=tts, local_asr=local_package("faster_whisper"),
-        local_piper=local_package("piper"), error=error,
+        asr=status.get("asr"), tts=status.get("tts"),
+        local_asr=local_package("faster_whisper"),
+        local_piper=local_package("piper"), errors=errors,
         executable=sys.executable,
     )
     if args.json:
