@@ -128,7 +128,7 @@ def assert_runtime_is_authority() -> None:
         local_asr=True, local_piper=False, errors={}, executable="python",
     )
     assert result["ready_for_live_voice_smoke"] is False
-    assert any("interpreter" in note for note in result["next_steps"])
+    assert any("NOT import-tested" in note and "worker" in note for note in result["next_steps"])
 
     result = tool.assess(
         asr=None, tts=None, local_asr=False, local_piper=False,
