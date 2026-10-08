@@ -72,7 +72,7 @@ production_activation=false. No evidence receipt or tag is generated.
 ## CI contract test
 
 ```powershell
-& $workerPython tests\workflow_voice_runtime_preflight.py
+& $diagnosticPython tests\workflow_voice_runtime_preflight.py
 ```
 
 CI's normal tests/workflow_*.py discovery runs this test without a rig.
