@@ -7,12 +7,13 @@ on:
     types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
 
-# Supersede obsolete PR-head qualification after a new synchronized head.
-# Preserve full exact-head validation for the CURRENT PR SHA; canceled older
-# runs are not authority. Push/main (including post-merge qualification) and
-# manual dispatch runs must NOT cancel one another.
+# Only PR runs share a group (per PR number) so newer immutable PR heads
+# supersede obsolete runs. Push/main and workflow_dispatch each use github.run_id
+# because GitHub silently replaces the *pending* member of a shared group even
+# when cancel-in-progress is false; distinct run IDs preserve queued main gates.
+# A canceled old PR run never qualifies a newer PR SHA.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
