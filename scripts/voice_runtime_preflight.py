@@ -11,6 +11,7 @@ sys.dont_write_bytecode = True
 
 import argparse
 import importlib.util
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -76,6 +77,8 @@ def query_worker(base: str, path: str) -> dict:
             raw = response.read(MAX_STATUS_BYTES + 1)
     except urllib.error.HTTPError as exc:
         raise ValueError(f"worker returned HTTP {exc.code}") from None
+    except http.client.HTTPException:
+        raise ValueError("worker returned a malformed HTTP response") from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise ValueError("worker is unreachable on the specified loopback port") from None
     if len(raw) > MAX_STATUS_BYTES:
