@@ -15,21 +15,23 @@ assert "pull_request:\n    types: [opened, synchronize, reopened, closed]" in WO
 assert "workflow_dispatch:" in WORKFLOW
 
 # Only the top-level exact-head workflow group may supersede previous PR heads.
-# Push/main and manual dispatch use the same group naming but are not canceled:
-# a late PR synchronization cannot cancel another PR or an exact-main-head run.
+# PR runs share their PR-number key to supersede old heads. Main and dispatch
+# use per-run IDs to avoid GitHub evicting a pending run within a shared group.
 match = re.search(
     r"(?ms)^concurrency:\n(?P<body>.*?)(?=^permissions:)", WORKFLOW
 )
 assert match is not None, "top-level exact-head concurrency must exist"
 group = match.group("body")
 assert (
-    "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+    "group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}"
     in group
-), "PRs must be isolated by number; push/main by ref"
+), "PRs must be grouped by number while main/dispatch are unique by run ID"
 assert (
     "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in group
 ), "obsolete PR runs must be superseded; main/dispatch must be preserved"
 assert "cancel-in-progress: false" not in group
+assert "github.run_id" in group, "main/dispatch queues need independent groups"
+assert "github.ref }}" not in group, "shared main ref would evict pending gates"
 
 # A canceled obsolete head has no authority over the new head. Retain exact
 # source checkout, all Stage-B shards, and merge-tree equivalence requirement.
