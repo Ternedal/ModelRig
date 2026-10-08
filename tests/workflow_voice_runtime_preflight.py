@@ -62,13 +62,13 @@ def assert_remote_contract() -> None:
         assert timeout == 4
         return Response(b'{"available":true,"device":"cuda"}')
 
-    with patch.object(tool.urllib.request, "urlopen", opener):
+    with patch.object(tool, "_open_worker_status", opener):
         assert tool.query_worker(
             "http://127.0.0.1:8099", "/voice/asr/status"
         )["available"] is True
 
     for invalid in (b'{"available":"yes"}', b"[]", b"{", b'{"ok":true}'):
-        with patch.object(tool.urllib.request, "urlopen", lambda *_args, **_kw: Response(invalid)):
+        with patch.object(tool, "_open_worker_status", lambda *_args, **_kw: Response(invalid)):
             try:
                 tool.query_worker("http://127.0.0.1:8099", "/voice/asr/status")
             except ValueError:
@@ -77,13 +77,41 @@ def assert_remote_contract() -> None:
                 raise AssertionError(f"invalid contract accepted: {invalid!r}")
 
     oversized = b"x" * (tool.MAX_STATUS_BYTES + 1)
-    with patch.object(tool.urllib.request, "urlopen", lambda *_args, **_kw: Response(oversized)):
+    with patch.object(tool, "_open_worker_status", lambda *_args, **_kw: Response(oversized)):
         try:
             tool.query_worker("http://127.0.0.1:8099", "/voice/asr/status")
         except ValueError as exc:
             assert "size limit" in str(exc)
         else:
             raise AssertionError("oversized status accepted")
+
+
+
+def assert_proxy_and_redirect_isolation() -> None:
+    """No proxy inheritance; deny even a redirect pointing to localhost."""
+    from unittest.mock import Mock
+
+    created = []
+    expected = Response(b'{"available":true}')
+    fake_opener = Mock()
+    fake_opener.open.return_value = expected
+
+    def fake_build_opener(*handlers):
+        created.extend(handlers)
+        return fake_opener
+
+    req = tool.urllib.request.Request("http://127.0.0.1:8099/voice/asr/status")
+    with patch.object(tool.urllib.request, "build_opener", fake_build_opener):
+        assert tool._open_worker_status(req) is expected
+
+    proxy = [h for h in created if isinstance(h, tool.urllib.request.ProxyHandler)]
+    redirect = [h for h in created if isinstance(h, tool._NoWorkerRedirect)]
+    assert len(proxy) == 1, "loopback probe must explicitly disable proxies"
+    assert proxy[0].proxies == {}, "proxy handler must ignore HTTP_PROXY"
+    assert len(redirect) == 1, "worker status probe must disable redirect following"
+    assert redirect[0].redirect_request(req, None, 302, "redirect", {}, "https://remote.invalid/") is None
+    assert redirect[0].redirect_request(req, None, 307, "redirect", {}, "http://127.0.0.1:8099/elsewhere") is None
+    fake_opener.open.assert_called_once_with(req, timeout=4)
 
 
 def assert_runtime_is_authority() -> None:
@@ -130,9 +158,10 @@ def assert_cli_contract() -> None:
 def main() -> None:
     assert_restricted_loopback()
     assert_remote_contract()
+    assert_proxy_and_redirect_isolation()
     assert_runtime_is_authority()
     assert_cli_contract()
-    print("voice runtime preflight: loopback/contract/runtime/CLI gates PASS")
+    print("voice runtime preflight: loopback/proxy/redirect/contract/runtime/CLI PASS")
 
 
 if __name__ == "__main__":
