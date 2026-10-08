@@ -205,6 +205,42 @@ def assert_malformed_http_status_is_isolated() -> None:
     assert not any("pip install faster-whisper" in note for note in report["next_steps"])
 
 
+
+def assert_spec_is_not_import_proof_or_install_authority() -> None:
+    """A found package spec is not an import success; script Python is not worker Python."""
+    other_python = r"C:\OtherPython\python.exe"
+    with patch.object(tool.importlib.util, "find_spec", return_value=object()):
+        assert tool.local_package("faster_whisper") is True
+    with patch.object(tool.importlib.util, "find_spec", return_value=None):
+        assert tool.local_package("piper") is False
+
+    discovered = tool.assess(
+        asr={"available": False}, tts={"available": False},
+        local_asr=True, local_piper=True, errors={}, executable=other_python,
+    )
+    notes = " ".join(discovered["next_steps"])
+    assert "NOT import-tested" in notes
+    assert "native dependency" in notes
+    assert other_python not in notes
+    assert discovered["inspected_python"] == other_python
+    assert discovered["inspected_python_faster_whisper_spec_found"] is True
+    assert discovered["inspected_python_piper_spec_found"] is True
+    assert "imports locally" not in notes
+    assert "restart only that worker" not in notes
+    assert discovered["ready_for_live_voice_smoke"] is False
+
+    missing = tool.assess(
+        asr={"available": False}, tts={"available": False},
+        local_asr=False, local_piper=False, errors={}, executable=other_python,
+    )
+    advice = " ".join(missing["next_steps"])
+    assert "pip install faster-whisper" in advice
+    assert "pip install piper-tts" in advice
+    assert "VERIFIED worker interpreter" in advice
+    assert other_python not in advice
+    assert missing["release_gate_satisfied"] is False
+
+
 def assert_cli_contract() -> None:
     with patch.object(tool, "query_worker", side_effect=[
         {"available": False}, {"available": True}
@@ -227,6 +263,7 @@ def main() -> None:
     assert_runtime_is_authority()
     assert_partial_probe_failure_is_not_total_worker_outage()
     assert_malformed_http_status_is_isolated()
+    assert_spec_is_not_import_proof_or_install_authority()
     assert_cli_contract()
     print("voice runtime preflight: loopback/proxy/redirect/contract/runtime/CLI PASS")
 
