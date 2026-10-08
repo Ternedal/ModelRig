@@ -117,7 +117,7 @@ def assert_runtime_is_authority() -> None:
     # Different local interpreter: remote-ready VoiceRig/Piper remains valid.
     result = tool.assess(
         asr={"available": True}, tts={"available": True},
-        local_asr=False, local_piper=False, error=None, executable="python",
+        local_asr=False, local_piper=False, errors={}, executable="python",
     )
     assert result["ready_for_live_voice_smoke"] is True
     assert result["release_gate_satisfied"] is False
@@ -125,18 +125,55 @@ def assert_runtime_is_authority() -> None:
 
     result = tool.assess(
         asr={"available": False}, tts={"available": True},
-        local_asr=True, local_piper=False, error=None, executable="python",
+        local_asr=True, local_piper=False, errors={}, executable="python",
     )
     assert result["ready_for_live_voice_smoke"] is False
     assert any("interpreter" in note for note in result["next_steps"])
 
     result = tool.assess(
         asr=None, tts=None, local_asr=False, local_piper=False,
-        error="worker unreachable", executable="python",
+        errors={"asr": "worker unreachable", "tts": "worker unreachable"}, executable="python",
     )
     assert result["ready_for_live_voice_smoke"] is False
     assert result["worker_reachable"] is False
     assert result["release_gate_satisfied"] is False
+
+
+
+def assert_partial_probe_failure_is_not_total_worker_outage() -> None:
+    """A healthy ASR endpoint must survive a failing TTS status route."""
+    partial = tool.assess(
+        asr={"available": True}, tts=None,
+        local_asr=False, local_piper=False,
+        errors={"tts": "worker returned HTTP 503"},
+        executable="python",
+    )
+    assert partial["worker_reachable"] is True
+    assert partial["worker_asr_available"] is True
+    assert partial["worker_tts_available"] is False
+    assert partial["worker_asr_probe_error"] is None
+    assert partial["worker_tts_probe_error"] == "worker returned HTTP 503"
+    assert partial["ready_for_live_voice_smoke"] is False
+    assert partial["release_gate_satisfied"] is False
+    assert not any("pip install" in step for step in partial["next_steps"])
+
+    # Both status routes must be queried, even when the first one fails.
+    def checker(base, path):
+        if path == tool.ENDPOINTS["asr"]:
+            raise ValueError("worker returned HTTP 401")
+        return {"available": True}
+    with patch.object(tool, "query_worker", checker), patch.object(
+        tool, "local_package", return_value=False
+    ):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            status = tool.main(["--json"])
+        report = json.loads(stdout.getvalue())
+    assert status == 1
+    assert report["worker_reachable"] is True
+    assert report["worker_asr_probe_error"] == "worker returned HTTP 401"
+    assert report["worker_tts_available"] is True
+    assert not any("pip install faster-whisper" in s for s in report["next_steps"])
 
 
 def assert_cli_contract() -> None:
@@ -159,6 +196,7 @@ def main() -> None:
     assert_remote_contract()
     assert_proxy_and_redirect_isolation()
     assert_runtime_is_authority()
+    assert_partial_probe_failure_is_not_total_worker_outage()
     assert_cli_contract()
     print("voice runtime preflight: loopback/proxy/redirect/contract/runtime/CLI PASS")
 
