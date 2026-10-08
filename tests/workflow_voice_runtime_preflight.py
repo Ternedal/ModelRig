@@ -176,6 +176,35 @@ def assert_partial_probe_failure_is_not_total_worker_outage() -> None:
     assert not any("pip install faster-whisper" in s for s in report["next_steps"])
 
 
+
+def assert_malformed_http_status_is_isolated() -> None:
+    """Real BadStatusLine exception must not abort JSON or hide the TTS probe."""
+    import http.client
+
+    with patch.object(
+        tool, "_open_worker_status",
+        side_effect=[
+            http.client.BadStatusLine("NOT_HTTP\\r\\n"),
+            Response(b'{"available":true,"voice":"local"}'),
+        ],
+    ), patch.object(tool, "local_package", return_value=False):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = tool.main(["--json"])
+
+    report = json.loads(output.getvalue())
+    assert exit_code == 1
+    assert report["worker_reachable"] is True
+    assert report["worker_asr_available"] is False
+    assert report["worker_tts_available"] is True
+    assert report["worker_asr_probe_error"] == "worker returned a malformed HTTP response"
+    assert report["worker_tts_probe_error"] is None
+    assert report["ready_for_live_voice_smoke"] is False
+    assert report["release_gate_satisfied"] is False
+    assert report["production_activation"] is False
+    assert not any("pip install faster-whisper" in note for note in report["next_steps"])
+
+
 def assert_cli_contract() -> None:
     with patch.object(tool, "query_worker", side_effect=[
         {"available": False}, {"available": True}
@@ -197,6 +226,7 @@ def main() -> None:
     assert_proxy_and_redirect_isolation()
     assert_runtime_is_authority()
     assert_partial_probe_failure_is_not_total_worker_outage()
+    assert_malformed_http_status_is_isolated()
     assert_cli_contract()
     print("voice runtime preflight: loopback/proxy/redirect/contract/runtime/CLI PASS")
 
