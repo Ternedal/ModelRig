@@ -49,12 +49,28 @@ def local_package(module: str) -> bool:
         return False
 
 
+class _NoWorkerRedirect(urllib.request.HTTPRedirectHandler):
+    """A loopback-only probe must not follow a worker-supplied Location header."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_worker_status(request: urllib.request.Request):
+    """Ignore proxy environment and block redirects, including to other hosts."""
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _NoWorkerRedirect(),
+    )
+    return opener.open(request, timeout=4)
+
+
 def query_worker(base: str, path: str) -> dict:
     request = urllib.request.Request(
         base + path, method="GET", headers={"Accept": "application/json"}
     )
     try:
-        with urllib.request.urlopen(request, timeout=4) as response:
+        with _open_worker_status(request) as response:
             if response.status != 200:
                 raise ValueError(f"worker returned HTTP {response.status}")
             raw = response.read(MAX_STATUS_BYTES + 1)
