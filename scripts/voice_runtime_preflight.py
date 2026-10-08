@@ -43,7 +43,7 @@ def worker_base(url: str) -> str:
 
 
 def local_package(module: str) -> bool:
-    """Inspect only this interpreter; never import CUDA/voice or load a model."""
+    """Discover a module spec only; this DOES NOT establish importability."""
     try:
         return importlib.util.find_spec(module) is not None
     except (ImportError, ValueError, AttributeError):
@@ -94,7 +94,7 @@ def query_worker(base: str, path: str) -> dict:
 
 def assess(*, asr: dict | None, tts: dict | None, local_asr: bool,
            local_piper: bool, errors: dict[str, str], executable: str) -> dict:
-    # The RUNNING worker is authority. An interpreter import is only diagnostic.
+    # The RUNNING worker is authority. find_spec only discovers a package, NOT importability.
     # Probe failures are different from a backend explicitly reporting 'false':
     # never recommend an installation just because a status route returned 401/503.
     asr_ok = asr is not None and asr["available"] is True
@@ -109,25 +109,32 @@ def assess(*, asr: dict | None, tts: dict | None, local_asr: bool,
     if asr is not None and not asr_ok:
         if local_asr:
             guidance.append(
-                "ASR exists in the inspected Python, but NOT the running worker. "
-                "Check the worker PID/interpreter and restart only that worker "
-                "after verifying its environment."
+                "faster_whisper module spec found in the inspected Python (NOT import-tested). "
+                "The running worker reports ASR unavailable. Read the worker import/native "
+                "dependency error and verify its PID, executable and environment before changing anything."
             )
         else:
             guidance.append(
-                f'Install ASR in the WORKER virtualenv (not another Python): '
-                f'"{executable}" -m pip install faster-whisper'
+                "ASR is unavailable in the running worker and faster_whisper was not found "
+                "in the separately inspected Python. First verify the running worker PID "
+                "and its actual interpreter; ONLY if missing there, use the VERIFIED "
+                "worker interpreter with -m pip install faster-whisper. "
+                "Do not install into the inspected Python unless it is independently verified."
             )
     if tts is not None and not tts_ok:
         if local_piper:
             guidance.append(
-                "Piper imports locally but running worker TTS is unavailable; "
-                "check worker interpreter, VoiceRig selection and voice model configuration."
+                "piper module spec found in the inspected Python (NOT import-tested), "
+                "but running worker TTS is unavailable. Check its import/native dependency logs, "
+                "actual interpreter, VoiceRig provider selection and voice model configuration."
             )
         else:
             guidance.append(
-                f'For a Piper fallback, in the WORKER virtualenv: '
-                f'"{executable}" -m pip install piper-tts'
+                "Piper was not found in the separately inspected Python; that alone does "
+                "not establish its absence from the worker. Check the selected TTS provider "
+                "and verify the worker PID/interpreter; ONLY if Piper fallback is selected "
+                "and missing there, use the VERIFIED worker interpreter with "
+                "-m pip install piper-tts."
             )
             guidance.append(
                 "If using VoiceRig instead of Piper, verify its selected provider and running sidecar."
@@ -147,8 +154,8 @@ def assess(*, asr: dict | None, tts: dict | None, local_asr: bool,
         "worker_asr_available": asr_ok,
         "worker_tts_available": tts_ok,
         "inspected_python": executable,
-        "inspected_python_has_faster_whisper": local_asr,
-        "inspected_python_has_piper": local_piper,
+        "inspected_python_faster_whisper_spec_found": local_asr,
+        "inspected_python_piper_spec_found": local_piper,
         "ready_for_live_voice_smoke": not errors and asr_ok and tts_ok,
         "release_gate_satisfied": False,
         "production_activation": False,
