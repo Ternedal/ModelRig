@@ -51,6 +51,8 @@ def opener(req):
 
 
 def git_ok(args, **_):
+    assert "--no-replace-objects" in args
+    assert "core.fsmonitor=false" in args
     if "--show-toplevel" in args:
         root = Path(args[args.index("-C") + 1]).resolve()
         return SimpleNamespace(returncode=0, stdout=str(root) + "\n")
@@ -59,10 +61,14 @@ def git_ok(args, **_):
     if "ls-tree" in args:
         assert "-r" in args and "-z" in args
         return SimpleNamespace(returncode=0, stdout=TREE_LINE)
-    assert "status" in args and "--porcelain" in args
-    assert "--no-optional-locks" in args
-    assert "core.fsmonitor=false" in args
-    return SimpleNamespace(returncode=0, stdout="")
+    assert "ls-files" in args and "-z" in args
+    if "--stage" in args:
+        return SimpleNamespace(
+            returncode=0,
+            stdout=("100644 " + VERSION_BLOB + " 0\tVERSION\0").encode("utf-8"),
+        )
+    assert "--others" in args and "--exclude-standard" in args
+    return SimpleNamespace(returncode=0, stdout=b"")
 
 
 def run():
@@ -103,12 +109,12 @@ for invalid in ("main", SHA.upper(), "a" * 39, SHA + "0"):
 
 with patch.object(tool.subprocess, "run", side_effect=git_ok):
     assert tool.checkout_identity(ROOT, "f" * 40)["status"] == "BLOCKED"
-def git_dirty(args, **kwargs):
-    if "status" in args:
-        return SimpleNamespace(returncode=0, stdout=" M worker/app/main_impl.py\n")
+def git_untracked(args, **kwargs):
+    if "ls-files" in args and "--others" in args:
+        return SimpleNamespace(returncode=0, stdout=b"unknown-file.txt\0")
     return git_ok(args, **kwargs)
 
-with patch.object(tool.subprocess, "run", side_effect=git_dirty):
+with patch.object(tool.subprocess, "run", side_effect=git_untracked):
     assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
 
 
@@ -140,7 +146,7 @@ docs = code_of(Path(__file__).resolve().parents[1] / "docs" / "KALIV_V1_RIG_SMOK
 assert "independently reviewed" in docs
 assert "$expectedModelRigSha = (git rev-parse HEAD)" not in docs
 assert "--expected-modelrig-sha $expectedModelRigSha" in docs
-assert "git -c core.fsmonitor=false --no-optional-locks status --short" in docs
+assert "git --no-replace-objects" in docs
 # Git index flags can hide changed source. An empty status is not proof
 # that the actual disk bytes match the exact HEAD tree.
 with tempfile.TemporaryDirectory() as td:
@@ -149,7 +155,7 @@ with tempfile.TemporaryDirectory() as td:
     with patch.object(tool.subprocess, "run", side_effect=git_ok):
         verdict = tool.checkout_identity(path, SHA)
     assert verdict["matches_expected"] is True
-    assert verdict["clean"] is True
+    assert verdict["clean"] is False
     assert verdict["tracked_bytes_match"] is False
     assert verdict["status"] == "BLOCKED"
 

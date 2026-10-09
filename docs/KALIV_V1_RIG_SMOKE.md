@@ -15,7 +15,7 @@ release candidate: even a stale/unauthorized clean checkout would self-match.
     # Paste the independent 40-hex ModelRig SHA from reviewed release evidence:
     $expectedModelRigSha = 'REPLACE_WITH_REVIEWED_40_HEX_MODELRIG_SHA'
     git rev-parse HEAD
-    git -c core.fsmonitor=false --no-optional-locks status --short
+    # No git status: it can execute local clean-filter commands.
     python scripts\kaliv_v1_rig_smoke.py --expected-modelrig-sha $expectedModelRigSha
 
 To test the frozen `C:\Rig\src\ModelRig` checkout **without copying a new
@@ -29,7 +29,11 @@ script compares HEAD and every tracked disk file with its committed blob SHA,
 not merely the index-visible status (which can hide changes via skip-worktree
 or assume-unchanged). The inspection targets the frozen checkout, **not** the
 inspector's draft worktree. Neither target tree nor Git index is written; status
-uses `git -c core.fsmonitor=false --no-optional-locks status`; HEAD and tracked bytes are rechecked after HTTP probes to detect ordinary checkout races. Never copy the draft script or its
+uses only `git --no-replace-objects` object and index listing commands, so
+replacement refs and configured clean-filter/fsmonitor hooks are never
+trusted or invoked. It compares HEAD, staged index entries, nonignored
+untracked paths and every HEAD blob against local bytes. Source identity is
+rechecked after HTTP probes to catch ordinary checkout races. Never copy the draft script or its
 voice helper into the frozen checkout, since that would dirty the very source
 we are verifying. The inspector remains **not part of qualified V1 code**, and
 its status verdict grants no release or physical acceptance authority.

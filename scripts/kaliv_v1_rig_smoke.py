@@ -47,59 +47,84 @@ def safe_root(root: Path) -> bool:
     return True
 
 
+def _git(root: Path, *args: str, text: bool = False):
+    """No replacement objects, fsmonitor hooks, index writes or shell commands."""
+    return subprocess.run(
+        ["git", "--no-replace-objects", "-C", str(root),
+         "-c", "core.fsmonitor=false", *args],
+        capture_output=True, text=text, timeout=20, check=False,
+    )
+
+
 def tracked_bytes_match(root: Path) -> bool:
-    """Verify all tracked HEAD blob bytes, not just the mutable Git index."""
+    """Verify the HEAD tree, staging index, nonignored extras and disk bytes.
+
+    git status may execute configured external clean filters or trust index
+    flags that hide changed files. Only read Git object/index listings and
+    hash disk bytes; no filters, hooks or mutable state are consulted.
+    """
     try:
-        tree = subprocess.run(
-            ["git", "-C", str(root), "ls-tree", "-r", "-z", "HEAD"],
-            capture_output=True, timeout=20, check=False,
-        )
+        tree = _git(root, "ls-tree", "-r", "-z", "HEAD")
+        index = _git(root, "ls-files", "--stage", "-z")
+        extras = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
     except (OSError, subprocess.TimeoutExpired):
         return False
-    if tree.returncode != 0 or not isinstance(tree.stdout, bytes):
+    if (tree.returncode or index.returncode or extras.returncode
+            or not isinstance(tree.stdout, bytes)
+            or not isinstance(index.stdout, bytes)
+            or not isinstance(extras.stdout, bytes) or extras.stdout):
         return False
-    records = [record for record in tree.stdout.split(b"\0") if record]
-    if not records:
+    index_blobs = {}
+    for entry in (x for x in index.stdout.split(b"\0") if x):
+        head, sep, filename = entry.partition(b"\t")
+        fields = head.split()
+        if not sep or len(fields) != 3 or fields[2] != b"0" or filename in index_blobs:
+            return False
+        index_blobs[filename] = (fields[0], fields[1])
+    records = [entry for entry in tree.stdout.split(b"\0") if entry]
+    if not records or len(records) != len(index_blobs):
         return False
+    seen = set()
     for record in records:
-        header, sep, raw_name = record.partition(b"\t")
+        header, sep, filename = record.partition(b"\t")
         fields = header.split()
         if not sep or len(fields) != 3 or fields[1] != b"blob":
             return False
         mode, _, expected_sha = fields
-        if mode not in (b"100644", b"100755", b"120000"):
+        if (mode not in (b"100644", b"100755", b"120000")
+                or filename in seen or index_blobs.get(filename) != (mode, expected_sha)):
             return False
+        seen.add(filename)
         try:
-            name = raw_name.decode("utf-8")
-            path = Path(name)
-            if not name or path.is_absolute() or ".." in path.parts:
+            path = Path(filename.decode("utf-8"))
+            if path.is_absolute() or ".." in path.parts or not path.parts:
                 return False
             local = root / path
             parent = root
-            for segment in path.parts[:-1]:
-                parent = parent / segment
+            for component in path.parts[:-1]:
+                parent = parent / component
                 if parent.is_symlink():
                     return False
             if mode == b"120000":
                 if not local.is_symlink():
                     return False
-                content = local.readlink().as_posix().encode("utf-8")
+                body = local.readlink().as_posix().encode("utf-8")
                 digest = hashlib.sha1(
-                    b"blob " + str(len(content)).encode("ascii") + b"\0" + content
+                    b"blob " + str(len(body)).encode("ascii") + b"\0" + body
                 ).hexdigest()
             else:
                 if local.is_symlink() or not local.is_file():
                     return False
                 size = local.stat().st_size
-                sha = hashlib.sha1()
-                sha.update(b"blob " + str(size).encode("ascii") + b"\0")
-                with local.open("rb") as reader:
+                hasher = hashlib.sha1()
+                hasher.update(b"blob " + str(size).encode("ascii") + b"\0")
+                with local.open("rb") as fd:
                     while True:
-                        block = reader.read(1024 * 1024)
+                        block = fd.read(1024 * 1024)
                         if not block:
                             break
-                        sha.update(block)
-                digest = sha.hexdigest()
+                        hasher.update(block)
+                digest = hasher.hexdigest()
             if digest != expected_sha.decode("ascii"):
                 return False
         except (OSError, UnicodeError, ValueError):
@@ -114,39 +139,27 @@ def checkout_identity(root: Path, expected_sha: str) -> dict:
         return {"status": "BLOCKED", "matches_expected": False,
                 "clean": False, "tracked_bytes_match": False}
     try:
-        toplevel = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5, check=False)
-        head = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5, check=False)
-        status = subprocess.run(
-            ["git", "-C", str(root), "-c", "core.fsmonitor=false",
-             "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal"],
-            capture_output=True, text=True, timeout=5, check=False)
+        toplevel = _git(root, "rev-parse", "--show-toplevel", text=True)
+        head = _git(root, "rev-parse", "HEAD", text=True)
     except (OSError, subprocess.TimeoutExpired):
         return {"status": "UNVERIFIED", "matches_expected": False,
                 "clean": False, "tracked_bytes_match": False}
-    valid = (toplevel.returncode == 0 and head.returncode == 0
-             and status.returncode == 0)
+    valid = toplevel.returncode == 0 and head.returncode == 0
     try:
         valid = valid and Path(toplevel.stdout.strip()).resolve() == root.resolve()
     except (OSError, ValueError):
         valid = False
     matched = bool(valid and head.stdout.strip() == expected_sha)
-    clean = bool(valid and not status.stdout.strip())
-    tracked = bool(matched and clean and tracked_bytes_match(root))
+    tracked = bool(matched and tracked_bytes_match(root))
     try:
-        end_head = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5, check=False)
-        stable = end_head.returncode == 0 and end_head.stdout.strip() == expected_sha
+        last_head = _git(root, "rev-parse", "HEAD", text=True)
+        stable = last_head.returncode == 0 and last_head.stdout.strip() == expected_sha
     except (OSError, subprocess.TimeoutExpired):
         stable = False
     verified = bool(tracked and stable and safe_root(root))
     return {"status": "PASS" if verified else "BLOCKED",
-            "matches_expected": bool(matched and stable), "clean": clean,
-            "tracked_bytes_match": bool(tracked and stable)}
+            "matches_expected": bool(matched and stable), "clean": verified,
+            "tracked_bytes_match": verified}
 
 
 def health(base: str, expected_service: str) -> dict:
