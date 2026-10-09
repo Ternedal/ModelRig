@@ -20,6 +20,18 @@ RESULT_SCHEMA = "kaliv-system/producer-file-inventory/v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_INDEX_BYTES = 1024 * 1024
 MAX_REPORT_BYTES = 2 * 1024 * 1024
+EXPECTED_PRODUCER_SCHEMAS = {
+    "software_exact_green": "kaliv-system/software-exact-green-verdict/v1",
+    "consciousness_live_lifecycle": "kaliv-consciousness-core/live-lifecycle-verdict/v1",
+    "visionrig_physical_perception": "visionrig/physical-perception-qualification/v2",
+    "voicerig_physical_acceptance": "kaliv-system/voicerig-physical-verdict/v1",
+    "bodyrig_photoreal_likeness": "kaliv-system/bodyrig-photoreal-verdict/v1",
+    "bodyrig_digital_twin_m6": "kaliv-system/bodyrig-digital-twin-m6-verdict/v1",
+    "bodyrig_android_live_body": "modelrig.kaliv-body.android-physical-gate/v1",
+    "end_to_end_latency": "kaliv-system/end-to-end-latency-verdict/v2",
+    "recovery_soak": "kaliv-recovery-soak-qualification/v1",
+    "repository_authority": "kaliv-system/repository-authority-verdict/v1",
+}
 
 
 class InventoryError(ValueError):
@@ -118,8 +130,8 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
         if digest != entry["sha256"]:
             raise InventoryError(f"{gate} report bytes do not match indexed SHA-256")
         report = _json_bytes(raw, f"{gate} source report")
-        if not isinstance(report.get("schema"), str) or not report["schema"]:
-            raise InventoryError(f"{gate} report schema missing")
+        if report.get("schema") != EXPECTED_PRODUCER_SCHEMAS[gate]:
+            raise InventoryError(f"{gate} source report schema mismatch")
         if gate == "visionrig_physical_perception":
             physical_gate = report.get("gate")
             if (not isinstance(physical_gate, dict)
