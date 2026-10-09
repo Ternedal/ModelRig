@@ -19,10 +19,23 @@ SPEC.loader.exec_module(audit)
 
 SHA = {"ModelRig": "1" * 40, "BodyRig": "2" * 40,
        "VisionRig": "3" * 40, "VoiceRig": "4" * 40}
+REPORT_UNSIGNED = {
+    "schema": "kaliv-system/software-exact-green-verdict/v1",
+    "state": "QUALIFIED",
+    "software_exact_green_gate_satisfied": True,
+    "release_gate_satisfied": False,
+    "production_activation": False,
+}
+REPORT_DIGEST = hashlib.sha256(
+    json.dumps(
+        REPORT_UNSIGNED, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True, allow_nan=False,
+    ).encode("utf-8")
+).hexdigest()
 REF = (
     "kaliv-software-exact-green:" + SHA["ModelRig"] + ":"
     + SHA["BodyRig"] + ":" + SHA["VisionRig"] + ":"
-    + SHA["VoiceRig"] + ":" + "a" * 64
+    + SHA["VoiceRig"] + ":" + REPORT_DIGEST
 )
 
 
@@ -58,14 +71,7 @@ def run_contract():
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         report_path = root / "producer.json"
-        report = {
-            "schema": "kaliv-system/software-exact-green-verdict/v1",
-            "state": "QUALIFIED",
-            "software_exact_green_gate_satisfied": True,
-            "release_evidence_ref": REF,
-            "release_gate_satisfied": False,
-            "production_activation": False,
-        }
+        report = dict(REPORT_UNSIGNED, release_evidence_ref=REF)
         def write_report(value):
             raw = (json.dumps(value, sort_keys=True) + "\n").encode()
             report_path.write_bytes(raw)
@@ -108,6 +114,14 @@ def run_contract():
         bad = copy.deepcopy(idx)
         bad["entries"] = []
         reject(m, bad, root, "declared PASS gates")
+
+        # A newly indexed hash over tampered bytes is not sufficient when
+        # the source verdict also has its own canonical ref digest.
+        bad_report = copy.deepcopy(report)
+        bad_report["schema"] = "kaliv-system/modified-verdict/v1"
+        bad_index = copy.deepcopy(idx)
+        bad_index["entries"][0]["sha256"] = write_report(bad_report)
+        reject(m, bad_index, root, "self-digest mismatch")
 
         bad_report = copy.deepcopy(report)
         bad_report["release_evidence_ref"] = REF[:-1] + "f"
