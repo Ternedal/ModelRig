@@ -76,6 +76,12 @@ def measured_midchain_shards(
     weighted_shards(files, measured, len(WORKER_SLOTS))
     if not SERIAL_DEEP_CONTRACTS.issubset(files):
         raise AssertionError("Stage-B required deep serial contracts missing")
+    # Any newly expensive >1800s contract would be unsafe on the unchanged
+    # 1800s default timeout in parallel shards. Re-measure/review explicitly,
+    # never silently route it through a shorter-bound worker.
+    observed_deep = {name for name in files if float(measured[name]) > 1800}
+    if observed_deep != SERIAL_DEEP_CONTRACTS:
+        raise AssertionError("Stage-B measured deep serial contract set changed; review required")
     if any(measured[name] <= 1800 for name in SERIAL_DEEP_CONTRACTS):
         raise AssertionError("Stage-B pinned serial contract costs changed unexpectedly")
 

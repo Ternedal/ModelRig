@@ -133,4 +133,7 @@ expect_failure(lambda: measured_midchain_shards(
     MIDCHAIN_CONTRACTS, {**MIDCHAIN_SECONDS,
                          next(iter(SERIAL_DEEP_CONTRACTS)): 0.1}),
     "deep-serial contract cannot silently become parallel")
+expect_failure(lambda: measured_midchain_shards(
+    MIDCHAIN_CONTRACTS, {**MIDCHAIN_SECONDS, MIDCHAIN_CONTRACTS[0]: 2000.0}),
+    "new >1800s contract cannot silently enter parallel/default-1800s shard")
 print("PASS: measured exact-main-head Stage-B midchain coverage + serial safety")
