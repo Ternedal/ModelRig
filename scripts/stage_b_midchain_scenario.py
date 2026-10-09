@@ -13,12 +13,24 @@ import ast
 import json
 import math
 from pathlib import Path
+from decimal import Decimal
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / "tests" / "support" / "rsi_pilot_exact_task_stage_b_midchain_driver.py"
 COSTS = ROOT / "tests" / "support" / "stage_b_midchain_timings_20261009.json"
 SOURCE_SHA = "0b2ff455116f4f28a1a41704d9cb81503f17d2df"
 GITHUB_JOBS = {"1": 113575752307, "2": 113575752249, "3": 113575752334}
+# Immutable observed tenths of a second, by canonical _CONTRACT_FILES order.
+# Transcribed from successful exact-head run 37845235363, jobs in GITHUB_JOBS.
+# This is an evidence-integrity check, NOT a calibrated speedup or CI authority.
+EXPECTED_OBSERVED_TENTHS = (
+    3161, 3172, 1608, 3256, 6, 1614,
+    3186, 3148, 1615, 3181, 3200, 1662,
+    3312, 3450, 1902, 4166, 4982, 4123,
+    11017, 20313, 4574, 11438, 11240, 6167,
+    11788, 11585, 6109, 11649, 11630, 6201,
+    11597, 26599, 6255, 11517, 11457, 6151,
+)
 # Current job shape, confirmed from the existing, qualified driver.
 CAPACITIES = (2, 1, 2)
 
@@ -63,6 +75,8 @@ def measured_costs(data: dict, files: tuple[str, ...]) -> dict[str, float]:
     observations = data.get("contract_timings")
     if not isinstance(observations, list) or len(observations) != len(files):
         raise ValueError("wrong timing record count")
+    if len(EXPECTED_OBSERVED_TENTHS) != len(files):
+        raise ValueError("pinned observations no longer match canonical contract count")
     result = {}
     for row in observations:
         if not isinstance(row, dict) or set(row) != {"file", "elapsed_seconds", "source_job_id"}:
@@ -73,6 +87,8 @@ def measured_costs(data: dict, files: tuple[str, ...]) -> dict[str, float]:
         if type(raw) not in (int, float) or not math.isfinite(raw) or raw <= 0:
             raise ValueError("timings must be positive finite seconds")
         canonical_index = files.index(name)
+        if Decimal(str(raw)) * 10 != EXPECTED_OBSERVED_TENTHS[canonical_index]:
+            raise ValueError("timing disagrees with pinned successful exact-head log observation")
         if job != GITHUB_JOBS[str(canonical_index % 3 + 1)]:
             raise ValueError("observation from wrong original shard")
         result[name] = float(raw)
