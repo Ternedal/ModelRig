@@ -2,6 +2,9 @@
 from __future__ import annotations
 import importlib.util
 import json
+import tempfile
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -118,4 +121,26 @@ assert "independently reviewed" in docs
 assert "$expectedModelRigSha = (git rev-parse HEAD)" not in docs
 assert "--expected-modelrig-sha $expectedModelRigSha" in docs
 assert "git --no-optional-locks status --short" in docs
+# A standalone PR worktree must be able to inspect the frozen V1 checkout
+# separately, without copying an untracked script into its clean Git tree.
+with tempfile.TemporaryDirectory() as temp_dir:
+    target = Path(temp_dir).resolve()
+    result = {"ready_for_real_voice_fixture_tests": True,
+              "release_gate_satisfied": False, "production_activation": False}
+    with patch.object(tool, "smoke", return_value=result) as run_probe:
+        with redirect_stdout(StringIO()):
+            assert tool.main(["--expected-modelrig-sha", SHA,
+                              "--checkout-root", str(target)]) == 0
+    assert run_probe.call_args.kwargs["root"] == target
+    assert run_probe.call_args.kwargs["expected_sha"] == SHA
+    with patch.object(tool, "smoke", side_effect=AssertionError("should not probe")):
+        try:
+            with redirect_stdout(StringIO()):
+                tool.main(["--expected-modelrig-sha", SHA,
+                           "--checkout-root", "relative/path"])
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("relative checkout root accepted")
+assert "--checkout-root" in docs
 print("kaliv V1 rig smoke contract PASS")

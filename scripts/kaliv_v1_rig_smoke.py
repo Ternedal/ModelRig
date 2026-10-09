@@ -101,12 +101,18 @@ def smoke(*, root: Path, expected_sha: str, backend_url: str, worker_url: str) -
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-modelrig-sha", required=True)
+    parser.add_argument("--checkout-root", type=Path, help="absolute path to a separate clean checkout to inspect (read-only)")
     parser.add_argument("--backend-url", default="http://127.0.0.1:8080")
     parser.add_argument("--worker-url", default="http://127.0.0.1:8099")
     args = parser.parse_args(argv)
+    root = args.checkout_root or Path(__file__).resolve().parents[1]
+    if args.checkout_root is not None and (
+        not root.is_absolute() or not root.is_dir() or root.is_symlink()
+    ):
+        parser.error("--checkout-root must name an existing absolute nonsymlink directory")
     try:
         report = smoke(
-            root=Path(__file__).resolve().parents[1],
+            root=root,
             expected_sha=args.expected_modelrig_sha,
             backend_url=args.backend_url, worker_url=args.worker_url)
     except ValueError as exc:

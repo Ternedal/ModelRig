@@ -18,6 +18,20 @@ release candidate: even a stale/unauthorized clean checkout would self-match.
     git --no-optional-locks status --short
     python scripts\kaliv_v1_rig_smoke.py --expected-modelrig-sha $expectedModelRigSha
 
+To test the frozen `C:\Rig\src\ModelRig` checkout **without copying a new
+script into that checkout**, launch this command from a separate local clone
+or worktree of draft PR #2101 (for example from its own checkout directory):
+
+    python scripts\kaliv_v1_rig_smoke.py --checkout-root 'C:\Rig\src\ModelRig' --expected-modelrig-sha $expectedModelRigSha
+
+`--checkout-root` must be an existing, absolute, non-symlink directory. The
+script checks Git HEAD and cleanliness of that target checkout, **not** the
+inspector's draft worktree. Neither target tree nor Git index is written; status
+uses `git --no-optional-locks status`. Never copy the draft script or its
+voice helper into the frozen checkout, since that would dirty the very source
+we are verifying. The inspector remains **not part of qualified V1 code**, and
+its status verdict grants no release or physical acceptance authority.
+
 The placeholder MUST be replaced with the lower-case SHA approved for the
 candidate currently under test. Never generate this expected value with
 `git rev-parse HEAD`, `git branch`, a mutable tag, or the running service.
