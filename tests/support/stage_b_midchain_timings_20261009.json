@@ -1,0 +1,193 @@
+{
+  "schema": "modelrig-stage-b-midchain-timings/v1",
+  "source_sha": "0b2ff455116f4f28a1a41704d9cb81503f17d2df",
+  "exact_head_run_id": 37845235363,
+  "github_jobs": {
+    "1": 113575752307,
+    "2": 113575752249,
+    "3": 113575752334
+  },
+  "contract_timings": [
+    {
+      "file": "rsi_pilot_exact_task_execution_plan_requirements_contract.py",
+      "elapsed_seconds": 316.1,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_development_task_binding_contract.py",
+      "elapsed_seconds": 317.2,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_development_task_binding_live_provenance_contract.py",
+      "elapsed_seconds": 160.8,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_executor_capability_live_guard_contract.py",
+      "elapsed_seconds": 325.6,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_executor_secret_custody_contract.py",
+      "elapsed_seconds": 0.6,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_executor_capability_semantics_contract.py",
+      "elapsed_seconds": 161.4,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_execution_plan_contract.py",
+      "elapsed_seconds": 318.6,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_prelaunch_reservation_contract.py",
+      "elapsed_seconds": 314.8,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_execution_transaction_contract.py",
+      "elapsed_seconds": 161.5,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_post_execution_evaluation_contract.py",
+      "elapsed_seconds": 318.1,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_local_commit_plan_contract.py",
+      "elapsed_seconds": 320,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_local_commit_object_identity_contract.py",
+      "elapsed_seconds": 166.2,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_local_commit_write_authorization_contract.py",
+      "elapsed_seconds": 331.2,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_local_commit_transaction_contract.py",
+      "elapsed_seconds": 345,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_post_commit_integration_evaluation_contract.py",
+      "elapsed_seconds": 190.2,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_integration_readiness_contract.py",
+      "elapsed_seconds": 416.6,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_remote_publication_plan_contract.py",
+      "elapsed_seconds": 498.2,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_remote_state_observation_contract.py",
+      "elapsed_seconds": 412.3,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_remote_publication_authorization_contract.py",
+      "elapsed_seconds": 1101.7,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_remote_publication_transaction_contract.py",
+      "elapsed_seconds": 2031.3,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_remote_publication_recovery_contract.py",
+      "elapsed_seconds": 457.4,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_post_publication_attestation_contract.py",
+      "elapsed_seconds": 1143.8,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_pr_lifecycle_authorization_contract.py",
+      "elapsed_seconds": 1124,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_pr_lifecycle_transaction_contract.py",
+      "elapsed_seconds": 616.7,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_pr_lifecycle_recovery_contract.py",
+      "elapsed_seconds": 1178.8,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_post_lifecycle_attestation_contract.py",
+      "elapsed_seconds": 1158.5,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_review_state_attestation_contract.py",
+      "elapsed_seconds": 610.9,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_merge_readiness_evaluation_contract.py",
+      "elapsed_seconds": 1164.9,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_merge_authorization_contract.py",
+      "elapsed_seconds": 1163,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_merge_transaction_contract.py",
+      "elapsed_seconds": 620.1,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_merge_recovery_contract.py",
+      "elapsed_seconds": 1159.7,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_post_merge_attestation_contract.py",
+      "elapsed_seconds": 2659.9,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_release_readiness_evaluation_contract.py",
+      "elapsed_seconds": 625.5,
+      "source_job_id": 113575752334
+    },
+    {
+      "file": "rsi_pilot_exact_task_release_plan_contract.py",
+      "elapsed_seconds": 1151.7,
+      "source_job_id": 113575752307
+    },
+    {
+      "file": "rsi_pilot_exact_task_release_state_observation_contract.py",
+      "elapsed_seconds": 1145.7,
+      "source_job_id": 113575752249
+    },
+    {
+      "file": "rsi_pilot_exact_task_release_authorization_contract.py",
+      "elapsed_seconds": 615.1,
+      "source_job_id": 113575752334
+    }
+  ],
+  "disclaimer": "Empirical wall seconds; not an execution authorization or performance guarantee."
+}
