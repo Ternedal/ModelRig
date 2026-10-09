@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 sys.dont_write_bytecode = True
 import argparse
+import hashlib
 import http.client
 import json
 import re
@@ -26,6 +27,66 @@ UNTESTED = (
 )
 
 
+def tracked_bytes_match(root: Path) -> bool:
+    """Verify all tracked HEAD blob bytes, not just the mutable Git index."""
+    try:
+        tree = subprocess.run(
+            ["git", "-C", str(root), "ls-tree", "-r", "-z", "HEAD"],
+            capture_output=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if tree.returncode != 0 or not isinstance(tree.stdout, bytes):
+        return False
+    records = [record for record in tree.stdout.split(b"\0") if record]
+    if not records:
+        return False
+    for record in records:
+        header, sep, raw_name = record.partition(b"\t")
+        fields = header.split()
+        if not sep or len(fields) != 3 or fields[1] != b"blob":
+            return False
+        mode, _, expected_sha = fields
+        if mode not in (b"100644", b"100755", b"120000"):
+            return False
+        try:
+            name = raw_name.decode("utf-8")
+            path = Path(name)
+            if not name or path.is_absolute() or ".." in path.parts:
+                return False
+            local = root / path
+            parent = root
+            for segment in path.parts[:-1]:
+                parent = parent / segment
+                if parent.is_symlink():
+                    return False
+            if mode == b"120000":
+                if not local.is_symlink():
+                    return False
+                content = local.readlink().as_posix().encode("utf-8")
+                digest = hashlib.sha1(
+                    b"blob " + str(len(content)).encode("ascii") + b"\0" + content
+                ).hexdigest()
+            else:
+                if local.is_symlink() or not local.is_file():
+                    return False
+                size = local.stat().st_size
+                sha = hashlib.sha1()
+                sha.update(b"blob " + str(size).encode("ascii") + b"\0")
+                with local.open("rb") as reader:
+                    while True:
+                        block = reader.read(1024 * 1024)
+                        if not block:
+                            break
+                        sha.update(block)
+                digest = sha.hexdigest()
+            if digest != expected_sha.decode("ascii"):
+                return False
+        except (OSError, UnicodeError, ValueError):
+            return False
+    return True
+
+
 def checkout_identity(root: Path, expected_sha: str) -> dict:
     if not SHA40.fullmatch(expected_sha):
         raise ValueError("expected ModelRig SHA must be lowercase 40-hex")
@@ -41,8 +102,10 @@ def checkout_identity(root: Path, expected_sha: str) -> dict:
     valid = head.returncode == 0 and status.returncode == 0
     match = valid and head.stdout.strip() == expected_sha
     clean = valid and not status.stdout.strip()
-    return {"status": "PASS" if match and clean else "BLOCKED",
-            "matches_expected": bool(match), "clean": bool(clean)}
+    tracked = bool(match and clean and tracked_bytes_match(root))
+    return {"status": "PASS" if tracked else "BLOCKED",
+            "matches_expected": bool(match), "clean": bool(clean),
+            "tracked_bytes_match": tracked}
 
 
 def health(base: str, expected_service: str) -> dict:
