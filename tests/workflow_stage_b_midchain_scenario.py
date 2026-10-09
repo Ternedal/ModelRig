@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests" / "support"))
+from source_code import code_of  # noqa: E402
 SCRIPT = ROOT / "scripts" / "stage_b_midchain_scenario.py"
 SPEC = importlib.util.spec_from_file_location("stage_b_midchain_scenario", SCRIPT)
 assert SPEC and SPEC.loader
 module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(module)
-driver_text = module.DRIVER.read_text(encoding="utf-8")
+driver_text = code_of(module.DRIVER)
 data = json.loads(module.COSTS.read_text(encoding="utf-8"))
 files = module.canonical_contracts(driver_text)
 assert len(files) == 36
@@ -61,6 +64,6 @@ fails(corrupt)
 fails(data, driver_text.replace("_CONTRACT_FILES[index - 1 :: total]", "ignored = []"))
 assert "_CONTRACT_FILES[index - 1 :: total]" in driver_text
 # The scenario must not become silent CI authority.
-assert "subprocess.run" not in SCRIPT.read_text(encoding="utf-8")
+assert "subprocess.run" not in code_of(SCRIPT)
 assert "_selected_contract_files()" in driver_text
 print("PASS: offline Stage-B observed-cost scenario, coverage and falsification tests")
