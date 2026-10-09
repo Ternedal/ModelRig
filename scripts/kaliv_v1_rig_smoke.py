@@ -62,7 +62,9 @@ def _git(root: Path, *args: str, text: bool = False):
     return subprocess.run(
         ["git", "--no-replace-objects", "-C", str(root),
          "-c", "core.fsmonitor=false", *args],
-        capture_output=True, text=text, timeout=20, check=False, env=env,
+        capture_output=True, text=text,
+        encoding="utf-8" if text else None, errors="strict" if text else None,
+        timeout=20, check=False, env=env,
     )
 
 
@@ -151,7 +153,7 @@ def checkout_identity(root: Path, expected_sha: str) -> dict:
     try:
         toplevel = _git(root, "rev-parse", "--show-toplevel", text=True)
         head = _git(root, "rev-parse", "HEAD", text=True)
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return {"status": "UNVERIFIED", "matches_expected": False,
                 "clean": False, "tracked_bytes_match": False}
     valid = toplevel.returncode == 0 and head.returncode == 0
@@ -164,7 +166,7 @@ def checkout_identity(root: Path, expected_sha: str) -> dict:
     try:
         last_head = _git(root, "rev-parse", "HEAD", text=True)
         stable = last_head.returncode == 0 and last_head.stdout.strip() == expected_sha
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         stable = False
     verified = bool(tracked and stable and safe_root(root))
     return {"status": "PASS" if verified else "BLOCKED",

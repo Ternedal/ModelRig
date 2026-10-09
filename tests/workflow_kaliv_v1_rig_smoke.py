@@ -54,6 +54,9 @@ def opener(req):
 def git_ok(args, **kw):
     assert "--no-replace-objects" in args
     assert "core.fsmonitor=false" in args
+    if kw.get("text"):
+        assert kw.get("encoding") == "utf-8"
+        assert kw.get("errors") == "strict"
     env = kw["env"]
     assert env["GIT_OPTIONAL_LOCKS"] == "0"
     assert not any(k.upper().startswith("GIT_") and k.upper() != "GIT_OPTIONAL_LOCKS" for k in env)
@@ -236,4 +239,26 @@ with patch.dict(os.environ, poison), patch.object(
 
 # The test must be present in the documented source contract, too.
 assert "GIT_INDEX_FILE" in docs
+# Non-ASCII Windows checkout roots must round-trip Git's UTF-8 paths,
+# independent of a legacy ANSI console/locale codepage.
+with tempfile.TemporaryDirectory() as td:
+    accented_root = Path(td).resolve() / "København-prøve-æøå"
+    accented_root.mkdir()
+    (accented_root / "VERSION").write_bytes(VERSION)
+    with patch.object(tool.subprocess, "run", side_effect=git_ok):
+        check = tool.checkout_identity(accented_root, SHA)
+    assert check["status"] == "PASS", check
+
+# A malformed UTF-8 Git pathname must fail closed as an unverified checkout,
+# not crash the smoke with an uncaught UnicodeDecodeError.
+def bad_utf8_git(args, **kwargs):
+    if "--show-toplevel" in args:
+        raise UnicodeDecodeError("utf-8", b"\\xff", 0, 1, "invalid start byte")
+    return git_ok(args, **kwargs)
+
+with patch.object(tool.subprocess, "run", side_effect=bad_utf8_git):
+    malformed = tool.checkout_identity(ROOT, SHA)
+assert malformed["status"] == "UNVERIFIED"
+assert malformed["clean"] is False
+
 print("kaliv V1 rig smoke contract PASS")
