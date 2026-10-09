@@ -41,6 +41,24 @@ assert driver._contract_timeout_seconds(
     "rsi_pilot_exact_task_post_merge_attestation_contract.py"
 ) == driver._TARGETED_DEEP_TIMEOUT_SECONDS == 3600
 
+# For every canonical contract, preserve its original per-file time budget
+# even when the experimental assignment moves it to a different shard.
+for new_shard in (1, 2, 3):
+    with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: f"{new_shard}/3"}):
+        for index, filename in enumerate(files):
+            original_timeout = (
+                3600 if filename in driver._TARGETED_DEEP_TIMEOUT_CONTRACTS
+                else 2400 if index % 3 == 1 else 1800
+            )
+            assert driver._contract_timeout_seconds(filename) == original_timeout
+
+# Without sharding, the default bound remains the original ordinary timeout.
+with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: ""}):
+    for filename in files:
+        assert driver._contract_timeout_seconds(filename) == (
+            3600 if filename in driver._TARGETED_DEEP_TIMEOUT_CONTRACTS else 1800
+        )
+
 for invalid in ("0/3", "4/3", "1/2", "wrong"):
     with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: invalid}):
         try:
