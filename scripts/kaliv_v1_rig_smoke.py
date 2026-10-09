@@ -203,7 +203,12 @@ def checkout_identity(root: Path, expected_sha: str) -> dict:
     except (OSError, ValueError):
         valid = False
     matched = bool(valid and head.stdout.strip() == expected_sha)
+    # A Windows same-size rewrite can preserve LastWriteTime and creation time.
+    # Metadata fingerprints cannot replace an independent second byte-level
+    # comparison with the authoritative HEAD tree.
     tracked = bool(matched and tracked_bytes_match(root))
+    if tracked:
+        tracked = tracked_bytes_match(root)
     try:
         last_head = _git(root, "rev-parse", "HEAD", text=True)
         stable = last_head.returncode == 0 and last_head.stdout.strip() == expected_sha

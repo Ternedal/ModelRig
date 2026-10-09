@@ -158,6 +158,29 @@ with tempfile.TemporaryDirectory() as td:
         assert tool.checkout_identity(altered_root, SHA)["status"] == "BLOCKED"
     assert late_tracked["untracked_scans"] == 2
 
+
+# On Windows a same-size rewrite can preserve the original timestamps and
+# file ID. A second actual byte-hash pass must catch a mutation that occurs
+# immediately after the first complete tree check.
+with tempfile.TemporaryDirectory() as td:
+    temp_root = Path(td).resolve()
+    physical_file = temp_root / "VERSION"
+    physical_file.write_bytes(VERSION)
+    two_pass_probe = {"tree_calls": 0}
+
+    def change_content_between_passes(args, **kwargs):
+        if "ls-tree" in args:
+            two_pass_probe["tree_calls"] += 1
+            if two_pass_probe["tree_calls"] == 2:
+                physical_file.write_bytes(b"X" * len(VERSION))
+        return git_ok(args, **kwargs)
+
+    with patch.object(tool.subprocess, "run", side_effect=change_content_between_passes):
+        outcome = tool.checkout_identity(temp_root, SHA)
+    assert outcome["status"] == "BLOCKED"
+    assert outcome["tracked_bytes_match"] is False
+    assert two_pass_probe["tree_calls"] == 2, "second full tree byte-hash pass was skipped"
+
 # Internal junction/reparse parents must be rejected, even when the root itself
 # is safe and the referenced tracked bytes match HEAD.
 with tempfile.TemporaryDirectory() as td:
