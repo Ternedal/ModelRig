@@ -32,6 +32,26 @@ EXPECTED_PRODUCER_SCHEMAS = {
     "recovery_soak": "kaliv-recovery-soak-qualification/v1",
     "repository_authority": "kaliv-system/repository-authority-verdict/v1",
 }
+REQUIRED_SUCCESS_MARKERS = {
+    "software_exact_green": ("software_exact_green_gate_satisfied", True),
+    "consciousness_live_lifecycle": ("consciousness_live_lifecycle_gate_satisfied", True),
+    "voicerig_physical_acceptance": ("voicerig_physical_acceptance_gate_satisfied", True),
+    "bodyrig_photoreal_likeness": ("bodyrig_photoreal_likeness_gate_satisfied", True),
+    "bodyrig_digital_twin_m6": ("bodyrig_digital_twin_m6_gate_satisfied", True),
+    "end_to_end_latency": ("end_to_end_latency_gate_satisfied", True),
+    "recovery_soak": ("qualified", True),
+    "repository_authority": ("repository_authority_gate_satisfied", True),
+    "bodyrig_android_live_body": ("status", "pass"),
+}
+REQUIRED_VERDICT_STATES = {
+    "software_exact_green": "QUALIFIED",
+    "consciousness_live_lifecycle": "QUALIFIED",
+    "voicerig_physical_acceptance": "QUALIFIED",
+    "bodyrig_photoreal_likeness": "QUALIFIED",
+    "bodyrig_digital_twin_m6": "QUALIFIED",
+    "end_to_end_latency": "MEASURED",
+    "repository_authority": "QUALIFIED",
+}
 
 
 class InventoryError(ValueError):
@@ -174,6 +194,16 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
             expected_digest = hashlib.sha256(canonical).hexdigest()
             if not expected_ref.endswith(":" + expected_digest):
                 raise InventoryError(f"{gate} source verdict self-digest mismatch")
+        if gate in REQUIRED_SUCCESS_MARKERS:
+            marker, expected = REQUIRED_SUCCESS_MARKERS[gate]
+            if report.get(marker) is not expected and report.get(marker) != expected:
+                raise InventoryError(f"{gate} source report lacks a successful producer marker")
+            # Avoid treating int(1) or string("true") as a true boolean.
+            if expected is True and report.get(marker) is not True:
+                raise InventoryError(f"{gate} source marker must be boolean true")
+        if gate in REQUIRED_VERDICT_STATES:
+            if report.get("state") != REQUIRED_VERDICT_STATES[gate]:
+                raise InventoryError(f"{gate} source verdict state is not qualified")
         observed.append({
             "gate": gate,
             "report_path": entry["report_path"],
