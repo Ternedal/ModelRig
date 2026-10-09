@@ -6,6 +6,11 @@
   "ollama": {
     "base_url": "http://127.0.0.1:11434"
   },
+  "llm": {
+    "provider": "ollama",
+    "base_url": "http://127.0.0.1:1337/v1",
+    "api_key": ""
+  },
   "worker": {
     "base_url": "http://127.0.0.1:8099"
   },

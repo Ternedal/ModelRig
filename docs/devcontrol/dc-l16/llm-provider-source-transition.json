@@ -1,0 +1,17 @@
+{
+  "schema": "kaliv-rsi-dc-l16-llm-provider-source-transition/v1",
+  "repository": "Ternedal/ModelRig",
+  "purpose": "Bind the Jan/OpenAI-compatible provider branch change to the selected backend source without attributing it to the earlier VisionRig transition.",
+  "tracked_source_transition": {
+    "path": "backend/internal/httpapi/server.go",
+    "from_git_blob_sha": "f9b646350c70900ec256387b7a7e544d2de3eb0b",
+    "to_git_blob_sha": "60bf48984fdc2ad40ee327a1be86ab1c34c84901"
+  },
+  "authority_state": {
+    "runtime_provider_selection_only": true,
+    "production_activation_authorized": false,
+    "merge_authorized": false,
+    "release_authorized": false,
+    "authority": "llm-provider-source-transition-only"
+  }
+}

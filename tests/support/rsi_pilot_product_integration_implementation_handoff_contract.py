@@ -28,6 +28,7 @@ HANDOFF = ROOT / "docs/devcontrol/dc-l16/product-integration-implementation-hand
 SCHEMA = ROOT / "devcontrol/schemas/rsi-pilot-product-integration-implementation-handoff-v1.schema.json"
 UI_HANDOFF = ROOT / "docs/devcontrol/dc-l16/product-ui-observer-handoff.json"
 SENSOR_CONTROL_HANDOFF = ROOT / "docs/devcontrol/dc-l16/visionrig-sensor-control-handoff.json"
+LLM_PROVIDER_HANDOFF = ROOT / "docs/devcontrol/dc-l16/llm-provider-source-transition.json"
 DESKTOP = ROOT / "desktop/composeApp/src/main/kotlin/dk/ternedal/modelrig/desktop/ControlCenterDialog.kt"
 ANDROID = ROOT / "android/app/src/main/java/dk/ternedal/modelrig/ui/ControlCenterScreen.kt"
 SERVER = ROOT / "backend/internal/httpapi/server.go"
@@ -81,8 +82,27 @@ def run_contract() -> None:
         successor_transition = successor["tracked_source_transition"]
         assert successor_transition["path"] == "backend/internal/httpapi/server.go"
         assert successor_transition["from_git_blob_sha"] == transition["to_git_blob_sha"]
-        assert successor_transition["to_git_blob_sha"] == server_sha
         run_sensor_control_handoff_contract()
+        if successor_transition["to_git_blob_sha"] == server_sha:
+            pass
+        else:
+            assert LLM_PROVIDER_HANDOFF.is_file()
+            llm_handoff = _load(LLM_PROVIDER_HANDOFF)
+            llm_transition = llm_handoff["tracked_source_transition"]
+            assert llm_handoff["schema"] == (
+                "kaliv-rsi-dc-l16-llm-provider-source-transition/v1"
+            )
+            assert llm_handoff["repository"] == "Ternedal/ModelRig"
+            assert llm_transition["path"] == "backend/internal/httpapi/server.go"
+            assert llm_transition["from_git_blob_sha"] == successor_transition["to_git_blob_sha"]
+            assert llm_transition["to_git_blob_sha"] == server_sha
+            assert llm_handoff["authority_state"] == {
+                "runtime_provider_selection_only": True,
+                "production_activation_authorized": False,
+                "merge_authorized": False,
+                "release_authorized": False,
+                "authority": "llm-provider-source-transition-only",
+            }
 
     new_files = handoff["new_product_files"]
     assert new_files == [
