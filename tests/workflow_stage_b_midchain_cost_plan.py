@@ -19,6 +19,19 @@ assert actual == plan.proposal(names, costs), "nondeterministic proposal"
 assignments = actual["proposed_shards"]
 assert sorted(name for shard in assignments for name in shard["contracts"]) == sorted(names)
 assert all(shard["contracts"] for shard in assignments)
+# Emitted contract order must equal modeled submission order, not be re-sorted
+# to canonical source order after bin assignment.
+assert any(
+    shard["contracts"] != sorted(shard["contracts"], key=names.index)
+    for shard in assignments
+)
+for shard in assignments:
+    expected_lanes = plan.lane_load(
+        tuple(shard["contracts"]), costs, shard["lanes"]
+    )
+    assert expected_lanes == shard["estimated_lane_seconds"], (
+        "emitted contract order disagrees with predicted lane schedule"
+    )
 assert assignments[1]["lanes"] == 1
 assert {n for n in names if costs[n] > plan.ORDINARY_TIMEOUT}.issubset(
     set(assignments[1]["contracts"])

@@ -126,8 +126,9 @@ def proposal(contracts: tuple[str, ...], costs: dict[str, float]) -> dict:
         members[dest].append(name)
         bins[dest][lane] += costs[name]
 
-    for shard in members:
-        shard.sort(key=idx.__getitem__)
+    # Preserve the actual descending-cost assignment order. The current
+    # Stage-B driver submits subprocesses in the returned contract order; a
+    # canonical sort here would invalidate the worker-slot load estimates.
     assigned = [name for shard in members for name in shard]
     if len(assigned) != len(contracts) or set(assigned) != set(contracts):
         raise ValueError("candidate shard plan lost or duplicated contracts")
