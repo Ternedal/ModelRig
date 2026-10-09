@@ -7,6 +7,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "tests" / "support"))
+from source_code import code_of  # noqa: E402
 import stage_b_midchain_plan as plan  # noqa: E402
 
 names = plan.driver_contracts(plan.DRIVER.read_text(encoding="utf-8"))
@@ -86,6 +88,6 @@ for value in (0, -2, "44", float("inf"), True):
 rejects(lambda: plan.driver_contracts("_CONTRACT_FILES = ('a.py', 'a.py')"))
 # Actual Stage-B execution remains the originally green three-way striding.
 # This analysis does not claim that a proposed mapping has been run or qualified.
-driver = plan.DRIVER.read_text(encoding="utf-8")
+driver = code_of(plan.DRIVER)
 assert "_CONTRACT_FILES[index - 1 :: total]" in driver
 print("PASS: isolated Stage-B measured cost planning, no runtime changes")
