@@ -120,7 +120,14 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
         report = _json_bytes(raw, f"{gate} source report")
         if not isinstance(report.get("schema"), str) or not report["schema"]:
             raise InventoryError(f"{gate} report schema missing")
-        if report.get("production_activation") is not False:
+        if gate == "visionrig_physical_perception":
+            physical_gate = report.get("gate")
+            if (not isinstance(physical_gate, dict)
+                    or physical_gate.get("passed") is not True
+                    or physical_gate.get("physical_perception_qualified") is not True
+                    or physical_gate.get("production_activation") is not False):
+                raise InventoryError("VisionRig report lacks successful non-activating physical gate")
+        elif report.get("production_activation") is not False:
             raise InventoryError(f"{gate} source report overclaims production authority")
         if report.get("release_gate_satisfied") is True:
             raise InventoryError(f"{gate} source report overclaims system release authority")
@@ -128,6 +135,26 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
         expected_ref = manifest["gates"][gate]["evidence_refs"][0]
         if report_ref != expected_ref:
             raise InventoryError(f"{gate} report ref differs from manifest ref")
+        # Recompute *self-contained verdict* hashes where the actual producer
+        # defines them that way. This is tamper detection, NOT source identity
+        # or proof of a real sensor, physical acceptance or human review.
+        if gate in {
+            "software_exact_green", "repository_authority",
+            "consciousness_live_lifecycle", "end_to_end_latency",
+            "visionrig_physical_perception", "bodyrig_android_live_body",
+        }:
+            key = "evidence_ref" if gate == "bodyrig_android_live_body" else "release_evidence_ref"
+            if key not in report:
+                raise InventoryError(f"{gate} canonical source ref field missing")
+            unsigned = dict(report)
+            unsigned.pop(key)
+            canonical = json.dumps(
+                unsigned, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=True, allow_nan=False,
+            ).encode("utf-8")
+            expected_digest = hashlib.sha256(canonical).hexdigest()
+            if not expected_ref.endswith(":" + expected_digest):
+                raise InventoryError(f"{gate} source verdict self-digest mismatch")
         # A claimed status is not physical provenance. Reject explicit failure.
         if report.get("state") in ("INVALID", "FAILED", "BLOCKED"):
             raise InventoryError(f"{gate} source report is not successful")
