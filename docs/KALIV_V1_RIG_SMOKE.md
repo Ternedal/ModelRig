@@ -15,7 +15,7 @@ release candidate: even a stale/unauthorized clean checkout would self-match.
     # Paste the independent 40-hex ModelRig SHA from reviewed release evidence:
     $expectedModelRigSha = 'REPLACE_WITH_REVIEWED_40_HEX_MODELRIG_SHA'
     git rev-parse HEAD
-    git --no-optional-locks status --short
+    git -c core.fsmonitor=false --no-optional-locks status --short
     python scripts\kaliv_v1_rig_smoke.py --expected-modelrig-sha $expectedModelRigSha
 
 To test the frozen `C:\Rig\src\ModelRig` checkout **without copying a new

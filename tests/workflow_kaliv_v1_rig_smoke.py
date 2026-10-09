@@ -3,12 +3,16 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import sys
 import tempfile
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "support"))
+from source_code import code_of  # noqa: E402
 
 SPEC = importlib.util.spec_from_file_location(
     "kaliv_v1_rig_smoke",
@@ -132,11 +136,11 @@ assert report["probes"]["backend"]["status"] == "BLOCKED"
 assert report["ready_for_real_voice_fixture_tests"] is False
 # Docs must bind against independently reviewed release evidence, NEVER self-authorize
 # a clean but wrong checkout by reading the expected SHA from its own HEAD.
-docs = (Path(__file__).resolve().parents[1] / "docs" / "KALIV_V1_RIG_SMOKE.md").read_text(encoding="utf-8")
+docs = code_of(Path(__file__).resolve().parents[1] / "docs" / "KALIV_V1_RIG_SMOKE.md")
 assert "independently reviewed" in docs
 assert "$expectedModelRigSha = (git rev-parse HEAD)" not in docs
 assert "--expected-modelrig-sha $expectedModelRigSha" in docs
-assert "git --no-optional-locks status --short" in docs
+assert "git -c core.fsmonitor=false --no-optional-locks status --short" in docs
 # Git index flags can hide changed source. An empty status is not proof
 # that the actual disk bytes match the exact HEAD tree.
 with tempfile.TemporaryDirectory() as td:
