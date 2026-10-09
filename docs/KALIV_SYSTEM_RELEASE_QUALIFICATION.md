@@ -4,6 +4,28 @@ _Documentation baseline: 2026-10-01 · V1 convergence requires exact repository 
 
 A green repository is not the same thing as a finished Kaliv system.
 
+> **V1 producer-evidence boundary — 2026-10-09:** A structurally
+> `QUALIFIED` system manifest is **not, by itself, proof** that the physical,
+> human-reviewed and administrative producer evidence exists. The current
+> `kaliv_system_release_gate.py` validates gate statuses, canonical ref
+> syntax and revision matches but does **not** re-open every referenced
+> receipt, independently recompute its SHA-256 or re-run each producer
+> qualifier. The assembler invokes that same structural validator.
+> **Never turn a hand-authored 64-hex digest or syntactically correct ref
+> into an asserted physical PASS.** The accepted release operator must
+> separately collect, hash-check and review the *real* producer artifacts
+> for all ten exact-SHA-bound gates before treating the manifest as
+> operational release authority. See
+> [#2111](https://github.com/Ternedal/ModelRig/issues/2111)
+> for the final-gate artifact-provenance hardening work and
+> [#2025](https://github.com/Ternedal/ModelRig/issues/2025)
+> for the current physical campaign.
+>
+> **Current frozen V1 status:** `software_exact_green=QUALIFIED`; the other
+> nine physical/admin gates are `PENDING`; `release_ready=false`;
+> `production_activation=false`. No release tag or promotion is authorized.
+
+
 `scripts/kaliv_system_release_gate.py` is the fail-closed final qualification
 boundary for a **cross-repository release candidate**. It binds the candidate to
 exact Git SHAs and requires evidence for the physical/runtime gates that normal CI
