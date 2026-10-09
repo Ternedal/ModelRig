@@ -24,12 +24,12 @@ or worktree of draft PR #2101 (for example from its own checkout directory):
 
     python scripts\kaliv_v1_rig_smoke.py --checkout-root 'C:\Rig\src\ModelRig' --expected-modelrig-sha $expectedModelRigSha
 
-`--checkout-root` must be an existing, absolute, non-symlink directory. The
+`--checkout-root` must be an existing absolute Git top-level directory, with no symlink, junction or Windows reparse ancestors. The
 script compares HEAD and every tracked disk file with its committed blob SHA,
 not merely the index-visible status (which can hide changes via skip-worktree
 or assume-unchanged). The inspection targets the frozen checkout, **not** the
 inspector's draft worktree. Neither target tree nor Git index is written; status
-uses `git --no-optional-locks status`. Never copy the draft script or its
+uses `git -c core.fsmonitor=false --no-optional-locks status`; HEAD and tracked bytes are rechecked after HTTP probes to detect ordinary checkout races. Never copy the draft script or its
 voice helper into the frozen checkout, since that would dirty the very source
 we are verifying. The inspector remains **not part of qualified V1 code**, and
 its status verdict grants no release or physical acceptance authority.

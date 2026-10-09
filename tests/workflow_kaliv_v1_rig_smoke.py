@@ -47,13 +47,17 @@ def opener(req):
 
 
 def git_ok(args, **_):
+    if "--show-toplevel" in args:
+        root = Path(args[args.index("-C") + 1]).resolve()
+        return SimpleNamespace(returncode=0, stdout=str(root) + "\n")
     if "rev-parse" in args:
         return SimpleNamespace(returncode=0, stdout=SHA + "\n")
     if "ls-tree" in args:
         assert "-r" in args and "-z" in args
         return SimpleNamespace(returncode=0, stdout=TREE_LINE)
     assert "status" in args and "--porcelain" in args
-    assert "--no-optional-locks" in args, "read-only git status must not refresh the index"
+    assert "--no-optional-locks" in args
+    assert "core.fsmonitor=false" in args
     return SimpleNamespace(returncode=0, stdout="")
 
 
@@ -95,9 +99,12 @@ for invalid in ("main", SHA.upper(), "a" * 39, SHA + "0"):
 
 with patch.object(tool.subprocess, "run", side_effect=git_ok):
     assert tool.checkout_identity(ROOT, "f" * 40)["status"] == "BLOCKED"
-with patch.object(tool.subprocess, "run", side_effect=[
-    SimpleNamespace(returncode=0, stdout=SHA + "\n"),
-    SimpleNamespace(returncode=0, stdout=" M worker/app/main_impl.py\n")]):
+def git_dirty(args, **kwargs):
+    if "status" in args:
+        return SimpleNamespace(returncode=0, stdout=" M worker/app/main_impl.py\n")
+    return git_ok(args, **kwargs)
+
+with patch.object(tool.subprocess, "run", side_effect=git_dirty):
     assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
 
 
@@ -142,12 +149,34 @@ with tempfile.TemporaryDirectory() as td:
     assert verdict["tracked_bytes_match"] is False
     assert verdict["status"] == "BLOCKED"
 
-with patch.object(tool.subprocess, "run", side_effect=[
-    SimpleNamespace(returncode=0, stdout=SHA + "\n"),
-    SimpleNamespace(returncode=0, stdout=""),
-    SimpleNamespace(returncode=0, stdout=b""),
-]):
+def git_empty_tree(args, **kwargs):
+    if "ls-tree" in args:
+        return SimpleNamespace(returncode=0, stdout=b"")
+    return git_ok(args, **kwargs)
+
+with patch.object(tool.subprocess, "run", side_effect=git_empty_tree):
     assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
+
+# A child directory is not the target Git repository root.
+def git_wrong_top(args, **kwargs):
+    if "--show-toplevel" in args:
+        return SimpleNamespace(returncode=0, stdout=str(ROOT.parent) + "\n")
+    return git_ok(args, **kwargs)
+
+with patch.object(tool.subprocess, "run", side_effect=git_wrong_top):
+    assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
+
+# The inspected checkout may change after the first proof but before HTTP GETs.
+with patch.object(tool, "checkout_identity", side_effect=[
+    {"status": "PASS"}, {"status": "BLOCKED"}
+]), patch.object(tool.voice, "_open_worker_status", opener):
+    assert run()["ready_for_real_voice_fixture_tests"] is False
+
+# An unsafe Windows reparse/junction path must be rejected before Git probes.
+with patch.object(tool, "safe_root", return_value=False):
+    with patch.object(tool.subprocess, "run", side_effect=AssertionError("no Git allowed")):
+        assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
+
 
 # A standalone PR worktree must be able to inspect the frozen V1 checkout
 # separately, without copying an untracked script into its clean Git tree.

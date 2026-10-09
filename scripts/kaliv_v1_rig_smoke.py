@@ -8,6 +8,7 @@ import hashlib
 import http.client
 import json
 import re
+import stat
 import subprocess
 import urllib.error
 import urllib.request
@@ -25,6 +26,25 @@ UNTESTED = (
     "consciousness_restart", "end_to_end_latency", "recovery_soak",
     "repository_authority",
 )
+
+
+def safe_root(root: Path) -> bool:
+    """Reject symlink and Windows junction/reparse checkout roots and ancestors."""
+    if not root.is_absolute() or not root.is_dir():
+        return False
+    try:
+        for component in (root, *root.parents):
+            if component.is_symlink():
+                return False
+            is_junction = getattr(component, "is_junction", None)
+            if is_junction is not None and is_junction():
+                return False
+            attrs = getattr(component.lstat(), "st_file_attributes", 0)
+            if attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+                return False
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def tracked_bytes_match(root: Path) -> bool:
@@ -90,22 +110,43 @@ def tracked_bytes_match(root: Path) -> bool:
 def checkout_identity(root: Path, expected_sha: str) -> dict:
     if not SHA40.fullmatch(expected_sha):
         raise ValueError("expected ModelRig SHA must be lowercase 40-hex")
+    if not safe_root(root):
+        return {"status": "BLOCKED", "matches_expected": False,
+                "clean": False, "tracked_bytes_match": False}
     try:
+        toplevel = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5, check=False)
         head = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=5, check=False)
         status = subprocess.run(
-            ["git", "-C", str(root), "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal"],
+            ["git", "-C", str(root), "-c", "core.fsmonitor=false",
+             "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal"],
             capture_output=True, text=True, timeout=5, check=False)
     except (OSError, subprocess.TimeoutExpired):
-        return {"status": "UNVERIFIED", "matches_expected": False, "clean": False}
-    valid = head.returncode == 0 and status.returncode == 0
-    match = valid and head.stdout.strip() == expected_sha
-    clean = valid and not status.stdout.strip()
-    tracked = bool(match and clean and tracked_bytes_match(root))
-    return {"status": "PASS" if tracked else "BLOCKED",
-            "matches_expected": bool(match), "clean": bool(clean),
-            "tracked_bytes_match": tracked}
+        return {"status": "UNVERIFIED", "matches_expected": False,
+                "clean": False, "tracked_bytes_match": False}
+    valid = (toplevel.returncode == 0 and head.returncode == 0
+             and status.returncode == 0)
+    try:
+        valid = valid and Path(toplevel.stdout.strip()).resolve() == root.resolve()
+    except (OSError, ValueError):
+        valid = False
+    matched = bool(valid and head.stdout.strip() == expected_sha)
+    clean = bool(valid and not status.stdout.strip())
+    tracked = bool(matched and clean and tracked_bytes_match(root))
+    try:
+        end_head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=False)
+        stable = end_head.returncode == 0 and end_head.stdout.strip() == expected_sha
+    except (OSError, subprocess.TimeoutExpired):
+        stable = False
+    verified = bool(tracked and stable and safe_root(root))
+    return {"status": "PASS" if verified else "BLOCKED",
+            "matches_expected": bool(matched and stable), "clean": clean,
+            "tracked_bytes_match": bool(tracked and stable)}
 
 
 def health(base: str, expected_service: str) -> dict:
@@ -144,13 +185,16 @@ def smoke(*, root: Path, expected_sha: str, backend_url: str, worker_url: str) -
     # Validate both URLs BEFORE issuing a request; no proxy, redirects or remote hosts.
     backend = voice.worker_base(backend_url)
     worker = voice.worker_base(worker_url)
-    source = checkout_identity(root, expected_sha)
+    before = checkout_identity(root, expected_sha)
     probes = {
         "backend": health(backend, "modelrig-server"),
         "worker": health(worker, "modelrig-worker"),
         "asr": availability(worker, voice.ENDPOINTS["asr"]),
         "tts": availability(worker, voice.ENDPOINTS["tts"]),
     }
+    source = checkout_identity(root, expected_sha)
+    if before["status"] != "PASS":
+        source = {**source, "status": "BLOCKED"}
     ready = source["status"] == "PASS" and all(
         item["status"] == "PASS" for item in probes.values())
     return {
@@ -169,10 +213,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--worker-url", default="http://127.0.0.1:8099")
     args = parser.parse_args(argv)
     root = args.checkout_root or Path(__file__).resolve().parents[1]
-    if args.checkout_root is not None and (
-        not root.is_absolute() or not root.is_dir() or root.is_symlink()
-    ):
-        parser.error("--checkout-root must name an existing absolute nonsymlink directory")
+    if not safe_root(root):
+        parser.error("--checkout-root must be absolute and free of symlinks, junctions and reparse ancestors")
     try:
         report = smoke(
             root=root,
