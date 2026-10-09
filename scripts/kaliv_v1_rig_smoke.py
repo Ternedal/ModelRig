@@ -141,7 +141,15 @@ def tracked_bytes_match(root: Path) -> bool:
                 return False
         except (OSError, UnicodeError, ValueError):
             return False
-    return True
+    # A file can be created while hashing thousands of tracked files.
+    # Repeat the untracked scan at the end, using read-only Git plumbing.
+    try:
+        final_extras = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return (final_extras.returncode == 0
+            and isinstance(final_extras.stdout, bytes)
+            and not final_extras.stdout)
 
 
 def checkout_identity(root: Path, expected_sha: str) -> dict:

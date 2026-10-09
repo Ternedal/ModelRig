@@ -125,6 +125,20 @@ with patch.object(tool.subprocess, "run", side_effect=git_untracked):
     assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
 
 
+# A late untracked file must be caught AFTER the lengthy tracked-byte scan.
+late_untracked = {"calls": 0}
+def git_untracked_after_hash(args, **kwargs):
+    if "ls-files" in args and "--others" in args:
+        late_untracked["calls"] += 1
+        if late_untracked["calls"] == 2:
+            return SimpleNamespace(returncode=0, stdout=b"late-file-during-hash.txt\0")
+    return git_ok(args, **kwargs)
+
+with patch.object(tool.subprocess, "run", side_effect=git_untracked_after_hash):
+    assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
+assert late_untracked["calls"] == 2, "must recheck extras after hashing"
+
+
 def no_asr(req):
     if req.full_url.endswith("/voice/asr/status"):
         return Response({"available": False})
