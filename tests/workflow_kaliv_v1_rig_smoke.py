@@ -139,6 +139,56 @@ with patch.object(tool.subprocess, "run", side_effect=git_untracked_after_hash):
 assert late_untracked["calls"] == 2, "must recheck extras after hashing"
 
 
+# A tracked file may be modified after it was hashed while remaining tracked
+# files are still being read. The final metadata snapshot must reject it.
+with tempfile.TemporaryDirectory() as td:
+    altered_root = Path(td).resolve()
+    tracked_version = altered_root / "VERSION"
+    tracked_version.write_bytes(VERSION)
+    late_tracked = {"untracked_scans": 0}
+
+    def git_change_tracked_after_hash(args, **kwargs):
+        if "ls-files" in args and "--others" in args:
+            late_tracked["untracked_scans"] += 1
+            if late_tracked["untracked_scans"] == 2:
+                tracked_version.write_bytes(b"modified while another tracked file was hashed")
+        return git_ok(args, **kwargs)
+
+    with patch.object(tool.subprocess, "run", side_effect=git_change_tracked_after_hash):
+        assert tool.checkout_identity(altered_root, SHA)["status"] == "BLOCKED"
+    assert late_tracked["untracked_scans"] == 2
+
+# Internal junction/reparse parents must be rejected, even when the root itself
+# is safe and the referenced tracked bytes match HEAD.
+with tempfile.TemporaryDirectory() as td:
+    tested_root = Path(td).resolve()
+    nested = tested_root / "nested"
+    nested.mkdir()
+    (nested / "VERSION").write_bytes(VERSION)
+
+    def git_nested(args, **kwargs):
+        if "ls-tree" in args:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(b"100644 blob " + VERSION_BLOB.encode("ascii")
+                        + b"\tnested/VERSION\0"))
+        if "ls-files" in args and "--stage" in args:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(b"100644 " + VERSION_BLOB.encode("ascii")
+                        + b" 0\tnested/VERSION\0"))
+        return git_ok(args, **kwargs)
+
+    real_safe_root = tool.safe_root
+    def simulated_junction(path):
+        return Path(path) != nested and real_safe_root(path)
+
+    with patch.object(tool.subprocess, "run", side_effect=git_nested), patch.object(
+        tool, "safe_root", side_effect=simulated_junction
+    ):
+        assert tool.checkout_identity(tested_root, SHA)["status"] == "BLOCKED"
+
+
 def no_asr(req):
     if req.full_url.endswith("/voice/asr/status"):
         return Response({"available": False})

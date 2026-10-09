@@ -68,6 +68,14 @@ def _git(root: Path, *args: str, text: bool = False):
     )
 
 
+def _file_fingerprint(path: Path) -> tuple[int, ...]:
+    """Stat identity to reject files rewritten during a long hash pass."""
+    info = path.lstat()
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns,
+            getattr(info, "st_file_attributes", 0))
+
+
 def tracked_bytes_match(root: Path) -> bool:
     """Verify the HEAD tree, staging index, nonignored extras and disk bytes.
 
@@ -97,6 +105,7 @@ def tracked_bytes_match(root: Path) -> bool:
     if not records or len(records) != len(index_blobs):
         return False
     seen = set()
+    snapshots: list[tuple[Path, tuple[int, ...]]] = []
     for record in records:
         header, sep, filename = record.partition(b"\t")
         fields = header.split()
@@ -115,8 +124,11 @@ def tracked_bytes_match(root: Path) -> bool:
             parent = root
             for component in path.parts[:-1]:
                 parent = parent / component
-                if parent.is_symlink():
+                # On Windows junctions/reparse points are not symlinks.
+                # Reject redirecting any tracked path outside the checkout.
+                if not safe_root(parent):
                     return False
+            before = _file_fingerprint(local)
             if mode == b"120000":
                 if not local.is_symlink():
                     return False
@@ -125,7 +137,9 @@ def tracked_bytes_match(root: Path) -> bool:
                     b"blob " + str(len(body)).encode("ascii") + b"\0" + body
                 ).hexdigest()
             else:
-                if local.is_symlink() or not local.is_file():
+                if (local.is_symlink() or not local.is_file()
+                        or not stat.S_ISREG(before[2])
+                        or before[-1] & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
                     return False
                 size = local.stat().st_size
                 hasher = hashlib.sha1()
@@ -139,6 +153,10 @@ def tracked_bytes_match(root: Path) -> bool:
                 digest = hasher.hexdigest()
             if digest != expected_sha.decode("ascii"):
                 return False
+            # Detect a mutation during the file's own hash as well.
+            if _file_fingerprint(local) != before:
+                return False
+            snapshots.append((local, before))
         except (OSError, UnicodeError, ValueError):
             return False
     # A file can be created while hashing thousands of tracked files.
@@ -147,9 +165,24 @@ def tracked_bytes_match(root: Path) -> bool:
         final_extras = _git(root, "ls-files", "--others", "--exclude-standard", "-z")
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return (final_extras.returncode == 0
-            and isinstance(final_extras.stdout, bytes)
-            and not final_extras.stdout)
+    if (final_extras.returncode != 0
+            or not isinstance(final_extras.stdout, bytes) or final_extras.stdout):
+        return False
+    # Revalidate earlier files: a process may have changed an already-hashed
+    # tracked file while later files were being inspected. Re-read the staged
+    # index too, to reject staged changes during this same observation.
+    try:
+        final_index = _git(root, "ls-files", "--stage", "-z")
+        if (final_index.returncode != 0
+                or not isinstance(final_index.stdout, bytes)
+                or final_index.stdout != index.stdout):
+            return False
+        for local, recorded in snapshots:
+            if not safe_root(local.parent) or _file_fingerprint(local) != recorded:
+                return False
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def checkout_identity(root: Path, expected_sha: str) -> dict:
