@@ -34,7 +34,7 @@ def checkout_identity(root: Path, expected_sha: str) -> dict:
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=5, check=False)
         status = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
+            ["git", "-C", str(root), "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal"],
             capture_output=True, text=True, timeout=5, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return {"status": "UNVERIFIED", "matches_expected": False, "clean": False}

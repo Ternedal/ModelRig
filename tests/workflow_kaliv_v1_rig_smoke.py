@@ -42,6 +42,7 @@ def git_ok(args, **_):
     if "rev-parse" in args:
         return SimpleNamespace(returncode=0, stdout=SHA + "\n")
     assert "status" in args and "--porcelain" in args
+    assert "--no-optional-locks" in args, "read-only git status must not refresh the index"
     return SimpleNamespace(returncode=0, stdout="")
 
 
@@ -110,4 +111,11 @@ with patch.object(tool.voice, "_open_worker_status", bad_backend), patch.object(
     report = run()
 assert report["probes"]["backend"]["status"] == "BLOCKED"
 assert report["ready_for_real_voice_fixture_tests"] is False
+# Docs must bind against independently reviewed release evidence, NEVER self-authorize
+# a clean but wrong checkout by reading the expected SHA from its own HEAD.
+docs = (Path(__file__).resolve().parents[1] / "docs" / "KALIV_V1_RIG_SMOKE.md").read_text(encoding="utf-8")
+assert "independently reviewed" in docs
+assert "$expectedModelRigSha = (git rev-parse HEAD)" not in docs
+assert "--expected-modelrig-sha $expectedModelRigSha" in docs
+assert "git --no-optional-locks status --short" in docs
 print("kaliv V1 rig smoke contract PASS")
