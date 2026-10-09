@@ -24,6 +24,9 @@ assert plan == balanced_midchain_shards(files)  # deterministic
 assert sorted(f for group in plan for f in group) == sorted(files)  # exhaustive
 assert _SERIAL_PINNED <= set(plan[1])
 assert tuple(len(group) for group in plan) == (16, 4, 16)
+# Regression: the execution order is the cost-planned sequence. Re-sorting
+# each shard to source order after scheduling would invalidate modeled loads.
+assert any(tuple(sorted(group, key=files.index)) != group for group in plan)
 # Exactly two deep >1800s contracts are pinned to the serial 2400s shard.
 assert all(COST_SECONDS[name] < driver._PER_CONTRACT_TIMEOUT_SECONDS for
            name in plan[0] + plan[2])

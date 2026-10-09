@@ -94,10 +94,10 @@ def balanced_midchain_shards(files) -> tuple[tuple[str, ...], ...]:
         groups[shard_index].append(filename)
         loads[shard_index][worker_index] += cost
 
-    result = tuple(
-        tuple(filename for filename in canonical if filename in set(group))
-        for group in groups
-    )
+    # ThreadPoolExecutor submits contracts in this exact returned order.
+    # Keep the planned worker-slot sequence instead of re-sorting it by
+    # canonical filename order (which would invalidate the cost model).
+    result = tuple(tuple(group) for group in groups)
     flattened = [filename for group in result for filename in group]
     if (len(flattened) != len(canonical) or set(flattened) != set(canonical)
             or any(not group for group in result)
