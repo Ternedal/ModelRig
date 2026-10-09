@@ -26,13 +26,16 @@ and the measured cost table, then deterministically assigns each once across
 three shards. Source order is preserved *within* each output shard.
 
 The two measured >1800s deep publication/post-merge contracts remain
-**pinned in shard 2**, which retains one worker, existing default 2400s
-per-contract timeout and the targeted 3600s post-merge limit. Shards 1 and 3
-retain their existing maximum two isolated-process workers and 1800s default
-limits. Existing downstream sharding is untouched.
+**pinned in shard 2**, which retains one worker. **Timeouts stay bound to
+the filename's original strided shard**, even when that filename moves:
+original shard-2 contracts retain 2400s, original shards 1/3 retain 1800s,
+and the explicit post-merge target retains 3600s. Shards 1 and 3 retain
+their existing maximum two isolated-process workers. Unsharded behavior and
+downstream partition are untouched.
 
-The planner minimizes a **simple estimated worker-slot makespan** based on
-one completed run, not true multi-resource runtime. It can get real performance
+The planner evaluates each candidate in the original canonical source order,
+which matches executor submission order, and minimizes a **simple estimated
+worker-slot makespan** based on one completed run, not true multi-resource runtime. It can get real performance
 wrong. Regression tests assert stable partitioning, full coverage, deep
 placement, worker counts, timeout expectations and stale/missing cost rejection.
 

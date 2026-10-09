@@ -113,9 +113,22 @@ def _contract_timeout_seconds(filename: str | None = None) -> int:
     if filename in _TARGETED_DEEP_TIMEOUT_CONTRACTS:
         return _TARGETED_DEEP_TIMEOUT_SECONDS
     shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
+    if not shard or filename is None:
+        # Unsharded runs remain 1800s by default. The header-only invocation
+        # keeps its old shard-2 display but has no contract authority.
+        return (
+            _DEEP_SHARD_TIMEOUT_SECONDS
+            if shard == "2/3"
+            else _PER_CONTRACT_TIMEOUT_SECONDS
+        )
+    # Preserve every filename's *original* strided-shard timeout even after
+    # measured balancing moves it to another shard. A formerly shard-2 file
+    # must not lose 2400s when dispatched on shard 1/3; conversely a formerly
+    # shard-1/3 file must not silently gain 2400s by moving to shard 2.
+    original_deep = filename in _CONTRACT_FILES[1::_REQUIRED_SHARD_COUNT]
     return (
         _DEEP_SHARD_TIMEOUT_SECONDS
-        if shard == "2/3"
+        if original_deep
         else _PER_CONTRACT_TIMEOUT_SECONDS
     )
 

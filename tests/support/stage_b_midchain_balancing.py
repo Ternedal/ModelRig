@@ -7,7 +7,7 @@ midchain-3 113575752334. One observation, NOT guaranteed future runtimes.
 
 Keep the two >1800s deep nested contracts alone in serial shard 2. Other
 contract costs are greedily packed onto the estimated currently least-busy
-worker slot in shards 1 and 3, with exact filename/contract-order ties.
+worker slot in shards 1 and 3, modeled in the canonical order actually submitted.
 Every original subprocess and timeout remains owned by the existing driver.
 """
 from __future__ import annotations
@@ -64,6 +64,28 @@ SERIAL_DEEP_CONTRACTS = frozenset({
 WORKER_SLOTS = (2, 1, 2)
 
 
+
+def modeled_midchain_makespans(
+    groups: list[list[str]] | tuple[tuple[str, ...], ...],
+    costs: dict[str, float],
+    canonical_files: tuple[str, ...],
+) -> tuple[float, float, float]:
+    """Predict per-shard completion using the driver's actual submission order.
+
+    This is a single-run cost heuristic, never actual CI runtime evidence.
+    """
+    if len(groups) != len(WORKER_SLOTS):
+        raise AssertionError("Stage-B modeled shard count changed")
+    index = {name: i for i, name in enumerate(canonical_files)}
+    totals = []
+    for group, slot_count in zip(groups, WORKER_SLOTS):
+        slots = [0.0] * slot_count
+        for filename in sorted(group, key=index.__getitem__):
+            earliest = min(range(slot_count), key=lambda pos: (slots[pos], pos))
+            slots[earliest] += float(costs[filename])
+        totals.append(max(slots))
+    return tuple(totals)  # type: ignore[return-value]
+
 def measured_midchain_shards(
     contract_files: tuple[str, ...],
     costs: dict[str, float] | None = None,
@@ -86,27 +108,26 @@ def measured_midchain_shards(
         raise AssertionError("Stage-B pinned serial contract costs changed unexpectedly")
 
     by_index = {name: i for i, name in enumerate(files)}
-    members = [[], [], []]
-    workers = [[0.0, 0.0], [0.0], [0.0, 0.0]]
+    members: list[list[str]] = [[], [], []]
     for name in sorted(SERIAL_DEEP_CONTRACTS, key=by_index.__getitem__):
         members[1].append(name)
-        workers[1][0] += float(measured[name])
 
     for name in sorted(
         (name for name in files if name not in SERIAL_DEEP_CONTRACTS),
         key=lambda value: (-float(measured[value]), by_index[value]),
     ):
-        # Predict the makespan if each candidate shard schedules the contract
-        # on its least-loaded worker, without creating any actual worker here.
+        # The driver submits each shard in CANONICAL source order. Its executor
+        # picks the earliest-free worker as each subprocess finishes, so every
+        # candidate MUST be scored after replaying that actual order. Estimating
+        # sorted-descending execution then restoring source order is unsound.
         candidates = []
-        for shard_index, load_slots in enumerate(workers):
-            least = min(range(len(load_slots)), key=lambda i: (load_slots[i], i))
-            predicted = max(
-                max(load_slots), load_slots[least] + float(measured[name]))
-            candidates.append((predicted, shard_index, least))
-        _predicted, shard_index, worker_index = min(candidates)
+        for shard_index in range(len(WORKER_SLOTS)):
+            trial = [list(group) for group in members]
+            trial[shard_index].append(name)
+            modeled = modeled_midchain_makespans(trial, measured, files)
+            candidates.append((max(modeled), sum(modeled), shard_index))
+        _max_seconds, _sum_seconds, shard_index = min(candidates)
         members[shard_index].append(name)
-        workers[shard_index][worker_index] += float(measured[name])
 
     for group in members:
         group.sort(key=by_index.__getitem__)

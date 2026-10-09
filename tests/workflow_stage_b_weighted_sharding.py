@@ -94,7 +94,7 @@ import os
 from unittest.mock import patch
 from stage_b_midchain_balancing import (
     MIDCHAIN_SECONDS, MEASURED_MAIN_SHA, MEASUREMENT_RUN_ID,
-    SERIAL_DEEP_CONTRACTS, measured_midchain_shards,
+    SERIAL_DEEP_CONTRACTS, measured_midchain_shards, modeled_midchain_makespans,
 )
 from rsi_pilot_exact_task_stage_b_midchain_driver import (
     _CONTRACT_FILES as MIDCHAIN_CONTRACTS,
@@ -118,8 +118,13 @@ for index in (1, 2, 3):
         assert _selected_contract_files() == proposal[index - 1]
         assert _worker_count(len(proposal[index - 1])) == (1 if index == 2 else 2)
         for filename in proposal[index - 1]:
-            if filename in SERIAL_DEEP_CONTRACTS:
-                assert _contract_timeout_seconds(filename) >= 2400
+            original_index = MIDCHAIN_CONTRACTS.index(filename)
+            expected_bound = 3600 if filename.endswith("post_merge_attestation_contract.py") else (
+                2400 if original_index % 3 == 1 else 1800
+            )
+            assert _contract_timeout_seconds(filename) == expected_bound, (
+                filename, index, _contract_timeout_seconds(filename), expected_bound
+            )
 with patch.dict(os.environ, {"MODELRIG_STAGE_B_CONTRACT_SHARD": ""}):
     assert _selected_contract_files() == MIDCHAIN_CONTRACTS
 expect_failure(lambda: measured_midchain_shards(
@@ -136,4 +141,11 @@ expect_failure(lambda: measured_midchain_shards(
 expect_failure(lambda: measured_midchain_shards(
     MIDCHAIN_CONTRACTS, {**MIDCHAIN_SECONDS, MIDCHAIN_CONTRACTS[0]: 2000.0}),
     "new >1800s contract cannot silently enter parallel/default-1800s shard")
+# The modeled load MUST be computed in the exact canonical file order
+# used by the executor, not in greedy cost-sorted assignment order.
+observed_model = modeled_midchain_makespans(proposal, MIDCHAIN_SECONDS, MIDCHAIN_CONTRACTS)
+assert len(observed_model) == 3 and all(seconds > 0 for seconds in observed_model)
+assert max(observed_model) < 11078.2, observed_model
+for group in proposal:
+    assert list(group) == sorted(group, key=MIDCHAIN_CONTRACTS.index)
 print("PASS: measured exact-main-head Stage-B midchain coverage + serial safety")
