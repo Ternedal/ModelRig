@@ -10,7 +10,13 @@ syntax, ten gate statuses and SHA bindings, but does not retrieve the producer
 reports. This tool closes **one narrower bookkeeping gap**: it checks that
 each gate declared PASS has a specific non-symlink local report whose exact
 bytes SHA-256 match the indexed hash, and that the report's evidence ref
-agrees with the manifest. An absent report is rejected. PASS and PENDING
+agrees with the manifest. For six self-content-addressed producer verdicts
+(software exact-green, repository authority, Consciousness, VisionRig,
+end-to-end latency and Android live body), it also independently recomputes
+the canonical SHA-256 of the verdict before its release ref was attached.
+A differently generated valid-looking report with the same old ref is
+therefore rejected. **Recomputation still does not authenticate the producer.**
+An absent report is rejected. PASS and PENDING
 gates must match the index exactly: no made-up extra entries.
 
 ## Important limitation
