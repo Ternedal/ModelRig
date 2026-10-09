@@ -15,6 +15,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from stage_b_midchain_balancing import measured_midchain_shards
+
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
@@ -23,6 +25,7 @@ _TARGETED_DEEP_TIMEOUT_SECONDS = 3600
 _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
     {"rsi_pilot_exact_task_post_merge_attestation_contract.py"}
 )
+# Weighted, pinned-heavy sharding is selected by stage_b_midchain_balancing.py.
 # These contracts are CPU-heavy nested provenance qualifications. Two workers are
 # useful for the ordinary shards, but shard 2/3 contains the publication/merge
 # tail where each contract recursively rebuilds most of ADR-034+. Running two of
@@ -91,7 +94,7 @@ def _selected_contract_files() -> tuple[str, ...]:
         raise AssertionError(
             f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
         )
-    selected = _CONTRACT_FILES[index - 1 :: total]
+    selected = measured_midchain_shards(_CONTRACT_FILES)[index - 1]
     if not selected:
         raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
     return selected
