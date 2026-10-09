@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import stage_b_midchain_plan as plan  # noqa: E402
 
 names = plan.driver_contracts(plan.DRIVER.read_text(encoding="utf-8"))
-data = json.loads(plan.EVIDENCE.read_text(encoding="utf-8"))
+data = json.loads(plan.EVIDENCE.read_text(encoding="utf-8"), object_pairs_hook=plan.unique_object_pairs)
 costs = plan.validated_costs(data, names)
 assert len(names) == 36
 assert len(costs) == 36
@@ -42,6 +42,24 @@ rejects(lambda: plan.validated_costs(missing, names))
 extra = copy.deepcopy(data)
 extra["cost_seconds"]["stale.py"] = 100
 rejects(lambda: plan.validated_costs(extra, names))
+# The JSON decoder itself must reject duplicate keys before Python dict
+# creation; otherwise the final value would silently overwrite evidence.
+for duplicate in (
+    '{"a": 1, "a": 2}',
+    '{"cost_seconds": {"contract.py": 1, "contract.py": 2}}',
+):
+    rejects(lambda duplicate=duplicate: json.loads(
+        duplicate, object_pairs_hook=plan.unique_object_pairs
+    ))
+for field, new_value in (
+    ("evidence_type", "synthetic"),
+    ("job_ids", {**data["job_ids"], "midchain-2": 123456789}),
+    ("driver_seconds", {**data["driver_seconds"], "midchain-2": 1.0}),
+    ("driver_seconds", {**data["driver_seconds"], "midchain-1": True}),
+):
+    changed = copy.deepcopy(data)
+    changed[field] = new_value
+    rejects(lambda changed=changed: plan.validated_costs(changed, names))
 wrong_ref = copy.deepcopy(data)
 wrong_ref["git_sha"] = "f" * 40
 rejects(lambda: plan.validated_costs(wrong_ref, names))

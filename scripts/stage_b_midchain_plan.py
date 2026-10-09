@@ -17,6 +17,28 @@ SOURCE_SHA = "0b2ff455116f4f28a1a41704d9cb81503f17d2df"
 LANES = (2, 1, 2)
 # Do not move observed >1800s contracts into the 1800s ordinary-shard bound.
 ORDINARY_TIMEOUT = 1800
+# Source-bound, independently observed passing GitHub job identities/durations.
+# These immutable checks are not a GitHub API verification or a release receipt.
+EXPECTED_JOB_IDS = {
+    "midchain-1": 113575752307,
+    "midchain-2": 113575752249,
+    "midchain-3": 113575752334,
+}
+EXPECTED_DRIVER_SECONDS = {
+    "midchain-1": 4520.7,
+    "midchain-2": 11078.2,
+    "midchain-3": 2591.8,
+}
+
+
+def unique_object_pairs(pairs: list[tuple[str, object]]) -> dict:
+    """Fail closed BEFORE json.loads collapses duplicate evidence keys."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON evidence key: {key}")
+        result[key] = value
+    return result
 
 
 def driver_contracts(source: str) -> tuple[str, ...]:
@@ -44,6 +66,20 @@ def validated_costs(payload: dict, contracts: tuple[str, ...]) -> dict[str, floa
     if (payload.get("workflow_run_id") != 37845235363
             or payload.get("completed_workflow_conclusion") != "success"):
         raise ValueError("measurement must come from the pinned successful run")
+    if payload.get("evidence_type") != "observed_single_run":
+        raise ValueError("unexpected Stage-B timing evidence type")
+    ids = payload.get("job_ids")
+    if (not isinstance(ids, dict) or set(ids) != set(EXPECTED_JOB_IDS)
+            or any(type(ids[k]) is not int or ids[k] != v
+                   for k, v in EXPECTED_JOB_IDS.items())):
+        raise ValueError("Stage-B timing job IDs are not the certified job IDs")
+    durations = payload.get("driver_seconds")
+    if (not isinstance(durations, dict)
+            or set(durations) != set(EXPECTED_DRIVER_SECONDS)
+            or any(type(durations[k]) not in (float, int)
+                   or not math.isfinite(durations[k]) or durations[k] != v
+                   for k, v in EXPECTED_DRIVER_SECONDS.items())):
+        raise ValueError("Stage-B observed driver timings differ from source jobs")
     raw = payload.get("cost_seconds")
     if not isinstance(raw, dict) or set(raw) != set(contracts):
         raise ValueError("measured contracts must match canonical driver exactly")
@@ -106,7 +142,7 @@ def proposal(contracts: tuple[str, ...], costs: dict[str, float]) -> dict:
         "production_activation": False,
         "source_sha": SOURCE_SHA,
         "source_run": 37845235363,
-        "observed_actual_driver_seconds": [4520.7, 11078.2, 2591.8],
+        "observed_actual_driver_seconds": [EXPECTED_DRIVER_SECONDS[f"midchain-{i}"] for i in range(1, 4)],
         "current_strided_estimated_max_seconds": max(
             max(lane_load(contracts[i::3], costs, LANES[i]))
             for i in range(3)
@@ -123,7 +159,7 @@ def proposal(contracts: tuple[str, ...], costs: dict[str, float]) -> dict:
 def main() -> int:
     try:
         canonical = driver_contracts(DRIVER.read_text(encoding="utf-8"))
-        raw = json.loads(EVIDENCE.read_text(encoding="utf-8"))
+        raw = json.loads(EVIDENCE.read_text(encoding="utf-8"), object_pairs_hook=unique_object_pairs)
         result = proposal(canonical, validated_costs(raw, canonical))
     except (ValueError, OSError, SyntaxError, json.JSONDecodeError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
