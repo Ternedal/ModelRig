@@ -31,7 +31,11 @@ or assume-unchanged). The inspection targets the frozen checkout, **not** the
 inspector's draft worktree. Neither target tree nor Git index is written; status
 uses only `git --no-replace-objects` object and index listing commands, so
 replacement refs and configured clean-filter/fsmonitor hooks are never
-trusted or invoked. It compares HEAD, staged index entries, nonignored
+trusted or invoked. It also strips inherited Git overrides (including
+`GIT_INDEX_FILE`, `GIT_DIR`, `GIT_WORK_TREE`, and `GIT_CONFIG_*`) for
+every subprocess, so an alternate index or worktree cannot masquerade as the
+inspected checkout. Git optional locks are disabled. It compares HEAD,
+staged index entries, nonignored
 untracked paths and every HEAD blob against local bytes. Source identity is
 rechecked after HTTP probes to catch ordinary checkout races. Never copy the draft script or its
 voice helper into the frozen checkout, since that would dirty the very source

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import http.client
 import json
+import os
 import re
 import stat
 import subprocess
@@ -48,11 +49,20 @@ def safe_root(root: Path) -> bool:
 
 
 def _git(root: Path, *args: str, text: bool = False):
-    """No replacement objects, fsmonitor hooks, index writes or shell commands."""
+    """Use a sanitized Git environment, never an operator's alternate index.
+
+    GIT_INDEX_FILE / GIT_DIR / GIT_WORK_TREE / GIT_CONFIG_* and related
+    variables otherwise override the inspected checkout even with -C root.
+    Inherit only non-GIT variables needed for Git executable discovery and
+    Windows runtime startup; force optional locks off for read-only listing.
+    """
+    env = {key: value for key, value in os.environ.items()
+           if not key.upper().startswith("GIT_")}
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     return subprocess.run(
         ["git", "--no-replace-objects", "-C", str(root),
          "-c", "core.fsmonitor=false", *args],
-        capture_output=True, text=text, timeout=20, check=False,
+        capture_output=True, text=text, timeout=20, check=False, env=env,
     )
 
 

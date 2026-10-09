@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -50,9 +51,12 @@ def opener(req):
     raise AssertionError("unexpected route")
 
 
-def git_ok(args, **_):
+def git_ok(args, **kw):
     assert "--no-replace-objects" in args
     assert "core.fsmonitor=false" in args
+    env = kw["env"]
+    assert env["GIT_OPTIONAL_LOCKS"] == "0"
+    assert not any(k.upper().startswith("GIT_") and k.upper() != "GIT_OPTIONAL_LOCKS" for k in env)
     if "--show-toplevel" in args:
         root = Path(args[args.index("-C") + 1]).resolve()
         return SimpleNamespace(returncode=0, stdout=str(root) + "\n")
@@ -210,4 +214,26 @@ with tempfile.TemporaryDirectory() as temp_dir:
         else:
             raise AssertionError("relative checkout root accepted")
 assert "--checkout-root" in docs
+
+# An inherited alternate index, checkout path or config must NEVER redirect
+# any Git query away from the approved --checkout-root.
+poison = {
+    "GIT_INDEX_FILE": "C:/other/forged.index",
+    "GIT_DIR": "C:/other/.git",
+    "GIT_WORK_TREE": "C:/other",
+    "GIT_COMMON_DIR": "C:/other/.git",
+    "GIT_OBJECT_DIRECTORY": "C:/other/objects",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES": "C:/other/alt",
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.fsmonitor",
+    "GIT_CONFIG_VALUE_0": "fake-command",
+    "git_index_file": "C:/other/lowercase.index",
+}
+with patch.dict(os.environ, poison), patch.object(
+    tool.subprocess, "run", side_effect=git_ok
+):
+    assert tool.checkout_identity(ROOT, SHA)["status"] == "PASS"
+
+# The test must be present in the documented source contract, too.
+assert "GIT_INDEX_FILE" in docs
 print("kaliv V1 rig smoke contract PASS")
