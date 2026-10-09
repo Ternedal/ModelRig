@@ -1,0 +1,113 @@
+"""Fail-closed, network-free tests of the opt-in V1 rig smoke."""
+from __future__ import annotations
+import importlib.util
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+SPEC = importlib.util.spec_from_file_location(
+    "kaliv_v1_rig_smoke",
+    Path(__file__).resolve().parents[1] / "scripts" / "kaliv_v1_rig_smoke.py")
+assert SPEC and SPEC.loader
+tool = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(tool)
+SHA = "0b2ff455116f4f28a1a41704d9cb81503f17d2df"
+
+
+class Response:
+    status = 200
+    def __init__(self, value):
+        self.data = json.dumps(value).encode("utf-8")
+    def __enter__(self):
+        return self
+    def __exit__(self, *_):
+        return False
+    def read(self, size):
+        return self.data[:size]
+
+
+def opener(req):
+    assert req.get_method() == "GET"
+    assert req.full_url.startswith(("http://127.0.0.1:8080/", "http://127.0.0.1:8099/"))
+    if req.full_url.endswith("/healthz"):
+        return Response({"status": "ok", "service":
+                         "modelrig-server" if ":8080/" in req.full_url else "modelrig-worker"})
+    if req.full_url.endswith(("/voice/asr/status", "/voice/tts/status")):
+        return Response({"available": True})
+    raise AssertionError("unexpected route")
+
+
+def git_ok(args, **_):
+    if "rev-parse" in args:
+        return SimpleNamespace(returncode=0, stdout=SHA + "\n")
+    assert "status" in args and "--porcelain" in args
+    return SimpleNamespace(returncode=0, stdout="")
+
+
+def run():
+    return tool.smoke(root=Path("."), expected_sha=SHA,
+                      backend_url="http://127.0.0.1:8080",
+                      worker_url="http://127.0.0.1:8099")
+
+
+with patch.object(tool.voice, "_open_worker_status", opener), patch.object(
+    tool.subprocess, "run", side_effect=git_ok):
+    report = run()
+assert report["source"]["status"] == "PASS"
+assert report["ready_for_real_voice_fixture_tests"] is True
+assert all(v["status"] == "PASS" for v in report["probes"].values())
+assert all(v == "NOT_TESTED" for v in report["physical_gates"].values())
+assert report["release_gate_satisfied"] is False
+assert report["production_activation"] is False
+
+for unsafe in ("https://127.0.0.1:8099", "http://example.org:8099",
+               "http://127.0.0.1:8099/extra",
+               "http://user:password@127.0.0.1:8099"):
+    try:
+        tool.smoke(root=Path("."), expected_sha=SHA,
+                   backend_url="http://127.0.0.1:8080", worker_url=unsafe)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unsafe remote/redirect-capable URL accepted")
+
+for invalid in ("main", SHA.upper(), "a" * 39, SHA + "0"):
+    try:
+        tool.checkout_identity(Path("."), invalid)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("mutable/noncanonical SHA accepted")
+
+with patch.object(tool.subprocess, "run", side_effect=git_ok):
+    assert tool.checkout_identity(Path("."), "f" * 40)["status"] == "BLOCKED"
+with patch.object(tool.subprocess, "run", side_effect=[
+    SimpleNamespace(returncode=0, stdout=SHA + "\n"),
+    SimpleNamespace(returncode=0, stdout=" M worker/app/main_impl.py\n")]):
+    assert tool.checkout_identity(Path("."), SHA)["status"] == "BLOCKED"
+
+
+def no_asr(req):
+    if req.full_url.endswith("/voice/asr/status"):
+        return Response({"available": False})
+    return opener(req)
+
+with patch.object(tool.voice, "_open_worker_status", no_asr), patch.object(
+    tool.subprocess, "run", side_effect=git_ok):
+    report = run()
+assert report["probes"]["asr"] == {"status": "BLOCKED", "available": False}
+assert report["ready_for_real_voice_fixture_tests"] is False
+
+
+def bad_backend(req):
+    if ":8080/" in req.full_url:
+        return Response({"status": "ok", "service": "unknown"})
+    return opener(req)
+
+with patch.object(tool.voice, "_open_worker_status", bad_backend), patch.object(
+    tool.subprocess, "run", side_effect=git_ok):
+    report = run()
+assert report["probes"]["backend"]["status"] == "BLOCKED"
+assert report["ready_for_real_voice_fixture_tests"] is False
+print("kaliv V1 rig smoke contract PASS")
