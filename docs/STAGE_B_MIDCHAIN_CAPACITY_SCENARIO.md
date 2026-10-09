@@ -8,7 +8,13 @@ cache identity, branch protection or release evidence.
 - Actual midchain job IDs: `113575752307`, `113575752249`, `113575752334`.
 - 36 per-contract elapsed observations transcribed directly from these three
   green GitHub Actions job logs into `tests/support/stage_b_midchain_timings_20261009.json`.
-- Costs, SHA and original shard provenance are all validated fail-closed.
+- SHA, original shard provenance and **all 36 exact observed cost values** are
+  checked against immutable tenths-of-seconds pins in the scenario script.
+  Editing a plausible positive elapsed value in the JSON will fail the analysis;
+  updating observations requires independently rechecking the three cited
+  qualified job logs and explicitly updating the pins and regression tests.
+  These pins protect against accidental fixture drift; they do **not** turn
+  transcribed logs into a cryptographically signed source attestation.
 
 Run from repository root with Python 3.11+:
 
