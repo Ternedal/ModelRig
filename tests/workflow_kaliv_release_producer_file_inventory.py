@@ -118,10 +118,16 @@ def run_contract():
         # A newly indexed hash over tampered bytes is not sufficient when
         # the source verdict also has its own canonical ref digest.
         bad_report = copy.deepcopy(report)
-        bad_report["schema"] = "kaliv-system/modified-verdict/v1"
+        bad_report["software_exact_green_gate_satisfied"] = False
         bad_index = copy.deepcopy(idx)
         bad_index["entries"][0]["sha256"] = write_report(bad_report)
         reject(m, bad_index, root, "self-digest mismatch")
+
+        bad_report = copy.deepcopy(report)
+        bad_report["schema"] = "kaliv-system/modified-verdict/v1"
+        bad_index = copy.deepcopy(idx)
+        bad_index["entries"][0]["sha256"] = write_report(bad_report)
+        reject(m, bad_index, root, "source report schema mismatch")
 
         bad_report = copy.deepcopy(report)
         bad_report["release_evidence_ref"] = REF[:-1] + "f"
