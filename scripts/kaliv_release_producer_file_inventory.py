@@ -131,6 +131,13 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
             raise InventoryError(f"{gate} source report overclaims production authority")
         if report.get("release_gate_satisfied") is True:
             raise InventoryError(f"{gate} source report overclaims system release authority")
+        # A claimed status is not physical provenance. Reject explicit failure.
+        if report.get("state") in ("INVALID", "FAILED", "BLOCKED"):
+            raise InventoryError(f"{gate} source report is not successful")
+        if report.get("status") in ("fail", "failed", "error"):
+            raise InventoryError(f"{gate} source report is not successful")
+        if report.get("qualified") is False:
+            raise InventoryError(f"{gate} source report is not qualified")
         report_ref = report.get("release_evidence_ref", report.get("evidence_ref"))
         expected_ref = manifest["gates"][gate]["evidence_refs"][0]
         if report_ref != expected_ref:
@@ -155,13 +162,6 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
             expected_digest = hashlib.sha256(canonical).hexdigest()
             if not expected_ref.endswith(":" + expected_digest):
                 raise InventoryError(f"{gate} source verdict self-digest mismatch")
-        # A claimed status is not physical provenance. Reject explicit failure.
-        if report.get("state") in ("INVALID", "FAILED", "BLOCKED"):
-            raise InventoryError(f"{gate} source report is not successful")
-        if report.get("status") in ("fail", "failed", "error"):
-            raise InventoryError(f"{gate} source report is not successful")
-        if report.get("qualified") is False:
-            raise InventoryError(f"{gate} source report is not qualified")
         observed.append({
             "gate": gate,
             "report_path": entry["report_path"],
