@@ -55,6 +55,17 @@ fails(corrupt)
 corrupt = deepcopy(data)
 corrupt["contract_timings"][0]["elapsed_seconds"] = 0
 fails(corrupt)
+# Positive but incorrect costs must also fail, even if SHA/run/job fields look real.
+corrupt = deepcopy(data)
+corrupt["contract_timings"][31]["elapsed_seconds"] = 265.99
+fails(corrupt)
+corrupt = deepcopy(data)
+corrupt["contract_timings"][0]["elapsed_seconds"] = 316.2
+fails(corrupt)
+corrupt = deepcopy(data)
+corrupt["contract_timings"][0]["elapsed_seconds"] = 316.11
+fails(corrupt)
+
 corrupt = deepcopy(data)
 corrupt["contract_timings"][0]["elapsed_seconds"] = True
 fails(corrupt)
