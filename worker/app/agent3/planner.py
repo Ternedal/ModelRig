@@ -127,7 +127,12 @@ class TypedPlanner:
 
     @staticmethod
     async def _chat(messages: list[dict], model: str | None) -> str:
-        return await oc.chat(messages, model=model)
+        return await oc.chat(
+            messages,
+            model=model,
+            response_format="json",
+            options={"temperature": 0, "seed": 42},
+        )
 
     async def plan(
         self,

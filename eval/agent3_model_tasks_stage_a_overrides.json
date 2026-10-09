@@ -7,11 +7,6 @@
   "override_version": "2026-07-23.1",
   "overrides": [
     {
-      "id": "20-note_append",
-      "from": {"tool": "note_append", "risk": "write", "args": {"text": "Test af lokal planner 20"}},
-      "to": {"tool": "note_append", "risk": "write", "args": {"text": "Test af lokal planner 20."}}
-    },
-    {
       "id": "24-pull_model",
       "from": {"tool": "pull_model", "risk": "write", "args": {"name": "qwen3:8b"}},
       "to": {"tool": "pull_model", "risk": "admin", "args": {"name": "qwen3:8b"}}

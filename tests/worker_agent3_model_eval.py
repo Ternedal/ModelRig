@@ -203,7 +203,7 @@ def test_stage_a_overrides_match_current_risk_contract() -> None:
     tasks = {task["id"]: task for task in task_set["tasks"]}
 
     assert tasks["20-note_append"]["expected"]["steps"] == [
-        {"tool": "note_append", "risk": "write", "args": {"text": "Test af lokal planner 20."}}
+        {"tool": "note_append", "risk": "write", "args": {"text": "Test af lokal planner 20"}}
     ]
     for task_id in ("24-pull_model", "25-pull_model", "26-pull_model"):
         assert tasks[task_id]["expected"]["steps"][0]["risk"] == "admin"
