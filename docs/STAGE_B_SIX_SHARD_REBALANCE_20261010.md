@@ -1,5 +1,7 @@
 # Stage-B six-shard runtime experiment — downstream rebalance stacked on #2103
 
+> **Historical v1 downstream experiment (#2114).** Its first two full exact-head runs both passed, but did not demonstrate a downstream-only speed improvement over parent #2103. This stacked v2 branch replaces only the measured cost table and partition; see [robust v2 experiment](STAGE_B_ROBUST_DOWNSTREAM_V2_20261010.md). Numerical predictions below apply to the immutable earlier #2114 commit, **not the v2 head**.
+
 **DRAFT / UNMERGED only. Frozen qualified V1 main remains unchanged.**
 The parent is [PR #2103](https://github.com/Ternedal/ModelRig/pull/2103),
 which already passed all 6 exact-head shards for the independently measured
