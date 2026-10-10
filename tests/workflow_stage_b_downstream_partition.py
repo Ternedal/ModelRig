@@ -34,21 +34,23 @@ assert planner.COST_SECONDS[
 
 plan = planner.balanced_downstream_shards(files)
 assert plan == planner.balanced_downstream_shards(files)
-assert tuple(len(group) for group in plan) == (10, 10, 11)
+assert tuple(len(group) for group in plan) == (5, 5, 5, 6, 5, 5)
 assert sorted(name for group in plan for name in group) == sorted(files)
 assert any(
     group != tuple(files[i::3]) for i, group in enumerate(plan)
 )
-# Shards retain the existing two independent isolated child processes.
-assert driver._MAX_SHARDED_PARALLEL_CONTRACTS == 2
+# Six separate runner jobs each run just one isolated process at a time.
+# Aggregate downstream subprocess concurrency remains capped at six.
+assert driver._REQUIRED_SHARD_COUNT == 6
+assert driver._MAX_SHARDED_PARALLEL_CONTRACTS == 1
 assert driver._MAX_PARALLEL_CONTRACTS == 2
 assert driver._PER_CONTRACT_TIMEOUT_SECONDS == 2400
 assert driver._TARGETED_DEEP_TIMEOUT_SECONDS == 3600
 assert len(driver._TARGETED_DEEP_TIMEOUT_CONTRACTS) == 10
 assert driver._TARGETED_DEEP_TIMEOUT_CONTRACTS <= set(files)
 
-for shard_index in range(1, 4):
-    with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: f"{shard_index}/3"}):
+for shard_index in range(1, 7):
+    with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: f"{shard_index}/6"}):
         assert driver._selected_contract_files() == plan[shard_index - 1]
         for name in plan[shard_index - 1]:
             budget = (3600 if name in driver._TARGETED_DEEP_TIMEOUT_CONTRACTS
@@ -59,18 +61,13 @@ for shard_index in range(1, 4):
 with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: ""}):
     assert driver._selected_contract_files() == files
 
-# Projection must model actual ThreadPoolExecutor submission order instead of
-# an independently assigned bin-pack whose worker order is never executed.
-modeled = []
-for group in plan:
-    workers = [0, 0]
-    for name in group:
-        slot = 0 if workers[0] <= workers[1] else 1
-        workers[slot] += planner.COST_SECONDS[name]
-    modeled.append(max(workers))
-assert max(modeled) == 8793, modeled
+# One isolated worker per dedicated runner: submission order remains deterministic.
+modeled = [sum(planner.COST_SECONDS[name] for name in group) for group in plan]
+assert modeled == [8607, 8271, 8174, 8793, 8030, 7985], modeled
+assert sum(modeled) == sum(planner.COST_SECONDS.values())
+assert max(modeled) == 8793, modeled  # projection only; never CI proof
 
-for invalid in ("0/3", "4/3", "1/2", "random"):
+for invalid in ("0/6", "7/6", "1/3", "2/3", "1/2", "random"):
     with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: invalid}):
         try:
             driver._selected_contract_files()
