@@ -208,8 +208,9 @@ check(
 )
 check(
     "_REQUIRED_SHARD_COUNT = 3" in downstream_driver
-    and "_CONTRACT_FILES[index - 1 :: total]" in downstream_driver,
-    "downstream retains original three-way strided shard partition",
+    and "balanced_downstream_shards(_CONTRACT_FILES)[index - 1]" in downstream_driver
+    and "from stage_b_downstream_plan import balanced_downstream_shards" in downstream_driver,
+    "downstream retains exact three-shard coverage via isolated measured-cost planner",
 )
 
 command = (
