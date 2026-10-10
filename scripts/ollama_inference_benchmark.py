@@ -104,7 +104,7 @@ def measure_once(
             if event.get("done") is True:
                 final = event
                 break
-            if event.get("done") not in (None, False):
+            if "done" in event and event["done"] is not False:
                 raise BenchmarkError("Ollama done marker is invalid")
         end = time.monotonic_ns()
     except (OSError, TimeoutError, http.client.HTTPException) as exc:
@@ -143,7 +143,7 @@ def benchmark(*, base_url: str, model: str, warmup: int = 1,
               prompt: str = DEFAULT_PROMPT) -> dict:
     target = local_target(base_url)
     if (not isinstance(model, str) or len(model) > 128 or not model
-            or any(x in model for x in "\\r\\n\\0")):
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in model)):
         raise BenchmarkError("model name must be a bounded, nonempty string")
     if (type(warmup) is not int or not 0 <= warmup <= 3
             or type(repetitions) is not int or not 1 <= repetitions <= 12
@@ -206,9 +206,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.output is not None:
             # Writing is opt-in; no secret prompt, completion or remote data
             # is ever included in the report.
-            args.output.write_text(
-                json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8"
-            )
+            with args.output.open("x", encoding="utf-8") as stream:
+                stream.write(json.dumps(report, indent=2, sort_keys=True) + chr(10))
     except (BenchmarkError, OSError) as exc:
         print(json.dumps({
             "schema": SCHEMA, "status": "BLOCKED", "reason": str(exc),
