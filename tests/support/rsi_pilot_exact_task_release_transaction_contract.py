@@ -15,6 +15,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from stage_b_downstream_plan import balanced_downstream_shards
+
 from rsi_pilot_exact_task_release_transaction_contract_base import (
     _ledger,
     _live_authority,
@@ -38,11 +40,11 @@ _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
         "rsi_pilot_exact_task_post_production_activation_attestation_stage_b_driver.py",
     }
 )
-# Deep downstream contracts rebuild increasingly nested provenance; four concurrent
-# copies oversubscribe hosted runners and magnify per-contract wall time. Match the
-# empirically stable midchain fan-out.
+# One child per downstream runner avoids local CPU oversubscription while six
+# independent jobs preserve six total concurrent isolated children. The
+# unsharded legacy path keeps its original two-worker upper bound.
 _MAX_PARALLEL_CONTRACTS = 2
-_MAX_SHARDED_PARALLEL_CONTRACTS = 2
+_MAX_SHARDED_PARALLEL_CONTRACTS = 1
 
 _CONTRACT_FILES = (
     "rsi_pilot_exact_task_release_transaction_contract_base.py",
@@ -79,7 +81,7 @@ _CONTRACT_FILES = (
 )
 
 _CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
-_REQUIRED_SHARD_COUNT = 3
+_REQUIRED_SHARD_COUNT = 6
 
 
 def _selected_contract_files() -> tuple[str, ...]:
@@ -92,13 +94,13 @@ def _selected_contract_files() -> tuple[str, ...]:
         total = int(total_text)
     except (ValueError, TypeError) as exc:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/6 through 6/6"
         ) from exc
     if total != _REQUIRED_SHARD_COUNT or not 1 <= index <= total:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/6 through 6/6"
         )
-    selected = _CONTRACT_FILES[index - 1 :: total]
+    selected = balanced_downstream_shards(_CONTRACT_FILES)[index - 1]
     if not selected:
         raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
     return selected

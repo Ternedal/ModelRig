@@ -133,6 +133,9 @@ expected_stage_b_names = (
     "downstream-1",
     "downstream-2",
     "downstream-3",
+    "downstream-4",
+    "downstream-5",
+    "downstream-6",
 )
 check(
     "stage-b-admission:" in stage_b_workflow
@@ -153,6 +156,16 @@ for shard in ("1/3", "2/3", "3/3"):
         f'shard: "{shard}"' in stage_b_workflow,
         f"Stage-B reusable workflow retains shard {shard}",
     )
+for shard in ("1/6", "2/6", "3/6", "4/6", "5/6", "6/6"):
+    check(
+        f'shard: "{shard}"' in stage_b_workflow,
+        f"Stage-B downstream dedicated runner retains shard {shard}",
+    )
+check(
+    stage_b_workflow.count("slice: downstream") == 6
+    and stage_b_workflow.count("slice: midchain") == 3,
+    "Stage-B preserves 3 midchain jobs and distributes downstream over exactly 6 jobs",
+)
 check(
     stage_b_workflow.count("timeout-minutes: 355") == 2,
     "admission and shard jobs stay below the GitHub-hosted six-hour job ceiling",
@@ -199,15 +212,20 @@ check(
     and 'stage_b_slice in ("midchain", "downstream")' in stage_b_driver,
     "midchain/downstream consume only a validated preloaded proof+ledger root",
 )
-for label, source in (
-    ("midchain", midchain_driver),
-    ("downstream", downstream_driver),
-):
-    check(
-        "_REQUIRED_SHARD_COUNT = 3" in source
-        and "_CONTRACT_FILES[index - 1 :: total]" in source,
-        f"{label} uses the locked three-way strided shard partition",
-    )
+check(
+    "_REQUIRED_SHARD_COUNT = 3" in midchain_driver
+    and "balanced_midchain_shards(_CONTRACT_FILES)[index - 1]" in midchain_driver
+    and "from stage_b_midchain_plan import balanced_midchain_shards"
+    in midchain_driver,
+    "midchain retains three exact shards and selects reviewed cost-balanced contracts",
+)
+check(
+    "_REQUIRED_SHARD_COUNT = 6" in downstream_driver
+    and "_MAX_SHARDED_PARALLEL_CONTRACTS = 1" in downstream_driver
+    and "balanced_downstream_shards(_CONTRACT_FILES)[index - 1]" in downstream_driver
+    and "from stage_b_downstream_plan import balanced_downstream_shards" in downstream_driver,
+    "downstream retains exact six-shard coverage via isolated measured-cost planner",
+)
 
 command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "
