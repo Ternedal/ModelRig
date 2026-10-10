@@ -25,6 +25,11 @@ REPORT_UNSIGNED = {
     "software_exact_green_gate_satisfied": True,
     "release_gate_satisfied": False,
     "production_activation": False,
+    "repositories": [
+        {"repository": "Ternedal/" + name, "git_sha": sha,
+         "evidence_ref": "test-only-source:" + name}
+        for name, sha in SHA.items()
+    ],
 }
 REPORT_DIGEST = hashlib.sha256(
     json.dumps(
@@ -117,6 +122,18 @@ def run_contract():
 
         # A newly indexed hash over tampered bytes is not sufficient when
         # the source verdict also has its own canonical ref digest.
+        bad_report = copy.deepcopy(report)
+        bad_report["repositories"][1]["git_sha"] = "f" * 40
+        bad_index = copy.deepcopy(idx)
+        bad_index["entries"][0]["sha256"] = write_report(bad_report)
+        reject(m, bad_index, root, "producer repository revisions do not match manifest pins")
+
+        bad_report = copy.deepcopy(report)
+        bad_report["repositories"][3] = copy.deepcopy(bad_report["repositories"][2])
+        bad_index = copy.deepcopy(idx)
+        bad_index["entries"][0]["sha256"] = write_report(bad_report)
+        reject(m, bad_index, root, "producer repository revisions do not match manifest pins")
+
         bad_report = copy.deepcopy(report)
         bad_report["software_exact_green_gate_satisfied"] = False
         bad_index = copy.deepcopy(idx)
