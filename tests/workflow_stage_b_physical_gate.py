@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "stage_b_physical_gate.py"
 
 _STAGE_B_SLICE = os.environ.get("MODELRIG_STAGE_B_SLICE", "all").strip() or "all"
-if _STAGE_B_SLICE not in {"all", "admission", "midchain", "downstream"}:
+if _STAGE_B_SLICE not in {"all", "admission", "admission-prefix", "admission-nonce", "midchain", "downstream"}:
     raise AssertionError(f"unsupported Stage-B slice: {_STAGE_B_SLICE!r}")
 
 
@@ -37,7 +37,9 @@ def _run_exact_task_stage_b_router() -> None:
 # Midchain/downstream jobs consume the admission cache and must not replay the
 # legacy physical/pilot-prefix contracts. The exact-task router owns shard
 # selection, cache validation and isolated contract execution for these slices.
-if _STAGE_B_SLICE in {"midchain", "downstream"}:
+# Only nonce admission is dispatched directly: the admission-prefix job
+# must still execute the original physical-gate/ADR-026 transitive tests.
+if _STAGE_B_SLICE in {"midchain", "downstream", "admission-nonce"}:
     print(
         f"Stage B top-level dispatcher: {_STAGE_B_SLICE} slice -> exact-task router",
         flush=True,
