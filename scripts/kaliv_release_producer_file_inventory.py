@@ -52,6 +52,17 @@ REQUIRED_VERDICT_STATES = {
     "end_to_end_latency": "MEASURED",
     "repository_authority": "QUALIFIED",
 }
+# Source-verdict identity fields, as emitted by the frozen V1 qualifiers.
+# These are untrusted claims until the independent producer is authenticated.
+REPORT_REVISION_FIELDS = {
+    "consciousness_live_lifecycle": ("candidate_git_sha", "Ternedal/ModelRig"),
+    "voicerig_physical_acceptance": ("voicerig_revision", "Ternedal/VoiceRig"),
+    "bodyrig_photoreal_likeness": ("bodyrig_revision", "Ternedal/BodyRig"),
+    "bodyrig_digital_twin_m6": ("bodyrig_revision", "Ternedal/BodyRig"),
+    "bodyrig_android_live_body": ("exact_head", "Ternedal/ModelRig"),
+    "end_to_end_latency": ("candidate_git_sha", "Ternedal/ModelRig"),
+    "recovery_soak": ("candidate_sha", "Ternedal/ModelRig"),
+}
 
 
 class InventoryError(ValueError):
@@ -139,6 +150,9 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
     if set(lookup) != requested:
         raise InventoryError("indexed reports must match exactly the declared PASS gates")
 
+    pins = structural.pinned_repositories
+    required_pins = {repo: pins[repo] for repo in release_gate.REQUIRED_REPOSITORIES}
+
     observed: list[dict[str, str]] = []
     for gate in release_gate.REQUIRED_GATES:
         if gate not in requested:
@@ -152,7 +166,27 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
         report = _json_bytes(raw, f"{gate} source report")
         if report.get("schema") != EXPECTED_PRODUCER_SCHEMAS[gate]:
             raise InventoryError(f"{gate} source report schema mismatch")
+        if gate in ("software_exact_green", "repository_authority"):
+            records = report.get("repositories")
+            if not isinstance(records, list) or len(records) != 4:
+                raise InventoryError(f"{gate} producer repository identity set is invalid")
+            try:
+                source_pins = {
+                    item["repository"]: item["git_sha"] for item in records
+                    if isinstance(item, dict)
+                }
+            except (KeyError, TypeError) as exc:
+                raise InventoryError(f"{gate} producer repository identities malformed") from exc
+            if len(source_pins) != 4 or source_pins != required_pins:
+                raise InventoryError(f"{gate} producer repository revisions do not match manifest pins")
+        if gate in REPORT_REVISION_FIELDS:
+            field, repository = REPORT_REVISION_FIELDS[gate]
+            if report.get(field) != pins[repository]:
+                raise InventoryError(f"{gate} producer source revision differs from manifest pin")
         if gate == "visionrig_physical_perception":
+            identity = report.get("visionrig")
+            if not isinstance(identity, dict) or identity.get("service_revision") != pins["Ternedal/VisionRig"]:
+                raise InventoryError("VisionRig source revision differs from manifest pin")
             physical_gate = report.get("gate")
             if (not isinstance(physical_gate, dict)
                     or physical_gate.get("passed") is not True
