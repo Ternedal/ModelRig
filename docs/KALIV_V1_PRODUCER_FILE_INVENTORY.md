@@ -15,7 +15,12 @@ agrees with the manifest. For six self-content-addressed producer verdicts
 end-to-end latency and Android live body), it also independently recomputes
 the canonical SHA-256 of the verdict before its release ref was attached.
 A differently generated valid-looking report with the same old ref is
-therefore rejected. **Recomputation still does not authenticate the producer.**
+therefore rejected. It also compares each producer report's own embedded
+source Git revision(s) with the frozen four-repository pins in the release
+manifest. A report that names another revision or repeats a repository pin
+cannot pass just because its local index hash was recalculated.
+**Neither digest recomputation nor revision comparison authenticates the
+producer, its upstream evidence or a physical/human observation.**
 An absent report is rejected. PASS and PENDING
 gates must match the index exactly: no made-up extra entries.
 
