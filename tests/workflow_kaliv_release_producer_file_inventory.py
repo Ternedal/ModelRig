@@ -163,6 +163,16 @@ def run_contract():
             bad_idx["entries"][0]["sha256"] = write_report(bad_report)
             reject(m, bad_idx, root, fragment)
 
+        for field, value, fragment in (
+            ("production_activation", "false", "overclaims production"),
+            ("release_gate_satisfied", 1, "overclaims system release"),
+        ):
+            bad_report = copy.deepcopy(report)
+            bad_report[field] = value
+            bad_idx = copy.deepcopy(idx)
+            bad_idx["entries"][0]["sha256"] = write_report(bad_report)
+            reject(m, bad_idx, root, fragment)
+
         # Ensure the parser cannot silently discard conflicting JSON keys.
         try:
             audit._json_bytes(b'{"schema":"one","schema":"two"}', "input")
