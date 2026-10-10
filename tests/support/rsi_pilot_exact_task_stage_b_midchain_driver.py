@@ -15,6 +15,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from stage_b_midchain_plan import balanced_midchain_shards
+
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
@@ -91,7 +93,7 @@ def _selected_contract_files() -> tuple[str, ...]:
         raise AssertionError(
             f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
         )
-    selected = _CONTRACT_FILES[index - 1 :: total]
+    selected = balanced_midchain_shards(_CONTRACT_FILES)[index - 1]
     if not selected:
         raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
     return selected
@@ -110,6 +112,19 @@ def _contract_timeout_seconds(filename: str | None = None) -> int:
     if filename in _TARGETED_DEEP_TIMEOUT_CONTRACTS:
         return _TARGETED_DEEP_TIMEOUT_SECONDS
     shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
+    # When rebalancing, a canonical deep-shard contract may move to another
+    # execution shard. Keep its original per-file timeout by canonical index,
+    # not by the experimental destination. The unsharded/all path is unchanged.
+    if filename is not None and shard:
+        try:
+            canonical_index = _CONTRACT_FILES.index(filename)
+        except ValueError as exc:
+            raise AssertionError("unknown Stage-B midchain contract") from exc
+        return (
+            _DEEP_SHARD_TIMEOUT_SECONDS
+            if canonical_index % _REQUIRED_SHARD_COUNT == 1
+            else _PER_CONTRACT_TIMEOUT_SECONDS
+        )
     return (
         _DEEP_SHARD_TIMEOUT_SECONDS
         if shard == "2/3"

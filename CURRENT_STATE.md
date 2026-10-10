@@ -560,7 +560,9 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_a_scheduler_publish.py`
 - `tests/workflow_stage_a_voice_test.py`
 - `tests/workflow_stage_b_cache_manifest.py`
+- `tests/workflow_stage_b_midchain_partition.py`
 - `tests/workflow_stage_b_one_click.py`
+- `tests/workflow_stage_b_parallel_admission.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_stage_b_weighted_sharding.py`
 - `tests/workflow_staged_promotion_runbook.py`
