@@ -69,6 +69,10 @@ def measure_once(
     }, ensure_ascii=False).encode("utf-8")
     conn = http.client.HTTPConnection(target[0], target[1], timeout=timeout)
     start = time.monotonic_ns()
+    # Socket timeouts are per read. Without an absolute wall deadline a
+    # server trickling one byte/event just before each read timeout can keep
+    # this local benchmark active for hours.
+    deadline_ns = start + timeout * 1_000_000_000
     first_token_ns: int | None = None
     final: dict | None = None
     events = 0
@@ -81,7 +85,17 @@ def measure_once(
         if response.status != 200:
             raise BenchmarkError(f"local Ollama returned HTTP {response.status}")
         while True:
+            remaining = (deadline_ns - time.monotonic_ns()) / 1e9
+            if remaining <= 0:
+                raise BenchmarkError("local Ollama overall timeout exceeded")
+            # Re-bound the transport for each event even when a malicious or
+            # stalled local server feeds data at an arbitrarily low rate.
+            sock = getattr(conn, "sock", None)
+            if sock is not None:
+                sock.settimeout(remaining)
             line = response.readline(MAX_EVENT_BYTES + 1)
+            if time.monotonic_ns() > deadline_ns:
+                raise BenchmarkError("local Ollama overall timeout exceeded")
             if not line:
                 break
             if len(line) > MAX_EVENT_BYTES:
