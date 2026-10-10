@@ -166,6 +166,12 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
         report = _json_bytes(raw, f"{gate} source report")
         if report.get("schema") != EXPECTED_PRODUCER_SCHEMAS[gate]:
             raise InventoryError(f"{gate} source report schema mismatch")
+        # VisionRig carries the mandatory false activation flag inside its
+        # nested gate, but any *additional* top-level true/unknown assertion
+        # must also be rejected as contradictory authority.
+        if ("production_activation" in report
+                and report["production_activation"] is not False):
+            raise InventoryError(f"{gate} source report overclaims production authority")
         if gate in ("software_exact_green", "repository_authority"):
             records = report.get("repositories")
             if not isinstance(records, list) or len(records) != 4:
@@ -195,7 +201,8 @@ def inventory(manifest: dict[str, Any], index: dict[str, Any], root: Path) -> di
                 raise InventoryError("VisionRig report lacks successful non-activating physical gate")
         elif report.get("production_activation") is not False:
             raise InventoryError(f"{gate} source report overclaims production authority")
-        if report.get("release_gate_satisfied") is True:
+        if ("release_gate_satisfied" in report
+                and report["release_gate_satisfied"] is not False):
             raise InventoryError(f"{gate} source report overclaims system release authority")
         # A claimed status is not physical provenance. Reject explicit failure.
         if report.get("state") in ("INVALID", "FAILED", "BLOCKED"):
