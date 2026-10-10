@@ -136,13 +136,34 @@ expected_stage_b_names = (
 )
 check(
     "stage-b-admission:" in stage_b_workflow
-    and "name: stage-b-admission" in stage_b_workflow,
-    "Stage-B reusable workflow owns one admission/bootstrap authority job",
+    and "name: stage-b-admission" in stage_b_workflow
+    and "stage-b-nonce:" in stage_b_workflow
+    and "name: stage-b-nonce" in stage_b_workflow,
+    "Stage-B requires both independent admission prefix and nonce authority jobs",
 )
 check(
-    "needs: stage-b-admission" in stage_b_workflow,
-    "all Stage-B contract shards require successful admission/bootstrap",
+    "needs: [stage-b-admission, stage-b-nonce]" in stage_b_workflow,
+    "all Stage-B shards require BOTH green independent admission phases",
 )
+check(
+    stage_b_workflow.count("Run entire admission-prefix physical and deep provenance chain") == 1
+    and stage_b_workflow.count("Run isolated nonce-reuse admission and publish canonical cache root") == 1
+    and stage_b_workflow.count("MODELRIG_STAGE_B_SLICE: admission-prefix") == 1
+    and stage_b_workflow.count("MODELRIG_STAGE_B_SLICE: admission-nonce") == 1
+    and stage_b_workflow.count("scripts/stage_b_cache_manifest.py create") == 1
+    and stage_b_workflow.count("scripts/stage_b_cache_manifest.py verify") == 2
+    and stage_b_workflow.count("Restore exact-head Stage-B shared cache") == 0
+    and "cache-hit" not in stage_b_workflow,
+    "parallel admission repeats full canonical prefix and nonce guards; no cache-hit skip",
+)
+check(
+    'if _STAGE_B_SLICE in {"midchain", "downstream", "admission-nonce"}:' in
+    code_of(root / "tests/workflow_stage_b_physical_gate.py")
+    and 'if stage_b_slice == "admission-prefix":' in stage_b_driver
+    and 'if stage_b_slice == "admission-nonce":' in stage_b_driver,
+    "prefix retains transitive physical tests while nonce executes the isolated replay contract",
+)
+
 for name in expected_stage_b_names:
     check(
         f"- name: {name}" in stage_b_workflow,
@@ -154,18 +175,19 @@ for shard in ("1/3", "2/3", "3/3"):
         f"Stage-B reusable workflow retains shard {shard}",
     )
 check(
-    stage_b_workflow.count("timeout-minutes: 355") == 2,
+    stage_b_workflow.count("timeout-minutes: 355") == 3,
     "admission and shard jobs stay below the GitHub-hosted six-hour job ceiling",
 )
 check(
     stage_b_workflow.count(
         "run: PYTHONPATH=worker python3 -u tests/workflow_stage_b_physical_gate.py"
     )
-    == 2,
-    "admission and shards both enter through the locked physical-gate test",
+    == 3,
+    "both admission phases and shards use the locked physical-gate entrypoint",
 )
 check(
-    'MODELRIG_STAGE_B_SLICE: admission' in stage_b_workflow
+    'MODELRIG_STAGE_B_SLICE: admission-prefix' in stage_b_workflow
+    and 'MODELRIG_STAGE_B_SLICE: admission-nonce' in stage_b_workflow
     and 'MODELRIG_STAGE_B_SLICE: ${{ matrix.slice }}' in stage_b_workflow
     and 'MODELRIG_STAGE_B_CONTRACT_SHARD: ${{ matrix.shard }}'
     in stage_b_workflow,
@@ -187,7 +209,7 @@ check(
     "Stage-B cache handoff is exact-head named and uses pinned artifact actions",
 )
 check(
-    '_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "midchain", "downstream")'
+    '_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "admission-prefix", "admission-nonce", "midchain", "downstream")'
     in stage_b_driver
     and '_CACHE_ROOT_ENV = "MODELRIG_STAGE_B_CACHE_ROOT"' in stage_b_driver
     and "_NONCE_REUSE_TIMEOUT_SECONDS = 7200" in stage_b_driver,
