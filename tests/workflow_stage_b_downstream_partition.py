@@ -20,9 +20,17 @@ assert len(files) == len(set(files)) == 31
 assert planner.REFERENCE_FROZEN_MAIN_SHA == (
     "0b2ff455116f4f28a1a41704d9cb81503f17d2df"
 )
-assert planner.REFERENCE_RUNS == (\n    37845235363, 37942702263, 37982695916, 38036507743, 38048149969\n)
+assert planner.REFERENCE_RUNS == (
+    37845235363, 37942702263, 37982695916, 38036507743, 38048149969
+)
 assert len(planner.REFERENCE_LOG_JOB_IDS) == 15
-assert len(set(planner.REFERENCE_LOG_JOB_IDS)) == 15\nassert planner.COST_SECONDS[\n    "rsi_pilot_exact_task_post_release_attestation_contract.py"\n] == 3143\nassert planner.COST_SECONDS[\n    "rsi_pilot_exact_task_staging_success_status_recovery_contract.py"\n] == 2625
+assert len(set(planner.REFERENCE_LOG_JOB_IDS)) == 15
+assert planner.COST_SECONDS[
+    "rsi_pilot_exact_task_post_release_attestation_contract.py"
+] == 3143
+assert planner.COST_SECONDS[
+    "rsi_pilot_exact_task_staging_success_status_recovery_contract.py"
+] == 2625
 
 plan = planner.balanced_downstream_shards(files)
 assert plan == planner.balanced_downstream_shards(files)
