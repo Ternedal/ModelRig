@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "stage_b_physical_gate.py"
 
 _STAGE_B_SLICE = os.environ.get("MODELRIG_STAGE_B_SLICE", "all").strip() or "all"
-if _STAGE_B_SLICE not in {"all", "admission", "midchain", "downstream"}:
+if _STAGE_B_SLICE not in {"all", "admission", "admission-prefix", "admission-nonce", "midchain", "downstream"}:
     raise AssertionError(f"unsupported Stage-B slice: {_STAGE_B_SLICE!r}")
 
 
