@@ -1,54 +1,53 @@
-"""Experimental measured-cost Stage-B downstream assignment; no gate authority.
+"""DRAFT: robust measured-cost Stage-B downstream reassignment; no gate authority.
 
-Evidence: three complete green exact-head runs on frozen V1 or clean V1-based
-drafts: 37845235363, 37942702263, 37982695916.
-Nine downstream shard log IDs in canonical run/shard order:
-113575752295, 113575752244, 113575752294, 113898121077, 113898121549, 113898121140, 114028089322, 114028089336, 114028089364.
-
-Observed per-contract wall times rounded from the mean across the three
-runs. Not a benchmark guarantee: GitHub runner sharing affects execution.
-Original 31 adversarial contracts, subprocess isolation, 2400/3600s
-timeouts and two-worker-per-shard bound are preserved by the caller.
+Five complete green exact-head runs: 37845235363, 37942702263, 37982695916, 38036507743, 38048149969.
+Fifteen GitHub downstream shard job logs: 113575752295, 113575752244, 113575752294, 113898121077, 113898121549, 113898121140, 114028089322, 114028089336, 114028089364, 114177716907, 114177716996, 114177717062, 114216238480, 114216238489, 114216238515.
+For each of the exact 31 original contracts: round(0.75 * historical
+3-run mean + 0.25 * two new green candidate-run mean), in seconds.
+The historical weight guards against overfitting the latest assignment's
+runner-dependent contention. Predictions are NOT evidence of acceleration.
+Do not skip/replace any contract, alter subprocess isolation or change
+original 2400/3600-second hard timeouts and 2 workers per downstream shard.
 """
 from __future__ import annotations
 
 from math import isfinite
 
 REFERENCE_FROZEN_MAIN_SHA = "0b2ff455116f4f28a1a41704d9cb81503f17d2df"
-REFERENCE_RUNS = (37845235363, 37942702263, 37982695916)
-REFERENCE_LOG_JOB_IDS = (113575752295, 113575752244, 113575752294, 113898121077, 113898121549, 113898121140, 114028089322, 114028089336, 114028089364)
+REFERENCE_RUNS = (37845235363, 37942702263, 37982695916, 38036507743, 38048149969)
+REFERENCE_LOG_JOB_IDS = (113575752295, 113575752244, 113575752294, 113898121077, 113898121549, 113898121140, 114028089322, 114028089336, 114028089364, 114177716907, 114177716996, 114177717062, 114216238480, 114216238489, 114216238515)
 COST_SECONDS = {
-    "rsi_pilot_exact_task_deploy_readiness_evaluation_contract.py": 912,
-    "rsi_pilot_exact_task_post_production_activation_attestation_stage_b_driver.py": 1086,
-    "rsi_pilot_exact_task_post_release_attestation_contract.py": 3456,
-    "rsi_pilot_exact_task_post_staging_deployment_attestation_contract.py": 2114,
-    "rsi_pilot_exact_task_post_staging_deployment_status_attestation_contract.py": 2086,
-    "rsi_pilot_exact_task_post_staging_success_status_attestation_contract.py": 1856,
-    "rsi_pilot_exact_task_product_pilot_start_requirements_contract.py": 1838,
-    "rsi_pilot_exact_task_product_pilot_tail_stage_b_driver.py": 872,
-    "rsi_pilot_exact_task_production_activation_authorization_contract.py": 1864,
-    "rsi_pilot_exact_task_production_activation_readiness_contract.py": 1485,
-    "rsi_pilot_exact_task_production_activation_recovery_stage_b_driver.py": 876,
-    "rsi_pilot_exact_task_production_activation_transaction_stage_b_driver.py": 1869,
+    "rsi_pilot_exact_task_deploy_readiness_evaluation_contract.py": 975,
+    "rsi_pilot_exact_task_post_production_activation_attestation_stage_b_driver.py": 985,
+    "rsi_pilot_exact_task_post_release_attestation_contract.py": 3143,
+    "rsi_pilot_exact_task_post_staging_deployment_attestation_contract.py": 2248,
+    "rsi_pilot_exact_task_post_staging_deployment_status_attestation_contract.py": 2228,
+    "rsi_pilot_exact_task_post_staging_success_status_attestation_contract.py": 1690,
+    "rsi_pilot_exact_task_product_pilot_start_requirements_contract.py": 1847,
+    "rsi_pilot_exact_task_product_pilot_tail_stage_b_driver.py": 929,
+    "rsi_pilot_exact_task_production_activation_authorization_contract.py": 1868,
+    "rsi_pilot_exact_task_production_activation_readiness_contract.py": 1578,
+    "rsi_pilot_exact_task_production_activation_recovery_stage_b_driver.py": 827,
+    "rsi_pilot_exact_task_production_activation_transaction_stage_b_driver.py": 1871,
     "rsi_pilot_exact_task_release_recovery_stage_b_driver.py": 1156,
-    "rsi_pilot_exact_task_release_transaction_contract_base.py": 914,
-    "rsi_pilot_exact_task_staging_deployment_authorization_contract.py": 914,
-    "rsi_pilot_exact_task_staging_deployment_plan_contract.py": 1905,
-    "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py": 1108,
+    "rsi_pilot_exact_task_release_transaction_contract_base.py": 979,
+    "rsi_pilot_exact_task_staging_deployment_authorization_contract.py": 970,
+    "rsi_pilot_exact_task_staging_deployment_plan_contract.py": 1909,
+    "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py": 1110,
     "rsi_pilot_exact_task_staging_deployment_state_observation_contract.py": 1138,
-    "rsi_pilot_exact_task_staging_deployment_status_authorization_contract.py": 1506,
-    "rsi_pilot_exact_task_staging_deployment_status_plan_contract.py": 1880,
-    "rsi_pilot_exact_task_staging_deployment_status_recovery_stage_b_driver.py": 1848,
-    "rsi_pilot_exact_task_staging_deployment_status_state_observation_contract.py": 1859,
-    "rsi_pilot_exact_task_staging_deployment_status_transaction_contract.py": 1880,
-    "rsi_pilot_exact_task_staging_deployment_transaction_stage_b_driver.py": 1113,
-    "rsi_pilot_exact_task_staging_runtime_build_identity_contract.py": 1827,
-    "rsi_pilot_exact_task_staging_runtime_verification_contract.py": 1856,
-    "rsi_pilot_exact_task_staging_success_status_authorization_contract.py": 1861,
-    "rsi_pilot_exact_task_staging_success_status_plan_contract.py": 1464,
-    "rsi_pilot_exact_task_staging_success_status_recovery_contract.py": 2621,
-    "rsi_pilot_exact_task_staging_success_status_state_observation_contract.py": 1846,
-    "rsi_pilot_exact_task_staging_success_status_transaction_contract.py": 1489,
+    "rsi_pilot_exact_task_staging_deployment_status_authorization_contract.py": 1424,
+    "rsi_pilot_exact_task_staging_deployment_status_plan_contract.py": 1707,
+    "rsi_pilot_exact_task_staging_deployment_status_recovery_stage_b_driver.py": 1854,
+    "rsi_pilot_exact_task_staging_deployment_status_state_observation_contract.py": 1869,
+    "rsi_pilot_exact_task_staging_deployment_status_transaction_contract.py": 1708,
+    "rsi_pilot_exact_task_staging_deployment_transaction_stage_b_driver.py": 1008,
+    "rsi_pilot_exact_task_staging_runtime_build_identity_contract.py": 1836,
+    "rsi_pilot_exact_task_staging_runtime_verification_contract.py": 1688,
+    "rsi_pilot_exact_task_staging_success_status_authorization_contract.py": 1867,
+    "rsi_pilot_exact_task_staging_success_status_plan_contract.py": 1566,
+    "rsi_pilot_exact_task_staging_success_status_recovery_contract.py": 2625,
+    "rsi_pilot_exact_task_staging_success_status_state_observation_contract.py": 1850,
+    "rsi_pilot_exact_task_staging_success_status_transaction_contract.py": 1407,
 }
 
 def balanced_downstream_shards(files) -> tuple[tuple[str, ...], ...]:
