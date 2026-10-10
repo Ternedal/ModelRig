@@ -113,13 +113,22 @@ jobs:
             shard: "3/3"
           - name: downstream-1
             slice: downstream
-            shard: "1/3"
+            shard: "1/6"
           - name: downstream-2
             slice: downstream
-            shard: "2/3"
+            shard: "2/6"
           - name: downstream-3
             slice: downstream
-            shard: "3/3"
+            shard: "3/6"
+          - name: downstream-4
+            slice: downstream
+            shard: "4/6"
+          - name: downstream-5
+            slice: downstream
+            shard: "5/6"
+          - name: downstream-6
+            slice: downstream
+            shard: "6/6"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
