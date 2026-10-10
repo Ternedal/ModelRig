@@ -7,7 +7,7 @@ For each of the exact 31 original contracts: round(0.75 * historical
 The historical weight guards against overfitting the latest assignment's
 runner-dependent contention. Predictions are NOT evidence of acceleration.
 Do not skip/replace any contract, alter subprocess isolation or change
-original 2400/3600-second hard timeouts and 2 workers per downstream shard.
+original 2400/3600-second hard timeouts and 1 worker per downstream shard.
 """
 from __future__ import annotations
 
@@ -60,27 +60,16 @@ def balanced_downstream_shards(files) -> tuple[tuple[str, ...], ...]:
         raise AssertionError("downstream costs must be positive finite seconds")
 
     original_index = {name: i for i, name in enumerate(canonical)}
-    groups: list[list[str]] = [[], [], []]
-    # Simulate completion-order assignment to exactly two slots per existing
-    # downstream shard. Never change process count, original contracts, or CI.
-    loads: list[list[float]] = [[0.0, 0.0] for _ in range(3)]
+    # Six independent downstream GitHub jobs each launch ONE isolated child
+    # at a time. Relative to 3 jobs x 2 children, the total maximum number
+    # of concurrent contracts stays 6; each child now owns its runner CPU.
+    # No change to contract assertions, subprocess isolation or timeouts.
+    groups: list[list[str]] = [[] for _ in range(6)]
+    loads: list[float] = [0.0] * 6
     for filename in sorted(canonical, key=lambda x: (-COST_SECONDS[x], original_index[x])):
-        cost = COST_SECONDS[filename]
-        options = []
-        for shard_index, workers in enumerate(loads):
-            worker_index = 0 if workers[0] <= workers[1] else 1
-            projected = list(workers)
-            projected[worker_index] += cost
-            options.append((
-                max(projected),
-                projected[worker_index],
-                max(workers),
-                shard_index,
-                worker_index,
-            ))
-        _, _, _, shard_index, worker_index = min(options)
+        shard_index = min(range(6), key=lambda i: (loads[i], i))
         groups[shard_index].append(filename)
-        loads[shard_index][worker_index] += cost
+        loads[shard_index] += COST_SECONDS[filename]
 
     result = tuple(tuple(group) for group in groups)
     flat = [filename for shard in result for filename in shard]
