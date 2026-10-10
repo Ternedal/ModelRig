@@ -126,6 +126,16 @@ with patch.object(benchmark.http.client, "HTTPConnection", FakeConnection):
             num_ctx=8192, num_predict=96,
             prompt=benchmark.DEFAULT_PROMPT, timeout=120,
         ), marker)
+    # An event stream that survives socket read deadlines by trickling bytes
+    # must still stop at the absolute end-to-end measurement deadline.
+    FakeConnection.events = SUCCESS
+    with patch.object(benchmark.time, "monotonic_ns",
+                      side_effect=[0, 11_000_000_000]):
+        reject(lambda: benchmark.measure_once(
+            ("127.0.0.1", 11435), "gemma4:26b",
+            num_ctx=8192, num_predict=96,
+            prompt=benchmark.DEFAULT_PROMPT, timeout=10,
+        ), "overall timeout")
     FakeConnection.events = SUCCESS
     FakeConnection.status = 302
     reject(lambda: benchmark.measure_once(
