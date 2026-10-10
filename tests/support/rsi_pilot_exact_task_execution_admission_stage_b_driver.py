@@ -30,7 +30,7 @@ _MAX_SHALLOW_PARALLEL_CONTRACTS = 2
 _STAGE_B_SLICE_ENV = "MODELRIG_STAGE_B_SLICE"
 _CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
 _CACHE_ROOT_ENV = "MODELRIG_STAGE_B_CACHE_ROOT"
-_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "midchain", "downstream")
+_SUPPORTED_STAGE_B_SLICES = ("all", "admission", "admission-prefix", "admission-nonce", "midchain", "downstream")
 
 _SHALLOW_CONTRACT_FILES = (
     "rsi_pilot_exact_task_execution_authorization_contract.py",
@@ -321,7 +321,7 @@ def _run_cached_slice(stage_b_slice: str) -> None:
 
 def run_contract() -> None:
     stage_b_slice = _stage_b_slice()
-    if stage_b_slice in ("all", "admission") and _contract_shard_is_active():
+    if stage_b_slice in ("all", "admission", "admission-prefix", "admission-nonce") and _contract_shard_is_active():
         raise AssertionError(
             "Stage-B admission/all slice cannot be combined with a contract shard"
         )
@@ -329,6 +329,16 @@ def run_contract() -> None:
         f"Stage-B exact-task admission chain selected slice: {stage_b_slice}",
         flush=True,
     )
+    # Experimental parallel admission: the two branches MUST each qualify
+    # independently and the workflow requires both successful jobs before
+    # any cache-bearing shard can run. No bypass for the original all/admission
+    # path, which still executes both canonical phases in series.
+    if stage_b_slice == "admission-prefix":
+        _run_admission_prefix()
+        return
+    if stage_b_slice == "admission-nonce":
+        _run_cached_slice("admission")
+        return
     if stage_b_slice in ("all", "admission"):
         _run_admission_prefix()
     _run_cached_slice(stage_b_slice)
