@@ -97,7 +97,7 @@ with patch.object(benchmark.http.client, "HTTPConnection", FakeConnection):
     assert result["generation_tps_median"] == 20.0
     assert result["repetitions"] == 3 and len(result["runs"]) == 3
     assert result["ttft_ms_p95_nearest_rank"] >= result["ttft_ms_p50"] >= 0
-    assert result["model_load_ms"] if False else True  # Per-run metric only.
+    assert all(run["model_load_ms"] == 400.0 for run in result["runs"])
     assert result["endpoint"] == "http://127.0.0.1:11435"
     assert result["prompt_sha256"] == hashlib.sha256(
         benchmark.DEFAULT_PROMPT.encode("utf-8")
