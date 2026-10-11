@@ -1515,28 +1515,28 @@ private fun ChatScreen(
                     // runCatching around the stream -- it is an app crash. Guard
                     // the index; a replaced list means the user moved on.
                     val cur = messages.getOrNull(idx) ?: return@launch
-                    if (!cur.streaming) return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[idx] = cur.copy(text = cur.text + delta)
                 }
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
-                    if (!cur.streaming) return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[idx] = cur.copy(context = cs)
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
-                    if (!cur.streaming) return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[idx] = cur.copy(sources = srcs)
                 }
             }
             val onPerson: (String) -> Unit = { label ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
-                    if (!cur.streaming) return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[idx] = cur.copy(personLabel = label)
                 }
             }
@@ -1547,7 +1547,7 @@ private fun ChatScreen(
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
                         val cur = messages.getOrNull(idx) ?: return@launch
-                        if (cur.streaming) messages[idx] = cur.copy(status = label)
+                        if (cur.streaming && turnEpoch == streamEpoch) messages[idx] = cur.copy(status = label)
                     }
                 }
             }
@@ -1702,6 +1702,7 @@ private fun ChatScreen(
         if (busy) return@retry
         val errMsg = messages.getOrNull(i) ?: return@retry
         if (!errMsg.error) return@retry
+        val turnEpoch = ++streamEpoch
         val userMsg = messages.getOrNull(i - 1) ?: return@retry
         if (userMsg.role != "user") return@retry
         val t = userMsg.text
@@ -1726,26 +1727,26 @@ private fun ChatScreen(
         var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
             val onDelta: (String) -> Unit = { delta ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming) return@launch; messages[i] = cur.copy(text = cur.text + delta) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming || turnEpoch != streamEpoch) return@launch; messages[i] = cur.copy(text = cur.text + delta) }
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
                     val cur = messages.getOrNull(i) ?: return@launch
-                    if (!cur.streaming) return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[i] = cur.copy(context = cs)
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming) return@launch; messages[i] = cur.copy(sources = srcs) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming || turnEpoch != streamEpoch) return@launch; messages[i] = cur.copy(sources = srcs) }
             }
             val onPersonRetry: (String) -> Unit = { label ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming) return@launch; messages[i] = cur.copy(personLabel = label) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming || turnEpoch != streamEpoch) return@launch; messages[i] = cur.copy(personLabel = label) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
                         val cur = messages.getOrNull(i) ?: return@launch
-                        if (cur.streaming) messages[i] = cur.copy(status = label)
+                        if (cur.streaming && turnEpoch == streamEpoch) messages[i] = cur.copy(status = label)
                     }
                 }
             }
