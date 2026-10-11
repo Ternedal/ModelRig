@@ -3,6 +3,9 @@ name: kaliv-voice-isolated-worker
 # Operator-only qualification build. Never tags, publishes or replaces the V1 worker.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/kaliv-voice-isolated-worker.yml'
 
 permissions:
   contents: read
