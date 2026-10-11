@@ -1434,6 +1434,8 @@ private fun ChatScreen(
         // allow an old network stream to continue consuming rig resources.
         activeCall?.cancel()
         streamEpoch++
+        busy = false
+        activeCall = null
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
