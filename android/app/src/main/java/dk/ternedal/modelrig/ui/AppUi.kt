@@ -1521,12 +1521,14 @@ private fun ChatScreen(
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming) return@launch
                     messages[idx] = cur.copy(sources = srcs)
                 }
             }
             val onPerson: (String) -> Unit = { label ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming) return@launch
                     messages[idx] = cur.copy(personLabel = label)
                 }
             }
@@ -1724,10 +1726,10 @@ private fun ChatScreen(
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(sources = srcs) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming) return@launch; messages[i] = cur.copy(sources = srcs) }
             }
             val onPersonRetry: (String) -> Unit = { label ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming) return@launch; messages[i] = cur.copy(personLabel = label) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
