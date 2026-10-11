@@ -35,6 +35,11 @@ KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_KEEP_ALIVE", "30m")
 # Embedding residency can be tuned independently; default remains unchanged.
 EMBED_KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_EMBED_KEEP_ALIVE", KEEP_ALIVE)
 
+# Keep HTTP connection pooling opt-in. A module-global client would require
+# careful event-loop ownership and shutdown handling, so the V1 default remains
+# per-call client lifetime. A future pooled client must be scoped per loop.
+
+
 
 class OllamaError(RuntimeError):
     """Any failure talking to Ollama (unreachable, non-200, malformed body)."""
