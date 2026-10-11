@@ -34,11 +34,27 @@ TIMEOUT = float(os.getenv("MODELRIG_OLLAMA_TIMEOUT", "600"))
 KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_KEEP_ALIVE", "30m")
 # Embedding residency can be tuned independently; default remains unchanged.
 EMBED_KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_EMBED_KEEP_ALIVE", KEEP_ALIVE)
+# Optional per-request output cap; unset means identical behaviour to V1.
+# Never silently truncate: callers must explicitly opt in to a cap.
+MAX_OUTPUT_TOKENS = os.getenv("MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS", "")
 
 # Keep HTTP connection pooling opt-in. A module-global client would require
 # careful event-loop ownership and shutdown handling, so the V1 default remains
 # per-call client lifetime. A future pooled client must be scoped per loop.
 
+
+
+def _output_options() -> dict:
+    """Return a bounded opt-in generation budget without changing defaults."""
+    if not MAX_OUTPUT_TOKENS:
+        return {}
+    try:
+        tokens = int(MAX_OUTPUT_TOKENS)
+    except ValueError as exc:
+        raise OllamaError("MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS must be an integer") from exc
+    if not 1 <= tokens <= 131072:
+        raise OllamaError("MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS must be between 1 and 131072")
+    return {"options": {"num_predict": tokens}}
 
 
 class OllamaError(RuntimeError):
@@ -83,7 +99,7 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
             r = await c.post(f"{OLLAMA_URL}/api/chat",
-                             json={"model": model, "messages": messages, "stream": False, "keep_alive": KEEP_ALIVE})
+                             json={"model": model, "messages": messages, "stream": False, "keep_alive": KEEP_ALIVE, **_output_options()})
     except httpx.HTTPError as e:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
@@ -152,7 +168,7 @@ async def chat_tools(messages: list[dict], tools: list[dict],
         _validate_cloud_url(base_url)
     # keep_alive is a local-VRAM directive; don't send it to a cloud upstream
     # (same fix as chat_stream -- it can hang the cloud request).
-    payload: dict = {"model": model, "messages": messages, "stream": False}
+    payload: dict = {"model": model, "messages": messages, "stream": False, **_output_options()}
     if not base_url:
         payload["keep_alive"] = KEEP_ALIVE
     if tools:
@@ -192,7 +208,7 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     # Cloud doesn't manage your VRAM, and sending it to the cloud upstream is what
     # made voice-via-cloud hang (regular cloud chat works precisely because the
     # app's CloudClient never sends keep_alive). So only send it to the local rig.
-    payload: dict = {"model": model, "messages": messages, "stream": True}
+    payload: dict = {"model": model, "messages": messages, "stream": True, **_output_options()}
     if not base_url:
         payload["keep_alive"] = KEEP_ALIVE
     client = httpx.AsyncClient(timeout=TIMEOUT)
