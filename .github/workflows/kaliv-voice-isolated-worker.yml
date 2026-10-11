@@ -47,7 +47,10 @@ jobs:
                   $schema = $resp.Content | ConvertFrom-Json
                   $routes = @($schema.paths.PSObject.Properties.Name)
                   Write-Host "OpenAPI routes: $($routes.Count)"
-                  if (-not ($routes | Where-Object { $_ -match 'voice' })) { throw "Voice routes missing" }
+                  $voiceRoutes = @($routes | Where-Object { $_ -match 'voice' })
+                  if ($voiceRoutes.Count -eq 0) { throw "Voice routes missing" }
+                  Write-Host "Voice routes: $($voiceRoutes -join ', ')"
+                  if ($voiceRoutes.Count -lt 2) { throw "Expected multiple voice routes in isolated worker" }
                   $ready = $true
                   break
                 }
