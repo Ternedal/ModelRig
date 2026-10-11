@@ -1643,7 +1643,7 @@ private fun ChatScreen(
                                 // local-first: a rig failure does NOT auto-send to cloud
                                 // unless the user opted in, and an attached image is
                                 // never sent via fallback -- it stays on the device.
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
+                                if (rigEmitted == 0 && activeCall?.isCanceled() != true && cloudKey != null && store.autoCloudFallback) {
                                     didFallback = true
                                     CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
@@ -1789,7 +1789,7 @@ private fun ChatScreen(
                                     .chatStream(rigModel, history, registerCall = hook,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
+                                if (rigEmitted == 0 && activeCall?.isCanceled() != true && cloudKey != null && store.autoCloudFallback) {
                                     CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
