@@ -1692,7 +1692,7 @@ private fun ChatScreen(
             // switch). Then there is nothing on screen to finish; bail rather
             // than index past the end. The reply is not persisted in that
             // case -- a loss, but a bounded one, where before it was a crash.
-            if (turnEpoch != streamEpoch) { busy = false; return@launch }
+            if (turnEpoch != streamEpoch) return@launch
             val cur = messages.getOrNull(idx) ?: run { busy = false; return@launch }
             if (!cur.streaming || cur.role != "assistant") { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
@@ -1848,7 +1848,7 @@ private fun ChatScreen(
             activeCall = null
             // Same as the main path: a parked write proposal surfaces the card.
             if (stopRequestedEpoch != turnEpoch) proposal?.let { pendingTool = it }
-            if (turnEpoch != streamEpoch) { busy = false; return@launch }
+            if (turnEpoch != streamEpoch) return@launch
             val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             if (!cur.streaming || cur.role != "assistant") { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
