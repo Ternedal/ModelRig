@@ -12,12 +12,12 @@ Status: proposal only. This document does not change V1 runtime or release gates
 
 ## Source verification (2026-10-11)
 - Inspected current `android/.../net/ModelRigClient.kt`: chatStream, ragChatStream, and voiceConverseStream expose `registerCall`; streaming completion and mid-stream failures are explicitly checked. Do not reimplement these features blindly.
-- `ChatScreen.kt` is not the current path; UI appears split across `ui/chat/ChatScreen1.kt`, `ui/AppUi.kt` and related files. UI behavior is not yet verified.
+- `ChatScreen.kt` is not the current path; UI is split across `ui/chat/ChatScreen1.kt`, `ui/AppUi.kt` and related files. `ChatScreen1.kt` already exposes `onStop` and uses it for the busy-state send/stop button. Parent callback wiring and cancellation lifecycle remain unverified.
 - README claims may be historical, not current release evidence. Acceptance status stays UNKNOWN until code-path and test inspection.
 
 ## P0 — release-safe usability and safety
 1. Show active source (local/cloud), model, connection status and whether fallback occurred; never silently transmit private prompts to cloud.
-2. Add cancel-generation action with deterministic cancellation, no duplicate assistant message and explicit partial-answer status.
+2. Verify existing cancel-generation UI wiring end-to-end; add deterministic cancellation tests, no duplicate assistant message and explicit partial-answer status where missing.
 3. Replace generic 502 errors with actionable, non-secret-leaking voice status and retry guidance.
 4. Provide keyboard/screen-reader semantics, visible focus, accessible contrast and touch targets.
 5. Preserve unsent draft on transient network errors; do not retry non-idempotent requests without user action.
