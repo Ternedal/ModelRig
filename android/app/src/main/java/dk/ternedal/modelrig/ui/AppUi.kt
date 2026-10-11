@@ -1653,7 +1653,7 @@ private fun ChatScreen(
                                 // local-first: a rig failure does NOT auto-send to cloud
                                 // unless the user opted in, and an attached image is
                                 // never sent via fallback -- it stays on the device.
-                                if (rigEmitted == 0 && !wasRigCallCancelled && cloudKey != null && store.autoCloudFallback) {
+                                if (dk.ternedal.modelrig.logic.CloudFallbackPolicy.shouldFallback(rigEmitted, wasRigCallCancelled, cloudKey != null, store.autoCloudFallback)) {
                                     didFallback = true
                                     CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
@@ -1804,7 +1804,7 @@ private fun ChatScreen(
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
                                 val wasRigCallCancelled = rigCall?.isCanceled() == true
-                                if (rigEmitted == 0 && !wasRigCallCancelled && cloudKey != null && store.autoCloudFallback) {
+                                if (dk.ternedal.modelrig.logic.CloudFallbackPolicy.shouldFallback(rigEmitted, wasRigCallCancelled, cloudKey != null, store.autoCloudFallback)) {
                                     CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
