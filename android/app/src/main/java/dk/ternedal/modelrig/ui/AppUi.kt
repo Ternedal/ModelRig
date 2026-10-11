@@ -1514,8 +1514,9 @@ private fun ChatScreen(
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
-                    val i = messages.lastIndex
-                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming) return@launch
+                    messages[idx] = cur.copy(context = cs)
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
@@ -1721,8 +1722,9 @@ private fun ChatScreen(
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
-                    val i = messages.lastIndex
-                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
+                    val cur = messages.getOrNull(i) ?: return@launch
+                    if (!cur.streaming) return@launch
+                    messages[i] = cur.copy(context = cs)
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
