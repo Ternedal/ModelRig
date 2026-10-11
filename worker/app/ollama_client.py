@@ -34,7 +34,7 @@ TIMEOUT = float(os.getenv("MODELRIG_OLLAMA_TIMEOUT", "600"))
 KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_KEEP_ALIVE", "30m")
 # Embedding residency can be tuned independently; default remains unchanged.
 EMBED_KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_EMBED_KEEP_ALIVE", KEEP_ALIVE)
-# Optional per-request output cap; unset means identical behaviour to V1.
+# Optional LOCAL generation cap; unset means identical behaviour to V1.
 # Never silently truncate: callers must explicitly opt in to a cap.
 MAX_OUTPUT_TOKENS = os.getenv("MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS", "")
 
@@ -168,9 +168,10 @@ async def chat_tools(messages: list[dict], tools: list[dict],
         _validate_cloud_url(base_url)
     # keep_alive is a local-VRAM directive; don't send it to a cloud upstream
     # (same fix as chat_stream -- it can hang the cloud request).
-    payload: dict = {"model": model, "messages": messages, "stream": False, **_output_options()}
+    payload: dict = {"model": model, "messages": messages, "stream": False}
     if not base_url:
         payload["keep_alive"] = KEEP_ALIVE
+        payload.update(_output_options())
     if tools:
         payload["tools"] = tools
     url = (base_url or OLLAMA_URL).rstrip("/")
@@ -208,9 +209,10 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     # Cloud doesn't manage your VRAM, and sending it to the cloud upstream is what
     # made voice-via-cloud hang (regular cloud chat works precisely because the
     # app's CloudClient never sends keep_alive). So only send it to the local rig.
-    payload: dict = {"model": model, "messages": messages, "stream": True, **_output_options()}
+    payload: dict = {"model": model, "messages": messages, "stream": True}
     if not base_url:
         payload["keep_alive"] = KEEP_ALIVE
+        payload.update(_output_options())
     client = httpx.AsyncClient(timeout=TIMEOUT)
     try:
         async with client.stream("POST", f"{url}/api/chat", headers=headers,
