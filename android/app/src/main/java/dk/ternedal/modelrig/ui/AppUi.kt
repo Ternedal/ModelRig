@@ -1635,15 +1635,18 @@ private fun ChatScreen(
                             // (rig down / model not pulled / HTTP error). A mid-stream
                             // rig failure is surfaced, not retried.
                             val cloudKey = store.cloudKey
+                            var rigCall: okhttp3.Call? = null
+                            val rigHook: (okhttp3.Call) -> Unit = { call -> rigCall = call; hook(call) }
                             try {
                                 ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook, imageB64 = imageB64,
+                                    .chatStream(rigModel, history, registerCall = rigHook, imageB64 = imageB64,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
+                                val wasRigCallCancelled = rigCall?.isCanceled() == true
                                 // local-first: a rig failure does NOT auto-send to cloud
                                 // unless the user opted in, and an attached image is
                                 // never sent via fallback -- it stays on the device.
-                                if (rigEmitted == 0 && activeCall?.isCanceled() != true && cloudKey != null && store.autoCloudFallback) {
+                                if (rigEmitted == 0 && !wasRigCallCancelled && cloudKey != null && store.autoCloudFallback) {
                                     didFallback = true
                                     CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
@@ -1784,12 +1787,15 @@ private fun ChatScreen(
                             // surfaced, not retried.
                             val cloudKey = store.cloudKey
                             var rigEmitted = 0
+                            var rigCall: okhttp3.Call? = null
+                            val rigHook: (okhttp3.Call) -> Unit = { call -> rigCall = call; hook(call) }
                             try {
                                 ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook,
+                                    .chatStream(rigModel, history, registerCall = rigHook,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
-                                if (rigEmitted == 0 && activeCall?.isCanceled() != true && cloudKey != null && store.autoCloudFallback) {
+                                val wasRigCallCancelled = rigCall?.isCanceled() == true
+                                if (rigEmitted == 0 && !wasRigCallCancelled && cloudKey != null && store.autoCloudFallback) {
                                     CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
