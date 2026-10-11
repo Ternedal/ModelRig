@@ -46,7 +46,9 @@ def main() -> int:
         return 2
     repos = {name: inspect_repo(args.workspace / name) for name in REPOS}
     tools = {name: shutil.which(name) is not None for name in ("git", "python", "nvidia-smi", "adb")}
-    ready = bool(tools["git"] and tools["python"]) and all(\n        x["present"] and x["sha"] and x["clean"] for x in repos.values()\n    )
+    ready = bool(tools["git"] and tools["python"]) and all(
+        x["present"] and x["sha"] and x["clean"] for x in repos.values()
+    )
     report = {
         "schema": "kaliv-v1-physical-preflight/v1",
         "created_at": datetime.now(timezone.utc).isoformat(),
