@@ -1687,7 +1687,7 @@ private fun ChatScreen(
             if (turnEpoch != streamEpoch) return@launch
             activeCall = null
             // A parked write proposal: surface the card. Nothing has executed.
-            proposal?.let { pendingTool = it }
+            if (stopRequestedEpoch != turnEpoch) proposal?.let { pendingTool = it }
             // The list can have been replaced mid-stream (a real conversation
             // switch). Then there is nothing on screen to finish; bail rather
             // than index past the end. The reply is not persisted in that
@@ -1847,7 +1847,7 @@ private fun ChatScreen(
             if (turnEpoch != streamEpoch) return@launch
             activeCall = null
             // Same as the main path: a parked write proposal surfaces the card.
-            proposal?.let { pendingTool = it }
+            if (stopRequestedEpoch != turnEpoch) proposal?.let { pendingTool = it }
             if (turnEpoch != streamEpoch) { busy = false; return@launch }
             val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             if (!cur.streaming || cur.role != "assistant") { busy = false; return@launch }
