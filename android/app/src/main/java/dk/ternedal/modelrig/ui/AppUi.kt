@@ -1562,7 +1562,11 @@ private fun ChatScreen(
             }
             val hook: (okhttp3.Call) -> Unit = { call ->
                 // Registration can race with a conversation switch or Stop.
-                if (turnEpoch == streamEpoch && stopRequestedEpoch != turnEpoch) activeCall = call else call.cancel()
+                if (turnEpoch == streamEpoch && stopRequestedEpoch != turnEpoch) {
+                    activeCall = call
+                } else {
+                    call.cancel()
+                }
             }
 
             // Track whether the rig stream emitted anything, so we only fall
