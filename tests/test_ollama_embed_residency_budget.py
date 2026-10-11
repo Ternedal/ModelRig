@@ -46,6 +46,18 @@ class EmbedResidencyBudgetTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(client.post.call_args.kwargs["json"]["keep_alive"], "30m")
 
+    def test_output_budget_is_opt_in_and_validated(self):
+        default = self._load()
+        self.assertEqual(default._output_options(), {})
+        limited = self._load(MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS="256")
+        self.assertEqual(limited._output_options(), {"options": {"num_predict": 256}})
+        invalid = self._load(MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS="0")
+        with self.assertRaises(invalid.OllamaError):
+            invalid._output_options()
+        invalid_text = self._load(MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS="oops")
+        with self.assertRaises(invalid_text.OllamaError):
+            invalid_text._output_options()
+
     async def test_legacy_embed_fallback_uses_embedding_override(self):
         mod = self._load(MODELRIG_OLLAMA_KEEP_ALIVE="30m",
                          MODELRIG_OLLAMA_EMBED_KEEP_ALIVE="0")
