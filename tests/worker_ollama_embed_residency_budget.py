@@ -77,6 +77,28 @@ class EmbedResidencyBudgetTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("options", client.post.await_args.kwargs["json"])
             self.assertNotIn("keep_alive", client.post.await_args.kwargs["json"])
 
+    async def test_local_tools_request_honors_cap(self):
+        mod = self._load(MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS="64")
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"message": {"content": "ok"}}
+        client = AsyncMock()
+        client.post.return_value = response
+        context = AsyncMock()
+        context.__aenter__.return_value = client
+        with patch.object(mod.httpx, "AsyncClient", return_value=context):
+            result = await mod.chat_tools([{"role": "user", "content": "hi"}], [])
+        self.assertEqual(result["content"], "ok")
+        payload = client.post.await_args.kwargs["json"]
+        self.assertEqual(payload["options"], {"num_predict": 64})
+        self.assertEqual(payload["keep_alive"], mod.KEEP_ALIVE)
+
+    def test_output_budget_rejects_negative_and_excessive_values(self):
+        for value in ("-1", "131073", "2.5", "NaN"):
+            with self.subTest(value=value):
+                mod = self._load(MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS=value)
+                with self.assertRaises(mod.OllamaError):
+                    mod._output_options()
+
     async def test_legacy_embed_fallback_uses_embedding_override(self):
         mod = self._load(MODELRIG_OLLAMA_KEEP_ALIVE="30m",
                          MODELRIG_OLLAMA_EMBED_KEEP_ALIVE="0")
