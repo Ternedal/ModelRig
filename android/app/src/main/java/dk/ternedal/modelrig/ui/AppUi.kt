@@ -855,6 +855,8 @@ private fun ChatScreen(
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
+    // Generation epoch prevents stale stream callbacks from mutating a new chat.
+    var streamEpoch by remember { mutableIntStateOf(0) }
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
     var showSourceSheet by remember { mutableStateOf(false) }
@@ -1429,6 +1431,7 @@ private fun ChatScreen(
         // A conversation switch invalidates the previous generation. Do not
         // allow an old network stream to continue consuming rig resources.
         activeCall?.cancel()
+        streamEpoch++
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
@@ -1473,6 +1476,7 @@ private fun ChatScreen(
         // Allow an image-only turn (vision: "describe this" with no text).
         if ((t.isEmpty() && pendingImageB64 == null) || busy) return@onSend
         messages.add(Msg("user", t)); input = ""; busy = true
+        val turnEpoch = ++streamEpoch
         // Route decision comes from the ONE table-tested router (see
         // TurnRouter) -- the retry path derives its flags from the same place,
         // so send and retry cannot diverge again.
@@ -1843,7 +1847,7 @@ private fun ChatScreen(
             val chatOverflowMenu: @Composable () -> Unit = {
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
-                            overflow = false; activeCall?.cancel(); messages.clear(); convId = null; onConvChanged(null)
+                            overflow = false; activeCall?.cancel(); streamEpoch++; messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
