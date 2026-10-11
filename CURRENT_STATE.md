@@ -564,6 +564,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_b_one_click.py`
 - `tests/workflow_stage_b_parallel_admission.py`
 - `tests/workflow_stage_b_physical_gate.py`
+- `tests/workflow_stage_b_robust_partition.py`
 - `tests/workflow_stage_b_weighted_sharding.py`
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_stale_check.py`
