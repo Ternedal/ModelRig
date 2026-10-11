@@ -45,3 +45,29 @@ Repeat idle (10 minutes without requests), cold first turn, 10 warm turns, and c
 ## Decision rule
 
 Prefer the Pareto-optimal profile: lower resource use **without measurable loss in required quality, security or acceptable latency**. If no profile dominates, present the trade-off explicitly and obtain operator approval before changing V1 defaults.
+
+## Minimal-overhead benchmark capture (read-only)
+
+The following uses built-in PowerShell and Ollama only; it does not install agents, keep a polling daemon alive, or write secrets. Save samples outside the repository and do not attach prompt contents or tokens.
+
+```powershell
+$ErrorActionPreference = "Stop"
+$ollama = "http://127.0.0.1:11435"
+$models = @(Invoke-RestMethod -Uri "$ollama/api/ps" -TimeoutSec 10).models
+$gpus = & nvidia-smi --query-gpu=index,memory.used,utilization.gpu,power.draw --format=csv,noheader,nounits
+[pscustomobject]@{
+  TimeUtc = [DateTime]::UtcNow.ToString("o")
+  LoadedModels = @($models | ForEach-Object { $_.name }) -join ","
+  GPU = @($gpus) -join "; "
+} | ConvertTo-Json -Depth 3
+```
+
+Run once before workload, immediately after workload, and after the configured idle timeout. Avoid continuous polling: sampling itself consumes resources. Never submit confidential prompts to a remote benchmark service.
+
+### Ollama response metadata
+
+For a fixed synthetic prompt, POST to `/api/chat` with `stream:false` and capture `total_duration`, `load_duration`, `prompt_eval_count`, `prompt_eval_duration`, `eval_count`, `eval_duration` (nanoseconds for durations). Never log generated content or API credentials. Report cold and warm samples separately. A timeout or absent metric is a failed/unknown sample, not zero.
+
+### Resource-efficiency scorecard
+
+Compare energy per successful task (joules), idle memory (MiB), p50/p95 latency, throughput, cold-start penalty, CPU load and safety/quality regression. Do not choose a lower-VRAM profile if it increases CPU offload, wall time, or energy per task significantly. Keep production default `30m` until a candidate is measured and approved.
