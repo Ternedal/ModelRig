@@ -1655,7 +1655,7 @@ private fun ChatScreen(
                                 // never sent via fallback -- it stays on the device.
                                 if (dk.ternedal.modelrig.logic.CloudFallbackPolicy.shouldFallback(rigEmitted, wasRigCallCancelled, cloudKey != null, store.autoCloudFallback)) {
                                     didFallback = true
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                                    CloudClient(requireNotNull(cloudKey)).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
                         }
@@ -1805,7 +1805,7 @@ private fun ChatScreen(
                             } catch (e: Exception) {
                                 val wasRigCallCancelled = rigCall?.isCanceled() == true
                                 if (dk.ternedal.modelrig.logic.CloudFallbackPolicy.shouldFallback(rigEmitted, wasRigCallCancelled, cloudKey != null, store.autoCloudFallback)) {
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                                    CloudClient(requireNotNull(cloudKey)).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
                         }
