@@ -857,6 +857,8 @@ private fun ChatScreen(
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
     // Generation epoch prevents stale stream callbacks from mutating a new chat.
     var streamEpoch by remember { mutableIntStateOf(0) }
+    // Stop may be pressed before OkHttp creates its Call.
+    var stopRequestedEpoch by remember { mutableIntStateOf(-1) }
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
     var showSourceSheet by remember { mutableStateOf(false) }
@@ -1553,7 +1555,7 @@ private fun ChatScreen(
             }
             val hook: (okhttp3.Call) -> Unit = { call ->
                 // Registration can race with a conversation switch or Stop.
-                if (turnEpoch == streamEpoch) activeCall = call else call.cancel()
+                if (turnEpoch == streamEpoch && stopRequestedEpoch != turnEpoch) activeCall = call else call.cancel()
             }
 
             // Track whether the rig stream emitted anything, so we only fall
@@ -2917,7 +2919,7 @@ private fun ChatScreen(
                     },
                     sendEnabled = canSendNow && !busy,
                     busy = busy,
-                    onStop = { activeCall?.cancel() },
+                    onStop = { stopRequestedEpoch = streamEpoch; activeCall?.cancel() },
                     inputField = {
                         BasicTextField(
                             value = input,
