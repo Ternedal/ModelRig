@@ -1821,6 +1821,7 @@ private fun ChatScreen(
                     }
                 }.exceptionOrNull()
             }
+            if (turnEpoch != streamEpoch) return@launch
             activeCall = null
             // Same as the main path: a parked write proposal surfaces the card.
             proposal?.let { pendingTool = it }
