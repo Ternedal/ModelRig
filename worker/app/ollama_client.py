@@ -32,6 +32,8 @@ TIMEOUT = float(os.getenv("MODELRIG_OLLAMA_TIMEOUT", "600"))
 # /health and back-to-back tool turns timing out even at a 5 min client
 # timeout. "30m" holds it for half an hour idle; "-1" pins it, "0" unloads.
 KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_KEEP_ALIVE", "30m")
+# Embedding residency can be tuned independently; default remains unchanged.
+EMBED_KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_EMBED_KEEP_ALIVE", KEEP_ALIVE)
 
 
 class OllamaError(RuntimeError):
@@ -51,10 +53,10 @@ async def embed(text: str, model: str | None = None) -> list[float]:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
             r = await c.post(f"{OLLAMA_URL}/api/embed",
-                             json={"model": model, "input": text, "keep_alive": KEEP_ALIVE})
+                             json={"model": model, "input": text, "keep_alive": EMBED_KEEP_ALIVE})
             if r.status_code in (404, 405):
                 r = await c.post(f"{OLLAMA_URL}/api/embeddings",
-                                 json={"model": model, "prompt": text, "keep_alive": KEEP_ALIVE})
+                                 json={"model": model, "prompt": text, "keep_alive": EMBED_KEEP_ALIVE})
     except httpx.HTTPError as e:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
