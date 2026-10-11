@@ -58,6 +58,24 @@ class EmbedResidencyBudgetTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(invalid_text.OllamaError):
             invalid_text._output_options()
 
+    async def test_local_chat_uses_cap_but_cloud_tools_do_not(self):
+        mod = self._load(MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS="128")
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"message": {"content": "ok"}}
+        client = AsyncMock()
+        client.post.return_value = response
+        context = AsyncMock()
+        context.__aenter__.return_value = client
+        with patch.object(mod.httpx, "AsyncClient", return_value=context):
+            self.assertEqual(await mod.chat([{"role": "user", "content": "hi"}]), "ok")
+            self.assertEqual(
+                client.post.await_args.kwargs["json"]["options"]["num_predict"], 128
+            )
+            with patch.object(mod, "_validate_cloud_url", return_value=None):
+                await mod.chat_tools([], [], base_url="https://example.com")
+            self.assertNotIn("options", client.post.await_args.kwargs["json"])
+            self.assertNotIn("keep_alive", client.post.await_args.kwargs["json"])
+
     async def test_legacy_embed_fallback_uses_embedding_override(self):
         mod = self._load(MODELRIG_OLLAMA_KEEP_ALIVE="30m",
                          MODELRIG_OLLAMA_EMBED_KEEP_ALIVE="0")
