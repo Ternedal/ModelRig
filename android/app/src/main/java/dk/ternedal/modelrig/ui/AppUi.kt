@@ -1426,6 +1426,9 @@ private fun ChatScreen(
         // convId already exists). Only a switch to a DIFFERENT conversation
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
+        // A conversation switch invalidates the previous generation. Do not
+        // allow an old network stream to continue consuming rig resources.
+        activeCall?.cancel()
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
@@ -1838,7 +1841,7 @@ private fun ChatScreen(
             val chatOverflowMenu: @Composable () -> Unit = {
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
-                            overflow = false; messages.clear(); convId = null; onConvChanged(null)
+                            overflow = false; activeCall?.cancel(); messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
