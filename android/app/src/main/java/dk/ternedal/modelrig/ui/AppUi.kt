@@ -1740,7 +1740,7 @@ private fun ChatScreen(
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
-                        val cur = messages[i]
+                        val cur = messages.getOrNull(i) ?: return@launch
                         if (cur.streaming) messages[i] = cur.copy(status = label)
                     }
                 }
