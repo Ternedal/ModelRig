@@ -14,7 +14,7 @@ class EmbedResidencyBudgetTests(unittest.IsolatedAsyncioTestCase):
 
     def test_default_matches_generation(self):
         with patch.dict(os.environ, {"MODELRIG_OLLAMA_KEEP_ALIVE": "30m"}, clear=False):
-            with patch.dict(os.environ, {"MODELRIG_OLLAMA_EMBED_KEEP_ALIVE": ""}, clear=False):
+            with patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("MODELRIG_OLLAMA_EMBED_KEEP_ALIVE", None)
                 mod = self._load()
                 self.assertEqual(mod.EMBED_KEEP_ALIVE, mod.KEEP_ALIVE)
@@ -23,7 +23,7 @@ class EmbedResidencyBudgetTests(unittest.IsolatedAsyncioTestCase):
         mod = self._load(MODELRIG_OLLAMA_KEEP_ALIVE="30m",
                          MODELRIG_OLLAMA_EMBED_KEEP_ALIVE="1m")
         response = MagicMock(status_code=200)
-        response.json.return_value = {"embeddings": [[0.1, 0.2]]}
+        response.json.side_effect = [{"embeddings": [[0.1, 0.2]]}, {"message": {"content": "ok"}}]
         client = AsyncMock()
         client.post.return_value = response
         context = AsyncMock()
