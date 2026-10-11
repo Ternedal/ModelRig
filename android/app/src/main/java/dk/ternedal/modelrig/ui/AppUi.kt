@@ -1718,9 +1718,9 @@ private fun ChatScreen(
         if (busy) return@retry
         val errMsg = messages.getOrNull(i) ?: return@retry
         if (!errMsg.error) return@retry
-        val turnEpoch = ++streamEpoch
         val userMsg = messages.getOrNull(i - 1) ?: return@retry
         if (userMsg.role != "user") return@retry
+        val turnEpoch = ++streamEpoch
         val t = userMsg.text
         // ONE router for send + retry (audit P1-1 -> 1.58.38): the retry can
         // no longer diverge from the original turn's route -- the decision
