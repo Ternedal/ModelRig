@@ -29,7 +29,7 @@ jobs:
         shell: pwsh
         run: |
           python scripts/stamp_build_identity.py
-          pyinstaller --noconfirm --clean --onefile --name modelrig-worker-voice-test-windows-x64 --paths worker --collect-all piper --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all av --collect-all nvidia --collect-all onnxruntime worker/run_worker.py
+          pyinstaller --noconfirm --clean --onefile --name modelrig-worker-voice-test-windows-x64 --paths . --paths worker --collect-submodules bodyrig --collect-all piper --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all av --collect-all nvidia --collect-all onnxruntime worker/run_worker.py
       - name: Smoke test isolated worker on a nonproduction port
         shell: pwsh
         run: |
