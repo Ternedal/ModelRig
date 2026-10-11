@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -29,7 +30,7 @@ def inspect_repo(path: Path) -> dict:
                              capture_output=True, text=True, timeout=10, check=True).stdout.strip()
         dirty = subprocess.run(["git", "-C", str(path), "status", "--porcelain"],
                                capture_output=True, text=True, timeout=10, check=True).stdout
-        result.update(sha=sha, clean=not bool(dirty.strip()))
+        result.update(sha=sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None, clean=not bool(dirty.strip()))
     except (OSError, subprocess.SubprocessError):
         pass
     return result
@@ -45,7 +46,7 @@ def main() -> int:
         return 2
     repos = {name: inspect_repo(args.workspace / name) for name in REPOS}
     tools = {name: shutil.which(name) is not None for name in ("git", "python", "nvidia-smi", "adb")}
-    ready = all(x["present"] and x["sha"] and x["clean"] for x in repos.values())
+    ready = bool(tools["git"] and tools["python"]) and all(\n        x["present"] and x["sha"] and x["clean"] for x in repos.values()\n    )
     report = {
         "schema": "kaliv-v1-physical-preflight/v1",
         "created_at": datetime.now(timezone.utc).isoformat(),
