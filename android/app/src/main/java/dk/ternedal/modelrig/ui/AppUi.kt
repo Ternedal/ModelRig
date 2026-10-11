@@ -1666,6 +1666,9 @@ private fun ChatScreen(
                     }
                 }.exceptionOrNull()
             }
+            // A stale generation must not clear the current request or surface
+            // a tool proposal belonging to another conversation.
+            if (turnEpoch != streamEpoch) return@launch
             activeCall = null
             // A parked write proposal: surface the card. Nothing has executed.
             proposal?.let { pendingTool = it }
