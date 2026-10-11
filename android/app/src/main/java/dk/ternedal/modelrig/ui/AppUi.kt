@@ -1449,7 +1449,7 @@ private fun ChatScreen(
             val loaded = withContext(Dispatchers.IO) {
                 db.conversationMeta(openConvId) to db.loadMessages(openConvId)
             }
-            if (loadEpoch != streamEpoch) return@LaunchedEffect
+            if (loadEpoch != streamEpoch || openConvId != convId) return@LaunchedEffect
             val (meta, msgs) = loaded
             // Strip emojis from OLD assistant replies on load too. The finalize-time
             // strip only cleans new replies; without this, opening a conversation
