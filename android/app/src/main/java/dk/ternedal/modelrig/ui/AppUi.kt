@@ -1508,6 +1508,7 @@ private fun ChatScreen(
                     // runCatching around the stream -- it is an app crash. Guard
                     // the index; a replaced list means the user moved on.
                     val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming) return@launch
                     messages[idx] = cur.copy(text = cur.text + delta)
                 }
             }
@@ -1714,7 +1715,7 @@ private fun ChatScreen(
         var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
             val onDelta: (String) -> Unit = { delta ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(text = cur.text + delta) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming) return@launch; messages[i] = cur.copy(text = cur.text + delta) }
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
