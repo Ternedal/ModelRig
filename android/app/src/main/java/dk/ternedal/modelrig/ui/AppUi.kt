@@ -1551,7 +1551,10 @@ private fun ChatScreen(
                     }
                 }
             }
-            val hook: (okhttp3.Call) -> Unit = { activeCall = it }
+            val hook: (okhttp3.Call) -> Unit = { call ->
+                // Registration can race with a conversation switch or Stop.
+                if (turnEpoch == streamEpoch) activeCall = call else call.cancel()
+            }
 
             // Track whether the rig stream emitted anything, so we only fall
             // back to cloud on a clean pre-emit failure (never mid-stream --
@@ -1754,7 +1757,10 @@ private fun ChatScreen(
                     }
                 }
             }
-            val hook: (okhttp3.Call) -> Unit = { activeCall = it }
+            val hook: (okhttp3.Call) -> Unit = { call ->
+                // Registration can race with a conversation switch or Stop.
+                if (turnEpoch == streamEpoch) activeCall = call else call.cancel()
+            }
             val err = withContext(Dispatchers.IO) {
                 runCatching {
                     when {
