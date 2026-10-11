@@ -1709,7 +1709,7 @@ private fun ChatScreen(
             if ((err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
             }
-            if (proposal != null) messages.removeAt(idx)
+            if (proposal != null && stopRequestedEpoch != turnEpoch) messages.removeAt(idx)
             busy = false
         }
     }
