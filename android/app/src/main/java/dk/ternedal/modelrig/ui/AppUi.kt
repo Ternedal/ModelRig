@@ -1670,6 +1670,7 @@ private fun ChatScreen(
             // than index past the end. The reply is not persisted in that
             // case -- a loss, but a bounded one, where before it was a crash.
             val cur = messages.getOrNull(idx) ?: run { busy = false; return@launch }
+            if (!cur.streaming || cur.role != "assistant") { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text), fellBackToCloud = didFallback)
@@ -1815,6 +1816,7 @@ private fun ChatScreen(
             // Same as the main path: a parked write proposal surfaces the card.
             proposal?.let { pendingTool = it }
             val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
+            if (!cur.streaming || cur.role != "assistant") { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text))
