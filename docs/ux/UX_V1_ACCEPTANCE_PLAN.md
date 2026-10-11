@@ -4,11 +4,16 @@ Status: proposal only. This document does not change V1 runtime or release gates
 
 ## Confirmed documentation gaps (verify current implementation before coding)
 - Desktop README: conversation persistence exists; conversation browser (list/switch/delete) is described as missing.
-- Android README: streaming exists; stop-generation via OkHttp call.cancel() is listed as future work.
+- Android README lists stop-generation as future work, BUT current ModelRigClient.chatStream and ragChatStream already expose registerCall for OkHttp cancellation. Verify actual UI wiring before treating stop as missing.
 - Android README: RAG is single-turn despite conversation history being displayed.
 - Android README: markdown renderer lacks tables, images and nested lists.
 - Desktop README: settings are in memory, while conversations persist.
 - Voice preflight: dependency discovery does not prove runtime ASR or real audio readiness.
+
+## Source verification (2026-10-11)
+- Inspected current `android/.../net/ModelRigClient.kt`: chatStream, ragChatStream, and voiceConverseStream expose `registerCall`; streaming completion and mid-stream failures are explicitly checked. Do not reimplement these features blindly.
+- `ChatScreen.kt` is not the current path; UI appears split across `ui/chat/ChatScreen1.kt`, `ui/AppUi.kt` and related files. UI behavior is not yet verified.
+- README claims may be historical, not current release evidence. Acceptance status stays UNKNOWN until code-path and test inspection.
 
 ## P0 — release-safe usability and safety
 1. Show active source (local/cloud), model, connection status and whether fallback occurred; never silently transmit private prompts to cloud.
