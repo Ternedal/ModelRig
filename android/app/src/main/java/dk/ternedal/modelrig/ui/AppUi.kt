@@ -1867,7 +1867,7 @@ private fun ChatScreen(
             val chatOverflowMenu: @Composable () -> Unit = {
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
-                            overflow = false; activeCall?.cancel(); streamEpoch++; messages.clear(); convId = null; onConvChanged(null)
+                            overflow = false; activeCall?.cancel(); streamEpoch++; activeCall = null; busy = false; messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
