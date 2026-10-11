@@ -1509,6 +1509,9 @@ private fun ChatScreen(
                 db.addMessage(id, "user", t)
                 id
             }
+            // A chat switch while persistence was running must not re-open the
+            // previous conversation or start its network generation.
+            if (turnEpoch != streamEpoch) return@launch
             if (convId == null) { convId = cid; onConvChanged(cid) }
 
             val onDelta: (String) -> Unit = { delta ->
