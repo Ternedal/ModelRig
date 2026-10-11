@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-MODULE = "worker.app.ollama_client"
+MODULE = "app.ollama_client"
 
 
 class EmbedResidencyBudgetTests(unittest.IsolatedAsyncioTestCase):
