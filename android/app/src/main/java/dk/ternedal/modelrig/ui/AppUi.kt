@@ -1709,6 +1709,7 @@ private fun ChatScreen(
             if ((err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
             }
+            if (turnEpoch != streamEpoch) return@launch
             if (proposal != null && stopRequestedEpoch != turnEpoch) messages.removeAt(idx)
             busy = false
         }
@@ -1863,6 +1864,7 @@ private fun ChatScreen(
             if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
             }
+            if (turnEpoch != streamEpoch) return@launch
             busy = false
         }
     }
