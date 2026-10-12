@@ -25,7 +25,8 @@ try {
 $models = @()
 $ollamaError = $null
 try {
-    $response = Invoke-RestMethod -Method Get -Uri "$OllamaUrl/api/ps" -TimeoutSec 10
+    # Never honor proxy environment settings or follow a loopback redirect.
+    $response = Invoke-RestMethod -Method Get -Uri "$OllamaUrl/api/ps" -TimeoutSec 10 -NoProxy -MaximumRedirection 0
     foreach ($model in @($response.models)) {
         if ($null -eq $model) { continue }
         # Names only: never include paths, tokens, prompts or model metadata.
