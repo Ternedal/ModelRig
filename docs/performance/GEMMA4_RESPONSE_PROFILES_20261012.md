@@ -27,7 +27,7 @@ For lange kontekstprompts måltes ca. 33–35 s, men testene ændrede både
 immutable, opt-in profiler og en ren funktion `apply_profile`. Den ændrer
 kun en **kopi** af et Ollama-payload, bevarer eksisterende systeminstruktioner,
 streamingindstillingen og øvrige options samt strengere outputlofter.
-Ukendt profil afvises. En separat `apply_chat_profile` kan håndtere simple `/api/chat`-beskeder med bevaret systemrolle og rækkefølge. Tool-calls, multimodale beskeder og blandede systemfelter afvises eksplicit. Ingen runtime-kalder er ændret.
+Ukendt profil afvises. En separat `apply_chat_profile` kan håndtere simple `/api/chat`-beskeder med bevaret systemrolle og rækkefølge. Tool-calls, multimodale beskeder, ekstra eller ikke-indledende systembeskeder og blandede systemfelter afvises eksplicit. Ingen runtime-kalder er ændret.
 
 | Profil | think | num_predict (loft) | Formål |
 |---|---|---:|---|
