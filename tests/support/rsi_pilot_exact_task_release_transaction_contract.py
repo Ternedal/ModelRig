@@ -94,11 +94,11 @@ def _selected_contract_files() -> tuple[str, ...]:
         total = int(total_text)
     except (ValueError, TypeError) as exc:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/5 through 4/4"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/5 through 5/5"
         ) from exc
     if total != _REQUIRED_SHARD_COUNT or not 1 <= index <= total:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/5 through 4/4"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/5 through 5/5"
         )
     selected = balanced_downstream_shards(_CONTRACT_FILES)[index - 1]
     if not selected:
