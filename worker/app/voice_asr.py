@@ -252,6 +252,8 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
             # Whisper wants 16 kHz mono. Downmix to mono; resample if needed.
             if getattr(data, "ndim", 1) > 1:
                 data = data.mean(axis=1)
+            if sr <= 0 or len(data) == 0:
+                raise ValueError("Audio must contain samples with a positive sample rate")
             if sr != 16000:
                 # Lightweight linear resample to 16 kHz (avoids pulling in scipy).
                 import numpy as np
