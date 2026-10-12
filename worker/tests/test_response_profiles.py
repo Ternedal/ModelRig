@@ -53,6 +53,12 @@ class ResponseProfileTests(unittest.TestCase):
                 with self.assertRaises(TypeError):
                     apply_profile({"options": value}, "chat_brief")
 
+    def test_chat_payload_requires_role_aware_adapter(self):
+        original = {"messages": [{"role": "system", "content": "Keep policy"}]}
+        with self.assertRaisesRegex(ValueError, "role-aware"):
+            apply_profile(original, "voice_brief")
+        self.assertEqual(original["messages"][0]["content"], "Keep policy")
+
     def test_invalid_system_fails(self):
         with self.assertRaises(TypeError):
             apply_profile({"system": ["not", "a", "string"]}, "chat_brief")
