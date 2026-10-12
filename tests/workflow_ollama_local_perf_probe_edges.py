@@ -129,7 +129,7 @@ for payload, expected in (
             ), expected
         )
 
-# Numeric metadata must reject NaN, infinity, booleans, and fractional VRAM.
+# Numeric metadata must reject NaN, infinity, booleans, and negative VRAM.
 for invalid in (True, float("nan"), float("inf"), -1):
     must_refuse(lambda v=invalid: probe._loaded_size(
         {"models": [{"name": "fixture:7b", "size_vram": v}]}, "fixture:7b"
