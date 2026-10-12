@@ -60,11 +60,12 @@ def balanced_downstream_shards(files) -> tuple[tuple[str, ...], ...]:
         raise AssertionError("downstream costs must be positive finite seconds")
 
     original_index = {name: i for i, name in enumerate(canonical)}
-    groups: list[list[str]] = [[], [], [], []]
+    groups: list[list[str]] = [[], [], [], [], []]
     # Simulate completion-order assignment to exactly two slots per existing
-    # downstream shard. Four jobs x two children is a separate CI-only fanout
-    # experiment (8 total vs 6 existing). No contract/timeout/gate changed.
-    loads: list[list[float]] = [[0.0, 0.0] for _ in range(4)]
+    # downstream shard. Five jobs x two isolated children expands max downstream
+    # concurrency from eight to ten, without changing each child timeout,
+    # runner-local process cap, canonical assertions or provenance gates.
+    loads: list[list[float]] = [[0.0, 0.0] for _ in range(5)]
     for filename in sorted(canonical, key=lambda x: (-COST_SECONDS[x], original_index[x])):
         cost = COST_SECONDS[filename]
         options = []
