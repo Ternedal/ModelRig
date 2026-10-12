@@ -146,4 +146,20 @@ with patch.object(probe, "_request_json", return_value={"models": []}) as reques
     assert request.call_count == 1
     assert request.call_args.args[1] == "/api/tags"
 
+# Report output must be create-only; an existing file must not be overwritten.
+# Patch the actual measurement to avoid network and GPU dependencies.
+from tempfile import TemporaryDirectory
+
+with TemporaryDirectory() as directory:
+    destination = Path(directory) / "diagnostic.json"
+    destination.write_text("KEEP_ORIGINAL", encoding="utf-8")
+    with patch.object(probe, "measure", return_value={"authority": "DIAGNOSTIC_ONLY_NOT_RELEASE_EVIDENCE"}):
+        try:
+            probe.main(["--model", "fixture:7b", "--json-out", str(destination)])
+        except SystemExit as exc:
+            assert exc.code == 2, exc.code
+        else:
+            raise AssertionError("Probe overwrote existing report")
+    assert destination.read_text(encoding="utf-8") == "KEEP_ORIGINAL"
+
 print("Ollama local performance probe edge-case contract PASS")
