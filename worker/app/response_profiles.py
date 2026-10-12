@@ -70,12 +70,17 @@ def apply_profile(
     """
     profile = resolve_profile(mode)
     result = dict(payload)
-    options = dict(payload.get("options") or {})
+    raw_options = payload.get("options")
+    if raw_options is not None and not isinstance(raw_options, dict):
+        raise TypeError("options must be an object")
+    options = dict(raw_options or {})
     existing = options.get("num_predict")
     if isinstance(existing, int) and not isinstance(existing, bool) and existing > 0:
         options["num_predict"] = min(existing, profile.num_predict)
-    else:
+    elif existing is None:
         options["num_predict"] = profile.num_predict
+    else:
+        raise ValueError("num_predict must be a positive integer")
     result["options"] = options
     result["think"] = profile.think
     existing_system = payload.get("system")
