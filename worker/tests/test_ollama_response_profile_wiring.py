@@ -2,7 +2,7 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from app import ollama_client as oc
 
@@ -10,9 +10,10 @@ from app import ollama_client as oc
 class _Response:
     status_code = 200
     text = ""
+    response_data = {"message": {"content": "Hej"}}
 
     def json(self):
-        return {"message": {"content": "Hej"}}
+        return self.response_data
 
 
 class _Client:
@@ -54,6 +55,28 @@ class WorkerProfileWiringTests(unittest.TestCase):
         self.assertFalse(result["think"])
         self.assertEqual(result["options"]["num_predict"], 128)
         self.assertTrue(result["messages"][0]["content"].startswith("Guard\n\n"))
+
+    def test_opt_in_rejects_truncated_and_empty_answers(self):
+        for data in (
+            {"message": {"content": "Incomplete"}, "done_reason": "length"},
+            {"message": {"content": ""}, "done_reason": "stop"},
+            {"message": {"content": "   "}, "done_reason": "stop"},
+        ):
+            with self.subTest(data=data), patch.dict(
+                os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "voice_brief"}
+            ), patch.object(
+                oc.httpx, "AsyncClient", side_effect=lambda **kwargs: _Client([])
+            ), patch.object(_Response, "response_data", data):
+                with self.assertRaises(oc.OllamaError):
+                    asyncio.run(oc.chat([{"role": "user", "content": "Hej"}]))
+
+    def test_default_preserves_legacy_empty_behavior(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            oc.httpx, "AsyncClient", side_effect=lambda **kwargs: _Client([])
+        ), patch.object(_Response, "response_data",
+                        {"message": {"content": ""}, "done_reason": "length"}):
+            self.assertEqual(asyncio.run(
+                oc.chat([{"role": "user", "content": "Hej"}])), "")
 
     def test_explicit_unsupported_mode_aborts_before_network(self):
         with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "invalid"}), patch.object(
