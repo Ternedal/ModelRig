@@ -1,0 +1,33 @@
+name: ollama-local-perf-contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/ollama_local_perf_probe.py'
+      - 'tests/workflow_ollama_local_perf_probe.py'
+      - '.github/workflows/ollama-local-perf-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-probe-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Offline negative and metrics tests (no Ollama or GPU)
+        shell: bash
+        run: python tests/workflow_ollama_local_perf_probe.py
