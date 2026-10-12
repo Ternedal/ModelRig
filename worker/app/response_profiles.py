@@ -92,3 +92,38 @@ def apply_profile(
         (existing_system.rstrip() + "\n\n") if existing_system else ""
     ) + profile.system_guidance
     return result
+
+
+def apply_chat_profile(
+    payload: dict[str, Any], mode: ResponseMode | str
+) -> dict[str, Any]:
+    """Opt-in adapter for /api/chat, preserving the original message sequence.
+
+    Requires a plain text conversation. Multimodal and tool-bearing conversations
+    need dedicated integration tests and remain explicitly unsupported here.
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("messages must be a nonempty list")
+    if "system" in payload or "tools" in payload:
+        raise ValueError("system or tools require a dedicated chat adapter")
+    if any(
+        not isinstance(message, dict)
+        or message.get("role") not in ("system", "user", "assistant")
+        or not isinstance(message.get("content"), str)
+        or set(message) - {"role", "content"}
+        for message in messages
+    ):
+        raise ValueError("unsupported chat message shape")
+    base = {key: value for key, value in payload.items() if key != "messages"}
+    result = apply_profile(base, mode)
+    guidance = result.pop("system")
+    cloned = [dict(message) for message in messages]
+    systems = [i for i, message in enumerate(cloned) if message["role"] == "system"]
+    if systems:
+        i = systems[-1]
+        cloned[i]["content"] = cloned[i]["content"].rstrip() + "\\n\\n" + guidance
+    else:
+        cloned.insert(0, {"role": "system", "content": guidance})
+    result["messages"] = cloned
+    return result
