@@ -129,6 +129,14 @@ for payload, expected in (
             ), expected
         )
 
+# VRAM is a byte count, so fractional metadata must not be silently rounded.
+must_refuse(lambda: probe._loaded_size(
+    {"models": [{"name": "fixture:7b", "size_vram": 1.5}]}, "fixture:7b"
+), "whole bytes")
+assert probe._loaded_size(
+    {"models": [{"name": "fixture:7b", "size_vram": 2048}]}, "fixture:7b"
+)["reported_vram_bytes"] == 2048
+
 # Numeric metadata must reject NaN, infinity, booleans, and negative VRAM.
 for invalid in (True, float("nan"), float("inf"), -1):
     must_refuse(lambda v=invalid: probe._loaded_size(
