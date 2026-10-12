@@ -129,4 +129,21 @@ for payload, expected in (
             ), expected
         )
 
+# Numeric metadata must reject NaN, infinity, booleans, and fractional VRAM.
+for invalid in (True, float("nan"), float("inf"), -1):
+    must_refuse(lambda v=invalid: probe._loaded_size(
+        {"models": [{"name": "fixture:7b", "size_vram": v}]}, "fixture:7b"
+    ), "numeric" if invalid is True else "finite")
+assert probe._loaded_size(
+    {"models": [{"name": "other:7b", "size_vram": 1}]}, "fixture:7b"
+) == {"loaded": False, "reported_vram_bytes": None}
+
+# An empty installed-model list must refuse before attempting inference.
+with patch.object(probe, "_request_json", return_value={"models": []}) as request:
+    must_refuse(lambda: probe.measure(
+        "http://127.0.0.1:11435", "fixture:7b", runs=1
+    ), "not installed")
+    assert request.call_count == 1
+    assert request.call_args.args[1] == "/api/tags"
+
 print("Ollama local performance probe edge-case contract PASS")
