@@ -122,7 +122,7 @@ def apply_chat_profile(
     systems = [i for i, message in enumerate(cloned) if message["role"] == "system"]
     if systems:
         i = systems[-1]
-        cloned[i]["content"] = cloned[i]["content"].rstrip() + "\\n\\n" + guidance
+        cloned[i]["content"] = cloned[i]["content"].rstrip() + "\n\n" + guidance
     else:
         cloned.insert(0, {"role": "system", "content": guidance})
     result["messages"] = cloned
