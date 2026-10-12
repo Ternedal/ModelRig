@@ -162,4 +162,24 @@ with TemporaryDirectory() as directory:
             raise AssertionError("Probe overwrote existing report")
     assert destination.read_text(encoding="utf-8") == "KEEP_ORIGINAL"
 
+# A symlink destination must never be followed or overwritten.
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    target = root / "original.json"
+    target.write_text("KEEP_TARGET", encoding="utf-8")
+    link = root / "linked.json"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pass  # Symlink privileges vary on Windows; Linux CI exercises this path.
+    else:
+        with patch.object(probe, "measure", return_value={"authority": "DIAGNOSTIC_ONLY_NOT_RELEASE_EVIDENCE"}):
+            try:
+                probe.main(["--model", "fixture:7b", "--json-out", str(link)])
+            except SystemExit as exc:
+                assert exc.code == 2, exc.code
+            else:
+                raise AssertionError("Probe followed report symlink")
+        assert target.read_text(encoding="utf-8") == "KEEP_TARGET"
+
 print("Ollama local performance probe edge-case contract PASS")
