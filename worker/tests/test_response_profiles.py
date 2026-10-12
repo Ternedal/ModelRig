@@ -1,7 +1,7 @@
 """Offline contract tests. No GPU, Ollama daemon or network required."""
 import unittest
 
-from app.response_profiles import ResponseMode, apply_profile, resolve_profile
+from app.response_profiles import ResponseMode, apply_profile, apply_chat_profile, resolve_profile
 
 
 class ResponseProfileTests(unittest.TestCase):
@@ -58,6 +58,36 @@ class ResponseProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "role-aware"):
             apply_profile(original, "voice_brief")
         self.assertEqual(original["messages"][0]["content"], "Keep policy")
+
+    def test_chat_system_injection_preserves_turns(self):
+        source = {"stream": True, "messages": [
+            {"role": "system", "content": "Always protect privacy."},
+            {"role": "user", "content": "Hej"},
+            {"role": "assistant", "content": "Hej!"}]}
+        result = apply_chat_profile(source, "voice_brief")
+        self.assertEqual(result["messages"][1:], source["messages"][1:])
+        self.assertTrue(result["messages"][0]["content"].startswith(
+            "Always protect privacy.\\n\\n"))
+        self.assertNotEqual(result["messages"], source["messages"])
+        self.assertFalse(result["think"])
+        self.assertTrue(result["stream"])
+
+    def test_chat_system_insertion(self):
+        result = apply_chat_profile({
+            "messages": [{"role": "user", "content": "Hej"}]
+        }, "chat_brief")
+        self.assertEqual(result["messages"][0]["role"], "system")
+        self.assertEqual(result["messages"][1]["content"], "Hej")
+
+    def test_chat_rejects_tools_and_multimodal(self):
+        for payload in (
+            {"messages": [{"role": "user", "content": "Hej"}], "tools": []},
+            {"messages": [{"role": "user", "content": "Hej", "images": ["abc"]}]},
+            {"messages": [{"role": "tool", "content": "result"}]},
+        ):
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    apply_chat_profile(payload, "voice_brief")
 
     def test_invalid_system_fails(self):
         with self.assertRaises(TypeError):
