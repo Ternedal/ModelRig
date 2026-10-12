@@ -4,10 +4,15 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from worker.app import voice_asr
 
 
+@unittest.skipIf(np is None, "NumPy is optional in shared CI; isolated voice CI installs and runs these tests")
 class VoiceAudioInputTests(unittest.TestCase):
     def _run(self, samples, rate):
         model = Mock()
