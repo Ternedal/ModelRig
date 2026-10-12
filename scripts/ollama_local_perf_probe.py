@@ -121,12 +121,14 @@ def _loaded_size(ps: dict, model: str) -> dict:
             raise ProbeError("Ollama process list contains invalid model entry")
         if item.get("name") == model or item.get("model") == model:
             vram = item.get("size_vram")
+            if vram is not None:
+                number = _nonnegative_number(vram, "size_vram")
+                if not number.is_integer():
+                    raise ProbeError("Ollama size_vram must be whole bytes")
+                vram = int(number)
             return {
                 "loaded": True,
-                "reported_vram_bytes": (
-                    int(_nonnegative_number(vram, "size_vram"))
-                    if vram is not None else None
-                ),
+                "reported_vram_bytes": vram,
             }
     return {"loaded": False, "reported_vram_bytes": None}
 
