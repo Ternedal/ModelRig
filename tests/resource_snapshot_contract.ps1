@@ -10,6 +10,8 @@ if ($errors.Count -gt 0) { throw "PowerShell parse errors: $($errors.Count)" }
 if ($source -notmatch 'modelrig-resource-snapshot/v1') { throw 'Schema identifier missing' }
 if ($source -notmatch '127\[\.\]0\[\.\]0\[\.\]1') { throw 'Loopback validation missing' }
 if ($source -notmatch 'TimeoutSec 10') { throw 'Bounded Ollama timeout missing' }
+if ($source -notmatch '-NoProxy') { throw 'Ollama request must ignore proxy configuration' }
+if ($source -notmatch '-MaximumRedirection\s+0') { throw 'Ollama request must reject redirects' }
 if ($source -notmatch 'ConvertTo-Json') { throw 'JSON output missing' }
 $commands = @($ast.FindAll({
     param($node)
