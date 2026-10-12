@@ -67,7 +67,7 @@ class ResponseProfileTests(unittest.TestCase):
         result = apply_chat_profile(source, "voice_brief")
         self.assertEqual(result["messages"][1:], source["messages"][1:])
         self.assertTrue(result["messages"][0]["content"].startswith(
-            "Always protect privacy.\\n\\n"))
+            "Always protect privacy.\n\n"))
         self.assertNotEqual(result["messages"], source["messages"])
         self.assertFalse(result["think"])
         self.assertTrue(result["stream"])
