@@ -262,10 +262,18 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
                     data = np.interp(xq, xp, data).astype("float32")
             audio_input = data
         except ImportError:
-            # soundfile not installed -> let faster-whisper try its own decode
-            # (may hit the PyAV block on Windows; the install note recommends
-            # soundfile for exactly this reason).
+            # soundfile is optional. In this case faster-whisper may decode
+            # the file through PyAV, which is not available on every rig.
             audio_input = path
+        except Exception as exc:
+            # Never silently hand an undecodable recording to another decoder.
+            # In particular, .m4a may be unsupported by libsndfile even though
+            # it is accepted by PyAV. Surface an actionable error instead of
+            # disguising it as an ASR/model failure.
+            raise ValueError(
+                f"Unable to decode audio with soundfile: {path!r}. "
+                "Convert the recording to 16 kHz mono WAV before retrying."
+            ) from exc
 
     # An utterance is independent of the previous push-to-talk recording.
     # Disabling previous-text conditioning prevents a long segment from
