@@ -34,12 +34,12 @@ assert planner.COST_SECONDS[
 
 plan = planner.balanced_downstream_shards(files)
 assert plan == planner.balanced_downstream_shards(files)
-assert tuple(len(group) for group in plan) == (7, 8, 8, 8)
+assert tuple(len(group) for group in plan) == (6, 7, 6, 6, 6)
 assert sorted(name for group in plan for name in group) == sorted(files)
 assert any(
     group != tuple(files[i::3]) for i, group in enumerate(plan)
 )
-# Four shard jobs retain exactly two isolated child processes each.\n# All 31 canonical contracts must be evaluated once across the four jobs.
+# Five dedicated downstream runner jobs each retain two isolated child processes.\n# All original 31 canonical contracts must execute exactly once across five jobs.
 assert driver._MAX_SHARDED_PARALLEL_CONTRACTS == 2
 assert driver._MAX_PARALLEL_CONTRACTS == 2
 assert driver._PER_CONTRACT_TIMEOUT_SECONDS == 2400
@@ -47,8 +47,8 @@ assert driver._TARGETED_DEEP_TIMEOUT_SECONDS == 3600
 assert len(driver._TARGETED_DEEP_TIMEOUT_CONTRACTS) == 10
 assert driver._TARGETED_DEEP_TIMEOUT_CONTRACTS <= set(files)
 
-for shard_index in range(1, 5):
-    with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: f"{shard_index}/4"}):
+for shard_index in range(1, 6):
+    with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: f"{shard_index}/5"}):
         assert driver._selected_contract_files() == plan[shard_index - 1]
         for name in plan[shard_index - 1]:
             budget = (3600 if name in driver._TARGETED_DEEP_TIMEOUT_CONTRACTS
@@ -68,10 +68,10 @@ for group in plan:
         slot = 0 if workers[0] <= workers[1] else 1
         workers[slot] += planner.COST_SECONDS[name]
     modeled.append(max(workers))
-assert modeled == [6276, 6297, 6338, 6205], modeled
-assert max(modeled) == 6338, modeled  # simulation ONLY, not wall time evidence
+assert modeled == [5496, 5526, 4814, 4984, 4737], modeled
+assert max(modeled) == 5526, modeled  # simulation ONLY, not wall time evidence
 
-for invalid in ("0/4", "5/4", "1/3", "1/2", "random"):
+for invalid in ("0/5", "6/5", "1/4", "1/3", "1/2", "random"):
     with patch.dict(os.environ, {driver._CONTRACT_SHARD_ENV: invalid}):
         try:
             driver._selected_contract_files()
