@@ -9,7 +9,10 @@ try:
 except ImportError:
     np = None
 
-from worker.app import voice_asr
+if np is not None:
+    from app import voice_asr
+else:
+    voice_asr = None
 
 
 @unittest.skipIf(np is None, "NumPy is optional in shared CI; isolated voice CI installs and runs these tests")
