@@ -6,6 +6,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# Validate the parsed port too: the regex alone accepts 00000 and 99999.
+$parsedEndpoint = [uri]$OllamaUrl
+if ($parsedEndpoint.Port -lt 1 -or $parsedEndpoint.Port -gt 65535) {
+    throw 'Ollama loopback port must be between 1 and 65535'
+}
 $stamp = [DateTimeOffset]::UtcNow.ToString('o')
 $gpuRows = @()
 $gpuError = $null
