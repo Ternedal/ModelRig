@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/ollama_local_perf_probe.py'
       - 'tests/workflow_ollama_local_perf_probe.py'
+      - 'tests/workflow_ollama_local_perf_probe_edges.py'
       - '.github/workflows/ollama-local-perf-contract.yml'
   workflow_dispatch:
 
@@ -30,4 +31,6 @@ jobs:
           python-version: '3.12'
       - name: Offline negative and metrics tests (no Ollama or GPU)
         shell: bash
-        run: python tests/workflow_ollama_local_perf_probe.py
+        run: |
+          python tests/workflow_ollama_local_perf_probe.py
+          python tests/workflow_ollama_local_perf_probe_edges.py
