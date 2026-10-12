@@ -69,6 +69,8 @@ def apply_profile(
     that ceiling. All other options and explicit stream value are preserved.
     """
     profile = resolve_profile(mode)
+    if "messages" in payload:
+        raise ValueError("chat messages need a separate role-aware adapter")
     result = dict(payload)
     raw_options = payload.get("options")
     if raw_options is not None and not isinstance(raw_options, dict):
