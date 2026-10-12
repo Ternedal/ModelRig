@@ -15,6 +15,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from stage_b_downstream_plan import balanced_downstream_shards
+
 from rsi_pilot_exact_task_release_transaction_contract_base import (
     _ledger,
     _live_authority,
@@ -79,7 +81,7 @@ _CONTRACT_FILES = (
 )
 
 _CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
-_REQUIRED_SHARD_COUNT = 3
+_REQUIRED_SHARD_COUNT = 4
 
 
 def _selected_contract_files() -> tuple[str, ...]:
@@ -92,13 +94,13 @@ def _selected_contract_files() -> tuple[str, ...]:
         total = int(total_text)
     except (ValueError, TypeError) as exc:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/4 through 4/4"
         ) from exc
     if total != _REQUIRED_SHARD_COUNT or not 1 <= index <= total:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/4 through 4/4"
         )
-    selected = _CONTRACT_FILES[index - 1 :: total]
+    selected = balanced_downstream_shards(_CONTRACT_FILES)[index - 1]
     if not selected:
         raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
     return selected
