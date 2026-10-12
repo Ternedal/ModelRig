@@ -115,6 +115,11 @@ def apply_chat_profile(
         for message in messages
     ):
         raise ValueError("unsupported chat message shape")
+    # One leading system message is supported; multiple or interleaved
+    # system messages have ambiguous precedence and must not be rewritten.
+    system_positions = [i for i, m in enumerate(messages) if m["role"] == "system"]
+    if len(system_positions) > 1 or (system_positions and system_positions[0] != 0):
+        raise ValueError("unsupported system-message placement")
     base = {key: value for key, value in payload.items() if key != "messages"}
     result = apply_profile(base, mode)
     guidance = result.pop("system")
