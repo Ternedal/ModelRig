@@ -5,7 +5,6 @@ No network, GPU, Ollama process, or user files are accessed.
 from __future__ import annotations
 
 import importlib.util
-import io
 import json
 import sys
 from pathlib import Path
@@ -66,4 +65,35 @@ must_refuse(
                                 body=None, timeout=10),
     "Unexpected endpoint",
 )
+# Verify the request adapter explicitly disables environment proxies and redirects.
+# A synthetic opener avoids any real HTTP request.
+class FakeResponse:
+    def __enter__(self):
+        return self
+    def __exit__(self, *_):
+        return False
+    def read(self, size):
+        assert size == probe._MAX_REPLY + 1
+        return b'{"models": []}'
+
+
+class FakeOpener:
+    def open(self, request, timeout):
+        assert request.full_url == "http://127.0.0.1:11435/api/tags"
+        assert request.get_method() == "GET"
+        assert timeout == 10
+        return FakeResponse()
+
+
+def fake_build_opener(*handlers):
+    from urllib.request import ProxyHandler
+    assert any(isinstance(h, ProxyHandler) and h.proxies == {} for h in handlers)
+    assert any(isinstance(h, probe._NoRedirect) for h in handlers)
+    return FakeOpener()
+
+
+with patch.object(probe, "build_opener", side_effect=fake_build_opener):
+    assert probe._request_json("http://127.0.0.1:11435", "/api/tags",
+                               body=None, timeout=10) == {"models": []}
+
 print("Ollama local performance probe edge-case contract PASS")
