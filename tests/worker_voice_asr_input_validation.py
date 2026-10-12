@@ -1,6 +1,7 @@
 """GPU-free Kaliv Voice input regressions, runnable by CI's Python glob runner."""
 import sys
 import types
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
@@ -10,6 +11,7 @@ except ImportError:
     np = None
 
 if np is not None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
     from app import voice_asr
 else:
     voice_asr = None
