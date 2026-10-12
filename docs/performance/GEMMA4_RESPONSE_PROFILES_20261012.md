@@ -27,7 +27,7 @@ For lange kontekstprompts måltes ca. 33–35 s, men testene ændrede både
 immutable, opt-in profiler og en ren funktion `apply_profile`. Den ændrer
 kun en **kopi** af et Ollama-payload, bevarer eksisterende systeminstruktioner,
 streamingindstillingen og øvrige options samt strengere outputlofter.
-Ukendt profil afvises. En separat `apply_chat_profile` kan håndtere simple `/api/chat`-beskeder med bevaret systemrolle og rækkefølge. Tool-calls, multimodale beskeder, ekstra eller ikke-indledende systembeskeder og blandede systemfelter afvises eksplicit. Ingen runtime-kalder er ændret.
+Ukendt profil afvises. En separat `apply_chat_profile` kan håndtere simple `/api/chat`-beskeder med bevaret systemrolle og rækkefølge. Tool-calls, multimodale beskeder, ekstra eller ikke-indledende systembeskeder og blandede systemfelter afvises eksplicit. Workerens lokale `ollama_client.chat` understøtter nu opt-in via miljøvariablen `MODELRIG_EXPERIMENTAL_CHAT_PROFILE` med værdierne `voice_brief`, `chat_brief`, `detailed` og `reasoning`. Uden miljøvariablen er payload identisk med før ændringen. Det gælder **kun** lokal plain-text non-streaming chat; streaming, tool-calls og cloud er ikke tilsluttet. Ny isoleret `test_ollama_response_profile_wiring.py` beviser default-off og opt-in uden en Ollama-server.
 
 | Profil | think | num_predict (loft) | Formål |
 |---|---|---:|---|
@@ -51,8 +51,7 @@ af eksisterende abort-/sikkerhedskontrakter.
 
 1. Identificér alle produktionskald til Ollama (`/api/generate` og `/api/chat`)
    og den nuværende ejerskabskæde for systemprompts, værktøjer og streaming.
-2. Integrér kun via en eksplicit feature flag, default **off**, uden at
-   ændre eksisterende V1-output eller tool-invocations.
+2. Den første integrationssøm er nu tilføjet bag en eksplicit environment-flag, default **off**. Hold den deaktiveret til CI, integrationstests og beslutning om rollout er gennemført; ændr ikke V1-output eller tool-invocations.
 3. Vælg profiler ud fra bekræftet UI-/opgave-intent, **ikke** regex-klassifikation
    af brugerindhold. Bevar brugerens eksplicitte ønske om detaljer.
 4. Ved `done_reason=length`, håndtér det som ufuldstændigt, ikke succes.
