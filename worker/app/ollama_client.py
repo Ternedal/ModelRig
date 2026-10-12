@@ -87,7 +87,16 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
         raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
-    return r.json().get("message", {}).get("content", "")
+    body = r.json()
+    # Preserve existing V1 behavior unless the experimental profile is selected.
+    if selected:
+        if body.get("done_reason") == "length":
+            raise OllamaError("profiled chat hit output token limit")
+        content = body.get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise OllamaError("profiled chat returned no visible answer")
+        return content
+    return body.get("message", {}).get("content", "")
 
 
 def _validate_cloud_url(base_url: str) -> None:
