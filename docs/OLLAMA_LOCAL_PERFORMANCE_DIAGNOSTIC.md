@@ -80,3 +80,36 @@ documentation. It does not modify the worker's Ollama client or any
 release/physical gate. The JSON output is an **observation**, not proof
 that system latency meets a target. No merge into frozen main without
 explicit release authorization.
+
+## Repeatable baseline protocol (no automatic tuning)
+
+To compare two runs fairly, record the exact Git commit, installed Ollama
+version, NVIDIA driver, model tag and quantization, both GPU utilization/VRAM
+figures, and whether other GPU workloads were running. Use the **same**
+`--num-ctx`, `--num-predict`, model and fixed probe prompt on every repeat.
+Do not compare a cold load against a warm repeat as though they were identical.
+Do not infer an improvement from one run: repeat the measurement and check
+whether the observed difference exceeds normal run-to-run variation.
+
+Suggested operator sequence:
+
+1. Run `ollama ps` and `nvidia-smi` before the probe; note CPU/GPU offload
+   and other resident models. Keep the system otherwise idle if possible.
+2. Run the three-repeat probe for the existing installed model. Preserve the
+   original JSON report under a new filename; never replace earlier evidence.
+3. Capture `ollama ps` and `nvidia-smi` again. Check for model residency,
+   load spikes, throttling or VRAM pressure.
+4. Repeat with identical settings in a separate session before drawing a
+   conclusion. If evaluating another model, treat quality, memory residency
+   and inference speed as separate dimensions.
+5. For Kaliv's perceived response time, collect the correlated real
+   perception/cognition/outward receipts described in
+   `docs/KALIV_END_TO_END_LATENCY_QUALIFICATION.md`. A raw Ollama result
+   cannot measure ASR, retrieval, routing or TTS latency.
+
+**Interpretation guardrails:** the median excludes the first request by
+convention, but that does not establish that later requests were warm. The
+probe's reported VRAM value is Ollama metadata, not per-card GPU proof.
+Timing differences are diagnostic observations, not a release threshold.
+Avoid changing keep-alive, concurrency, quantization, context size, or
+security settings until a measured bottleneck and regression test justify it.
