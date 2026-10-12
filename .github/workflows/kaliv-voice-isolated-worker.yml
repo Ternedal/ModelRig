@@ -71,7 +71,7 @@ jobs:
           Get-FileHash $exe -Algorithm SHA256 | Format-List
           $sizeMiB = [math]::Round((Get-Item $exe).Length / 1MB, 1)
           Write-Host "Isolated EXE size: $sizeMiB MiB"
-          if ($sizeMiB -gt 1800) { throw "Isolated EXE exceeds 1800 MiB packaging ceiling" }
+          if ($sizeMiB -gt 1600) { throw "Isolated EXE exceeds 1600 MiB packaging ceiling" }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
         with:
           name: kaliv-voice-test-worker-windows-x64
