@@ -267,11 +267,15 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
             # soundfile for exactly this reason).
             audio_input = path
 
+    # An utterance is independent of the previous push-to-talk recording.
+    # Disabling previous-text conditioning prevents a long segment from
+    # propagating an earlier hallucination into subsequent segments.
     segments, info = model.transcribe(
         audio_input,
         language=language,
         beam_size=5,
         vad_filter=True,
+        condition_on_previous_text=False,
     )
     # segments is a generator -- materialize it (this is where work happens).
     seg_list = []
