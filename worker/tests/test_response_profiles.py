@@ -89,6 +89,18 @@ class ResponseProfileTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     apply_chat_profile(payload, "voice_brief")
 
+    def test_chat_rejects_ambiguous_system_placement(self):
+        for messages in (
+            [{"role": "user", "content": "Hej"},
+             {"role": "system", "content": "Late policy"}],
+            [{"role": "system", "content": "First"},
+             {"role": "system", "content": "Second"},
+             {"role": "user", "content": "Hej"}],
+        ):
+            with self.subTest(messages=messages):
+                with self.assertRaisesRegex(ValueError, "system-message placement"):
+                    apply_chat_profile({"messages": messages}, "voice_brief")
+
     def test_invalid_system_fails(self):
         with self.assertRaises(TypeError):
             apply_profile({"system": ["not", "a", "string"]}, "chat_brief")
