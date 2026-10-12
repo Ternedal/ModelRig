@@ -41,6 +41,18 @@ class ResponseProfileTests(unittest.TestCase):
         self.assertTrue(result["system"].startswith("Du må ikke afsløre hemmeligheder."))
         self.assertIn("to korte sætninger", result["system"])
 
+    def test_invalid_token_ceiling_fails_closed(self):
+        for value in (0, -1, True, "128", 2.5):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    apply_profile({"options": {"num_predict": value}}, "voice_brief")
+
+    def test_invalid_options_object_fails_closed(self):
+        for value in ("bad", [], 42):
+            with self.subTest(value=value):
+                with self.assertRaises(TypeError):
+                    apply_profile({"options": value}, "chat_brief")
+
     def test_invalid_system_fails(self):
         with self.assertRaises(TypeError):
             apply_profile({"system": ["not", "a", "string"]}, "chat_brief")
