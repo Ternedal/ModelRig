@@ -254,6 +254,11 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
                 data = data.mean(axis=1)
             if sr <= 0 or len(data) == 0:
                 raise ValueError("Audio must contain samples with a positive sample rate")
+            # Invalid floating-point samples can otherwise contaminate Whisper
+            # feature extraction and yield misleading or empty transcripts.
+            import numpy as np
+            if not np.isfinite(data).all():
+                raise ValueError("Audio contains NaN or infinite samples")
             if sr != 16000:
                 # Lightweight linear resample to 16 kHz (avoids pulling in scipy).
                 import numpy as np
