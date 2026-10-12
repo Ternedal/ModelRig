@@ -96,4 +96,37 @@ with patch.object(probe, "build_opener", side_effect=fake_build_opener):
     assert probe._request_json("http://127.0.0.1:11435", "/api/tags",
                                body=None, timeout=10) == {"models": []}
 
+# Reject oversized and invalid JSON responses without retaining their content.
+class StubResponse:
+    def __init__(self, payload):
+        self.payload = payload
+    def __enter__(self):
+        return self
+    def __exit__(self, *_):
+        return False
+    def read(self, limit):
+        assert limit == probe._MAX_REPLY + 1
+        return self.payload
+
+
+class StubOpener:
+    def __init__(self, payload):
+        self.payload = payload
+    def open(self, request, timeout):
+        return StubResponse(self.payload)
+
+
+for payload, expected in (
+    (b"x" * (probe._MAX_REPLY + 1), "size limit"),
+    (b"not-json", "invalid JSON"),
+    (b"[]", "error object"),
+    (b'{"error":"private failure"}', "error object"),
+):
+    with patch.object(probe, "build_opener", return_value=StubOpener(payload)):
+        must_refuse(
+            lambda: probe._request_json(
+                "http://127.0.0.1:11435", "/api/tags", body=None, timeout=10
+            ), expected
+        )
+
 print("Ollama local performance probe edge-case contract PASS")
