@@ -134,6 +134,7 @@ expected_stage_b_names = (
     "downstream-2",
     "downstream-3",
     "downstream-4",
+    "downstream-5",
 )
 check(
     "stage-b-admission:" in stage_b_workflow
@@ -175,16 +176,16 @@ for shard in ("1/3", "2/3", "3/3"):
         f'shard: "{shard}"' in stage_b_workflow,
         f"Stage-B reusable workflow retains shard {shard}",
     )
-for downstream_shard in ("1/4", "2/4", "3/4", "4/4"):
+for downstream_shard in ("1/5", "2/5", "3/5", "4/5", "5/5"):
     check(
         f'shard: "{downstream_shard}"' in stage_b_workflow,
         f"Stage-B downstream contract coverage retains {downstream_shard}",
     )
 check(
-    stage_b_workflow.count("slice: downstream") == 4
+    stage_b_workflow.count("slice: downstream") == 5
     and stage_b_workflow.count("slice: midchain") == 3
     and stage_b_workflow.count("needs: [stage-b-admission, stage-b-nonce]") == 1,
-    "exactly four downstream jobs and three unchanged midchain jobs require both admissions",
+    "exactly five downstream jobs and three unchanged midchain jobs require both admissions",
 )
 check(
     stage_b_workflow.count("timeout-minutes: 355") == 3,
@@ -241,11 +242,11 @@ check(
     "midchain retains three exact shards and selects reviewed cost-balanced contracts",
 )
 check(
-    "_REQUIRED_SHARD_COUNT = 4" in downstream_driver
+    "_REQUIRED_SHARD_COUNT = 5" in downstream_driver
     and "balanced_downstream_shards(_CONTRACT_FILES)[index - 1]" in downstream_driver
     and "from stage_b_downstream_plan import balanced_downstream_shards" in downstream_driver
     and "_MAX_SHARDED_PARALLEL_CONTRACTS = 2" in downstream_driver,
-    "downstream uses exactly four balanced shards x two isolated workers without skipping contracts",
+    "downstream uses exactly five balanced shards x two isolated workers without skipping contracts",
 )
 
 command = (
