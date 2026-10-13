@@ -47,7 +47,8 @@ def check(manifest_path: Path, ledger_path: Path) -> dict:
             raise ValueError(f"{name}: invalid sha256")
         relative = item["path"]
         if (not isinstance(relative, str) or not relative or Path(relative).is_absolute()
-                or "\\" in relative or not Path(relative).parts):
+                or "\\" in relative or not Path(relative).parts
+                or any(part in (".", "..") for part in relative.split("/"))):
             raise ValueError(f"{name}: invalid relative path")
         candidate = root / relative
         if (any(part.is_symlink() for part in (candidate, *candidate.parents)
