@@ -140,6 +140,21 @@ class WorkerProfileWiringTests(unittest.TestCase):
                 asyncio.run(oc.chat([{"role": "user", "content": "Hej"}]))
         self.assertEqual(len(captured), 1)
 
+    def test_retry_does_not_mutate_request_messages(self):
+        captured = []
+        messages = [{"role": "system", "content": "Original policy"},
+                    {"role": "user", "content": "Hej"}]
+        with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "voice_brief"}), patch.object(
+            oc.httpx, "AsyncClient", side_effect=lambda **kwargs: _Client(captured)
+        ), patch.object(_Response, "response_data",
+                        {"message": {"content": "Partial"}, "done_reason": "length"}):
+            with self.assertRaises(oc.OllamaError):
+                asyncio.run(oc.chat(messages))
+        self.assertEqual(messages[0]["content"], "Original policy")
+        self.assertEqual(len(captured), 2)
+        self.assertEqual(captured[0]["payload"]["messages"],
+                         captured[1]["payload"]["messages"])
+
     def test_explicit_unsupported_mode_aborts_before_network(self):
         with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "invalid"}), patch.object(
             oc.httpx, "AsyncClient"
