@@ -51,6 +51,31 @@ jobs:
       - name: Exercise release evidence filesystem boundary
         run: python -m unittest discover -s tests -p 'worker_kaliv_release_local_evidence_preflight.py' -v
 
+  release-producer-attestation-contract:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install verification test backend
+        run: python -m pip install --disable-pip-version-check 'cryptography>=44,<47'
+      - name: Assert Ed25519 backend present
+        run: python -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey; assert Ed25519PrivateKey"
+      - name: Run envelope and real-signature regression suite
+        run: |
+          python -m unittest discover -s tests -p 'worker_kaliv_producer_attestation_envelope.py' -v
+          python -m unittest discover -s tests -p 'worker_kaliv_producer_signature_verifier.py' -v
+
   # The optional browser runtime stays out of worker/requirements.txt. This job
   # validates the pinned package and locked profile, launches real Chromium
   # against one controlled localhost fixture, then proves the claim-bound CDP
