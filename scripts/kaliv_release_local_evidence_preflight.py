@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -19,7 +20,6 @@ MAX_BYTES = 4 * 1024 * 1024
 
 def check(manifest_path: Path, ledger_path: Path) -> dict:
     """Require an independently prepared ledger for every PASS reference."""
-    import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import kaliv_system_release_gate as gate
 
@@ -27,6 +27,10 @@ def check(manifest_path: Path, ledger_path: Path) -> dict:
     structural = gate.evaluate_manifest(manifest)
     if not structural.release_ready:
         raise ValueError("structural release gate is BLOCKED")
+    if ledger_path.is_symlink() or not ledger_path.is_file():
+        raise ValueError("ledger missing or symlinked")
+    if ledger_path.stat().st_size > MAX_BYTES:
+        raise ValueError("ledger oversized")
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     if not isinstance(ledger, dict) or set(ledger) != set(gate.REQUIRED_GATES):
         raise ValueError("ledger must cover exactly all release gates")
@@ -42,10 +46,10 @@ def check(manifest_path: Path, ledger_path: Path) -> dict:
         if not isinstance(expected, str) or not SHA256.fullmatch(expected):
             raise ValueError(f"{name}: invalid sha256")
         relative = item["path"]
-        if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
+        if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or "\\" in relative:
             raise ValueError(f"{name}: invalid relative path")
         candidate = root / relative
-        if candidate.is_symlink() or not candidate.is_file():
+        if any(part.is_symlink() for part in (candidate, *candidate.parents) if part != root and part.is_relative_to(root)) or not candidate.is_file():
             raise ValueError(f"{name}: missing or symlinked evidence")
         resolved = candidate.resolve()
         if not resolved.is_relative_to(root):
@@ -65,6 +69,11 @@ def check(manifest_path: Path, ledger_path: Path) -> dict:
     }
 
 
+def gate_error():
+    from kaliv_system_release_gate import SystemReleaseManifestError
+    return SystemReleaseManifestError
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
@@ -72,7 +81,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         print(json.dumps(check(args.manifest, args.ledger), sort_keys=True))
-    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, Exception) as exc:
+    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, gate_error()) as exc:
         print(json.dumps({"state": "INVALID", "release_ready": False,
                           "production_activation": False, "error": str(exc)}))
         return 2
