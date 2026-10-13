@@ -27,6 +27,11 @@ class ClockVoiceTest(unittest.TestCase):
         self.assertRegex(result["reply"], r"^Klokken er [0-2][0-9]:[0-5][0-9]\.$")
         self.assertNotIn("[indsæt", result["reply"].lower())
         self.assertEqual(len(result["chunks"]), 1)
+        timings = result["timings"]
+        self.assertGreaterEqual(timings["asr_s"], 0)
+        self.assertGreaterEqual(timings["tts_s"], 0)
+        self.assertGreaterEqual(timings["to_first_audio_from_request_s"], 0)
+        self.assertGreaterEqual(result["total_s"], timings["asr_s"])
 
 
 if __name__ == "__main__":
