@@ -40,4 +40,7 @@ def compose_voice_warmup_lifespan(inner):
                 if task is not None and not task.done():
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
+    # Preserve the production scheduler lifespan identity contract for
+    # introspection and existing lifecycle regression tests.
+    lifespan.__wrapped__ = getattr(inner, "__wrapped__", inner)
     return lifespan
