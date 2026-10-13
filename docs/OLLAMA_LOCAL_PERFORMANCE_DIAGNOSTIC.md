@@ -36,7 +36,8 @@ cd C:\Rig\src\ModelRig
 $OllamaUrl = @('http://127.0.0.1:11434', 'http://127.0.0.1:11435') |
     Where-Object {
         try {
-            $reply = Invoke-RestMethod -Method Get -Uri "$_/api/tags" -NoProxy -MaximumRedirection 0 -TimeoutSec 3
+            $endpoint = $_
+            $reply = Invoke-RestMethod -Method Get -Uri "$endpoint/api/tags" -NoProxy -MaximumRedirection 0 -TimeoutSec 3
             $null -ne $reply.models
         } catch { $false }
     } | Select-Object -First 1
