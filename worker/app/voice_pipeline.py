@@ -36,6 +36,7 @@ from . import body_session
 from . import ollama_client as oc
 from . import voice_asr
 from . import voice_tts
+from .voice_timer_intent import unsupported_timer_reply
 
 
 class VoiceBackendMissing(RuntimeError):
@@ -237,6 +238,8 @@ async def converse(
             # Never manufacture a time when time zone configuration is bad.
             clock_answer = "Jeg kan ikke hente klokkeslættet lige nu."
 
+    timer_reply = unsupported_timer_reply(transcript)
+
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
     messages = [{"role": "user", "content": transcript}]
@@ -298,9 +301,10 @@ async def converse(
     # cloud backends may reject Ollama-specific inference controls.
     voice_options = {"num_ctx": 8192, "num_predict": 128} if not llm_base_url else None
     async def _response_lines():
-        if clock_answer is not None:
+        if clock_answer is not None or timer_reply is not None:
             import json
-            yield json.dumps({"message": {"content": clock_answer}}).encode("utf-8")
+            direct_reply = clock_answer if clock_answer is not None else timer_reply
+            yield json.dumps({"message": {"content": direct_reply}}).encode("utf-8")
             return
         async for item in oc.chat_stream(
             messages, model=model, base_url=llm_base_url, api_key=llm_api_key,
