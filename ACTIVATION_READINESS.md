@@ -4,7 +4,7 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `2.0.14`
-**Kørende appliance:** `2.0.12` — task-readiness: `utilgængelig`, /api/v1/schedules: HTTP 404
+**Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
 **Genereret:** 2026-10-13 17:56 UTC
 
 ---
@@ -13,7 +13,7 @@
 
 Blokerende:
 
-- **Kørende appliance 2.0.12 afviser task-readiness:** probe-fejl: HTTP Error 404: Not Found
+- **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
 
@@ -54,11 +54,9 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 
 ## Fysisk validering
 
-- **Rapport til stede:** ja
+- **Rapport til stede:** NEJ
 - **Sti:** `validation/agent3-rig-validation-latest.json`
-- **Valideret version:** `2.0.14` (main er `2.0.14`)
-- **Version matcher:** ja
-- **Rapport-SHA256:** `ce54fa31fc03a5a2…`
+- **Hvorfor ikke klar:** ingen rapport på disken — fysisk validering er ikke kørt
 
 Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
