@@ -77,7 +77,7 @@ def record_verified_attestation(
                 "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
                 ("table", "accepted_attestations"),
             ).fetchone()
-            if actual is None or actual[0].strip() != _SCHEMA.strip().rstrip(";"):
+            if actual is None or actual[0].strip() != _SCHEMA.strip().rstrip(";").replace(" IF NOT EXISTS", ""):
                 raise ReplayLedgerError("Replay ledger schema is not trusted")
             conn.execute(
                 "INSERT INTO accepted_attestations "
