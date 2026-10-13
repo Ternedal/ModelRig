@@ -103,6 +103,25 @@ class PreflightFilesystemTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "oversized evidence"):
             self.run_check()
 
+    def test_invalid_ledger_json_rejected(self):
+        self.ledger.write_text("{broken", encoding="utf-8")
+        with self.assertRaises(json.JSONDecodeError):
+            self.run_check()
+
+    def test_invalid_hash_format_rejected(self):
+        value = json.loads(self.ledger.read_text(encoding="utf-8"))
+        value[self.gate]["sha256"] = "0" * 63
+        self.ledger.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid sha256"):
+            self.run_check()
+
+    def test_backslash_path_rejected(self):
+        value = json.loads(self.ledger.read_text(encoding="utf-8"))
+        value[self.gate]["path"] = "folder\\\\source.json"
+        self.ledger.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid relative path"):
+            self.run_check()
+
     def test_symlinked_ledger_rejected(self):
         real = self.root / "real-ledger.json"
         self.ledger.rename(real)
