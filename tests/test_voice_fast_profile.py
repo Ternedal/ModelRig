@@ -20,6 +20,7 @@ class VoiceProfileTest(unittest.TestCase):
             seen = {}
             async def stream(messages, **kwargs):
                 seen.update(kwargs)
+                seen["messages"] = messages
                 yield (json.dumps({"message": {"content": "Hej."}}) + "\n").encode()
             async def fake_asr(*args):
                 return {"text": "Hej", "language": "da"}
@@ -38,8 +39,10 @@ class VoiceProfileTest(unittest.TestCase):
             return seen
         local = asyncio.run(exercise(False))
         self.assertIs(local["think"], False)
-        self.assertEqual(local["options"], {"num_ctx": 8192, "num_predict": 128})
+        self.assertEqual(local["options"], {"num_ctx": 8192, "num_predict": 256})
         self.assertEqual(local["keep_alive"], "15m")
+        self.assertEqual(local["messages"][0]["role"], "system")
+        self.assertIn("hele sætninger", local["messages"][0]["content"])
         cloud = asyncio.run(exercise(True))
         self.assertIsNone(cloud["think"])
         self.assertIsNone(cloud["options"])
