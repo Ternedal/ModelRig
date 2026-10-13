@@ -48,8 +48,8 @@ class CoordinatorPolicyTests(unittest.TestCase):
         with self.assertRaises(CoordinatorPolicyError):
             self.parse()
 
-    def test_untrusted_signature_algorithm_not_accepted_as_field(self):
-        self.policy["gate_keys"]["voicerig_physical_acceptance"]["algorithm"] = "RSA"
+    def test_unexpected_policy_field_rejected(self):
+        self.policy["signature_algorithm"] = "RSA"
         with self.assertRaises(CoordinatorPolicyError):
             self.parse()
 
