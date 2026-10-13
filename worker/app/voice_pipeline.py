@@ -271,8 +271,15 @@ async def converse(
             await on_chunk(chunk)
         idx += 1
 
-    async for line in oc.chat_stream(messages, model=model,
-                                    base_url=llm_base_url, api_key=llm_api_key):
+    # Voice needs low-latency audible replies. Keep these options local-only:
+    # cloud backends may reject Ollama-specific inference controls.
+    voice_options = {"num_ctx": 8192, "num_predict": 128} if not llm_base_url else None
+    async for line in oc.chat_stream(
+        messages, model=model, base_url=llm_base_url, api_key=llm_api_key,
+        think=False if not llm_base_url else None,
+        options=voice_options,
+        keep_alive="15m" if not llm_base_url else None,
+    ):
         delta = _extract_delta(line)
         if not delta:
             continue
