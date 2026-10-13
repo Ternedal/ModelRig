@@ -25,9 +25,11 @@ answer, and speak, and how fast?) can only be proven on Anders' rig.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import os
 import re
 import time
+from zoneinfo import ZoneInfo
 from typing import Awaitable, Callable
 
 from . import body_session
@@ -217,6 +219,23 @@ async def converse(
     if on_transcript is not None:
         await on_transcript(transcript)
 
+    # A clock request is a deterministic tool query, not a language-model
+    # knowledge question. Resolve locally at the moment of the request.
+    clock_request = bool(re.fullmatch(
+        r"(?:hvad er klokken(?: lige nu)?|hvor meget er klokken|"
+        r"kan du fortælle mig hvad klokken er)[?.! ]*",
+        transcript.strip(), flags=re.IGNORECASE,
+    ))
+    clock_answer = None
+    if clock_request:
+        clock_zone = os.getenv("MODELRIG_VOICE_TIMEZONE", "Europe/Copenhagen")
+        try:
+            now = datetime.now(ZoneInfo(clock_zone))
+            clock_answer = f"Klokken er {now:%H:%M}."
+        except (KeyError, ValueError):
+            # Never manufacture a time when time zone configuration is bad.
+            clock_answer = "Jeg kan ikke hente klokkeslættet lige nu."
+
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
     messages = [{"role": "user", "content": transcript}]
@@ -274,12 +293,19 @@ async def converse(
     # Voice needs low-latency audible replies. Keep these options local-only:
     # cloud backends may reject Ollama-specific inference controls.
     voice_options = {"num_ctx": 8192, "num_predict": 128} if not llm_base_url else None
-    async for line in oc.chat_stream(
-        messages, model=model, base_url=llm_base_url, api_key=llm_api_key,
-        think=False if not llm_base_url else None,
-        options=voice_options,
-        keep_alive="15m" if not llm_base_url else None,
-    ):
+    async def _response_lines():
+        if clock_answer is not None:
+            yield {"message": {"content": clock_answer}}
+            return
+        async for item in oc.chat_stream(
+            messages, model=model, base_url=llm_base_url, api_key=llm_api_key,
+            think=False if not llm_base_url else None,
+            options=voice_options,
+            keep_alive="15m" if not llm_base_url else None,
+        ):
+            yield item
+
+    async for line in _response_lines():
         delta = _extract_delta(line)
         if not delta:
             continue
