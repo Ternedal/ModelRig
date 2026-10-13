@@ -38,6 +38,8 @@ _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _dll_dirs_added = False
 _registered_dll_dirs: list[str] = []
+_dll_handles: list[object] = []
+_cuda_lib_handles: list[object] = []
 
 
 def registered_dll_dirs() -> list[str]:
@@ -74,6 +76,9 @@ def _add_cuda_dll_dirs() -> list[str]:
     if _dll_dirs_added or not hasattr(os, "add_dll_directory"):
         return list(_registered_dll_dirs)
     added: list[str] = []
+    # Isolated workers can reuse compatible existing CUDA 12 DLLs.
+    explicit = os.getenv("MODELRIG_ASR_CUDA_DLL_DIRS", "")
+    candidates = [p for p in explicit.split(os.pathsep) if p]
     try:
         import nvidia  # the namespace package created by nvidia-* wheels
     except Exception as exc:  # noqa: BLE001
@@ -83,19 +88,22 @@ def _add_cuda_dll_dirs() -> list[str]:
         # on the 3060 or crawls on the CPU.
         logging.getLogger(__name__).debug(
             "ingen nvidia-wheels fundet; springer CUDA DLL-registrering over: %r", exc)
-        _dll_dirs_added = True
-        return []
+        nvidia = None
     for root in getattr(nvidia, "__path__", []):
         if not os.path.isdir(root):
             continue
         for pkg in os.listdir(root):
             bin_dir = os.path.join(root, pkg, "bin")
             if os.path.isdir(bin_dir):
-                try:
-                    os.add_dll_directory(bin_dir)
-                    added.append(bin_dir)
-                except OSError:
-                    pass
+                candidates.append(bin_dir)
+    for bin_dir in dict.fromkeys(candidates):
+        if not os.path.isdir(bin_dir):
+            continue
+        try:
+            _dll_handles.append(os.add_dll_directory(bin_dir))
+            added.append(bin_dir)
+        except OSError:
+            pass
     if added:
         # add_dll_directory() alone is NOT enough here. Hardware-verified on
         # Anders' rig 2026-07-09 (v1.12.2 logging): the dirs WERE registered,
@@ -107,6 +115,19 @@ def _add_cuda_dll_dirs() -> list[str]:
         os.environ["PATH"] = (
             os.pathsep.join(added) + os.pathsep + os.environ.get("PATH", "")
         )
+    # CTranslate2 can load CUDA DLLs lazily on the first inference.
+    if added:
+        import ctypes
+        for dll in ("cublasLt64_12.dll", "cublas64_12.dll", "cudnn64_9.dll"):
+            for directory in added:
+                candidate = os.path.join(directory, dll)
+                if os.path.isfile(candidate):
+                    try:
+                        _cuda_lib_handles.append(ctypes.WinDLL(candidate))
+                    except OSError as exc:
+                        logging.getLogger(__name__).warning(
+                            "CUDA library %s could not be loaded: %s", dll, exc)
+                    break
     _dll_dirs_added = True
     _registered_dll_dirs.extend(added)
     return added
