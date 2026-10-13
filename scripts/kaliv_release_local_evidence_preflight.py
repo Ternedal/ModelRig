@@ -11,13 +11,9 @@ import argparse
 import hashlib
 import json
 import re
-import sys
-
-try:
-    from kaliv_system_release_gate import SystemReleaseManifestError
-except ImportError:
-    from scripts.kaliv_system_release_gate import SystemReleaseManifestError
 from pathlib import Path
+
+import kaliv_system_release_gate as gate
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MAX_BYTES = 4 * 1024 * 1024
@@ -25,9 +21,6 @@ MAX_BYTES = 4 * 1024 * 1024
 
 def check(manifest_path: Path, ledger_path: Path) -> dict:
     """Require an independently prepared ledger for every PASS reference."""
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import kaliv_system_release_gate as gate
-
     manifest = gate.load_manifest(manifest_path)
     structural = gate.evaluate_manifest(manifest)
     if not structural.release_ready:
@@ -40,6 +33,8 @@ def check(manifest_path: Path, ledger_path: Path) -> dict:
     if not isinstance(ledger, dict) or set(ledger) != set(gate.REQUIRED_GATES):
         raise ValueError("ledger must cover exactly all release gates")
     root = ledger_path.resolve().parent
+    if root.is_symlink():
+        raise ValueError("ledger root is symlinked")
     for name in gate.REQUIRED_GATES:
         refs = manifest["gates"][name]["evidence_refs"]
         item = ledger[name]
@@ -83,7 +78,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         print(json.dumps(check(args.manifest, args.ledger), sort_keys=True))
-    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, SystemReleaseManifestError) as exc:
+    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, gate.SystemReleaseManifestError) as exc:
         print(json.dumps({"state": "INVALID", "release_ready": False,
                           "production_activation": False, "error": str(exc)}))
         return 2
