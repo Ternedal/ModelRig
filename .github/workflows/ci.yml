@@ -76,6 +76,7 @@ jobs:
           python -m unittest discover -s tests -p 'worker_kaliv_producer_attestation_envelope.py' -v
           python -m unittest discover -s tests -p 'worker_kaliv_producer_signature_verifier.py' -v
           python -m unittest discover -s tests -p 'worker_kaliv_attestation_replay_boundary.py' -v
+          python -m unittest discover -s tests -p 'worker_kaliv_durable_attestation_replay_ledger.py' -v
 
   # The optional browser runtime stays out of worker/requirements.txt. This job
   # validates the pinned package and locked profile, launches real Chromium
