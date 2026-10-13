@@ -215,6 +215,7 @@ async def converse(
     # model is shared state. Keep the serialization; drop the freeze.
     async with _ASR_LOCK:
         asr = await asyncio.to_thread(voice_asr.transcribe_wav, audio_path, language)
+    asr_done = time.time()
     transcript = asr["text"]
     if on_transcript is not None:
         await on_transcript(transcript)
@@ -243,13 +244,15 @@ async def converse(
     reply_parts: list[str] = []
     chunks: list[dict] = []
     first_audio_at: float | None = None
+    first_llm_text_at: float | None = None
+    tts_seconds = 0.0
     idx = 0
     # One id per converse() call so the body's utterances never collide across turns.
     turn_id = f"voice-{int(time.time() * 1000):x}"
     llm_start = time.time()
 
     async def _synth(sentence: str) -> None:
-        nonlocal first_audio_at, idx
+        nonlocal first_audio_at, idx, tts_seconds
         # Speak the words, not the markup. The chat still shows the original
         # sentence; only the audio gets the stripped version. A sentence that is
         # ENTIRELY markup (a table row, a code fence) strips to nothing -- skip
@@ -272,6 +275,7 @@ async def converse(
         # all is not, and second-guessing it would drop good audio.
         if isinstance(result, dict) and not result.get("duration"):
             return
+        tts_seconds += time.time() - s0
         synth_s = round(time.time() - s0, 2)
         if first_audio_at is None:
             first_audio_at = time.time()
@@ -310,6 +314,8 @@ async def converse(
         delta = _extract_delta(line)
         if not delta:
             continue
+        if first_llm_text_at is None:
+            first_llm_text_at = time.time()
         buffer += delta
         reply_parts.append(delta)
         # Emit every complete sentence currently in the buffer.
@@ -327,6 +333,7 @@ async def converse(
     if tail:
         await _synth(tail)
 
+    finished_at = time.time()
     reply = "".join(reply_parts).strip()
     ttfa = round((first_audio_at - llm_start), 2) if first_audio_at else None
     return {
@@ -338,6 +345,15 @@ async def converse(
         "via_cloud": bool(llm_base_url),
         "language": asr["language"],
         "time_to_first_audio_s": ttfa,
-        "total_s": round(time.time() - t_start, 2),
+        "total_s": round(finished_at - t_start, 2),
+        "timings": {
+            "asr_s": round(asr_done - t_start, 2),
+            "to_first_text_s": round(first_llm_text_at - llm_start, 2)
+                if first_llm_text_at is not None else None,
+            "tts_s": round(tts_seconds, 2),
+            "after_asr_s": round(finished_at - asr_done, 2),
+            "to_first_audio_from_request_s": round(first_audio_at - t_start, 2)
+                if first_audio_at is not None else None,
+        },
         "chunks": chunks,
     }
