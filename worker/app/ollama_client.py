@@ -178,7 +178,9 @@ async def chat_tools(messages: list[dict], tools: list[dict],
 
 
 async def chat_stream(messages: list[dict], model: str | None = None,
-                      base_url: str | None = None, api_key: str | None = None):
+                      base_url: str | None = None, api_key: str | None = None,
+                      *, think: bool | None = None, options: dict | None = None,
+                      keep_alive: str | None = None):
     """Async generator yielding raw NDJSON lines (bytes) from Ollama's streaming
     chat. Raises OllamaError (before the first yield) if the request can't start.
 
@@ -202,7 +204,11 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     # app's CloudClient never sends keep_alive). So only send it to the local rig.
     payload: dict = {"model": model, "messages": messages, "stream": True}
     if not base_url:
-        payload["keep_alive"] = KEEP_ALIVE
+        payload["keep_alive"] = keep_alive if keep_alive is not None else KEEP_ALIVE
+        if think is not None:
+            payload["think"] = think
+        if options is not None:
+            payload["options"] = dict(options)
     client = httpx.AsyncClient(timeout=TIMEOUT)
     try:
         async with client.stream("POST", f"{url}/api/chat", headers=headers,
