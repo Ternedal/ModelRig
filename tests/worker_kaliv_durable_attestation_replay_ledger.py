@@ -59,6 +59,60 @@ class DurableReplayLedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(ReplayLedgerError, "absolute"):
             record_verified_attestation("replay.sqlite3", **self.kwargs)
 
+    def test_forged_schema_without_primary_key_rejected(self):
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                "CREATE TABLE accepted_attestations "
+                "(release_id TEXT, gate TEXT, producer TEXT, run_id TEXT, evidence_sha256 TEXT)"
+            )
+        with self.assertRaisesRegex(ReplayLedgerError, "schema is not trusted"):
+            self.record()
+
+    def test_forged_schema_with_wrong_unique_constraint_rejected(self):
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                "CREATE TABLE accepted_attestations "
+                "(release_id TEXT, gate TEXT, producer TEXT, run_id TEXT, "
+                "evidence_sha256 TEXT, UNIQUE(release_id, gate))"
+            )
+        with self.assertRaisesRegex(ReplayLedgerError, "schema is not trusted"):
+            self.record()
+
+    def test_symlinked_parent_directory_rejected(self):
+        target = Path(self.directory.name) / "actual"
+        target.mkdir()
+        alias = Path(self.directory.name) / "alias"
+        alias.symlink_to(target, target_is_directory=True)
+        with self.assertRaisesRegex(ReplayLedgerError, "non-symlink"):
+            record_verified_attestation(alias / "ledger.sqlite3", **self.kwargs)
+
+    def test_directory_instead_of_database_rejected(self):
+        self.path.mkdir()
+        with self.assertRaisesRegex(ReplayLedgerError, "regular file"):
+            self.record()
+
+    def test_concurrent_duplicate_only_one_commits(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        barrier = Barrier(6)
+
+        def attempt(_):
+            barrier.wait()
+            try:
+                self.record()
+                return "inserted"
+            except ReplayLedgerError:
+                return "rejected"
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(attempt, range(6)))
+        self.assertEqual(results.count("inserted"), 1)
+        self.assertEqual(results.count("rejected"), 5)
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT count(*) FROM accepted_attestations"
+            ).fetchone()[0], 1)
+
     def test_database_symlink_rejected(self):
         target = Path(self.directory.name) / "actual.sqlite3"
         self.path.symlink_to(target)
