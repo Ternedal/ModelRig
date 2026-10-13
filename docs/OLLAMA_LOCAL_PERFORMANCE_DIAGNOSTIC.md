@@ -31,16 +31,24 @@ requests are called "warm repeats" only for grouping.
 
 ```powershell
 cd C:\Rig\src\ModelRig
-$env:OLLAMA_HOST = "127.0.0.1:11435"
-ollama list
-ollama ps
+# Probe the actual running loopback port first. Do not change OLLAMA_HOST
+# or start a second Ollama service just to run this diagnostic.
+$OllamaUrl = @('http://127.0.0.1:11434', 'http://127.0.0.1:11435') |
+    Where-Object {
+        try {
+            $reply = Invoke-RestMethod -Method Get -Uri "$_/api/tags" -NoProxy -MaximumRedirection 0 -TimeoutSec 3
+            $null -ne $reply.models
+        } catch { $false }
+    } | Select-Object -First 1
+if (-not $OllamaUrl) { throw 'No local Ollama found on 11434 or 11435; stop and check the service' }
+Write-Host "Ollama diagnostic endpoint: $OllamaUrl"
 nvidia-smi
 
 # Quick, bounded, never downloads models or unloads/pins them.
-python scripts/ollama_local_perf_probe.py --model qwen2.5-coder:7b --runs 3 --num-ctx 4096 --num-predict 96 --timeout 600
+python scripts/ollama_local_perf_probe.py --url $OllamaUrl --model qwen2.5-coder:7b --runs 3 --num-ctx 4096 --num-predict 96 --timeout 600
 
-# Compare the model currently involved in CPU offload, if installed:
-python scripts/ollama_local_perf_probe.py --model gemma4:26b --runs 3 --num-ctx 4096 --num-predict 96 --timeout 900
+# Compare the larger installed model only when needed:
+python scripts/ollama_local_perf_probe.py --url $OllamaUrl --model gemma4:26b --runs 3 --num-ctx 4096 --num-predict 96 --timeout 900
 ```
 
 Optionally save a new diagnostic JSON file via `--json-out`, e.g.
