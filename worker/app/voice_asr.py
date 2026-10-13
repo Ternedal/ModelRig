@@ -262,10 +262,16 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
                     data = np.interp(xq, xp, data).astype("float32")
             audio_input = data
         except ImportError:
-            # soundfile not installed -> let faster-whisper try its own decode
-            # (may hit the PyAV block on Windows; the install note recommends
-            # soundfile for exactly this reason).
+            # A supported audio decoder may still be present through PyAV.
             audio_input = path
+        except RuntimeError as exc:
+            # libsndfile does not decode some compressed containers (e.g. M4A).
+            # Only fall back for an unsupported-format error, not for corrupt
+            # paths, permissions, or unrelated decoding failures.
+            if "format not recognised" not in str(exc).lower() and "format not recognized" not in str(exc).lower():
+                raise
+            from faster_whisper.audio import decode_audio
+            audio_input = decode_audio(path, sampling_rate=16000)
 
     segments, info = model.transcribe(
         audio_input,
