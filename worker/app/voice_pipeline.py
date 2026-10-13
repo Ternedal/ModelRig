@@ -242,7 +242,15 @@ async def converse(
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
-    messages = [{"role": "user", "content": transcript}]
+    messages = [
+        {"role": "system", "content": (
+            "Du er Kaliv og svarer mundtligt på dansk. Svar kort, normalt højst "
+            "to hele sætninger og cirka 35 ord. Afslut altid sidste sætning. "
+            "Undgå lister og lange forklaringer. Påstå aldrig adgang til "
+            "kalender, alarmer eller andre værktøjer, du ikke har brugt."
+        )},
+        {"role": "user", "content": transcript},
+    ]
     buffer = ""
     reply_parts: list[str] = []
     chunks: list[dict] = []
@@ -299,7 +307,7 @@ async def converse(
 
     # Voice needs low-latency audible replies. Keep these options local-only:
     # cloud backends may reject Ollama-specific inference controls.
-    voice_options = {"num_ctx": 8192, "num_predict": 128} if not llm_base_url else None
+    voice_options = {"num_ctx": 8192, "num_predict": 256} if not llm_base_url else None
     async def _response_lines():
         if clock_answer is not None or timer_reply is not None:
             import json
