@@ -79,7 +79,24 @@ class PreflightFilesystemTests(unittest.TestCase):
         value = json.loads(self.ledger.read_text())
         value[self.gate]["path"] = "../outside.json"
         self.ledger.write_text(json.dumps(value))
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "invalid relative path"):
+            self.run_check()
+
+    def test_existing_outside_file_rejected_before_hashing(self):
+        outside = self.root.parent / (self.root.name + "-outside.json")
+        outside.write_bytes(self.source.read_bytes())
+        self.addCleanup(outside.unlink)
+        value = json.loads(self.ledger.read_text(encoding="utf-8"))
+        value[self.gate]["path"] = "../" + outside.name
+        self.ledger.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid relative path"):
+            self.run_check()
+
+    def test_dot_path_component_rejected(self):
+        value = json.loads(self.ledger.read_text(encoding="utf-8"))
+        value[self.gate]["path"] = "./source.json"
+        self.ledger.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid relative path"):
             self.run_check()
 
     def test_structural_block_never_reads_evidence(self):
