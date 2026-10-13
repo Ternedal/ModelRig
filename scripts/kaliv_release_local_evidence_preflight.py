@@ -12,6 +12,11 @@ import hashlib
 import json
 import re
 import sys
+
+try:
+    from kaliv_system_release_gate import SystemReleaseManifestError
+except ImportError:
+    from scripts.kaliv_system_release_gate import SystemReleaseManifestError
 from pathlib import Path
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -46,10 +51,12 @@ def check(manifest_path: Path, ledger_path: Path) -> dict:
         if not isinstance(expected, str) or not SHA256.fullmatch(expected):
             raise ValueError(f"{name}: invalid sha256")
         relative = item["path"]
-        if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or "\\" in relative:
+        if (not isinstance(relative, str) or not relative or Path(relative).is_absolute()
+                or "\\" in relative or not Path(relative).parts):
             raise ValueError(f"{name}: invalid relative path")
         candidate = root / relative
-        if any(part.is_symlink() for part in (candidate, *candidate.parents) if part != root and part.is_relative_to(root)) or not candidate.is_file():
+        if (any(part.is_symlink() for part in (candidate, *candidate.parents)
+                if part != root and part.is_relative_to(root)) or not candidate.is_file()):
             raise ValueError(f"{name}: missing or symlinked evidence")
         resolved = candidate.resolve()
         if not resolved.is_relative_to(root):
@@ -69,11 +76,6 @@ def check(manifest_path: Path, ledger_path: Path) -> dict:
     }
 
 
-def gate_error():
-    from kaliv_system_release_gate import SystemReleaseManifestError
-    return SystemReleaseManifestError
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
@@ -81,7 +83,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         print(json.dumps(check(args.manifest, args.ledger), sort_keys=True))
-    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, gate_error()) as exc:
+    except (ValueError, OSError, KeyError, TypeError, json.JSONDecodeError, SystemReleaseManifestError) as exc:
         print(json.dumps({"state": "INVALID", "release_ready": False,
                           "production_activation": False, "error": str(exc)}))
         return 2
