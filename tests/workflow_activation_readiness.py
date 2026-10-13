@@ -172,6 +172,15 @@ for _name in (
         f"the real constant-backed setting {_name} is not counted as a feature switch",
     )
 
+# The committed readiness document must never inherit local operator evidence.
+from unittest.mock import patch as _patch  # noqa: E402
+with _patch.object(AR, "validation", side_effect=AssertionError("local report read")), \
+     _patch.object(AR, "live_appliance_probe", side_effect=AssertionError("local worker probe")):
+    _portable = AR.render()
+check("fysisk validering er ikke kørt" in _portable
+      and "aktiveres nu? **NEJ**" in _portable,
+      "committed snapshot is portable and fails closed without rig evidence")
+
 server_plans, note = AR.plan_authority()
 check(server_plans is True, "production run creation is server-authoritative")
 check(
