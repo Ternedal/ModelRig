@@ -7,6 +7,7 @@ and the transaction boundary with its external approval workflow.
 from __future__ import annotations
 
 import sqlite3
+import stat
 from pathlib import Path
 
 
@@ -57,13 +58,27 @@ def record_verified_attestation(
     if signature_verified is not True:
         raise ReplayLedgerError("Unverified attestation cannot be recorded")
     path = Path(database_path)
-    if not path.is_absolute() or path.is_symlink() or not path.parent.is_dir():
-        raise ReplayLedgerError("Coordinator database path must be absolute and non-symlink")
+    if not path.is_absolute() or not path.parent.is_dir():
+        raise ReplayLedgerError("Coordinator database path must be absolute with existing parent")
+    # This is preflight only; OS-protected ownership is still required.
+    for component in (path, *path.parents):
+        if component.is_symlink():
+            raise ReplayLedgerError("Coordinator database path must be non-symlink")
+    if path.exists() and not stat.S_ISREG(path.stat().st_mode):
+        raise ReplayLedgerError("Coordinator database must be a regular file")
     try:
         # BEGIN IMMEDIATE obtains the write lock before checking uniqueness.
         with sqlite3.connect(str(path), timeout=5.0) as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(_SCHEMA)
+            # An attacker-precreated table without the primary key can defeat
+            # replay detection. Require the expected schema, not just its name.
+            actual = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
+                ("table", "accepted_attestations"),
+            ).fetchone()
+            if actual is None or actual[0].strip() != _SCHEMA.strip().rstrip(";"):
+                raise ReplayLedgerError("Replay ledger schema is not trusted")
             conn.execute(
                 "INSERT INTO accepted_attestations "
                 "(release_id, gate, producer, run_id, evidence_sha256) "
