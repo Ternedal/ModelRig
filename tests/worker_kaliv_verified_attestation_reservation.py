@@ -88,6 +88,20 @@ class VerifiedReservationTests(unittest.TestCase):
             self.reserve(trusted_keys={})
         self.assertFalse(self.path.exists())
 
+    def test_valid_signature_cannot_use_forged_ledger_schema(self):
+        import sqlite3
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                "CREATE TABLE accepted_attestations "
+                "(release_id TEXT, gate TEXT, producer TEXT, run_id TEXT, evidence_sha256 TEXT)"
+            )
+        with self.assertRaisesRegex(ReplayLedgerError, "schema is not trusted"):
+            self.reserve()
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT count(*) FROM accepted_attestations"
+            ).fetchone()[0], 0)
+
     def test_wrong_run_does_not_create_ledger(self):
         with self.assertRaises(AttestationVerificationError):
             self.reserve(expected_run_id="other")
