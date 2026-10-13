@@ -78,6 +78,39 @@ class WorkerProfileWiringTests(unittest.TestCase):
             self.assertEqual(asyncio.run(
                 oc.chat([{"role": "user", "content": "Hej"}])), "")
 
+
+    def test_retry_once_on_length_then_success(self):
+        captured = []
+        responses = [
+            {"message": {"content": "Afbrudt"}, "done_reason": "length"},
+            {"message": {"content": "Færdigt"}, "done_reason": "stop"},
+        ]
+
+        class SequentialClient(_Client):
+            async def post(self, url, json):
+                self.captured.append({"url": url, "payload": json})
+                response = _Response()
+                response.response_data = responses.pop(0)
+                return response
+
+        with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "voice_brief"}), patch.object(
+            oc.httpx, "AsyncClient", side_effect=lambda **kwargs: SequentialClient(captured)
+        ):
+            result = asyncio.run(oc.chat([{"role": "user", "content": "Hej"}]))
+        self.assertEqual(result, "Færdigt")
+        self.assertEqual(len(captured), 2)
+        self.assertEqual([x["payload"]["options"]["num_predict"] for x in captured], [128, 256])
+
+    def test_no_retry_on_empty_content(self):
+        captured = []
+        with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "voice_brief"}), patch.object(
+            oc.httpx, "AsyncClient", side_effect=lambda **kwargs: _Client(captured)
+        ), patch.object(_Response, "response_data",
+                        {"message": {"content": ""}, "done_reason": "stop"}):
+            with self.assertRaises(oc.OllamaError):
+                asyncio.run(oc.chat([{"role": "user", "content": "Hej"}]))
+        self.assertEqual(len(captured), 1)
+
     def test_explicit_unsupported_mode_aborts_before_network(self):
         with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "invalid"}), patch.object(
             oc.httpx, "AsyncClient"
