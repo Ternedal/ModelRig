@@ -7,9 +7,14 @@ on:
     types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
 
+# Only PR runs share a group (per PR number) so newer immutable PR heads
+# supersede obsolete runs. Push/main and workflow_dispatch each use github.run_id
+# because GitHub silently replaces the *pending* member of a shared group even
+# when cancel-in-progress is false; distinct run IDs preserve queued main gates.
+# A canceled old PR run never qualifies a newer PR SHA.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
