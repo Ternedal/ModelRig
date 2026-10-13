@@ -378,6 +378,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_release_manifest_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
+- `tests/worker_kaliv_verified_attestation_reservation.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
