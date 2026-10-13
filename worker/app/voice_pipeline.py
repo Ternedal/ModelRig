@@ -295,7 +295,8 @@ async def converse(
     voice_options = {"num_ctx": 8192, "num_predict": 128} if not llm_base_url else None
     async def _response_lines():
         if clock_answer is not None:
-            yield {"message": {"content": clock_answer}}
+            import json
+            yield json.dumps({"message": {"content": clock_answer}}).encode("utf-8")
             return
         async for item in oc.chat_stream(
             messages, model=model, base_url=llm_base_url, api_key=llm_api_key,
