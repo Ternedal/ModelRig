@@ -80,23 +80,37 @@ async def chat(messages: list[dict], model: str | None = None) -> str:
     if selected:
         from .response_profiles import apply_chat_profile
         payload = apply_chat_profile(payload, selected)
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-            r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
-    except httpx.HTTPError as e:
-        raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
-    if r.status_code != 200:
-        raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
-    body = r.json()
-    # Preserve existing V1 behavior unless the experimental profile is selected.
-    if selected:
+    # One bounded retry is permitted only for the opt-in plain-text request,
+    # and only when Ollama explicitly reports token exhaustion. No tools or
+    # writes can occur on this path. Do not retry network failures.
+    attempts = 2 if selected else 1
+    for attempt in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+                r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
+        except httpx.HTTPError as e:
+            raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
+        if r.status_code != 200:
+            raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
+        body = r.json()
+        if not selected:
+            return body.get("message", {}).get("content", "")
         if body.get("done_reason") == "length":
-            raise OllamaError("profiled chat hit output token limit")
+            if attempt == 0:
+                # Increase only the generation budget, not prompt context,
+                # preserving the original profile and immutable message list.
+                payload = dict(payload)
+                payload["options"] = dict(payload["options"])
+                payload["options"]["num_predict"] = min(
+                    payload["options"]["num_predict"] * 2, 4096
+                )
+                continue
+            raise OllamaError("profiled chat hit output token limit after retry")
         content = body.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
             raise OllamaError("profiled chat returned no visible answer")
         return content
-    return body.get("message", {}).get("content", "")
+    raise OllamaError("profiled chat did not complete")
 
 
 def _validate_cloud_url(base_url: str) -> None:
