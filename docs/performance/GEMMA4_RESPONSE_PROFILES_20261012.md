@@ -37,7 +37,7 @@ Ukendt profil afvises. En separat `apply_chat_profile` kan håndtere simple `/ap
 | reasoning | true | 2048 | krævende ræsonnement |
 
 Tokenlofter kan stoppe et svar midt i en sætning: `done_reason=length`
-**må aldrig** vises som et fuldført svar uden eksplicit håndtering. Den første opt-in worker-integration afviser nu `length` og tomme svar med `OllamaError`. Dette kan føre til en 502 i kaldende API, indtil en senere kontrolleret retry/fallback er implementeret; ingen automatisk gentagelse eller thinking-disable på fejl er indført.
+**må aldrig** vises som et fuldført svar uden eksplicit håndtering. Den første opt-in worker-integration afviser nu `length` og tomme svar med `OllamaError`. Ved eksplicit `done_reason=length` forsøger opt-in plain-text `chat` nu **præcis én** gentagelse med dobbelt `num_predict` (maks. 4096). Kun dette lokale, ikke-streamende kald gentages. Fejl i netværk/HTTP og tomme svar gentages ikke. Hvis andet forsøg også udtømmer tokenbudgettet, afvises svaret, hvilket kan føre til 502. Thinking-indstillingen ændres ikke under retry.
 Systemtekst er kun vejledning; den er ikke en sikkerhedsgrænse.
 
 ## Eksisterende funktionalitet der skal genbruges
