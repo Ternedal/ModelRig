@@ -70,6 +70,27 @@ class PreflightFilesystemTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_check()
 
+    def test_structural_block_never_reads_evidence(self):
+        class Verdict:
+            release_ready = False
+        with patch("kaliv_system_release_gate.load_manifest", return_value={}), patch(
+            "kaliv_system_release_gate.evaluate_manifest", return_value=Verdict()
+        ):
+            with self.assertRaisesRegex(ValueError, "structural release gate is BLOCKED"):
+                preflight.check(self.manifest, self.ledger)
+
+    def test_oversized_ledger_rejected(self):
+        with self.ledger.open("ab") as stream:
+            stream.write(b" " * (preflight.MAX_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, "ledger oversized"):
+            self.run_check()
+
+    def test_oversized_evidence_rejected(self):
+        with self.source.open("ab") as stream:
+            stream.write(b" " * (preflight.MAX_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, "oversized evidence"):
+            self.run_check()
+
     def test_symlinked_ledger_rejected(self):
         real = self.root / "real-ledger.json"
         self.ledger.rename(real)
