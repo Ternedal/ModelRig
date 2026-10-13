@@ -111,6 +111,35 @@ class WorkerProfileWiringTests(unittest.TestCase):
                 asyncio.run(oc.chat([{"role": "user", "content": "Hej"}]))
         self.assertEqual(len(captured), 1)
 
+    def test_second_length_response_fails_after_exactly_two_calls(self):
+        captured = []
+        with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "voice_brief"}), patch.object(
+            oc.httpx, "AsyncClient", side_effect=lambda **kwargs: _Client(captured)
+        ), patch.object(_Response, "response_data",
+                        {"message": {"content": "Partial"}, "done_reason": "length"}):
+            with self.assertRaisesRegex(oc.OllamaError, "after retry"):
+                asyncio.run(oc.chat([{"role": "user", "content": "Hej"}]))
+        self.assertEqual(len(captured), 2)
+
+    def test_http_failure_does_not_retry(self):
+        captured = []
+
+        class BadResponse(_Response):
+            status_code = 503
+            text = "server unavailable"
+
+        class BadClient(_Client):
+            async def post(self, url, json):
+                self.captured.append(json)
+                return BadResponse()
+
+        with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "voice_brief"}), patch.object(
+            oc.httpx, "AsyncClient", side_effect=lambda **kwargs: BadClient(captured)
+        ):
+            with self.assertRaisesRegex(oc.OllamaError, "503"):
+                asyncio.run(oc.chat([{"role": "user", "content": "Hej"}]))
+        self.assertEqual(len(captured), 1)
+
     def test_explicit_unsupported_mode_aborts_before_network(self):
         with patch.dict(os.environ, {"MODELRIG_EXPERIMENTAL_CHAT_PROFILE": "invalid"}), patch.object(
             oc.httpx, "AsyncClient"
