@@ -4,8 +4,8 @@
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
 **Version på main:** `2.0.14`
-**Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
-**Genereret:** 2026-09-23 18:12 UTC
+**Kørende appliance:** `2.0.12` — task-readiness: `utilgængelig`, /api/v1/schedules: HTTP 404
+**Genereret:** 2026-10-13 17:56 UTC
 
 ---
 
@@ -13,7 +13,7 @@
 
 Blokerende:
 
-- **Fysisk rig-validering:** ingen rapport på disken — fysisk validering er ikke kørt
+- **Kørende appliance 2.0.12 afviser task-readiness:** probe-fejl: HTTP Error 404: Not Found
 
 Indtil ovenstående er lukket, er `KALIV_AGENT3_ENABLED=1` en beslutning truffet uden evidens. Koden kan være korrekt i tests og fejle på Windows, Ollama, Tailscale eller en Pixel 6a — det er dét fysisk validering er til for, og det er ikke noget CI kan gøre for dig.
 
@@ -54,9 +54,11 @@ Hver probe bygger de RIGTIGE komponenter mod engangs-databaser og injicerer fejl
 
 ## Fysisk validering
 
-- **Rapport til stede:** NEJ
+- **Rapport til stede:** ja
 - **Sti:** `validation/agent3-rig-validation-latest.json`
-- **Hvorfor ikke klar:** ingen rapport på disken — fysisk validering er ikke kørt
+- **Valideret version:** `2.0.14` (main er `2.0.14`)
+- **Version matcher:** ja
+- **Rapport-SHA256:** `ce54fa31fc03a5a2…`
 
 Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
@@ -71,7 +73,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 42 feature-switches er tændt som default.** (35 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -133,6 +135,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_WEB_RESEARCH_ENABLED` | `(tom)` | slukket |
 | `KALIV_WORKER_ALLOW_LAN` | `0` | slukket |
 | `MODELRIG_ADMIN_KEY` | `(unset)` | indstilling |
+| `MODELRIG_ASR_CUDA_DLL_DIRS` | `(tom)` | slukket |
 | `MODELRIG_CLAIM_MAX` | `(unset)` | indstilling |
 | `MODELRIG_CONFIG` | `(unset)` | indstilling |
 | `MODELRIG_DATA` | `(unset)` | slukket |
@@ -145,6 +148,9 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `MODELRIG_OLLAMA_URL` | `http://127.0.0.1:11434` | indstilling |
 | `MODELRIG_PAIRING_TTL` | `(unset)` | indstilling |
 | `MODELRIG_PORT` | `(unset)` | indstilling |
+| `MODELRIG_VOICE_PREWARM` | `0` | slukket |
+| `MODELRIG_VOICE_PREWARM_PIPER` | `0` | slukket |
+| `MODELRIG_VOICE_TIMEZONE` | `Europe/Copenhagen` | indstilling |
 | `MODELRIG_WORKER_HOST` | `127.0.0.1` | indstilling |
 | `MODELRIG_WORKER_PORT` | `8099` | indstilling |
 | `MODELRIG_WORKER_URL` | `(unset)` | indstilling |
