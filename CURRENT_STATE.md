@@ -370,6 +370,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_bodyrig_photoreal_qualifier.py`
 - `tests/worker_kaliv_end_to_end_latency_qualifier.py`
 - `tests/worker_kaliv_independent_release_authority.py`
+- `tests/worker_kaliv_producer_attestation_envelope.py`
+- `tests/worker_kaliv_producer_signature_verifier.py`
 - `tests/worker_kaliv_release_local_evidence_preflight.py`
 - `tests/worker_kaliv_release_manifest_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
