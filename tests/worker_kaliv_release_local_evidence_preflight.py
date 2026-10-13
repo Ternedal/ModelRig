@@ -51,6 +51,18 @@ class PreflightFilesystemTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bytes differ"):
             self.run_check()
 
+    def test_attacker_replaces_bytes_and_ledger_still_cannot_authorize(self):
+        self.source.write_text('{"forged":true}', encoding="utf-8")
+        value = json.loads(self.ledger.read_text(encoding="utf-8"))
+        value[self.gate]["sha256"] = hashlib.sha256(self.source.read_bytes()).hexdigest()
+        self.ledger.write_text(json.dumps(value), encoding="utf-8")
+        result = self.run_check()
+        self.assertEqual(result["state"], "LOCAL_BYTES_MATCH")
+        self.assertFalse(result["physical_provenance_verified"])
+        self.assertFalse(result["human_approval_verified"])
+        self.assertFalse(result["release_ready"])
+        self.assertFalse(result["production_activation"])
+
     def test_missing_source_rejected(self):
         self.source.unlink()
         with self.assertRaises(ValueError):
