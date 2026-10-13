@@ -56,13 +56,19 @@ async def _sample(chat, model: str, mode: str | None, prompt: str) -> dict:
 async def _run(model: str, repeats: int) -> dict:
     from app.ollama_client import chat
 
+    # Interleave modes for the same prompt to reduce warm-model and
+    # prompt-difficulty bias. No concurrent requests: env profile is process-wide.
+    labels = ("baseline", "voice_brief", "chat_brief", "detailed")
+    rows_by_label = {label: [] for label in labels}
+    for i in range(repeats):
+        prompt = PROMPTS[i % len(PROMPTS)]
+        # Rotate order each round so baseline is not always first.
+        ordered = labels[i % len(labels):] + labels[:i % len(labels)]
+        for label in ordered:
+            mode = None if label == "baseline" else label
+            rows_by_label[label].append(await _sample(chat, model, mode, prompt))
     results = {}
-    # Alternating baseline and opt-in profiles helps expose warm-model bias.
-    for mode in (None, "voice_brief", "chat_brief", "detailed"):
-        label = mode or "baseline"
-        rows = []
-        for i in range(repeats):
-            rows.append(await _sample(chat, model, mode, PROMPTS[i % len(PROMPTS)]))
+    for label, rows in rows_by_label.items():
         successful = [row["seconds"] for row in rows if row["ok"]]
         results[label] = {
             "measurements": rows,
