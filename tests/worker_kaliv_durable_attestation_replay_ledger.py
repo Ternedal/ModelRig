@@ -91,6 +91,28 @@ class DurableReplayLedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(ReplayLedgerError, "regular file"):
             self.record()
 
+    def test_concurrent_duplicate_only_one_commits(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        barrier = Barrier(6)
+
+        def attempt(_):
+            barrier.wait()
+            try:
+                self.record()
+                return "inserted"
+            except ReplayLedgerError:
+                return "rejected"
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(attempt, range(6)))
+        self.assertEqual(results.count("inserted"), 1)
+        self.assertEqual(results.count("rejected"), 5)
+        with sqlite3.connect(self.path) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT count(*) FROM accepted_attestations"
+            ).fetchone()[0], 1)
+
     def test_database_symlink_rejected(self):
         target = Path(self.directory.name) / "actual.sqlite3"
         self.path.symlink_to(target)
