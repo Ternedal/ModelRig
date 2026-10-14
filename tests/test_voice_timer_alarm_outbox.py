@@ -117,8 +117,12 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             self.assertEqual(retry.attempts, 2)
             self.assertFalse(outbox.acknowledge(first, now=131))
             self.assertTrue(outbox.acknowledge(retry, now=131))
-            self.assertTrue(outbox.acknowledge(second, now=131) is False)
-            self.assertIsNone(outbox.claim_next(now=131))
+            self.assertFalse(outbox.acknowledge(second, now=131))
+            retry_b = outbox.claim_next(now=131)
+            self.assertEqual(retry_b.timer_id, "b")
+            self.assertEqual(retry_b.attempts, 2)
+            self.assertTrue(outbox.acknowledge(retry_b, now=132))
+            self.assertIsNone(outbox.claim_next(now=132))
             with self.assertRaises(ValueError):
                 outbox.claim_next(now=131, lease_seconds=True)
 
