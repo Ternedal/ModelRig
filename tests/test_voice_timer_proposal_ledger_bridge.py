@@ -189,6 +189,21 @@ class TimerProposalLedgerBridgeTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 bridge.inspect_pending("", now=1001)
 
+    def test_cancel_rejects_divergent_terminal_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            item = bridge.create_pending(30, now=1000)
+            self.assertTrue(bridge.cancel_pending(item.proposal_id, now=1001))
+            with TimerStateLedger(path) as ledger:
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='expired' WHERE timer_id=?",
+                    (item.proposal_id,)
+                )
+                ledger.db.commit()
+            with self.assertRaisesRegex(ValueError, "state mismatch"):
+                bridge.cancel_pending(item.proposal_id, now=1002)
+
     def test_rejected_requests_do_not_create_orphans(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "timers.sqlite")
