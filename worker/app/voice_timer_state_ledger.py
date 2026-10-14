@@ -57,7 +57,7 @@ class TimerStateLedger:
         self.close()
 
     def register_pending(self, timer_id: str) -> TimerRecord:
-        if not timer_id or not timer_id.strip():
+        if not isinstance(timer_id, str) or not timer_id.strip():
             raise ValueError("timer id is required")
         with self.db:
             self.db.execute(
