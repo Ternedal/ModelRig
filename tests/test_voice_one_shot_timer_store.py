@@ -27,8 +27,8 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
             path = os.path.join(tmp, "proposals.sqlite3")
             with OneShotTimerProposalStore(path) as store:
                 item = store.propose(30, now=1000)
-                self.assertTrue(store.cancel(item.proposal_id))
-                self.assertFalse(store.cancel(item.proposal_id))
+                self.assertTrue(store.cancel(item.proposal_id, now=1001))
+                self.assertFalse(store.cancel(item.proposal_id, now=1001))
             with OneShotTimerProposalStore(path) as store:
                 self.assertEqual(store.get(item.proposal_id, now=9999).status, "cancelled")
 
@@ -40,7 +40,7 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "too many outstanding"):
                     store.propose(30, now=1001)
                 # Cancelled proposals never occupy capacity.
-                self.assertTrue(store.cancel(first[0].proposal_id))
+                self.assertTrue(store.cancel(first[0].proposal_id, now=1001))
                 store.propose(30, now=1001)
                 # All pending proposals have expired before this insert.
                 newest = store.propose(30, now=1182)
@@ -51,7 +51,7 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
             path = os.path.join(tmp, "proposals.sqlite3")
             with OneShotTimerProposalStore(path) as store:
                 old = store.propose(30, now=1000)
-                self.assertTrue(store.cancel(old.proposal_id))
+                self.assertTrue(store.cancel(old.proposal_id, now=1001))
                 recent = store.propose(30, now=700000)
                 self.assertEqual(store.prune(now=700001), 0)
                 self.assertIsNone(store.get(old.proposal_id, now=700001))
@@ -62,7 +62,7 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with OneShotTimerProposalStore(os.path.join(tmp, "p.db")) as store:
                 old = store.propose(30, now=1000)
-                self.assertTrue(store.cancel(old.proposal_id))
+                self.assertTrue(store.cancel(old.proposal_id, now=1001))
                 self.assertEqual(store.prune(now=700000), 1)
                 self.assertIsNone(store.get(old.proposal_id, now=700000))
 
@@ -70,9 +70,29 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with OneShotTimerProposalStore(os.path.join(tmp, "p.db")) as store:
                 old = store.propose(30, now=1000)
-                self.assertTrue(store.cancel(old.proposal_id))
+                self.assertTrue(store.cancel(old.proposal_id, now=1001))
                 store.propose(30, now=700000)
                 self.assertIsNone(store.get(old.proposal_id, now=700000))
+
+    def test_cancel_after_deadline_is_expired_not_cancelled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "p.db")
+            with OneShotTimerProposalStore(path) as store:
+                item = store.propose(30, now=1000)
+                self.assertFalse(store.cancel(item.proposal_id, now=1180))
+                self.assertEqual(store.get(item.proposal_id, now=1180).status, "expired")
+                self.assertFalse(store.cancel(item.proposal_id, now=1181))
+                with self.assertRaises(ValueError):
+                    store.cancel(None, now=1001)
+
+    def test_two_connections_cannot_cancel_same_proposal_twice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "p.db")
+            with OneShotTimerProposalStore(path) as first, OneShotTimerProposalStore(path) as second:
+                item = first.propose(30, now=1000)
+                self.assertTrue(first.cancel(item.proposal_id, now=1001))
+                self.assertFalse(second.cancel(item.proposal_id, now=1001))
+                self.assertEqual(second.get(item.proposal_id, now=1001).status, "cancelled")
 
     def test_rejects_invalid_duration_and_missing_path(self):
         with self.assertRaises(ValueError):
