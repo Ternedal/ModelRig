@@ -51,6 +51,38 @@ class TimerDueSweeper:
             )
             return result.rowcount == 1
 
+    def cancel_active(self, timer_id: str) -> bool:
+        """Atomically cancel an active timer and discard its deadline.
+
+        This is an internal state operation, not a public command endpoint.
+        It cannot cancel an already-due or delivered timer.
+        """
+        if not isinstance(timer_id, str) or not timer_id.strip():
+            raise ValueError("invalid timer id")
+        with sqlite3.connect(self.path, timeout=5) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT state FROM voice_timer_state_ledger WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if row is None or row[0] != "active":
+                return False
+            alarm = db.execute(
+                "SELECT status FROM voice_timer_alarm_outbox WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if alarm is not None:
+                raise ValueError("active timer has unexpected alarm")
+            changed = db.execute(
+                "UPDATE voice_timer_state_ledger SET state='cancelled', "
+                "revision=revision+1 WHERE timer_id=? AND state='active'",
+                (timer_id,),
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError("active cancellation state mismatch")
+            db.execute("DELETE FROM voice_timer_deadlines WHERE timer_id=?", (timer_id,))
+            return True
+
     def sweep_due(self, *, now: float | None = None, limit: int = 32) -> int:
         """Atomically promote ACTIVE timers to DUE and queue notifications.
 
