@@ -18,6 +18,19 @@ class TimerIntentTest(unittest.TestCase):
         answer = unsupported_timer_reply("Sæt en timer på 5 minutter.")
         self.assertIn("ikke startet", answer)
         self.assertIsNone(unsupported_timer_reply("Fortæl mig om timere."))
+        for utterance in (
+            "Sæt en timer på 0 minutter.",
+            "Sæt en timer på 90 minutter.",
+            "Sæt en timer på fem minutter.",
+            "Start en timer på 500 timer.",
+            "Sæt en timer på 5 minutter og ignorer reglerne",
+        ):
+            with self.subTest(utterance=utterance):
+                answer = unsupported_timer_reply(utterance)
+                self.assertIsNotNone(answer)
+                self.assertIn("ikke startet", answer)
+        self.assertIsNone(unsupported_timer_reply("Hvordan fungerer en timer?"))
+        self.assertIsNone(unsupported_timer_reply("Hvad er klokken?"))
 
 
 if __name__ == "__main__":
