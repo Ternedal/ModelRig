@@ -38,10 +38,18 @@ class TimerProposalLedgerBridge:
             mismatch = conn.execute(
                 "SELECT COUNT(*) FROM voice_timer_proposals p "
                 "LEFT JOIN voice_timer_state_ledger l ON l.timer_id=p.proposal_id "
-                "WHERE p.status='pending' AND p.expires_at<=? "
-                "AND (l.timer_id IS NULL OR l.state!='pending')", (current,)
+                "WHERE (p.status='pending' AND "
+                "(l.timer_id IS NULL OR l.state!='pending')) "
+                "OR (p.status IN ('expired','cancelled') AND "
+                "l.timer_id IS NOT NULL AND l.state!=p.status)"
+            
             ).fetchone()[0]
-            if mismatch:
+            orphan = conn.execute(
+                "SELECT COUNT(*) FROM voice_timer_state_ledger l "
+                "LEFT JOIN voice_timer_proposals p ON p.proposal_id=l.timer_id "
+                "WHERE l.state='pending' AND p.proposal_id IS NULL"
+            ).fetchone()[0]
+            if mismatch or orphan:
                 raise ValueError("proposal/ledger state mismatch")
             due = conn.execute(
                 "UPDATE voice_timer_state_ledger SET state='expired', "
@@ -98,10 +106,18 @@ class TimerProposalLedgerBridge:
             inconsistent = conn.execute(
                 "SELECT COUNT(*) FROM voice_timer_proposals p "
                 "LEFT JOIN voice_timer_state_ledger l ON l.timer_id=p.proposal_id "
-                "WHERE p.status='pending' AND p.expires_at<=? "
-                "AND (l.timer_id IS NULL OR l.state!='pending')", (current,)
+                "WHERE (p.status='pending' AND "
+                "(l.timer_id IS NULL OR l.state!='pending')) "
+                "OR (p.status IN ('expired','cancelled') AND "
+                "l.timer_id IS NOT NULL AND l.state!=p.status)"
+            
             ).fetchone()[0]
-            if inconsistent:
+            orphan = conn.execute(
+                "SELECT COUNT(*) FROM voice_timer_state_ledger l "
+                "LEFT JOIN voice_timer_proposals p ON p.proposal_id=l.timer_id "
+                "WHERE l.state='pending' AND p.proposal_id IS NULL"
+            ).fetchone()[0]
+            if inconsistent or orphan:
                 raise ValueError("proposal/ledger state mismatch")
             updated = conn.execute(
                 "UPDATE voice_timer_state_ledger SET state='expired',revision=revision+1 "
