@@ -69,7 +69,7 @@ def run() -> None:
             path.write_bytes(old)
 
             item["sha256"] = "f" * 64
-            rejected(manifest, attestations, root, "reference digest mismatch")
+            rejected(manifest, attestations, root, "byte hash mismatch")
             item.update(original)
 
             item["reference"] = "receipt:wrong"
@@ -80,6 +80,16 @@ def run() -> None:
             item["reference"] = f"receipt:{first}:{item['sha256']}"
             manifest["gates"][first]["evidence_refs"] = [item["reference"]]
             rejected(manifest, attestations, root, "byte hash mismatch")
+            item.update(original)
+            manifest["gates"][first]["evidence_refs"] = [original["reference"]]
+
+            # A canonical producer reference digest is not necessarily the
+            # SHA-256 of the retrieved artifact file; byte verification alone
+            # must not pretend to validate producer-specific payload semantics.
+            item["reference"] = f"receipt:{first}:{'e' * 64}"
+            manifest["gates"][first]["evidence_refs"] = [item["reference"]]
+            result = preflight(manifest, attestations, root)
+            assert result["state"] == "BYTE_HASHES_VERIFIED_ONLY"
             item.update(original)
             manifest["gates"][first]["evidence_refs"] = [original["reference"]]
 
