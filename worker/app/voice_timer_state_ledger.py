@@ -14,7 +14,7 @@ STATES = ("pending", "active", "due", "delivered", "cancelled", "expired")
 TRANSITIONS = {
     "pending": frozenset(("cancelled", "expired")),
     "active": frozenset(("due", "cancelled")),
-    "due": frozenset(("delivered", "cancelled")),
+    "due": frozenset(("cancelled",)),
     "delivered": frozenset(),
     "cancelled": frozenset(),
     "expired": frozenset(),
@@ -74,8 +74,8 @@ class TimerStateLedger:
         return TimerRecord(*row) if row else None
 
     def transition(self, timer_id: str, *, expected_revision: int, target: str) -> TimerRecord:
-        if target not in STATES or target == "active":
-            # Activating needs a trusted operator execution path, not this ledger.
+        if target not in STATES or target in ("active", "delivered"):
+            # Activation and delivery need trusted executor/transport proofs.
             raise ValueError("active timer activation is not available")
         with self.db:
             # Acquire the write lock before reading. This avoids lock-upgrade
