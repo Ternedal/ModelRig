@@ -53,10 +53,18 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
                 old = store.propose(30, now=1000)
                 self.assertTrue(store.cancel(old.proposal_id))
                 recent = store.propose(30, now=700000)
-                self.assertEqual(store.prune(now=700001), 1)
+                self.assertEqual(store.prune(now=700001), 0)
                 self.assertIsNone(store.get(old.proposal_id, now=700001))
                 self.assertEqual(store.get(recent.proposal_id, now=700001).status, "pending")
                 self.assertEqual(store.prune(now=700001), 0)
+
+    def test_explicit_prune_removes_terminal_history_before_new_proposal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with OneShotTimerProposalStore(os.path.join(tmp, "p.db")) as store:
+                old = store.propose(30, now=1000)
+                self.assertTrue(store.cancel(old.proposal_id))
+                self.assertEqual(store.prune(now=700000), 1)
+                self.assertIsNone(store.get(old.proposal_id, now=700000))
 
     def test_propose_prunes_terminal_history(self):
         with tempfile.TemporaryDirectory() as tmp:
