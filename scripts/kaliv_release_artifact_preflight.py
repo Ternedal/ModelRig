@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import stat
 import re
 from pathlib import Path
 
@@ -67,10 +69,17 @@ def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
         path = candidate.resolve(strict=True)
         if not path.is_relative_to(root) or not path.is_file():
             raise AttestationError(f"{gate}: unsafe or missing artifact")
-        if path.stat().st_size > MAX_BYTES:
-            raise AttestationError(f"{gate}: artifact exceeds size limit")
-        hasher = hashlib.sha256()
-        with path.open("rb") as artifact:
+        # Open the final component without following a swapped-in symlink.
+        # fstat checks the opened descriptor, not a potentially replaced path.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as artifact:
+            info = os.fstat(artifact.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise AttestationError(f"{gate}: artifact is not a regular file")
+            if info.st_size > MAX_BYTES:
+                raise AttestationError(f"{gate}: artifact exceeds size limit")
+            hasher = hashlib.sha256()
             total = 0
             while chunk := artifact.read(1024 * 1024):
                 total += len(chunk)
