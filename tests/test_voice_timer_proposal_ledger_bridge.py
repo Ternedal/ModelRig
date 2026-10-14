@@ -85,6 +85,78 @@ class TimerProposalLedgerBridgeTest(unittest.TestCase):
             with OneShotTimerProposalStore(path) as store:
                 self.assertEqual(store.get(item.proposal_id, now=1001).status, "pending")
 
+    def test_new_registration_fails_closed_on_expired_ledger_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            old = bridge.create_pending(30, now=1000)
+            with TimerStateLedger(path) as ledger:
+                ledger.db.execute(
+                    "DELETE FROM voice_timer_state_ledger WHERE timer_id=?",
+                    (old.proposal_id,),
+                )
+                ledger.db.commit()
+            with self.assertRaises(ValueError):
+                bridge.create_pending(30, now=1180)
+            with OneShotTimerProposalStore(path) as store:
+                self.assertEqual(store.get(old.proposal_id, now=1001).status, "pending")
+
+    def test_new_registration_only_expires_newly_due_ledger_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            first = bridge.create_pending(30, now=1000)
+            bridge.create_pending(30, now=1180)
+            bridge.create_pending(30, now=1181)
+            with TimerStateLedger(path) as ledger:
+                self.assertEqual(ledger.get(first.proposal_id).revision, 1)
+                self.assertEqual(ledger.get(first.proposal_id).state, "expired")
+
+    def test_rejects_live_pending_proposal_without_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            original = bridge.create_pending(30, now=1000)
+            with TimerStateLedger(path) as ledger:
+                ledger.db.execute(
+                    "DELETE FROM voice_timer_state_ledger WHERE timer_id=?",
+                    (original.proposal_id,)
+                )
+                ledger.db.commit()
+            with self.assertRaisesRegex(ValueError, "state mismatch"):
+                bridge.create_pending(30, now=1001)
+            with self.assertRaisesRegex(ValueError, "state mismatch"):
+                bridge.expire_pending(now=1001)
+            with OneShotTimerProposalStore(path) as store:
+                self.assertEqual(store.get(original.proposal_id, now=1001).status, "pending")
+
+    def test_rejects_orphan_pending_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            bridge.create_pending(30, now=1000)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("orphan")
+            with self.assertRaisesRegex(ValueError, "state mismatch"):
+                bridge.create_pending(30, now=1001)
+            with self.assertRaisesRegex(ValueError, "state mismatch"):
+                bridge.expire_pending(now=1001)
+
+    def test_rejects_terminal_state_divergence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            item = bridge.create_pending(30, now=1000)
+            self.assertTrue(bridge.cancel_pending(item.proposal_id, now=1001))
+            with TimerStateLedger(path) as ledger:
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='expired' WHERE timer_id=?",
+                    (item.proposal_id,)
+                )
+                ledger.db.commit()
+            with self.assertRaisesRegex(ValueError, "state mismatch"):
+                bridge.create_pending(30, now=1002)
+
     def test_rejected_requests_do_not_create_orphans(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "timers.sqlite")
