@@ -46,6 +46,22 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
                 newest = store.propose(30, now=1182)
                 self.assertEqual(store.get(newest.proposal_id, now=1182).status, "pending")
 
+    def test_terminal_retention_cleans_old_rows_without_removing_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "p.db")
+            with OneShotTimerProposalStore(path) as store:
+                old = store.propose(30, now=1000)
+                self.assertTrue(store.cancel(old.proposal_id))
+                pending = store.propose(30, now=700000)
+                # Seven days after the old proposal expired, it can be pruned.
+                self.assertEqual(store.purge_terminal(now=700000), 1)
+                self.assertIsNone(store.get(old.proposal_id, now=700000))
+                self.assertEqual(store.get(pending.proposal_id, now=700000).status, "pending")
+                # New insert runs the same bounded cleanup path.
+                latest = store.propose(20, now=1400000)
+                self.assertIsNone(store.get(pending.proposal_id, now=1400000))
+                self.assertEqual(store.get(latest.proposal_id, now=1400000).status, "pending")
+
     def test_rejects_invalid_duration_and_missing_path(self):
         with self.assertRaises(ValueError):
             OneShotTimerProposalStore("")
