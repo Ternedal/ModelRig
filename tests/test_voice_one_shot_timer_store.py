@@ -32,6 +32,20 @@ class OneShotTimerProposalStoreTests(unittest.TestCase):
             with OneShotTimerProposalStore(path) as store:
                 self.assertEqual(store.get(item.proposal_id, now=9999).status, "cancelled")
 
+    def test_pending_capacity_expires_stale_before_new_insert(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "p.db")
+            with OneShotTimerProposalStore(path) as store:
+                first = [store.propose(30, now=1000) for _ in range(32)]
+                with self.assertRaisesRegex(ValueError, "too many outstanding"):
+                    store.propose(30, now=1001)
+                # Cancelled proposals never occupy capacity.
+                self.assertTrue(store.cancel(first[0].proposal_id))
+                store.propose(30, now=1001)
+                # All pending proposals have expired before this insert.
+                newest = store.propose(30, now=1182)
+                self.assertEqual(store.get(newest.proposal_id, now=1182).status, "pending")
+
     def test_rejects_invalid_duration_and_missing_path(self):
         with self.assertRaises(ValueError):
             OneShotTimerProposalStore("")
