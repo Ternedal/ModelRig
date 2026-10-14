@@ -116,6 +116,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/test_voice_fast_profile.py`
 - `tests/test_voice_m4a_fallback.py`
 - `tests/test_voice_timer_intent.py`
+- `tests/test_voice_warmup_observability.py`
 - `tests/worker_agent3_approval.py`
 - `tests/worker_agent3_approval_api.py`
 - `tests/worker_agent3_approval_concurrency.py`
