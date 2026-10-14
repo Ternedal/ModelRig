@@ -108,11 +108,27 @@ class OneShotTimerProposalStore:
             )
         return result.rowcount
 
-    def cancel(self, proposal_id: str) -> bool:
+    def cancel(self, proposal_id: str, *, now: float | None = None) -> bool:
+        """Cancel only a still-valid pending proposal, atomically.
+
+        Expiry must not depend on whether another caller happened to run
+        get()/expire() first. Otherwise an already-expired request can be
+        recorded as an intentional cancellation after the deadline.
+        """
+        if not isinstance(proposal_id, str) or not proposal_id.strip():
+            raise ValueError("proposal id must be nonempty text")
+        current = time.time() if now is None else float(now)
         with self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            self._db.execute(
+                "UPDATE voice_timer_proposals SET status='expired' "
+                "WHERE proposal_id=? AND status='pending' AND expires_at<=?",
+                (proposal_id, current),
+            )
             result = self._db.execute(
                 "UPDATE voice_timer_proposals SET status='cancelled' "
-                "WHERE proposal_id=? AND status='pending'", (proposal_id,)
+                "WHERE proposal_id=? AND status='pending' AND expires_at>?",
+                (proposal_id, current),
             )
         return result.rowcount == 1
 
