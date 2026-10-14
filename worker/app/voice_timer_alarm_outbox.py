@@ -62,6 +62,12 @@ class TimerAlarmOutbox:
         token = str(uuid.uuid4())
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
+            state = db.execute(
+                "SELECT state FROM voice_timer_state_ledger WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if state is None or state[0] != "due":
+                return None
             update = db.execute(
                 "UPDATE voice_timer_alarm_outbox SET status='leased', "
                 "lease_token=?, lease_until=?, attempts=attempts+1 "
@@ -83,6 +89,12 @@ class TimerAlarmOutbox:
         current = time.time() if now is None else float(now)
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
+            state = db.execute(
+                "SELECT state FROM voice_timer_state_ledger WHERE timer_id=?",
+                (claim.timer_id,),
+            ).fetchone()
+            if state is None or state[0] != "due":
+                return False
             update = db.execute(
                 "UPDATE voice_timer_alarm_outbox SET status='delivered',"
                 "lease_token=NULL, lease_until=NULL "
