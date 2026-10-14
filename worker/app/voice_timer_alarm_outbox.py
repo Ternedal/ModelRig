@@ -33,11 +33,20 @@ class TimerAlarmOutbox:
             )
 
     def enqueue_due(self, timer_id: str) -> bool:
-        """Only an explicitly called, trusted future executor may enqueue."""
+        """Enqueue only an already-due timer recorded in the shared ledger."""
         if not isinstance(timer_id, str) or not timer_id.strip():
             raise ValueError("invalid timer id")
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
+            # Fail closed if no trusted lifecycle has recorded a due timer.
+            # The same SQLite transaction locks the ledger check and outbox
+            # insertion so cancellation cannot race between them.
+            row = db.execute(
+                "SELECT state FROM voice_timer_state_ledger WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if row is None or row[0] != "due":
+                return False
             result = db.execute(
                 "INSERT OR IGNORE INTO voice_timer_alarm_outbox"
                 "(timer_id,status) VALUES (?,'queued')", (timer_id,)
