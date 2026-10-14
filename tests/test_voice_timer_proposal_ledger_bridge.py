@@ -157,6 +157,38 @@ class TimerProposalLedgerBridgeTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "state mismatch"):
                 bridge.create_pending(30, now=1002)
 
+    def test_inspection_is_read_only_and_never_claims_active_timer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            proposal = bridge.create_pending(30, now=1000)
+            snapshot = bridge.inspect_pending(proposal.proposal_id, now=1001)
+            self.assertEqual(snapshot["status"], "pending")
+            self.assertEqual(snapshot["revision"], 0)
+            self.assertTrue(snapshot["can_request_confirmation"])
+            self.assertFalse(snapshot["timer_started"])
+            expired_view = bridge.inspect_pending(proposal.proposal_id, now=1180)
+            self.assertFalse(expired_view["can_request_confirmation"])
+            self.assertEqual(expired_view["revision"], 0)
+            self.assertEqual(bridge.inspect_pending("not-found", now=1001), None)
+            self.assertEqual(bridge.expire_pending(now=1180), 1)
+
+    def test_inspection_fails_closed_on_missing_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            proposal = bridge.create_pending(30, now=1000)
+            with TimerStateLedger(path) as ledger:
+                ledger.db.execute(
+                    "DELETE FROM voice_timer_state_ledger WHERE timer_id=?",
+                    (proposal.proposal_id,)
+                )
+                ledger.db.commit()
+            with self.assertRaisesRegex(ValueError, "state mismatch"):
+                bridge.inspect_pending(proposal.proposal_id, now=1001)
+            with self.assertRaises(ValueError):
+                bridge.inspect_pending("", now=1001)
+
     def test_rejected_requests_do_not_create_orphans(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "timers.sqlite")
