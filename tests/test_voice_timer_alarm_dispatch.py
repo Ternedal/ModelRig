@@ -51,12 +51,26 @@ class DispatchTests(unittest.TestCase):
         self.queue_due("b")
         transport = FakeTransport()
         result = dispatch_once(self.outbox, transport, now=100)
-        self.assertEqual(result.outcome, "transport_accepted")
+        self.assertEqual(result.outcome, "transport_accepted_pending_receipt")
         self.assertEqual(transport.calls, ["a"])
-        self.assertEqual(self.outbox.status("a"), "delivered")
+        self.assertEqual(self.outbox.status("a"), "leased")
         self.assertEqual(self.outbox.status("b"), "queued")
         with TimerStateLedger(self.path) as ledger:
-            self.assertEqual(ledger.get("a").state, "delivered")
+            self.assertEqual(ledger.get("a").state, "due")
+
+    def test_acceptance_requires_separate_receipt(self):
+        self.queue_due("a")
+        result = dispatch_once(self.outbox, FakeTransport(), now=100)
+        self.assertEqual(result.outcome, "transport_accepted_pending_receipt")
+        self.assertEqual(self.outbox.status("a"), "leased")
+        with TimerStateLedger(self.path) as ledger:
+            self.assertEqual(ledger.get("a").state, "due")
+        # Missing device acknowledgement causes an eventual retry.
+        self.assertEqual(dispatch_once(self.outbox, FakeTransport(), now=129).outcome, "idle")
+        self.assertEqual(dispatch_once(self.outbox, FakeTransport(), now=130).outcome,
+                         "transport_accepted_pending_receipt")
+        with TimerStateLedger(self.path) as ledger:
+            self.assertEqual(ledger.get("a").state, "due")
 
     def test_failed_send_retries_after_lease(self):
         self.queue_due("a")
@@ -67,7 +81,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(dispatch_once(self.outbox, decline, now=130).outcome, "not_accepted")
         with TimerStateLedger(self.path) as ledger:
             self.assertEqual(ledger.get("a").state, "due")
-        self.assertEqual(dispatch_once(self.outbox, FakeTransport(), now=160).outcome, "transport_accepted")
+        self.assertEqual(dispatch_once(self.outbox, FakeTransport(), now=160).outcome, "transport_accepted_pending_receipt")
 
     def test_cancellation_suppresses_retry(self):
         self.queue_due("a")
