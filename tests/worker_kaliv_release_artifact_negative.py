@@ -17,18 +17,19 @@ PINS = {repo: format(i + 1, "x") * 40 for i, repo in enumerate(REQUIRED_REPOSITO
 
 
 def fixture(root: Path):
-    manifest = {
-        "gates": {gate: {"evidence_refs": [f"receipt:{gate}"]} for gate in REQUIRED_GATES}
-    }
+    manifest = {"gates": {gate: {"evidence_refs": []} for gate in REQUIRED_GATES}}
     attestations = {}
     for gate in REQUIRED_GATES:
         rel = f"{gate}.json"
         data = ('{"gate":"' + gate + '","status":"PASS"}').encode()
         (root / rel).write_bytes(data)
+        digest = hashlib.sha256(data).hexdigest()
+        reference = f"receipt:{gate}:{digest}"
+        manifest["gates"][gate]["evidence_refs"] = [reference]
         attestations[gate] = {
-            "reference": f"receipt:{gate}",
+            "reference": reference,
             "path": rel,
-            "sha256": hashlib.sha256(data).hexdigest(),
+            "sha256": digest,
             "repository": REQUIRED_REPOSITORIES[0],
             "git_sha": PINS[REQUIRED_REPOSITORIES[0]],
         }
@@ -74,6 +75,13 @@ def run() -> None:
             item["reference"] = "receipt:wrong"
             rejected(manifest, attestations, root, "reference mismatch")
             item.update(original)
+
+            item["sha256"] = "f" * 64
+            item["reference"] = f"receipt:{first}:{item['sha256']}"
+            manifest["gates"][first]["evidence_refs"] = [item["reference"]]
+            rejected(manifest, attestations, root, "byte hash mismatch")
+            item.update(original)
+            manifest["gates"][first]["evidence_refs"] = [original["reference"]]
 
             item["git_sha"] = "f" * 40
             rejected(manifest, attestations, root, "repository pin mismatch")
