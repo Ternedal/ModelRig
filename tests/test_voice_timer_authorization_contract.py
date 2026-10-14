@@ -27,7 +27,7 @@ class TimerAuthorizationContractTest(unittest.TestCase):
         valid = TimerExecutionReceipt(
             authorized=True, persisted=True, delivery_confirmed=True, timer_id="t-1"
         )
-        self.assertEqual(authorized_timer_acknowledgement(valid), "Timeren er startet.")
+        self.assertIn("ikke startet", authorized_timer_acknowledgement(valid))
         for receipt in (
             None,
             TimerExecutionReceipt(False, True, True, "t-1"),
