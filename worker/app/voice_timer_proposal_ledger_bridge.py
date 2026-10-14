@@ -182,3 +182,37 @@ class TimerProposalLedgerBridge:
             raise
         finally:
             conn.close()
+
+    def inspect_pending(self, proposal_id: str, *, now: float | None = None) -> dict | None:
+        """Read consistent timer status without modifying either table.
+
+        A pending timer is actionable only before its proposal deadline.
+        Missing or mismatched ledger data is a corruption error, never a
+        successful or active timer. This does not authorize activation.
+        """
+        if not isinstance(proposal_id, str) or not proposal_id.strip():
+            raise ValueError("proposal id must be nonempty text")
+        current = time.time() if now is None else float(now)
+        conn = sqlite3.connect(self._path, timeout=5)
+        try:
+            row = conn.execute(
+                "SELECT p.proposal_id,p.duration_seconds,p.status,p.expires_at,"
+                "l.state,l.revision FROM voice_timer_proposals p "
+                "LEFT JOIN voice_timer_state_ledger l ON l.timer_id=p.proposal_id "
+                "WHERE p.proposal_id=?", (proposal_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            identifier, duration, status, expiry, ledger_state, revision = row
+            if ledger_state is None or ledger_state != status:
+                raise ValueError("proposal/ledger state mismatch")
+            return {
+                "proposal_id": identifier,
+                "duration_seconds": duration,
+                "status": status,
+                "revision": revision,
+                "can_request_confirmation": status == "pending" and current < expiry,
+                "timer_started": False,
+            }
+        finally:
+            conn.close()
