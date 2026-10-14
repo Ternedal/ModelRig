@@ -80,6 +80,14 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             self.assertEqual(outbox.status("cancelled-before-claim"), "queued")
             self.assertEqual(outbox.status("cancelled-after-claim"), "leased")
 
+    def test_fresh_outbox_has_empty_ledger_and_denies_unknown_alarm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outbox = TimerAlarmOutbox(os.path.join(tmp, "fresh.sqlite"))
+            self.assertFalse(outbox.enqueue_due("unknown"))
+            self.assertIsNone(outbox.claim("unknown", now=100))
+            with TimerStateLedger(outbox.path) as ledger:
+                self.assertIsNone(ledger.get("unknown"))
+
     def test_missing_and_invalid_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             outbox = TimerAlarmOutbox(os.path.join(tmp, "outbox.db"))
