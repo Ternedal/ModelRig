@@ -86,6 +86,12 @@ class TimerDueSweeperTests(unittest.TestCase):
             with TimerStateLedger(path) as ledger:
                 self.assertEqual((ledger.get("t3").state, ledger.get("t3").revision), ("active", 0))
             self.assertEqual(TimerAlarmOutbox(path).status("t3"), "delivered")
+            # A failed promotion must not lose the deadline needed for retry.
+            import sqlite3
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute(
+                    "SELECT due_at FROM voice_timer_deadlines WHERE timer_id='t3'"
+                ).fetchone()[0], 100)
 
     def test_existing_outbox_rolls_back_due_transition(self):
         with tempfile.TemporaryDirectory() as tmp:
