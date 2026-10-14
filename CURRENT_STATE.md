@@ -118,6 +118,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/test_voice_timer_authorization_contract.py`
 - `tests/test_voice_timer_handoff.py`
 - `tests/test_voice_timer_intent.py`
+- `tests/test_voice_timer_scheduler_preview.py`
 - `tests/worker_agent3_approval.py`
 - `tests/worker_agent3_approval_api.py`
 - `tests/worker_agent3_approval_concurrency.py`
