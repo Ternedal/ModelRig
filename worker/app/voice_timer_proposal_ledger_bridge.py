@@ -79,3 +79,47 @@ class TimerProposalLedgerBridge:
         finally:
             conn.close()
         return StoredTimerProposal(proposal_id, duration_seconds, current, current+180, "pending")
+
+    def cancel_pending(self, proposal_id: str, *, now: float | None = None) -> bool:
+        """Atomically cancel both records, or expire both at the deadline.
+
+        Returns true only when a still-valid pending proposal and its ledger
+        were cancelled together. A mismatched ledger is an error, not success.
+        """
+        if not isinstance(proposal_id, str) or not proposal_id.strip():
+            raise ValueError("proposal id must be nonempty text")
+        current = time.time() if now is None else float(now)
+        conn = sqlite3.connect(self._path, timeout=5)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT status,expires_at FROM voice_timer_proposals WHERE proposal_id=?",
+                (proposal_id,),
+            ).fetchone()
+            if row is None or row[0] != "pending":
+                conn.rollback()
+                return False
+            ledger = conn.execute(
+                "SELECT state FROM voice_timer_state_ledger WHERE timer_id=?",
+                (proposal_id,),
+            ).fetchone()
+            if ledger is None or ledger[0] != "pending":
+                raise ValueError("proposal/ledger state mismatch")
+            target = "expired" if row[1] <= current else "cancelled"
+            conn.execute(
+                "UPDATE voice_timer_proposals SET status=? WHERE proposal_id=? "
+                "AND status='pending'", (target, proposal_id),
+            )
+            updated = conn.execute(
+                "UPDATE voice_timer_state_ledger SET state=?,revision=revision+1 "
+                "WHERE timer_id=? AND state='pending'", (target, proposal_id),
+            )
+            if updated.rowcount != 1:
+                raise ValueError("concurrent or inconsistent ledger update")
+            conn.commit()
+            return target == "cancelled"
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
