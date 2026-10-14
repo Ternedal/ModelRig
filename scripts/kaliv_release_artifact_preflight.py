@@ -51,6 +51,8 @@ def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
         digest = item["sha256"]
         if not isinstance(digest, str) or not SHA256.fullmatch(digest):
             raise AttestationError(f"{gate}: invalid SHA-256")
+        if not isinstance(item["reference"], str) or item["reference"].rsplit(":", 1)[-1] != digest:
+            raise AttestationError(f"{gate}: reference digest mismatch")
         rel = item["path"]
         if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
             raise AttestationError(f"{gate}: invalid relative path")
