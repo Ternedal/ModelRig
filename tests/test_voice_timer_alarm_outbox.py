@@ -88,6 +88,40 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             with TimerStateLedger(outbox.path) as ledger:
                 self.assertIsNone(ledger.get("unknown"))
 
+    def test_claim_next_only_due_and_retries_expired_lease(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "outbox.db")
+            outbox = TimerAlarmOutbox(path)
+            with TimerStateLedger(path) as ledger:
+                for timer_id in ("a", "b", "cancelled"):
+                    ledger.register_pending(timer_id)
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='due' "
+                    "WHERE timer_id IN ('a','b','cancelled')"
+                )
+                ledger.db.commit()
+            for timer_id in ("a", "b", "cancelled"):
+                self.assertTrue(outbox.enqueue_due(timer_id))
+            with TimerStateLedger(path) as ledger:
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='cancelled' "
+                    "WHERE timer_id='cancelled'"
+                )
+                ledger.db.commit()
+            first = outbox.claim_next(now=100, lease_seconds=30)
+            second = outbox.claim_next(now=100, lease_seconds=30)
+            self.assertEqual((first.timer_id, second.timer_id), ("a", "b"))
+            self.assertIsNone(outbox.claim_next(now=129))
+            retry = outbox.claim_next(now=130)
+            self.assertEqual(retry.timer_id, "a")
+            self.assertEqual(retry.attempts, 2)
+            self.assertFalse(outbox.acknowledge(first, now=131))
+            self.assertTrue(outbox.acknowledge(retry, now=131))
+            self.assertTrue(outbox.acknowledge(second, now=131) is False)
+            self.assertIsNone(outbox.claim_next(now=131))
+            with self.assertRaises(ValueError):
+                outbox.claim_next(now=131, lease_seconds=True)
+
     def test_missing_and_invalid_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             outbox = TimerAlarmOutbox(os.path.join(tmp, "outbox.db"))
