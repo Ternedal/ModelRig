@@ -80,6 +80,44 @@ class TimerProposalLedgerBridge:
             conn.close()
         return StoredTimerProposal(proposal_id, duration_seconds, current, current+180, "pending")
 
+    def expire_pending(self, *, now: float | None = None) -> int:
+        """Expire both pending tables together, or roll back on mismatch.
+
+        Unlike the legacy proposal-only expiry method, this is the canonical
+        bridge operation for paired records. It never starts an alarm.
+        """
+        current = time.time() if now is None else float(now)
+        conn = sqlite3.connect(self._path, timeout=5)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            inconsistent = conn.execute(
+                "SELECT COUNT(*) FROM voice_timer_proposals p "
+                "LEFT JOIN voice_timer_state_ledger l ON l.timer_id=p.proposal_id "
+                "WHERE p.status='pending' AND p.expires_at<=? "
+                "AND (l.timer_id IS NULL OR l.state!='pending')", (current,)
+            ).fetchone()[0]
+            if inconsistent:
+                raise ValueError("proposal/ledger state mismatch")
+            updated = conn.execute(
+                "UPDATE voice_timer_state_ledger SET state='expired',revision=revision+1 "
+                "WHERE state='pending' AND timer_id IN "
+                "(SELECT proposal_id FROM voice_timer_proposals "
+                "WHERE status='pending' AND expires_at<=?)", (current,)
+            )
+            result = conn.execute(
+                "UPDATE voice_timer_proposals SET status='expired' "
+                "WHERE status='pending' AND expires_at<=?", (current,)
+            )
+            if updated.rowcount != result.rowcount:
+                raise ValueError("proposal/ledger expiry count mismatch")
+            conn.commit()
+            return result.rowcount
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def cancel_pending(self, proposal_id: str, *, now: float | None = None) -> bool:
         """Atomically cancel both records, or expire both at the deadline.
 

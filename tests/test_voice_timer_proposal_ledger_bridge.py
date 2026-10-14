@@ -53,6 +53,38 @@ class TimerProposalLedgerBridgeTest(unittest.TestCase):
                 self.assertEqual(store.get(item.proposal_id, now=1180).status, "expired")
                 self.assertEqual(ledger.get(item.proposal_id).state, "expired")
 
+    def test_bulk_expiry_is_consistent_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            first = bridge.create_pending(30, now=1000)
+            second = bridge.create_pending(30, now=1001)
+            self.assertEqual(bridge.expire_pending(now=1180), 1)
+            self.assertEqual(bridge.expire_pending(now=1180), 0)
+            with OneShotTimerProposalStore(path) as store, TimerStateLedger(path) as ledger:
+                self.assertEqual(store.get(first.proposal_id, now=1180).status, "expired")
+                self.assertEqual(ledger.get(first.proposal_id).revision, 1)
+                self.assertEqual(store.get(second.proposal_id, now=1180).status, "pending")
+                self.assertEqual(ledger.get(second.proposal_id).revision, 0)
+            self.assertEqual(bridge.expire_pending(now=1181), 1)
+            self.assertEqual(bridge.expire_pending(now=1181), 0)
+
+    def test_expiry_rollback_if_ledger_record_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            item = bridge.create_pending(30, now=1000)
+            with TimerStateLedger(path) as ledger:
+                ledger.db.execute(
+                    "DELETE FROM voice_timer_state_ledger WHERE timer_id=?",
+                    (item.proposal_id,),
+                )
+                ledger.db.commit()
+            with self.assertRaises(ValueError):
+                bridge.expire_pending(now=1180)
+            with OneShotTimerProposalStore(path) as store:
+                self.assertEqual(store.get(item.proposal_id, now=1001).status, "pending")
+
     def test_rejected_requests_do_not_create_orphans(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "timers.sqlite")
