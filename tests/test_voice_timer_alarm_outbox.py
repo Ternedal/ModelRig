@@ -158,6 +158,53 @@ class TimerAlarmOutboxTests(unittest.TestCase):
                 self.assertEqual(ledger.get("persistent").state, "delivered")
             self.assertIsNone(third_instance.claim_next(now=200))
 
+    def test_cancel_due_suppresses_queued_and_leased_alarm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "alarms.sqlite")
+            outbox = TimerAlarmOutbox(path)
+            with TimerStateLedger(path) as ledger:
+                for timer_id in ("queued", "leased", "untracked"):
+                    ledger.register_pending(timer_id)
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='due' "
+                    "WHERE timer_id IN ('queued','leased','untracked')"
+                )
+                ledger.db.commit()
+            self.assertTrue(outbox.enqueue_due("queued"))
+            self.assertTrue(outbox.enqueue_due("leased"))
+            claim = outbox.claim("leased", now=100)
+            self.assertTrue(outbox.cancel_due("queued"))
+            self.assertTrue(outbox.cancel_due("leased"))
+            self.assertTrue(outbox.cancel_due("untracked"))
+            self.assertFalse(outbox.cancel_due("leased"))
+            self.assertFalse(outbox.acknowledge(claim, now=101))
+            self.assertIsNone(outbox.claim_next(now=101))
+            with TimerStateLedger(path) as ledger:
+                for timer_id in ("queued", "leased", "untracked"):
+                    self.assertEqual(ledger.get(timer_id).state, "cancelled")
+                    self.assertEqual(ledger.get(timer_id).revision, 1)
+            self.assertEqual(outbox.status("queued"), "cancelled")
+            self.assertEqual(outbox.status("leased"), "cancelled")
+            self.assertIsNone(outbox.status("untracked"))
+
+    def test_delivered_alarm_cannot_be_retroactively_cancelled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "alarms.sqlite")
+            outbox = TimerAlarmOutbox(path)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("done")
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='due' WHERE timer_id='done'"
+                )
+                ledger.db.commit()
+            self.assertTrue(outbox.enqueue_due("done"))
+            claim = outbox.claim_next(now=100)
+            self.assertTrue(outbox.acknowledge(claim, now=101))
+            self.assertFalse(outbox.cancel_due("done"))
+            self.assertEqual(outbox.status("done"), "delivered")
+            with TimerStateLedger(path) as ledger:
+                self.assertEqual(ledger.get("done").state, "delivered")
+
     def test_missing_and_invalid_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             outbox = TimerAlarmOutbox(os.path.join(tmp, "outbox.db"))
