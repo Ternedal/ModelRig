@@ -121,4 +121,11 @@ class TimerDueSweeper:
                     "INSERT INTO voice_timer_alarm_outbox "
                     "(timer_id,status) VALUES (?,'queued')", (timer_id,)
                 )
+                # The durable outbox now owns delivery. Release the deadline
+                # in the same transaction so long-running rigs do not retain
+                # every completed timer forever.
+                db.execute(
+                    "DELETE FROM voice_timer_deadlines WHERE timer_id=?",
+                    (timer_id,),
+                )
             return len(rows)
