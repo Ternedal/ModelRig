@@ -31,20 +31,13 @@ class TimerExecutionReceipt:
 
 
 def authorized_timer_acknowledgement(receipt: TimerExecutionReceipt | None) -> str:
-    """Never confirm a timer unless every required executor proof is present.
+    """Fail closed until a trusted executor can verify persisted delivery.
 
-    A valid timer ID is not itself proof of consent, persistence, or delivery.
+    Dataclass fields are caller-supplied claims, not an authenticated receipt.
+    Do not turn them into a user-facing success message. A future integration
+    must verify the real scheduler result through its own trusted boundary.
     """
-    if (
-        receipt is None
-        or not receipt.authorized
-        or not receipt.persisted
-        or not receipt.delivery_confirmed
-        or not isinstance(receipt.timer_id, str)
-        or not receipt.timer_id.strip()
-    ):
-        return "Timeren er ikke startet. Jeg kunne ikke bekræfte godkendelse og levering."
-    return "Timeren er startet."
+    return "Timeren er ikke startet. Jeg kunne ikke bekræfte godkendelse og levering."
 
 
 def propose_timer(text: str) -> TimerProposal | None:
