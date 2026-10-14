@@ -32,6 +32,27 @@ class TimerProposalLedgerBridgeTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ledger.transition(old.proposal_id, expected_revision=0, target="cancelled")
 
+    def test_cancel_updates_both_tables_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            item = bridge.create_pending(30, now=1000)
+            self.assertTrue(bridge.cancel_pending(item.proposal_id, now=1001))
+            self.assertFalse(bridge.cancel_pending(item.proposal_id, now=1002))
+            with OneShotTimerProposalStore(path) as store, TimerStateLedger(path) as ledger:
+                self.assertEqual(store.get(item.proposal_id, now=1002).status, "cancelled")
+                self.assertEqual((ledger.get(item.proposal_id).state, ledger.get(item.proposal_id).revision), ("cancelled", 1))
+
+    def test_cancel_at_deadline_expires_both_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            item = bridge.create_pending(30, now=1000)
+            self.assertFalse(bridge.cancel_pending(item.proposal_id, now=1180))
+            with OneShotTimerProposalStore(path) as store, TimerStateLedger(path) as ledger:
+                self.assertEqual(store.get(item.proposal_id, now=1180).status, "expired")
+                self.assertEqual(ledger.get(item.proposal_id).state, "expired")
+
     def test_rejected_requests_do_not_create_orphans(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "timers.sqlite")
