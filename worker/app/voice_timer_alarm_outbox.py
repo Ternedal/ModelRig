@@ -157,6 +157,43 @@ class TimerAlarmOutbox:
                 raise RuntimeError("alarm acknowledgement/ledger mismatch")
             return True
 
+    def cancel_due(self, timer_id: str) -> bool:
+        """Cancel a due timer and suppress its queued/leased alarm atomically.
+
+        An already delivered timer cannot be cancelled retroactively. No
+        network recall is promised for alarms already sent to a client.
+        """
+        if not isinstance(timer_id, str) or not timer_id.strip():
+            raise ValueError("invalid timer id")
+        with sqlite3.connect(self.path, timeout=5) as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = db.execute(
+                "SELECT state FROM voice_timer_state_ledger WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if state is None or state[0] != "due":
+                return False
+            outbox = db.execute(
+                "SELECT status FROM voice_timer_alarm_outbox WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if outbox is not None and outbox[0] == "delivered":
+                return False
+            update = db.execute(
+                "UPDATE voice_timer_state_ledger SET state='cancelled', "
+                "revision=revision+1 WHERE timer_id=? AND state='due'",
+                (timer_id,),
+            )
+            if update.rowcount != 1:
+                raise RuntimeError("due timer cancellation lost")
+            db.execute(
+                "UPDATE voice_timer_alarm_outbox SET status='cancelled', "
+                "lease_token=NULL, lease_until=NULL "
+                "WHERE timer_id=? AND status IN ('queued','leased')",
+                (timer_id,),
+            )
+            return True
+
     def status(self, timer_id: str) -> str | None:
         with sqlite3.connect(self.path) as db:
             row = db.execute(
