@@ -89,6 +89,44 @@ class TimerAlarmOutbox:
             ).fetchone()[0]
             return AlarmClaim(timer_id, token, current+lease_seconds, attempts)
 
+    def claim_next(self, *, now: float | None = None, lease_seconds: int = 30) -> AlarmClaim | None:
+        """Atomically lease one eligible due alarm without caller-supplied ID.
+
+        This only reserves a database item: no transport or device is called.
+        Cancelled/missing timers are excluded even if old outbox rows remain.
+        """
+        if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
+            raise ValueError("invalid lease length")
+        current = time.time() if now is None else float(now)
+        token = str(uuid.uuid4())
+        with sqlite3.connect(self.path, timeout=5) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT o.timer_id FROM voice_timer_alarm_outbox o "
+                "JOIN voice_timer_state_ledger l ON l.timer_id=o.timer_id "
+                "WHERE l.state='due' AND (o.status='queued' OR "
+                "(o.status='leased' AND o.lease_until<=?)) "
+                "ORDER BY o.attempts ASC, o.timer_id ASC LIMIT 1",
+                (current,),
+            ).fetchone()
+            if row is None:
+                return None
+            timer_id = row[0]
+            result = db.execute(
+                "UPDATE voice_timer_alarm_outbox SET status='leased', "
+                "lease_token=?, lease_until=?, attempts=attempts+1 "
+                "WHERE timer_id=? AND (status='queued' OR "
+                "(status='leased' AND lease_until<=?))",
+                (token, current+lease_seconds, timer_id, current),
+            )
+            if result.rowcount != 1:
+                raise RuntimeError("outbox claim lost while holding write lock")
+            attempts = db.execute(
+                "SELECT attempts FROM voice_timer_alarm_outbox WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()[0]
+            return AlarmClaim(timer_id, token, current+lease_seconds, attempts)
+
     def acknowledge(self, claim: AlarmClaim, *, now: float | None = None) -> bool:
         if not isinstance(claim, AlarmClaim):
             raise ValueError("valid claim required")
