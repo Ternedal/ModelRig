@@ -126,6 +126,32 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 outbox.claim_next(now=131, lease_seconds=True)
 
+    def test_persists_across_new_instances_and_prevents_duplicate_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "outbox.db")
+            first_instance = TimerAlarmOutbox(path)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("persistent")
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='due' WHERE timer_id=?",
+                    ("persistent",)
+                )
+                ledger.db.commit()
+            self.assertTrue(first_instance.enqueue_due("persistent"))
+            second_instance = TimerAlarmOutbox(path)
+            first_claim = first_instance.claim_next(now=100, lease_seconds=30)
+            self.assertEqual(first_claim.timer_id, "persistent")
+            self.assertIsNone(second_instance.claim_next(now=101))
+            self.assertFalse(second_instance.acknowledge(first_claim, now=130))
+            replacement = second_instance.claim_next(now=130)
+            self.assertEqual(replacement.timer_id, "persistent")
+            self.assertEqual(replacement.attempts, 2)
+            self.assertFalse(first_instance.acknowledge(first_claim, now=131))
+            self.assertTrue(first_instance.acknowledge(replacement, now=131))
+            third_instance = TimerAlarmOutbox(path)
+            self.assertEqual(third_instance.status("persistent"), "delivered")
+            self.assertIsNone(third_instance.claim_next(now=200))
+
     def test_missing_and_invalid_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             outbox = TimerAlarmOutbox(os.path.join(tmp, "outbox.db"))
