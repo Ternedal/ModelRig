@@ -19,6 +19,19 @@ class TimerProposalLedgerBridgeTest(unittest.TestCase):
                 record = ledger.get(proposal.proposal_id)
                 self.assertEqual((record.state, record.revision), ("pending", 0))
 
+    def test_expiry_updates_ledger_and_revision_on_next_registration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timers.sqlite")
+            bridge = TimerProposalLedgerBridge(path)
+            old = bridge.create_pending(30, now=1000)
+            bridge.create_pending(30, now=1180)
+            with OneShotTimerProposalStore(path) as store, TimerStateLedger(path) as ledger:
+                self.assertEqual(store.get(old.proposal_id, now=1180).status, "expired")
+                record = ledger.get(old.proposal_id)
+                self.assertEqual((record.state, record.revision), ("expired", 1))
+                with self.assertRaises(ValueError):
+                    ledger.transition(old.proposal_id, expected_revision=0, target="cancelled")
+
     def test_rejected_requests_do_not_create_orphans(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "timers.sqlite")
