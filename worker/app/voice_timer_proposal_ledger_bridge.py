@@ -35,25 +35,30 @@ class TimerProposalLedgerBridge:
         conn = sqlite3.connect(self._path, timeout=5)
         try:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
+            mismatch = conn.execute(
+                "SELECT COUNT(*) FROM voice_timer_proposals p "
+                "LEFT JOIN voice_timer_state_ledger l ON l.timer_id=p.proposal_id "
+                "WHERE p.status='pending' AND p.expires_at<=? "
+                "AND (l.timer_id IS NULL OR l.state!='pending')", (current,)
+            ).fetchone()[0]
+            if mismatch:
+                raise ValueError("proposal/ledger state mismatch")
+            due = conn.execute(
+                "UPDATE voice_timer_state_ledger SET state='expired', "
+                "revision=revision+1 WHERE state='pending' AND timer_id IN "
+                "(SELECT proposal_id FROM voice_timer_proposals "
+                "WHERE status='pending' AND expires_at<=?)", (current,)
+            ).rowcount
+            expired = conn.execute(
                 "UPDATE voice_timer_proposals SET status='expired' "
                 "WHERE status='pending' AND expires_at<=?", (current,)
-            )
+            ).rowcount
+            if due != expired:
+                raise ValueError("proposal/ledger expiry count mismatch")
             conn.execute(
                 "DELETE FROM voice_timer_proposals WHERE status IN ('expired','cancelled') "
                 "AND expires_at<=?", (current-TERMINAL_RETENTION_SECONDS,)
             )
-            # Keep ledger state in sync whenever proposal expiry is applied.
-            # CAS revisions must advance so a stale caller cannot act on an
-            # expired pending proposal after another connection cleaned up.
-            conn.execute(
-                "UPDATE voice_timer_state_ledger SET state='expired', "
-                "revision=revision+1 WHERE state='pending' AND timer_id IN "
-                "(SELECT proposal_id FROM voice_timer_proposals "
-                "WHERE status='expired')"
-            )
-            # Historical ledger rows are inert but must not grow indefinitely
-            # after their matching terminal proposals have been pruned.
             conn.execute(
                 "DELETE FROM voice_timer_state_ledger WHERE "
                 "state IN ('expired','cancelled') AND timer_id NOT IN "
