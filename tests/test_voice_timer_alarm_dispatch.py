@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 from app.voice_timer_alarm_dispatch import dispatch_once
 from app.voice_timer_alarm_outbox import TimerAlarmOutbox
 from app.voice_timer_state_ledger import TimerStateLedger
+from app.voice_timer_due_sweeper import TimerDueSweeper
 
 
 class FakeTransport:
@@ -39,6 +40,59 @@ class DispatchTests(unittest.TestCase):
             )
             ledger.db.commit()
         self.assertTrue(self.outbox.enqueue_due(timer_id))
+
+    def test_restart_due_promotion_dispatch_retry_and_internal_ack(self):
+        # ACTIVE is a fixture: production activation is not implemented.
+        sweeper = TimerDueSweeper(self.path)
+        with TimerStateLedger(self.path) as ledger:
+            ledger.register_pending("integrated")
+            ledger.db.execute(
+                "UPDATE voice_timer_state_ledger SET state='active' "
+                "WHERE timer_id='integrated'"
+            )
+            ledger.db.commit()
+        self.assertTrue(sweeper.register_active_deadline("integrated", due_at=130))
+        self.assertEqual(TimerDueSweeper(self.path).sweep_due(now=129), 0)
+        self.assertEqual(TimerDueSweeper(self.path).sweep_due(now=130), 1)
+        self.assertEqual(TimerDueSweeper(self.path).sweep_due(now=131), 0)
+        restarted_outbox = TimerAlarmOutbox(self.path)
+        failed = dispatch_once(restarted_outbox, FakeTransport(error=True), now=130)
+        self.assertEqual(failed.outcome, "transport_error")
+        self.assertEqual(dispatch_once(restarted_outbox, FakeTransport(), now=159).outcome, "idle")
+        delivered_to_transport = dispatch_once(
+            TimerAlarmOutbox(self.path), FakeTransport(), now=160,
+        )
+        self.assertEqual(delivered_to_transport.outcome, "transport_accepted_pending_receipt")
+        self.assertEqual(TimerAlarmOutbox(self.path).status("integrated"), "leased")
+        with TimerStateLedger(self.path) as ledger:
+            self.assertEqual((ledger.get("integrated").state, ledger.get("integrated").revision),
+                             ("due", 1))
+        # No device attestation exists: even successful transport acceptance
+        # must not mark the timer as delivered.
+        self.assertEqual(dispatch_once(TimerAlarmOutbox(self.path), FakeTransport(), now=189).outcome, "idle")
+        self.assertEqual(dispatch_once(TimerAlarmOutbox(self.path), FakeTransport(), now=190).outcome,
+                         "transport_accepted_pending_receipt")
+        with TimerStateLedger(self.path) as ledger:
+            self.assertEqual(ledger.get("integrated").state, "due")
+
+    def test_restart_cancelled_alarm_never_dispatches(self):
+        sweeper = TimerDueSweeper(self.path)
+        with TimerStateLedger(self.path) as ledger:
+            ledger.register_pending("cancel-after-due")
+            ledger.db.execute(
+                "UPDATE voice_timer_state_ledger SET state='active' "
+                "WHERE timer_id='cancel-after-due'"
+            )
+            ledger.db.commit()
+        self.assertTrue(sweeper.register_active_deadline("cancel-after-due", due_at=100))
+        self.assertEqual(sweeper.sweep_due(now=100), 1)
+        self.assertTrue(TimerAlarmOutbox(self.path).cancel_due("cancel-after-due"))
+        after_restart = TimerAlarmOutbox(self.path)
+        transport = FakeTransport()
+        self.assertEqual(dispatch_once(after_restart, transport, now=200).outcome, "idle")
+        self.assertEqual(transport.calls, [])
+        with TimerStateLedger(self.path) as ledger:
+            self.assertEqual(ledger.get("cancel-after-due").state, "cancelled")
 
     def test_idle_does_not_call_transport(self):
         transport = FakeTransport()
