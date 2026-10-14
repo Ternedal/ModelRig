@@ -155,15 +155,18 @@ class TimerProposalLedgerBridge:
                 "SELECT status,expires_at FROM voice_timer_proposals WHERE proposal_id=?",
                 (proposal_id,),
             ).fetchone()
-            if row is None or row[0] != "pending":
+            if row is None:
                 conn.rollback()
                 return False
             ledger = conn.execute(
                 "SELECT state FROM voice_timer_state_ledger WHERE timer_id=?",
                 (proposal_id,),
             ).fetchone()
-            if ledger is None or ledger[0] != "pending":
+            if ledger is None or ledger[0] != row[0]:
                 raise ValueError("proposal/ledger state mismatch")
+            if row[0] != "pending":
+                conn.rollback()
+                return False
             target = "expired" if row[1] <= current else "cancelled"
             conn.execute(
                 "UPDATE voice_timer_proposals SET status=? WHERE proposal_id=? "
