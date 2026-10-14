@@ -57,7 +57,14 @@ def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
         rel = item["path"]
         if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
             raise AttestationError(f"{gate}: invalid relative path")
-        path = (root / rel).resolve(strict=True)
+        # Reject symlinks in every path component: a resolved-path check alone
+        # can silently accept a link to another artifact inside the root.
+        candidate = root
+        for part in Path(rel).parts:
+            candidate = candidate / part
+            if candidate.is_symlink():
+                raise AttestationError(f"{gate}: symlink artifact path")
+        path = candidate.resolve(strict=True)
         if not path.is_relative_to(root) or not path.is_file():
             raise AttestationError(f"{gate}: unsafe or missing artifact")
         if path.stat().st_size > MAX_BYTES:
