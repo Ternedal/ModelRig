@@ -1577,7 +1577,7 @@ async def voice_converse_stream(req: ConverseUploadReq):
         raw = base64.b64decode(req.audio_base64)
     except Exception:
         raise HTTPException(status_code=400, detail="audio_base64 is not valid base64")
-    tmp_dir = tempfile.mkdtemp(prefix="alva_voice_stream_")
+    tmp_dir = tempfile.mkdtemp(prefix="kaliv_voice_stream_")
     in_path = _os.path.join(tmp_dir, "input.wav")
     with open(in_path, "wb") as f:
         f.write(raw)
