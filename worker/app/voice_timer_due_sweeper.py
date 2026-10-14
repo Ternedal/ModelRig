@@ -72,6 +72,12 @@ class TimerDueSweeper:
                 (current, limit),
             ).fetchall()
             for (timer_id,) in rows:
+                existing = db.execute(
+                    "SELECT status FROM voice_timer_alarm_outbox WHERE timer_id=?",
+                    (timer_id,),
+                ).fetchone()
+                if existing is not None:
+                    raise ValueError("active timer already has alarm outbox record")
                 changed = db.execute(
                     "UPDATE voice_timer_state_ledger SET state='due', "
                     "revision=revision+1 WHERE timer_id=? AND state='active'",
@@ -80,7 +86,7 @@ class TimerDueSweeper:
                 if changed.rowcount != 1:
                     raise RuntimeError("due-state promotion mismatch")
                 db.execute(
-                    "INSERT OR IGNORE INTO voice_timer_alarm_outbox "
+                    "INSERT INTO voice_timer_alarm_outbox "
                     "(timer_id,status) VALUES (?,'queued')", (timer_id,)
                 )
             return len(rows)
