@@ -43,6 +43,22 @@ class TimerProposalLedgerBridge:
                 "DELETE FROM voice_timer_proposals WHERE status IN ('expired','cancelled') "
                 "AND expires_at<=?", (current-TERMINAL_RETENTION_SECONDS,)
             )
+            # Keep ledger state in sync whenever proposal expiry is applied.
+            # CAS revisions must advance so a stale caller cannot act on an
+            # expired pending proposal after another connection cleaned up.
+            conn.execute(
+                "UPDATE voice_timer_state_ledger SET state='expired', "
+                "revision=revision+1 WHERE state='pending' AND timer_id IN "
+                "(SELECT proposal_id FROM voice_timer_proposals "
+                "WHERE status='expired')"
+            )
+            # Historical ledger rows are inert but must not grow indefinitely
+            # after their matching terminal proposals have been pruned.
+            conn.execute(
+                "DELETE FROM voice_timer_state_ledger WHERE "
+                "state IN ('expired','cancelled') AND timer_id NOT IN "
+                "(SELECT proposal_id FROM voice_timer_proposals)"
+            )
             pending = conn.execute(
                 "SELECT COUNT(*) FROM voice_timer_proposals WHERE status='pending'"
             ).fetchone()[0]
