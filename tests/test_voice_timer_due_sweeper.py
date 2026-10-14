@@ -55,6 +55,30 @@ class TimerDueSweeperTests(unittest.TestCase):
             self.assertEqual(sweeper.sweep_due(now=200), 0)
             self.assertIsNone(TimerAlarmOutbox(path).status("t2"))
 
+    def test_conflicting_alarm_rolls_back_due_transition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timer.db")
+            sweeper = TimerDueSweeper(path)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("t3")
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='active' WHERE timer_id='t3'"
+                )
+                ledger.db.commit()
+            self.assertTrue(sweeper.register_active_deadline("t3", due_at=100))
+            # Corrupted pre-existing delivery: sweeper must not overwrite it.
+            import sqlite3
+            with sqlite3.connect(path) as db:
+                db.execute(
+                    "INSERT INTO voice_timer_alarm_outbox (timer_id,status) "
+                    "VALUES ('t3','delivered')"
+                )
+            with self.assertRaisesRegex(ValueError, "already has alarm"):
+                sweeper.sweep_due(now=100)
+            with TimerStateLedger(path) as ledger:
+                self.assertEqual((ledger.get("t3").state, ledger.get("t3").revision), ("active", 0))
+            self.assertEqual(TimerAlarmOutbox(path).status("t3"), "delivered")
+
     def test_validation(self):
         with tempfile.TemporaryDirectory() as tmp:
             sweeper = TimerDueSweeper(os.path.join(tmp, "timer.db"))
