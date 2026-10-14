@@ -34,6 +34,18 @@ class TimerLedgerTests(unittest.TestCase):
                     second.transition("shared", expected_revision=0, target="expired")
                 self.assertEqual(second.get("shared").state, "cancelled")
 
+    def test_rejects_invalid_revisions_and_identifiers(self):
+        with tempfile.TemporaryDirectory() as d:
+            with TimerStateLedger(os.path.join(d, "timer.sqlite")) as ledger:
+                ledger.register_pending("valid")
+                for revision in (-1, True, 0.5, "0"):
+                    with self.subTest(revision=revision), self.assertRaises(ValueError):
+                        ledger.transition("valid", expected_revision=revision, target="cancelled")
+                for timer_id in (None, 3, "", "  "):
+                    with self.subTest(timer_id=timer_id), self.assertRaises(ValueError):
+                        ledger.register_pending(timer_id)
+                self.assertEqual(ledger.get("valid").state, "pending")
+
     def test_rejects_activation_and_duplicate_registration(self):
         with tempfile.TemporaryDirectory() as d:
             with TimerStateLedger(os.path.join(d, "timer.sqlite")) as ledger:
