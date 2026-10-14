@@ -21,6 +21,9 @@ class StoredTimerProposal:
     status: str
 
 
+MAX_PENDING_PROPOSALS = 32
+
+
 class OneShotTimerProposalStore:
     """Persistent, restart-safe proposals with no execution interface."""
 
@@ -61,6 +64,15 @@ class OneShotTimerProposalStore:
             str(uuid.uuid4()), duration_seconds, current, current + 180, "pending"
         )
         with self._db:
+            self._db.execute(
+                "UPDATE voice_timer_proposals SET status=\'expired\' "
+                "WHERE status=\'pending\' AND expires_at<=?", (current,)
+            )
+            pending = self._db.execute(
+                "SELECT COUNT(*) FROM voice_timer_proposals WHERE status=\'pending\'"
+            ).fetchone()[0]
+            if pending >= MAX_PENDING_PROPOSALS:
+                raise ValueError("too many outstanding timer proposals")
             self._db.execute(
                 "INSERT INTO voice_timer_proposals VALUES (?,?,?,?,?)",
                 (proposal.proposal_id, proposal.duration_seconds,
