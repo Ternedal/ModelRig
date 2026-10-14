@@ -11,6 +11,8 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from .voice_timer_state_ledger import TimerStateLedger
+
 
 @dataclass(frozen=True)
 class AlarmClaim:
@@ -25,6 +27,10 @@ class TimerAlarmOutbox:
         if not isinstance(path, str) or not path.strip():
             raise ValueError("explicit database path required")
         self.path = path
+        # Shared ledger must exist even when no timer was registered yet.
+        # This creates schema only; it never creates a due timer.
+        with TimerStateLedger(path):
+            pass
         with sqlite3.connect(path) as db:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS voice_timer_alarm_outbox ("
