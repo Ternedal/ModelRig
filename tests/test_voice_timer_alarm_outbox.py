@@ -37,6 +37,10 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             self.assertFalse(outbox.acknowledge(second, now=132))
             self.assertIsNone(outbox.claim("a", now=200))
             self.assertEqual(outbox.status("a"), "delivered")
+            with TimerStateLedger(outbox.path) as ledger:
+                record = ledger.get("a")
+                self.assertEqual(record.state, "delivered")
+                self.assertEqual(record.revision, 1)
 
     def test_rejects_undue_and_unknown_timer(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -150,6 +154,8 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             self.assertTrue(first_instance.acknowledge(replacement, now=131))
             third_instance = TimerAlarmOutbox(path)
             self.assertEqual(third_instance.status("persistent"), "delivered")
+            with TimerStateLedger(path) as ledger:
+                self.assertEqual(ledger.get("persistent").state, "delivered")
             self.assertIsNone(third_instance.claim_next(now=200))
 
     def test_missing_and_invalid_inputs(self):
