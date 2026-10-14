@@ -6,6 +6,7 @@ must deduplicate by timer_id because a lost acknowledgement can cause retries.
 """
 from __future__ import annotations
 
+import math
 import sqlite3
 import time
 import uuid
@@ -20,6 +21,14 @@ class AlarmClaim:
     delivery_token: str
     lease_until: float
     attempts: int
+
+
+def _finite_time(now: float | None) -> float:
+    if now is None:
+        return time.time()
+    if isinstance(now, bool) or not isinstance(now, (float, int)) or not math.isfinite(now):
+        raise ValueError("finite timestamp required")
+    return float(now)
 
 
 class TimerAlarmOutbox:
@@ -64,7 +73,7 @@ class TimerAlarmOutbox:
             raise ValueError("invalid timer id")
         if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
             raise ValueError("invalid lease length")
-        current = time.time() if now is None else float(now)
+        current = _finite_time(now)
         token = str(uuid.uuid4())
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -97,7 +106,7 @@ class TimerAlarmOutbox:
         """
         if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
             raise ValueError("invalid lease length")
-        current = time.time() if now is None else float(now)
+        current = _finite_time(now)
         token = str(uuid.uuid4())
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -130,7 +139,7 @@ class TimerAlarmOutbox:
     def acknowledge(self, claim: AlarmClaim, *, now: float | None = None) -> bool:
         if not isinstance(claim, AlarmClaim):
             raise ValueError("valid claim required")
-        current = time.time() if now is None else float(now)
+        current = _finite_time(now)
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
             state = db.execute(
