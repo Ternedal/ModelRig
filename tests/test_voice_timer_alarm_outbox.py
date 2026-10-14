@@ -205,6 +205,28 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             with TimerStateLedger(path) as ledger:
                 self.assertEqual(ledger.get("done").state, "delivered")
 
+    def test_rejects_nonfinite_times_for_claim_and_ack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "alarms.sqlite")
+            outbox = TimerAlarmOutbox(path)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("due")
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='due' WHERE timer_id='due'"
+                )
+                ledger.db.commit()
+            self.assertTrue(outbox.enqueue_due("due"))
+            claim = outbox.claim_next(now=100)
+            for invalid in (float("nan"), float("inf"), float("-inf"), True, "100"):
+                with self.subTest(invalid=invalid):
+                    with self.assertRaises(ValueError):
+                        outbox.claim("due", now=invalid)
+                    with self.assertRaises(ValueError):
+                        outbox.claim_next(now=invalid)
+                    with self.assertRaises(ValueError):
+                        outbox.acknowledge(claim, now=invalid)
+            self.assertTrue(outbox.acknowledge(claim, now=101))
+
     def test_missing_and_invalid_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             outbox = TimerAlarmOutbox(os.path.join(tmp, "outbox.db"))
