@@ -101,6 +101,18 @@ def run() -> None:
             rejected(manifest, attestations, root, "invalid relative path")
             item.update(original)
 
+            # Even links pointing back inside the artifact root are forbidden.
+            link = root / "linked-artifact.json"
+            try:
+                link.symlink_to(path)
+            except (OSError, NotImplementedError):
+                pass  # Filesystem without symlink support.
+            else:
+                item["path"] = link.name
+                rejected(manifest, attestations, root, "symlink artifact path")
+                item.update(original)
+                link.unlink()
+
             item["path"] = "missing.json"
             rejected(manifest, attestations, root, "missing.json")
             item.update(original)
