@@ -24,12 +24,28 @@ class TimerLedgerTests(unittest.TestCase):
                 ledger.transition("b", expected_revision=expired.revision, target="expired")
                 self.assertEqual(ledger.get("b").state, "expired")
 
+    def test_two_connections_cannot_reuse_same_revision(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "timer.sqlite")
+            with TimerStateLedger(path) as first, TimerStateLedger(path) as second:
+                first.register_pending("shared")
+                first.transition("shared", expected_revision=0, target="cancelled")
+                with self.assertRaises(ValueError):
+                    second.transition("shared", expected_revision=0, target="expired")
+                self.assertEqual(second.get("shared").state, "cancelled")
+
     def test_rejects_activation_and_duplicate_registration(self):
         with tempfile.TemporaryDirectory() as d:
             with TimerStateLedger(os.path.join(d, "timer.sqlite")) as ledger:
                 ledger.register_pending("a")
                 with self.assertRaises(ValueError):
                     ledger.transition("a", expected_revision=0, target="active")
+                with self.assertRaises(ValueError):
+                    ledger.transition("a", expected_revision=0, target="delivered")
+                # Simulate a future trusted executor creating a due row.
+                # This generic ledger still has no transport proof to deliver.
+                with ledger.db:
+                    ledger.db.execute("UPDATE voice_timer_state_ledger SET state=\'due\' WHERE timer_id=\'a\'")
                 with self.assertRaises(ValueError):
                     ledger.transition("a", expected_revision=0, target="delivered")
                 with self.assertRaises(ValueError):

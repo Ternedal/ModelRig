@@ -14,7 +14,7 @@ STATES = ("pending", "active", "due", "delivered", "cancelled", "expired")
 TRANSITIONS = {
     "pending": frozenset(("cancelled", "expired")),
     "active": frozenset(("due", "cancelled")),
-    "due": frozenset(("delivered", "cancelled")),
+    "due": frozenset(("cancelled",)),
     "delivered": frozenset(),
     "cancelled": frozenset(),
     "expired": frozenset(),
@@ -35,6 +35,7 @@ class TimerStateLedger:
         if not path:
             raise ValueError("database path required")
         self.db = sqlite3.connect(path, timeout=5)
+        self.db.execute("PRAGMA busy_timeout=5000")
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS voice_timer_state_ledger (
                 timer_id TEXT PRIMARY KEY,
@@ -73,10 +74,13 @@ class TimerStateLedger:
         return TimerRecord(*row) if row else None
 
     def transition(self, timer_id: str, *, expected_revision: int, target: str) -> TimerRecord:
-        if target not in STATES or target == "active":
-            # Activating needs a trusted operator execution path, not this ledger.
+        if target not in STATES or target in ("active", "delivered"):
+            # Activation and delivery need trusted executor/transport proofs.
             raise ValueError("active timer activation is not available")
         with self.db:
+            # Acquire the write lock before reading. This avoids lock-upgrade
+            # races with another connection modifying the same timer.
+            self.db.execute("BEGIN IMMEDIATE")
             current = self.get(timer_id)
             if current is None or current.revision != expected_revision:
                 raise ValueError("unknown timer or stale revision")
