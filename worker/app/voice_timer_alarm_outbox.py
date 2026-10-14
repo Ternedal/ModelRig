@@ -146,7 +146,16 @@ class TimerAlarmOutbox:
                 "AND lease_until>?",
                 (claim.timer_id, claim.delivery_token, current),
             )
-            return update.rowcount == 1
+            if update.rowcount != 1:
+                return False
+            changed = db.execute(
+                "UPDATE voice_timer_state_ledger SET state='delivered', "
+                "revision=revision+1 WHERE timer_id=? AND state='due'",
+                (claim.timer_id,),
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError("alarm acknowledgement/ledger mismatch")
+            return True
 
     def status(self, timer_id: str) -> str | None:
         with sqlite3.connect(self.path) as db:
