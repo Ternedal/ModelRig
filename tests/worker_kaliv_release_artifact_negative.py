@@ -69,7 +69,7 @@ def run() -> None:
             path.write_bytes(old)
 
             item["sha256"] = "f" * 64
-            rejected(manifest, attestations, root, "byte hash mismatch")
+            rejected(manifest, attestations, root, "reference digest mismatch")
             item.update(original)
 
             item["reference"] = "receipt:wrong"
