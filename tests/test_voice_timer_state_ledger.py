@@ -24,6 +24,16 @@ class TimerLedgerTests(unittest.TestCase):
                 ledger.transition("b", expected_revision=expired.revision, target="expired")
                 self.assertEqual(ledger.get("b").state, "expired")
 
+    def test_two_connections_cannot_reuse_same_revision(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "timer.sqlite")
+            with TimerStateLedger(path) as first, TimerStateLedger(path) as second:
+                first.register_pending("shared")
+                first.transition("shared", expected_revision=0, target="cancelled")
+                with self.assertRaises(ValueError):
+                    second.transition("shared", expected_revision=0, target="expired")
+                self.assertEqual(second.get("shared").state, "cancelled")
+
     def test_rejects_activation_and_duplicate_registration(self):
         with tempfile.TemporaryDirectory() as d:
             with TimerStateLedger(os.path.join(d, "timer.sqlite")) as ledger:
