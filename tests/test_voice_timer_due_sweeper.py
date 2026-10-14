@@ -35,6 +35,14 @@ class TimerDueSweeperTests(unittest.TestCase):
             outbox = TimerAlarmOutbox(path)
             self.assertEqual(outbox.status("t1"), "queued")
             self.assertFalse(outbox.enqueue_due("t1"))
+            # Promotion transfers ownership to the durable outbox and must
+            # release the no-longer-needed deadline, including after restart.
+            import sqlite3
+            with sqlite3.connect(path) as db:
+                self.assertIsNone(db.execute(
+                    "SELECT due_at FROM voice_timer_deadlines WHERE timer_id='t1'"
+                ).fetchone())
+            self.assertEqual(TimerDueSweeper(path).sweep_due(now=200), 0)
 
     def test_cancelled_timer_never_due(self):
         with tempfile.TemporaryDirectory() as tmp:
