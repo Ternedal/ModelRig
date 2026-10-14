@@ -2,7 +2,7 @@
 
 A transport implementation is supplied explicitly. The return value only
 represents an internal transport acceptance, NOT a device alarm receipt.
-Client-side durable acknowledgement remains a separate release gate.
+Client-side durable acknowledgement remains a separate release gate.\nA transport ACK never marks a timer delivered.
 """
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ def dispatch_once(
         return AlarmDispatchResult(claim.timer_id, "transport_error")
     if accepted is not True:
         return AlarmDispatchResult(claim.timer_id, "not_accepted")
-    if not outbox.acknowledge(claim, now=now):
-        return AlarmDispatchResult(claim.timer_id, "ack_rejected")
-    return AlarmDispatchResult(claim.timer_id, "transport_accepted")
+    # Transport acceptance is NOT proof of client presentation.
+    # Leave the claim leased until a separate trusted client-receipt boundary
+    # acknowledges it. Without such a boundary it expires and can be retried.
+    return AlarmDispatchResult(claim.timer_id, "transport_accepted_pending_receipt")
