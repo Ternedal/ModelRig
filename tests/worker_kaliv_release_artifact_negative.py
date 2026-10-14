@@ -113,6 +113,11 @@ def run() -> None:
                 item.update(original)
                 link.unlink()
 
+            # A directory is not an artifact even if a path check races.
+            item["path"] = "."
+            rejected(manifest, attestations, root, "unsafe or missing artifact")
+            item.update(original)
+
             item["path"] = "missing.json"
             rejected(manifest, attestations, root, "missing.json")
             item.update(original)
