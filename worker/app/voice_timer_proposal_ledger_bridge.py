@@ -98,14 +98,15 @@ class TimerProposalLedgerBridge:
             ).fetchone()[0]
             if inconsistent:
                 raise ValueError("proposal/ledger state mismatch")
-            result = conn.execute(
-                "UPDATE voice_timer_proposals SET status='expired' "
-                "WHERE status='pending' AND expires_at<=?", (current,)
-            )
             updated = conn.execute(
                 "UPDATE voice_timer_state_ledger SET state='expired',revision=revision+1 "
                 "WHERE state='pending' AND timer_id IN "
-                "(SELECT proposal_id FROM voice_timer_proposals WHERE status='expired')"
+                "(SELECT proposal_id FROM voice_timer_proposals "
+                "WHERE status='pending' AND expires_at<=?)", (current,)
+            )
+            result = conn.execute(
+                "UPDATE voice_timer_proposals SET status='expired' "
+                "WHERE status='pending' AND expires_at<=?", (current,)
             )
             if updated.rowcount != result.rowcount:
                 raise ValueError("proposal/ledger expiry count mismatch")
