@@ -1,17 +1,28 @@
 """SQLite tests for inert durable alarm outbox; no alarms are delivered."""
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "worker"))
 from app.voice_timer_alarm_outbox import TimerAlarmOutbox
+from app.voice_timer_state_ledger import TimerStateLedger
 
 
 class TimerAlarmOutboxTests(unittest.TestCase):
     def test_lease_expiry_and_acknowledgement(self):
         with tempfile.TemporaryDirectory() as tmp:
             outbox = TimerAlarmOutbox(os.path.join(tmp, "outbox.db"))
+            with TimerStateLedger(outbox.path) as ledger:
+                ledger.register_pending("a")
+                self.assertFalse(outbox.enqueue_due("a"))
+                # Test fixture represents a trusted executor that has recorded
+                # the due transition; no activation API is exposed by the outbox.
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='due' WHERE timer_id='a'"
+                )
+                ledger.db.commit()
             self.assertTrue(outbox.enqueue_due("a"))
             self.assertFalse(outbox.enqueue_due("a"))
             first = outbox.claim("a", now=100, lease_seconds=30)
@@ -26,6 +37,22 @@ class TimerAlarmOutboxTests(unittest.TestCase):
             self.assertFalse(outbox.acknowledge(second, now=132))
             self.assertIsNone(outbox.claim("a", now=200))
             self.assertEqual(outbox.status("a"), "delivered")
+
+    def test_rejects_undue_and_unknown_timer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "outbox.db")
+            outbox = TimerAlarmOutbox(path)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("pending")
+                self.assertFalse(outbox.enqueue_due("pending"))
+                self.assertFalse(outbox.enqueue_due("unknown"))
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='cancelled' "
+                    "WHERE timer_id='pending'"
+                )
+                ledger.db.commit()
+                self.assertFalse(outbox.enqueue_due("pending"))
+            self.assertIsNone(outbox.status("pending"))
 
     def test_missing_and_invalid_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
