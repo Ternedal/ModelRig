@@ -42,6 +42,10 @@ class TimerLedgerTests(unittest.TestCase):
                     ledger.transition("a", expected_revision=0, target="active")
                 with self.assertRaises(ValueError):
                     ledger.transition("a", expected_revision=0, target="delivered")
+                # Even a future due row must not be marked delivered by this
+                # untrusted generic API (no transport acknowledgement exists).
+                with self.assertRaises(ValueError):
+                    ledger.transition("a", expected_revision=0, target="active")
                 with self.assertRaises(ValueError):
                     ledger.register_pending(" ")
                 with self.assertRaises(Exception):
