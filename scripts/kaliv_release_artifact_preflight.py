@@ -59,8 +59,15 @@ def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
             raise AttestationError(f"{gate}: unsafe or missing artifact")
         if path.stat().st_size > MAX_BYTES:
             raise AttestationError(f"{gate}: artifact exceeds size limit")
-        data = path.read_bytes()
-        if len(data) > MAX_BYTES or hashlib.sha256(data).hexdigest() != digest:
+        hasher = hashlib.sha256()
+        with path.open("rb") as artifact:
+            total = 0
+            while chunk := artifact.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_BYTES:
+                    raise AttestationError(f"{gate}: artifact exceeds size limit")
+                hasher.update(chunk)
+        if hasher.hexdigest() != digest:
             raise AttestationError(f"{gate}: artifact byte hash mismatch")
         checked.append(gate)
     return {
