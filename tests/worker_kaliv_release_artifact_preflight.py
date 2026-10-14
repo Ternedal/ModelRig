@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import tempfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 
 from kaliv_release_artifact_preflight import AttestationError, preflight
 from kaliv_system_release_gate import REQUIRED_GATES, REQUIRED_REPOSITORIES
