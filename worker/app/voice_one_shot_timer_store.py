@@ -22,6 +22,7 @@ class StoredTimerProposal:
 
 
 MAX_PENDING_PROPOSALS = 32
+TERMINAL_RETENTION_SECONDS = 7 * 86400
 
 
 class OneShotTimerProposalStore:
@@ -68,6 +69,12 @@ class OneShotTimerProposalStore:
                 "UPDATE voice_timer_proposals SET status=\'expired\' "
                 "WHERE status=\'pending\' AND expires_at<=?", (current,)
             )
+            # Completed proposals are retained briefly for diagnostics, not forever.
+            self._db.execute(
+                "DELETE FROM voice_timer_proposals "
+                "WHERE status IN ('expired','cancelled') AND expires_at<=?",
+                (current - TERMINAL_RETENTION_SECONDS,),
+            )
             pending = self._db.execute(
                 "SELECT COUNT(*) FROM voice_timer_proposals WHERE status=\'pending\'"
             ).fetchone()[0]
@@ -86,6 +93,17 @@ class OneShotTimerProposalStore:
             result = self._db.execute(
                 "UPDATE voice_timer_proposals SET status='expired' "
                 "WHERE status='pending' AND expires_at<=?", (current,)
+            )
+        return result.rowcount
+
+    def purge_terminal(self, *, now: float | None = None) -> int:
+        """Bound stored terminal history without deleting pending proposals."""
+        current = time.time() if now is None else float(now)
+        with self._db:
+            result = self._db.execute(
+                "DELETE FROM voice_timer_proposals "
+                "WHERE status IN ('expired','cancelled') AND expires_at<=?",
+                (current - TERMINAL_RETENTION_SECONDS,),
             )
         return result.rowcount
 
