@@ -54,6 +54,32 @@ class TimerAlarmOutboxTests(unittest.TestCase):
                 self.assertFalse(outbox.enqueue_due("pending"))
             self.assertIsNone(outbox.status("pending"))
 
+    def test_cancelled_due_timer_cannot_be_claimed_or_acknowledged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "outbox.db")
+            outbox = TimerAlarmOutbox(path)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("cancelled-before-claim")
+                ledger.register_pending("cancelled-after-claim")
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='due' "
+                    "WHERE timer_id IN ('cancelled-before-claim','cancelled-after-claim')"
+                )
+                ledger.db.commit()
+                self.assertTrue(outbox.enqueue_due("cancelled-before-claim"))
+                self.assertTrue(outbox.enqueue_due("cancelled-after-claim"))
+                claim = outbox.claim("cancelled-after-claim", now=100)
+                self.assertIsNotNone(claim)
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='cancelled' "
+                    "WHERE timer_id IN ('cancelled-before-claim','cancelled-after-claim')"
+                )
+                ledger.db.commit()
+            self.assertIsNone(outbox.claim("cancelled-before-claim", now=101))
+            self.assertFalse(outbox.acknowledge(claim, now=101))
+            self.assertEqual(outbox.status("cancelled-before-claim"), "queued")
+            self.assertEqual(outbox.status("cancelled-after-claim"), "leased")
+
     def test_missing_and_invalid_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             outbox = TimerAlarmOutbox(os.path.join(tmp, "outbox.db"))
