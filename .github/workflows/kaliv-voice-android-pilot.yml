@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  SOURCE_SHA: ${d}{{ github.event.pull_request.head.sha || github.sha }}
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 concurrency:
   group: kaliv-voice-android-pilot-${{ github.ref }}
@@ -92,11 +92,11 @@ jobs:
           mkdir -p pilot-artifact
           cp "$apk" pilot-artifact/kaliv-voice-test.apk
           (cd pilot-artifact && sha256sum kaliv-voice-test.apk > SHA256SUMS.txt)
-          printf 'source_commit=%s\nbase_worker_commit=e01b2d1c989f4da1d454e004f074870741f409df\npackage=dk.ternedal.modelrig.a425f\nproduction_activation=false\n' "$GITHUB_SHA" > pilot-artifact/PILOT.txt
+          printf 'source_commit=%s\nbase_worker_commit=e01b2d1c989f4da1d454e004f074870741f409df\npackage=dk.ternedal.modelrig.a425f\nproduction_activation=false\n' "$SOURCE_SHA" > pilot-artifact/PILOT.txt
       - name: Upload signed test APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: kaliv-voice-test-${{ github.sha }}
+          name: kaliv-voice-test-${{ github.event.pull_request.head.sha || github.sha }}
           path: pilot-artifact/
           if-no-files-found: error
           retention-days: 14
@@ -126,12 +126,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
           $hash = (Get-FileHash pilot-backend/modelrig-server-pilot.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  modelrig-server-pilot.exe" | Set-Content -Encoding ascii pilot-backend/SHA256SUMS.txt
-          "source_commit=$env:GITHUB_SHA" | Set-Content -Encoding ascii pilot-backend/PILOT.txt
+          "source_commit=$env:SOURCE_SHA" | Set-Content -Encoding ascii pilot-backend/PILOT.txt
           "production_activation=false" | Add-Content -Encoding ascii pilot-backend/PILOT.txt
       - name: Upload isolated Go backend
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: kaliv-voice-pilot-backend-${{ github.sha }}
+          name: kaliv-voice-pilot-backend-${{ github.event.pull_request.head.sha || github.sha }}
           path: pilot-backend/
           if-no-files-found: error
           retention-days: 14
