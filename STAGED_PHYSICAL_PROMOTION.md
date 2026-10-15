@@ -1,8 +1,8 @@
 # Staged physical promotion — 2.0.15
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
-`2.0.15`. Kandidaten ligger på `release/kaliv-voice-2.0.15-20261015`; den eksakte SHA skal
-altid læses fra den fetch'ede `origin/release/kaliv-voice-2.0.15-20261015`, matches mod lokal
+`2.0.15`. Kandidaten ligger på `physical-proof/2.0.15`; den eksakte SHA skal
+altid læses fra den fetch'ede `origin/physical-proof/2.0.15`, matches mod lokal
 HEAD og bevises med `candidate_freeze_check.py`. Den må aldrig gættes eller
 kopieres fra ældre evidens.
 
@@ -24,19 +24,19 @@ kopieres fra ældre evidens.
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch release/kaliv-voice-2.0.15-20261015
-git pull --ff-only origin release/kaliv-voice-2.0.15-20261015
+git switch physical-proof/2.0.15
+git pull --ff-only origin physical-proof/2.0.15
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/release/kaliv-voice-2.0.15-20261015).Trim()
+$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.15).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/release/kaliv-voice-2.0.15-20261015: local=$CandidateSha remote=$RemoteCandidateSha" }
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.15: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.15") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/release/kaliv-voice-2.0.15-20261015`, lokal exact HEAD og den grønne
+`origin/physical-proof/2.0.15`, lokal exact HEAD og den grønne
 `candidate_freeze_check.py` skal alle pege på samme kandidat-SHA. Stop ved
 enhver forskel. Historiske freeze-PR'er og tidligere 2.0.15-heads er ikke
 SHA-authority.
