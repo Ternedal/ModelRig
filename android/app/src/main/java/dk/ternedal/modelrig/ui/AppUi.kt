@@ -1219,47 +1219,47 @@ private fun ChatScreen(
                         registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
                             if (!playbackStop.get()) {
-                            val tt = t.trim()
-                            if (tt.isNotEmpty() && !transcriptShown) {
-                                transcriptShown = true
-                                transcriptText = tt
-                                voiceTranscript = tt
-                                // messages is a SnapshotStateList -- safe to mutate
-                                // from this IO thread; the recomposer picks it up.
-                                // Set replyIdx synchronously (the callbacks run in
-                                // order on the reader thread) so the first chunk
-                                // can reference it.
-                                messages.add(Msg("user", tt))
-                                replyIdx = messages.size
-                                // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
-                                messages.add(Msg("assistant", "", streaming = true))
-                            }
+                                val tt = t.trim()
+                                if (tt.isNotEmpty() && !transcriptShown) {
+                                    transcriptShown = true
+                                    transcriptText = tt
+                                    voiceTranscript = tt
+                                    // messages is a SnapshotStateList -- safe to mutate
+                                    // from this IO thread; the recomposer picks it up.
+                                    // Set replyIdx synchronously (the callbacks run in
+                                    // order on the reader thread) so the first chunk
+                                    // can reference it.
+                                    messages.add(Msg("user", tt))
+                                    replyIdx = messages.size
+                                    // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
+                                    messages.add(Msg("assistant", "", streaming = true))
+                                }
                             }
                         },
                         onChunk = { _, text, chunkB64, utteranceId ->
                             if (!playbackStop.get()) {
-                            if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
-                            replyBuilder.append(text.trim())
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
-                            }
-                            if (chunkB64.isNotEmpty() && !playbackStop.get()) {
-                                val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
-                                audioChan.trySend(bytes to utteranceId)
-                            }
+                                if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
+                                replyBuilder.append(text.trim())
+                                if (replyIdx in messages.indices) {
+                                    messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
+                                }
+                                if (chunkB64.isNotEmpty()) {
+                                    val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
+                                    audioChan.trySend(bytes to utteranceId)
+                                }
                             }
                         },
                         onDone = { reply, m, cloud ->
                             if (!playbackStop.get()) {
-                            usedModel = m; usedCloud = cloud
-                            val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
-                            completedReply = finalText
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(
-                                    text = finalText,
-                                    streaming = false, voiceModel = m, voiceViaCloud = cloud,
-                                )
-                            }
+                                usedModel = m; usedCloud = cloud
+                                val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
+                                completedReply = finalText
+                                if (replyIdx in messages.indices) {
+                                    messages[replyIdx] = messages[replyIdx].copy(
+                                        text = finalText,
+                                        streaming = false, voiceModel = m, voiceViaCloud = cloud,
+                                    )
+                                }
                             }
                         },
                         onError = { status, detail ->
