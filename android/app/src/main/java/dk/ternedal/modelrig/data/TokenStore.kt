@@ -293,8 +293,11 @@ class TokenStore(context: Context) {
      * If an existing ciphertext cannot be decrypted, enabling fails closed.
      */
     fun saveHubMirrorConfig(url: String, newSecret: String?, enabled: Boolean): Boolean {
-        val normalizedUrl = if (url.isBlank() && !enabled) "" else
+        val normalizedUrl = if (url.isBlank() && !enabled) {
+            ""
+        } else {
             dk.ternedal.modelrig.net.HubMirrorClient.endpoint(url) ?: return false
+        }
         val supplied = newSecret?.trim().orEmpty()
         val usableSecret = supplied.ifEmpty { hubMirrorSecret.orEmpty() }
         if (enabled && usableSecret.length < 32) return false
