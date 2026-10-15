@@ -49,6 +49,7 @@ import dk.ternedal.modelrig.net.VoiceCapability
 import dk.ternedal.modelrig.net.WorkerCapabilities
 import dk.ternedal.modelrig.net.IngestCapability
 import dk.ternedal.modelrig.net.ModelRigClient
+import dk.ternedal.modelrig.voice.VoiceTurnCancellation
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -959,7 +960,9 @@ private fun ChatScreen(
     //                   AudioTrack write, so the flag is what actually stops
     //                   the sound.
     var voiceJob by remember { mutableStateOf<Job?>(null) }
-    val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    // One cancellation controller per spoken turn: unlike cancelling a Job,
+    // it also aborts the blocking OkHttp voice HTTP request.
+    var voiceCancellation by remember { mutableStateOf<VoiceTurnCancellation?>(null) }
     var speaking by remember { mutableStateOf(false) }
     var showVoice by remember { mutableStateOf(false) }
     // Skaerm 13: rig-liveness. null = ukendt endnu; loekken auto-retry'er
@@ -1152,8 +1155,11 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        val cancellation = VoiceTurnCancellation()
+        voiceCancellation = cancellation
+        val playbackStop = cancellation.stopFlag
         voiceBusy = true; voiceError = null; wasInterrupted = false
-        speaking = false; playbackStop.set(false)
+        speaking = false
         voiceJob = scope.launch {
             // Audio chunks flow from the network reader (producer) to the player
             // (consumer) through this channel. Unlimited: sentences are small and
@@ -1182,7 +1188,7 @@ private fun ChatScreen(
                     bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
                     bodyReporter.report(utteranceId, "ended")
-                    if (cut) { wasInterrupted = true; playbackStop.set(true); break }
+                    if (cut) { wasInterrupted = true; cancellation.stop(); break }
                 }
                 speaking = false
             }
@@ -1209,7 +1215,7 @@ private fun ChatScreen(
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
-                        registerCall = { c -> activeCall = c },
+                        registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
                             val tt = t.trim()
                             if (tt.isNotEmpty() && !transcriptShown) {
@@ -1283,10 +1289,13 @@ private fun ChatScreen(
                 audioChan.close()
                 throw e
             } catch (e: Exception) {
-                voiceError = e.message ?: "stemme-fejl"
+                // A user-requested Stop intentionally closes OkHttp; its
+                // IOException is not an error to show in the voice overlay.
+                if (!playbackStop.get()) voiceError = e.message ?: "stemme-fejl"
                 audioChan.close()
             } finally {
-                activeCall = null
+                cancellation.clear()
+                if (voiceCancellation === cancellation) voiceCancellation = null
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
@@ -1305,7 +1314,8 @@ private fun ChatScreen(
      * first would leave the audio playing until the WAV ran out.
      */
     fun stopVoiceTurn() {
-        playbackStop.set(true)
+        // Stop playback first, then the blocking HTTP read, then coroutine work.
+        voiceCancellation?.stop()
         voiceJob?.cancel()
     }
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
