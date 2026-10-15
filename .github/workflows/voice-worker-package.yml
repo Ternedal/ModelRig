@@ -24,7 +24,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
+      # On pull_request, default checkout is GitHub's synthetic merge SHA.
+      # Physical evidence must use the real candidate HEAD instead.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
@@ -33,6 +37,11 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install -r worker/requirements.txt -r worker/requirements-release-voice.txt pyinstaller
+          # GITHUB_SHA is the synthetic PR merge SHA unless overridden.
+          # Stamp the checked-out exact candidate SHA in the frozen EXE.
+          $env:GITHUB_SHA = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $checkedOut = (git rev-parse HEAD).Trim()
+          if ($checkedOut -ne $env:GITHUB_SHA) { throw "Candidate checkout identity mismatch" }
           python scripts/stamp_build_identity.py
           pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths worker --paths . --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
 
@@ -75,3 +84,27 @@ jobs:
               & taskkill.exe /PID $worker.Id /T /F 2>&1 | Out-Null
             }
           }
+
+      # Keep the successfully smoke-tested EXE available for an isolated
+      # physical rig test BEFORE any tag, release or production update.
+      # This is a GitHub Actions artifact, not a published release asset.
+      - name: Record exact candidate worker checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/modelrig-worker-windows-x64.exe"
+          if (-not (Test-Path $exe)) { throw "Missing smoke-tested frozen worker" }
+          $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()
+          "$hash  modelrig-worker-windows-x64.exe" | Set-Content -Encoding ascii dist/WORKER_SHA256.txt
+          "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content -Encoding ascii dist/CANDIDATE_COMMIT.txt
+
+      - name: Upload smoke-tested worker for isolated physical acceptance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kaliv-voice-worker-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            dist/modelrig-worker-windows-x64.exe
+            dist/WORKER_SHA256.txt
+            dist/CANDIDATE_COMMIT.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
