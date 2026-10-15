@@ -46,7 +46,7 @@ pwsh -NoProfile -File .\scripts\voice-device-lab.ps1 -Role Pair
 pwsh -NoProfile -File .\scripts\voice-device-lab.ps1 -Role BuildApk
 ```
 
-The first command prints a **test-only** pairing code issued by the isolated backend. The second builds `android/app/build/outputs/apk/a425f/app-a425f.apk`. Install it using Android Studio or `adb install -r` on the connected test phone. Do not uninstall the normal Kaliv app or reuse its pairing token. In the `.a425f` app, pair against `http://<rig-private-ip>:8181` and enter the new test pairing code.
+The first command prints a **test-only** pairing code issued by the isolated backend. The second uses `gh` and the existing `a425f-apk.yml` GitHub Actions workflow to build and download an exact-HEAD signed test APK **without Android SDK on the rig**. (`gh auth login` must already be configured.) Only if `gh` is unavailable does it try the local SDK/Gradle route. The command prints the actual APK path. Install it using Android Studio or `adb install -r` on the connected test phone. Do not uninstall the normal Kaliv app or reuse its pairing token. In the `.a425f` app, pair against `http://<rig-private-ip>:8181` and enter the new test pairing code.
 
 ## Physical acceptance on the device
 
