@@ -38,6 +38,7 @@ _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _dll_dirs_added = False
 _registered_dll_dirs: list[str] = []
+_dll_directory_handles: list[object] = []
 
 
 def registered_dll_dirs() -> list[str]:
@@ -51,66 +52,112 @@ def registered_dll_dirs() -> list[str]:
     return list(_registered_dll_dirs)
 
 
+def _candidate_cuda_dll_dirs() -> list[str]:
+    """Find local CUDA 12 DLLs without a full-disk scan or global PATH change.
+
+    The frozen worker has its own Python environment and cannot import wheels
+    installed in an existing rig venv. On Windows, reuse a *paired* cuBLAS 12
+    and cuDNN 9 installation from the nearest trusted venvs directory. Also
+    support explicitly configured directories and DLLs bundled by PyInstaller.
+    Called only on the first CUDA model load; /status stays cheap.
+    """
+    import sys
+    from pathlib import Path
+
+    dirs: list[str] = []
+    seen: set[str] = set()
+
+    def add(candidate: Path) -> None:
+        if not candidate.is_dir():
+            return
+        path = str(candidate.resolve())
+        key = os.path.normcase(path)
+        if key not in seen:
+            seen.add(key)
+            dirs.append(path)
+
+    # Packages installed in the same interpreter, when running unfrozen.
+    try:
+        import nvidia
+        for root in getattr(nvidia, "__path__", []):
+            for package in sorted(Path(root).iterdir()):
+                add(package / "bin")
+    except (ImportError, OSError):
+        pass
+
+    # Optional CUDA DLLs included inside the PyInstaller extraction directory.
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        for rel in ("nvidia/cublas/bin", "nvidia/cudnn/bin", "ctranslate2"):
+            add(Path(frozen_root) / rel)
+
+    # Explicit operator override, e.g. two paths separated by semicolons on
+    # Windows. The paths must exist; no registry or arbitrary recursive search.
+    for raw in (env("CUDA_DLL_DIRS", "") or "").split(os.pathsep):
+        if raw.strip():
+            add(Path(raw.strip()))
+
+    roots: list[Path] = []
+    configured = os.environ.get("MODELRIG_VENVS_DIR", "").strip()
+    if configured:
+        roots.append(Path(configured))
+
+    # A frozen EXE at C:\Rig\test\... or C:\Rig\bin\... discovers
+    # C:\Rig\venvs; a normal venv Python discovers its sibling venvs.
+    executable = Path(sys.executable).resolve()
+    for parent in executable.parents:
+        sibling = parent / "venvs"
+        if sibling.is_dir():
+            roots.append(sibling)
+            break
+
+    for root in roots:
+        try:
+            environments = sorted(
+                (entry for entry in root.iterdir() if entry.is_dir()),
+                key=lambda p: (not p.name.lower().startswith("kalivvoice"), p.name.lower()),
+            )[:100]
+        except OSError:
+            continue
+        for venv in environments:
+            site = venv / "Lib" / "site-packages"
+            cublas = site / "nvidia" / "cublas" / "bin"
+            cudnn = site / "ctranslate2"
+            if not (cudnn / "cudnn64_9.dll").is_file():
+                cudnn = site / "nvidia" / "cudnn" / "bin"
+            if (cublas / "cublas64_12.dll").is_file() and (cudnn / "cudnn64_9.dll").is_file():
+                add(cublas)
+                add(cudnn)
+                return dirs  # one compatible venv pair; don't mix environments
+    return dirs
+
+
 def _add_cuda_dll_dirs() -> list[str]:
-    """Make CUDA runtime DLLs findable on Windows. Returns the dirs added.
+    """Expose CUDA 12 DLLs to the frozen worker on first GPU inference.
 
-    CTranslate2 (faster-whisper's backend) needs cublas64_12.dll and cuDNN at
-    load time. `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` puts them in
-    site-packages/nvidia/<pkg>/bin, which Windows does NOT search -- so the load
-    fails with "Library cublas64_12.dll is not found or cannot be loaded".
-    Verified on Anders' rig 2026-07-09: installing the pip packages alone wasn't
-    enough, and he had to fall back to CPU.
-
-    Python 3.8+ on Windows only searches directories registered via
-    os.add_dll_directory() -- but that only covers libraries loaded with the
-    new search flags. CTranslate2 resolves cuBLAS via the LEGACY search path,
-    which only consults PATH (hardware-verified 2026-07-09: dirs registered,
-    DLL on disk, load still failed; prepending PATH fixed it). So we do BOTH:
-    register the dirs and prepend them to PATH. No-op on Linux/macOS (where
-    the loader uses RPATH/LD_LIBRARY_PATH) and harmless if the packages
-    aren't installed.
+    CTranslate2's legacy cuBLAS loader uses PATH, not just
+    os.add_dll_directory(). Both are required; changes are process-local and
+    never touch the user's persistent PATH or another worker process.
     """
     global _dll_dirs_added
     if _dll_dirs_added or not hasattr(os, "add_dll_directory"):
         return list(_registered_dll_dirs)
-    added: list[str] = []
-    try:
-        import nvidia  # the namespace package created by nvidia-* wheels
-    except Exception as exc:  # noqa: BLE001
-        # No nvidia-* wheels means no CUDA DLL directories to register, which is
-        # a legitimate CPU-only setup -- but it is also what a half-installed
-        # CUDA stack looks like, and the difference decides whether Whisper runs
-        # on the 3060 or crawls on the CPU.
-        logging.getLogger(__name__).debug(
-            "ingen nvidia-wheels fundet; springer CUDA DLL-registrering over: %r", exc)
-        _dll_dirs_added = True
-        return []
-    for root in getattr(nvidia, "__path__", []):
-        if not os.path.isdir(root):
-            continue
-        for pkg in os.listdir(root):
-            bin_dir = os.path.join(root, pkg, "bin")
-            if os.path.isdir(bin_dir):
-                try:
-                    os.add_dll_directory(bin_dir)
-                    added.append(bin_dir)
-                except OSError:
-                    pass
-    if added:
-        # add_dll_directory() alone is NOT enough here. Hardware-verified on
-        # Anders' rig 2026-07-09 (v1.12.2 logging): the dirs WERE registered,
-        # cublas64_12.dll WAS on disk, and CTranslate2 still failed with
-        # "Library cublas64_12.dll is not found or cannot be loaded" -- it
-        # resolves cuBLAS through the legacy search path, which only consults
-        # PATH. Prepending the same dirs to PATH fixed it on the spot
-        # (manual `set PATH=...` -> voice worked end-to-end). We set both.
-        os.environ["PATH"] = (
-            os.pathsep.join(added) + os.pathsep + os.environ.get("PATH", "")
-        )
-    _dll_dirs_added = True
-    _registered_dll_dirs.extend(added)
-    return added
 
+    added: list[str] = []
+    for directory in _candidate_cuda_dll_dirs():
+        try:
+            # Keep the handle alive: closing it removes the DLL directory.
+            handle = os.add_dll_directory(directory)
+            _dll_directory_handles.append(handle)
+            added.append(directory)
+        except OSError:
+            continue
+
+    if added:
+        os.environ["PATH"] = os.pathsep.join(added) + os.pathsep + os.environ.get("PATH", "")
+    _registered_dll_dirs.extend(added)
+    _dll_dirs_added = True
+    return list(added)
 
 def _model_name() -> str:
     # large-v3 = best multilingual/Danish accuracy. int8 keeps VRAM ~2.5 GB so
