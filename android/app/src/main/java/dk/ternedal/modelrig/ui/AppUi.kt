@@ -1162,9 +1162,9 @@ private fun ChatScreen(
         speaking = false
         voiceJob = scope.launch {
             // Audio chunks flow from the network reader (producer) to the player
-            // (consumer) through this channel. Unlimited: sentences are small and
-            // we never want the reader to block on a slow player.
-            val audioChan = Channel<Pair<ByteArray, String?>>(Channel.UNLIMITED)
+            // (consumer) through a bounded channel. If playback lags behind
+            // generation, we must not accumulate unbounded decoded audio in RAM.
+            val audioChan = Channel<Pair<ByteArray, String?>>(Channel.BUFFERED)
             // The rig's body follows what the phone plays: report start and end
             // of each sentence against its utterance id (slice B sync).
             val bodyReporter = dk.ternedal.modelrig.net.BodyPlaybackReporter(store.baseUrl.orEmpty(), store.token.orEmpty())
@@ -1173,8 +1173,6 @@ private fun ChatScreen(
             var replyIdx = -1
             val replyBuilder = StringBuilder()
             var completedReply: String? = null
-            var usedModel: String? = null
-            var usedCloud = false
             var streamError: Pair<Int, String>? = null
 
             // Player: pull decoded WAVs and play each in order via playWav, which
@@ -1245,13 +1243,17 @@ private fun ChatScreen(
                                 }
                                 if (chunkB64.isNotEmpty()) {
                                     val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
-                                    audioChan.trySend(bytes to utteranceId)
+                                    audioChan.trySend(bytes to utteranceId).onFailure {
+                                        // Bounded queue is full: do not silently drop spoken
+                                        // sentences. Treat overload as a stream error so the
+                                        // user can retry rather than hear an incomplete reply.
+                                        throw IllegalStateException("stemmeafspilning kunne ikke følge med")
+                                    }
                                 }
                             }
                         },
                         onDone = { reply, m, cloud ->
                             if (!playbackStop.get()) {
-                                usedModel = m; usedCloud = cloud
                                 val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
                                 completedReply = finalText
                                 if (replyIdx in messages.indices) {
