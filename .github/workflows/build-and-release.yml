@@ -292,7 +292,7 @@ jobs:
           # Voice modules import providers lazily. Explicitly collect their
           # Python modules and native libraries (CTranslate2, libsndfile,
           # Piper and ONNX Runtime); otherwise a build can succeed as core-only.
-          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths worker --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths worker --paths . --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
       - name: Build supervisor exe
         # Keeps the worker + server alive at logon (scripts/kaliv-autostart.ps1).
         # go.mod is in backend/, like the server exe above.
@@ -313,9 +313,14 @@ jobs:
           try {
             # onefile exes self-extract on first start; poll instead of guessing a sleep
             $wh = $null
-            foreach ($i in 1..15) {
+            foreach ($i in 1..60) {
               try { $wh = Invoke-RestMethod -Uri http://127.0.0.1:8099/healthz -TimeoutSec 3; break }
-              catch { Start-Sleep -Seconds 2 }
+              catch {
+                if ($worker.HasExited) {
+                  throw "Frozen worker exited before healthz (exit code $($worker.ExitCode))"
+                }
+                Start-Sleep -Seconds 2
+              }
             }
             if (-not $wh -or $wh.service -ne "modelrig-worker") { throw "worker healthz failed: $($wh | ConvertTo-Json -Compress)" }
             Write-Host "worker exe OK: $($wh.service) $($wh.version)"
