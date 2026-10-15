@@ -281,18 +281,18 @@ jobs:
         # failed on exactly this (built from root, no module found).
         working-directory: backend
         run: go build -o ../modelrig-server-windows-x64.exe ./cmd/modelrig-server
-      - name: Build worker exe (PyInstaller)
+      - name: Build voice-capable worker exe (PyInstaller)
         run: |
-          pip install -r worker/requirements.txt pyinstaller
-          # The packed worker has no source tree to hash, and hashing its own exe
-          # answers a different question than the readiness page asks (F-607).
-          # Decide the code identity here, from the code, and pack it in -- so a
-          # frozen worker reports what it was BUILT FROM and the two sides can
-          # actually be compared. Without this the exe raises rather than
-          # guessing, which is deliberate: a worker that cannot say what it is
-          # does not get to take part in physical evidence.
+          # The release worker MUST contain ASR and TTS. Installing voice deps
+          # into a separate venv on the rig does not repair a frozen core exe.
+          python -m pip install -r worker/requirements.txt -r worker/requirements-release-voice.txt pyinstaller
+          # The packed worker has no source tree to hash. Stamp the source
+          # identity before packaging, preserving the existing evidence gate.
           python scripts/stamp_build_identity.py
-          pyinstaller --onefile --name modelrig-worker-windows-x64 --paths worker worker/run_worker.py
+          # Voice modules import providers lazily. Explicitly collect their
+          # Python modules and native libraries (CTranslate2, libsndfile,
+          # Piper and ONNX Runtime); otherwise a build can succeed as core-only.
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths worker --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
       - name: Build supervisor exe
         # Keeps the worker + server alive at logon (scripts/kaliv-autostart.ps1).
         # go.mod is in backend/, like the server exe above.
@@ -339,7 +339,20 @@ jobs:
             foreach ($k in @("asr","tts","pdf","docx","cuda")) {
               if ($null -eq $hf.capabilities.$k) { throw "health/full missing capability key '$k'" }
             }
-            Write-Host "health/full OK: worker $($hf.checks.worker.version); capabilities $($hf.capabilities | ConvertTo-Json -Compress)"
+            # Fail CLOSED on a core-only packaged worker. This checks import
+            # availability on the actual frozen EXE, not the build interpreter.
+            # CI runners have no NVIDIA GPU or Danish voice model, so real
+            # transcription, TTS playback and CUDA need separate rig evidence.
+            $caps = Invoke-RestMethod -Uri http://127.0.0.1:8099/capabilities -TimeoutSec 5
+            if ($caps.asr -ne $true -or $caps.tts -ne $true) {
+              throw "RELEASE BLOCKED: frozen worker missing ASR/TTS: $($caps | ConvertTo-Json -Compress)"
+            }
+            $asr = Invoke-RestMethod -Uri http://127.0.0.1:8099/voice/asr/status -TimeoutSec 5
+            $tts = Invoke-RestMethod -Uri http://127.0.0.1:8099/voice/tts/status -TimeoutSec 5
+            if ($asr.available -ne $true -or $tts.available -ne $true) {
+              throw "RELEASE BLOCKED: frozen voice endpoints unavailable: ASR=$($asr | ConvertTo-Json -Compress) TTS=$($tts | ConvertTo-Json -Compress)"
+            }
+            Write-Host "health/full OK: worker $($hf.checks.worker.version); ASR and TTS available in frozen release worker (physical audio/CUDA unverified)"
           }
           finally {
             if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
