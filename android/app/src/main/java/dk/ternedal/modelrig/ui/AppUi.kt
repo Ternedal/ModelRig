@@ -891,14 +891,25 @@ private fun ChatScreen(
     var hubMirrorEnabledDraft by remember { mutableStateOf(store.hubMirrorEnabled) }
     var hubMirrorError by remember { mutableStateOf<String?>(null) }
 
+    // A single best-effort worker preserves the order of completed replies and
+    // bounds memory/network work if the receiver is slow or offline.
+    val hubMirrorQueue = remember { Channel<Triple<String, String, String>>(capacity = 8) }
+    LaunchedEffect(hubMirrorQueue) {
+        for ((endpoint, secret, text) in hubMirrorQueue) {
+            if (!store.hubMirrorEnabled) continue
+            withContext(Dispatchers.IO) {
+                // Cast failures must NEVER interrupt ordinary Android chat.
+                runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
+            }
+        }
+    }
+
     fun mirrorFinishedAssistant(text: String) {
         if (!store.hubMirrorEnabled || text.isBlank()) return
         val endpoint = store.hubMirrorEndpoint ?: return
         val secret = store.hubMirrorSecret ?: return
-        scope.launch(Dispatchers.IO) {
-            // Display failures never influence delivery or persistence of chat.
-            runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
-        }
+        // Never suspend the main chat on a slow/display-only transport.
+        hubMirrorQueue.trySend(Triple(endpoint, secret, text))
     }
 
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
