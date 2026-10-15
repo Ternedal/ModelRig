@@ -56,16 +56,28 @@ object HubMirrorClient {
             (a == 100 && b in 64..127) // Tailscale / RFC 6598
     }
 
+    internal fun limitVisibleText(text: String): String {
+        var value = text.trim().take(2000)
+        if (value.isNotEmpty() && Character.isHighSurrogate(value.last())) {
+            value = value.dropLast(1)
+        }
+        return value
+    }
+
+    internal fun signature(secret: String, timestamp: String, body: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        val bytes = mac.doFinal((timestamp + "\n" + body).toByteArray(Charsets.UTF_8))
+        return "v1=" + bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
     /** Called only after persisting an actual successful assistant turn. */
     fun sendCompleted(configuredUrl: String, secret: String, completed: String): Boolean {
         val target = endpoint(configuredUrl) ?: return false
         if (secret.length < 32 || completed.isBlank()) return false
         // Cast's JS string-length limit counts UTF-16 code units, as Kotlin does.
         // Do not split a surrogate pair at the display boundary.
-        var visible = completed.trim().take(2000)
-        if (visible.isNotEmpty() && Character.isHighSurrogate(visible.last())) {
-            visible = visible.dropLast(1)
-        }
+        val visible = limitVisibleText(completed)
         if (visible.isBlank()) return false
         val body = JSONObject()
             .put("version", 1)
@@ -74,10 +86,7 @@ object HubMirrorClient {
             .put("text", visible)
             .toString()
         val timestamp = (System.currentTimeMillis() / 1000L).toString()
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
-        val bytes = mac.doFinal((timestamp + "\n" + body).toByteArray(Charsets.UTF_8))
-        val signature = "v1=" + bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val signature = signature(secret, timestamp, body)
         val request = Request.Builder()
             .url(target)
             .header("X-Kaliv-Timestamp", timestamp)
