@@ -60,23 +60,11 @@ function Resolve-Backend([string]$Explicit) {
         if (-not (Test-Path -LiteralPath $Explicit -PathType Leaf)) { throw "Backend findes ikke: $Explicit" }
         return (Resolve-Path -LiteralPath $Explicit).Path
     }
-    $paths = New-Object System.Collections.Generic.List[string]
-    try {
-        Get-CimInstance Win32_Process -ErrorAction Stop |
-            Where-Object { $_.Name -match '^modelrig-server.*\.exe$' -and $_.ExecutablePath } |
-            ForEach-Object { $paths.Add([string]$_.ExecutablePath) }
-    } catch { }
-    foreach ($path in @(
-        "C:\Rig\test\kaliv-android-voice-pilot\modelrig-server-pilot.exe",
-        "C:\Rig\src\ModelRig\modelrig-server-windows-x64.exe",
-        "C:\Rig\src\ModelRig\backend\modelrig-server.exe",
-        "C:\Rig\src\ModelRig\backend\modelrig-server-windows-x64.exe",
-        "C:\Rig\modelrig-server-windows-x64.exe"
-    )) { $paths.Add($path) }
-    foreach ($path in $paths) {
-        if (Test-Path -LiteralPath $path -PathType Leaf) { return (Resolve-Path -LiteralPath $path).Path }
-    }
-    throw "Ingen ModelRig backend-EXE fundet. Angiv -BackendExe med stien til modelrig-server*.exe."
+    # Never implicitly reuse the executable of the running production backend.
+    # Prefer the exact CI-built, checksum-verified isolated pilot backend.
+    $pilot = "C:\Rig\test\kaliv-android-voice-pilot\modelrig-server-pilot.exe"
+    if (Test-Path -LiteralPath $pilot -PathType Leaf) { return (Resolve-Path -LiteralPath $pilot).Path }
+    throw "Pilot-backend mangler. Download GitHub Actions artifact kaliv-voice-pilot-backend-(commit) til C:\Rig\test\kaliv-android-voice-pilot eller angiv -BackendExe."
 }
 function New-AdminKey {
     $bytes = New-Object byte[] 32
