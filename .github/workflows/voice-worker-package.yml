@@ -76,7 +76,18 @@ jobs:
             if ($asr.available -ne $true -or $tts.available -ne $true) {
               throw "Voice endpoints unavailable: ASR=$($asr | ConvertTo-Json -Compress); TTS=$($tts | ConvertTo-Json -Compress)"
             }
-            Write-Host "FROZEN WORKER VOICE PACKAGE PASS: ASR and TTS imports and endpoints available."
+            # Physical evidence must identify the *exact* source commit and
+            # executable hash, not the synthetic PR merge commit.
+            $full = Invoke-RestMethod -Uri "http://127.0.0.1:8099/health/full" -TimeoutSec 20
+            $expectedCommit = "${{ github.event.pull_request.head.sha || github.sha }}"
+            $expectedHash = (Get-FileHash -Algorithm SHA256 ".\\dist\\modelrig-worker-windows-x64.exe").Hash.ToLowerInvariant()
+            if ($full.build.frozen -ne $true -or $full.build.commit_sha -ne $expectedCommit) {
+              throw "Frozen worker identity mismatch: expected $expectedCommit; actual $($full.build | ConvertTo-Json -Compress)"
+            }
+            if ($full.build.artifact_sha256 -ne $expectedHash) {
+              throw "Frozen worker artifact hash mismatch: expected $expectedHash; actual $($full.build.artifact_sha256)"
+            }
+            Write-Host "FROZEN WORKER VOICE PACKAGE PASS: ASR and TTS imports and endpoints available; exact commit + EXE SHA-256 verified."
             Write-Host "NOT PROVEN: CUDA on RTX 3060, model download, real Danish ASR, audible TTS, Android E2E."
           }
           finally {
