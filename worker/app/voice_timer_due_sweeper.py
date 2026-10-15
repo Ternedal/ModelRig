@@ -45,6 +45,12 @@ class TimerDueSweeper:
             ).fetchone()
             if row is None or row[0] != "active":
                 return False
+            existing_alarm = db.execute(
+                "SELECT status FROM voice_timer_alarm_outbox WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if existing_alarm is not None:
+                raise ValueError("active timer has unexpected alarm")
             current_deadline = db.execute(
                 "SELECT due_at FROM voice_timer_deadlines WHERE timer_id=?",
                 (timer_id,),
