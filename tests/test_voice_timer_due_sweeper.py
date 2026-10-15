@@ -191,6 +191,28 @@ class TimerDueSweeperTests(unittest.TestCase):
                     "SELECT due_at FROM voice_timer_deadlines WHERE timer_id='orphan-alarm'"
                 ).fetchone())
 
+    def test_next_due_at_filters_terminal_timers_and_survives_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timer.db")
+            sweeper = TimerDueSweeper(path)
+            self.assertIsNone(sweeper.next_due_at())
+            with TimerStateLedger(path) as ledger:
+                for timer_id in ("early", "late", "cancelled"):
+                    ledger.register_pending(timer_id)
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='active'"
+                )
+                ledger.db.commit()
+            self.assertTrue(sweeper.register_active_deadline("early", due_at=100))
+            self.assertTrue(sweeper.register_active_deadline("late", due_at=250))
+            self.assertTrue(sweeper.register_active_deadline("cancelled", due_at=50))
+            self.assertTrue(sweeper.cancel_active("cancelled"))
+            self.assertEqual(TimerDueSweeper(path).next_due_at(), 100)
+            self.assertEqual(sweeper.sweep_due(now=100), 1)
+            self.assertEqual(TimerDueSweeper(path).next_due_at(), 250)
+            self.assertTrue(sweeper.cancel_active("late"))
+            self.assertIsNone(TimerDueSweeper(path).next_due_at())
+
     def test_validation(self):
         with tempfile.TemporaryDirectory() as tmp:
             sweeper = TimerDueSweeper(os.path.join(tmp, "timer.db"))
