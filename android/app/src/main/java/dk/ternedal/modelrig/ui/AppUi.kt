@@ -1285,7 +1285,7 @@ private fun ChatScreen(
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
-                playbackStop.set(true)
+                cancellation.stop()
                 audioChan.close()
                 throw e
             } catch (e: Exception) {
@@ -1295,15 +1295,32 @@ private fun ChatScreen(
                 audioChan.close()
             } finally {
                 cancellation.clear()
-                if (voiceCancellation === cancellation) voiceCancellation = null
+                // A cancelled stream may have inserted an assistant bubble
+                // before receiving its final onDone event. Never leave that
+                // bubble permanently marked as "streaming".
+                if (replyIdx in messages.indices) {
+                    val partial = messages[replyIdx]
+                    if (partial.role == "assistant" && partial.streaming) {
+                        if (partial.text.isBlank()) {
+                            messages.removeAt(replyIdx)
+                        } else {
+                            messages[replyIdx] = partial.copy(streaming = false)
+                        }
+                    }
+                }
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
                 // barge-in attempt. liveRms resets to 0 (nothing playing now).
                 detector?.let { liveRms = 0.0; peakRms = it.peakRms }
-                speaking = false
-                voiceBusy = false
-                voiceJob = null
+                // Only the owner of the currently active turn can reset its
+                // UI state; a late cancelled job must not clear a newer turn.
+                if (voiceCancellation === cancellation) {
+                    voiceCancellation = null
+                    speaking = false
+                    voiceBusy = false
+                    voiceJob = null
+                }
             }
         }
     }
