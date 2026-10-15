@@ -136,14 +136,67 @@ switch ($Role) {
         Write-Host "Use this code ONLY in the separate .a425f test app." -ForegroundColor Green
     }
     "BuildApk" {
-        if (!(Test-Path -LiteralPath $gradle)) { throw "Android Gradle wrapper not found: $gradle" }
-        Push-Location (Join-Path $repo "android")
-        try {
-            & $gradle ":app:assembleA425f"
-            if ($LASTEXITCODE -ne 0) { throw "Android lab build failed ($LASTEXITCODE)." }
-        } finally { Pop-Location }
+        # The rig often has no Android SDK. Prefer the existing signed CI
+        # a425f-apk workflow (non-release, side-by-side package); build locally
+        # only if GitHub CLI is unavailable and Android SDK is already set up.
+        $expectedHead = (& git -C $repo rev-parse HEAD).Trim()
         $apk = Join-Path $repo "android\app\build\outputs\apk\a425f\app-a425f.apk"
-        if (!(Test-Path -LiteralPath $apk)) { throw "Gradle succeeded but APK was not found: $apk" }
+        if (Get-Command gh -ErrorAction SilentlyContinue) {
+            $workflow = "a425f-apk.yml"
+            $repoName = "Ternedal/ModelRig"
+            function Get-HeadRun {
+                $raw = & gh run list --repo $repoName --workflow $workflow --branch $branch --limit 40 --json databaseId,headSha,status,conclusion
+                if ($LASTEXITCODE -ne 0) { throw "GitHub CLI cannot list APK builds; check gh auth status." }
+                return @($raw | ConvertFrom-Json |
+                    Where-Object { $_.headSha -eq $expectedHead } |
+                    Sort-Object -Property databaseId -Descending |
+                    Select-Object -First 1)
+            }
+            $matches = @(Get-HeadRun)
+            $run = if ($matches.Count -gt 0) { $matches[0] } else { $null }
+            if ($null -eq $run -or ($run.status -eq "completed" -and $run.conclusion -ne "success")) {
+                Write-Host "Dispatching exact-HEAD side-by-side Android APK build on GitHub..." -ForegroundColor Cyan
+                & gh workflow run $workflow --repo $repoName --ref $branch
+                if ($LASTEXITCODE -ne 0) { throw "Could not dispatch CI APK workflow." }
+                $run = $null
+            }
+            $deadline = (Get-Date).AddMinutes(25)
+            while ((Get-Date) -lt $deadline) {
+                $matches = @(Get-HeadRun)
+                if ($matches.Count -gt 0) { $run = $matches[0] }
+                if ($null -ne $run -and $run.status -eq "completed") { break }
+                Start-Sleep -Seconds 12
+            }
+            if ($null -eq $run -or $run.status -ne "completed") {
+                throw "APK workflow has not finished; view GitHub Actions for this branch."
+            }
+            if ($run.conclusion -ne "success") {
+                throw "APK build $($run.databaseId) finished with $($run.conclusion)."
+            }
+            $artifact = "kaliv-a425f-apk-$expectedHead"
+            $destination = Join-Path $lab ("apk-" + $run.databaseId)
+            if (!(Test-Path -LiteralPath $destination)) {
+                New-Item -ItemType Directory -Path $destination -Force | Out-Null
+                & gh run download $run.databaseId --repo $repoName -n $artifact -D $destination
+                if ($LASTEXITCODE -ne 0) { throw "Failed to download exact-head APK artifact $artifact." }
+            }
+            $apks = @(Get-ChildItem -LiteralPath $destination -Filter *.apk -File -Recurse)
+            if ($apks.Count -ne 1) { throw "Expected one signed test APK in artifact, got $($apks.Count)." }
+            $apk = $apks[0].FullName
+            Write-Host "GitHub build: https://github.com/$repoName/actions/runs/$($run.databaseId)"
+        } else {
+            if (!(Test-Path -LiteralPath $gradle)) { throw "Android wrapper not found: $gradle" }
+            if ([string]::IsNullOrWhiteSpace($env:ANDROID_HOME) -and
+                [string]::IsNullOrWhiteSpace($env:ANDROID_SDK_ROOT)) {
+                throw "Neither gh CLI nor a configured Android SDK is available. Use a425f-apk.yml in GitHub Actions."
+            }
+            Push-Location (Join-Path $repo "android")
+            try {
+                & $gradle ":app:assembleA425f"
+                if ($LASTEXITCODE -ne 0) { throw "Android lab build failed ($LASTEXITCODE)." }
+            } finally { Pop-Location }
+            if (!(Test-Path -LiteralPath $apk)) { throw "Gradle succeeded but APK was not found: $apk" }
+        }
         Write-Host "Test-only APK: $apk" -ForegroundColor Green
         Write-Host "Android package: dk.ternedal.modelrig.a425f (does not replace Kaliv)." -ForegroundColor Green
     }
