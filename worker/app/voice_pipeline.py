@@ -244,6 +244,15 @@ async def converse(
         # Serialized so sentences still reach the phone in order.
         async with _TTS_LOCK:
             result = await asyncio.to_thread(voice_tts.synthesize_to_wav, speakable, wav)
+        # Reject phantom audio before streaming it or notifying BodyRig.
+        actual_path = result.get("out_path") if isinstance(result, dict) else None
+        if not os.path.isfile(wav) or os.path.getsize(wav) < 44:
+            raise RuntimeError(
+                "TTS did not create a usable WAV: "
+                f"expected={wav!r}, returned_path={actual_path!r}, "
+                f"provider={result.get('provider') if isinstance(result, dict) else 'unknown'!r}, "
+                f"duration={result.get('duration') if isinstance(result, dict) else None!r}"
+            )
         # Belt and braces: even with the guard above, TTS may hand back silence
         # for text it cannot voice. Emitting a chunk with no audio would make
         # the client show a bubble it can never play.
