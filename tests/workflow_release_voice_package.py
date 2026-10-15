@@ -5,11 +5,15 @@ then proves the actual PyInstaller EXE imports both voice providers. Neither
 test claims a physical CUDA/model/audio pass.
 """
 from pathlib import Path
+import sys
 
 root = Path(__file__).resolve().parents[1]
-release = (root / ".github/workflows/build-and-release.yml").read_text(encoding="utf-8")
-candidate = (root / ".github/workflows/voice-worker-package.yml").read_text(encoding="utf-8")
-requirements = (root / "worker/requirements-release-voice.txt").read_text(encoding="utf-8")
+sys.path.insert(0, str(root / "tests" / "support"))
+from source_code import code_of  # noqa: E402
+
+release = code_of(root / ".github/workflows/build-and-release.yml")
+candidate = code_of(root / ".github/workflows/voice-worker-package.yml")
+requirements = code_of(root / "worker/requirements-release-voice.txt")
 
 pins = (
     "faster-whisper==1.2.1",
