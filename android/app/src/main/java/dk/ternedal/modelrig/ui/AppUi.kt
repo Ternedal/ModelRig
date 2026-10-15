@@ -2902,6 +2902,9 @@ private fun ChatScreen(
                                                     withContext(Dispatchers.IO) {
                                                         db.addMessage(id, "assistant", text)
                                                     }
+                                                    if (next?.answer?.isNotBlank() == true) {
+                                                        mirrorFinishedAssistant(text)
+                                                    }
                                                 }
                                             }
                                         }
