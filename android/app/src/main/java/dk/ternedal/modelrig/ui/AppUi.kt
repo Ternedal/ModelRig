@@ -1185,13 +1185,13 @@ private fun ChatScreen(
             val player = launch(Dispatchers.IO) {
                 for ((bytes, utteranceId) in audioChan) {
                     if (playbackStop.get()) break
-                    speaking = true
+                    if (voiceCancellation === cancellation) speaking = true
                     bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
                     bodyReporter.report(utteranceId, "ended")
                     if (cut) { wasInterrupted = true; cancellation.stop(); break }
                 }
-                speaking = false
+                if (voiceCancellation === cancellation) speaking = false
             }
             // Poll the barge-in detector at 5 Hz to drive the on-screen RMS meter
             // (liveRms / peakRms). The streaming rewrite has to carry this over
@@ -1218,6 +1218,7 @@ private fun ChatScreen(
                         cloudKey = key,
                         registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
+                            if (!playbackStop.get()) {
                             val tt = t.trim()
                             if (tt.isNotEmpty() && !transcriptShown) {
                                 transcriptShown = true
@@ -1233,8 +1234,10 @@ private fun ChatScreen(
                                 // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
                                 messages.add(Msg("assistant", "", streaming = true))
                             }
+                            }
                         },
                         onChunk = { _, text, chunkB64, utteranceId ->
+                            if (!playbackStop.get()) {
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
                             if (replyIdx in messages.indices) {
@@ -1244,8 +1247,10 @@ private fun ChatScreen(
                                 val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
                                 audioChan.trySend(bytes to utteranceId)
                             }
+                            }
                         },
                         onDone = { reply, m, cloud ->
+                            if (!playbackStop.get()) {
                             usedModel = m; usedCloud = cloud
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
                             completedReply = finalText
@@ -1255,8 +1260,11 @@ private fun ChatScreen(
                                     streaming = false, voiceModel = m, voiceViaCloud = cloud,
                                 )
                             }
+                            }
                         },
-                        onError = { status, detail -> streamError = status to detail },
+                        onError = { status, detail ->
+                            if (!playbackStop.get()) streamError = status to detail
+                        },
                     )
                 }
                 // The network stream is done; close the channel so the player
