@@ -1,0 +1,78 @@
+name: kaliv-voice-android-pilot
+
+# An isolated, signed side-by-side test APK for the physically proven voice worker.
+# No tag, GitHub release, production updater or deployment.
+on:
+  push:
+    branches:
+      - "work/kaliv-android-voice-pilot-20261015"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaliv-voice-android-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pilot-script-syntax:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Parse isolated pilot PowerShell without executing it
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("scripts/kaliv-android-voice-pilot.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          Write-Host "PowerShell parser PASS"
+
+  side-by-side-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+        with:
+          packages: platform-tools
+      - name: Install matching Android platform and build tools
+        run: sdkmanager "platforms;android-37" "build-tools;35.0.0"
+      - name: Build isolated A425f Android APK
+        working-directory: android
+        run: |
+          echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
+          ./gradlew :app:assembleA425f --no-daemon --console=plain
+      - name: Verify APK identity, signing and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find android/app/build/outputs/apk/a425f -maxdepth 1 -type f -name '*.apk')
+          test "${#apks[@]}" -eq 1
+          apk="${apks[0]}"
+          bt="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
+          "$bt/apksigner" verify --print-certs "$apk"
+          badging="$("$bt/aapt" dump badging "$apk")"
+          grep -F "name='dk.ternedal.modelrig.a425f'" <<<"$badging"
+          grep -F "versionName='2.0.15-a425f'" <<<"$badging"
+          mkdir -p pilot-artifact
+          cp "$apk" pilot-artifact/kaliv-voice-test.apk
+          (cd pilot-artifact && sha256sum kaliv-voice-test.apk > SHA256SUMS.txt)
+          printf 'source_commit=%s\nbase_worker_commit=e01b2d1c989f4da1d454e004f074870741f409df\npackage=dk.ternedal.modelrig.a425f\nproduction_activation=false\n' "$GITHUB_SHA" > pilot-artifact/PILOT.txt
+      - name: Upload signed test APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kaliv-voice-test-${{ github.sha }}
+          path: pilot-artifact/
+          if-no-files-found: error
+          retention-days: 14
