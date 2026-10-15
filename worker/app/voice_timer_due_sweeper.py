@@ -45,11 +45,19 @@ class TimerDueSweeper:
             ).fetchone()
             if row is None or row[0] != "active":
                 return False
-            result = db.execute(
-                "INSERT OR IGNORE INTO voice_timer_deadlines(timer_id,due_at) "
+            current_deadline = db.execute(
+                "SELECT due_at FROM voice_timer_deadlines WHERE timer_id=?",
+                (timer_id,),
+            ).fetchone()
+            if current_deadline is not None:
+                if current_deadline[0] != float(due_at):
+                    raise ValueError("conflicting active timer deadline")
+                return False
+            db.execute(
+                "INSERT INTO voice_timer_deadlines(timer_id,due_at) "
                 "VALUES (?,?)", (timer_id, float(due_at))
             )
-            return result.rowcount == 1
+            return True
 
     def cancel_active(self, timer_id: str) -> bool:
         """Atomically cancel an active timer and discard its deadline.
