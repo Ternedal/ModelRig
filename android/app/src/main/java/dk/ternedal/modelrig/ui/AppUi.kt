@@ -49,6 +49,7 @@ import dk.ternedal.modelrig.net.VoiceCapability
 import dk.ternedal.modelrig.net.WorkerCapabilities
 import dk.ternedal.modelrig.net.IngestCapability
 import dk.ternedal.modelrig.net.ModelRigClient
+import dk.ternedal.modelrig.net.HubMirrorClient
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -881,6 +882,25 @@ private fun ChatScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+
+    // KalivHub is an OPTIONAL output-only display. Neither the normal chat
+    // flow nor persistence waits for the Nest Hub to be online.
+    var showHubMirrorSetup by remember { mutableStateOf(false) }
+    var hubMirrorUrlDraft by remember { mutableStateOf(store.hubMirrorEndpoint.orEmpty()) }
+    var hubMirrorSecretDraft by remember { mutableStateOf("") }
+    var hubMirrorEnabledDraft by remember { mutableStateOf(store.hubMirrorEnabled) }
+    var hubMirrorError by remember { mutableStateOf<String?>(null) }
+
+    fun mirrorFinishedAssistant(text: String) {
+        if (!store.hubMirrorEnabled || text.isBlank()) return
+        val endpoint = store.hubMirrorEndpoint ?: return
+        val secret = store.hubMirrorSecret ?: return
+        scope.launch(Dispatchers.IO) {
+            // Display failures never influence delivery or persistence of chat.
+            runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
+        }
+    }
+
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
     // regnskab — riggen kender den ikke, og INTET herfra sendes af sig selv.
     val queueStore = remember {
@@ -1276,6 +1296,9 @@ private fun ChatScreen(
                     if (convId == null) convId = cid
                     if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
+                }
+                if (streamError == null && !wasInterrupted && finalReply.isNotBlank()) {
+                    mirrorFinishedAssistant(stripEmojis(finalReply))
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
@@ -1674,6 +1697,9 @@ private fun ChatScreen(
             if ((err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
             }
+            if (err == null && proposal == null && finalText.isNotBlank()) {
+                mirrorFinishedAssistant(finalText)
+            }
             if (proposal != null) messages.removeAt(idx)
             busy = false
         }
@@ -1813,8 +1839,71 @@ private fun ChatScreen(
             if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
             }
+            if (err == null && proposal == null && finalText.isNotBlank()) {
+                mirrorFinishedAssistant(finalText)
+            }
             busy = false
         }
+    }
+
+
+    if (showHubMirrorSetup) {
+        AlertDialog(
+            onDismissRequest = { showHubMirrorSetup = false },
+            title = { Text("Nest Hub-spejling") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Spejl kun færdige Kaliv-svar til Nest Hub. " +
+                            "Kun på et betroet privat netværk: HTTP krypterer ikke teksten.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = hubMirrorUrlDraft,
+                        onValueChange = { hubMirrorUrlDraft = it },
+                        label = { Text("Riggens LAN-adresse") },
+                        placeholder = { Text("http://192.168.1.100:8765") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = hubMirrorSecretDraft,
+                        onValueChange = { hubMirrorSecretDraft = it },
+                        label = { Text("Spejlingsnøgle") },
+                        placeholder = {
+                            Text(if (store.hubMirrorSecret != null)
+                                "Tom = behold gemt nøgle" else "Indsæt nøgle fra riggen")
+                        },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = hubMirrorEnabledDraft,
+                            onCheckedChange = { hubMirrorEnabledDraft = it },
+                        )
+                        Text("Aktivér spejling", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    hubMirrorError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (store.saveHubMirrorConfig(
+                            hubMirrorUrlDraft, hubMirrorSecretDraft.ifBlank { null },
+                            hubMirrorEnabledDraft,
+                        )) {
+                        hubMirrorSecretDraft = ""
+                        showHubMirrorSetup = false
+                    } else {
+                        hubMirrorError =
+                            "Kontrollér privat IPv4-adresse, port og nøgle (mindst 32 tegn)."
+                    }
+                }) { Text("Gem") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showHubMirrorSetup = false }) { Text("Annuller") }
+            },
+        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -1832,6 +1921,14 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
                         DropdownMenuItem(text = { Text("Rig-status") }, onClick = { overflow = false; onOpenRigStatus() })
+                        DropdownMenuItem(text = { Text("Nest Hub-spejling") }, onClick = {
+                            overflow = false
+                            hubMirrorUrlDraft = store.hubMirrorEndpoint.orEmpty()
+                            hubMirrorSecretDraft = ""
+                            hubMirrorEnabledDraft = store.hubMirrorEnabled
+                            hubMirrorError = null
+                            showHubMirrorSetup = true
+                        })
                         DropdownMenuItem(text = { Text("Enheder") }, onClick = { overflow = false; onOpenDevices() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
