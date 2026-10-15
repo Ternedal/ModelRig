@@ -34,7 +34,7 @@ jobs:
         with:
           packages: platform-tools
       - name: Set up build tools
-        run: sdkmanager "platforms;android-37" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Build separately installed test APK
         working-directory: android
         run: |
