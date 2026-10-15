@@ -269,6 +269,46 @@ class TokenStore(context: Context) {
         get() = prefs.getString("cloud_system", DEFAULT_SYSTEM)?.ifBlank { DEFAULT_SYSTEM } ?: DEFAULT_SYSTEM
         set(v) { prefs.edit().putString("cloud_system", v).apply() }
 
+
+    // ---- KalivHub display mirror (strict opt-in, off by default) ----
+    /** LAN endpoint only; never accept a hostname/public URL. */
+    val hubMirrorEndpoint: String?
+        get() = prefs.getString("hub_mirror_endpoint", null)
+
+    /** Independent display-only HMAC key. Not the ModelRig pairing token. */
+    val hubMirrorSecretStatus: StoredCredentialRead
+        get() = StoredCredentialReader.read(
+            prefs.getString("hub_mirror_secret_enc", null),
+            Crypto::decrypt,
+        )
+
+    val hubMirrorSecret: String?
+        get() = (hubMirrorSecretStatus as? StoredCredentialRead.Ready)?.value
+
+    val hubMirrorEnabled: Boolean
+        get() = prefs.getBoolean("hub_mirror_enabled", false)
+
+    /**
+     * Persist url, encrypted secret and enabled switch as one transaction.
+     * If an existing ciphertext cannot be decrypted, enabling fails closed.
+     */
+    fun saveHubMirrorConfig(url: String, newSecret: String?, enabled: Boolean): Boolean {
+        val normalizedUrl = if (url.isBlank() && !enabled) "" else
+            dk.ternedal.modelrig.net.HubMirrorClient.endpoint(url) ?: return false
+        val supplied = newSecret?.trim().orEmpty()
+        val usableSecret = supplied.ifEmpty { hubMirrorSecret.orEmpty() }
+        if (enabled && usableSecret.length < 32) return false
+        if (supplied.isNotEmpty() && supplied.length < 32) return false
+        val ciphertext = if (supplied.isNotEmpty()) {
+            try { Crypto.encrypt(supplied) } catch (_: Exception) { return false }
+        } else null
+        return prefs.edit().apply {
+            putString("hub_mirror_endpoint", normalizedUrl)
+            if (ciphertext != null) putString("hub_mirror_secret_enc", ciphertext)
+            putBoolean("hub_mirror_enabled", enabled)
+        }.commit()
+    }
+
     val hasRig: Boolean get() = rigCredentialStatus is StoredCredentialRead.Ready
     val hasCloud: Boolean get() = cloudCredentialStatus is StoredCredentialRead.Ready
 
