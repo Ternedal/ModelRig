@@ -62,6 +62,8 @@ function Set-BackendEnv {
     # Explicitly override all endpoint and state settings; never reuse the
     # production pairing file or a pre-existing MODELRIG_CONFIG path.
     $env:MODELRIG_CONFIG = ""
+    $env:KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED = "0"
+    $env:KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED = "0"
     $env:MODELRIG_HOST = $(if ($ExposeLan) { "0.0.0.0" } else { "127.0.0.1" })
     $env:MODELRIG_PORT = [string]$backendPort
     $env:MODELRIG_WORKER_URL = "http://127.0.0.1:$workerPort"
@@ -201,7 +203,8 @@ switch ($Role) {
 
         Write-Host "ISOLATED VOICE DEVICE LAB READY" -ForegroundColor Green
         Write-Host "  Worker: 127.0.0.1:$workerPort (loopback only)"
-        Write-Host "  Backend: $($env:MODELRIG_HOST):$backendPort"
+        $labBindHost = $(if ($ExposeLan) { "0.0.0.0" } else { "127.0.0.1" })
+        Write-Host "  Backend bind: ${labBindHost}:$backendPort"
         if ($ExposeLan) {
             Write-Host "  Android: http://<your-rig-LAN-IP>:$backendPort" -ForegroundColor Cyan
             Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
