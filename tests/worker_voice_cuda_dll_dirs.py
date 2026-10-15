@@ -48,11 +48,18 @@ with tempfile.TemporaryDirectory(prefix="kaliv-cuda-discovery-") as tmp:
     }
     with mock.patch.dict(os.environ, env_patch), mock.patch.object(sys, "executable", str(exe)):
         dirs = voice_asr._candidate_cuda_dll_dirs()
-        check(str(cublas) in dirs and str(cudnn) in dirs,
+        # Windows Path.resolve() may expand 8.3 temp paths and normalize case.
+        # Compare canonical paths rather than their pre-resolve spelling.
+        canonical = {os.path.normcase(str(Path(d).resolve())) for d in dirs}
+        def found(path):
+            return os.path.normcase(str(path.resolve())) in canonical
+
+        print("CUDA discovery:", dirs)
+        check(found(cublas) and found(cudnn),
               "frozen worker discovers CUDA 12 cuBLAS and cuDNN 9 in a rig venv")
-        check(str(incomplete) not in dirs,
+        check(not found(incomplete),
               "incomplete venv cannot mix CUDA DLLs with another environment")
-        check(str(explicit) in dirs, "explicit Kaliv CUDA directory is supported")
+        check(found(explicit), "explicit Kaliv CUDA directory is supported")
 
         old_path = os.environ.get("PATH", "")
         old_added = voice_asr._dll_dirs_added
@@ -70,7 +77,10 @@ with tempfile.TemporaryDirectory(prefix="kaliv-cuda-discovery-") as tmp:
 
             with mock.patch.object(os, "add_dll_directory", side_effect=add_dir, create=True):
                 result = voice_asr._add_cuda_dll_dirs()
-                check(str(cublas) in result and str(cudnn) in result,
+                check(os.path.normcase(str(cublas.resolve())) in
+                      {os.path.normcase(str(Path(d).resolve())) for d in result} and
+                      os.path.normcase(str(cudnn.resolve())) in
+                      {os.path.normcase(str(Path(d).resolve())) for d in result},
                       "CUDA directories registered at first model load")
                 check(os.environ["PATH"].split(os.pathsep)[:len(result)] == result,
                       "CUDA DLLs are prepended to process-local PATH")
