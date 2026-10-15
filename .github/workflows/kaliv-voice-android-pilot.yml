@@ -50,7 +50,7 @@ jobs:
         with:
           packages: platform-tools
       - name: Install matching Android platform and build tools
-        run: sdkmanager "platforms;android-37" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Build isolated A425f Android APK
         working-directory: android
         run: |
