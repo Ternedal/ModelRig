@@ -161,6 +161,34 @@ def _extract_delta(ndjson_line: bytes) -> str:
     return msg.get("content", "") or ""
 
 
+VOICE_HISTORY_MAX_MESSAGES = 20
+VOICE_HISTORY_MAX_CHARS = 24_000
+
+
+def bounded_voice_history(history: list[dict] | None) -> list[dict]:
+    """Bound caller-provided context without granting system authority.
+
+    History is explicitly supplied per request. No global server-side cache
+    keyed only by conversation id: that could leak turns between clients.
+    """
+    valid: list[dict] = []
+    for item in history or []:
+        if not isinstance(item, dict) or item.get("role") not in ("user", "assistant"):
+            continue
+        content = item.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        valid.append({"role": item["role"], "content": content[-VOICE_HISTORY_MAX_CHARS:]})
+    tail = valid[-VOICE_HISTORY_MAX_MESSAGES:]
+    total = sum(len(item["content"]) for item in tail)
+    while len(tail) > 1 and total > VOICE_HISTORY_MAX_CHARS:
+        total -= len(tail[0]["content"])
+        tail = tail[1:]
+    if tail and total > VOICE_HISTORY_MAX_CHARS:
+        tail[0]["content"] = tail[0]["content"][-VOICE_HISTORY_MAX_CHARS:]
+    return tail
+
+
 async def converse(
     audio_path: str,
     language: str = "da",
@@ -170,6 +198,7 @@ async def converse(
     llm_api_key: str | None = None,
     on_chunk: "Callable[[dict], Awaitable[None]] | None" = None,
     on_transcript: "Callable[[str], Awaitable[None]] | None" = None,
+    history: list[dict] | None = None,
 ) -> dict:
     """Run one full spoken turn from an audio file.
 
@@ -219,7 +248,7 @@ async def converse(
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
-    messages = [{"role": "user", "content": transcript}]
+    messages = bounded_voice_history(history) + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
     chunks: list[dict] = []
