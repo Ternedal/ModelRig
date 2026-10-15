@@ -1243,10 +1243,9 @@ private fun ChatScreen(
                                 }
                                 if (chunkB64.isNotEmpty()) {
                                     val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
-                                    audioChan.trySend(bytes to utteranceId).onFailure {
-                                        // Bounded queue is full: do not silently drop spoken
-                                        // sentences. Treat overload as a stream error so the
-                                        // user can retry rather than hear an incomplete reply.
+                                    if (audioChan.trySend(bytes to utteranceId).isFailure) {
+                                        // Bounded queue is full or closed: never silently drop
+                                        // sentences and play an incomplete assistant reply.
                                         throw IllegalStateException("stemmeafspilning kunne ikke følge med")
                                     }
                                 }
