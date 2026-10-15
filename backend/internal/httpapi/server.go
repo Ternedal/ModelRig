@@ -67,6 +67,8 @@ func (s *server) routes() {
 
 	// Protected (Bearer token required)
 	s.mux.Handle("GET /api/v1/status", s.authMW(http.HandlerFunc(s.handleStatus)))
+	// Android capability gate must query the authenticated backend, not the loopback-only worker.
+	s.mux.Handle("GET /api/v1/capabilities", s.authMW(http.HandlerFunc(s.handleWorkerCapabilities)))
 	s.mux.Handle("GET /api/v1/health/deep", s.authMW(http.HandlerFunc(s.handleHealthDeep)))
 	s.mux.Handle("GET /api/v1/health/full", s.authMW(http.HandlerFunc(s.handleHealthFull)))
 	s.mux.Handle("GET /api/v1/control-center/status", s.authMW(http.HandlerFunc(s.handleControlCenterStatus)))
