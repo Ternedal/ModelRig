@@ -97,6 +97,21 @@ class TimerDueSweeper:
             db.execute("DELETE FROM voice_timer_deadlines WHERE timer_id=?", (timer_id,))
             return True
 
+    def next_due_at(self) -> float | None:
+        """Read the earliest ACTIVE deadline; never activate or deliver.
+
+        This is an optimization hint for a future bounded worker poller, not a
+        guarantee that a timer will fire without a live worker. Cancelled or
+        terminal ledger entries do not count as pending alarm deadlines.
+        """
+        with sqlite3.connect(self.path, timeout=5) as db:
+            row = db.execute(
+                "SELECT MIN(d.due_at) FROM voice_timer_deadlines d "
+                "JOIN voice_timer_state_ledger l ON l.timer_id=d.timer_id "
+                "WHERE l.state='active'"
+            ).fetchone()
+            return row[0] if row and row[0] is not None else None
+
     def sweep_due(self, *, now: float | None = None, limit: int = 32) -> int:
         """Atomically promote ACTIVE timers to DUE and queue notifications.
 
