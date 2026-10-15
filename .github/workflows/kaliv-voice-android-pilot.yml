@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - "work/kaliv-android-voice-pilot-20261015"
+  pull_request:
+    branches:
+      - "release/kaliv-voice-2.0.15-20261015"
   workflow_dispatch:
 
 permissions:
@@ -89,7 +92,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force pilot-backend | Out-Null
-          go build -C backend -trimpath -o ../pilot-backend/modelrig-server-pilot.exe ./cmd/modelrig-server
+          go -C backend build -trimpath -o ../pilot-backend/modelrig-server-pilot.exe ./cmd/modelrig-server
           if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
           $hash = (Get-FileHash pilot-backend/modelrig-server-pilot.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  modelrig-server-pilot.exe" | Set-Content -Encoding ascii pilot-backend/SHA256SUMS.txt
