@@ -248,7 +248,23 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
     if isinstance(path, str):
         try:
             import soundfile as sf
-            data, sr = sf.read(path, dtype="float32")
+            try:
+                data, sr = sf.read(path, dtype="float32")
+            except RuntimeError as exc:
+                # On Windows libsndfile can fail to open a temporary pathname
+                # even though Python can read its bytes. Retry in memory,
+                # preserving the soundfile decoder and avoiding PyAV.
+                import io
+                try:
+                    with open(path, "rb") as source:
+                        wav_bytes = source.read()
+                    data, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+                except Exception as retry_exc:
+                    raise RuntimeError(
+                        f"ASR could not decode input WAV (path={path!r}, "
+                        f"bytes={len(wav_bytes) if 'wav_bytes' in locals() else 'unreadable'}, "
+                        f"file_error={exc!s}, memory_error={retry_exc!s})"
+                    ) from retry_exc
             # Whisper wants 16 kHz mono. Downmix to mono; resample if needed.
             if getattr(data, "ndim", 1) > 1:
                 data = data.mean(axis=1)
