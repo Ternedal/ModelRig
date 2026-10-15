@@ -1,0 +1,11 @@
+# Windows release-only Voice dependencies. The core CI worker stays lightweight.
+# This file is installed ONLY by the signed Windows release worker build and
+# its candidate packaging test. Pin exact versions; changing them requires a
+# new Windows package smoke test and physical voice acceptance.
+faster-whisper==1.2.1
+soundfile==0.13.1
+piper-tts==1.4.2
+
+# Piper is GPL-3.0-or-later. Review source/notice distribution obligations
+# before publishing a public bundled executable. This file alone is not
+# evidence of license compliance or physical GPU/audio readiness.
