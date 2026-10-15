@@ -161,6 +161,28 @@ def _extract_delta(ndjson_line: bytes) -> str:
     return msg.get("content", "") or ""
 
 
+async def _run_blocking_until_finished(fn, *args):
+    """Do not abandon an in-flight native ASR/TTS thread on cancellation.
+
+    asyncio.to_thread cannot interrupt native work.  Without this shield the
+    streaming endpoint can remove its temporary WAV directory while an
+    already-running TTS thread is still writing the next sentence on Windows.
+    """
+    work = asyncio.create_task(asyncio.to_thread(fn, *args))
+    try:
+        return await asyncio.shield(work)
+    except asyncio.CancelledError:
+        # Cancellation stops the voice turn, but only *after* any native writer
+        # has released its files.  The streaming endpoint then owns cleanup.
+        try:
+            await asyncio.shield(work)
+        except Exception:
+            # A failed worker is irrelevant to a turn that was cancelled;
+            # the original cancellation must still propagate to the caller.
+            pass
+        raise
+
+
 async def converse(
     audio_path: str,
     language: str = "da",
@@ -212,7 +234,7 @@ async def converse(
     # event loop used to serialize these by accident, and the faster-whisper
     # model is shared state. Keep the serialization; drop the freeze.
     async with _ASR_LOCK:
-        asr = await asyncio.to_thread(voice_asr.transcribe_wav, audio_path, language)
+        asr = await _run_blocking_until_finished(voice_asr.transcribe_wav, audio_path, language)
     transcript = asr["text"]
     if on_transcript is not None:
         await on_transcript(transcript)
@@ -243,7 +265,7 @@ async def converse(
         # Piper is a subprocess and a loaded model: same reasoning as ASR.
         # Serialized so sentences still reach the phone in order.
         async with _TTS_LOCK:
-            result = await asyncio.to_thread(voice_tts.synthesize_to_wav, speakable, wav)
+            result = await _run_blocking_until_finished(voice_tts.synthesize_to_wav, speakable, wav)
         # Reject phantom audio before streaming it or notifying BodyRig.
         actual_path = result.get("out_path") if isinstance(result, dict) else None
         if not os.path.isfile(wav) or os.path.getsize(wav) < 44:
