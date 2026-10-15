@@ -147,7 +147,8 @@ switch ($Role) {
             function Get-HeadRun {
                 $raw = & gh run list --repo $repoName --workflow $workflow --branch $branch --limit 40 --json databaseId,headSha,status,conclusion
                 if ($LASTEXITCODE -ne 0) { throw "GitHub CLI cannot list APK builds; check gh auth status." }
-                return @($raw | ConvertFrom-Json |
+                $allRuns = ($raw -join "`n") | ConvertFrom-Json
+                return @($allRuns |
                     Where-Object { $_.headSha -eq $expectedHead } |
                     Sort-Object -Property databaseId -Descending |
                     Select-Object -First 1)
