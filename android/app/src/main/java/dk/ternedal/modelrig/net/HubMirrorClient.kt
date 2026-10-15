@@ -39,7 +39,7 @@ object HubMirrorClient {
         if (url.rawPath !in listOf("", "/", "/v1/events")) return null
         val host = url.host ?: return null
         if (!privateIpv4(host)) return null
-        return "http://$host:@PORT@/v1/events".replace("@PORT@", url.port.toString())
+        return "http://$host:${url.port}/v1/events"
     }
 
     fun privateIpv4(raw: String): Boolean {
