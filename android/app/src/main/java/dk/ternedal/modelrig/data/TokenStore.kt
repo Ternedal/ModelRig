@@ -293,6 +293,9 @@ class TokenStore(context: Context) {
      * If an existing ciphertext cannot be decrypted, enabling fails closed.
      */
     fun saveHubMirrorConfig(url: String, newSecret: String?, enabled: Boolean): Boolean {
+        // Disabling is always possible, even if a stored key is corrupt or
+        // the address field contains malformed input.
+        if (!enabled) return prefs.edit().putBoolean("hub_mirror_enabled", false).commit()
         val normalizedUrl = if (url.isBlank() && !enabled) {
             ""
         } else {
