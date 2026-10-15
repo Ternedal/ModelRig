@@ -89,6 +89,7 @@ jobs:
           badging="$("$bt/aapt" dump badging "$apk")"
           grep -F "name='dk.ternedal.modelrig.a425f'" <<<"$badging"
           grep -F "versionName='2.0.15-a425f'" <<<"$badging"
+          grep -F "application-label:'Kaliv Voice Test'" <<<"$badging"
           mkdir -p pilot-artifact
           cp "$apk" pilot-artifact/kaliv-voice-test.apk
           (cd pilot-artifact && sha256sum kaliv-voice-test.apk > SHA256SUMS.txt)
