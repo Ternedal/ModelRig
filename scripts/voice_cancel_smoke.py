@@ -39,6 +39,10 @@ def main() -> int:
         parser.error("fixture must be a non-empty WAV file")
 
     vb.get_json(args.worker_url, "/healthz", min(args.timeout, 10))
+    # Remember the entire campaign's starting temp state.  A leaked directory
+    # from probe 2 must not become invisible merely because probe 3 snapshots
+    # it in its own "before" set.
+    campaign_before = vb._voice_temp_entries()
     results = []
     for index in range(args.probes):
         trigger = "transcript" if index % 2 == 0 else "first_chunk"
@@ -88,6 +92,9 @@ def main() -> int:
         )
 
     passed = sum(1 for result in results if result["passed"])
+    campaign_cleanup = vb.wait_for_cleanup(
+        campaign_before, timeout_s=args.cleanup_timeout
+    )
     report = {
         "schema": "kaliv-voice-cancel-smoke/v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -95,11 +102,21 @@ def main() -> int:
         "worker_url": args.worker_url,
         "fixture_sha256": hashlib.sha256(raw).hexdigest(),
         "probes": results,
-        "summary": {"passed": passed, "total": args.probes, "gate_passed": passed == args.probes},
+        "campaign_cleanup": campaign_cleanup,
+        "summary": {
+            "passed": passed,
+            "total": args.probes,
+            "gate_passed": passed == args.probes and campaign_cleanup["clean"],
+        },
     }
     vb._write_json_atomic(args.report, report)
-    print(f"Result: {passed}/{args.probes} passed; report: {args.report}", flush=True)
-    return 0 if passed == args.probes else 1
+    print(
+        f"Result: {passed}/{args.probes} probes; "
+        f"whole-campaign cleanup={campaign_cleanup['clean']}; "
+        f"report: {args.report}",
+        flush=True,
+    )
+    return 0 if report["summary"]["gate_passed"] else 1
 
 
 if __name__ == "__main__":
