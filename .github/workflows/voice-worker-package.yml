@@ -1,0 +1,72 @@
+name: voice-worker-package
+
+# A tag-free Windows packaging test. The normal release workflow runs only
+# after a v* tag, so PR CI previously could not detect a core-only worker EXE.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-and-release.yml"
+      - ".github/workflows/voice-worker-package.yml"
+      - "worker/**"
+      - "scripts/stamp_build_identity.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-worker-package-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frozen-voice-worker:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Build the exact release worker with voice dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -r worker/requirements.txt -r worker/requirements-release-voice.txt pyinstaller
+          python scripts/stamp_build_identity.py
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths worker --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
+
+      - name: Check ASR and TTS inside the frozen Windows worker
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          $worker = Start-Process -FilePath ".\dist\modelrig-worker-windows-x64.exe" -PassThru -NoNewWindow
+          try {
+            $health = $null
+            foreach ($i in 1..60) {
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:8099/healthz" -TimeoutSec 2
+                break
+              } catch { Start-Sleep -Seconds 2 }
+            }
+            if (-not $health -or $health.service -ne "modelrig-worker") {
+              throw "Frozen worker failed to start on port 8099"
+            }
+            $caps = Invoke-RestMethod -Uri "http://127.0.0.1:8099/capabilities" -TimeoutSec 10
+            if ($caps.asr -ne $true -or $caps.tts -ne $true) {
+              throw "Core-only worker would ship: $($caps | ConvertTo-Json -Compress)"
+            }
+            $asr = Invoke-RestMethod -Uri "http://127.0.0.1:8099/voice/asr/status" -TimeoutSec 10
+            $tts = Invoke-RestMethod -Uri "http://127.0.0.1:8099/voice/tts/status" -TimeoutSec 10
+            if ($asr.available -ne $true -or $tts.available -ne $true) {
+              throw "Voice endpoints unavailable: ASR=$($asr | ConvertTo-Json -Compress); TTS=$($tts | ConvertTo-Json -Compress)"
+            }
+            Write-Host "FROZEN WORKER VOICE PACKAGE PASS: ASR and TTS imports and endpoints available."
+            Write-Host "NOT PROVEN: CUDA on RTX 3060, model download, real Danish ASR, audible TTS, Android E2E."
+          }
+          finally {
+            if ($worker -and -not $worker.HasExited) {
+              & taskkill.exe /PID $worker.Id /T /F 2>&1 | Out-Null
+            }
+          }
