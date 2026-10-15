@@ -377,13 +377,6 @@ func (s *server) handleVoiceConverseStream(w http.ResponseWriter, r *http.Reques
 	s.WorkerSlow.Forward(w, r, "/voice/converse/stream")
 }
 
-// handleWorkerCapabilities exposes the worker's cheap dependency booleans
-// through the same Bearer-authenticated backend used by the Android app.
-// Never expose the worker's loopback listener directly to the phone.
-func (s *server) handleWorkerCapabilities(w http.ResponseWriter, r *http.Request) {
-	s.Worker.Forward(w, r, "/capabilities")
-}
-
 // handleVoiceStatus proxies the worker's ASR/TTS availability so the app can
 // show whether voice is usable on this rig before recording.
 func (s *server) handleVoiceStatus(w http.ResponseWriter, r *http.Request) {
