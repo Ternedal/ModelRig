@@ -890,6 +890,7 @@ private fun ChatScreen(
     var hubMirrorSecretDraft by remember { mutableStateOf("") }
     var hubMirrorEnabledDraft by remember { mutableStateOf(store.hubMirrorEnabled) }
     var hubMirrorError by remember { mutableStateOf<String?>(null) }
+    var hubMirrorTesting by remember { mutableStateOf(false) }
 
     // A single best-effort worker preserves the order of completed replies and
     // bounds memory/network work if the receiver is slow or offline.
@@ -1912,7 +1913,39 @@ private fun ChatScreen(
                 }) { Text("Gem") }
             },
             dismissButton = {
-                TextButton(onClick = { showHubMirrorSetup = false }) { Text("Annuller") }
+                Row {
+                    TextButton(
+                        enabled = !hubMirrorTesting,
+                        onClick = {
+                            val mirrorKey = hubMirrorSecretDraft.trim()
+                                .ifEmpty { store.hubMirrorSecret.orEmpty() }
+                            val endpoint = HubMirrorClient.endpoint(hubMirrorUrlDraft)
+                            if (endpoint == null || mirrorKey.length < 32) {
+                                hubMirrorError = "Angiv privat LAN-IP og gyldig spejlingsnøgle først."
+                            } else {
+                                hubMirrorTesting = true
+                                hubMirrorError = null
+                                scope.launch {
+                                    val accepted = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            HubMirrorClient.sendCompleted(
+                                                endpoint, mirrorKey, "KalivHub: forbindelsestest",
+                                            )
+                                        }.getOrDefault(false)
+                                    }
+                                    hubMirrorTesting = false
+                                    hubMirrorError = if (accepted)
+                                        "Riggen har modtaget testen. Se efter beskeden på Nest Hub."
+                                    else
+                                        "Ingen kvittering fra riggens spejlingsmodtager."
+                                }
+                            }
+                        },
+                    ) { Text(if (hubMirrorTesting) "Tester…" else "Test") }
+                    TextButton(onClick = { showHubMirrorSetup = false }) {
+                        Text("Annuller")
+                    }
+                }
             },
         )
     }
