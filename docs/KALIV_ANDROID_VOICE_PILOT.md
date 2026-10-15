@@ -36,7 +36,7 @@ after the physical voice acceptance on 2026-10-15.
 - Wait for **side-by-side-apk** and **pilot-script-syntax** to pass.
 - Download artifact kaliv-voice-test-(commit) ZIP on the phone, extract
   kaliv-voice-test.apk, tap it and confirm the Android installation prompt.
-- Open the newly installed test app from Android's installation screen.
+- Open **Kaliv Voice Test** (distinct launcher label) from Android's installation screen.
   The original Kaliv remains installed. No USB or ADB is needed.
 - Do not publish the artifact as a release or feed it to the updater.
 
