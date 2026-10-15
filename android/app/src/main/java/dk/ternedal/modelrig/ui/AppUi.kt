@@ -1172,6 +1172,7 @@ private fun ChatScreen(
             var transcriptShown = false
             var replyIdx = -1
             val replyBuilder = StringBuilder()
+            var completedReply: String? = null
             var usedModel: String? = null
             var usedCloud = false
             var streamError: Pair<Int, String>? = null
@@ -1247,6 +1248,7 @@ private fun ChatScreen(
                         onDone = { reply, m, cloud ->
                             usedModel = m; usedCloud = cloud
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
+                            completedReply = finalText
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(
                                     text = finalText,
@@ -1272,7 +1274,7 @@ private fun ChatScreen(
                 // list). If the reply is empty (e.g. all-markup), still persist
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
-                val finalReply = replyBuilder.toString().trim()
+                val finalReply = (completedReply ?: replyBuilder.toString()).trim()
                 if (finalReply.isEmpty() && replyIdx in messages.indices &&
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
