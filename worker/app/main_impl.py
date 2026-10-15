@@ -1572,15 +1572,19 @@ async def voice_converse_stream(req: ConverseUploadReq):
     cloud models. ASR/TTS stay local; only the LLM step may go to cloud.
     """
     from . import voice_pipeline
+    import shutil
     import base64, tempfile, os as _os, json as _json, asyncio as _asyncio, time as _time
     try:
         raw = base64.b64decode(req.audio_base64)
     except Exception:
         raise HTTPException(status_code=400, detail="audio_base64 is not valid base64")
-    tmp_dir = tempfile.mkdtemp(prefix="alva_voice_stream_")
+    tmp_dir = tempfile.mkdtemp(prefix="kaliv_voice_stream_")
     in_path = _os.path.join(tmp_dir, "input.wav")
     with open(in_path, "wb") as f:
         f.write(raw)
+    if len(raw) < 44 or raw[:4] not in (b"RIFF", b"RF64") or raw[8:12] != b"WAVE":
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="Expected non-empty WAV audio in audio_base64")
 
     # A queue bridges the pipeline's callbacks (producer) to the NDJSON response
     # (consumer). None is the sentinel that the producer has finished.
@@ -1646,4 +1650,11 @@ async def voice_converse_stream(req: ConverseUploadReq):
             if not task.done():
                 task.cancel()
 
-    return StreamingResponse(gen(), media_type="application/x-ndjson")
+    async def gen_with_cleanup():
+        try:
+            async for payload in gen():
+                yield payload
+        finally:
+            await _asyncio.to_thread(shutil.rmtree, tmp_dir, ignore_errors=True)
+
+    return StreamingResponse(gen_with_cleanup(), media_type="application/x-ndjson")
