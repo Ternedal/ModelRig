@@ -167,6 +167,30 @@ class TimerDueSweeperTests(unittest.TestCase):
             with TimerStateLedger(path) as ledger:
                 self.assertEqual(ledger.get("conflict-cancel").state, "active")
 
+    def test_active_deadline_rejects_existing_alarm_before_insert(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timer.db")
+            sweeper = TimerDueSweeper(path)
+            with TimerStateLedger(path) as ledger:
+                ledger.register_pending("orphan-alarm")
+                ledger.db.execute(
+                    "UPDATE voice_timer_state_ledger SET state='active' "
+                    "WHERE timer_id='orphan-alarm'"
+                )
+                ledger.db.commit()
+            import sqlite3
+            with sqlite3.connect(path) as db:
+                db.execute(
+                    "INSERT INTO voice_timer_alarm_outbox(timer_id,status) "
+                    "VALUES ('orphan-alarm','queued')"
+                )
+            with self.assertRaisesRegex(ValueError, "unexpected alarm"):
+                sweeper.register_active_deadline("orphan-alarm", due_at=100)
+            with sqlite3.connect(path) as db:
+                self.assertIsNone(db.execute(
+                    "SELECT due_at FROM voice_timer_deadlines WHERE timer_id='orphan-alarm'"
+                ).fetchone())
+
     def test_validation(self):
         with tempfile.TemporaryDirectory() as tmp:
             sweeper = TimerDueSweeper(os.path.join(tmp, "timer.db"))
