@@ -25,6 +25,10 @@ for pin in pins:
 
 for name, workflow in (("release", release), ("candidate", candidate)):
     assert "-r worker/requirements-release-voice.txt" in workflow, name
+    # app.body_session imports the repo-root bodyrig package. --paths worker
+    # alone builds an EXE that fails at boot with ModuleNotFoundError: bodyrig.
+    assert "--paths worker --paths ." in workflow, name
+    assert "$worker.HasExited" in workflow, name
     for module in ("faster_whisper", "ctranslate2", "soundfile", "piper", "onnxruntime", "av"):
         assert f"--collect-all {module}" in workflow, (name, module)
     assert "8099/capabilities" in workflow, name
