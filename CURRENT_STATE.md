@@ -115,7 +115,17 @@ Run by glob, so a file that matches is a file that runs
 - `tests/test_voice_clock.py`
 - `tests/test_voice_fast_profile.py`
 - `tests/test_voice_m4a_fallback.py`
+- `tests/test_voice_one_shot_timer_store.py`
+- `tests/test_voice_timer_alarm_dispatch.py`
+- `tests/test_voice_timer_alarm_outbox.py`
+- `tests/test_voice_timer_authorization_contract.py`
+- `tests/test_voice_timer_due_sweeper.py`
+- `tests/test_voice_timer_handoff.py`
 - `tests/test_voice_timer_intent.py`
+- `tests/test_voice_timer_proposal_ledger_bridge.py`
+- `tests/test_voice_timer_scheduler_preview.py`
+- `tests/test_voice_timer_state_ledger.py`
+- `tests/test_voice_timer_state_machine.py`
 - `tests/worker_agent3_approval.py`
 - `tests/worker_agent3_approval_api.py`
 - `tests/worker_agent3_approval_concurrency.py`
