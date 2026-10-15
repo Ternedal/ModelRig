@@ -1152,6 +1152,12 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        // Snapshot completed messages before the ASR callback adds this turn.
+        // These are the same locally persisted turns used by text chat.
+        val voiceHistory = trimHistory("", messages
+            .filter { !it.error && !it.streaming && it.text.isNotBlank() }
+            .map { it.role to it.text })
+            .filter { it.first == "user" || it.first == "assistant" }
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
         voiceJob = scope.launch {
@@ -1209,6 +1215,7 @@ private fun ChatScreen(
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
+                        history = voiceHistory,
                         registerCall = { c -> activeCall = c },
                         onTranscript = { t ->
                             val tt = t.trim()
@@ -1273,7 +1280,7 @@ private fun ChatScreen(
                 }
                 withContext(Dispatchers.IO) {
                     val cid = convId ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
-                    if (convId == null) convId = cid
+                    if (convId == null) { convId = cid; onConvChanged(cid) }
                     if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
                 }
