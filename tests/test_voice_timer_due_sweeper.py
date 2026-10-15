@@ -24,7 +24,9 @@ class TimerDueSweeperTests(unittest.TestCase):
                 )
                 ledger.db.commit()
             self.assertTrue(sweeper.register_active_deadline("t1", due_at=130))
-            self.assertFalse(sweeper.register_active_deadline("t1", due_at=99))
+            self.assertFalse(sweeper.register_active_deadline("t1", due_at=130))
+            with self.assertRaisesRegex(ValueError, "conflicting active timer deadline"):
+                sweeper.register_active_deadline("t1", due_at=99)
             restarted = TimerDueSweeper(path)
             self.assertEqual(restarted.sweep_due(now=129), 0)
             self.assertEqual(restarted.sweep_due(now=130), 1)
