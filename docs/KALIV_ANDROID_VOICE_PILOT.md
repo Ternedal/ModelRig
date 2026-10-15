@@ -51,7 +51,11 @@ PowerShell 7:
     gh api -H "Accept: application/vnd.github.raw+json" "repos/Ternedal/ModelRig/contents/scripts/kaliv-android-voice-pilot.ps1?ref=work/kaliv-android-voice-pilot-20261015" | Set-Content -Encoding utf8 C:\Rig\test\kaliv-android-voice-pilot\run.ps1
     & C:\Rig\test\kaliv-android-voice-pilot\run.ps1
 
-If the backend executable cannot be found automatically, pass
+If the backend executable cannot be found automatically, download the
+separate Actions artifact kaliv-voice-pilot-backend-(commit) ZIP and extract
+modelrig-server-pilot.exe and SHA256SUMS.txt together into
+C:\Rig\test\kaliv-android-voice-pilot. The script finds that executable
+automatically and verifies its SHA-256. Alternatively pass
 -BackendExe "C:\path\to\modelrig-server-windows-x64.exe". The script verifies
 the running backend version is 2.0.15 and fails closed otherwise.
 
