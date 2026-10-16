@@ -46,6 +46,39 @@ class VoiceStreamCleanupTests(unittest.TestCase):
         self.assertIn("mkdtemp(", endpoint_source)
         self.assertIn("rmtree(tmp_dir,", endpoint_source)
 
+    def test_generator_runtime_cleans_files_on_normal_completion(self):
+        """Execute the real nested generator with a fake completed producer."""
+        import asyncio
+        import json
+        import tempfile
+        from types import SimpleNamespace
+
+        async def scenario():
+            with tempfile.TemporaryDirectory() as parent:
+                tmp_dir = Path(parent) / "voice-turn"
+                tmp_dir.mkdir()
+                (tmp_dir / "chunk.wav").write_bytes(b"RIFF")
+                queue = asyncio.Queue()
+                await queue.put({"type": "done", "reply": "hej"})
+                await queue.put(None)
+                async def producer():
+                    return None
+                task = asyncio.create_task(producer())
+                await task
+                namespace = {
+                    "_asyncio": asyncio, "_json": json,
+                    "queue": queue, "tmp_dir": str(tmp_dir),
+                    "run": lambda: task,
+                }
+                # The nested gen() refers to task created in its own scope.
+                gen_source = ast.unparse(self.generator)
+                exec("async def wrapper():\\n" + "\\n".join("    " + line for line in gen_source.splitlines()) + "\\n    return gen", namespace)
+                stream = await namespace["wrapper"]()
+                events = [json.loads(line) async for line in stream()]
+                self.assertEqual(events[0]["type"], "done")
+                self.assertFalse(tmp_dir.exists())
+        asyncio.run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()
