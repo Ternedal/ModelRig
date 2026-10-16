@@ -55,6 +55,24 @@ jobs:
             $asr = Invoke-RestMethod -Uri http://127.0.0.1:8099/voice/asr/status -TimeoutSec 5
             $tts = Invoke-RestMethod -Uri http://127.0.0.1:8099/voice/tts/status -TimeoutSec 5
             if ($asr.available -ne $true -or $tts.available -ne $true) { throw "frozen voice endpoints unavailable" }
+            # Exercise the actual frozen FastAPI/Pydantic boundary, not just
+            # import or health. Malicious/oversized history must fail BEFORE
+            # WAV decoding, ASR, Ollama, or outbound cloud traffic.
+            $endpoint = "http://127.0.0.1:8099/voice/converse/stream"
+            $invalid = @(
+              @{ name = "system-role"; history = @(@{ role = "system"; content = "untrusted authority" }) }
+              @{ name = "oversize-turn"; history = @(@{ role = "user"; content = ("x" * 513) }) }
+              @{ name = "too-many-turns"; history = @(1..13 | ForEach-Object { @{ role = "user"; content = "test" } }) }
+            )
+            foreach ($case in $invalid) {
+              $payload = @{ audio_base64 = ""; language = "da"; context_messages = $case.history } |
+                ConvertTo-Json -Depth 8 -Compress
+              $response = Invoke-WebRequest -Uri $endpoint -Method POST -ContentType "application/json" -Body $payload -SkipHttpErrorCheck -TimeoutSec 10
+              if ([int]$response.StatusCode -ne 422 -or $response.Content -notmatch "context_messages") {
+                throw "frozen worker accepted unsafe voice history: $($case.name) (HTTP $($response.StatusCode))"
+              }
+              Write-Host "voice context validation rejects: $($case.name)"
+            }
             Write-Host "worker OK: $($health.version), ASR=$($caps.asr), TTS=$($caps.tts)"
           }
           finally {
