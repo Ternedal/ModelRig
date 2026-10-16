@@ -192,6 +192,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         model: String? = null,
         cloudBaseUrl: String? = null,
         cloudKey: String? = null,
+        contextMessages: List<Pair<String, String>> = emptyList(),
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onTranscript: (String) -> Unit,
         onChunk: (index: Int, text: String, audioB64: String, utteranceId: String?) -> Unit,
@@ -199,6 +200,16 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         onError: (status: Int, detail: String) -> Unit,
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
+        // Only completed turns from this chat. Do not send UI/system messages,
+        // and keep the same strict limits as the worker's request schema.
+        val history = JSONArray()
+        contextMessages.takeLast(12).forEach { (role, content) ->
+            val cleaned = content.trim().take(512)
+            if ((role == "user" || role == "assistant") && cleaned.isNotEmpty()) {
+                history.put(JSONObject().put("role", role).put("content", cleaned))
+            }
+        }
+        if (history.length() > 0) payload.put("context_messages", history)
         if (model != null) payload.put("model", model)
         if (cloudBaseUrl != null && cloudKey != null) {
             payload.put("llm_base_url", cloudBaseUrl)
