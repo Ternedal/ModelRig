@@ -138,6 +138,22 @@ def run():
             check(sent[-1]["content"] == "hvad er klokken",
                   "latest ASR transcript is the final user turn")
 
+        # Local history must never be silently forwarded to a cloud voice
+        # model: the existing cloud toggle covers the current transcript only.
+        seen_messages.clear()
+        oc.chat_stream = inspecting_stream
+        try:
+            asyncio.run(vp.converse(
+                in_wav, language="da", out_dir=tmp,
+                llm_base_url="https://ollama.com", llm_api_key="test-only-key",
+                context_messages=[{"role": "user", "content": "lokal privat historik"}],
+            ))
+        finally:
+            oc.chat_stream = previous_stream
+        check(len(seen_messages) == 1 and seen_messages[0] == [
+            {"role": "user", "content": "hvad er klokken"}
+        ], "cloud voice receives current transcript only, not local prior turns")
+
         # Backward compat: calling without callbacks must not raise.
         restore2 = _install_stubs(deltas)
         try:
