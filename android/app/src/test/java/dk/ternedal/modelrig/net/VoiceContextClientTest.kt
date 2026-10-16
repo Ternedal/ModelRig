@@ -52,6 +52,28 @@ class VoiceContextClientTest {
     }
 
     @Test
+    fun cloudVoiceNeverSendsEarlierLocalConversation() {
+        val server = MockWebServer()
+        server.enqueue(doneResponse())
+        server.start()
+        try {
+            ModelRigClient(server.url("/").toString()).voiceConverseStream(
+                audioB64 = "UklGRg==",
+                cloudBaseUrl = "https://ollama.com", cloudKey = "test-only-cloud-key",
+                contextMessages = listOf("user" to "private local history", "assistant" to "secret reply"),
+                onTranscript = {}, onChunk = { _, _, _, _ -> },
+                onDone = { _, _, _ -> }, onError = { _, _ -> },
+            )
+            val body = JSONObject(server.takeRequest().body.readUtf8())
+            assertFalse("Prior local voice turns must not leave the device on cloud requests",
+                body.has("context_messages"))
+            assertEquals("https://ollama.com", body.getString("llm_base_url"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun olderClientsRemainCompatibleAndContextIsBounded() {
         val server = MockWebServer()
         server.enqueue(doneResponse())
