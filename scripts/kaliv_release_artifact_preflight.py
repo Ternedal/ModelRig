@@ -32,6 +32,7 @@ SHA40 = re.compile(r"^[0-9a-f]{40}$")
 MAX_BYTES = 16 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024
 MAX_JSON_DEPTH = 64
+MAX_ERROR_CHARS = 1024
 SCHEMA = "kaliv-artifact-byte-preflight/v1"
 
 # These are the repositories whose revisions the canonical gate references
@@ -134,6 +135,12 @@ def _open_artifact(root: Path, parts: tuple[str, ...]):
             yield artifact
 
 
+def _same_snapshot(before: os.stat_result, after: os.stat_result) -> bool:
+    return os.path.samestat(before, after) and (
+        before.st_size, before.st_mtime_ns, before.st_ctime_ns
+    ) == (after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+
+
 def _artifact_hash(root: Path, parts: tuple[str, ...], gate: str, *,
                    collect_json: bool = False) -> tuple[str, int, bytes | None]:
     before = _inspect_path(root, parts, gate)
@@ -141,7 +148,7 @@ def _artifact_hash(root: Path, parts: tuple[str, ...], gate: str, *,
     chunks = [] if collect_json else None
     with _open_artifact(root, parts) as artifact:
         info = os.fstat(artifact.fileno())
-        if not stat.S_ISREG(info.st_mode) or not os.path.samestat(before, info):
+        if not stat.S_ISREG(info.st_mode) or not _same_snapshot(before, info):
             raise AttestationError(f"{gate}: artifact changed during verification")
         if info.st_size > maximum:
             raise AttestationError(f"{gate}: artifact exceeds size limit")
@@ -157,9 +164,8 @@ def _artifact_hash(root: Path, parts: tuple[str, ...], gate: str, *,
         after = os.fstat(artifact.fileno())
         path_info = _inspect_path(root, parts, gate)
         if (
-            not os.path.samestat(info, path_info) or total != info.st_size
-            or (after.st_size, after.st_mtime_ns, after.st_ctime_ns)
-            != (info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+            total != info.st_size or not _same_snapshot(info, after)
+            or not _same_snapshot(info, path_info)
         ):
             raise AttestationError(f"{gate}: artifact changed during verification")
     return hasher.hexdigest(), total, b"".join(chunks) if chunks is not None else None
@@ -362,6 +368,13 @@ def _load_json_object(path: Path) -> dict:
             raise AttestationError("JSON input exceeds size limit")
         with os.fdopen(fd, "rb", closefd=False) as source:
             raw = source.read(MAX_JSON_BYTES + 1)
+            after = os.fstat(fd)
+            # Config paths may be explicit operator-selected symlinks. Follow
+            # that path for identity checks, without changing their policy.
+            path_info = path.stat()
+            if (len(raw) != info.st_size or not _same_snapshot(info, after)
+                    or not _same_snapshot(info, path_info)):
+                raise AttestationError("JSON input changed during verification")
     return _parse_json_object(raw)
 
 
@@ -385,6 +398,20 @@ def _parse_json_object(raw: bytes) -> dict:
     return value
 
 
+def _failure_report(error: Exception) -> dict:
+    message = str(error)
+    truncated = len(message) > MAX_ERROR_CHARS
+    if truncated:
+        message = message[:MAX_ERROR_CHARS - 3] + "..."
+    result = {
+        "schema": SCHEMA, "state": "INVALID", "release_ready": False,
+        "production_activation": False, "error": message,
+    }
+    if truncated:
+        result["error_truncated"] = True
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
@@ -398,8 +425,7 @@ def main(argv: list[str] | None = None) -> int:
                            _load_json_object(args.attestations),
                            args.artifact_root, replay_producers=args.replay_producers)
     except (ValueError, OSError, KeyError, TypeError, RecursionError) as exc:
-        print(json.dumps({"schema": SCHEMA, "state": "INVALID", "release_ready": False,
-                          "production_activation": False, "error": str(exc)}))
+        print(json.dumps(_failure_report(exc)))
         return 2
     print(json.dumps(output, indent=2, sort_keys=True))
     return 0

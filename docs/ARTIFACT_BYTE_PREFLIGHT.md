@@ -144,6 +144,15 @@ unsafe paths, oversized files and hash mismatches produce exit code 2 and an
 INVALID JSON object. Both authority flags are false on errors as well. No
 partial verification result is emitted as success.
 
+CLI error text is limited to 1,024 Unicode characters including a trailing
+ellipsis when shortened. Only shortened messages add error_truncated=true;
+ordinary error messages and the success output retain their existing shape.
+The INVALID JSON response stays below 16 KiB even when diagnostic text contains
+non-BMP Unicode characters that require longer ASCII escapes. This bounds log
+output from invalid field names; it is not redaction or a limit on API exception
+messages. Errors still return exit code 2 and never include partial verification
+records.
+
 Each input JSON file is limited to 1 MiB and 64 nested containers. Inputs must be
 UTF-8 JSON objects with unique field names; NaN and infinities are rejected.
 This also rejects valid JSON exponent tokens such as 1e999 that overflow the
@@ -166,6 +175,17 @@ anchored to open descriptors so replacing a parent with a symlink cannot redirec
 the file open. Other platforms, including Windows, use before/after path and
 descriptor checks; that fallback is not a security boundary against a concurrently
 hostile filesystem. The caller must control the directory and its ancestors.
+
+Manifest and attestation inputs are also checked for ordinary concurrent edits:
+the opened descriptor and final path must still identify the same file with the
+same size and recorded filesystem timestamps, and the read byte count must
+match. Growth, truncation, same-size rewrites and path replacement during the
+read are rejected. Explicit operator-selected input symlinks remain permitted;
+artifact paths retain their stricter no-link policy. Artifact verification now
+compares the initial path, opened descriptor, final descriptor and final path
+snapshots, so a detected in-place update cannot slip between path and descriptor
+checks before or after hashing.
+These checks retain the trusted, quiescent-directory assumption above.
 
 A user can supply a fabricated file together with its matching digest. A byte
 match therefore does not establish authenticity or prove the physical test ran.
@@ -193,6 +213,11 @@ Numeric cases include positive/negative exponent overflow in both CLI inputs,
 source evidence and latency receipts; an otherwise valid lifecycle payload with
 a matching producer reference and overflowing nested diagnostics; finite numeric
 boundaries; and extreme integer measurements through the API and CLI.
+Input snapshot cases cover growth, truncation, same-size edits, replacement and
+descriptor cleanup on rejection. Artifact cases also cover mutation between the
+initial path stat and open, and just before the final path stat. Long
+manifest/producer diagnostics exercise bounded JSON
+errors, explicit truncation and Unicode escaping without partial success.
 Latency replay cases additionally cover three-source digest binding, correlated
 phases, modified report fields and Boolean types, missing sources, nested path
 escape/symlinks, bounded strict source JSON, cleanup after success/failure, and

@@ -106,6 +106,13 @@ class ArtifactNegativeTests(PreflightFixture):
             with self.assertRaisesRegex(module.AttestationError, "reparse point"):
                 self.verify()
 
+    def test_explicit_json_input_symlink_still_reads_regular_target(self):
+        target = self.directory / "json-input-target.json"
+        target.write_bytes(b'{"input":"operator-selected"}')
+        link = self.directory / "json-input-alias.json"
+        self.symlink_or_skip(link, target)
+        self.assertEqual(module._load_json_object(link), {"input": "operator-selected"})
+
     @unittest.skipUnless(os.name == "nt", "requires native Windows directory junctions")
     def test_native_windows_directory_junction_is_rejected_before_open(self):
         original_bytes = self.path.read_bytes()
@@ -170,6 +177,40 @@ class ArtifactNegativeTests(PreflightFixture):
             with patch.object(module.os, "fstat", side_effect=grow):
                 with self.assertRaisesRegex(module.AttestationError, "exceeds size limit"):
                     self.verify()
+
+    def test_mutation_before_final_path_stat_is_rejected(self):
+        real_inspect = module._inspect_path
+        inspections = 0
+
+        def mutate(root, parts, gate):
+            nonlocal inspections
+            if gate == self.first:
+                inspections += 1
+                if inspections == 2:
+                    self.path.write_bytes(b"changed after the final descriptor stat")
+            return real_inspect(root, parts, gate)
+
+        with patch.object(module, "_inspect_path", side_effect=mutate):
+            with self.assertRaisesRegex(module.AttestationError, "artifact changed during verification"):
+                self.verify()
+
+    def test_mutation_between_initial_path_stat_and_open_is_rejected(self):
+        from contextlib import contextmanager
+
+        changed = b"new bytes that would match the independently supplied digest"
+        self.item["sha256"] = hashlib.sha256(changed).hexdigest()
+        real_open = module._open_artifact
+
+        @contextmanager
+        def mutate(root, parts):
+            if "/".join(parts) == self.item["path"]:
+                self.path.write_bytes(changed)
+            with real_open(root, parts) as source:
+                yield source
+
+        with patch.object(module, "_open_artifact", mutate):
+            with self.assertRaisesRegex(module.AttestationError, "artifact changed during verification"):
+                self.verify()
 
     def test_cli_missing_input_returns_json(self):
         missing = self.directory / "missing.json"
@@ -506,6 +547,19 @@ class ArtifactProducerReplayTests(ProducerReplayFixture):
         with patch.object(module.importlib, "import_module", side_effect=ModuleNotFoundError("missing qualifier")):
             with self.assertRaisesRegex(module.AttestationError, "producer replay failed: missing qualifier"):
                 self.replay()
+
+    def test_cli_long_producer_errors_are_bounded_without_partial_success(self):
+        gate = "software_exact_green"
+        payload = {**self.payloads[gate], "unexpected-" + "x" * 65000: True}
+        self.write_payload(gate, payload)
+        completed = self.cli(replay_producers=True)
+        self.assertInvalid(completed, "software_exact_green: producer replay failed")
+        result = json.loads(completed.stdout)
+        self.assertIs(result["error_truncated"], True)
+        self.assertLessEqual(len(result["error"]), 1024)
+        self.assertLess(len(completed.stdout.encode("utf-8")), 16 * 1024)
+        self.assertNotIn("verified_artifacts", result)
+        self.assertNotIn("producer_replay", result)
 
     def test_producer_authority_overclaim_cannot_escape_adapter(self):
         verdict = self.qualifiers["software_exact_green"](self.payloads["software_exact_green"])

@@ -306,6 +306,71 @@ class ArtifactPreflightTests(PreflightFixture):
                     "JSON input exceeds size limit",
                 )
 
+    def test_json_input_edits_during_read_are_rejected_and_descriptor_is_closed(self):
+        path = self.directory / "changing-input.json"
+        initial = b'{"value":"initial"}'
+        real_fstat = os.fstat
+        for before, after in ((initial, initial + b" "), (initial + b" ", initial),
+                              (initial, b'{"value":"changed"}')):
+            with self.subTest(before_size=len(before), after_size=len(after)):
+                path.write_bytes(before)
+                descriptors = []
+
+                def mutate(fd):
+                    info = real_fstat(fd)
+                    if not descriptors:
+                        descriptors.append(fd)
+                        path.write_bytes(after)
+                        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
+                    return info
+
+                with patch.object(module.os, "fstat", side_effect=mutate):
+                    with self.assertRaisesRegex(module.AttestationError, "JSON input changed during verification"):
+                        module._load_json_object(path)
+                with self.assertRaises(OSError):
+                    real_fstat(descriptors[0])
+
+    def test_json_input_replacement_during_read_cannot_be_accepted(self):
+        path = self.directory / "replaced-input.json"
+        replacement = self.directory / "replacement-input.json"
+        path.write_bytes(b'{"value":"initial"}')
+        replacement.write_bytes(b'{"value":"changed"}')
+        real_fstat = os.fstat
+        changed = False
+
+        def replace(fd):
+            nonlocal changed
+            info = real_fstat(fd)
+            if not changed:
+                changed = True
+                replacement.replace(path)
+            return info
+
+        # Windows may prevent replacing an open file; POSIX permits it.
+        # Either the OS or the snapshot check must reject this operation.
+        with patch.object(module.os, "fstat", side_effect=replace):
+            with self.assertRaises((module.AttestationError, OSError)):
+                module._load_json_object(path)
+
+    def test_cli_long_manifest_errors_are_bounded_with_explicit_truncation(self):
+        for field in ("x" * 65000, "\U0001f680" * 12000):
+            with self.subTest(field_chars=len(field)):
+                bad = {**self.manifest, field: True}
+                completed = self.cli(manifest=json.dumps(bad).encode("utf-8"))
+                self.assertInvalid(completed, "invalid release manifest")
+                result = json.loads(completed.stdout)
+                self.assertIs(result["error_truncated"], True)
+                self.assertLessEqual(len(result["error"]), 1024)
+                self.assertTrue(result["error"].endswith("..."))
+                self.assertLess(len(completed.stdout.encode("utf-8")), 16 * 1024)
+
+    def test_ordinary_cli_errors_preserve_their_full_message(self):
+        completed = self.cli(manifest=b"{}")
+        self.assertInvalid(completed, "invalid release manifest")
+        result = json.loads(completed.stdout)
+        self.assertIn("missing", result["error"])
+        self.assertNotIn("error_truncated", result)
+
     def test_cli_deeply_nested_json_is_invalid(self):
         for depth in (module.MAX_JSON_DEPTH + 1, 2000):
             with self.subTest(depth=depth):
