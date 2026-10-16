@@ -203,7 +203,11 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         // Only completed turns from this chat. Do not send UI/system messages,
         // and keep the same strict limits as the worker's request schema.
         val history = JSONArray()
-        contextMessages.takeLast(12).forEach { (role, content) ->
+        // Cloud voice consent covered only the current spoken transcript; do
+        // not silently expose earlier local turns to an external LLM.
+        val localHistory: List<Pair<String, String>> =
+            if (cloudBaseUrl != null && cloudKey != null) emptyList() else contextMessages.takeLast(12)
+        localHistory.forEach { (role, content) ->
             val cleaned = content.trim().take(512)
             if ((role == "user" || role == "assistant") && cleaned.isNotEmpty()) {
                 history.put(JSONObject().put("role", role).put("content", cleaned))
