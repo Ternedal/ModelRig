@@ -1341,8 +1341,7 @@ private fun ChatScreen(
                 // requires a transactional DB API and is tracked separately.
                 if (!stillCurrent()) return@launch
                 withContext(Dispatchers.IO) {
-                    if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
-                    if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
+                    db.addCompletedVoiceTurn(cid, transcriptText, finalReply)
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
