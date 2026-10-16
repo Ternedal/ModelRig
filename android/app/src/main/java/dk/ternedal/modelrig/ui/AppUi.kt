@@ -1155,6 +1155,15 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        // Voice previously sent only the latest transcript to the LLM, so
+        // "Husk at testordet er blå elefant" was forgotten on the NEXT turn.
+        // Snapshot finished messages before the async reader appends this turn.
+        // Restrict context to the selected conversation; no hidden global memory.
+        val voiceContext = messages
+            .filter { (it.role == "user" || it.role == "assistant") &&
+                !it.streaming && it.text.isNotBlank() }
+            .takeLast(12)
+            .map { it.role to it.text.take(512) }
         val cancellation = VoiceTurnCancellation()
         voiceCancellation = cancellation
         val playbackStop = cancellation.stopFlag
@@ -1214,6 +1223,7 @@ private fun ChatScreen(
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
+                        contextMessages = voiceContext,
                         registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
                             if (!playbackStop.get()) {
