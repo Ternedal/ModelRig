@@ -49,14 +49,24 @@ def inventory() -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strict", action="store_true", help="Exit 1 if material is tracked")
+    parser.add_argument("--baseline", help="JSON list of known tracked signing paths; fail on newly introduced paths")
     args = parser.parse_args()
     try:
         report = inventory()
     except (OSError, subprocess.CalledProcessError) as exc:
         print(f"inventory unavailable: {type(exc).__name__}", file=sys.stderr)
         return 2
+    if args.baseline:
+        try:
+            allowed = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+            if not isinstance(allowed, list) or not all(isinstance(p, str) for p in allowed):
+                raise ValueError("baseline must be a JSON array of paths")
+        except (OSError, ValueError) as exc:
+            print(f"invalid baseline: {type(exc).__name__}", file=sys.stderr)
+            return 2
+        report["new_paths"] = sorted(set(report["exposed_paths"]) - set(allowed))
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    return int(args.strict and bool(report["exposed_paths"]))
+    return int(bool(report.get("new_paths")) or (args.strict and bool(report["exposed_paths"])))
 
 
 if __name__ == "__main__":
