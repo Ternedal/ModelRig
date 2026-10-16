@@ -288,22 +288,29 @@ class TokenStore(context: Context) {
     val hubMirrorEnabled: Boolean
         get() = prefs.getBoolean("hub_mirror_enabled", false)
 
+    /** Bumped whenever mirror consent or pairing changes to invalidate queued turns. */
+    val hubMirrorGeneration: Long
+        get() = prefs.getLong("hub_mirror_generation", 0L)
+
     /**
-     * Persist url, encrypted secret and enabled switch as one transaction.
-     * If an existing ciphertext cannot be decrypted, enabling fails closed.
+     * Persist url, encrypted secret and opt-in as one transaction.
+     * Disabling must always succeed even with an invalid or undecryptable key.
+     * A generation bump invalidates pending display deliveries from old consent.
      */
     fun saveHubMirrorConfig(url: String, newSecret: String?, enabled: Boolean): Boolean {
-        // Disabling is always possible, even if a stored key is corrupt or
-        // the address field contains malformed input.
-        if (!enabled) return prefs.edit().putBoolean("hub_mirror_enabled", false).commit()
-        val normalizedUrl = if (url.isBlank() && !enabled) {
-            ""
-        } else {
-            dk.ternedal.modelrig.net.HubMirrorClient.endpoint(url) ?: return false
+        val nextGeneration = hubMirrorGeneration + 1L
+        if (!enabled) {
+            return prefs.edit()
+                .putBoolean("hub_mirror_enabled", false)
+                .putLong("hub_mirror_generation", nextGeneration)
+                .commit()
         }
+
+        val normalizedUrl = dk.ternedal.modelrig.net.HubMirrorClient.endpoint(url)
+            ?: return false
         val supplied = newSecret?.trim().orEmpty()
         val usableSecret = supplied.ifEmpty { hubMirrorSecret.orEmpty() }
-        if (enabled && usableSecret.length < 32) return false
+        if (usableSecret.length < 32) return false
         if (supplied.isNotEmpty() && supplied.length < 32) return false
         val ciphertext = if (supplied.isNotEmpty()) {
             try { Crypto.encrypt(supplied) } catch (_: Exception) { return false }
@@ -311,7 +318,8 @@ class TokenStore(context: Context) {
         return prefs.edit().apply {
             putString("hub_mirror_endpoint", normalizedUrl)
             if (ciphertext != null) putString("hub_mirror_secret_enc", ciphertext)
-            putBoolean("hub_mirror_enabled", enabled)
+            putBoolean("hub_mirror_enabled", true)
+            putLong("hub_mirror_generation", nextGeneration)
         }.commit()
     }
 
