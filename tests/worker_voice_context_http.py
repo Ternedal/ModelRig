@@ -51,7 +51,8 @@ class VoiceContextHTTPTests(unittest.TestCase):
                 "model": model, "cloud_url": llm_base_url,
             })
             self.assertTrue(os.path.isfile(audio_path))
-            self.assertEqual(open(audio_path, "rb").read(4), b"RIFF")
+            with open(audio_path, "rb") as incoming:
+                self.assertEqual(incoming.read(4), b"RIFF")
             self.assertEqual(language, "da")
             if model == "fail-test":
                 raise RuntimeError("test pipeline failure")
