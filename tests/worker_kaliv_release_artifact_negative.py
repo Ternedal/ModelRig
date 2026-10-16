@@ -158,7 +158,7 @@ class ArtifactNegativeTests(PreflightFixture):
 
 
 
-class ArtifactProducerReplayTests(PreflightFixture):
+class ProducerReplayFixture(PreflightFixture):
     def setUp(self):
         super().setUp()
         # Reuse the existing canonical test fixtures and REAL validators.
@@ -209,6 +209,57 @@ class ArtifactProducerReplayTests(PreflightFixture):
             ref = self.qualifiers[gate](payload)["release_evidence_ref"]
             self.manifest["gates"][gate]["evidence_refs"] = [ref]
             self.attestations[gate]["reference"] = ref
+        self.add_latency_fixture(model_sha)
+
+    def add_latency_fixture(self, model_sha):
+        import kaliv_end_to_end_latency_qualifier as latency
+
+        self.latency_producer = latency
+        self.latency_sources = {}
+        self.latency_paths = {}
+        details = {
+            "perception_received": {"input_kind": "voice", "input_id": "input-1"},
+            "cognition_completed": {"cognition_event_id": "latency-event-1",
+                                    "transition_receipt_ref": "transition:synthetic", "completed_cycles": 1},
+            "outward_started": {"outward_kind": "voice+body", "started": True,
+                                "utterance_id": "utterance-1", "body_runtime_id": "body-1"},
+        }
+        for phase, at_ms in zip(details, (1000.0, 1300.0, 1500.0)):
+            value = {
+                "schema": latency.SOURCE_SCHEMA, "phase": phase,
+                "candidate_git_sha": model_sha, "event_id": "latency-event-1",
+                "runtime_epoch": "epoch-1", "observer_id": "observer-1",
+                "clock": {"kind": "monotonic", "unit": "milliseconds", "origin": "single-observer"},
+                "observed_at_ms": at_ms, "real_event": True, "simulated": False,
+                "replay": False, "details": details[phase], "production_activation": False,
+            }
+            self.latency_sources[phase] = value
+            rel = Path("latency") / f"{phase}.json"
+            self.latency_paths[phase] = rel
+            path = self.root / rel
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(json.dumps(value, sort_keys=True).encode("utf-8"))
+        self.latency_report = self.measure_latency()
+        self.write_payload("end_to_end_latency", self.latency_report)
+        reference = self.latency_report["release_evidence_ref"]
+        self.manifest["gates"]["end_to_end_latency"]["evidence_refs"] = [reference]
+        self.attestations["end_to_end_latency"]["reference"] = reference
+
+    def measure_latency(self):
+        return self.latency_producer.qualify_receipts(
+            evidence_root=self.root,
+            perception_path=self.latency_paths["perception_received"],
+            cognition_path=self.latency_paths["cognition_completed"],
+            outward_path=self.latency_paths["outward_started"],
+        )
+
+    def write_latency_source(self, phase, raw, *, update_claim=True):
+        (self.root / self.latency_paths[phase]).write_bytes(raw)
+        if update_claim:
+            for item in self.latency_report["source_receipts"]:
+                if item["phase"] == phase:
+                    item["sha256"] = hashlib.sha256(raw).hexdigest()
+            self.write_payload("end_to_end_latency", self.latency_report)
 
     def write_raw(self, gate, raw):
         item = self.attestations[gate]
@@ -221,21 +272,25 @@ class ArtifactProducerReplayTests(PreflightFixture):
     def replay(self):
         return module.preflight(self.manifest, self.attestations, self.root, replay_producers=True)
 
-    def test_six_real_producers_replay_without_global_release_authority(self):
+class ArtifactProducerReplayTests(ProducerReplayFixture):
+    def test_supported_producers_replay_without_global_release_authority(self):
         result = self.replay()
         report = result["producer_replay"]
         self.assertEqual(report["state"], "PARTIAL")
         self.assertIs(report["complete"], False)
-        self.assertEqual(report["verified_gates"], list(self.payloads))
+        self.assertEqual(report["verified_gates"], [
+            gate for gate in module.REQUIRED_GATES if gate in self.payloads or gate == "end_to_end_latency"
+        ])
         self.assertEqual(report["not_replayed_gates"], [
             "visionrig_physical_perception", "bodyrig_android_live_body",
-            "end_to_end_latency", "recovery_soak",
+            "recovery_soak",
         ])
         self.assertIs(result["release_ready"], False)
         self.assertIs(result["production_activation"], False)
-        self.assertEqual(len(report["verdicts"]), 6)
+        self.assertEqual(len(report["verdicts"]), 7)
         for entry in report["verdicts"]:
-            expected = self.qualifiers[entry["gate"]](self.payloads[entry["gate"]])
+            expected = (self.latency_report if entry["gate"] == "end_to_end_latency"
+                        else self.qualifiers[entry["gate"]](self.payloads[entry["gate"]]))
             self.assertEqual(entry["producer_schema"], expected["schema"])
             self.assertEqual(entry["release_evidence_ref"], expected["release_evidence_ref"])
             self.assertEqual(entry["state"], "PRODUCER_PAYLOAD_REPLAYED_ONLY")
@@ -316,7 +371,7 @@ class ArtifactProducerReplayTests(PreflightFixture):
         for gate, payload in self.payloads.items():
             raw = json.dumps(payload, indent=3, sort_keys=False).encode("utf-8") + b"\n"
             self.write_raw(gate, raw)
-        self.assertEqual(len(self.replay()["producer_replay"]["verified_gates"]), 6)
+        self.assertEqual(len(self.replay()["producer_replay"]["verified_gates"]), 7)
 
     def test_strict_json_applies_to_the_verified_source_bytes(self):
         for raw, reason in (
@@ -357,21 +412,22 @@ class ArtifactProducerReplayTests(PreflightFixture):
             result = self.replay()
         self.assertEqual(opens.count(self.item["path"]), 1)
         self.assertEqual(result["verified_artifacts"][0]["sha256"], original_digest)
-        self.assertEqual(len(result["producer_replay"]["verified_gates"]), 6)
+        self.assertEqual(len(result["producer_replay"]["verified_gates"]), 7)
 
-    def test_replay_does_not_fetch_nested_artifacts_or_contact_live_services(self):
-        before = {p.name: p.read_bytes() for p in self.root.iterdir()}
+    def test_replay_does_not_contact_services_or_mutate_artifacts(self):
+        before = {p.relative_to(self.root).as_posix(): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
         with patch("socket.socket", side_effect=AssertionError("unexpected network")):
             with patch("subprocess.run", side_effect=AssertionError("unexpected process")):
                 self.replay()
-        self.assertEqual(before, {p.name: p.read_bytes() for p in self.root.iterdir()})
+        self.assertEqual(before, {p.relative_to(self.root).as_posix(): p.read_bytes()
+                                  for p in self.root.rglob("*") if p.is_file()})
 
     def test_cli_replays_all_supported_payloads(self):
         completed = self.cli(replay_producers=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(completed.stderr, "")
         result = json.loads(completed.stdout)
-        self.assertEqual(len(result["producer_replay"]["verified_gates"]), 6)
+        self.assertEqual(len(result["producer_replay"]["verified_gates"]), 7)
         self.assertIs(result["release_ready"], False)
         self.assertIs(result["production_activation"], False)
 
@@ -398,6 +454,194 @@ class ArtifactProducerReplayTests(PreflightFixture):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(module.AttestationError, "must be a boolean"):
                     module.preflight(self.manifest, self.attestations, self.root, replay_producers=value)
+
+
+class ArtifactLatencyReplayTests(ProducerReplayFixture):
+    def latency_verdict(self, result):
+        return next(item for item in result["producer_replay"]["verdicts"]
+                    if item["gate"] == "end_to_end_latency")
+
+    def test_latency_replay_binds_each_source_file_and_measured_phases(self):
+        result = self.replay()
+        replayed = self.latency_verdict(result)
+        self.assertEqual(replayed["producer_schema"], self.latency_producer.VERDICT_SCHEMA)
+        self.assertEqual(replayed["release_evidence_ref"], self.latency_report["release_evidence_ref"])
+        self.assertEqual(len(replayed["verified_source_receipts"]), 3)
+        for record in replayed["verified_source_receipts"]:
+            path = self.root / record["path"]
+            self.assertEqual(record["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(record["size_bytes"], path.stat().st_size)
+            self.assertFalse(Path(record["path"]).is_absolute())
+        self.assertEqual(self.latency_report["end_to_end_ms"], 500.0)
+        self.assertIs(self.latency_report["threshold_applied"], False)
+        self.assertIs(result["release_ready"], False)
+        self.assertIs(result["production_activation"], False)
+
+    def test_changed_source_without_updating_digest_is_rejected(self):
+        phase = "perception_received"
+        raw = (self.root / self.latency_paths[phase]).read_bytes() + b"\n"
+        self.write_latency_source(phase, raw, update_claim=False)
+        with self.assertRaisesRegex(module.AttestationError, "source byte hash mismatch"):
+            self.replay()
+
+    def test_rehashed_spliced_or_failed_source_receipts_are_rejected(self):
+        cases = (
+            ("cognition_completed", lambda p: p.update(candidate_git_sha="f" * 40), "candidate SHA mismatch"),
+            ("cognition_completed", lambda p: p.update(event_id="other-event"), "mixed correlation"),
+            ("outward_started", lambda p: p.update(runtime_epoch="other-epoch"), "mixed runtime epoch"),
+            ("outward_started", lambda p: p.update(observer_id="other-observer"), "mixed observer"),
+            ("cognition_completed", lambda p: p.update(observed_at_ms=999.0), "timestamps must be monotone"),
+            ("perception_received", lambda p: p.update(simulated=True), "non-simulated"),
+            ("perception_received", lambda p: p.update(replay=True), "replay evidence"),
+            ("cognition_completed", lambda p: p["details"].update(completed_cycles=0), "completed real cycle"),
+            ("outward_started", lambda p: p["details"].update(started=False), "actual outward start"),
+        )
+        for phase, mutate, reason in cases:
+            with self.subTest(phase=phase, reason=reason):
+                payload = copy.deepcopy(self.latency_sources[phase])
+                mutate(payload)
+                self.write_latency_source(phase, json.dumps(payload).encode("utf-8"))
+                with self.assertRaisesRegex(module.AttestationError, reason):
+                    self.replay()
+                self.write_latency_source(phase, json.dumps(self.latency_sources[phase], sort_keys=True).encode("utf-8"))
+
+    def test_rehashed_valid_source_change_does_not_match_old_latency_verdict(self):
+        payload = copy.deepcopy(self.latency_sources["outward_started"])
+        payload["observed_at_ms"] = 1600.0
+        self.write_latency_source("outward_started", json.dumps(payload).encode("utf-8"))
+        with self.assertRaisesRegex(module.AttestationError, "latency verdict does not match source receipts"):
+            self.replay()
+
+    def test_coherent_new_verdict_still_requires_manifest_reference_binding(self):
+        payload = copy.deepcopy(self.latency_sources["outward_started"])
+        payload["observed_at_ms"] = 1600.0
+        self.write_latency_source("outward_started", json.dumps(payload).encode("utf-8"))
+        changed = self.measure_latency()
+        self.write_payload("end_to_end_latency", changed)
+        with self.assertRaisesRegex(module.AttestationError, "producer evidence reference mismatch"):
+            self.replay()
+        self.manifest["gates"]["end_to_end_latency"]["evidence_refs"] = [changed["release_evidence_ref"]]
+        self.attestations["end_to_end_latency"]["reference"] = changed["release_evidence_ref"]
+        result = self.replay()
+        self.assertEqual(self.latency_verdict(result)["release_evidence_ref"], changed["release_evidence_ref"])
+        self.assertIs(result["release_ready"], False)
+
+    def test_report_fields_are_compared_canonically_including_boolean_types(self):
+        for field, value in (
+            ("end_to_end_ms", 999.0), ("threshold_applied", 0),
+            ("production_activation", 0), ("release_gate_satisfied", True),
+            ("state", "QUALIFIED"), ("release_ready", True),
+        ):
+            with self.subTest(field=field, value=value):
+                report = copy.deepcopy(self.latency_report)
+                report[field] = value
+                self.write_payload("end_to_end_latency", report)
+                with self.assertRaisesRegex(module.AttestationError, "latency verdict does not match source receipts"):
+                    self.replay()
+
+    def test_source_declarations_must_cover_exactly_three_distinct_phases(self):
+        sources = self.latency_report["source_receipts"]
+        malformed = (
+            None, sources[:2], [sources[0], sources[0], sources[2]],
+            [{**sources[0], "phase": []}, sources[1], sources[2]],
+            [{**sources[0], "extra": True}, sources[1], sources[2]],
+            [{**sources[0], "sha256": "A" * 64}, sources[1], sources[2]],
+        )
+        for value in malformed:
+            with self.subTest(value=value):
+                report = copy.deepcopy(self.latency_report)
+                report["source_receipts"] = value
+                self.write_payload("end_to_end_latency", report)
+                with self.assertRaisesRegex(module.AttestationError, "producer replay failed"):
+                    self.replay()
+
+    def test_nested_source_path_escape_is_rejected(self):
+        report = copy.deepcopy(self.latency_report)
+        report["source_receipts"][0]["path"] = "../outside.json"
+        self.write_payload("end_to_end_latency", report)
+        with self.assertRaisesRegex(module.AttestationError, "invalid relative path"):
+            self.replay()
+
+    def test_nested_source_symlink_is_rejected(self):
+        source = self.root / self.latency_paths["perception_received"]
+        target = source.with_name("source-target.json")
+        source.rename(target)
+        try:
+            source.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("filesystem cannot create symlinks")
+        with self.assertRaisesRegex(module.AttestationError, "symlink artifact path"):
+            self.replay()
+
+    def test_source_json_is_strict_even_when_declared_byte_digest_matches(self):
+        for raw, reason in (
+            (b'{"schema":"a","schema":"b"}', "duplicate JSON object field"),
+            (b'{"nested":{"x":1,"x":2}}', "duplicate JSON object field"),
+            (b'{"observed_at_ms":NaN}', "invalid JSON constant"),
+            (b"[]", "must be an object"), (b"\xff", "utf-8"),
+            (b'{"x":' * 65 + b"0" + b"}" * 65, "nesting limit"),
+        ):
+            with self.subTest(raw=raw[:40]):
+                self.write_latency_source("perception_received", raw)
+                with self.assertRaisesRegex(module.AttestationError, reason):
+                    self.replay()
+
+    def test_source_size_limit_is_checked_before_staging_or_json_decode(self):
+        self.write_latency_source("perception_received", b"x" * (module.MAX_JSON_BYTES + 1))
+        with self.assertRaisesRegex(module.AttestationError, "exceeds size limit"):
+            self.replay()
+
+    def test_private_snapshot_directories_are_removed_on_success_and_failure(self):
+        real_temporary_directory = module.tempfile.TemporaryDirectory
+        created = []
+
+        def temporary(*args, **kwargs):
+            context = real_temporary_directory(*args, **kwargs)
+            created.append(Path(context.name))
+            return context
+
+        with patch.object(module.tempfile, "TemporaryDirectory", side_effect=temporary):
+            self.replay()
+            bad = copy.deepcopy(self.latency_sources["outward_started"])
+            bad["details"]["started"] = False
+            self.write_latency_source("outward_started", json.dumps(bad).encode("utf-8"))
+            with self.assertRaisesRegex(module.AttestationError, "actual outward start"):
+                self.replay()
+        self.assertEqual(len(created), 2)
+        self.assertTrue(all(not path.exists() for path in created))
+
+    def test_source_replay_uses_original_verified_snapshot_if_path_changes_after_read(self):
+        from contextlib import contextmanager
+
+        source_rel = self.latency_paths["perception_received"].as_posix()
+        real_open = module._open_artifact
+        opened = []
+
+        @contextmanager
+        def replace_after_snapshot(root, parts):
+            relative = "/".join(parts)
+            opened.append(relative)
+            with real_open(root, parts) as source:
+                yield source
+            if relative == source_rel:
+                (self.root / source_rel).write_bytes(b"changed after the verified snapshot")
+
+        with patch.object(module, "_open_artifact", replace_after_snapshot):
+            result = self.replay()
+        self.assertEqual(opened.count(source_rel), 1)
+        self.assertEqual(self.latency_verdict(result)["release_evidence_ref"],
+                         self.latency_report["release_evidence_ref"])
+
+    def test_missing_source_returns_invalid_json_from_cli(self):
+        (self.root / self.latency_paths["cognition_completed"]).unlink()
+        self.assertInvalid(self.cli(replay_producers=True), "producer replay failed")
+
+    def test_legacy_latency_verdict_is_not_silently_treated_as_v2(self):
+        report = copy.deepcopy(self.latency_report)
+        report["schema"] = "kaliv-system/end-to-end-latency-verdict/v1"
+        self.write_payload("end_to_end_latency", report)
+        with self.assertRaisesRegex(module.AttestationError, "canonical v2 verdict"):
+            self.replay()
 
 if __name__ == "__main__":
     unittest.main()

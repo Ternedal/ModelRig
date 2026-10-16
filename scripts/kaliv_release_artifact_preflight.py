@@ -3,7 +3,7 @@
 
 This is not a release qualifier. It verifies that a supplied manifest's PASS
 references have independently retrieved bytes matching operator-supplied
-SHA-256 values. Optional replay covers six data-only producer qualifiers;
+SHA-256 values. Optional replay covers seven producer qualifiers;
 remaining semantic checks, trusted provenance and human approval are still
 required before release authorization. No network access or production writes.
 """
@@ -17,6 +17,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 from pathlib import Path
 
 from kaliv_system_release_gate import (
@@ -49,14 +50,15 @@ GATE_REPOSITORIES = {
     "repository_authority": "Ternedal/ModelRig",
 }
 # Fixed allowlist: artifact content never selects executable code. These
-# existing qualifiers accept data only; filesystem/live campaign validators
-# deliberately remain outside this offline replay path.
+# existing qualifiers accept data or bounded private receipt snapshots;
+# live campaign validators remain outside this offline replay path.
 PRODUCER_REPLAY = {
     "software_exact_green": ("kaliv_software_exact_green_qualifier", None, None),
     "consciousness_live_lifecycle": ("consciousness_live_lifecycle_qualifier", None, None),
     "voicerig_physical_acceptance": ("kaliv_voicerig_physical_qualifier", "expected_voicerig_sha", "Ternedal/VoiceRig"),
     "bodyrig_photoreal_likeness": ("kaliv_bodyrig_photoreal_qualifier", "expected_bodyrig_sha", "Ternedal/BodyRig"),
     "bodyrig_digital_twin_m6": ("kaliv_bodyrig_digital_twin_m6_qualifier", "expected_bodyrig_sha", "Ternedal/BodyRig"),
+    "end_to_end_latency": ("kaliv_end_to_end_latency_qualifier", None, None),
     "repository_authority": ("kaliv_repository_authority_qualifier", None, None),
 }
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
@@ -162,14 +164,70 @@ def _artifact_hash(root: Path, parts: tuple[str, ...], gate: str, *,
     return hasher.hexdigest(), total, b"".join(chunks) if chunks is not None else None
 
 
-def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: str) -> dict:
+def _replay_latency(producer, payload: dict, root: Path) -> tuple[dict, list[dict]]:
+    """Rerun the unchanged file validator against three bounded byte snapshots."""
+    gate = "end_to_end_latency"
+    phases = ("perception_received", "cognition_completed", "outward_started")
+    sources = payload.get("source_receipts")
+    if payload.get("schema") != producer.VERDICT_SCHEMA:
+        raise AttestationError("latency artifact must be the canonical v2 verdict")
+    if not isinstance(sources, list) or len(sources) != 3:
+        raise AttestationError("invalid latency source_receipts")
+    loaded = {}
+    verified_sources = []
+    for item in sources:
+        if not isinstance(item, dict) or set(item) != {"phase", "path", "sha256"}:
+            raise AttestationError("invalid latency source_receipts fields")
+        phase = item["phase"]
+        if not isinstance(phase, str) or phase not in phases or phase in loaded:
+            raise AttestationError("invalid latency source_receipts phases")
+        digest = item["sha256"]
+        if not isinstance(digest, str) or not SHA256.fullmatch(digest):
+            raise AttestationError(f"{phase}: invalid source SHA-256")
+        parts = _relative_parts(item["path"], f"{gate}.{phase}")
+        actual, size, raw = _artifact_hash(root, parts, f"{gate}.{phase}", collect_json=True)
+        if actual != digest:
+            raise AttestationError(f"{phase}: source byte hash mismatch")
+        _parse_json_object(raw)
+        loaded[phase] = (parts, raw)
+        verified_sources.append({**item, "size_bytes": size})
+
+    # Keep original relative names because they are part of the producer's
+    # canonical reference. Only private temporary files are written. Reusing
+    # the real validator avoids inventing a second latency/correlation policy.
+    with tempfile.TemporaryDirectory(prefix="kaliv-latency-replay-") as directory:
+        snapshot_root = Path(directory)
+        for parts, raw in loaded.values():
+            target = snapshot_root.joinpath(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("xb") as output:
+                output.write(raw)
+        verdict = producer.qualify_receipts(
+            evidence_root=snapshot_root,
+            perception_path=Path(*loaded["perception_received"][0]),
+            cognition_path=Path(*loaded["cognition_completed"][0]),
+            outward_path=Path(*loaded["outward_started"][0]),
+        )
+    if producer._canonical(verdict) != producer._canonical(payload):
+        raise AttestationError("latency verdict does not match source receipts")
+    return verdict, verified_sources
+
+
+def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: str, *, root: Path) -> dict:
     try:
         module_name, pin_argument, repository = PRODUCER_REPLAY[gate]
         producer = importlib.import_module(module_name)
-        kwargs = {pin_argument: pins[repository]} if pin_argument else {}
-        verdict = producer.qualify(_parse_json_object(raw), **kwargs)
+        payload = _parse_json_object(raw)
+        verified_sources = None
+        if gate == "end_to_end_latency":
+            verdict, verified_sources = _replay_latency(producer, payload, root)
+            expected_state = "MEASURED"
+        else:
+            kwargs = {pin_argument: pins[repository]} if pin_argument else {}
+            verdict = producer.qualify(payload, **kwargs)
+            expected_state = "QUALIFIED"
         if (
-            verdict.get("state") != "QUALIFIED"
+            verdict.get("state") != expected_state
             or verdict.get("production_activation") is not False
             or verdict.get("release_gate_satisfied", False) is not False
             or verdict.get("release_ready", False) is not False
@@ -177,14 +235,17 @@ def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: 
             raise AttestationError("producer verdict is not a bounded qualification")
         if verdict.get("release_evidence_ref") != expected_ref:
             raise AttestationError("producer evidence reference mismatch")
-        return {
+        result = {
             "gate": gate,
             "producer_schema": verdict["schema"],
             "release_evidence_ref": expected_ref,
             "state": "PRODUCER_PAYLOAD_REPLAYED_ONLY",
             "production_activation": False,
         }
-    except (ImportError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        if verified_sources is not None:
+            result["verified_source_receipts"] = verified_sources
+        return result
+    except (ImportError, OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise AttestationError(f"{gate}: producer replay failed: {exc}") from exc
 
 
@@ -236,7 +297,7 @@ def preflight(manifest: dict, attestations: dict, root: Path, *,
             # Parse the very bytes that were hashed, without reopening the
             # path after the byte-integrity check (which would introduce a
             # second-read replacement race).
-            replayed.append(_replay_producer(gate, payload, verdict.pinned_repositories, refs[0]))
+            replayed.append(_replay_producer(gate, payload, verdict.pinned_repositories, refs[0], root=root))
         checked.append(gate)
         verified_artifacts.append({"gate": gate, **item, "size_bytes": size})
     result = {
@@ -316,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("attestations", type=Path)
     parser.add_argument("artifact_root", type=Path)
     parser.add_argument("--replay-producers", action="store_true",
-                        help="Revalidate six supported source JSON payloads; other gates remain unreplayed.")
+                        help="Revalidate seven supported producers; other gates remain unreplayed.")
     args = parser.parse_args(argv)
     try:
         output = preflight(_load_json_object(args.manifest),
