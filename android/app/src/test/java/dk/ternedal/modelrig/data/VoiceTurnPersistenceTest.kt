@@ -86,6 +86,15 @@ class VoiceTurnPersistenceTest {
     }
 
     @Test
+    fun deletedConversationDoesNotReappearAfterFailedVoiceWrite() {
+        val id = chatDb.newConversation("rig", "local", "deleted")
+        chatDb.deleteConversation(id)
+        chatDb.addCompletedVoiceTurn(id, "late user", "late assistant")
+        assertEquals(null, chatDb.conversationMeta(id))
+        assertTrue(chatDb.loadMessages(id).isEmpty())
+    }
+
+    @Test
     fun failedAssistantInsertRollsBackEarlierUserInsert() {
         val id = chatDb.newConversation("rig", "local", "rollback")
         val before = chatDb.conversationMeta(id)!!.updatedAt
