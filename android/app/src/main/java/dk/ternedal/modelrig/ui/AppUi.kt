@@ -1270,7 +1270,11 @@ private fun ChatScreen(
                             }
                         },
                         onError = { status, detail ->
-                            if (!playbackStop.get()) streamError = status to detail
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
+                                streamError = status to detail
+                            }
                         },
                     )
                 }
@@ -1278,6 +1282,11 @@ private fun ChatScreen(
                 // finishes the queued sentences, then wait for it.
                 audioChan.close()
                 player.join()
+                // A switch can occur while waiting for queued playback to finish.
+                // Do not surface an error or persist a stale voice turn afterward.
+                if (playbackStop.get() ||
+                    voiceConversationRevisionAtStart != voiceConversationRevision ||
+                    voiceCancellation !== cancellation) return@launch
 
                 streamError?.let { (status, detail) ->
                     voiceError = friendlyError(RuntimeException("voice ($status): $detail"))
