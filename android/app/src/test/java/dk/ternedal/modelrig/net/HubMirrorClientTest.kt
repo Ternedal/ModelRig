@@ -75,6 +75,19 @@ class HubMirrorClientTest {
         assertFalse(HubMirrorClient.mayDeliver(true, 7L, 7L, -1L))
     }
 
+    @Test fun signedDisplayDeadlineStartsAtOriginalQueueTime() {
+        val now = 1_700_000_000_000L
+        assertEquals("1700000000", HubMirrorClient.signedTimestamp(now, 0L))
+        assertEquals("1699999999", HubMirrorClient.signedTimestamp(now, 1L))
+        assertEquals("1699999999", HubMirrorClient.signedTimestamp(now, 1_000_000_000L))
+        assertEquals("1699999998", HubMirrorClient.signedTimestamp(now, 1_000_000_001L))
+        assertEquals("1699999975", HubMirrorClient.signedTimestamp(now, 24_100_000_000L))
+        assertEquals("1699999970", HubMirrorClient.signedTimestamp(now, 30_000_000_000L))
+        assertNull(HubMirrorClient.signedTimestamp(now, 30_000_000_001L))
+        assertNull(HubMirrorClient.signedTimestamp(now, -1L))
+        assertNull(HubMirrorClient.signedTimestamp(now, Long.MAX_VALUE))
+    }
+
     @Test fun deterministicSignatureMatchesPythonHmacSha256() {
         val body = "{\"version\":1,\"type\":\"assistant_complete\"," +
             "\"event_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"text\":\"Hej\"}"
