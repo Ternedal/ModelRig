@@ -1,0 +1,67 @@
+name: promote-kaliv-v2.0.16
+
+# One-shot, user-authorized release handoff. The normal build-and-release
+# workflow owns all signing, checksum, attestation, asset and publish gates.
+# Never release on a generic push: only creation of this exact workflow file
+# on this exact versioned release branch can request promotion.
+on:
+  push:
+    branches:
+      - release/v2.0.16-kaliv-voice
+    paths:
+      - .github/workflows/promote-kaliv-v2.0.16.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: promote-kaliv-v2.0.16
+  cancel-in-progress: false
+
+jobs:
+  request-verified-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Verify exact release lineage, version and generated docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "release/v2.0.16-kaliv-voice"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor v2.0.15 HEAD
+          test "$(cat VERSION)" = "2.0.16"
+          python3 scripts/version_tool.py check --tag v2.0.16
+          python3 scripts/current_state.py --check
+          grep -q 'versionCode = 297' android/app/build.gradle.kts
+          grep -q 'requirements-release-voice.txt' .github/workflows/build-and-release.yml
+          echo "Preflight passed for v2.0.16 source $GITHUB_SHA"
+      - name: Create draft tag and dispatch normal signed release pipeline
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v2.0.16
+          # Never rewrite a tag, or alter a version already published.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            actual=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')
+            test "$actual" = "$GITHUB_SHA" || { echo 'Tag points at an unexpected commit'; exit 1; }
+            if gh release view "$TAG" --json isDraft --jq '.isDraft' | grep -qx 'false'; then
+              echo 'Release is already public: refusing to change it'
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --draft \
+              --notes 'Kaliv v2.0.16: fixes stuck voice UI on NDJSON completion; bounded local same-conversation voice recall (blå elefant); cleaner spoken Markdown/URL normalization. Android, Windows desktop, backend and voice-capable worker are version-matched. Cloud voice does not receive prior local conversation history. Device acceptance remains to be confirmed.'
+          fi
+          # A tag created with GITHUB_TOKEN deliberately does not fire a push
+          # workflow. workflow_dispatch is the documented allowed exception.
+          # The existing release workflow builds all assets on the TAG ref and
+          # atomically publishes only after tests, checksums and attestations.
+          gh workflow run build-and-release.yml --ref "$TAG" -f force_full_matrix=true
+          echo "Dispatched signed release workflow for $TAG ($GITHUB_SHA)"
