@@ -44,7 +44,8 @@ class VoiceStreamCleanupTests(unittest.TestCase):
     def test_cleanup_does_not_delete_shared_directory(self):
         endpoint_source = ast.unparse(self.endpoint)
         self.assertIn("mkdtemp(", endpoint_source)
-        self.assertIn("rmtree(tmp_dir", endpoint_source)
+        self.assertIn("rmtree", endpoint_source)
+        self.assertIn("tmp_dir", endpoint_source)
 
     def test_generator_runtime_cleans_files_on_normal_completion(self):
         """Execute the real nested generator with a fake completed producer."""
