@@ -63,6 +63,12 @@ PRODUCER_REPLAY = {
     "end_to_end_latency": ("kaliv_end_to_end_latency_qualifier", None, None),
     "repository_authority": ("kaliv_repository_authority_qualifier", None, None),
 }
+_BODYRIG_SHARED_FIELDS = (
+    "person_id", "person_revision", "assembly_fingerprint", "body_revision",
+    "body_id", "body_package_sha256", "windows_realization_sha256", "quest_realization_sha256",
+)
+_BODYRIG_PHOTO = "bodyrig_photoreal_likeness"
+_BODYRIG_M6 = "bodyrig_digital_twin_m6"
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
     f"{prefix}{number}" for prefix in ("COM", "LPT") for number in range(1, 10)
 }
@@ -220,7 +226,8 @@ def _replay_latency(producer, payload: dict, root: Path) -> tuple[dict, list[dic
     return verdict, verified_sources
 
 
-def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: str, *, root: Path) -> dict:
+def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: str, *,
+                     root: Path) -> tuple[dict, dict | None]:
     try:
         module_name, pin_argument, repository = PRODUCER_REPLAY[gate]
         producer = importlib.import_module(module_name)
@@ -251,13 +258,49 @@ def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: 
         }
         if verified_sources is not None:
             result["verified_source_receipts"] = verified_sources
-        return result
+        # Keep only the bounded fields needed for the later BodyRig link
+        # check, from the same parsed bytes the existing producer validated.
+        body_source = None
+        if gate in {_BODYRIG_PHOTO, _BODYRIG_M6}:
+            body_source = {name: payload[name] for name in _BODYRIG_SHARED_FIELDS}
+            if gate == _BODYRIG_PHOTO:
+                for name in ("canonical_m6_release_id", "canonical_m6_release_file_sha256",
+                             "canonical_m6_release_content_sha256"):
+                    body_source[name] = payload[name]
+            else:
+                body_source.update(
+                    release_id=payload["release_id"],
+                    file_sha256=hashlib.sha256(raw).hexdigest(),
+                    content_sha256=verdict["bodyrig_authority_sha256"],
+                )
+        return result, body_source
     except OverflowError as exc:
         raise AttestationError(
             f"{gate}: producer replay failed: numeric value exceeds supported range"
         ) from exc
     except (ImportError, OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise AttestationError(f"{gate}: producer replay failed: {exc}") from exc
+
+
+def _verify_bodyrig_binding(sources: dict[str, dict]) -> dict:
+    if set(sources) != {_BODYRIG_PHOTO, _BODYRIG_M6}:
+        raise AttestationError("BodyRig source binding requires both replayed sources")
+    photo, m6 = sources[_BODYRIG_PHOTO], sources[_BODYRIG_M6]
+    links = {
+        "canonical_m6_release_id": m6["release_id"],
+        "canonical_m6_release_file_sha256": m6["file_sha256"],
+        "canonical_m6_release_content_sha256": m6["content_sha256"],
+    }
+    for name in _BODYRIG_SHARED_FIELDS:
+        if photo[name] != m6[name]:
+            raise AttestationError(f"BodyRig source binding mismatch: {name}")
+    for name, expected in links.items():
+        if photo[name] != expected:
+            raise AttestationError(f"BodyRig source binding mismatch: {name}")
+    return {
+        "state": "SOURCE_BINDING_VERIFIED_ONLY", "gates": [_BODYRIG_PHOTO, _BODYRIG_M6],
+        **links, "matched_fields": list(_BODYRIG_SHARED_FIELDS), "production_activation": False,
+    }
 
 
 def preflight(manifest: dict, attestations: dict, root: Path, *,
@@ -279,6 +322,7 @@ def preflight(manifest: dict, attestations: dict, root: Path, *,
     checked = []
     verified_artifacts = []
     replayed = []
+    body_sources = {}
     for gate in REQUIRED_GATES:
         item = attestations[gate]
         if not isinstance(item, dict) or set(item) != {"reference", "path", "sha256", "repository", "git_sha"}:
@@ -308,7 +352,12 @@ def preflight(manifest: dict, attestations: dict, root: Path, *,
             # Parse the very bytes that were hashed, without reopening the
             # path after the byte-integrity check (which would introduce a
             # second-read replacement race).
-            replayed.append(_replay_producer(gate, payload, verdict.pinned_repositories, refs[0], root=root))
+            replay_result, body_source = _replay_producer(
+                gate, payload, verdict.pinned_repositories, refs[0], root=root,
+            )
+            replayed.append(replay_result)
+            if body_source is not None:
+                body_sources[gate] = body_source
         checked.append(gate)
         verified_artifacts.append({"gate": gate, **item, "size_bytes": size})
     result = {
@@ -330,6 +379,7 @@ def preflight(manifest: dict, attestations: dict, root: Path, *,
             "verified_gates": verified,
             "not_replayed_gates": [gate for gate in REQUIRED_GATES if gate not in verified],
             "verdicts": replayed,
+            "cross_producer_bindings": [_verify_bodyrig_binding(body_sources)],
         }
     return result
 

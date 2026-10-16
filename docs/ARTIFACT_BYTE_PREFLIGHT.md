@@ -113,17 +113,51 @@ threshold_applied=false; no new latency SLO or fresh measurement is claimed.
 The replay record includes verified_source_receipts with phase, relative path,
 observed SHA-256 and size. Legacy v1 latency verdicts are rejected.
 
+Producer replay also cross-checks the two supplied BodyRig authorities. The
+Photoreal authority must refer to the exact canonical M6 artifact supplied for
+bodyrig_digital_twin_m6. This follows BodyRig's existing
+[Photoreal release builder](https://github.com/Ternedal/BodyRig/blob/8a85597637d0b59947bd179366e27be1bb847c16/bodyrig/digital_twin_photoreal_release.py):
+
+| Photoreal field | Required match |
+| --- | --- |
+| canonical_m6_release_id | M6 authority's canonical release_id. |
+| canonical_m6_release_file_sha256 | SHA-256 of the exact verified M6 source bytes. |
+| canonical_m6_release_content_sha256 | M6 qualifier's recomputed canonical authority-content SHA-256. |
+
+The authorities must also agree exactly on person_id, person_revision,
+assembly_fingerprint, body_revision, body_id, body_package_sha256,
+windows_realization_sha256 and quest_realization_sha256. Both independently
+remain bound to the manifest's BodyRig Git revision by their existing qualifiers.
+Individually qualified authorities with freshly recomputed references still
+fail this cross-check if their identities, realizations or source links differ.
+
+The check retains only the needed fields from the already parsed, verified
+snapshots. It does not reopen either BodyRig artifact. Reformatting the M6 JSON
+preserves its own canonical reference but changes its file hash; the Photoreal
+file-hash claim, release ID and manifest reference must then be recomputed.
+Use the original M6 authority bytes when copying an existing evidence pair.
+
+producer_replay.cross_producer_bindings records the two gate names, matched
+field names, canonical M6 release ID, file/content hashes and
+SOURCE_BINDING_VERIFIED_ONLY. It omits Person/body field values and retains
+production_activation=false. This is an extra consistency check between two of
+the seven supported producers; it does not add another replayed gate, validate
+BodyRig's full underlying M4/M5/platform evidence chain, or establish physical
+origin or human approval.
+
 visionrig_physical_perception, bodyrig_android_live_body and recovery_soak
 are not replayed here. Their canonical validation requires further
 source artifacts, checkout/runtime authority, or other specialized validation.
 The optional producer_replay result always says PARTIAL and complete=false and
-lists verified_gates, not_replayed_gates and bounded per-producer verdict records.
+lists verified_gates, not_replayed_gates, bounded per-producer verdict records
+and the BodyRig cross-producer binding record.
 The top-level byte-only state and both false authority flags are preserved.
 Without the option, byte-only behavior and the existing result shape are kept.
 
-Replay validates only the checks implemented by these existing qualifiers.
-Apart from the three local latency source receipts, it does not retrieve or
-authenticate nested artifacts/evidence references. It does not contact
+Replay reuses the existing qualifiers and the local source-binding checks above.
+Apart from the three local latency source receipts and the link between the
+already supplied BodyRig authorities, it does not retrieve or authenticate
+nested artifacts/evidence references. It does not contact
 live services, rerun physical tests, verify an operator identity, or establish
 that any observations actually occurred. A fabricated but internally consistent
 payload can still pass. Trusted provenance and human approval remain required.
@@ -223,6 +257,10 @@ phases, modified report fields and Boolean types, missing sources, nested path
 escape/symlinks, bounded strict source JSON, cleanup after success/failure, and
 source paths changing after the original verified snapshot was read.
 The tests use temporary files and do not contact rig services or create releases.
+BodyRig cases additionally cover all eight shared identity/realization fields,
+all three M6 links, swapping file/content hashes, individually valid but spliced
+authorities with matching links, M6 reformatting, coherent Unicode identities,
+replaying the original M6 byte snapshot and unchanged default byte-only behavior.
 
 The reusable _tests.yml workflow defines a five-minute step in the existing
 test-windows-tool-isolation job that runs both artifact suites on Python 3.12

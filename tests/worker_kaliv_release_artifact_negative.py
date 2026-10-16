@@ -14,6 +14,11 @@ from unittest.mock import patch
 
 from worker_kaliv_release_artifact_preflight import PreflightFixture, module
 
+BODY_FIELDS = (
+    "person_id", "person_revision", "assembly_fingerprint", "body_revision",
+    "body_id", "body_package_sha256", "windows_realization_sha256", "quest_realization_sha256",
+)
+
 
 class ArtifactNegativeTests(PreflightFixture):
     def test_incomplete_and_extra_gate_sets(self):
@@ -256,6 +261,15 @@ class ProducerReplayFixture(PreflightFixture):
         m6_payload["release_id"] = m6.module._release_id(m6_payload)
         photo_payload = photo._authority()
         photo_payload["bodyrig_revision"] = body_sha
+        for name in BODY_FIELDS:
+            photo_payload[name] = m6_payload[name]
+        photo_payload["canonical_m6_release_id"] = m6_payload["release_id"]
+        photo_payload["canonical_m6_release_file_sha256"] = hashlib.sha256(
+            json.dumps(m6_payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        photo_payload["canonical_m6_release_content_sha256"] = m6.module.qualify(
+            m6_payload, expected_bodyrig_sha=body_sha,
+        )["bodyrig_authority_sha256"]
         photo_payload["release_id"] = photo.module._release_id(photo_payload)
 
         self.payloads = {
@@ -439,6 +453,10 @@ class ArtifactProducerReplayTests(ProducerReplayFixture):
 
     def test_json_whitespace_and_key_order_do_not_change_canonical_reference(self):
         for gate, payload in self.payloads.items():
+            # M6 bytes are also pinned by Photoreal. Its formatting changes
+            # require a new Photoreal file-hash claim, covered separately.
+            if gate == "bodyrig_digital_twin_m6":
+                continue
             raw = json.dumps(payload, indent=3, sort_keys=False).encode("utf-8") + b"\n"
             self.write_raw(gate, raw)
         self.assertEqual(len(self.replay()["producer_replay"]["verified_gates"]), 7)
@@ -573,6 +591,148 @@ class ArtifactProducerReplayTests(ProducerReplayFixture):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(module.AttestationError, "must be a boolean"):
                     module.preflight(self.manifest, self.attestations, self.root, replay_producers=value)
+
+
+class ArtifactBodyRigBindingTests(ProducerReplayFixture):
+    PHOTO = "bodyrig_photoreal_likeness"
+    M6 = "bodyrig_digital_twin_m6"
+
+    def bind(self, gate, payload):
+        import kaliv_bodyrig_photoreal_qualifier as photo
+        import kaliv_bodyrig_digital_twin_m6_qualifier as m6
+
+        payload = copy.deepcopy(payload)
+        producer = photo if gate == self.PHOTO else m6
+        payload["release_id"] = producer._release_id(payload)
+        reference = self.qualifiers[gate](payload)["release_evidence_ref"]
+        self.write_payload(gate, payload)
+        self.attestations[gate]["reference"] = reference
+        self.manifest["gates"][gate]["evidence_refs"] = [reference]
+        return payload
+
+    def linked_photo(self, m6, *, copy_shared=False):
+        photo = copy.deepcopy(self.payloads[self.PHOTO])
+        if copy_shared:
+            for name in BODY_FIELDS:
+                photo[name] = m6[name]
+        photo["canonical_m6_release_id"] = m6["release_id"]
+        raw = (self.root / self.attestations[self.M6]["path"]).read_bytes()
+        photo["canonical_m6_release_file_sha256"] = hashlib.sha256(raw).hexdigest()
+        photo["canonical_m6_release_content_sha256"] = self.qualifiers[self.M6](m6)["bodyrig_authority_sha256"]
+        return photo
+
+    def test_linked_pair_reports_only_bounded_nonactivating_binding_metadata(self):
+        result = self.replay()
+        bindings = result["producer_replay"]["cross_producer_bindings"]
+        photo = self.payloads[self.PHOTO]
+        self.assertEqual(bindings, [{
+            "state": "SOURCE_BINDING_VERIFIED_ONLY", "gates": [self.PHOTO, self.M6],
+            "canonical_m6_release_id": photo["canonical_m6_release_id"],
+            "canonical_m6_release_file_sha256": photo["canonical_m6_release_file_sha256"],
+            "canonical_m6_release_content_sha256": photo["canonical_m6_release_content_sha256"],
+            "matched_fields": list(BODY_FIELDS), "production_activation": False,
+        }])
+        self.assertNotEqual(photo["canonical_m6_release_file_sha256"], photo["canonical_m6_release_content_sha256"])
+        for name in BODY_FIELDS:
+            self.assertNotIn(photo[name], json.dumps(bindings))
+        self.assertIs(result["release_ready"], False)
+        self.assertIs(result["production_activation"], False)
+        self.assertIs(result["producer_replay"]["complete"], False)
+        self.assertEqual(len(result["producer_replay"]["verified_gates"]), 7)
+
+    def test_individually_valid_photoreal_cannot_describe_a_different_body(self):
+        for name in BODY_FIELDS:
+            with self.subTest(field=name):
+                photo = copy.deepcopy(self.payloads[self.PHOTO])
+                photo[name] = "f" * 64 if name.endswith("_sha256") or name == "assembly_fingerprint" else photo[name] + "-other"
+                self.bind(self.PHOTO, photo)
+                with self.assertRaisesRegex(module.AttestationError, f"BodyRig source binding mismatch: {name}"):
+                    self.replay()
+
+    def test_each_m6_link_must_match_actual_release_bytes_and_content(self):
+        original = self.payloads[self.PHOTO]
+        for name, value in (
+            ("canonical_m6_release_id", "dtrelease-" + "f" * 32),
+            ("canonical_m6_release_file_sha256", original["canonical_m6_release_content_sha256"]),
+            ("canonical_m6_release_content_sha256", original["canonical_m6_release_file_sha256"]),
+        ):
+            with self.subTest(field=name):
+                photo = copy.deepcopy(original)
+                photo[name] = value
+                self.bind(self.PHOTO, photo)
+                with self.assertRaisesRegex(module.AttestationError, f"BodyRig source binding mismatch: {name}"):
+                    self.replay()
+                completed = self.cli(replay_producers=True)
+                self.assertInvalid(completed, f"BodyRig source binding mismatch: {name}")
+                self.assertNotIn("producer_replay", json.loads(completed.stdout))
+
+    def test_rebinding_all_three_links_cannot_hide_spliced_m6_identity(self):
+        for name in BODY_FIELDS:
+            with self.subTest(field=name):
+                m6 = copy.deepcopy(self.payloads[self.M6])
+                m6[name] = "f" * 64 if name.endswith("_sha256") or name == "assembly_fingerprint" else m6[name] + "-other"
+                m6 = self.bind(self.M6, m6)
+                self.bind(self.PHOTO, self.linked_photo(m6))
+                with self.assertRaisesRegex(module.AttestationError, f"BodyRig source binding mismatch: {name}"):
+                    self.replay()
+
+    def test_m6_formatting_preserves_its_ref_but_requires_a_new_photoreal_file_claim(self):
+        m6 = self.payloads[self.M6]
+        old_m6_ref = self.attestations[self.M6]["reference"]
+        old_photo_ref = self.attestations[self.PHOTO]["reference"]
+        raw = json.dumps(dict(reversed(list(m6.items()))), indent=2).encode("utf-8") + b"\n"
+        (self.root / self.attestations[self.M6]["path"]).write_bytes(raw)
+        with self.assertRaisesRegex(module.AttestationError, "artifact byte hash mismatch"):
+            self.replay()
+        self.write_raw(self.M6, raw)
+        with self.assertRaisesRegex(module.AttestationError, "canonical_m6_release_file_sha256"):
+            self.replay()
+        self.bind(self.PHOTO, self.linked_photo(m6))
+        result = self.replay()
+        self.assertEqual(self.attestations[self.M6]["reference"], old_m6_ref)
+        self.assertNotEqual(self.attestations[self.PHOTO]["reference"], old_photo_ref)
+        self.assertEqual(result["producer_replay"]["cross_producer_bindings"][0]["canonical_m6_release_file_sha256"], hashlib.sha256(raw).hexdigest())
+
+    def test_coherent_new_unicode_identity_and_references_remain_valid(self):
+        m6 = copy.deepcopy(self.payloads[self.M6])
+        m6.update(person_id="person-æøå-\U0001f680", person_revision="person-r0002", body_package_sha256="e" * 64)
+        m6 = self.bind(self.M6, m6)
+        photo = self.bind(self.PHOTO, self.linked_photo(m6, copy_shared=True))
+        result = self.replay()
+        binding = result["producer_replay"]["cross_producer_bindings"][0]
+        self.assertEqual(binding["canonical_m6_release_id"], m6["release_id"])
+        self.assertEqual(binding["canonical_m6_release_content_sha256"], photo["canonical_m6_release_content_sha256"])
+        self.assertNotIn(m6["person_id"], json.dumps(result, ensure_ascii=False))
+        self.assertIs(result["production_activation"], False)
+
+    def test_binding_uses_verified_m6_snapshot_without_reopening_source_path(self):
+        from contextlib import contextmanager
+
+        relative = self.attestations[self.M6]["path"]
+        expected_hash = self.attestations[self.M6]["sha256"]
+        real_open = module._open_artifact
+        opened = []
+
+        @contextmanager
+        def replace_after_snapshot(root, parts):
+            opened.append("/".join(parts))
+            with real_open(root, parts) as source:
+                yield source
+            if "/".join(parts) == relative:
+                (self.root / relative).write_bytes(b"replaced after verification")
+
+        with patch.object(module, "_open_artifact", replace_after_snapshot):
+            result = self.replay()
+        self.assertEqual(opened.count(relative), 1)
+        self.assertEqual(result["producer_replay"]["cross_producer_bindings"][0]["canonical_m6_release_file_sha256"], expected_hash)
+
+    def test_default_byte_only_mode_does_not_claim_or_enforce_source_binding(self):
+        photo = copy.deepcopy(self.payloads[self.PHOTO])
+        photo["canonical_m6_release_id"] = "dtrelease-" + "f" * 32
+        self.bind(self.PHOTO, photo)
+        result = self.verify()
+        self.assertNotIn("producer_replay", result)
+        self.assertIs(result["release_ready"], False)
 
 
 class ArtifactLatencyReplayTests(ProducerReplayFixture):
