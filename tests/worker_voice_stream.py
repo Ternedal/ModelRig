@@ -115,6 +115,45 @@ def run():
     finally:
         restore()
 
+    # Native ASR/TTS calls execute in threads.  Cancelling the request must
+    # wait for an in-flight native WAV writer before the owner removes its dir.
+    async def verify_native_cancellation():
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def native_writer():
+            started.set()
+            release.wait(timeout=5)
+            finished.set()
+            return 42
+
+        task = asyncio.create_task(vp._run_blocking_until_finished(native_writer))
+        try:
+            if not await asyncio.to_thread(started.wait, 3):
+                return False, False, False
+            task.cancel()
+            await asyncio.sleep(0.05)
+            waited_for_writer = not task.done()
+        finally:
+            release.set()
+
+        cancelled = False
+        try:
+            await task
+        except asyncio.CancelledError:
+            cancelled = True
+        return waited_for_writer, cancelled, finished.is_set()
+
+    waited_for_writer, cancelled, writer_finished = asyncio.run(
+        verify_native_cancellation()
+    )
+    check(waited_for_writer, "cancelled voice coroutine waits for active native WAV writer")
+    check(cancelled, "voice coroutine still propagates cancellation after thread finishes")
+    check(writer_finished, "native writer exits before cancelled voice task finishes")
+
     print(f"\n===== VOICE STREAM: {passed} passed, {failed} failed =====")
     sys.exit(1 if failed else 0)
 

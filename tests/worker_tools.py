@@ -628,8 +628,17 @@ check("asyncio.to_thread" in src_c, "T28: confirm() -- which executes -- is offl
 # milliseconds: whisper is blocking CUDA work.
 from app import voice_pipeline as _vp  # noqa: E402
 src_v = _i.getsource(_vp.converse)
-check("to_thread" in src_v and "transcribe_wav" in src_v,
-      "T28: ASR is offloaded from the event loop")
+# The cancellation-safe voice path wraps asyncio.to_thread in a shielded
+# helper so native CUDA work can release its WAV handles before teardown.
+# Verify the actual helper implementation rather than requiring a literal
+# to_thread call inside converse() itself.
+src_voice_helper = _i.getsource(_vp._run_blocking_until_finished)
+check(
+    "_run_blocking_until_finished(voice_asr.transcribe_wav" in src_v
+    and "asyncio.to_thread" in src_voice_helper
+    and "asyncio.shield" in src_voice_helper,
+    "T28: ASR is offloaded from the event loop with cancellation-safe cleanup",
+)
 check("_ASR_LOCK" in src_v and "_TTS_LOCK" in src_v,
       "T28: ASR and TTS stay serialized -- the loop used to serialize them by accident")
 
