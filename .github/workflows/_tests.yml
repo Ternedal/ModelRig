@@ -717,6 +717,16 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Offline artifact preflight and producer replay on Windows
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python tests/worker_kaliv_release_artifact_preflight.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/worker_kaliv_release_artifact_negative.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install worker deps
         run: pip install -r worker/requirements.txt
 

@@ -676,6 +676,8 @@ else:
 check(retarget_rejected, "task-bound registry rejects cross-task retargeting")
 
 native_windows_contracts = (
+    "tests/worker_kaliv_release_artifact_preflight.py",
+    "tests/worker_kaliv_release_artifact_negative.py",
     "tests/support/windows_job_contract.py",
     "tests/support/windows_job_close_contract.py",
     "tests/support/windows_bounded_subprocess_contract.py",

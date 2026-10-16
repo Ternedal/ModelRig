@@ -106,6 +106,35 @@ class ArtifactNegativeTests(PreflightFixture):
             with self.assertRaisesRegex(module.AttestationError, "reparse point"):
                 self.verify()
 
+    @unittest.skipUnless(os.name == "nt", "requires native Windows directory junctions")
+    def test_native_windows_directory_junction_is_rejected_before_open(self):
+        original_bytes = self.path.read_bytes()
+        # Fixed relative cmd arguments avoid interpreting the operator's
+        # temporary-directory spelling as command text. Both targets stay
+        # inside this test's private temporary directory.
+        for relative in ("junction-target", r"..\outside-junction-target"):
+            with self.subTest(target=relative):
+                target = self.root / relative
+                target.mkdir()
+                target_file = target / self.path.name
+                target_file.write_bytes(original_bytes)
+                completed = subprocess.run(
+                    ["cmd.exe", "/d", "/c", "mklink", "/J", "junction", relative],
+                    cwd=self.root, capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                junction = self.root / "junction"
+                try:
+                    self.assertTrue(junction.is_junction())
+                    self.item["path"] = f"junction/{self.path.name}"
+                    with patch.object(module, "_open_artifact", side_effect=AssertionError("junction opened")):
+                        with self.assertRaisesRegex(module.AttestationError, "reparse point"):
+                            self.verify()
+                    self.assertInvalid(self.cli(), "reparse point")
+                finally:
+                    junction.rmdir()
+                self.assertEqual(target_file.read_bytes(), original_bytes)
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO files unavailable")
     def test_named_pipe_is_rejected_without_blocking(self):
         self.path.unlink()
@@ -696,4 +725,3 @@ class ArtifactLatencyReplayTests(ProducerReplayFixture):
 
 if __name__ == "__main__":
     unittest.main()
-

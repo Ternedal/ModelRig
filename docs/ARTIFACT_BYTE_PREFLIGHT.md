@@ -6,8 +6,9 @@ structural release manifest. Optional producer replay revalidates seven supporte
 producers with their existing qualifiers. The tool does not collect
 physical evidence, establish provenance, approve a release, or activate services.
 
-It is intentionally not integrated into release workflows. Development of this
-tool must leave the active release candidate, tags, assets and workers unchanged.
+It is not a release-authorization or publication step. Reusable CI runs only its
+synthetic regression suites. Development of this tool must leave the active
+release candidate, tags, assets and workers unchanged.
 
 ## Invocation
 
@@ -198,6 +199,23 @@ escape/symlinks, bounded strict source JSON, cleanup after success/failure, and
 source paths changing after the original verified snapshot was read.
 The tests use temporary files and do not contact rig services or create releases.
 
-Linux execution and the path-based fallback can be checked locally. The reparse
-attribute test simulates the Windows flag; it does not substitute for running on
-Windows. Physical evidence and Windows filesystem acceptance remain separate.
+The reusable _tests.yml workflow defines a five-minute step in the existing
+test-windows-tool-isolation job that runs both artifact suites on Python 3.12
+before worker dependencies are installed. Each command's exit code is checked;
+failed artifact validation cannot be hidden by a later successful command.
+This extends the existing job without adding a job, trigger, or release action.
+The test-coverage contract also requires both artifact suites to remain wired.
+
+Linux execution and the path-based fallback can be checked locally. The portable
+reparse-attribute test simulates the Windows flag. A separate Windows-only case
+creates real directory junctions with
+[mklink /J](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/mklink), covering targets inside and
+outside the artifact root. The API must reject each junction before opening the
+artifact, the CLI must report INVALID, and the target bytes must remain unchanged.
+The case skips explicitly on other operating systems; creating a junction must
+succeed on Windows or the test fails. All junctions and target files belong to
+the test's private temporary directory.
+
+These are test definitions and CI wiring, not evidence that this commit passed
+on Windows. Windows filesystem acceptance remains pending until the actual
+Windows job passes on the exact commit. Physical evidence remains separate.
