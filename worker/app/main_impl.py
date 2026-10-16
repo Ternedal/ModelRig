@@ -28,6 +28,7 @@ import uuid
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from . import ollama_client as oc
 from . import rag
@@ -1478,6 +1479,12 @@ async def voice_converse(req: ConverseReq) -> dict:
         raise HTTPException(status_code=502, detail=f"LLM error: {e}")
 
 
+class VoiceContextMessage(BaseModel):
+    """Bounded prior user/assistant turn, never an authority-bearing system role."""
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=512)
+
+
 class ConverseUploadReq(BaseModel):
     # base64-encoded audio bytes (16 kHz mono WAV) uploaded from the phone.
     # The existing /voice/converse takes a rig file path, useless over the
@@ -1486,6 +1493,9 @@ class ConverseUploadReq(BaseModel):
     audio_base64: str
     language: str = "da"
     model: str | None = None
+    # Limited to the existing conversation; explicit durable Memory 4 remains
+    # independently gated and is not bypassed by this transient voice history.
+    context_messages: list[VoiceContextMessage] = Field(default_factory=list, max_length=12)
     # Optional: answer the spoken question with a CLOUD model instead of the
     # rig's local Ollama. ASR and TTS always stay on the rig (that's where those
     # models live) -- only the LLM step moves. Lets a spoken question reach a
@@ -1516,6 +1526,7 @@ async def voice_converse_upload(req: ConverseUploadReq) -> dict:
         result = await voice_pipeline.converse(
             in_path, language=req.language, model=req.model, out_dir=tmp_dir,
             llm_base_url=req.llm_base_url, llm_api_key=req.llm_api_key,
+            context_messages=[turn.model_dump() for turn in req.context_messages],
         )
     except voice_pipeline.VoiceBackendMissing as e:
         _logger.info("level=warn voice=converse_upload backend_missing=%r", str(e))
@@ -1615,6 +1626,7 @@ async def voice_converse_stream(req: ConverseUploadReq):
             result = await voice_pipeline.converse(
                 in_path, language=req.language, model=req.model, out_dir=tmp_dir,
                 llm_base_url=req.llm_base_url, llm_api_key=req.llm_api_key,
+                context_messages=[turn.model_dump() for turn in req.context_messages],
                 on_transcript=on_transcript, on_chunk=on_chunk,
             )
             await queue.put({

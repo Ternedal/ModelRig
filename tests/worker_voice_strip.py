@@ -61,6 +61,17 @@ eq("### Overskrift", "Overskrift", "heading marker dropped")
 eq("- punkt et", "punkt et", "bullet dropped")
 eq("[ModelRig](https://x.dev)", "ModelRig", "link text kept, url dropped")
 
+# --- tokens that TTS previously spelled aloud -------------------------------
+eq("Det er ~~forkert~~ rigtigt.", "Det er forkert rigtigt.",
+   "strikethrough markers stripped")
+eq("Se https://example.org/path?x=123 for detaljer", "Se for detaljer",
+   "bare URL omitted rather than spelled out")
+eq("Husk testordet **blå elefant**.", "Husk testordet blå elefant.",
+   "markdown around the Danish memory test phrase")
+eq("Vores svar er ***vigtigt***!", "Vores svar er vigtigt!",
+   "triple emphasis does not spell out asterisks")
+eq("2 * 3 = 6", "2 * 3 = 6", "ordinary mathematics still preserved")
+
 # --- combined ---
 eq("**Vigtigt** 🎯 se her", "Vigtigt se her", "markdown + emoji together")
 
