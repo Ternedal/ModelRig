@@ -1316,17 +1316,25 @@ private fun ChatScreen(
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
                 }
+                // Read and publish Compose navigation state on Main, not IO.
+                // Capture the target before dispatching any blocking DB work.
+                val stillCurrent = {
+                    !playbackStop.get() &&
+                        voiceConversationRevisionAtStart == voiceConversationRevision &&
+                        voiceCancellation === cancellation
+                }
+                if (!stillCurrent()) return@launch
+                val existingCid = voiceConversationIdAtStart
+                val cid = if (existingCid != null) existingCid else withContext(Dispatchers.IO) {
+                    db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
+                }
+                // The DB call above can suspend while the user navigates away.
+                if (!stillCurrent()) return@launch
+                if (existingCid == null) {
+                    convId = cid
+                    onConvChanged(cid)
+                }
                 withContext(Dispatchers.IO) {
-                    // Navigation during the network turn must not persist its answer
-                    // into a different conversation selected in the meantime.
-                    if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
-                    val cid = voiceConversationIdAtStart
-                        ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
-                    if (voiceConversationIdAtStart == null) {
-                        if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
-                        convId = cid
-                        onConvChanged(cid)
-                    }
                     if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
                 }
