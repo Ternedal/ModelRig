@@ -1495,6 +1495,7 @@ class ConverseUploadReq(BaseModel):
     # used for that single request, and is never written to disk here.
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    history: list[dict[str, str]] | None = None
 
 
 @app.post("/voice/converse/upload")
@@ -1516,6 +1517,7 @@ async def voice_converse_upload(req: ConverseUploadReq) -> dict:
         result = await voice_pipeline.converse(
             in_path, language=req.language, model=req.model, out_dir=tmp_dir,
             llm_base_url=req.llm_base_url, llm_api_key=req.llm_api_key,
+            history=req.history,
         )
     except voice_pipeline.VoiceBackendMissing as e:
         _logger.info("level=warn voice=converse_upload backend_missing=%r", str(e))
@@ -1611,6 +1613,7 @@ async def voice_converse_stream(req: ConverseUploadReq):
             result = await voice_pipeline.converse(
                 in_path, language=req.language, model=req.model, out_dir=tmp_dir,
                 llm_base_url=req.llm_base_url, llm_api_key=req.llm_api_key,
+            history=req.history,
                 on_transcript=on_transcript, on_chunk=on_chunk,
             )
             await queue.put({
