@@ -49,6 +49,7 @@ import dk.ternedal.modelrig.net.VoiceCapability
 import dk.ternedal.modelrig.net.WorkerCapabilities
 import dk.ternedal.modelrig.net.IngestCapability
 import dk.ternedal.modelrig.net.ModelRigClient
+import dk.ternedal.modelrig.voice.VoiceTurnCancellation
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -959,7 +960,9 @@ private fun ChatScreen(
     //                   AudioTrack write, so the flag is what actually stops
     //                   the sound.
     var voiceJob by remember { mutableStateOf<Job?>(null) }
-    val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    // One cancellation controller per spoken turn: unlike cancelling a Job,
+    // it also aborts the blocking OkHttp voice HTTP request.
+    var voiceCancellation by remember { mutableStateOf<VoiceTurnCancellation?>(null) }
     var speaking by remember { mutableStateOf(false) }
     var showVoice by remember { mutableStateOf(false) }
     // Skaerm 13: rig-liveness. null = ukendt endnu; loekken auto-retry'er
@@ -1152,13 +1155,16 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        val cancellation = VoiceTurnCancellation()
+        voiceCancellation = cancellation
+        val playbackStop = cancellation.stopFlag
         voiceBusy = true; voiceError = null; wasInterrupted = false
-        speaking = false; playbackStop.set(false)
+        speaking = false
         voiceJob = scope.launch {
             // Audio chunks flow from the network reader (producer) to the player
-            // (consumer) through this channel. Unlimited: sentences are small and
-            // we never want the reader to block on a slow player.
-            val audioChan = Channel<Pair<ByteArray, String?>>(Channel.UNLIMITED)
+            // (consumer) through a bounded channel. If playback lags behind
+            // generation, we must not accumulate unbounded decoded audio in RAM.
+            val audioChan = Channel<Pair<ByteArray, String?>>(Channel.BUFFERED)
             // The rig's body follows what the phone plays: report start and end
             // of each sentence against its utterance id (slice B sync).
             val bodyReporter = dk.ternedal.modelrig.net.BodyPlaybackReporter(store.baseUrl.orEmpty(), store.token.orEmpty())
@@ -1166,8 +1172,7 @@ private fun ChatScreen(
             var transcriptShown = false
             var replyIdx = -1
             val replyBuilder = StringBuilder()
-            var usedModel: String? = null
-            var usedCloud = false
+            var completedReply: String? = null
             var streamError: Pair<Int, String>? = null
 
             // Player: pull decoded WAVs and play each in order via playWav, which
@@ -1178,13 +1183,13 @@ private fun ChatScreen(
             val player = launch(Dispatchers.IO) {
                 for ((bytes, utteranceId) in audioChan) {
                     if (playbackStop.get()) break
-                    speaking = true
+                    if (voiceCancellation === cancellation) speaking = true
                     bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
                     bodyReporter.report(utteranceId, "ended")
-                    if (cut) { wasInterrupted = true; playbackStop.set(true); break }
+                    if (cut) { wasInterrupted = true; cancellation.stop(); break }
                 }
-                speaking = false
+                if (voiceCancellation === cancellation) speaking = false
             }
             // Poll the barge-in detector at 5 Hz to drive the on-screen RMS meter
             // (liveRms / peakRms). The streaming rewrite has to carry this over
@@ -1209,46 +1214,58 @@ private fun ChatScreen(
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
-                        registerCall = { c -> activeCall = c },
+                        registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
-                            val tt = t.trim()
-                            if (tt.isNotEmpty() && !transcriptShown) {
-                                transcriptShown = true
-                                transcriptText = tt
-                                voiceTranscript = tt
-                                // messages is a SnapshotStateList -- safe to mutate
-                                // from this IO thread; the recomposer picks it up.
-                                // Set replyIdx synchronously (the callbacks run in
-                                // order on the reader thread) so the first chunk
-                                // can reference it.
-                                messages.add(Msg("user", tt))
-                                replyIdx = messages.size
-                                // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
-                                messages.add(Msg("assistant", "", streaming = true))
+                            if (!playbackStop.get()) {
+                                val tt = t.trim()
+                                if (tt.isNotEmpty() && !transcriptShown) {
+                                    transcriptShown = true
+                                    transcriptText = tt
+                                    voiceTranscript = tt
+                                    // messages is a SnapshotStateList -- safe to mutate
+                                    // from this IO thread; the recomposer picks it up.
+                                    // Set replyIdx synchronously (the callbacks run in
+                                    // order on the reader thread) so the first chunk
+                                    // can reference it.
+                                    messages.add(Msg("user", tt))
+                                    replyIdx = messages.size
+                                    // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
+                                    messages.add(Msg("assistant", "", streaming = true))
+                                }
                             }
                         },
                         onChunk = { _, text, chunkB64, utteranceId ->
-                            if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
-                            replyBuilder.append(text.trim())
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
-                            }
-                            if (chunkB64.isNotEmpty() && !playbackStop.get()) {
-                                val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
-                                audioChan.trySend(bytes to utteranceId)
+                            if (!playbackStop.get()) {
+                                if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
+                                replyBuilder.append(text.trim())
+                                if (replyIdx in messages.indices) {
+                                    messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
+                                }
+                                if (chunkB64.isNotEmpty()) {
+                                    val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
+                                    if (audioChan.trySend(bytes to utteranceId).isFailure) {
+                                        // Bounded queue is full or closed: never silently drop
+                                        // sentences and play an incomplete assistant reply.
+                                        throw IllegalStateException("stemmeafspilning kunne ikke følge med")
+                                    }
+                                }
                             }
                         },
                         onDone = { reply, m, cloud ->
-                            usedModel = m; usedCloud = cloud
-                            val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(
-                                    text = finalText,
-                                    streaming = false, voiceModel = m, voiceViaCloud = cloud,
-                                )
+                            if (!playbackStop.get()) {
+                                val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
+                                completedReply = finalText
+                                if (replyIdx in messages.indices) {
+                                    messages[replyIdx] = messages[replyIdx].copy(
+                                        text = finalText,
+                                        streaming = false, voiceModel = m, voiceViaCloud = cloud,
+                                    )
+                                }
                             }
                         },
-                        onError = { status, detail -> streamError = status to detail },
+                        onError = { status, detail ->
+                            if (!playbackStop.get()) streamError = status to detail
+                        },
                     )
                 }
                 // The network stream is done; close the channel so the player
@@ -1266,7 +1283,7 @@ private fun ChatScreen(
                 // list). If the reply is empty (e.g. all-markup), still persist
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
-                val finalReply = replyBuilder.toString().trim()
+                val finalReply = (completedReply ?: replyBuilder.toString()).trim()
                 if (finalReply.isEmpty() && replyIdx in messages.indices &&
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
@@ -1279,22 +1296,42 @@ private fun ChatScreen(
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
-                playbackStop.set(true)
+                cancellation.stop()
                 audioChan.close()
                 throw e
             } catch (e: Exception) {
-                voiceError = e.message ?: "stemme-fejl"
+                // A user-requested Stop intentionally closes OkHttp; its
+                // IOException is not an error to show in the voice overlay.
+                if (!playbackStop.get()) voiceError = e.message ?: "stemme-fejl"
                 audioChan.close()
             } finally {
-                activeCall = null
+                cancellation.clear()
+                // A cancelled stream may have inserted an assistant bubble
+                // before receiving its final onDone event. Never leave that
+                // bubble permanently marked as "streaming".
+                if (replyIdx in messages.indices) {
+                    val partial = messages[replyIdx]
+                    if (partial.role == "assistant" && partial.streaming) {
+                        if (partial.text.isBlank()) {
+                            messages.removeAt(replyIdx)
+                        } else {
+                            messages[replyIdx] = partial.copy(streaming = false)
+                        }
+                    }
+                }
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
                 // barge-in attempt. liveRms resets to 0 (nothing playing now).
                 detector?.let { liveRms = 0.0; peakRms = it.peakRms }
-                speaking = false
-                voiceBusy = false
-                voiceJob = null
+                // Only the owner of the currently active turn can reset its
+                // UI state; a late cancelled job must not clear a newer turn.
+                if (voiceCancellation === cancellation) {
+                    voiceCancellation = null
+                    speaking = false
+                    voiceBusy = false
+                    voiceJob = null
+                }
             }
         }
     }
@@ -1305,7 +1342,8 @@ private fun ChatScreen(
      * first would leave the audio playing until the WAV ran out.
      */
     fun stopVoiceTurn() {
-        playbackStop.set(true)
+        // Stop playback first, then the blocking HTTP read, then coroutine work.
+        voiceCancellation?.stop()
         voiceJob?.cancel()
     }
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->

@@ -1,0 +1,125 @@
+name: voice-worker-package
+
+# A tag-free Windows packaging test. The normal release workflow runs only
+# after a v* tag, so PR CI previously could not detect a core-only worker EXE.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-and-release.yml"
+      - ".github/workflows/voice-worker-package.yml"
+      - "worker/**"
+      - "scripts/stamp_build_identity.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: voice-worker-package-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frozen-voice-worker:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      # On pull_request, default checkout is GitHub's synthetic merge SHA.
+      # Physical evidence must use the real candidate HEAD instead.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Build the exact release worker with voice dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -r worker/requirements.txt -r worker/requirements-release-voice.txt pyinstaller
+          # GITHUB_SHA is the synthetic PR merge SHA unless overridden.
+          # Stamp the checked-out exact candidate SHA in the frozen EXE.
+          $env:GITHUB_SHA = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $checkedOut = (git rev-parse HEAD).Trim()
+          if ($checkedOut -ne $env:GITHUB_SHA) { throw "Candidate checkout identity mismatch" }
+          python scripts/stamp_build_identity.py
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths worker --paths . --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
+
+      - name: Verify CUDA DLL discovery contract on Windows
+        shell: pwsh
+        run: python tests/worker_voice_cuda_dll_dirs.py
+
+      - name: Check ASR and TTS inside the frozen Windows worker
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          $worker = Start-Process -FilePath ".\dist\modelrig-worker-windows-x64.exe" -PassThru -NoNewWindow
+          try {
+            $health = $null
+            foreach ($i in 1..60) {
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:8099/healthz" -TimeoutSec 2
+                break
+              } catch {
+                if ($worker.HasExited) {
+                  throw "Frozen worker exited before healthz (exit code $($worker.ExitCode))"
+                }
+                Start-Sleep -Seconds 2
+              }
+            }
+            if (-not $health -or $health.service -ne "modelrig-worker") {
+              throw "Frozen worker failed to start on port 8099"
+            }
+            $caps = Invoke-RestMethod -Uri "http://127.0.0.1:8099/capabilities" -TimeoutSec 10
+            if ($caps.asr -ne $true -or $caps.tts -ne $true) {
+              throw "Core-only worker would ship: $($caps | ConvertTo-Json -Compress)"
+            }
+            $asr = Invoke-RestMethod -Uri "http://127.0.0.1:8099/voice/asr/status" -TimeoutSec 10
+            $tts = Invoke-RestMethod -Uri "http://127.0.0.1:8099/voice/tts/status" -TimeoutSec 10
+            if ($asr.available -ne $true -or $tts.available -ne $true) {
+              throw "Voice endpoints unavailable: ASR=$($asr | ConvertTo-Json -Compress); TTS=$($tts | ConvertTo-Json -Compress)"
+            }
+            # Physical evidence must identify the *exact* source commit and
+            # executable hash, not the synthetic PR merge commit.
+            $full = Invoke-RestMethod -Uri "http://127.0.0.1:8099/health/full" -TimeoutSec 20
+            $expectedCommit = "${{ github.event.pull_request.head.sha || github.sha }}"
+            $expectedHash = (Get-FileHash -Algorithm SHA256 "dist/modelrig-worker-windows-x64.exe").Hash.ToLowerInvariant()
+            if ($full.build.frozen -ne $true -or $full.build.commit_sha -ne $expectedCommit) {
+              throw "Frozen worker identity mismatch: expected $expectedCommit; actual $($full.build | ConvertTo-Json -Compress)"
+            }
+            if ($full.build.artifact_sha256 -ne $expectedHash) {
+              throw "Frozen worker artifact hash mismatch: expected $expectedHash; actual $($full.build.artifact_sha256)"
+            }
+            Write-Host "FROZEN WORKER VOICE PACKAGE PASS: ASR and TTS imports and endpoints available; exact commit + EXE SHA-256 verified."
+            Write-Host "NOT PROVEN: CUDA on RTX 3060, model download, real Danish ASR, audible TTS, Android E2E."
+          }
+          finally {
+            if ($worker -and -not $worker.HasExited) {
+              & taskkill.exe /PID $worker.Id /T /F 2>&1 | Out-Null
+            }
+          }
+
+      # Keep the successfully smoke-tested EXE available for an isolated
+      # physical rig test BEFORE any tag, release or production update.
+      # This is a GitHub Actions artifact, not a published release asset.
+      - name: Record exact candidate worker checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/modelrig-worker-windows-x64.exe"
+          if (-not (Test-Path $exe)) { throw "Missing smoke-tested frozen worker" }
+          $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()
+          "$hash  modelrig-worker-windows-x64.exe" | Set-Content -Encoding ascii dist/WORKER_SHA256.txt
+          "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content -Encoding ascii dist/CANDIDATE_COMMIT.txt
+
+      - name: Upload smoke-tested worker for isolated physical acceptance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kaliv-voice-worker-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            dist/modelrig-worker-windows-x64.exe
+            dist/WORKER_SHA256.txt
+            dist/CANDIDATE_COMMIT.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

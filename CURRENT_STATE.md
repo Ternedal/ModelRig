@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 2.0.14
+**Version:** 2.0.15
 
 ## Tools the model can see
 
@@ -438,6 +438,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_unit.py`
 - `tests/worker_vision.py`
 - `tests/worker_voice_baseline.py`
+- `tests/worker_voice_cuda_dll_dirs.py`
 - `tests/worker_voice_stream.py`
 - `tests/worker_voice_strip.py`
 - `tests/worker_voice_tts_empty_synthesis.py`
@@ -537,6 +538,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_proof_scope_git_fail_closed.py`
 - `tests/workflow_ps1_encoding.py`
 - `tests/workflow_release.py`
+- `tests/workflow_release_voice_package.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_repository_authority.py`
 - `tests/workflow_rig_preflight.py`

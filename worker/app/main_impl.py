@@ -1572,15 +1572,19 @@ async def voice_converse_stream(req: ConverseUploadReq):
     cloud models. ASR/TTS stay local; only the LLM step may go to cloud.
     """
     from . import voice_pipeline
+    import shutil
     import base64, tempfile, os as _os, json as _json, asyncio as _asyncio, time as _time
     try:
         raw = base64.b64decode(req.audio_base64)
     except Exception:
         raise HTTPException(status_code=400, detail="audio_base64 is not valid base64")
-    tmp_dir = tempfile.mkdtemp(prefix="alva_voice_stream_")
+    tmp_dir = tempfile.mkdtemp(prefix="kaliv_voice_stream_")
     in_path = _os.path.join(tmp_dir, "input.wav")
     with open(in_path, "wb") as f:
         f.write(raw)
+    if len(raw) < 44 or raw[:4] not in (b"RIFF", b"RF64") or raw[8:12] != b"WAVE":
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="Expected non-empty WAV audio in audio_base64")
 
     # A queue bridges the pipeline's callbacks (producer) to the NDJSON response
     # (consumer). None is the sentinel that the producer has finished.
@@ -1634,7 +1638,23 @@ async def voice_converse_stream(req: ConverseUploadReq):
         finally:
             await queue.put(None)
 
+    def _remove_stream_dir():
+        # Windows may briefly retain a native WAV handle after the final write.
+        # Retry a bounded number of times; do not hide a persistent leak.
+        for attempt in range(6):
+            try:
+                shutil.rmtree(tmp_dir)
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                if attempt == 5:
+                    raise
+                _time.sleep(0.2)
+
     async def gen():
+        import anyio
+
         task = _asyncio.create_task(run())
         try:
             while True:
@@ -1643,7 +1663,23 @@ async def voice_converse_stream(req: ConverseUploadReq):
                     break
                 yield (_json.dumps(item) + "\n").encode()
         finally:
-            if not task.done():
-                task.cancel()
+            # A disconnected client cancels the streaming task.  Protect the
+            # teardown from the ASGI cancellation scope, then wait for the
+            # producer to stop (including native ASR/TTS threads) BEFORE we
+            # remove its WAV directory.
+            with anyio.CancelScope(shield=True):
+                if not task.done():
+                    task.cancel()
+                try:
+                    await task
+                except _asyncio.CancelledError:
+                    pass
+                finally:
+                    try:
+                        await _asyncio.to_thread(_remove_stream_dir)
+                    except OSError:
+                        _logger.exception(
+                            "level=error voice=converse_stream temp_cleanup_failed"
+                        )
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
