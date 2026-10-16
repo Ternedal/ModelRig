@@ -3,7 +3,8 @@
 
 This is not a release qualifier. It verifies that a supplied manifest's PASS
 references have independently retrieved bytes matching operator-supplied
-SHA-256 values. Producer-specific semantic replay and human approval are still
+SHA-256 values. Optional replay covers six data-only producer qualifiers;
+remaining semantic checks, trusted provenance and human approval are still
 required before release authorization. No network access or production writes.
 """
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack, contextmanager
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -45,6 +47,17 @@ GATE_REPOSITORIES = {
     "end_to_end_latency": "Ternedal/ModelRig",
     "recovery_soak": "Ternedal/ModelRig",
     "repository_authority": "Ternedal/ModelRig",
+}
+# Fixed allowlist: artifact content never selects executable code. These
+# existing qualifiers accept data only; filesystem/live campaign validators
+# deliberately remain outside this offline replay path.
+PRODUCER_REPLAY = {
+    "software_exact_green": ("kaliv_software_exact_green_qualifier", None, None),
+    "consciousness_live_lifecycle": ("consciousness_live_lifecycle_qualifier", None, None),
+    "voicerig_physical_acceptance": ("kaliv_voicerig_physical_qualifier", "expected_voicerig_sha", "Ternedal/VoiceRig"),
+    "bodyrig_photoreal_likeness": ("kaliv_bodyrig_photoreal_qualifier", "expected_bodyrig_sha", "Ternedal/BodyRig"),
+    "bodyrig_digital_twin_m6": ("kaliv_bodyrig_digital_twin_m6_qualifier", "expected_bodyrig_sha", "Ternedal/BodyRig"),
+    "repository_authority": ("kaliv_repository_authority_qualifier", None, None),
 }
 _RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL"} | {
     f"{prefix}{number}" for prefix in ("COM", "LPT") for number in range(1, 10)
@@ -118,21 +131,26 @@ def _open_artifact(root: Path, parts: tuple[str, ...]):
             yield artifact
 
 
-def _artifact_hash(root: Path, parts: tuple[str, ...], gate: str) -> tuple[str, int]:
+def _artifact_hash(root: Path, parts: tuple[str, ...], gate: str, *,
+                   collect_json: bool = False) -> tuple[str, int, bytes | None]:
     before = _inspect_path(root, parts, gate)
+    maximum = min(MAX_BYTES, MAX_JSON_BYTES) if collect_json else MAX_BYTES
+    chunks = [] if collect_json else None
     with _open_artifact(root, parts) as artifact:
         info = os.fstat(artifact.fileno())
         if not stat.S_ISREG(info.st_mode) or not os.path.samestat(before, info):
             raise AttestationError(f"{gate}: artifact changed during verification")
-        if info.st_size > MAX_BYTES:
+        if info.st_size > maximum:
             raise AttestationError(f"{gate}: artifact exceeds size limit")
         hasher = hashlib.sha256()
         total = 0
         while chunk := artifact.read(1024 * 1024):
             total += len(chunk)
-            if total > MAX_BYTES:
+            if total > maximum:
                 raise AttestationError(f"{gate}: artifact exceeds size limit")
             hasher.update(chunk)
+            if chunks is not None:
+                chunks.append(chunk)
         after = os.fstat(artifact.fileno())
         path_info = _inspect_path(root, parts, gate)
         if (
@@ -141,11 +159,40 @@ def _artifact_hash(root: Path, parts: tuple[str, ...], gate: str) -> tuple[str, 
             != (info.st_size, info.st_mtime_ns, info.st_ctime_ns)
         ):
             raise AttestationError(f"{gate}: artifact changed during verification")
-    return hasher.hexdigest(), total
+    return hasher.hexdigest(), total, b"".join(chunks) if chunks is not None else None
 
 
-def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
+def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: str) -> dict:
+    try:
+        module_name, pin_argument, repository = PRODUCER_REPLAY[gate]
+        producer = importlib.import_module(module_name)
+        kwargs = {pin_argument: pins[repository]} if pin_argument else {}
+        verdict = producer.qualify(_parse_json_object(raw), **kwargs)
+        if (
+            verdict.get("state") != "QUALIFIED"
+            or verdict.get("production_activation") is not False
+            or verdict.get("release_gate_satisfied", False) is not False
+            or verdict.get("release_ready", False) is not False
+        ):
+            raise AttestationError("producer verdict is not a bounded qualification")
+        if verdict.get("release_evidence_ref") != expected_ref:
+            raise AttestationError("producer evidence reference mismatch")
+        return {
+            "gate": gate,
+            "producer_schema": verdict["schema"],
+            "release_evidence_ref": expected_ref,
+            "state": "PRODUCER_PAYLOAD_REPLAYED_ONLY",
+            "production_activation": False,
+        }
+    except (ImportError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise AttestationError(f"{gate}: producer replay failed: {exc}") from exc
+
+
+def preflight(manifest: dict, attestations: dict, root: Path, *,
+              replay_producers: bool = False) -> dict:
     """Check exact one-to-one coverage, bounded regular files, hashes and pins."""
+    if type(replay_producers) is not bool:
+        raise AttestationError("replay_producers must be a boolean")
     try:
         verdict = evaluate_manifest(manifest)
     except (SystemReleaseManifestError, ValueError, TypeError, KeyError) as exc:
@@ -159,6 +206,7 @@ def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
     root = root.resolve(strict=True)
     checked = []
     verified_artifacts = []
+    replayed = []
     for gate in REQUIRED_GATES:
         item = attestations[gate]
         if not isinstance(item, dict) or set(item) != {"reference", "path", "sha256", "repository", "git_sha"}:
@@ -180,12 +228,18 @@ def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
         # the artifact file bytes. Do not equate these independent digests.
         # Producer-specific semantic replay must validate reference payloads.
         parts = _relative_parts(item["path"], gate)
-        actual_digest, size = _artifact_hash(root, parts, gate)
+        collect_json = replay_producers and gate in PRODUCER_REPLAY
+        actual_digest, size, payload = _artifact_hash(root, parts, gate, collect_json=collect_json)
         if actual_digest != digest:
             raise AttestationError(f"{gate}: artifact byte hash mismatch")
+        if collect_json:
+            # Parse the very bytes that were hashed, without reopening the
+            # path after the byte-integrity check (which would introduce a
+            # second-read replacement race).
+            replayed.append(_replay_producer(gate, payload, verdict.pinned_repositories, refs[0]))
         checked.append(gate)
         verified_artifacts.append({"gate": gate, **item, "size_bytes": size})
-    return {
+    result = {
         "schema": SCHEMA,
         "state": "BYTE_HASHES_VERIFIED_ONLY",
         "release_id": verdict.release_id,
@@ -196,6 +250,16 @@ def preflight(manifest: dict, attestations: dict, root: Path) -> dict:
         "verified_artifacts": verified_artifacts,
         "requires": ["producer_semantic_replay", "human_approval", "trusted_provenance"],
     }
+    if replay_producers:
+        verified = [item["gate"] for item in replayed]
+        result["producer_replay"] = {
+            "state": "PARTIAL",
+            "complete": False,
+            "verified_gates": verified,
+            "not_replayed_gates": [gate for gate in REQUIRED_GATES if gate not in verified],
+            "verdicts": replayed,
+        }
+    return result
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict:
@@ -223,6 +287,10 @@ def _load_json_object(path: Path) -> dict:
             raise AttestationError("JSON input exceeds size limit")
         with os.fdopen(fd, "rb", closefd=False) as source:
             raw = source.read(MAX_JSON_BYTES + 1)
+    return _parse_json_object(raw)
+
+
+def _parse_json_object(raw: bytes) -> dict:
     if len(raw) > MAX_JSON_BYTES:
         raise AttestationError("JSON input exceeds size limit")
     try:
@@ -247,11 +315,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("manifest", type=Path)
     parser.add_argument("attestations", type=Path)
     parser.add_argument("artifact_root", type=Path)
+    parser.add_argument("--replay-producers", action="store_true",
+                        help="Revalidate six supported source JSON payloads; other gates remain unreplayed.")
     args = parser.parse_args(argv)
     try:
         output = preflight(_load_json_object(args.manifest),
                            _load_json_object(args.attestations),
-                           args.artifact_root)
+                           args.artifact_root, replay_producers=args.replay_producers)
     except (ValueError, OSError, KeyError, TypeError, RecursionError) as exc:
         print(json.dumps({"schema": SCHEMA, "state": "INVALID", "release_ready": False,
                           "production_activation": False, "error": str(exc)}))

@@ -84,7 +84,7 @@ class PreflightFixture(unittest.TestCase):
     def verify(self):
         return module.preflight(self.manifest, self.attestations, self.root)
 
-    def cli(self, *, manifest=None, attestations=None, root=None):
+    def cli(self, *, manifest=None, attestations=None, root=None, replay_producers=False):
         manifest_path = self.directory / "manifest.json"
         attestations_path = self.directory / "attestations.json"
         manifest_path.write_bytes(
@@ -95,7 +95,8 @@ class PreflightFixture(unittest.TestCase):
         )
         return subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "kaliv_release_artifact_preflight.py"),
-             str(manifest_path), str(attestations_path), str(self.root if root is None else root)],
+             str(manifest_path), str(attestations_path), str(self.root if root is None else root),
+             *(["--replay-producers"] if replay_producers else [])],
             capture_output=True, text=True, timeout=10,
         )
 
