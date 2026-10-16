@@ -853,6 +853,8 @@ private fun ChatScreen(
 
     val messages = remember { mutableStateListOf<Msg>() }
     var convId by remember { mutableStateOf<Long?>(null) }
+    // Every explicit conversation switch invalidates in-flight voice callbacks.
+    var voiceConversationRevision by remember { mutableStateOf(0) }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
@@ -1155,6 +1157,9 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        // Bind both persisted result and callbacks to the conversation at turn start.
+        val voiceConversationIdAtStart = convId
+        val voiceConversationRevisionAtStart = voiceConversationRevision
         // Snapshot the completed turns before this voice request mutates the chat.
         val voiceHistory = trimHistory("", messages
             .filter { !it.error && !it.streaming && it.text.isNotBlank() }
@@ -1295,8 +1300,16 @@ private fun ChatScreen(
                     messages.removeAt(replyIdx)
                 }
                 withContext(Dispatchers.IO) {
-                    val cid = convId ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
-                    if (convId == null) { convId = cid; onConvChanged(cid) }
+                    // Navigation during the network turn must not persist its answer
+                    // into a different conversation selected in the meantime.
+                    if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
+                    val cid = voiceConversationIdAtStart
+                        ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
+                    if (voiceConversationIdAtStart == null) {
+                        if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
+                        convId = cid
+                        onConvChanged(cid)
+                    }
                     if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
                 }
@@ -1315,7 +1328,8 @@ private fun ChatScreen(
                 // A cancelled stream may have inserted an assistant bubble
                 // before receiving its final onDone event. Never leave that
                 // bubble permanently marked as "streaming".
-                if (replyIdx in messages.indices) {
+                if (voiceConversationRevisionAtStart == voiceConversationRevision &&
+                    replyIdx in messages.indices) {
                     val partial = messages[replyIdx]
                     if (partial.role == "assistant" && partial.streaming) {
                         if (partial.text.isBlank()) {
@@ -1470,6 +1484,11 @@ private fun ChatScreen(
         // convId already exists). Only a switch to a DIFFERENT conversation
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
+        // A real conversation switch invalidates any old voice answer BEFORE
+        // the shared messages list is cleared and populated for the new thread.
+        voiceConversationRevision += 1
+        voiceCancellation?.stop()
+        voiceJob?.cancel()
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
