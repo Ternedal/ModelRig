@@ -47,7 +47,7 @@ class HubMirrorClientWireTest {
             assertEquals("/v1/events", request.url.encodedPath)
             assertNull(request.header("Authorization"))
             assertNull(request.header("Cookie"))
-            assertTrue(request.header("Content-Type").orEmpty().startsWith("application/json"))
+            assertTrue(request.body!!.contentType().toString().startsWith("application/json"))
 
             val bytes = okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8()
             val obj = JSONObject(bytes)
