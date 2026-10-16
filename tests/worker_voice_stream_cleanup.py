@@ -51,7 +51,6 @@ class VoiceStreamCleanupTests(unittest.TestCase):
         import asyncio
         import json
         import tempfile
-        from types import SimpleNamespace
 
         async def scenario():
             with tempfile.TemporaryDirectory() as parent:
@@ -70,7 +69,7 @@ class VoiceStreamCleanupTests(unittest.TestCase):
                 }
                 # The nested gen() refers to task created in its own scope.
                 gen_source = ast.unparse(self.generator)
-                exec("async def wrapper():\\n" + "\\n".join("    " + line for line in gen_source.splitlines()) + "\\n    return gen", namespace)
+                exec("async def wrapper():\n" + "\n".join("    " + line for line in gen_source.splitlines()) + "\n    return gen", namespace)
                 stream = await namespace["wrapper"]()
                 events = [json.loads(line) async for line in stream()]
                 self.assertEqual(events[0]["type"], "done")
