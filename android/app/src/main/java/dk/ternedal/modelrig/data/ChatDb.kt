@@ -100,6 +100,8 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
      * The caller must resolve the target conversation before invoking this.
      */
     fun addCompletedVoiceTurn(convId: Long, transcript: String, reply: String) {
+        // An empty/failed voice turn must not alter conversation recency.
+        if (transcript.isBlank() && reply.isBlank()) return
         val db = writableDatabase
         db.beginTransaction()
         try {
