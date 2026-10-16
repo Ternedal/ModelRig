@@ -56,6 +56,15 @@ class HubMirrorClientTest {
         assertEquals("", HubMirrorClient.limitVisibleText("  "))
     }
 
+    @Test fun queuedRepliesAreRevokedOnDisableOrKeyRotation() {
+        val originalGeneration = 41L
+        assertTrue(HubMirrorClient.mayDeliver(true, originalGeneration, originalGeneration))
+        assertFalse(HubMirrorClient.mayDeliver(false, originalGeneration + 1, originalGeneration))
+        assertFalse(HubMirrorClient.mayDeliver(true, originalGeneration + 2, originalGeneration))
+        assertFalse(HubMirrorClient.mayDeliver(true, originalGeneration + 1, originalGeneration))
+        assertTrue(HubMirrorClient.mayDeliver(true, originalGeneration + 2, originalGeneration + 2))
+    }
+
     @Test fun deterministicSignatureMatchesPythonHmacSha256() {
         val body = "{\"version\":1,\"type\":\"assistant_complete\"," +
             "\"event_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"text\":\"Hej\"}"
