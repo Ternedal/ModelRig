@@ -71,12 +71,19 @@ object HubMirrorClient {
         return "v1=" + bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
-    /** A reply queued before an opt-out/re-pair must never become visible later. */
+    /**
+     * Revoke queued messages on opt-out/re-pair and discard stale replies
+     * after a receiver/network outage. Age is based on monotonic nanoTime.
+     */
     internal fun mayDeliver(
         enabled: Boolean,
         currentGeneration: Long,
         queuedGeneration: Long,
-    ): Boolean = enabled && currentGeneration == queuedGeneration
+        ageNanos: Long = 0L,
+    ): Boolean =
+        enabled &&
+        currentGeneration == queuedGeneration &&
+        ageNanos in 0L..30_000_000_000L
 
     /** Called only after persisting an actual successful assistant turn. */
     fun sendCompleted(configuredUrl: String, secret: String, completed: String): Boolean {
