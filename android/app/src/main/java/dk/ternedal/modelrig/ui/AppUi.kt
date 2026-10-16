@@ -894,13 +894,21 @@ private fun ChatScreen(
 
     // A single best-effort worker preserves the order of completed replies and
     // bounds memory/network work if the receiver is slow or offline.
-    val hubMirrorQueue = remember { Channel<Triple<String, String, String>>(capacity = 8) }
+    val hubMirrorQueue = remember {
+        Channel<Pair<Long, Triple<String, String, String>>>(capacity = 8)
+    }
     LaunchedEffect(hubMirrorQueue) {
-        for ((endpoint, secret, text) in hubMirrorQueue) {
-            if (!store.hubMirrorEnabled) continue
+        for ((consentGeneration, payload) in hubMirrorQueue) {
+            // Don't leak buffered replies after disabling/re-enabling or
+            // changing pairing. Queued items carry the original consent epoch.
+            if (!store.hubMirrorEnabled || store.hubMirrorGeneration != consentGeneration) continue
+            val (endpoint, secret, text) = payload
             withContext(Dispatchers.IO) {
                 // Cast failures must NEVER interrupt ordinary Android chat.
-                runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
+                // Recheck consent before beginning the blocking HTTP request.
+                if (store.hubMirrorEnabled && store.hubMirrorGeneration == consentGeneration) {
+                    runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
+                }
             }
         }
     }
@@ -910,7 +918,7 @@ private fun ChatScreen(
         val endpoint = store.hubMirrorEndpoint ?: return
         val secret = store.hubMirrorSecret ?: return
         // Never suspend the main chat on a slow/display-only transport.
-        hubMirrorQueue.trySend(Triple(endpoint, secret, text))
+        hubMirrorQueue.trySend(store.hubMirrorGeneration to Triple(endpoint, secret, text))
     }
 
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
