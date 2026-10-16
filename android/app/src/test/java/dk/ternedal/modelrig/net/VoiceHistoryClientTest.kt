@@ -78,6 +78,28 @@ class VoiceHistoryClientTest {
         }
     }
 
+
+    @Test
+    fun cloudVoiceDoesNotSerializePriorLocalConversation() {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBody("{}"))
+        server.start()
+        try {
+            ModelRigClient(server.url("/").toString(), "paired-token").voiceConverse(
+                audioB64 = "UklGRg==",
+                cloudBaseUrl = "https://ollama.com",
+                cloudKey = "fake-test-key",
+                history = listOf("user" to "Blå elefant er privat lokal historik"),
+            )
+            val payload = JSONObject(server.takeRequest().body.readUtf8())
+            assertFalse("cloud voice must not upload local history", payload.has("history"))
+            assertEquals("https://ollama.com", payload.getString("llm_base_url"))
+            assertEquals("fake-test-key", payload.getString("llm_api_key"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
     @Test
     fun legacyStatelessVoiceDoesNotInheritAnotherConversation() {
         val server = MockWebServer()

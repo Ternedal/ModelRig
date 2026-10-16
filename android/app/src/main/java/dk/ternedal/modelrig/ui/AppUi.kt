@@ -1224,7 +1224,8 @@ private fun ChatScreen(
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
-                        history = voiceHistory,
+                        // Cloud voice shares only this turn's transcript, not local chat history.
+                        history = if (key == null) voiceHistory else emptyList(),
                         registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
                             if (!playbackStop.get() &&

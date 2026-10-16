@@ -175,6 +175,14 @@ def run():
               "stateless voice request cannot inherit another conversation's history")
         check(stateless["transcript"] == "hvad er klokken",
               "stateless request still executes normally")
+        cloud_turn = asyncio.run(vp.converse(
+            in_wav, language="da", out_dir=tmp,
+            llm_base_url="https://ollama.com", llm_api_key="fake-test-key",
+            history=prior))
+        check(observed[-1] == [{"role": "user", "content": "hvad er klokken"}],
+              "cloud voice forwards only the current ASR transcript")
+        check(cloud_turn["transcript"] == "hvad er klokken",
+              "cloud voice remains functional with local-history privacy")
     finally:
         restore3()
 

@@ -270,7 +270,11 @@ async def converse(
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
-    messages = bounded_voice_history(history) + [{"role": "user", "content": transcript}]
+    # Defense in depth: an untrusted client cannot route stored local turns
+    # to an external LLM using a cloud base URL or key alongside history.
+    # Only the current recognized utterance may leave the rig on a cloud turn.
+    local_history = bounded_voice_history(history) if llm_base_url is None and llm_api_key is None else []
+    messages = local_history + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
     chunks: list[dict] = []

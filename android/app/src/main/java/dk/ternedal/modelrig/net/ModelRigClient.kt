@@ -201,7 +201,8 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
         if (model != null) payload.put("model", model)
-        if (history.isNotEmpty()) {
+        // Cloud voice must not serialize earlier local conversation turns.
+        if (history.isNotEmpty() && cloudBaseUrl == null && cloudKey == null) {
             val arr = JSONArray()
             for ((role, content) in history) {
                 if ((role == "user" || role == "assistant") && content.isNotBlank()) {
@@ -264,7 +265,8 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     ): JSONObject {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
         if (model != null) payload.put("model", model)
-        if (history.isNotEmpty()) {
+        // Cloud voice must not serialize earlier local conversation turns.
+        if (history.isNotEmpty() && cloudBaseUrl == null && cloudKey == null) {
             val arr = JSONArray()
             for ((role, content) in history) {
                 if ((role == "user" || role == "assistant") && content.isNotBlank()) {
