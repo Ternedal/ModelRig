@@ -71,12 +71,27 @@ async def embed(text: str, model: str | None = None) -> list[float]:
     return emb
 
 
-async def chat(messages: list[dict], model: str | None = None) -> str:
+async def chat(
+    messages: list[dict],
+    model: str | None = None,
+    *,
+    response_format: str | dict | None = None,
+    options: dict | None = None,
+) -> str:
     model = model or GEN_MODEL
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "keep_alive": KEEP_ALIVE,
+    }
+    if response_format is not None:
+        payload["format"] = response_format
+    if options:
+        payload["options"] = dict(options)
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-            r = await c.post(f"{OLLAMA_URL}/api/chat",
-                             json={"model": model, "messages": messages, "stream": False, "keep_alive": KEEP_ALIVE})
+            r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
     except httpx.HTTPError as e:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
