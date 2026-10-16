@@ -63,6 +63,20 @@ class VoiceTurnPersistenceTest {
     }
 
     @Test
+    fun transcriptOnlyTurnPersistsUserWithoutEmptyAssistantRow() {
+        val id = chatDb.newConversation("rig", "local", "transcript-only")
+        chatDb.addCompletedVoiceTurn(id, "Blå elefant", "")
+        assertEquals(listOf("user" to "Blå elefant"), chatDb.loadMessages(id))
+    }
+
+    @Test
+    fun replyOnlyTurnPersistsAssistantWithoutEmptyUserRow() {
+        val id = chatDb.newConversation("rig", "local", "reply-only")
+        chatDb.addCompletedVoiceTurn(id, "  ", "Jeg husker det.")
+        assertEquals(listOf("assistant" to "Jeg husker det."), chatDb.loadMessages(id))
+    }
+
+    @Test
     fun absentOrDeletedConversationCannotReceiveLateVoiceMessages() {
         val id = chatDb.newConversation("rig", "local", "removed")
         chatDb.deleteConversation(id)
