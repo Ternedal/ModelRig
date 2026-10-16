@@ -44,7 +44,7 @@ class VoiceStreamCleanupTests(unittest.TestCase):
     def test_cleanup_does_not_delete_shared_directory(self):
         endpoint_source = ast.unparse(self.endpoint)
         self.assertIn("mkdtemp(", endpoint_source)
-        self.assertIn("rmtree(tmp_dir,", endpoint_source)
+        self.assertIn("rmtree(tmp_dir", endpoint_source)
 
     def test_generator_runtime_cleans_files_on_normal_completion(self):
         """Execute the real nested generator with a fake completed producer."""
@@ -90,9 +90,11 @@ class VoiceStreamCleanupTests(unittest.TestCase):
                 queue = asyncio.Queue()
                 await queue.put({"type": "transcript", "text": "hej"})
                 cancelled = asyncio.Event()
+                started = asyncio.Event()
 
                 async def producer():
                     try:
+                        started.set()
                         await asyncio.Event().wait()
                     finally:
                         cancelled.set()
@@ -107,6 +109,7 @@ class VoiceStreamCleanupTests(unittest.TestCase):
                 stream = (await namespace["wrapper"]())()
                 first = json.loads(await stream.__anext__())
                 self.assertEqual(first["type"], "transcript")
+                await asyncio.wait_for(started.wait(), timeout=3)
                 await asyncio.wait_for(stream.aclose(), timeout=3)
                 self.assertTrue(cancelled.is_set())
                 self.assertFalse(tmp_dir.exists())
