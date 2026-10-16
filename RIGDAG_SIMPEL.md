@@ -6,7 +6,7 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
 ## Kandidat
 
-- version: `2.0.15`;
+- version: `2.0.16`;
 - branch: `release/v2.0.16-voice-hotfix`;
 - freeze: `candidate_freeze_check.py` grøn på exact SHA;
 - exact SHA: læses fra den fetch'ede `origin/release/v2.0.16-voice-hotfix` og må aldrig gættes eller kopieres fra ældre evidens;
