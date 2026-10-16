@@ -1325,6 +1325,8 @@ private fun ChatScreen(
                 }
                 if (!stillCurrent()) return@launch
                 val existingCid = voiceConversationIdAtStart
+                // Keep the selected conversation and its immutable target ID
+                // separate from the potentially slow database write.
                 val cid = if (existingCid != null) existingCid else withContext(Dispatchers.IO) {
                     db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
                 }
@@ -1334,6 +1336,10 @@ private fun ChatScreen(
                     convId = cid
                     onConvChanged(cid)
                 }
+                // Recheck immediately before entering the blocking write. This
+                // prevents the common switch-during-creation case; full atomicity
+                // requires a transactional DB API and is tracked separately.
+                if (!stillCurrent()) return@launch
                 withContext(Dispatchers.IO) {
                     if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
