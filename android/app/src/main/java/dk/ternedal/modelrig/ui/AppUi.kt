@@ -1214,6 +1214,7 @@ private fun ChatScreen(
             var transcriptShown = false
             var replyIdx = -1
             val replyBuilder = StringBuilder()
+            var completedVoiceReply: String? = null
             var usedModel: String? = null
             var usedCloud = false
             var streamError: Pair<Int, String>? = null
@@ -1289,6 +1290,7 @@ private fun ChatScreen(
                         onDone = { reply, m, cloud ->
                             usedModel = m; usedCloud = cloud
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
+                            completedVoiceReply = finalText
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(
                                     text = finalText,
@@ -1314,7 +1316,10 @@ private fun ChatScreen(
                 // list). If the reply is empty (e.g. all-markup), still persist
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
-                val finalReply = replyBuilder.toString().trim()
+                // The stream's authoritative Done.reply can contain text even
+                // when the server emitted no individual audio/text chunks.
+                val finalReply = completedVoiceReply
+                    ?: stripEmojis(replyBuilder.toString().trim())
                 if (finalReply.isEmpty() && replyIdx in messages.indices &&
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
@@ -1326,7 +1331,7 @@ private fun ChatScreen(
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
                 }
                 if (streamError == null && !wasInterrupted && finalReply.isNotBlank()) {
-                    mirrorFinishedAssistant(stripEmojis(finalReply))
+                    mirrorFinishedAssistant(finalReply)
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
