@@ -30,7 +30,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 296          // monotonic, bumped every release (not tied to semver)
-        versionName = "2.0.15"
+        versionName = "2.0.16"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
