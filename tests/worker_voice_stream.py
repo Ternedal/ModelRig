@@ -169,6 +169,12 @@ def run():
         check(observed == [prior + [{"role": "user", "content": "hvad er klokken"}]],
               "previous voice turns reach LLM before current ASR transcript")
         check("blå elefant" in remembered["reply"], "voice answer returns with context")
+        # A following stateless request must not inherit the previous context.
+        stateless = asyncio.run(vp.converse(in_wav, language="da", out_dir=tmp))
+        check(observed[-1] == [{"role": "user", "content": "hvad er klokken"}],
+              "stateless voice request cannot inherit another conversation's history")
+        check(stateless["transcript"] == "hvad er klokken",
+              "stateless request still executes normally")
     finally:
         restore3()
 
