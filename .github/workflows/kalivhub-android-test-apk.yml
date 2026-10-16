@@ -6,6 +6,9 @@ on:
       - android/app/src/main/java/dk/ternedal/modelrig/data/TokenStore.kt
       - android/app/src/main/java/dk/ternedal/modelrig/ui/AppUi.kt
       - android/app/src/test/java/dk/ternedal/modelrig/net/HubMirrorClientTest.kt
+      - android/app/src/test/java/dk/ternedal/modelrig/net/HubMirrorClientWireTest.kt
+      - android/app/src/test/java/dk/ternedal/modelrig/data/HubMirrorPreferencesTest.kt
+      - android/app/src/a425f/res/values/strings.xml
       - .github/workflows/kalivhub-android-test-apk.yml
   workflow_dispatch:
 
@@ -46,6 +49,12 @@ jobs:
           path="android/app/build/outputs/apk/a425f/app-a425f.apk"
           test -s "$path"
           sha256sum "$path"
+          # The side-installed app must not use production's application ID.
+          aapt="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0/aapt"
+          test -x "$aapt"
+          "$aapt" dump badging "$path" > apk-badging.txt
+          grep -F "package: name='dk.ternedal.modelrig.a425f'" apk-badging.txt
+          grep -F "application-label:'Kaliv TEST" apk-badging.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
         with:
           name: kalivhub-mirror-android-a425f-test-apk
