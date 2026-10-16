@@ -1223,7 +1223,7 @@ private fun ChatScreen(
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
-                        contextMessages = voiceContext,
+                        contextMessages = if (key == null) voiceContext else emptyList(),
                         registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
                             if (!playbackStop.get()) {
