@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.Proxy
 import java.net.URI
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -22,7 +23,10 @@ import javax.crypto.spec.SecretKeySpec
  * prevents replay, but does NOT encrypt the reply. Never use this on open Wi-Fi.
  */
 object HubMirrorClient {
-    private val http = OkHttpClient.Builder()
+    internal val http = OkHttpClient.Builder()
+        // A private IPv4 destination is NOT safe if the OS HTTP proxy can
+        // relay the cleartext chat reply to an external third party.
+        .proxy(Proxy.NO_PROXY)
         .connectTimeout(2, TimeUnit.SECONDS)
         .readTimeout(3, TimeUnit.SECONDS)
         .callTimeout(6, TimeUnit.SECONDS)
