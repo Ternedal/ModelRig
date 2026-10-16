@@ -252,7 +252,10 @@ async def converse(
     # exclude empty/oversized items, and never accept a caller-provided system role.
     # A bounded suffix keeps voice fast on modest local GPU hardware.
     history = []
-    for turn in (context_messages or [])[-12:]:
+    # Cloud voice already shares the CURRENT transcript by explicit setting.
+    # Never silently expand that egress to prior local chat messages: that
+    # requires its own opt-in, which this feature deliberately does not add.
+    for turn in (() if llm_base_url else (context_messages or [])[-12:]):
         if not isinstance(turn, dict):
             continue
         role, content = turn.get("role"), turn.get("content")
