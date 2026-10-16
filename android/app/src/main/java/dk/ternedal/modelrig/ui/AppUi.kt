@@ -853,6 +853,8 @@ private fun ChatScreen(
 
     val messages = remember { mutableStateListOf<Msg>() }
     var convId by remember { mutableStateOf<Long?>(null) }
+    // Every explicit conversation switch invalidates in-flight voice callbacks.
+    var voiceConversationRevision by remember { mutableStateOf(0) }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
@@ -1155,6 +1157,14 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        // Bind both persisted result and callbacks to the conversation at turn start.
+        val voiceConversationIdAtStart = convId
+        val voiceConversationRevisionAtStart = voiceConversationRevision
+        // Snapshot the completed turns before this voice request mutates the chat.
+        val voiceHistory = trimHistory("", messages
+            .filter { !it.error && !it.streaming && it.text.isNotBlank() }
+            .map { it.role to it.text })
+            .filter { it.first == "user" || it.first == "assistant" }
         val cancellation = VoiceTurnCancellation()
         voiceCancellation = cancellation
         val playbackStop = cancellation.stopFlag
@@ -1214,9 +1224,13 @@ private fun ChatScreen(
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
+                        // Cloud voice shares only this turn's transcript, not local chat history.
+                        history = if (key == null) voiceHistory else emptyList(),
                         registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
-                            if (!playbackStop.get()) {
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
                                 val tt = t.trim()
                                 if (tt.isNotEmpty() && !transcriptShown) {
                                     transcriptShown = true
@@ -1235,7 +1249,9 @@ private fun ChatScreen(
                             }
                         },
                         onChunk = { _, text, chunkB64, utteranceId ->
-                            if (!playbackStop.get()) {
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
                                 if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                                 replyBuilder.append(text.trim())
                                 if (replyIdx in messages.indices) {
@@ -1252,7 +1268,9 @@ private fun ChatScreen(
                             }
                         },
                         onDone = { reply, m, cloud ->
-                            if (!playbackStop.get()) {
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
                                 val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
                                 completedReply = finalText
                                 if (replyIdx in messages.indices) {
@@ -1284,13 +1302,23 @@ private fun ChatScreen(
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
                 val finalReply = (completedReply ?: replyBuilder.toString()).trim()
-                if (finalReply.isEmpty() && replyIdx in messages.indices &&
+                if (voiceConversationRevisionAtStart == voiceConversationRevision &&
+                    voiceCancellation === cancellation &&
+                    finalReply.isEmpty() && replyIdx in messages.indices &&
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
                 }
                 withContext(Dispatchers.IO) {
-                    val cid = convId ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
-                    if (convId == null) convId = cid
+                    // Navigation during the network turn must not persist its answer
+                    // into a different conversation selected in the meantime.
+                    if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
+                    val cid = voiceConversationIdAtStart
+                        ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
+                    if (voiceConversationIdAtStart == null) {
+                        if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
+                        convId = cid
+                        onConvChanged(cid)
+                    }
                     if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
                 }
@@ -1309,7 +1337,8 @@ private fun ChatScreen(
                 // A cancelled stream may have inserted an assistant bubble
                 // before receiving its final onDone event. Never leave that
                 // bubble permanently marked as "streaming".
-                if (replyIdx in messages.indices) {
+                if (voiceConversationRevisionAtStart == voiceConversationRevision &&
+                    replyIdx in messages.indices) {
                     val partial = messages[replyIdx]
                     if (partial.role == "assistant" && partial.streaming) {
                         if (partial.text.isBlank()) {
@@ -1464,6 +1493,11 @@ private fun ChatScreen(
         // convId already exists). Only a switch to a DIFFERENT conversation
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
+        // A real conversation switch invalidates any old voice answer BEFORE
+        // the shared messages list is cleared and populated for the new thread.
+        voiceConversationRevision += 1
+        voiceCancellation?.stop()
+        voiceJob?.cancel()
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the

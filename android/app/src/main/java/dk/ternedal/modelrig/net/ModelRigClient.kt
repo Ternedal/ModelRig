@@ -192,6 +192,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         model: String? = null,
         cloudBaseUrl: String? = null,
         cloudKey: String? = null,
+        history: List<Pair<String, String>> = emptyList(),
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onTranscript: (String) -> Unit,
         onChunk: (index: Int, text: String, audioB64: String, utteranceId: String?) -> Unit,
@@ -200,6 +201,16 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
         if (model != null) payload.put("model", model)
+        // Cloud voice must not serialize earlier local conversation turns.
+        if (history.isNotEmpty() && cloudBaseUrl == null && cloudKey == null) {
+            val arr = JSONArray()
+            for ((role, content) in history) {
+                if ((role == "user" || role == "assistant") && content.isNotBlank()) {
+                    arr.put(JSONObject().put("role", role).put("content", content))
+                }
+            }
+            payload.put("history", arr)
+        }
         if (cloudBaseUrl != null && cloudKey != null) {
             payload.put("llm_base_url", cloudBaseUrl)
             payload.put("llm_api_key", cloudKey)
@@ -250,9 +261,20 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         model: String? = null,
         cloudBaseUrl: String? = null,
         cloudKey: String? = null,
+        history: List<Pair<String, String>> = emptyList(),
     ): JSONObject {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
         if (model != null) payload.put("model", model)
+        // Cloud voice must not serialize earlier local conversation turns.
+        if (history.isNotEmpty() && cloudBaseUrl == null && cloudKey == null) {
+            val arr = JSONArray()
+            for ((role, content) in history) {
+                if ((role == "user" || role == "assistant") && content.isNotBlank()) {
+                    arr.put(JSONObject().put("role", role).put("content", content))
+                }
+            }
+            payload.put("history", arr)
+        }
         if (cloudBaseUrl != null && cloudKey != null) {
             payload.put("llm_base_url", cloudBaseUrl)
             payload.put("llm_api_key", cloudKey)
