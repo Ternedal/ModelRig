@@ -45,7 +45,7 @@ MAX_AUDIO_BYTES = 25 * 1024 * 1024
 EXPECTED_SAMPLE_RATE = 16_000
 EXPECTED_CHANNELS = 1
 EXPECTED_SAMPLE_WIDTH = 2
-VOICE_TEMP_PREFIXES = ("alva_voice_", "alva_voice_stream_", "alva_voice_up_")
+VOICE_TEMP_PREFIXES = ("alva_voice_", "alva_voice_stream_", "alva_voice_up_", "kaliv_voice_stream_")
 
 
 class VoiceBaselineError(RuntimeError):
