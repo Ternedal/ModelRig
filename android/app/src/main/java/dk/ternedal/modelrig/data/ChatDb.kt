@@ -112,6 +112,7 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
                 }
             }
             val now = System.currentTimeMillis()
+            var inserted = 0
             for ((role, content) in listOf("user" to transcript, "assistant" to reply)) {
                 if (content.isBlank()) continue
                 db.insertOrThrow("message", null, ContentValues().apply {
@@ -120,8 +121,12 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
                     put("content", content)
                     put("created_at", now)
                 })
+                inserted++
             }
-            db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
+            // Preserve the existing ordering if no actual message was written.
+            if (inserted > 0) {
+                db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
+            }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
