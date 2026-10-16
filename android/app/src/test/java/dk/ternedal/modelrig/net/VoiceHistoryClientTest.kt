@@ -16,8 +16,8 @@ class VoiceHistoryClientTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse().setBody(
-                "{\"type\":\"transcript\",\"text\":\"Hvad husker du?\"}\\n" +
-                    "{\"type\":\"done\",\"reply\":\"blå elefant\",\"model\":\"test\",\"via_cloud\":false}\\n",
+                "{\"type\":\"transcript\",\"text\":\"Hvad husker du?\"}\n" +
+                    "{\"type\":\"done\",\"reply\":\"blå elefant\",\"model\":\"test\",\"via_cloud\":false}\n",
             ),
         )
         server.start()
