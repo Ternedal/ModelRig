@@ -63,6 +63,9 @@ class HubMirrorClientTest {
         assertFalse(HubMirrorClient.mayDeliver(true, originalGeneration + 2, originalGeneration))
         assertFalse(HubMirrorClient.mayDeliver(true, originalGeneration + 1, originalGeneration))
         assertTrue(HubMirrorClient.mayDeliver(true, originalGeneration + 2, originalGeneration + 2))
+        assertTrue(HubMirrorClient.mayDeliver(true, 7L, 7L, 29_000_000_000L))
+        assertFalse(HubMirrorClient.mayDeliver(true, 7L, 7L, 31_000_000_000L))
+        assertFalse(HubMirrorClient.mayDeliver(true, 7L, 7L, -1L))
     }
 
     @Test fun deterministicSignatureMatchesPythonHmacSha256() {
