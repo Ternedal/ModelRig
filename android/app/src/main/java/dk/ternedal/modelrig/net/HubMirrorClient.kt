@@ -90,9 +90,26 @@ object HubMirrorClient {
         currentGeneration == queuedGeneration &&
         ageNanos in 0L..30_000_000_000L
 
-    /** Called only after persisting an actual successful assistant turn. */
-    fun sendCompleted(configuredUrl: String, secret: String, completed: String): Boolean =
-        sendCompletedWithClient(configuredUrl, secret, completed, http)
+    /**
+     * Called only after persisting an actual successful assistant turn.
+     * queuedAgeNanos carries time already spent waiting in Android's queue
+     * into the signed timestamp: a delayed reply must not get another fresh
+     * 30-second display lifetime just because HTTP delivery started late.
+     */
+    fun sendCompleted(
+        configuredUrl: String,
+        secret: String,
+        completed: String,
+        queuedAgeNanos: Long = 0L,
+    ): Boolean =
+        sendCompletedWithClient(configuredUrl, secret, completed, http, queuedAgeNanos)
+
+    /** Round queued age UP to whole seconds so sub-second delay never extends TTL. */
+    internal fun signedTimestamp(nowEpochMillis: Long, queuedAgeNanos: Long): String? {
+        if (queuedAgeNanos !in 0L..30_000_000_000L) return null
+        val elapsedSeconds = (queuedAgeNanos + 999_999_999L) / 1_000_000_000L
+        return (nowEpochMillis / 1000L - elapsedSeconds).toString()
+    }
 
     /**
      * Same production request path with injectable transport for offline tests.
@@ -103,6 +120,7 @@ object HubMirrorClient {
         secret: String,
         completed: String,
         client: OkHttpClient,
+        queuedAgeNanos: Long = 0L,
     ): Boolean {
         val target = endpoint(configuredUrl) ?: return false
         if (secret.length < 32 || completed.isBlank()) return false
@@ -116,7 +134,10 @@ object HubMirrorClient {
             .put("event_id", UUID.randomUUID().toString())
             .put("text", visible)
             .toString()
-        val timestamp = (System.currentTimeMillis() / 1000L).toString()
+        // The receiver's 30-second TTL must start at assistant completion,
+        // not at eventual network dispatch after Android's bounded queue.
+        val timestamp = signedTimestamp(System.currentTimeMillis(), queuedAgeNanos)
+            ?: return false
         val signature = signature(secret, timestamp, body)
         val request = Request.Builder()
             .url(target)
