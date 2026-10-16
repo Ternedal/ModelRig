@@ -215,32 +215,33 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 throw ModelRigException("voice stream failed (${resp.code}): $text")
             }
             val source = resp.body?.source() ?: throw ModelRigException("empty response body")
-            // Voice had the worst version of the bug: if the stream ended
-            // without "done", NO callback fired at all -- not onDone, not
-            // onError -- so the turn just hung there spinning.
-            var sawTerminal = false
-            while (!source.exhausted()) {
+            // The NDJSON done/error line is the end of the VOICE turn. A proxy
+            // or upstream may keep the HTTP connection open after that line;
+            // waiting for transport EOF used to leave the overlay at "Tænker…"
+            // for the full five-minute read timeout despite a complete reply.
+            // Closing the response here also releases its OkHttp connection.
+            while (true) {
                 val line = source.readUtf8Line() ?: break
                 when (val ev = StreamContract.parse(line)) {
                     is StreamEvent.Phase -> Unit  // stemmestroemmen udsender ingen faser endnu
                     is StreamEvent.Transcript -> onTranscript(ev.text)
                     is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64, ev.utteranceId)
                     is StreamEvent.Done -> {
-                        sawTerminal = true
                         onDone(ev.reply, ev.model, ev.viaCloud)
+                        return@use
                     }
                     is StreamEvent.Failure -> {
-                        sawTerminal = true
                         onError(ev.status, ev.message)
+                        return@use
                     }
                     else -> {}
                 }
             }
-            if (!sawTerminal) {
-                throw ModelRigException(
-                    "stemmesvaret blev afbrudt — forbindelsen lukkede før riggen var færdig; prøv igen"
-                )
-            }
+            // HTTP 200 and EOF are not proof that the ASR/LLM/TTS pipeline
+            // finished: a truncated stream must still surface an error.
+            throw ModelRigException(
+                "stemmesvaret blev afbrudt — forbindelsen lukkede før riggen var færdig; prøv igen"
+            )
         }
     }
 
