@@ -14,6 +14,7 @@ from contextlib import ExitStack, contextmanager
 import hashlib
 import importlib
 import json
+import math
 import os
 import re
 import stat
@@ -245,6 +246,10 @@ def _replay_producer(gate: str, raw: bytes, pins: dict[str, str], expected_ref: 
         if verified_sources is not None:
             result["verified_source_receipts"] = verified_sources
         return result
+    except OverflowError as exc:
+        raise AttestationError(
+            f"{gate}: producer replay failed: numeric value exceeds supported range"
+        ) from exc
     except (ImportError, OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise AttestationError(f"{gate}: producer replay failed: {exc}") from exc
 
@@ -336,6 +341,15 @@ def _invalid_constant(value: str):
     raise AttestationError(f"invalid JSON constant: {value}")
 
 
+def _finite_json_float(value: str) -> float:
+    # parse_constant only rejects literal NaN/Infinity. Valid JSON exponent
+    # tokens such as 1e999 otherwise silently decode to float infinity.
+    number = float(value)
+    if not math.isfinite(number):
+        raise AttestationError("non-finite JSON number")
+    return number
+
+
 def _load_json_object(path: Path) -> dict:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
     with ExitStack() as stack:
@@ -356,7 +370,7 @@ def _parse_json_object(raw: bytes) -> dict:
         raise AttestationError("JSON input exceeds size limit")
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object,
-                           parse_constant=_invalid_constant)
+                           parse_constant=_invalid_constant, parse_float=_finite_json_float)
     except RecursionError as exc:
         raise AttestationError("JSON input exceeds nesting limit") from exc
     pending = [(value, 1)]

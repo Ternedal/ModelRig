@@ -378,6 +378,8 @@ class ArtifactProducerReplayTests(ProducerReplayFixture):
             (b'{"schema":"a","schema":"b"}', "duplicate JSON object field"),
             (b'{"nested":{"x":1,"x":2}}', "duplicate JSON object field"),
             (b'{"x":NaN}', "invalid JSON constant"),
+            (b'{"nested":[{"x":1e999}]}', "non-finite JSON number"),
+            (b'{"x":-1e999}', "non-finite JSON number"),
             (b"[]", "must be an object"),
             (b"\xff", "utf-8"),
             (b'{"x":' * 65 + b"0" + b"}" * 65, "nesting limit"),
@@ -386,6 +388,40 @@ class ArtifactProducerReplayTests(ProducerReplayFixture):
                 self.write_raw("software_exact_green", raw)
                 with self.assertRaisesRegex(module.AttestationError, reason):
                     self.replay()
+
+    def test_overflow_in_nested_metadata_is_rejected_even_with_matching_producer_reference(self):
+        gate = "consciousness_live_lifecycle"
+        for number, token in ((float("inf"), b"1e999"), (float("-inf"), b"-1e999")):
+            with self.subTest(token=token):
+                payload = copy.deepcopy(self.payloads[gate])
+                payload["live_cycle"]["diagnostics"] = {"numbers": [number]}
+                # The existing producer hashes extra diagnostic fields without
+                # rejecting infinity. Even its matching ref must not bypass
+                # the preflight's stricter JSON input contract.
+                reference = self.qualifiers[gate](payload)["release_evidence_ref"]
+                self.manifest["gates"][gate]["evidence_refs"] = [reference]
+                self.attestations[gate]["reference"] = reference
+                raw = json.dumps(payload).encode("utf-8")
+                literal = b"Infinity" if number > 0 else b"-Infinity"
+                self.write_raw(gate, raw.replace(literal, token))
+                with self.assertRaisesRegex(module.AttestationError, "non-finite JSON number"):
+                    self.replay()
+                self.assertInvalid(self.cli(replay_producers=True), "non-finite JSON number")
+
+    def test_finite_exponents_and_numeric_text_preserve_producer_reference(self):
+        gate = "consciousness_live_lifecycle"
+        payload = copy.deepcopy(self.payloads[gate])
+        payload["live_cycle"]["diagnostics"] = {
+            "numbers": [1.7976931348623157e308, -1.7976931348623157e308, 5e-324, -0.0, 0.0],
+            "text": "1e999 and -Infinity are ordinary text",
+        }
+        reference = self.qualifiers[gate](payload)["release_evidence_ref"]
+        self.manifest["gates"][gate]["evidence_refs"] = [reference]
+        self.attestations[gate]["reference"] = reference
+        self.write_payload(gate, payload)
+        result = self.replay()
+        replayed = next(item for item in result["producer_replay"]["verdicts"] if item["gate"] == gate)
+        self.assertEqual(replayed["release_evidence_ref"], reference)
 
     def test_replay_json_budget_is_smaller_than_generic_artifact_budget(self):
         with patch.object(module, "MAX_JSON_BYTES", self.path.stat().st_size - 1):
@@ -578,6 +614,8 @@ class ArtifactLatencyReplayTests(ProducerReplayFixture):
             (b'{"schema":"a","schema":"b"}', "duplicate JSON object field"),
             (b'{"nested":{"x":1,"x":2}}', "duplicate JSON object field"),
             (b'{"observed_at_ms":NaN}', "invalid JSON constant"),
+            (b'{"observed_at_ms":1e999}', "non-finite JSON number"),
+            (b'{"nested":[{"x":-1e999}]}', "non-finite JSON number"),
             (b"[]", "must be an object"), (b"\xff", "utf-8"),
             (b'{"x":' * 65 + b"0" + b"}" * 65, "nesting limit"),
         ):
@@ -585,6 +623,19 @@ class ArtifactLatencyReplayTests(ProducerReplayFixture):
                 self.write_latency_source("perception_received", raw)
                 with self.assertRaisesRegex(module.AttestationError, reason):
                     self.replay()
+
+    def test_extreme_integer_measurements_fail_closed_through_api_and_cli(self):
+        for phase, original in self.latency_sources.items():
+            with self.subTest(phase=phase):
+                payload = copy.deepcopy(original)
+                payload["observed_at_ms"] = 10 ** 400
+                self.write_latency_source(phase, json.dumps(payload).encode("utf-8"))
+                try:
+                    with self.assertRaisesRegex(module.AttestationError, "numeric value exceeds supported range"):
+                        self.replay()
+                    self.assertInvalid(self.cli(replay_producers=True), "numeric value exceeds supported range")
+                finally:
+                    self.write_latency_source(phase, json.dumps(original, sort_keys=True).encode("utf-8"))
 
     def test_source_size_limit_is_checked_before_staging_or_json_decode(self):
         self.write_latency_source("perception_received", b"x" * (module.MAX_JSON_BYTES + 1))

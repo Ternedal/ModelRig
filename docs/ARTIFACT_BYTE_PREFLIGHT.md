@@ -145,6 +145,12 @@ partial verification result is emitted as success.
 
 Each input JSON file is limited to 1 MiB and 64 nested containers. Inputs must be
 UTF-8 JSON objects with unique field names; NaN and infinities are rejected.
+This also rejects valid JSON exponent tokens such as 1e999 that overflow the
+decoder's floating-point range, including inside otherwise unused nested
+metadata. Finite exponents, subnormal values and numeric-looking text retain
+their normal JSON meaning. If a producer cannot convert an extreme integer
+measurement to its supported numeric range, the preflight reports INVALID with
+exit code 2 instead of propagating an arithmetic exception or emitting a traceback.
 Each artifact is a regular file of at most 16 MiB, hashed in bounded chunks.
 Absolute and drive-relative paths, parent traversal, alternate streams, Windows
 device names, ambiguous trailing spaces/dots and platform-specific separators
@@ -182,6 +188,10 @@ Producer replay cases use the existing synthetic producer fixtures and real
 qualifiers. They cover failed semantics with a matching file hash, stale/forged
 canonical references, wrong revisions, strict source JSON, parsing the original
 byte snapshot, the opt-in CLI and explicit reporting of unreplayed gates.
+Numeric cases include positive/negative exponent overflow in both CLI inputs,
+source evidence and latency receipts; an otherwise valid lifecycle payload with
+a matching producer reference and overflowing nested diagnostics; finite numeric
+boundaries; and extreme integer measurements through the API and CLI.
 Latency replay cases additionally cover three-source digest binding, correlated
 phases, modified report fields and Boolean types, missing sources, nested path
 escape/symlinks, bounded strict source JSON, cleanup after success/failure, and
