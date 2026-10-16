@@ -7,9 +7,9 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 ## Kandidat
 
 - version: `2.0.15`;
-- branch: `physical-proof/2.0.15`;
+- branch: `release/v2.0.16-voice-hotfix`;
 - freeze: `candidate_freeze_check.py` grøn på exact SHA;
-- exact SHA: læses fra den fetch'ede `origin/physical-proof/2.0.15` og må aldrig gættes eller kopieres fra ældre evidens;
+- exact SHA: læses fra den fetch'ede `origin/release/v2.0.16-voice-hotfix` og må aldrig gættes eller kopieres fra ældre evidens;
 - produktion: ikke aktiveret.
 
 Evidens fra 2.0.12 eller fra en tidligere ugyldiggjort 2.0.13-head må ikke
@@ -20,18 +20,18 @@ genbruges.
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch physical-proof/2.0.15
-git pull --ff-only origin physical-proof/2.0.15
+git switch release/v2.0.16-voice-hotfix
+git pull --ff-only origin release/v2.0.16-voice-hotfix
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.15).Trim()
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.15: local=$CandidateSha remote=$RemoteCandidateSha" }
+$RemoteCandidateSha = (git rev-parse origin/release/v2.0.16-voice-hotfix).Trim()
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/release/v2.0.16-voice-hotfix: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.15") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/physical-proof/2.0.15` og den grønne `candidate_freeze_check.py` er den
+`origin/release/v2.0.16-voice-hotfix` og den grønne `candidate_freeze_check.py` er den
 aktuelle kandidat-authority. Historiske freeze-PR'er eller ældre 2.0.13-heads
 må ikke bruges som SHA-reference.
 
