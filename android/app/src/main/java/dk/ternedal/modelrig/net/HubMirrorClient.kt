@@ -73,7 +73,8 @@ object HubMirrorClient {
 
     /**
      * Revoke queued messages on opt-out/re-pair and discard stale replies
-     * after a receiver/network outage. Age is based on monotonic nanoTime.
+     * after a receiver/network outage. Age comes from elapsedRealtimeNanos
+     * so time spent with the phone suspended also counts toward expiration.
      */
     internal fun mayDeliver(
         enabled: Boolean,
