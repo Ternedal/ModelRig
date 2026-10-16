@@ -49,6 +49,7 @@ import dk.ternedal.modelrig.net.VoiceCapability
 import dk.ternedal.modelrig.net.WorkerCapabilities
 import dk.ternedal.modelrig.net.IngestCapability
 import dk.ternedal.modelrig.net.ModelRigClient
+import dk.ternedal.modelrig.net.HubMirrorClient
 import dk.ternedal.modelrig.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -881,6 +882,58 @@ private fun ChatScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+
+    // KalivHub is an OPTIONAL output-only display. Neither the normal chat
+    // flow nor persistence waits for the Nest Hub to be online.
+    var showHubMirrorSetup by remember { mutableStateOf(false) }
+    var hubMirrorUrlDraft by remember { mutableStateOf(store.hubMirrorEndpoint.orEmpty()) }
+    var hubMirrorSecretDraft by remember { mutableStateOf("") }
+    var hubMirrorEnabledDraft by remember { mutableStateOf(store.hubMirrorEnabled) }
+    var hubMirrorError by remember { mutableStateOf<String?>(null) }
+    var hubMirrorTesting by remember { mutableStateOf(false) }
+
+    // A single best-effort worker preserves the order of completed replies and
+    // bounds memory/network work if the receiver is slow or offline.
+    val hubMirrorQueue = remember {
+        Channel<Triple<Long, Long, Triple<String, String, String>>>(capacity = 8)
+    }
+    LaunchedEffect(hubMirrorQueue) {
+        for ((consentGeneration, queuedAt, payload) in hubMirrorQueue) {
+            // Drop stale answers as well as revoked consent: if the receiver
+            // was offline, a late backlog must not appear as fresh chat.
+            if (!HubMirrorClient.mayDeliver(
+                    store.hubMirrorEnabled, store.hubMirrorGeneration,
+                    consentGeneration, android.os.SystemClock.elapsedRealtimeNanos() - queuedAt,
+                )) continue
+            val (endpoint, secret, text) = payload
+            withContext(Dispatchers.IO) {
+                // Cast failures must NEVER interrupt ordinary Android chat.
+                // Recheck consent and age before beginning the HTTP request.
+                if (HubMirrorClient.mayDeliver(
+                        store.hubMirrorEnabled, store.hubMirrorGeneration,
+                        consentGeneration, android.os.SystemClock.elapsedRealtimeNanos() - queuedAt,
+                    )) {
+                    runCatching {
+                        HubMirrorClient.sendCompleted(
+                            endpoint, secret, text,
+                            queuedAgeNanos = android.os.SystemClock.elapsedRealtimeNanos() - queuedAt,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun mirrorFinishedAssistant(text: String) {
+        if (!store.hubMirrorEnabled || text.isBlank()) return
+        val endpoint = store.hubMirrorEndpoint ?: return
+        val secret = store.hubMirrorSecret ?: return
+        // Never suspend the main chat on a slow/display-only transport.
+        hubMirrorQueue.trySend(
+            Triple(store.hubMirrorGeneration, android.os.SystemClock.elapsedRealtimeNanos(), Triple(endpoint, secret, text))
+        )
+    }
+
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
     // regnskab — riggen kender den ikke, og INTET herfra sendes af sig selv.
     val queueStore = remember {
@@ -1166,6 +1219,7 @@ private fun ChatScreen(
             var transcriptShown = false
             var replyIdx = -1
             val replyBuilder = StringBuilder()
+            var completedVoiceReply: String? = null
             var usedModel: String? = null
             var usedCloud = false
             var streamError: Pair<Int, String>? = null
@@ -1241,6 +1295,7 @@ private fun ChatScreen(
                         onDone = { reply, m, cloud ->
                             usedModel = m; usedCloud = cloud
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
+                            completedVoiceReply = finalText
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(
                                     text = finalText,
@@ -1266,7 +1321,10 @@ private fun ChatScreen(
                 // list). If the reply is empty (e.g. all-markup), still persist
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
-                val finalReply = replyBuilder.toString().trim()
+                // The stream's authoritative Done.reply can contain text even
+                // when the server emitted no individual audio/text chunks.
+                val finalReply = completedVoiceReply
+                    ?: stripEmojis(replyBuilder.toString().trim())
                 if (finalReply.isEmpty() && replyIdx in messages.indices &&
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
@@ -1276,6 +1334,9 @@ private fun ChatScreen(
                     if (convId == null) convId = cid
                     if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
                     if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
+                }
+                if (streamError == null && !wasInterrupted && finalReply.isNotBlank()) {
+                    mirrorFinishedAssistant(finalReply)
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
@@ -1674,6 +1735,9 @@ private fun ChatScreen(
             if ((err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
             }
+            if (err == null && proposal == null && finalText.isNotBlank()) {
+                mirrorFinishedAssistant(finalText)
+            }
             if (proposal != null) messages.removeAt(idx)
             busy = false
         }
@@ -1813,8 +1877,103 @@ private fun ChatScreen(
             if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
             }
+            if (err == null && proposal == null && finalText.isNotBlank()) {
+                mirrorFinishedAssistant(finalText)
+            }
             busy = false
         }
+    }
+
+
+    if (showHubMirrorSetup) {
+        AlertDialog(
+            onDismissRequest = { showHubMirrorSetup = false },
+            title = { Text("Nest Hub-spejling") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Spejl kun færdige Kaliv-svar til Nest Hub. " +
+                            "Kun på et betroet privat netværk: HTTP krypterer ikke teksten.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = hubMirrorUrlDraft,
+                        onValueChange = { hubMirrorUrlDraft = it },
+                        label = { Text("Riggens LAN-adresse") },
+                        placeholder = { Text("http://192.168.1.100:8765") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = hubMirrorSecretDraft,
+                        onValueChange = { hubMirrorSecretDraft = it },
+                        label = { Text("Spejlingsnøgle") },
+                        placeholder = {
+                            Text(if (store.hubMirrorSecret != null)
+                                "Tom = behold gemt nøgle" else "Indsæt nøgle fra riggen")
+                        },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = hubMirrorEnabledDraft,
+                            onCheckedChange = { hubMirrorEnabledDraft = it },
+                        )
+                        Text("Aktivér spejling", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    hubMirrorError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (store.saveHubMirrorConfig(
+                            hubMirrorUrlDraft, hubMirrorSecretDraft.ifBlank { null },
+                            hubMirrorEnabledDraft,
+                        )) {
+                        hubMirrorSecretDraft = ""
+                        showHubMirrorSetup = false
+                    } else {
+                        hubMirrorError =
+                            "Kontrollér privat IPv4-adresse, port og nøgle (mindst 32 tegn)."
+                    }
+                }) { Text("Gem") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        enabled = !hubMirrorTesting,
+                        onClick = {
+                            val mirrorKey = hubMirrorSecretDraft.trim()
+                                .ifEmpty { store.hubMirrorSecret.orEmpty() }
+                            val endpoint = HubMirrorClient.endpoint(hubMirrorUrlDraft)
+                            if (endpoint == null || mirrorKey.length < 32) {
+                                hubMirrorError = "Angiv privat LAN-IP og gyldig spejlingsnøgle først."
+                            } else {
+                                hubMirrorTesting = true
+                                hubMirrorError = null
+                                scope.launch {
+                                    val accepted = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            HubMirrorClient.sendCompleted(
+                                                endpoint, mirrorKey, "KalivHub: forbindelsestest",
+                                            )
+                                        }.getOrDefault(false)
+                                    }
+                                    hubMirrorTesting = false
+                                    hubMirrorError = if (accepted)
+                                        "Riggen har modtaget testen. Se efter beskeden på Nest Hub."
+                                    else
+                                        "Ingen kvittering fra riggens spejlingsmodtager."
+                                }
+                            }
+                        },
+                    ) { Text(if (hubMirrorTesting) "Tester…" else "Test") }
+                    TextButton(onClick = { showHubMirrorSetup = false }) {
+                        Text("Annuller")
+                    }
+                }
+            },
+        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -1832,6 +1991,14 @@ private fun ChatScreen(
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
                         DropdownMenuItem(text = { Text("Rig-status") }, onClick = { overflow = false; onOpenRigStatus() })
+                        DropdownMenuItem(text = { Text("Nest Hub-spejling") }, onClick = {
+                            overflow = false
+                            hubMirrorUrlDraft = store.hubMirrorEndpoint.orEmpty()
+                            hubMirrorSecretDraft = ""
+                            hubMirrorEnabledDraft = store.hubMirrorEnabled
+                            hubMirrorError = null
+                            showHubMirrorSetup = true
+                        })
                         DropdownMenuItem(text = { Text("Enheder") }, onClick = { overflow = false; onOpenDevices() })
                         DropdownMenuItem(text = { Text("Viden") }, onClick = { overflow = false; onOpenKnowledge() })
                         DropdownMenuItem(text = { Text("Planer") }, onClick = { overflow = false; onOpenSchedules() })
@@ -2760,6 +2927,9 @@ private fun ChatScreen(
                                                 convId?.let { id ->
                                                     withContext(Dispatchers.IO) {
                                                         db.addMessage(id, "assistant", text)
+                                                    }
+                                                    if (next?.answer?.isNotBlank() == true) {
+                                                        mirrorFinishedAssistant(text)
                                                     }
                                                 }
                                             }
