@@ -901,12 +901,12 @@ private fun ChatScreen(
         for ((consentGeneration, payload) in hubMirrorQueue) {
             // Don't leak buffered replies after disabling/re-enabling or
             // changing pairing. Queued items carry the original consent epoch.
-            if (!store.hubMirrorEnabled || store.hubMirrorGeneration != consentGeneration) continue
+            if (!HubMirrorClient.mayDeliver(store.hubMirrorEnabled, store.hubMirrorGeneration, consentGeneration)) continue
             val (endpoint, secret, text) = payload
             withContext(Dispatchers.IO) {
                 // Cast failures must NEVER interrupt ordinary Android chat.
                 // Recheck consent before beginning the blocking HTTP request.
-                if (store.hubMirrorEnabled && store.hubMirrorGeneration == consentGeneration) {
+                if (HubMirrorClient.mayDeliver(store.hubMirrorEnabled, store.hubMirrorGeneration, consentGeneration)) {
                     runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
                 }
             }
