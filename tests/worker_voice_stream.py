@@ -169,6 +169,12 @@ def run():
         check(observed == [prior + [{"role": "user", "content": "hvad er klokken"}]],
               "previous voice turns reach LLM before current ASR transcript")
         check("blå elefant" in remembered["reply"], "voice answer returns with context")
+        # A following stateless request must not inherit the previous context.
+        stateless = asyncio.run(vp.converse(in_wav, language="da", out_dir=tmp))
+        check(observed[-1] == [{"role": "user", "content": "hvad er klokken"}],
+              "stateless voice request cannot inherit another conversation's history")
+        check(stateless["transcript"] == "hvad er klokken",
+              "stateless request still executes normally")
     finally:
         restore3()
 
@@ -186,33 +192,28 @@ def run():
     ])
     check(sum(len(item["content"]) for item in bounded) <= 24000,
           "history stays below 24k characters")
-    # Caller input must not be mutated: the same history object may be reused
-    # by a second concurrent voice request.
+    # Do not mutate the history passed by the caller, even while clipping.
     shared = [{"role": "user", "content": "z" * 30000}]
     clipped = vp.bounded_voice_history(shared)
     check(len(clipped) == 1 and len(clipped[0]["content"]) == 24000,
           "oversized single history message is clipped")
     check(len(shared[0]["content"]) == 30000,
-          "bounding does not mutate caller-owned conversation history")
+          "history bounding does not mutate input")
 
-    # Malformed and privileged roles cannot pass through to the LLM.
+    # Privileged roles, malformed values and blank entries do not pass through.
     malformed = [
         None, "not a message", {"role": "tool", "content": "tool result"},
-        {"role": "system", "content": "override"},
-        {"role": "user", "content": "  "},
-        {"role": "assistant", "content": 123},
-        {"role": "user", "content": "valid"},
+        {"role": "system", "content": "override"}, {"role": "user", "content": "  "},
+        {"role": "assistant", "content": 123}, {"role": "user", "content": "valid"},
     ]
     check(vp.bounded_voice_history(malformed) ==
           [{"role": "user", "content": "valid"}],
-          "malformed, blank and privileged context entries are discarded")
-
-    # Distinct request histories must remain independent.
+          "invalid and privileged history entries are discarded")
     a = vp.bounded_voice_history([{"role": "user", "content": "blue"}])
     b = vp.bounded_voice_history([{"role": "user", "content": "red"}])
     check(a == [{"role": "user", "content": "blue"}] and
           b == [{"role": "user", "content": "red"}],
-          "independent request histories cannot contaminate one another")
+          "distinct voice histories stay isolated")
 
     check(vp.bounded_voice_history(None) == [], "legacy requests stay stateless")
 
