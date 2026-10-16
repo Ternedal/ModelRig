@@ -76,6 +76,42 @@ class VoiceStreamCleanupTests(unittest.TestCase):
                 self.assertFalse(tmp_dir.exists())
         asyncio.run(scenario())
 
+    def test_generator_runtime_cleans_files_on_client_disconnect(self):
+        """Closing the stream must cancel the producer and remove its WAVs."""
+        import asyncio
+        import json
+        import tempfile
+
+        async def scenario():
+            with tempfile.TemporaryDirectory() as parent:
+                tmp_dir = Path(parent) / "voice-turn"
+                tmp_dir.mkdir()
+                (tmp_dir / "chunk.wav").write_bytes(b"RIFF")
+                queue = asyncio.Queue()
+                await queue.put({"type": "transcript", "text": "hej"})
+                cancelled = asyncio.Event()
+
+                async def producer():
+                    try:
+                        await asyncio.Event().wait()
+                    finally:
+                        cancelled.set()
+
+                namespace = {
+                    "_asyncio": asyncio, "_json": json,
+                    "queue": queue, "tmp_dir": str(tmp_dir),
+                    "run": producer,
+                }
+                gen_source = ast.unparse(self.generator)
+                exec("async def wrapper():\n" + "\n".join("    " + line for line in gen_source.splitlines()) + "\n    return gen", namespace)
+                stream = (await namespace["wrapper"]())()
+                first = json.loads(await stream.__anext__())
+                self.assertEqual(first["type"], "transcript")
+                await asyncio.wait_for(stream.aclose(), timeout=3)
+                self.assertTrue(cancelled.is_set())
+                self.assertFalse(tmp_dir.exists())
+        asyncio.run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()
