@@ -1,6 +1,8 @@
 """Tests for the read-only signing-material inventory."""
 import importlib.util
 import unittest
+import json
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 from subprocess import CompletedProcess
@@ -20,6 +22,18 @@ class SigningInventoryTest(unittest.TestCase):
         self.assertEqual(len(result["exposed_paths"]), 2)
         self.assertNotIn("password", str(result).lower())
         run.assert_called_once()
+
+    @patch.object(module.subprocess, "run")
+    def test_baseline_flags_new_key_without_exposing_content(self, run):
+        run.return_value = CompletedProcess([], 0, b"android/signing/modelrig.keystore\\0android/signing/extra.jks\\0", b"")
+        with tempfile.TemporaryDirectory() as folder:
+            baseline = Path(folder) / "baseline.json"
+            baseline.write_text(json.dumps(["android/signing/modelrig.keystore"]), encoding="utf-8")
+            with patch.object(module.sys, "argv", ["audit", "--baseline", str(baseline)]):
+                with patch("builtins.print") as output:
+                    self.assertEqual(module.main(), 1)
+                payload = json.loads(output.call_args.args[0])
+                self.assertEqual(payload["new_paths"], ["android/signing/extra.jks"])
 
     @patch.object(module.subprocess, "run")
     def test_empty_inventory(self, run):
