@@ -19,4 +19,4 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -p test_audit_android_signing.py
       - name: Block newly tracked Android signing materials
-        run: python scripts/audit_android_signing.py --baseline scripts/android-signing-known-paths.json
+        run: python scripts/audit_android_signing.py --baseline scripts/android-signing-known-paths.json --blob-baseline scripts/android-signing-known-blobs.json
