@@ -913,7 +913,12 @@ private fun ChatScreen(
                         store.hubMirrorEnabled, store.hubMirrorGeneration,
                         consentGeneration, android.os.SystemClock.elapsedRealtimeNanos() - queuedAt,
                     )) {
-                    runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
+                    runCatching {
+                        HubMirrorClient.sendCompleted(
+                            endpoint, secret, text,
+                            queuedAgeNanos = android.os.SystemClock.elapsedRealtimeNanos() - queuedAt,
+                        )
+                    }
                 }
             }
         }
