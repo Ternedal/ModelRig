@@ -5,9 +5,16 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.Proxy
 
 /** Entirely offline tests; no Android device, secrets, or network services. */
 class HubMirrorClientTest {
+    @Test fun productionDisplayTransportNeverUsesOperatingSystemProxy() {
+        assertEquals(Proxy.NO_PROXY, HubMirrorClient.http.proxy)
+        assertFalse(HubMirrorClient.http.followRedirects)
+        assertFalse(HubMirrorClient.http.followSslRedirects)
+    }
+
     @Test fun acceptsOnlyExplicitPrivateIpEndpoints() {
         assertEquals(
             "http://192.168.1.100:8765/v1/events",
