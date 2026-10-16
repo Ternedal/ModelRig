@@ -903,7 +903,7 @@ private fun ChatScreen(
             // was offline, a late backlog must not appear as fresh chat.
             if (!HubMirrorClient.mayDeliver(
                     store.hubMirrorEnabled, store.hubMirrorGeneration,
-                    consentGeneration, System.nanoTime() - queuedAt,
+                    consentGeneration, android.os.SystemClock.elapsedRealtimeNanos() - queuedAt,
                 )) continue
             val (endpoint, secret, text) = payload
             withContext(Dispatchers.IO) {
@@ -911,7 +911,7 @@ private fun ChatScreen(
                 // Recheck consent and age before beginning the HTTP request.
                 if (HubMirrorClient.mayDeliver(
                         store.hubMirrorEnabled, store.hubMirrorGeneration,
-                        consentGeneration, System.nanoTime() - queuedAt,
+                        consentGeneration, android.os.SystemClock.elapsedRealtimeNanos() - queuedAt,
                     )) {
                     runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
                 }
@@ -925,7 +925,7 @@ private fun ChatScreen(
         val secret = store.hubMirrorSecret ?: return
         // Never suspend the main chat on a slow/display-only transport.
         hubMirrorQueue.trySend(
-            Triple(store.hubMirrorGeneration, System.nanoTime(), Triple(endpoint, secret, text))
+            Triple(store.hubMirrorGeneration, android.os.SystemClock.elapsedRealtimeNanos(), Triple(endpoint, secret, text))
         )
     }
 
