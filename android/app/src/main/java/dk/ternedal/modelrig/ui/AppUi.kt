@@ -895,18 +895,24 @@ private fun ChatScreen(
     // A single best-effort worker preserves the order of completed replies and
     // bounds memory/network work if the receiver is slow or offline.
     val hubMirrorQueue = remember {
-        Channel<Pair<Long, Triple<String, String, String>>>(capacity = 8)
+        Channel<Triple<Long, Long, Triple<String, String, String>>>(capacity = 8)
     }
     LaunchedEffect(hubMirrorQueue) {
-        for ((consentGeneration, payload) in hubMirrorQueue) {
-            // Don't leak buffered replies after disabling/re-enabling or
-            // changing pairing. Queued items carry the original consent epoch.
-            if (!HubMirrorClient.mayDeliver(store.hubMirrorEnabled, store.hubMirrorGeneration, consentGeneration)) continue
+        for ((consentGeneration, queuedAt, payload) in hubMirrorQueue) {
+            // Drop stale answers as well as revoked consent: if the receiver
+            // was offline, a late backlog must not appear as fresh chat.
+            if (!HubMirrorClient.mayDeliver(
+                    store.hubMirrorEnabled, store.hubMirrorGeneration,
+                    consentGeneration, System.nanoTime() - queuedAt,
+                )) continue
             val (endpoint, secret, text) = payload
             withContext(Dispatchers.IO) {
                 // Cast failures must NEVER interrupt ordinary Android chat.
-                // Recheck consent before beginning the blocking HTTP request.
-                if (HubMirrorClient.mayDeliver(store.hubMirrorEnabled, store.hubMirrorGeneration, consentGeneration)) {
+                // Recheck consent and age before beginning the HTTP request.
+                if (HubMirrorClient.mayDeliver(
+                        store.hubMirrorEnabled, store.hubMirrorGeneration,
+                        consentGeneration, System.nanoTime() - queuedAt,
+                    )) {
                     runCatching { HubMirrorClient.sendCompleted(endpoint, secret, text) }
                 }
             }
@@ -918,7 +924,9 @@ private fun ChatScreen(
         val endpoint = store.hubMirrorEndpoint ?: return
         val secret = store.hubMirrorSecret ?: return
         // Never suspend the main chat on a slow/display-only transport.
-        hubMirrorQueue.trySend(store.hubMirrorGeneration to Triple(endpoint, secret, text))
+        hubMirrorQueue.trySend(
+            Triple(store.hubMirrorGeneration, System.nanoTime(), Triple(endpoint, secret, text))
+        )
     }
 
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
