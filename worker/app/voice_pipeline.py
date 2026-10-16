@@ -170,6 +170,7 @@ async def converse(
     llm_api_key: str | None = None,
     on_chunk: "Callable[[dict], Awaitable[None]] | None" = None,
     on_transcript: "Callable[[str], Awaitable[None]] | None" = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict:
     """Run one full spoken turn from an audio file.
 
@@ -219,7 +220,16 @@ async def converse(
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
-    messages = [{"role": "user", "content": transcript}]
+    # Never accept arbitrary roles or unbounded client-supplied context.
+    prior = [
+        {"role": item["role"], "content": item["content"][:4000]}
+        for item in (history or [])[-12:]
+        if isinstance(item, dict)
+        and item.get("role") in ("user", "assistant")
+        and isinstance(item.get("content"), str)
+        and item["content"].strip()
+    ]
+    messages = prior + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
     chunks: list[dict] = []
