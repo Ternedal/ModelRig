@@ -86,7 +86,19 @@ object HubMirrorClient {
         ageNanos in 0L..30_000_000_000L
 
     /** Called only after persisting an actual successful assistant turn. */
-    fun sendCompleted(configuredUrl: String, secret: String, completed: String): Boolean {
+    fun sendCompleted(configuredUrl: String, secret: String, completed: String): Boolean =
+        sendCompletedWithClient(configuredUrl, secret, completed, http)
+
+    /**
+     * Same production request path with injectable transport for offline tests.
+     * Never bypass the validated private-LAN destination check.
+     */
+    internal fun sendCompletedWithClient(
+        configuredUrl: String,
+        secret: String,
+        completed: String,
+        client: OkHttpClient,
+    ): Boolean {
         val target = endpoint(configuredUrl) ?: return false
         if (secret.length < 32 || completed.isBlank()) return false
         // Cast's JS string-length limit counts UTF-16 code units, as Kotlin does.
@@ -107,7 +119,7 @@ object HubMirrorClient {
             .header("X-Kaliv-Signature", signature)
             .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
-        return http.newCall(request).execute().use { response ->
+        return client.newCall(request).execute().use { response ->
             // 202 = queued, not proof that the physical receiver displayed it.
             response.code == 202 || response.code == 409
         }
