@@ -101,6 +101,46 @@ class HubMirrorClientWireTest {
     }
 
     @Test
+    fun delayedQueueReplyUsesEarlierAuthenticatedTimestamp() {
+        val now = System.currentTimeMillis() / 1000L
+        val secret = "s".repeat(40)
+        val called = AtomicInteger(0)
+        val client = fixtureClient(202) { request ->
+            called.incrementAndGet()
+            val signed = request.header("X-Kaliv-Timestamp")!!.toLong()
+            // The event waited 25 seconds before HTTP, so it must not
+            // acquire 30 NEW seconds of display lifetime on the receiver.
+            assertTrue("Signed timestamp should include queue delay",
+                signed in (now - 27L)..(now - 25L))
+            val body = okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8()
+            assertEquals(
+                HubMirrorClient.signature(secret, signed.toString(), body),
+                request.header("X-Kaliv-Signature"),
+            )
+        }
+        assertTrue(HubMirrorClient.sendCompletedWithClient(
+            "http://192.168.1.100:8765", secret, "Gammelt, men stadig gyldigt", client,
+            queuedAgeNanos = 25_000_000_000L,
+        ))
+        assertEquals(1, called.get())
+    }
+
+    @Test
+    fun expiredQueueReplyNeverTouchesHttpTransport() {
+        val called = AtomicInteger(0)
+        val client = fixtureClient(202) { called.incrementAndGet() }
+        assertFalse(HubMirrorClient.sendCompletedWithClient(
+            "http://192.168.1.100:8765", "s".repeat(40), "Udløbet", client,
+            queuedAgeNanos = 30_000_000_001L,
+        ))
+        assertFalse(HubMirrorClient.sendCompletedWithClient(
+            "http://192.168.1.100:8765", "s".repeat(40), "Ugyldigt", client,
+            queuedAgeNanos = -1L,
+        ))
+        assertEquals(0, called.get())
+    }
+
+    @Test
     fun nonBmpUnicodeCannotExceedReceiversUtf16Limit() {
         val http = fixtureClient(202) { request ->
             val body = okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8()
