@@ -1,0 +1,87 @@
+name: candidate-voice-worker
+
+# Isolated physical-test worker: never creates tags, releases or updater assets.
+# No Windows SDK/Python/PyInstaller installation required on the user's rig.
+on:
+  push:
+    branches:
+      - "physical-proof/**"
+    paths:
+      - "worker/**"
+      - ".github/workflows/candidate-voice-worker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-voice-worker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Build frozen voice-capable worker (same recipe as release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install -r worker/requirements.txt -r worker/requirements-release-voice.txt pyinstaller
+          python scripts/stamp_build_identity.py
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths worker --paths . --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
+      - name: Smoke test frozen worker voice capability
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          $worker = Start-Process -FilePath ".\dist\modelrig-worker-windows-x64.exe" -PassThru -NoNewWindow
+          try {
+            $health = $null
+            foreach ($i in 1..60) {
+              try { $health = Invoke-RestMethod -Uri http://127.0.0.1:8099/healthz -TimeoutSec 3; break }
+              catch {
+                if ($worker.HasExited) { throw "worker exited with code $($worker.ExitCode)" }
+                Start-Sleep -Seconds 2
+              }
+            }
+            if (-not $health -or $health.service -ne "modelrig-worker") { throw "frozen worker failed healthz" }
+            $caps = Invoke-RestMethod -Uri http://127.0.0.1:8099/capabilities -TimeoutSec 5
+            if ($caps.asr -ne $true -or $caps.tts -ne $true) { throw "missing frozen ASR/TTS: $($caps | ConvertTo-Json -Compress)" }
+            $asr = Invoke-RestMethod -Uri http://127.0.0.1:8099/voice/asr/status -TimeoutSec 5
+            $tts = Invoke-RestMethod -Uri http://127.0.0.1:8099/voice/tts/status -TimeoutSec 5
+            if ($asr.available -ne $true -or $tts.available -ne $true) { throw "frozen voice endpoints unavailable" }
+            Write-Host "worker OK: $($health.version), ASR=$($caps.asr), TTS=$($caps.tts)"
+          }
+          finally {
+            if (-not $worker.HasExited) { Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Record candidate provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = ".\dist\modelrig-worker-windows-x64.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "repository=${{ github.repository }}"
+            "source_sha=${{ github.sha }}"
+            "branch=${{ github.ref_name }}"
+            "artifact=modelrig-worker-windows-x64.exe"
+            "sha256=$hash"
+            "version=$(Get-Content VERSION -Raw)"
+            "scope=isolated-physical-test-only"
+            "production_activation=false"
+          ) | Set-Content -Path ".\dist\candidate-provenance.txt" -Encoding UTF8
+      - name: Upload worker test candidate (never publish a release)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: modelrig-voice-worker-candidate-${{ github.sha }}
+          path: |
+            dist/modelrig-worker-windows-x64.exe
+            dist/candidate-provenance.txt
+          if-no-files-found: error
+          retention-days: 14
