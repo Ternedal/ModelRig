@@ -215,6 +215,20 @@ def run():
           b == [{"role": "user", "content": "red"}],
           "distinct voice histories stay isolated")
 
+    # If the last twenty turns exceed the total character budget, oldest
+    # messages must be removed first while preserving the newest turn intact.
+    ordered = [
+        {"role": "user", "content": f"turn-{i:02d}:" + ("x" * 2000)}
+        for i in range(20)
+    ]
+    tail = vp.bounded_voice_history(ordered)
+    check(len(tail) < 20 and len(tail) > 0 and
+          tail[-1]["content"] == ordered[-1]["content"] and
+          sum(len(item["content"]) for item in tail) <= 24000,
+          "history total budget preserves newest complete turns")
+    check(tail[0]["content"].startswith("turn-"),
+          "history trimming removes oldest messages, not newest content")
+
     check(vp.bounded_voice_history(None) == [], "legacy requests stay stateless")
 
     print(f"\n===== VOICE STREAM: {passed} passed, {failed} failed =====")
