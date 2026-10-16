@@ -63,12 +63,10 @@ class VoiceStreamCleanupTests(unittest.TestCase):
                 await queue.put(None)
                 async def producer():
                     return None
-                task = asyncio.create_task(producer())
-                await task
                 namespace = {
                     "_asyncio": asyncio, "_json": json,
                     "queue": queue, "tmp_dir": str(tmp_dir),
-                    "run": lambda: task,
+                    "run": producer,
                 }
                 # The nested gen() refers to task created in its own scope.
                 gen_source = ast.unparse(self.generator)
