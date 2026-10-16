@@ -1227,7 +1227,9 @@ private fun ChatScreen(
                         history = voiceHistory,
                         registerCall = { c -> cancellation.register(c) },
                         onTranscript = { t ->
-                            if (!playbackStop.get()) {
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
                                 val tt = t.trim()
                                 if (tt.isNotEmpty() && !transcriptShown) {
                                     transcriptShown = true
@@ -1246,7 +1248,9 @@ private fun ChatScreen(
                             }
                         },
                         onChunk = { _, text, chunkB64, utteranceId ->
-                            if (!playbackStop.get()) {
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
                                 if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                                 replyBuilder.append(text.trim())
                                 if (replyIdx in messages.indices) {
@@ -1263,7 +1267,9 @@ private fun ChatScreen(
                             }
                         },
                         onDone = { reply, m, cloud ->
-                            if (!playbackStop.get()) {
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
                                 val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
                                 completedReply = finalText
                                 if (replyIdx in messages.indices) {
@@ -1295,7 +1301,9 @@ private fun ChatScreen(
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
                 val finalReply = (completedReply ?: replyBuilder.toString()).trim()
-                if (finalReply.isEmpty() && replyIdx in messages.indices &&
+                if (voiceConversationRevisionAtStart == voiceConversationRevision &&
+                    voiceCancellation === cancellation &&
+                    finalReply.isEmpty() && replyIdx in messages.indices &&
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
                 }
