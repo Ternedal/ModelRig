@@ -25,7 +25,7 @@ class SigningInventoryTest(unittest.TestCase):
 
     @patch.object(module.subprocess, "run")
     def test_baseline_flags_new_key_without_exposing_content(self, run):
-        run.return_value = CompletedProcess([], 0, b"android/signing/modelrig.keystore\\0android/signing/extra.jks\\0", b"")
+        run.return_value = CompletedProcess([], 0, b"android/signing/modelrig.keystore\0android/signing/extra.jks\0", b"")
         with tempfile.TemporaryDirectory() as folder:
             baseline = Path(folder) / "baseline.json"
             baseline.write_text(json.dumps(["android/signing/modelrig.keystore"]), encoding="utf-8")
