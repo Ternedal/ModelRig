@@ -5,7 +5,7 @@
 ## Baseline and methodology
 
 - Public repository `Ternedal/ModelRig`; default branch `main`.
-- Complete non-truncated Git tree fetched (tree SHA `49dbc2b46b9af2da2195e2e90e3c611145a8df3b`): **3,095 blobs**.
+- Complete non-truncated Git tree recorded at commit `49dbc2b46b9af2da2195e2e90e3c611145a8df3b` (tree SHA `0c633ae733794753e6bdfd7311f10df1ad231d22`): **3,095 blobs**.
 - Selected subtree file totals: `tests/` 657, `worker/` 309, `backend/` 107, `android/` 394, `desktop/` 175, `devcontrol/` 494, `docs/` 344, `scripts/` 215, `vr/` 84, `.github/` 41. Counts include support files, not necessarily executable tests.
 - Reviewed `README.md`, `SECURITY.md`, `.github/workflows/ci.yml`, `.gitignore`, `backend/go.mod`, public file inventory, and current open PR descriptions. No local rig or test hardware accessed.
 
