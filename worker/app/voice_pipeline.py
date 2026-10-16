@@ -64,10 +64,10 @@ _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 # formatting, so ordinary text survives ("5 * 3" keeps its asterisk, and a
 # lone underscore in a filename isn't touched).
 
-_MD_CODE_FENCE = re.compile(r"```[\\s\\S]*?```")          # fenced blocks: drop entirely
-_MD_STRIKE = re.compile(r"~~([^~\\n]+)~~")               # ~~deleted~~ -> deleted
-_MD_BARE_URL = re.compile(r"https?://[^\\s<>]+")         # don't spell URLs or query strings
-_MD_RESIDUAL_MARKERS = re.compile(r"(?:\\*{2,}|_{2,}|~{2,}|`{2,})")  # orphan formatting markers
+_MD_CODE_FENCE = re.compile(r"```[\s\S]*?```")          # fenced blocks: drop entirely
+_MD_STRIKE = re.compile(r"~~([^~\n]+)~~")               # ~~deleted~~ -> deleted
+_MD_BARE_URL = re.compile(r"https?://[^\s<>]+")         # do not spell URLs or query strings
+_MD_RESIDUAL_MARKERS = re.compile(r"(?:\*{2,}|_{2,}|~{2,}|`{2,})")  # orphan formatting markers
 _MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")             # `code` -> code
 _MD_BOLD_ITALIC = re.compile(r"(\*{1,3})(\S(?:.*?\S)?)\1")  # **x** *x* ***x*** -> x
 _MD_UNDERSCORE = re.compile(r"(?<!\w)(_{1,3})(\S(?:.*?\S)?)\1(?!\w)")  # _x_ -> x
