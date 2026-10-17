@@ -1634,16 +1634,4 @@ async def voice_converse_stream(req: ConverseUploadReq):
         finally:
             await queue.put(None)
 
-    async def gen():
-        task = _asyncio.create_task(run())
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield (_json.dumps(item) + "\n").encode()
-        finally:
-            if not task.done():
-                task.cancel()
-
     return StreamingResponse(gen(), media_type="application/x-ndjson")
