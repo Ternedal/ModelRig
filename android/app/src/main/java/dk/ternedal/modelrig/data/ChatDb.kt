@@ -94,6 +94,45 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
     }
 
+    /**
+     * Persist a completed spoken turn as one transaction, so a crash cannot
+     * leave only the user half of a successful user/assistant exchange.
+     * The caller must resolve the target conversation before invoking this.
+     */
+    fun addCompletedVoiceTurn(convId: Long, transcript: String, reply: String) {
+        // An empty/failed voice turn must not alter conversation recency.
+        if (transcript.isBlank() && reply.isBlank()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.rawQuery("SELECT 1 FROM conversation WHERE id=?", arrayOf(convId.toString())).use {
+                if (!it.moveToFirst()) {
+                    db.setTransactionSuccessful()
+                    return
+                }
+            }
+            val now = System.currentTimeMillis()
+            var inserted = 0
+            for ((role, content) in listOf("user" to transcript, "assistant" to reply)) {
+                if (content.isBlank()) continue
+                db.insertOrThrow("message", null, ContentValues().apply {
+                    put("conv_id", convId)
+                    put("role", role)
+                    put("content", content)
+                    put("created_at", now)
+                })
+                inserted++
+            }
+            // Preserve the existing ordering if no actual message was written.
+            if (inserted > 0) {
+                db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun loadMessages(convId: Long): List<Pair<String, String>> {
         val out = mutableListOf<Pair<String, String>>()
         readableDatabase.rawQuery(

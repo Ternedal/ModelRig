@@ -1282,7 +1282,11 @@ private fun ChatScreen(
                             }
                         },
                         onError = { status, detail ->
-                            if (!playbackStop.get()) streamError = status to detail
+                            if (!playbackStop.get() &&
+                                voiceConversationRevisionAtStart == voiceConversationRevision &&
+                                voiceCancellation === cancellation) {
+                                streamError = status to detail
+                            }
                         },
                     )
                 }
@@ -1290,6 +1294,11 @@ private fun ChatScreen(
                 // finishes the queued sentences, then wait for it.
                 audioChan.close()
                 player.join()
+                // A conversation change may occur while playback drains the queue.
+                // Leave this turn without surfacing stale errors or persisting it.
+                if (playbackStop.get() ||
+                    voiceConversationRevisionAtStart != voiceConversationRevision ||
+                    voiceCancellation !== cancellation) return@launch
 
                 streamError?.let { (status, detail) ->
                     voiceError = friendlyError(RuntimeException("voice ($status): $detail"))
@@ -1308,19 +1317,32 @@ private fun ChatScreen(
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
                 }
+                // Read and publish Compose navigation state on Main, not IO.
+                // Capture the target before dispatching any blocking DB work.
+                val stillCurrent = {
+                    !playbackStop.get() &&
+                        voiceConversationRevisionAtStart == voiceConversationRevision &&
+                        voiceCancellation === cancellation
+                }
+                if (!stillCurrent()) return@launch
+                val existingCid = voiceConversationIdAtStart
+                // Keep the selected conversation and its immutable target ID
+                // separate from the potentially slow database write.
+                val cid = if (existingCid != null) existingCid else withContext(Dispatchers.IO) {
+                    db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
+                }
+                // The DB call above can suspend while the user navigates away.
+                if (!stillCurrent()) return@launch
+                if (existingCid == null) {
+                    convId = cid
+                    onConvChanged(cid)
+                }
+                // Recheck immediately before entering the blocking write. This
+                // prevents the common switch-during-creation case; full atomicity
+                // requires a transactional DB API and is tracked separately.
+                if (!stillCurrent()) return@launch
                 withContext(Dispatchers.IO) {
-                    // Navigation during the network turn must not persist its answer
-                    // into a different conversation selected in the meantime.
-                    if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
-                    val cid = voiceConversationIdAtStart
-                        ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
-                    if (voiceConversationIdAtStart == null) {
-                        if (voiceConversationRevisionAtStart != voiceConversationRevision) return@withContext
-                        convId = cid
-                        onConvChanged(cid)
-                    }
-                    if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
-                    if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
+                    db.addCompletedVoiceTurn(cid, transcriptText, finalReply)
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true

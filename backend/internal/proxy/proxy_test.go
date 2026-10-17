@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,4 +135,45 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// History belongs to the spoken conversation; the Go gateway must not
+// silently remove it before it reaches the worker. These are real HTTP
+// requests but use a local stub upstream, never the production worker.
+func TestForward_VoiceHistoryRequestBodyIsPreserved(t *testing.T) {
+    payload := `{"audio_base64":"UklGRg==","language":"da","history":[{"role":"user","content":"blå elefant"},{"role":"assistant","content":"Jeg husker det."}]}`
+    for _, target := range []string{"/voice/converse/upload", "/voice/converse/stream"} {
+        t.Run(target, func(t *testing.T) {
+            received := make(chan string, 1)
+            up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                body, err := io.ReadAll(r.Body)
+                if err != nil || r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
+                    received <- "invalid upstream request"
+                    w.WriteHeader(http.StatusBadRequest)
+                    return
+                }
+                received <- string(body)
+                w.Header().Set("Content-Type", "application/x-ndjson")
+                fmt.Fprintln(w, `{"type":"done","reply":"ok"}`)
+            }))
+            defer up.Close()
+
+            client := New(up.URL, 5*time.Second)
+            req := httptest.NewRequest(http.MethodPost, "/api/v1"+target, strings.NewReader(payload))
+            req.Header.Set("Content-Type", "application/json")
+            rec := httptest.NewRecorder()
+            client.Forward(rec, req, target)
+            if rec.Code != http.StatusOK {
+                t.Fatalf("proxy failed with %d: %s", rec.Code, rec.Body.String())
+            }
+            select {
+            case got := <-received:
+                if got != payload {
+                    t.Fatalf("voice request body changed in Go proxy: got %q", got)
+                }
+            case <-time.After(3 * time.Second):
+                t.Fatal("worker did not receive the voice request")
+            }
+        })
+    }
 }
