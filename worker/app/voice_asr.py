@@ -252,6 +252,13 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
             # Whisper wants 16 kHz mono. Downmix to mono; resample if needed.
             if getattr(data, "ndim", 1) > 1:
                 data = data.mean(axis=1)
+            if sr <= 0 or len(data) == 0:
+                raise ValueError("Audio must contain samples with a positive sample rate")
+            # Invalid floating-point samples can otherwise contaminate Whisper
+            # feature extraction and yield misleading or empty transcripts.
+            import numpy as np
+            if not np.isfinite(data).all():
+                raise ValueError("Audio contains NaN or infinite samples")
             if sr != 16000:
                 # Lightweight linear resample to 16 kHz (avoids pulling in scipy).
                 import numpy as np
@@ -262,16 +269,28 @@ def transcribe_wav(path: str, language: str = "da") -> dict:
                     data = np.interp(xq, xp, data).astype("float32")
             audio_input = data
         except ImportError:
-            # soundfile not installed -> let faster-whisper try its own decode
-            # (may hit the PyAV block on Windows; the install note recommends
-            # soundfile for exactly this reason).
+            # soundfile is optional. In this case faster-whisper may decode
+            # the file through PyAV, which is not available on every rig.
             audio_input = path
+        except Exception as exc:
+            # Never silently hand an undecodable recording to another decoder.
+            # In particular, .m4a may be unsupported by libsndfile even though
+            # it is accepted by PyAV. Surface an actionable error instead of
+            # disguising it as an ASR/model failure.
+            raise ValueError(
+                f"Unable to decode audio with soundfile: {path!r}. "
+                "Convert the recording to 16 kHz mono WAV before retrying."
+            ) from exc
 
+    # An utterance is independent of the previous push-to-talk recording.
+    # Disabling previous-text conditioning prevents a long segment from
+    # propagating an earlier hallucination into subsequent segments.
     segments, info = model.transcribe(
         audio_input,
         language=language,
         beam_size=5,
         vad_filter=True,
+        condition_on_previous_text=False,
     )
     # segments is a generator -- materialize it (this is where work happens).
     seg_list = []

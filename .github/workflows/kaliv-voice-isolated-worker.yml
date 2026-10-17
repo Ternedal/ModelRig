@@ -1,0 +1,85 @@
+name: kaliv-voice-isolated-worker
+
+# Operator-only qualification build. Never tags, publishes or replaces the V1 worker.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/kaliv-voice-isolated-worker.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  voice-worker:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Install pinned worker dependencies and optional voice engines
+        shell: pwsh
+        run: |
+          python -m pip install -r worker/requirements.txt
+          python -m pip install "piper-tts==1.8.0" "faster-whisper==1.2.1" "soundfile" "nvidia-cublas-cu12" "nvidia-cudnn-cu12" "pyinstaller"
+          python -c "import piper, faster_whisper, soundfile; print('Voice imports OK')"
+      - name: Test ASR input validation without GPU
+        shell: pwsh
+        run: |
+          python -m pip install "pytest" "numpy"
+          python -m pytest tests/worker_voice_asr_input_validation.py -q
+      - name: Stamp source identity and build isolated executable
+        shell: pwsh
+        run: |
+          python scripts/stamp_build_identity.py
+          pyinstaller --noconfirm --clean --onefile --name modelrig-worker-voice-test-windows-x64 --paths . --paths worker --collect-submodules bodyrig --collect-all piper --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all av --collect-all nvidia --collect-all onnxruntime worker/run_worker.py
+      - name: Smoke test isolated worker on a nonproduction port
+        shell: pwsh
+        run: |
+          $env:MODELRIG_WORKER_HOST = "127.0.0.1"
+          $env:MODELRIG_WORKER_PORT = "18099"
+          $exe = (Resolve-Path "dist/modelrig-worker-voice-test-windows-x64.exe").Path
+          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP/voice-worker.out" -RedirectStandardError "$env:RUNNER_TEMP/voice-worker.err"
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 45; $i++) {
+              if ($proc.HasExited) { throw "Worker exited before responding: $($proc.ExitCode)" }
+              try {
+                $resp = Invoke-WebRequest "http://127.0.0.1:18099/openapi.json" -TimeoutSec 3
+                if ($resp.StatusCode -eq 200) {
+                  $schema = $resp.Content | ConvertFrom-Json
+                  $routes = @($schema.paths.PSObject.Properties.Name)
+                  Write-Host "OpenAPI routes: $($routes.Count)"
+                  $voiceRoutes = @($routes | Where-Object { $_ -match 'voice' })
+                  if ($voiceRoutes.Count -eq 0) { throw "Voice routes missing" }
+                  Write-Host "Voice routes: $($voiceRoutes -join ', ')"
+                  if ($voiceRoutes.Count -lt 2) { throw "Expected multiple voice routes in isolated worker" }
+                  $ready = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 2
+              }
+            }
+            if (-not $ready) { throw "Isolated worker did not become ready" }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+            Get-Content "$env:RUNNER_TEMP/voice-worker.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
+          }
+      - name: Verify artifact exists
+        shell: pwsh
+        run: |
+          $exe = "dist/modelrig-worker-voice-test-windows-x64.exe"
+          if (!(Test-Path $exe)) { throw "Voice test worker was not produced" }
+          Get-FileHash $exe -Algorithm SHA256 | Format-List
+          $sizeMiB = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Host "Isolated EXE size: $sizeMiB MiB"
+          if ($sizeMiB -gt 1600) { throw "Isolated EXE exceeds 1600 MiB packaging ceiling" }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: kaliv-voice-test-worker-windows-x64
+          path: dist/modelrig-worker-voice-test-windows-x64.exe
+          if-no-files-found: error
+          retention-days: 3
