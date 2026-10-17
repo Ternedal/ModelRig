@@ -90,7 +90,7 @@ _source = _source.replace(_old_passing_report, _new_passing_report)
 
 _old_module_setup = """module = load_module()
 check(module.BRANCH == "physical-proof/2.0.15", "operator is pinned to the combined physical branch")
-check(module.VERSION == "2.0.16", "operator is pinned to version 2.0.15")
+check(module.VERSION == "2.0.16", "operator is pinned to version 2.0.16")
 sha = "a" * 40
 good = passing_report(module, sha)
 check(module.report_passes(good, sha), "exact-SHA 20/20 report passes")
@@ -107,7 +107,7 @@ for label, mutate in (
 
 _new_module_setup = """module = load_module()
 check(module.BRANCH == "physical-proof/2.0.15", "operator is pinned to the combined physical branch")
-check(module.VERSION == "2.0.16", "operator is pinned to version 2.0.15")
+check(module.VERSION == "2.0.16", "operator is pinned to version 2.0.16")
 sha = "a" * 40
 identity = {
     "version": module.VERSION,
