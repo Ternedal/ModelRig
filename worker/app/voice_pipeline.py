@@ -271,27 +271,50 @@ async def converse(
             await on_chunk(chunk)
         idx += 1
 
-    async for line in oc.chat_stream(messages, model=model,
-                                    base_url=llm_base_url, api_key=llm_api_key):
-        delta = _extract_delta(line)
-        if not delta:
-            continue
-        buffer += delta
-        reply_parts.append(delta)
-        # Emit every complete sentence currently in the buffer.
-        while True:
-            m = _SENTENCE_END.search(buffer)
-            if not m:
-                break
-            end = m.end()
-            sentence = buffer[:end].strip()
-            buffer = buffer[end:]
-            if sentence:
-                await _synth(sentence)
-    # Flush any trailing text with no terminal punctuation.
-    tail = buffer.strip()
-    if tail:
-        await _synth(tail)
+    # Bound synthesis to ONE task and preserve audio/chunk callback ordering,
+    # but consume incoming LLM tokens while the previous sentence is being
+    # synthesized. Previously the stream stopped reading for the full Piper
+    # duration after each sentence, adding avoidable backpressure to generation.
+    # Do not drop tests, bypass ASR/TTS locks, or allow unbounded TTS fan-out.
+    pending_synth: asyncio.Task[None] | None = None
+
+    async def _queue_sentence(sentence: str) -> None:
+        nonlocal pending_synth
+        if pending_synth is not None:
+            # This is the bounded backpressure point: at most one outstanding
+            # synthesis task. Completion/exception is observed *before* another
+            # utterance can begin, preserving sequential side effects.
+            await pending_synth
+        pending_synth = asyncio.create_task(_synth(sentence))
+
+    try:
+        async for line in oc.chat_stream(messages, model=model,
+                                        base_url=llm_base_url, api_key=llm_api_key):
+            delta = _extract_delta(line)
+            if not delta:
+                continue
+            buffer += delta
+            reply_parts.append(delta)
+            # Every complete sentence remains scheduled exactly once.
+            while True:
+                m = _SENTENCE_END.search(buffer)
+                if not m:
+                    break
+                end = m.end()
+                sentence = buffer[:end].strip()
+                buffer = buffer[end:]
+                if sentence:
+                    await _queue_sentence(sentence)
+        # Flush any trailing text with no terminal punctuation.
+        tail = buffer.strip()
+        if tail:
+            await _queue_sentence(tail)
+    finally:
+        # Crucial: do not abandon an already-running to_thread(TTS) worker on
+        # LLM errors or callback failures. Await the last task before unwinding,
+        # so audio is fully committed or failure is visible to the caller.
+        if pending_synth is not None:
+            await pending_synth
 
     reply = "".join(reply_parts).strip()
     ttfa = round((first_audio_at - llm_start), 2) if first_audio_at else None
