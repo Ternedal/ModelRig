@@ -31,6 +31,7 @@ SECTION_TEST = ROOT / "desktop/composeApp/src/test/kotlin/dk/ternedal/modelrig/d
 SERVER = ROOT / "backend/internal/httpapi/server.go"
 PILOT = ROOT / "backend/internal/httpapi/devcontrol_pilot.go"
 SENSOR_CONTROL_HANDOFF = ROOT / "docs/devcontrol/dc-l16/visionrig-sensor-control-handoff.json"
+LLM_PROVIDER_HANDOFF = ROOT / "docs/devcontrol/dc-l16/llm-provider-source-transition.json"
 
 
 def _load(path: Path) -> dict:
@@ -91,8 +92,29 @@ def run_contract() -> None:
         successor = _load(SENSOR_CONTROL_HANDOFF)
         server_transition = successor["tracked_source_transition"]
         assert server_transition["from_git_blob_sha"] == "582b163d7a71a934b43671ddad62a5644df3087e"
-        assert server_transition["to_git_blob_sha"] == server_sha
         run_sensor_control_handoff_contract()
+        if server_transition["to_git_blob_sha"] == server_sha:
+            pass
+        else:
+            assert LLM_PROVIDER_HANDOFF.is_file()
+            llm_handoff = _load(LLM_PROVIDER_HANDOFF)
+            llm_transition = llm_handoff["tracked_source_transition"]
+            assert llm_handoff["schema"] == (
+                "kaliv-rsi-dc-l16-llm-provider-source-transition/v1"
+            )
+            assert llm_handoff["repository"] == "Ternedal/ModelRig"
+            assert llm_transition == {
+                "path": "backend/internal/httpapi/server.go",
+                "from_git_blob_sha": server_transition["to_git_blob_sha"],
+                "to_git_blob_sha": server_sha,
+            }
+            assert llm_handoff["authority_state"] == {
+                "runtime_provider_selection_only": True,
+                "production_activation_authorized": False,
+                "merge_authorized": False,
+                "release_authorized": False,
+                "authority": "llm-provider-source-transition-only",
+            }
     assert _git_blob_sha(PILOT) == "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
 
     desktop = code_of(DESKTOP)

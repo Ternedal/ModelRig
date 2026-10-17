@@ -26,6 +26,10 @@ type unloadedModel struct {
 }
 
 func (s *server) handleModelsUnload(w http.ResponseWriter, r *http.Request) {
+	if s.LLM != nil && s.LLM.Name() != "ollama" {
+		writeErr(w, http.StatusNotImplemented, "model unload is currently Ollama-only")
+		return
+	}
 	ctx := r.Context()
 
 	// Fail-closed frem for panik: er der ingen Ollama-upstream konfigureret,
