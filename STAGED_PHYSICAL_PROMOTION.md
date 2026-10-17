@@ -1,8 +1,8 @@
 # Staged physical promotion — 2.0.15
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
-`2.0.15`. Kandidaten ligger på `physical-proof/2.0.15`; den eksakte SHA skal
-altid læses fra den fetch'ede `origin/physical-proof/2.0.15`, matches mod lokal
+`2.0.15`. Kandidaten ligger på `release/v2.0.16-voice-hotfix`; den eksakte SHA skal
+altid læses fra den fetch'ede `origin/release/v2.0.16-voice-hotfix`, matches mod lokal
 HEAD og bevises med `candidate_freeze_check.py`. Den må aldrig gættes eller
 kopieres fra ældre evidens.
 
@@ -24,19 +24,19 @@ kopieres fra ældre evidens.
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch physical-proof/2.0.15
-git pull --ff-only origin physical-proof/2.0.15
+git switch release/v2.0.16-voice-hotfix
+git pull --ff-only origin release/v2.0.16-voice-hotfix
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.15).Trim()
+$RemoteCandidateSha = (git rev-parse origin/release/v2.0.16-voice-hotfix).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.15: local=$CandidateSha remote=$RemoteCandidateSha" }
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/release/v2.0.16-voice-hotfix: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.15") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/physical-proof/2.0.15`, lokal exact HEAD og den grønne
+`origin/release/v2.0.16-voice-hotfix`, lokal exact HEAD og den grønne
 `candidate_freeze_check.py` skal alle pege på samme kandidat-SHA. Stop ved
 enhver forskel. Historiske freeze-PR'er og tidligere 2.0.15-heads er ikke
 SHA-authority.

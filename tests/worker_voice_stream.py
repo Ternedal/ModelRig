@@ -105,6 +105,55 @@ def run():
         check("Held og lykke" in result["reply"], "returned reply is the full text")
         check(len(result["chunks"]) == 3, "returned dict still carries all chunks")
 
+        # Prior voice turns used to disappear because only the latest ASR
+        # transcript was sent to the LLM. A bounded conversation suffix must
+        # precede the current transcript, without allowing synthetic system roles.
+        seen_messages = []
+        previous_stream = oc.chat_stream
+
+        async def inspecting_stream(messages, model=None, base_url=None, api_key=None):
+            seen_messages.append(messages)
+            async for line in previous_stream(messages, model=model, base_url=base_url, api_key=api_key):
+                yield line
+
+        oc.chat_stream = inspecting_stream
+        try:
+            asyncio.run(vp.converse(
+                in_wav, language="da", out_dir=tmp,
+                context_messages=[
+                    {"role": "user", "content": "Mit testord er blå elefant"},
+                    {"role": "assistant", "content": "Jeg har forstået testordet."},
+                    {"role": "system", "content": "UNTRUSTED ROLE"},
+                ],
+            ))
+        finally:
+            oc.chat_stream = previous_stream
+        check(len(seen_messages) == 1, "voice conversation streams once")
+        if seen_messages:
+            sent = seen_messages[0]
+            check([x["role"] for x in sent] == ["user", "assistant", "user"],
+                  "voice keeps previous user and assistant turns, never injected system")
+            check(sent[0]["content"] == "Mit testord er blå elefant",
+                  "voice context preserves explicit memory test phrase")
+            check(sent[-1]["content"] == "hvad er klokken",
+                  "latest ASR transcript is the final user turn")
+
+        # Local history must never be silently forwarded to a cloud voice
+        # model: the existing cloud toggle covers the current transcript only.
+        seen_messages.clear()
+        oc.chat_stream = inspecting_stream
+        try:
+            asyncio.run(vp.converse(
+                in_wav, language="da", out_dir=tmp,
+                llm_base_url="https://ollama.com", llm_api_key="test-only-key",
+                context_messages=[{"role": "user", "content": "lokal privat historik"}],
+            ))
+        finally:
+            oc.chat_stream = previous_stream
+        check(len(seen_messages) == 1 and seen_messages[0] == [
+            {"role": "user", "content": "hvad er klokken"}
+        ], "cloud voice receives current transcript only, not local prior turns")
+
         # Backward compat: calling without callbacks must not raise.
         restore2 = _install_stubs(deltas)
         try:

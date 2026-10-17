@@ -192,6 +192,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         model: String? = null,
         cloudBaseUrl: String? = null,
         cloudKey: String? = null,
+        contextMessages: List<Pair<String, String>> = emptyList(),
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onTranscript: (String) -> Unit,
         onChunk: (index: Int, text: String, audioB64: String, utteranceId: String?) -> Unit,
@@ -199,6 +200,20 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         onError: (status: Int, detail: String) -> Unit,
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
+        // Only completed turns from this chat. Do not send UI/system messages,
+        // and keep the same strict limits as the worker's request schema.
+        val history = JSONArray()
+        // Cloud voice consent covered only the current spoken transcript; do
+        // not silently expose earlier local turns to an external LLM.
+        val localHistory: List<Pair<String, String>> =
+            if (cloudBaseUrl != null && cloudKey != null) emptyList() else contextMessages.takeLast(12)
+        localHistory.forEach { (role, content) ->
+            val cleaned = content.trim().take(512)
+            if ((role == "user" || role == "assistant") && cleaned.isNotEmpty()) {
+                history.put(JSONObject().put("role", role).put("content", cleaned))
+            }
+        }
+        if (history.length() > 0) payload.put("context_messages", history)
         if (model != null) payload.put("model", model)
         if (cloudBaseUrl != null && cloudKey != null) {
             payload.put("llm_base_url", cloudBaseUrl)
@@ -215,32 +230,33 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 throw ModelRigException("voice stream failed (${resp.code}): $text")
             }
             val source = resp.body?.source() ?: throw ModelRigException("empty response body")
-            // Voice had the worst version of the bug: if the stream ended
-            // without "done", NO callback fired at all -- not onDone, not
-            // onError -- so the turn just hung there spinning.
-            var sawTerminal = false
-            while (!source.exhausted()) {
+            // The NDJSON done/error line is the end of the VOICE turn. A proxy
+            // or upstream may keep the HTTP connection open after that line;
+            // waiting for transport EOF used to leave the overlay at "Tænker…"
+            // for the full five-minute read timeout despite a complete reply.
+            // Closing the response here also releases its OkHttp connection.
+            while (true) {
                 val line = source.readUtf8Line() ?: break
                 when (val ev = StreamContract.parse(line)) {
                     is StreamEvent.Phase -> Unit  // stemmestroemmen udsender ingen faser endnu
                     is StreamEvent.Transcript -> onTranscript(ev.text)
                     is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64, ev.utteranceId)
                     is StreamEvent.Done -> {
-                        sawTerminal = true
                         onDone(ev.reply, ev.model, ev.viaCloud)
+                        return@use
                     }
                     is StreamEvent.Failure -> {
-                        sawTerminal = true
                         onError(ev.status, ev.message)
+                        return@use
                     }
                     else -> {}
                 }
             }
-            if (!sawTerminal) {
-                throw ModelRigException(
-                    "stemmesvaret blev afbrudt — forbindelsen lukkede før riggen var færdig; prøv igen"
-                )
-            }
+            // HTTP 200 and EOF are not proof that the ASR/LLM/TTS pipeline
+            // finished: a truncated stream must still surface an error.
+            throw ModelRigException(
+                "stemmesvaret blev afbrudt — forbindelsen lukkede før riggen var færdig; prøv igen"
+            )
         }
     }
 

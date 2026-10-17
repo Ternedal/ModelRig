@@ -65,6 +65,9 @@ _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 # lone underscore in a filename isn't touched).
 
 _MD_CODE_FENCE = re.compile(r"```[\s\S]*?```")          # fenced blocks: drop entirely
+_MD_STRIKE = re.compile(r"~~([^~\n]+)~~")               # ~~deleted~~ -> deleted
+_MD_BARE_URL = re.compile(r"https?://[^\s<>]+")         # do not spell URLs or query strings
+_MD_RESIDUAL_MARKERS = re.compile(r"(?:\*{2,}|_{2,}|~{2,}|`{2,})")  # orphan formatting markers
 _MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")             # `code` -> code
 _MD_BOLD_ITALIC = re.compile(r"(\*{1,3})(\S(?:.*?\S)?)\1")  # **x** *x* ***x*** -> x
 _MD_UNDERSCORE = re.compile(r"(?<!\w)(_{1,3})(\S(?:.*?\S)?)\1(?!\w)")  # _x_ -> x
@@ -138,6 +141,8 @@ def strip_markdown(text: str) -> str:
     t = _MD_HRULE.sub(" ", t)
     t = _MD_IMAGE.sub(r"\1", t)
     t = _MD_LINK.sub(r"\1", t)
+    t = _MD_BARE_URL.sub(" ", t)
+    t = _MD_STRIKE.sub(r"\1", t)
     t = _MD_INLINE_CODE.sub(r"\1", t)
     t = _MD_BOLD_ITALIC.sub(r"\2", t)
     t = _MD_UNDERSCORE.sub(r"\2", t)
@@ -145,6 +150,7 @@ def strip_markdown(text: str) -> str:
     t = _MD_BLOCKQUOTE.sub("", t)
     t = _MD_BULLET.sub("", t)
     t = _MD_NUMLIST.sub("", t)
+    t = _MD_RESIDUAL_MARKERS.sub(" ", t)
     t = _EMOJI.sub(" ", t)  # emojis are unspeakable; drop them (chat keeps them)
     t = _WS.sub(" ", t)
     return t.strip()
@@ -192,6 +198,7 @@ async def converse(
     llm_api_key: str | None = None,
     on_chunk: "Callable[[dict], Awaitable[None]] | None" = None,
     on_transcript: "Callable[[str], Awaitable[None]] | None" = None,
+    context_messages: list[dict[str, str]] | None = None,
 ) -> dict:
     """Run one full spoken turn from an audio file.
 
@@ -241,7 +248,22 @@ async def converse(
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
-    messages = [{"role": "user", "content": transcript}]
+    # Previous turns are data, not instructions. Allow only model-chat roles,
+    # exclude empty/oversized items, and never accept a caller-provided system role.
+    # A bounded suffix keeps voice fast on modest local GPU hardware.
+    history = []
+    # Cloud voice already shares the CURRENT transcript by explicit setting.
+    # Never silently expand that egress to prior local chat messages: that
+    # requires its own opt-in, which this feature deliberately does not add.
+    for turn in (() if llm_base_url else (context_messages or [])[-12:]):
+        if not isinstance(turn, dict):
+            continue
+        role, content = turn.get("role"), turn.get("content")
+        if role in ("user", "assistant") and isinstance(content, str):
+            content = content.strip()
+            if content and len(content) <= 512:
+                history.append({"role": role, "content": content})
+    messages = [*history, {"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
     chunks: list[dict] = []

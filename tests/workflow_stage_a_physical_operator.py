@@ -7,8 +7,8 @@ from pathlib import Path
 _source_path = Path(__file__).with_name("workflow_stage_a_physical_operator.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.15"),
-    ("1.58.143", "2.0.15"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.16"),
+    ("1.58.143", "2.0.16"),
     ("1.58.142", "2.0.12"),
     ("#150", "#161"),
 ):
