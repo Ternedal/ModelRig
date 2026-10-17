@@ -43,10 +43,10 @@ def _install_stubs(reply_deltas):
     }
     vp.voice_asr.is_available = lambda: True
     vp.voice_tts.is_available = lambda: True
-    vp.voice_asr.transcribe_wav = lambda path, lang: {"text": "hvad er klokken", "language": lang}
+    vp.voice_asr.transcribe_wav = lambda path, lang: {"text": "fortæl mig en historie", "language": lang}
     vp.voice_tts.synthesize_to_wav = lambda text, wav: _write_silent_wav(wav)
 
-    async def fake_stream(messages, model=None, base_url=None, api_key=None):
+    async def fake_stream(messages, model=None, base_url=None, api_key=None, **kwargs):
         for d in reply_deltas:
             # chat_stream yields bytes; _extract_delta calls .decode() on them.
             yield ('{"message":{"content":' + _json_str(d) + '}}').encode()
@@ -88,7 +88,7 @@ def run():
         ))
 
         # on_transcript fires exactly once, before any chunks, with the ASR text.
-        check(transcripts == ["hvad er klokken"],
+        check(transcripts == ["fortæl mig en historie"],
               "on_transcript fires once with the ASR text")
 
         # Three sentences -> three chunks, each with text + a real WAV path + index.

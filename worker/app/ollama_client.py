@@ -71,12 +71,27 @@ async def embed(text: str, model: str | None = None) -> list[float]:
     return emb
 
 
-async def chat(messages: list[dict], model: str | None = None) -> str:
+async def chat(
+    messages: list[dict],
+    model: str | None = None,
+    *,
+    response_format: str | dict | None = None,
+    options: dict | None = None,
+) -> str:
     model = model or GEN_MODEL
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "keep_alive": KEEP_ALIVE,
+    }
+    if response_format is not None:
+        payload["format"] = response_format
+    if options:
+        payload["options"] = dict(options)
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-            r = await c.post(f"{OLLAMA_URL}/api/chat",
-                             json={"model": model, "messages": messages, "stream": False, "keep_alive": KEEP_ALIVE})
+            r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
     except httpx.HTTPError as e:
         raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
     if r.status_code != 200:
@@ -163,7 +178,9 @@ async def chat_tools(messages: list[dict], tools: list[dict],
 
 
 async def chat_stream(messages: list[dict], model: str | None = None,
-                      base_url: str | None = None, api_key: str | None = None):
+                      base_url: str | None = None, api_key: str | None = None,
+                      *, think: bool | None = None, options: dict | None = None,
+                      keep_alive: str | None = None):
     """Async generator yielding raw NDJSON lines (bytes) from Ollama's streaming
     chat. Raises OllamaError (before the first yield) if the request can't start.
 
@@ -187,7 +204,11 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     # app's CloudClient never sends keep_alive). So only send it to the local rig.
     payload: dict = {"model": model, "messages": messages, "stream": True}
     if not base_url:
-        payload["keep_alive"] = KEEP_ALIVE
+        payload["keep_alive"] = keep_alive if keep_alive is not None else KEEP_ALIVE
+        if think is not None:
+            payload["think"] = think
+        if options is not None:
+            payload["options"] = dict(options)
     client = httpx.AsyncClient(timeout=TIMEOUT)
     try:
         async with client.stream("POST", f"{url}/api/chat", headers=headers,

@@ -5,7 +5,7 @@
 
 **Version på main:** `2.0.14`
 **Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
-**Genereret:** 2026-09-23 18:12 UTC
+**Genereret:** 2026-10-13 17:56 UTC
 
 ---
 
@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 42 feature-switches er tændt som default.** (35 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -133,6 +133,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_WEB_RESEARCH_ENABLED` | `(tom)` | slukket |
 | `KALIV_WORKER_ALLOW_LAN` | `0` | slukket |
 | `MODELRIG_ADMIN_KEY` | `(unset)` | indstilling |
+| `MODELRIG_ASR_CUDA_DLL_DIRS` | `(tom)` | slukket |
 | `MODELRIG_CLAIM_MAX` | `(unset)` | indstilling |
 | `MODELRIG_CONFIG` | `(unset)` | indstilling |
 | `MODELRIG_DATA` | `(unset)` | slukket |
@@ -145,6 +146,9 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `MODELRIG_OLLAMA_URL` | `http://127.0.0.1:11434` | indstilling |
 | `MODELRIG_PAIRING_TTL` | `(unset)` | indstilling |
 | `MODELRIG_PORT` | `(unset)` | indstilling |
+| `MODELRIG_VOICE_PREWARM` | `0` | slukket |
+| `MODELRIG_VOICE_PREWARM_PIPER` | `0` | slukket |
+| `MODELRIG_VOICE_TIMEZONE` | `Europe/Copenhagen` | indstilling |
 | `MODELRIG_WORKER_HOST` | `127.0.0.1` | indstilling |
 | `MODELRIG_WORKER_PORT` | `8099` | indstilling |
 | `MODELRIG_WORKER_URL` | `(unset)` | indstilling |

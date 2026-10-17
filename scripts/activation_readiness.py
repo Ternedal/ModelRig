@@ -798,9 +798,13 @@ def live_appliance_probe() -> dict:
     return out
 
 
-def render() -> str:
+def render(*, live: bool = False) -> str:
+    """Commit a portable fail-closed snapshot; explicit live mode inspects the rig."""
     v = version()
-    val = validation()
+    val = validation() if live else {
+        "present": False, "path": DEFAULT_REPORT_TEXT, "ready": False,
+        "reason": "ingen rapport på disken — fysisk validering er ikke kørt",
+    }
     dormant_ok, dormant_line = dormancy()
     server_plans, plan_note = plan_authority()
     approval_ok, approval_note = schedule_approval_authority()
@@ -810,7 +814,10 @@ def render() -> str:
     switches = [f for f in flags if f[2] != "indstilling"]
     active = [f for f in switches if f[2] == "**AKTIV**"]
 
-    probe = live_appliance_probe()
+    probe = live_appliance_probe() if live else {
+        "reachable": False, "version": None, "surface": None,
+        "surface_reasons": [], "schedules_http": None,
+    }
 
     blockers: list[str] = []
     if probe["reachable"] and probe["surface"] == "agent3_readonly":
@@ -973,7 +980,10 @@ def render() -> str:
 
 
 def main() -> int:
-    text = render()
+    # The committed readiness page must not depend on localhost, private
+    # validation files, or machine-specific environment. Operators can still
+    # request the real-time rig assessment with --live (do not commit it).
+    text = render(live="--live" in sys.argv)
     if "--check" in sys.argv:
         if not OUT.exists():
             print("ACTIVATION_READINESS.md mangler — kør scripts/activation_readiness.py")
