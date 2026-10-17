@@ -855,6 +855,10 @@ private fun ChatScreen(
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
+    // Generation epoch prevents stale stream callbacks from mutating a new chat.
+    var streamEpoch by remember { mutableIntStateOf(0) }
+    // Stop may be pressed before OkHttp creates its Call.
+    var stopRequestedEpoch by remember { mutableIntStateOf(-1) }
     var currentModel by remember { mutableStateOf(store.model) }
     var models by remember { mutableStateOf(listOf<String>()) }
     var showSourceSheet by remember { mutableStateOf(false) }
@@ -1426,6 +1430,13 @@ private fun ChatScreen(
         // convId already exists). Only a switch to a DIFFERENT conversation
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
+        // A conversation switch invalidates the previous generation. Do not
+        // allow an old network stream to continue consuming rig resources.
+        activeCall?.cancel()
+        streamEpoch++
+        val loadEpoch = streamEpoch
+        busy = false
+        activeCall = null
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
@@ -1438,6 +1449,7 @@ private fun ChatScreen(
             val loaded = withContext(Dispatchers.IO) {
                 db.conversationMeta(openConvId) to db.loadMessages(openConvId)
             }
+            if (loadEpoch != streamEpoch || openConvId != convId) return@LaunchedEffect
             val (meta, msgs) = loaded
             // Strip emojis from OLD assistant replies on load too. The finalize-time
             // strip only cleans new replies; without this, opening a conversation
@@ -1470,6 +1482,7 @@ private fun ChatScreen(
         // Allow an image-only turn (vision: "describe this" with no text).
         if ((t.isEmpty() && pendingImageB64 == null) || busy) return@onSend
         messages.add(Msg("user", t)); input = ""; busy = true
+        val turnEpoch = ++streamEpoch
         // Route decision comes from the ONE table-tested router (see
         // TurnRouter) -- the retry path derives its flags from the same place,
         // so send and retry cannot diverge again.
@@ -1500,6 +1513,9 @@ private fun ChatScreen(
                 db.addMessage(id, "user", t)
                 id
             }
+            // A chat switch while persistence was running must not re-open the
+            // previous conversation or start its network generation.
+            if (turnEpoch != streamEpoch) return@launch
             if (convId == null) { convId = cid; onConvChanged(cid) }
 
             val onDelta: (String) -> Unit = { delta ->
@@ -1508,24 +1524,28 @@ private fun ChatScreen(
                     // runCatching around the stream -- it is an app crash. Guard
                     // the index; a replaced list means the user moved on.
                     val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[idx] = cur.copy(text = cur.text + delta)
                 }
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
-                    val i = messages.lastIndex
-                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
+                    messages[idx] = cur.copy(context = cs)
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[idx] = cur.copy(sources = srcs)
                 }
             }
             val onPerson: (String) -> Unit = { label ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
                     messages[idx] = cur.copy(personLabel = label)
                 }
             }
@@ -1536,11 +1556,18 @@ private fun ChatScreen(
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
                         val cur = messages.getOrNull(idx) ?: return@launch
-                        if (cur.streaming) messages[idx] = cur.copy(status = label)
+                        if (cur.streaming && turnEpoch == streamEpoch) messages[idx] = cur.copy(status = label)
                     }
                 }
             }
-            val hook: (okhttp3.Call) -> Unit = { activeCall = it }
+            val hook: (okhttp3.Call) -> Unit = { call ->
+                // Registration can race with a conversation switch or Stop.
+                if (turnEpoch == streamEpoch && stopRequestedEpoch != turnEpoch) {
+                    activeCall = call
+                } else {
+                    call.cancel()
+                }
+            }
 
             // Track whether the rig stream emitted anything, so we only fall
             // back to cloud on a clean pre-emit failure (never mid-stream --
@@ -1635,31 +1662,39 @@ private fun ChatScreen(
                             // (rig down / model not pulled / HTTP error). A mid-stream
                             // rig failure is surfaced, not retried.
                             val cloudKey = store.cloudKey
+                            var rigCall: okhttp3.Call? = null
+                            val rigHook: (okhttp3.Call) -> Unit = { call -> rigCall = call; hook(call) }
                             try {
                                 ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook, imageB64 = imageB64,
+                                    .chatStream(rigModel, history, registerCall = rigHook, imageB64 = imageB64,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
+                                val wasRigCallCancelled = rigCall?.isCanceled() == true
                                 // local-first: a rig failure does NOT auto-send to cloud
                                 // unless the user opted in, and an attached image is
                                 // never sent via fallback -- it stays on the device.
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
+                                if (dk.ternedal.modelrig.logic.CloudFallbackPolicy.shouldFallback(rigEmitted, wasRigCallCancelled || stopRequestedEpoch == turnEpoch || turnEpoch != streamEpoch, cloudKey != null, store.autoCloudFallback)) {
                                     didFallback = true
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                                    CloudClient(requireNotNull(cloudKey)).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
                         }
                     }
                 }.exceptionOrNull()
             }
+            // A stale generation must not clear the current request or surface
+            // a tool proposal belonging to another conversation.
+            if (turnEpoch != streamEpoch) return@launch
             activeCall = null
             // A parked write proposal: surface the card. Nothing has executed.
-            proposal?.let { pendingTool = it }
+            if (stopRequestedEpoch != turnEpoch) proposal?.let { pendingTool = it }
             // The list can have been replaced mid-stream (a real conversation
             // switch). Then there is nothing on screen to finish; bail rather
             // than index past the end. The reply is not persisted in that
             // case -- a loss, but a bounded one, where before it was a crash.
+            if (turnEpoch != streamEpoch) return@launch
             val cur = messages.getOrNull(idx) ?: run { busy = false; return@launch }
+            if (!cur.streaming || cur.role != "assistant") { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[idx] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text), fellBackToCloud = didFallback)
@@ -1674,7 +1709,8 @@ private fun ChatScreen(
             if ((err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
             }
-            if (proposal != null) messages.removeAt(idx)
+            if (turnEpoch != streamEpoch) return@launch
+            if (proposal != null && stopRequestedEpoch != turnEpoch) messages.removeAt(idx)
             busy = false
         }
     }
@@ -1689,6 +1725,7 @@ private fun ChatScreen(
         if (!errMsg.error) return@retry
         val userMsg = messages.getOrNull(i - 1) ?: return@retry
         if (userMsg.role != "user") return@retry
+        val turnEpoch = ++streamEpoch
         val t = userMsg.text
         // ONE router for send + retry (audit P1-1 -> 1.58.38): the retry can
         // no longer diverge from the original turn's route -- the decision
@@ -1711,29 +1748,37 @@ private fun ChatScreen(
         var proposal: dk.ternedal.modelrig.net.ToolTurn? = null
         scope.launch {
             val onDelta: (String) -> Unit = { delta ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(text = cur.text + delta) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming || turnEpoch != streamEpoch) return@launch; messages[i] = cur.copy(text = cur.text + delta) }
             }
             val onContext: (List<dk.ternedal.modelrig.net.UsedChunk>) -> Unit = { cs ->
                 scope.launch {
-                    val i = messages.lastIndex
-                    if (i >= 0) messages[i] = messages[i].copy(context = cs)
+                    val cur = messages.getOrNull(i) ?: return@launch
+                    if (!cur.streaming || turnEpoch != streamEpoch) return@launch
+                    messages[i] = cur.copy(context = cs)
                 }
             }
             val onSources: (List<String>) -> Unit = { srcs ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(sources = srcs) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming || turnEpoch != streamEpoch) return@launch; messages[i] = cur.copy(sources = srcs) }
             }
             val onPersonRetry: (String) -> Unit = { label ->
-                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; if (!cur.streaming || turnEpoch != streamEpoch) return@launch; messages[i] = cur.copy(personLabel = label) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
-                        val cur = messages[i]
-                        if (cur.streaming) messages[i] = cur.copy(status = label)
+                        val cur = messages.getOrNull(i) ?: return@launch
+                        if (cur.streaming && turnEpoch == streamEpoch) messages[i] = cur.copy(status = label)
                     }
                 }
             }
-            val hook: (okhttp3.Call) -> Unit = { activeCall = it }
+            val hook: (okhttp3.Call) -> Unit = { call ->
+                // Registration can race with a conversation switch or Stop.
+                if (turnEpoch == streamEpoch && stopRequestedEpoch != turnEpoch) {
+                    activeCall = call
+                } else {
+                    call.cancel()
+                }
+            }
             val err = withContext(Dispatchers.IO) {
                 runCatching {
                     when {
@@ -1784,23 +1829,29 @@ private fun ChatScreen(
                             // surfaced, not retried.
                             val cloudKey = store.cloudKey
                             var rigEmitted = 0
+                            var rigCall: okhttp3.Call? = null
+                            val rigHook: (okhttp3.Call) -> Unit = { call -> rigCall = call; hook(call) }
                             try {
                                 ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook,
+                                    .chatStream(rigModel, history, registerCall = rigHook,
                                         onDelta = { d -> rigEmitted++; onDelta(d) })
                             } catch (e: Exception) {
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
+                                val wasRigCallCancelled = rigCall?.isCanceled() == true
+                                if (dk.ternedal.modelrig.logic.CloudFallbackPolicy.shouldFallback(rigEmitted, wasRigCallCancelled || stopRequestedEpoch == turnEpoch || turnEpoch != streamEpoch, cloudKey != null, store.autoCloudFallback)) {
+                                    CloudClient(requireNotNull(cloudKey)).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
                                 } else throw e
                             }
                         }
                     }
                 }.exceptionOrNull()
             }
+            if (turnEpoch != streamEpoch) return@launch
             activeCall = null
             // Same as the main path: a parked write proposal surfaces the card.
-            proposal?.let { pendingTool = it }
+            if (stopRequestedEpoch != turnEpoch) proposal?.let { pendingTool = it }
+            if (turnEpoch != streamEpoch) return@launch
             val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
+            if (!cur.streaming || cur.role != "assistant") { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
                 err == null -> cur.copy(streaming = false, text = stripEmojis(cur.text))
@@ -1813,6 +1864,7 @@ private fun ChatScreen(
             if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
                 withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
             }
+            if (turnEpoch != streamEpoch) return@launch
             busy = false
         }
     }
@@ -1827,7 +1879,7 @@ private fun ChatScreen(
             val chatOverflowMenu: @Composable () -> Unit = {
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
-                            overflow = false; messages.clear(); convId = null; onConvChanged(null)
+                            overflow = false; activeCall?.cancel(); streamEpoch++; activeCall = null; busy = false; messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
@@ -2884,7 +2936,7 @@ private fun ChatScreen(
                     },
                     sendEnabled = canSendNow && !busy,
                     busy = busy,
-                    onStop = { activeCall?.cancel() },
+                    onStop = { stopRequestedEpoch = streamEpoch; activeCall?.cancel() },
                     inputField = {
                         BasicTextField(
                             value = input,
