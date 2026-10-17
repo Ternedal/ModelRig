@@ -1643,7 +1643,16 @@ async def voice_converse_stream(req: ConverseUploadReq):
                     break
                 yield (_json.dumps(item) + "\n").encode()
         finally:
+            # A disconnected phone must not leave ASR/LLM/TTS running or
+            # accumulate per-turn input/chunk WAV files on the rig.
             if not task.done():
                 task.cancel()
+            try:
+                await task
+            except _asyncio.CancelledError:
+                pass
+            finally:
+                import shutil as _shutil
+                await _asyncio.to_thread(_shutil.rmtree, tmp_dir, ignore_errors=True)
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
