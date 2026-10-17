@@ -376,6 +376,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
+- `tests/worker_ollama_embed_residency_budget.py`
 - `tests/worker_paths.py`
 - `tests/worker_person_registry.py`
 - `tests/worker_person_runtime.py`

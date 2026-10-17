@@ -75,6 +75,7 @@ SETTING_ENV_SUFFIXES = (
     "_AGE_HOURS",
     "_MB",
     "_MAX",
+    "_TOKENS",
     "_ID",
     "_ISOLATION",
 )
