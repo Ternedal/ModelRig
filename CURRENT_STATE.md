@@ -439,6 +439,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_vision.py`
 - `tests/worker_voice_baseline.py`
 - `tests/worker_voice_stream.py`
+- `tests/worker_voice_stream_cleanup.py`
 - `tests/worker_voice_strip.py`
 - `tests/worker_voice_tts_empty_synthesis.py`
 - `tests/worker_voice_tts_voicerig_provider.py`

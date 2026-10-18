@@ -192,6 +192,7 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         model: String? = null,
         cloudBaseUrl: String? = null,
         cloudKey: String? = null,
+        history: List<Pair<String, String>> = emptyList(),
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onTranscript: (String) -> Unit,
         onChunk: (index: Int, text: String, audioB64: String, utteranceId: String?) -> Unit,
@@ -199,6 +200,15 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         onError: (status: Int, detail: String) -> Unit,
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
+        if (history.isNotEmpty()) {
+            val previous = org.json.JSONArray()
+            history.takeLast(12).forEach { (role, content) ->
+                if ((role == "user" || role == "assistant") && content.isNotBlank()) {
+                    previous.put(JSONObject().put("role", role).put("content", content.take(4000)))
+                }
+            }
+            payload.put("history", previous)
+        }
         if (model != null) payload.put("model", model)
         if (cloudBaseUrl != null && cloudKey != null) {
             payload.put("llm_base_url", cloudBaseUrl)
