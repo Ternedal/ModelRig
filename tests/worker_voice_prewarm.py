@@ -18,9 +18,10 @@ class VoicePrewarmTests(unittest.TestCase):
             yield
         async def run():
             with patch.dict(os.environ, {"MODELRIG_VOICE_PREWARM": "0"}), \
-                 patch.object(voice_prewarm, "prewarm_asr", side_effect=AssertionError("unexpected prewarm")):
+                 patch.object(voice_prewarm, "prewarm_asr", side_effect=AssertionError("unexpected prewarm")) as prewarm:
                 async with voice_prewarm.compose_asr_prewarm_lifespan(inner)(None):
-                    pass
+                    await asyncio.sleep(0)
+                prewarm.assert_not_called()
         asyncio.run(run())
 
     def test_opt_in_nonblocking_and_cleanup(self):
