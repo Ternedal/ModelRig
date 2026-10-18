@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import os
 import sys
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -40,16 +41,31 @@ class VoicePrewarmTests(unittest.TestCase):
         asyncio.run(run())
 
     def test_cancelled_prewarm_is_not_reported_as_loaded(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_model():
+            started.set()
+            if not release.wait(timeout=2):
+                raise TimeoutError("test model release timed out")
+            return object()
+
         async def run():
-            # Cancellation before a background thread finishes must never
-            # claim a successfully loaded model.
-            with patch("app.voice_asr._get_model", side_effect=lambda: __import__("time").sleep(0.05)):
+            # Wait for the worker thread to enter model construction before
+            # cancelling; one event-loop tick is not a reliable barrier.
+            with patch("app.voice_asr._get_model", side_effect=slow_model):
                 task = asyncio.create_task(voice_prewarm.prewarm_asr())
-                await asyncio.sleep(0)
-                task.cancel()
-                with self.assertRaises(asyncio.CancelledError):
-                    await task
-                self.assertEqual(voice_prewarm.prewarm_status()["state"], "cancelled")
+                try:
+                    self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+                    self.assertEqual(voice_prewarm.prewarm_status()["state"], "cancelled")
+                finally:
+                    release.set()
+                    if not task.done():
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
         asyncio.run(run())
 
     def test_success_and_failure_never_expose_exception(self):
