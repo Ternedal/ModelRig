@@ -57,11 +57,10 @@ def compose_asr_prewarm_lifespan(inner):
                 yield
             finally:
                 if task is not None and not task.done():
-                    # The underlying to_thread() model load cannot be stopped by
-                    # cancelling its coroutine. Wait for it to finish rather
-                    # than leave a GPU initialization running past shutdown.
-                    await asyncio.shield(task)
-                elif task is not None:
+                    # Cancellation stops the coroutine, but cannot forcibly
+                    # terminate an already running to_thread() native load.
+                    # The ASR singleton lock still prevents duplicate loads.
+                    task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
     lifespan.__wrapped__ = getattr(inner, "__wrapped__", inner)
     return lifespan
