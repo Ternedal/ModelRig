@@ -31,6 +31,10 @@ async def prewarm_asr() -> None:
         # _get_model holds its own threading lock. A simultaneous real request
         # waits for that same initialization instead of loading a second model.
         await asyncio.to_thread(voice_asr._get_model)
+    except asyncio.CancelledError:
+        _state = "cancelled"
+        _elapsed_seconds = round(time.monotonic() - started, 3)
+        raise
     except Exception:
         _state = "failed"
         _elapsed_seconds = round(time.monotonic() - started, 3)
@@ -53,7 +57,11 @@ def compose_asr_prewarm_lifespan(inner):
                 yield
             finally:
                 if task is not None and not task.done():
-                    task.cancel()
+                    # The underlying to_thread() model load cannot be stopped by
+                    # cancelling its coroutine. Wait for it to finish rather
+                    # than leave a GPU initialization running past shutdown.
+                    await asyncio.shield(task)
+                elif task is not None:
                     await asyncio.gather(task, return_exceptions=True)
     lifespan.__wrapped__ = getattr(inner, "__wrapped__", inner)
     return lifespan
