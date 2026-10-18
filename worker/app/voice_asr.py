@@ -158,7 +158,7 @@ def status() -> dict:
         "ok": available,
         "device": _device() if available else None,
         "model": _model_name() if available else None,
-        "detail": None if available else "faster-whisper not installed",
+        "detail": None if available else "faster-whisper import unavailable (missing package or native dependency); inspect worker logs",
     }
 
 
