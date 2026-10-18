@@ -47,6 +47,53 @@ class VoiceStreamCleanupTests(unittest.TestCase):
         self.assertIn("rmtree", endpoint_source)
         self.assertIn("tmp_dir", endpoint_source)
 
+    def test_cancelled_backend_waits_for_thread_before_unlock(self):
+        """Disconnect cannot release a backend lock while its OS thread runs."""
+        import asyncio
+        import threading
+
+        pipeline_tree = ast.parse(
+            (ROOT / "worker" / "app" / "voice_pipeline.py").read_text(encoding="utf-8")
+        )
+        helper = next(
+            n for n in pipeline_tree.body
+            if isinstance(n, ast.AsyncFunctionDef)
+            and n.name == "_run_backend_to_completion"
+        )
+        namespace = {"asyncio": asyncio}
+        exec(compile(ast.Module(body=[helper], type_ignores=[]), "<backend-helper>", "exec"), namespace)
+        run_backend = namespace["_run_backend_to_completion"]
+
+        async def scenario():
+            started = threading.Event()
+            release = threading.Event()
+            lock = asyncio.Lock()
+
+            def blocking_backend():
+                started.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("backend not released")
+                return "done"
+
+            async def producer():
+                async with lock:
+                    await run_backend(blocking_backend)
+
+            task = asyncio.create_task(producer())
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 3))
+                task.cancel()
+                await asyncio.sleep(0.05)
+                self.assertFalse(task.done(), "producer must join the backend thread")
+                self.assertTrue(lock.locked(), "backend lock released while thread runs")
+            finally:
+                release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=3)
+            self.assertFalse(lock.locked())
+
+        asyncio.run(scenario())
+
     def test_generator_runtime_cleans_files_on_normal_completion(self):
         """Execute the real nested generator with a fake completed producer."""
         import asyncio
