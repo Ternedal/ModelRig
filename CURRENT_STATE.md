@@ -82,7 +82,6 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_VISION_MODEL` | `(unset)` |
 | `KALIV_WEB_RESEARCH_ENABLED` | `` |
 | `KALIV_WORKER_ALLOW_LAN` | `0` |
-| `MODELRIG_VOICE_PREWARM` | `0` |
 
 ## Desktop credential storage
 
