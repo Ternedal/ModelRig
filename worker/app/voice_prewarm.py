@@ -9,20 +9,36 @@ import time
 
 log = logging.getLogger(__name__)
 
+# In-process diagnostics only; no HTTP endpoint or user content.
+_state = "not_started"
+_elapsed_seconds = None
+
+
+def prewarm_status() -> dict:
+    """Snapshot of initialization only (not proof of successful inference)."""
+    return {"state": _state, "elapsed_seconds": _elapsed_seconds}
+
 
 async def prewarm_asr() -> None:
     """Load the same singleton used by requests; never claim ready on failure."""
     from . import voice_asr
 
+    global _state, _elapsed_seconds
+    _state = "loading"
+    _elapsed_seconds = None
     started = time.monotonic()
     try:
         # _get_model holds its own threading lock. A simultaneous real request
         # waits for that same initialization instead of loading a second model.
         await asyncio.to_thread(voice_asr._get_model)
     except Exception:
+        _state = "failed"
+        _elapsed_seconds = round(time.monotonic() - started, 3)
         # No transcript, path, model secret or raw exception in routine logs.
         log.warning("ASR prewarm failed after %.2fs", time.monotonic() - started)
     else:
+        _state = "loaded"
+        _elapsed_seconds = round(time.monotonic() - started, 3)
         log.info("ASR prewarm completed after %.2fs", time.monotonic() - started)
 
 
