@@ -45,10 +45,14 @@ class VoicePrewarmTests(unittest.TestCase):
                  patch.object(voice_prewarm, "log") as log:
                 await voice_prewarm.prewarm_asr()
                 log.info.assert_called_once()
+                self.assertEqual(voice_prewarm.prewarm_status()["state"], "loaded")
+                self.assertGreaterEqual(voice_prewarm.prewarm_status()["elapsed_seconds"], 0)
             with patch("app.voice_asr._get_model", side_effect=RuntimeError("PRIVATE_PATH")), \
                  patch.object(voice_prewarm, "log") as log:
                 await voice_prewarm.prewarm_asr()
                 self.assertNotIn("PRIVATE_PATH", str(log.warning.call_args))
+                self.assertEqual(voice_prewarm.prewarm_status()["state"], "failed")
+                self.assertGreaterEqual(voice_prewarm.prewarm_status()["elapsed_seconds"], 0)
         asyncio.run(run())
 
 
