@@ -82,6 +82,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_VISION_MODEL` | `(unset)` |
 | `KALIV_WEB_RESEARCH_ENABLED` | `` |
 | `KALIV_WORKER_ALLOW_LAN` | `0` |
+| `MODELRIG_VOICE_PREWARM` | `0` |
 
 ## Desktop credential storage
 
@@ -438,6 +439,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_unit.py`
 - `tests/worker_vision.py`
 - `tests/worker_voice_baseline.py`
+- `tests/worker_voice_prewarm.py`
 - `tests/worker_voice_stream.py`
 - `tests/worker_voice_strip.py`
 - `tests/worker_voice_tts_empty_synthesis.py`
