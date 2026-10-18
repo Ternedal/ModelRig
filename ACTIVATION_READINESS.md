@@ -132,7 +132,6 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_VISION_MODEL` | `(tom)` | indstilling |
 | `KALIV_WEB_RESEARCH_ENABLED` | `(tom)` | slukket |
 | `KALIV_WORKER_ALLOW_LAN` | `0` | slukket |
-| `MODELRIG_VOICE_PREWARM` | `0` | slukket |
 | `MODELRIG_ADMIN_KEY` | `(unset)` | indstilling |
 | `MODELRIG_CLAIM_MAX` | `(unset)` | indstilling |
 | `MODELRIG_CONFIG` | `(unset)` | indstilling |
@@ -146,6 +145,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `MODELRIG_OLLAMA_URL` | `http://127.0.0.1:11434` | indstilling |
 | `MODELRIG_PAIRING_TTL` | `(unset)` | indstilling |
 | `MODELRIG_PORT` | `(unset)` | indstilling |
+| `MODELRIG_VOICE_PREWARM` | `0` | slukket |
 | `MODELRIG_WORKER_HOST` | `127.0.0.1` | indstilling |
 | `MODELRIG_WORKER_PORT` | `8099` | indstilling |
 | `MODELRIG_WORKER_URL` | `(unset)` | indstilling |
