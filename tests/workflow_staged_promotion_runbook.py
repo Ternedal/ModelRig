@@ -9,7 +9,7 @@ for _old, _new in (
     ("agent/unified-candidate-1.58.143", "physical-proof/2.0.16"),
     ("1.58.143", "2.0.16"),
     ("1.58.142", "2.0.12"),
-    ("draft-PR #150", "origin/physical-proof/2.0.16"),
+    ("draft-PR #150", "origin/release/kaliv-v2.0.16-prep-20261018"),
 ):
     _source = _source.replace(_old, _new)
 exec(compile(_source, str(_source_path), "exec"), globals(), globals())
@@ -27,8 +27,8 @@ _live_contracts = (
         "staged runbook contains no mechanically rewritten freeze placeholder",
     ),
     (
-        "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.16).Trim()" in rigdag
-        and "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.16).Trim()" in staged,
+        "$RemoteCandidateSha = (git rev-parse origin/release/kaliv-v2.0.16-prep-20261018).Trim()" in rigdag
+        and "$RemoteCandidateSha = (git rev-parse origin/release/kaliv-v2.0.16-prep-20261018).Trim()" in staged,
         "both operator runbooks resolve the fetched remote candidate SHA",
     ),
     (
@@ -42,8 +42,8 @@ _live_contracts = (
         "both operator runbooks run the exact-SHA candidate freeze gate",
     ),
     (
-        "origin/physical-proof/2.0.16" in rigdag
-        and "origin/physical-proof/2.0.16" in staged,
+        "origin/release/kaliv-v2.0.16-prep-20261018" in rigdag
+        and "origin/release/kaliv-v2.0.16-prep-20261018" in staged,
         "both operator runbooks name the active remote candidate authority",
     ),
 )
