@@ -40,8 +40,6 @@ class VoicePrewarmTests(unittest.TestCase):
         asyncio.run(run())
 
     def test_cancelled_prewarm_is_not_reported_as_loaded(self):
-        async def blocked_load():
-            await asyncio.Event().wait()
         async def run():
             # Cancellation before a background thread finishes must never
             # claim a successfully loaded model.
