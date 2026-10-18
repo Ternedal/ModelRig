@@ -39,6 +39,21 @@ class VoicePrewarmTests(unittest.TestCase):
                 self.assertFalse(tasks)
         asyncio.run(run())
 
+    def test_cancelled_prewarm_is_not_reported_as_loaded(self):
+        async def blocked_load():
+            await asyncio.Event().wait()
+        async def run():
+            # Cancellation before a background thread finishes must never
+            # claim a successfully loaded model.
+            with patch("app.voice_asr._get_model", side_effect=lambda: __import__("time").sleep(0.05)):
+                task = asyncio.create_task(voice_prewarm.prewarm_asr())
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertEqual(voice_prewarm.prewarm_status()["state"], "cancelled")
+        asyncio.run(run())
+
     def test_success_and_failure_never_expose_exception(self):
         async def run():
             with patch("app.voice_asr._get_model", return_value=object()), \
