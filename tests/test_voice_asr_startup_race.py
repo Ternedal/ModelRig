@@ -3,11 +3,14 @@
 This test is intentionally isolated from production startup wiring. It can be
 used when a readiness-aware prewarm implementation is proposed. No GPU required.
 """
+import os
+import sys
 import threading
 import time
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'worker'))
 from app import voice_asr
 
 
