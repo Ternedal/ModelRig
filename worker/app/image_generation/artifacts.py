@@ -9,13 +9,19 @@ import hashlib
 import os
 import tempfile
 import uuid
+from .storage_policy import require_external_media_root
 from pathlib import Path
 
 
 class ImageArtifactStore:
-    def __init__(self, root: Path, *, max_bytes: int = 16_000_000):
+    def __init__(
+        self, root: Path, *, max_bytes: int = 16_000_000,
+        external_volume: Path | None = None,
+    ):
         if not 1 <= max_bytes <= 32_000_000:
             raise ValueError("Invalid artifact size limit")
+        if external_volume is not None:
+            root = require_external_media_root(root, mounted_volume=external_volume)
         supplied_root = Path(root).absolute()
         if supplied_root.is_symlink():
             raise ValueError("Artifact root cannot be a symlink")
