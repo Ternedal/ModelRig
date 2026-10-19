@@ -34,6 +34,8 @@ def comfy_external_environment(environ: dict[str, str] | None = None) -> dict[st
         "TMP": paths["temp"],
     }
     for path in dirs.values():
+        if path.is_symlink():
+            raise ValueError("ComfyUI path is a symlink")
         path.mkdir(parents=True, exist_ok=True)
         if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise ValueError("ComfyUI path escaped approved media root")
