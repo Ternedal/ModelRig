@@ -21,6 +21,8 @@ def test_image_api_complete_owner_scoped_flow(tmp_path, monkeypatch):
         prompt_id = "00000000-0000-4000-8000-000000000001"
         artifact = b"\x89PNG\r\n\x1a\n" + b"sanitized-fixture"
         submitted = []
+        source_png = (b"\\x89PNG\\r\\n\\x1a\\n" + b"\\x00\\x00\\x00\\x0dIHDR"
+                      + (1).to_bytes(4, "big") + (1).to_bytes(4, "big"))
 
         def engine(request):
             if request.url.path == "/prompt":
@@ -34,12 +36,12 @@ def test_image_api_complete_owner_scoped_flow(tmp_path, monkeypatch):
                 }})
             if request.url.path == "/view":
                 return httpx.Response(200, headers={"content-type": "image/png"},
-                                      content=b"fake-original")
+                                      content=source_png)
             return httpx.Response(404)
 
         monkeypatch.setattr(
             "app.image_generation.ingest.sanitize_to_png",
-            lambda data, **kwargs: artifact if data == b"fake-original" else None
+            lambda data, **kwargs: artifact if data == source_png else None
         )
         adapter = ComfyUIAdapter(transport=httpx.MockTransport(engine))
         service = ImageGenerationService(
