@@ -11,6 +11,7 @@ from typing import Callable
 from .video_comfy_adapter import ComfyVideoClient, VideoBackendError
 from .video_contract import VideoRequest
 from .video_job_store import VideoJobStore
+from .video_storage_config import configured_video_storage
 
 
 class VideoDispatcher:
@@ -22,6 +23,9 @@ class VideoDispatcher:
 
     def dispatch_one(self) -> str | None:
         """Claim one queued job and submit it. No background loop is started."""
+        # Storage admission precedes claiming a job or contacting ComfyUI.
+        # If the external volume is absent, leave the job queued.
+        configured_video_storage().assert_ready()
         for row in self.store.queued(limit=1):
             job_id = row["job_id"]
             if not self.store.transition(job_id, "queued", "running"):
