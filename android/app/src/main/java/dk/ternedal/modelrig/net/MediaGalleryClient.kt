@@ -59,8 +59,13 @@ class MediaGalleryClient(baseUrl: String, private val token: String) {
             }
             val expected = endInclusive - start + 1
             val range = response.header("Content-Range").orEmpty()
-            if (!range.startsWith("bytes " + start + "-" + endInclusive + "/")) {
+            val total = range.substringAfter("/", "").toLongOrNull()
+            if (range.substringBefore("/") != "bytes " + start + "-" + endInclusive ||
+                total == null || total <= endInclusive) {
                 throw ModelRigException("Ugyldigt byte-interval fra medieserveren")
+            }
+            if (response.header("Content-Length")?.toLongOrNull()?.let { it != expected } == true) {
+                throw ModelRigException("Ugyldig medielængde")
             }
             val body = response.body ?: throw ModelRigException("Tomt mediesvar")
             val data = body.byteStream().use { stream ->
