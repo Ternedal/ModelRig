@@ -120,7 +120,9 @@ def build_image_router(
                             owner, job_id, manager=service.manager,
                             adapter=service.adapter, store=artifact_store,
                         )
-                    except (ValueError, RuntimeError) as exc:
+                    except (RuntimeError, OSError) as exc:
+                        raise HTTPException(status_code=503, detail="Image ingestion storage unavailable") from exc
+                    except ValueError as exc:
                         raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
                     ingested_artifacts[job_id] = artifact_id
                     return {"artifact_id": artifact_id}
