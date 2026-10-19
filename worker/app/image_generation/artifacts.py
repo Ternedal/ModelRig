@@ -96,6 +96,18 @@ class ImageArtifactStore:
                 os.fsync(handle.fileno())
             self._assert_volume_available()
             os.replace(temp_name, directory / (artifact_id + ".png"))
+            # Make the new directory entry durable before reporting success.
+            dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            try:
+                dir_fd = os.open(directory, dir_flags)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                # Directory fsync is not supported on every filesystem/Windows.
+                # The file content was already fsynced before atomic publish.
+                pass
         finally:
             if os.path.exists(temp_name):
                 os.unlink(temp_name)
