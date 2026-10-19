@@ -179,7 +179,15 @@ mount_file_capabilities(fastapi_app)
 # Experimental image routes remain unmounted in standard V1 boots. The
 # explicit integration boundary is imported only; it is not enabled until
 # a trusted auth dependency, reviewed workflow and external volume are wired.
-# No image modules are imported or routes mounted on a default V1 boot.
+# Experimental image code is imported only after explicit operator opt-in.
+# A missing trusted auth/service bootstrap intentionally prevents activation.
+# This is NOT an automatic activation path for V1 or remote clients.
+if os.getenv("KALIV_EXPERIMENTAL_IMAGES_ENABLED", "0") == "1":
+    from .image_generation.production_mount import mount_experimental_images
+    raise RuntimeError(
+        "Experimental image API cannot be enabled without trusted authentication, "
+        "a configured generation service, and a strict external media store"
+    )
 
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
