@@ -28,6 +28,38 @@ def validate_image_header(data: bytes, *, max_dimension: int = 8192) -> str:
         width = 1 + int.from_bytes(data[24:27], "little")
         height = 1 + int.from_bytes(data[27:30], "little")
         kind = "image/webp"
+    elif data.startswith(b"\xff\xd8\xff"):
+        # Bounded JPEG marker walk: find a Start-of-Frame marker containing
+        # dimensions, without attempting to decode untrusted compressed pixels.
+        width = height = 0
+        offset = 2
+        while offset + 4 <= len(data):
+            if data[offset] != 0xFF:
+                break
+            while offset < len(data) and data[offset] == 0xFF:
+                offset += 1
+            if offset >= len(data):
+                break
+            marker = data[offset]
+            offset += 1
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                continue
+            if marker in (0xD9, 0xDA):
+                break
+            if offset + 2 > len(data):
+                break
+            segment_length = int.from_bytes(data[offset:offset + 2], "big")
+            if segment_length < 2 or offset + segment_length > len(data):
+                break
+            if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                          0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                if segment_length < 7:
+                    break
+                height = int.from_bytes(data[offset + 3:offset + 5], "big")
+                width = int.from_bytes(data[offset + 5:offset + 7], "big")
+                break
+            offset += segment_length
+        kind = "image/jpeg"
     else:
         raise InvalidImage("Unsupported image format")
     if not 1 <= width <= max_dimension or not 1 <= height <= max_dimension:
