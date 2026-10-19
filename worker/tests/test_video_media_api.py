@@ -48,6 +48,28 @@ class MediaAPITests(unittest.TestCase):
         self.assertEqual(response.headers["content-length"], "10")
         self.assertEqual(response.content, b"")
 
+    def test_non_loopback_client_is_denied(self):
+        app = FastAPI()
+        app.include_router(build_media_router())
+        remote = TestClient(app, client=("192.0.2.10", 51000))
+        self.assertEqual(remote.get("/experimental/media").status_code, 403)
+        self.assertEqual(remote.get("/experimental/media/clip_1").status_code, 403)
+
+    def test_unsatisfiable_range(self):
+        response = self.client.get(
+            "/experimental/media/clip_1", headers={"Range": "bytes=999-"}
+        )
+        self.assertEqual(response.status_code, 416)
+        self.assertEqual(response.headers["content-range"], "bytes */10")
+
+    def test_head_with_range(self):
+        response = self.client.head(
+            "/experimental/media/clip_1", headers={"Range": "bytes=3-5"}
+        )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.headers["content-range"], "bytes 3-5/10")
+        self.assertEqual(response.content, b"")
+
     def test_unknown_media(self):
         self.assertEqual(self.client.get("/experimental/media/nope").status_code, 404)
 
