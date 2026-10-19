@@ -87,6 +87,7 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
         Timeout: 10 * time.Minute,
         CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
     }
+    defer transport.CloseIdleConnections()
     response, err := client.Do(req)
     if err != nil {
         writeErr(w, http.StatusBadGateway, "media worker unavailable")
