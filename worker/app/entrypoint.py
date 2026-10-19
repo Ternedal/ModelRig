@@ -179,8 +179,7 @@ mount_file_capabilities(fastapi_app)
 # Experimental image routes remain unmounted in standard V1 boots. The
 # explicit integration boundary is imported only; it is not enabled until
 # a trusted auth dependency, reviewed workflow and external volume are wired.
-from .image_generation.production_mount import mount_experimental_images
-mount_experimental_images(fastapi_app)
+mount_experimental_images = None  # No image modules loaded on a default V1 boot.
 
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
