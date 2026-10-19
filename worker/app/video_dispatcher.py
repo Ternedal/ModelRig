@@ -36,8 +36,9 @@ class VideoDispatcher:
                 if not isinstance(workflow, dict) or not workflow:
                     raise ValueError("Missing trusted workflow")
                 prompt_id = self.client.submit_trusted_workflow(workflow)
-                # Persist the backend prompt ID only as an intermediate link;
-                # artifact completion must be verified by a separate collector.
+                # Persist correlation before a separate collector verifies output.
+                if not self.store.record_prompt(job_id, prompt_id):
+                    raise VideoBackendError("Cannot persist backend prompt ID")
                 return prompt_id
             except (VideoBackendError, ValueError, TypeError, KeyError):
                 self.store.transition(job_id, "running", "failed", error_code="submission_failed")
