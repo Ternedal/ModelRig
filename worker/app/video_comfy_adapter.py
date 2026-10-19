@@ -73,6 +73,23 @@ class ComfyVideoClient:
             raise ValueError("Invalid prompt ID")
         return self._request("GET", "/history/" + urllib.parse.quote(prompt_id, safe=""))
 
+    def completed_outputs(self, prompt_id: str) -> dict[str, Any] | None:
+        """Return completed ComfyUI output metadata, or None while pending.
+
+        File paths are not trusted here; a separate collector must validate
+        every filename against its configured output directory.
+        """
+        record = self.history(prompt_id).get(prompt_id)
+        if not isinstance(record, dict):
+            return None
+        status = record.get("status")
+        if isinstance(status, dict) and status.get("status_str") == "error":
+            raise VideoBackendError("ComfyUI job failed")
+        outputs = record.get("outputs")
+        if not isinstance(outputs, dict):
+            return None
+        return outputs
+
     def interrupt(self) -> None:
         """Global ComfyUI interrupt: caller must enforce single-tenant ownership."""
         self._request("POST", "/interrupt", {})
