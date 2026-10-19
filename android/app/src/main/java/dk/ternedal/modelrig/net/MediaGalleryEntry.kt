@@ -14,11 +14,12 @@ data class MediaGalleryEntry(
     val stereo: String,
     val thumbnailId: String?
 ) {
-    fun mediaPath(): String = "/api/v1/media/$id"
+    fun mediaPath(): String = "/api/v1/media/${seg(id)}"
 
-    fun thumbnailPath(): String? = thumbnailId?.let { "/api/v1/media/$it" }
+    fun thumbnailPath(): String? = thumbnailId?.let { "/api/v1/media/${seg(it)}" }
 
     companion object {
+        private fun seg(value: String): String = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
         private val SAFE_ID = Regex("^[A-Za-z0-9_-]{1,128}$")
         private val PROJECTIONS = setOf("flat", "equirectangular_180", "equirectangular_360")
         private val STEREO = setOf("mono", "left_right", "top_bottom")
