@@ -17,7 +17,7 @@ class ImageArtifactStore:
     def __init__(
         self, root: Path, *, max_bytes: int = 16_000_000,
         external_volume: Path | None = None,
-        require_external_volume: bool = True,
+        require_external_volume: bool = False,
     ):
         if not 1 <= max_bytes <= 32_000_000:
             raise ValueError("Invalid artifact size limit")
@@ -83,3 +83,8 @@ class ImageArtifactStore:
         if len(payload) > self.max_bytes:
             raise ValueError("Stored artifact exceeds size limit")
         return payload
+
+
+def external_image_artifact_store(root: Path, *, external_volume: Path, max_bytes: int = 16_000_000) -> ImageArtifactStore:
+    """Production-facing constructor: never permit local disk fallback."""
+    return ImageArtifactStore(root, max_bytes=max_bytes, external_volume=external_volume, require_external_volume=True)
