@@ -83,9 +83,13 @@ def build_image_router(
             identity=Depends(authenticated_owner),
         ):
             owner = owner_id(identity)
+            try:
+                artifact_ids = artifact_store.list_png_ids(owner, limit=limit, offset=offset)
+            except (ValueError, RuntimeError, OSError) as exc:
+                raise HTTPException(status_code=503, detail="Image storage unavailable") from exc
             return {"artifacts": [
                 {"id": artifact_id, "media_type": "image/png"}
-                for artifact_id in artifact_store.list_png_ids(owner, limit=limit, offset=offset)
+                for artifact_id in artifact_ids
             ]}
 
         @router.post("/jobs/{job_id}/ingest")
@@ -133,7 +137,7 @@ def build_image_router(
             owner = owner_id(identity)
             try:
                 payload = artifact_store.get_thumbnail_png(owner, artifact_id)
-            except RuntimeError as exc:
+            except (RuntimeError, OSError) as exc:
                 raise HTTPException(status_code=503, detail="Thumbnail service unavailable") from exc
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail="Invalid stored image") from exc
@@ -149,7 +153,10 @@ def build_image_router(
             artifact_id: str, identity=Depends(authenticated_owner)
         ):
             owner = owner_id(identity)
-            payload = artifact_store.get_png(owner, artifact_id)
+            try:
+                payload = artifact_store.get_png(owner, artifact_id)
+            except (ValueError, RuntimeError, OSError) as exc:
+                raise HTTPException(status_code=503, detail="Image storage unavailable") from exc
             if payload is None:
                 raise HTTPException(status_code=404, detail="Image artifact not found")
             return Response(
