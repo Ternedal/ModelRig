@@ -6,7 +6,6 @@ ComfyUI node graphs. Runtime video generation is not enabled by this module.
 """
 from __future__ import annotations
 
-import ipaddress
 import json
 import urllib.error
 import urllib.parse
@@ -63,14 +62,14 @@ class ComfyVideoClient:
             raise ValueError("Trusted workflow is required")
         result = self._request("POST", "/prompt", {"prompt": workflow})
         prompt_id = result.get("prompt_id")
-        if not isinstance(prompt_id, str) or not prompt_id or len(prompt_id) > 128:
+        if not isinstance(prompt_id, str) or not (1 <= len(prompt_id) <= 128) or not all(c.isascii() and (c.isalnum() or c in "-_") for c in prompt_id):
             raise VideoBackendError("ComfyUI returned no valid prompt ID")
         return prompt_id
 
     def history(self, prompt_id: str) -> dict[str, Any]:
         if not isinstance(prompt_id, str) or not (1 <= len(prompt_id) <= 128):
             raise ValueError("Invalid prompt ID")
-        if not all(c.isalnum() or c in "-_" for c in prompt_id):
+        if not all(c.isascii() and (c.isalnum() or c in "-_") for c in prompt_id):
             raise ValueError("Invalid prompt ID")
         return self._request("GET", "/history/" + urllib.parse.quote(prompt_id, safe=""))
 
