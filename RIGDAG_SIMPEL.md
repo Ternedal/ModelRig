@@ -1,6 +1,6 @@
-# RIGDAG_SIMPEL — ModelRig 2.0.16
+# RIGDAG_SIMPEL — ModelRig 2.0.17
 
-> **Release-forberedelse, ikke fysisk godkendelse:** Denne branch er endnu ikke fysisk kvalificeret. Kør ikke promotion/tagging alene ud fra denne vejledning; kræv ny exact-head- og rig-evidens for v2.0.16.
+> **Release-forberedelse, ikke fysisk godkendelse:** Denne branch er endnu ikke fysisk kvalificeret. Kør ikke promotion/tagging alene ud fra denne vejledning; kræv ny exact-head- og rig-evidens for v2.0.17.
 
 Dette er den korte operatorindgang. Den autoritative rækkefølge og alle
 fail-closed grænser står i `STAGED_PHYSICAL_PROMOTION.md`; Stage B-detaljerne
@@ -8,10 +8,10 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
 ## Kandidat
 
-- version: `2.0.16`;
-- branch: `release/kaliv-v2.0.16-prep-20261018`;
+- version: `2.0.17`;
+- branch: `release/kaliv-v2.0.17-prep-20261019`;
 - freeze: `candidate_freeze_check.py` grøn på exact SHA;
-- exact SHA: læses fra den fetch'ede `origin/release/kaliv-v2.0.16-prep-20261018` og må aldrig gættes eller kopieres fra ældre evidens;
+- exact SHA: læses fra den fetch'ede `origin/release/kaliv-v2.0.17-prep-20261019` og må aldrig gættes eller kopieres fra ældre evidens;
 - produktion: ikke aktiveret.
 
 Evidens fra 2.0.12 eller fra en tidligere ugyldiggjort 2.0.13-head må ikke
@@ -22,18 +22,18 @@ genbruges.
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch release/kaliv-v2.0.16-prep-20261018
-git pull --ff-only origin release/kaliv-v2.0.16-prep-20261018
+git switch release/kaliv-v2.0.17-prep-20261019
+git pull --ff-only origin release/kaliv-v2.0.17-prep-20261019
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/release/kaliv-v2.0.16-prep-20261018).Trim()
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/release/kaliv-v2.0.16-prep-20261018: local=$CandidateSha remote=$RemoteCandidateSha" }
+$RemoteCandidateSha = (git rev-parse origin/release/kaliv-v2.0.17-prep-20261019).Trim()
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/release/kaliv-v2.0.17-prep-20261019: local=$CandidateSha remote=$RemoteCandidateSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "2.0.16") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.17") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/release/kaliv-v2.0.16-prep-20261018` og den grønne `candidate_freeze_check.py` er den
+`origin/release/kaliv-v2.0.17-prep-20261019` og den grønne `candidate_freeze_check.py` er den
 aktuelle kandidat-authority. Historiske freeze-PR'er eller ældre 2.0.13-heads
 må ikke bruges som SHA-reference.
 
@@ -80,12 +80,12 @@ Stage A merger, tagger, releaser og aktiverer intet.
 ## Beslutningspunkt
 
 Kun efter en særskilt eksplicit beslutning må præcis Stage A-SHA'en
-fast-forwardes til `main`, tagges `v2.0.16` og publiceres som et komplet
+fast-forwardes til `main`, tagges `v2.0.17` og publiceres som et komplet
 signeret release-sæt.
 
 ## Blok 2 — Stage B
 
-Kildereleasen er den signerede 2.0.12; target er 2.0.16. Target-updaterens
+Kildereleasen er den signerede 2.0.12; target er 2.0.17. Target-updaterens
 checksum og provenance verificeres som den autoritative bootstrap-grænse, før
 server, supervisor og worker må flyttes gennem updateren. Stage B-runbooken er
 autoritet for den præcise updater-/self-update-semantik; der må ikke håndkopieres
@@ -119,7 +119,7 @@ summary.total=9
 
 Det særskilte automatiske signed-release-to-signed-release self-update-bevis
 forbliver under #401 og må ikke antages ud fra versionsbumpet alene. Det
-blokerer ikke promotion af 2.0.16, medmindre #401's authority ændres særskilt.
+blokerer ikke promotion af 2.0.17, medmindre #401's authority ændres særskilt.
 
 ## Stopregler
 
