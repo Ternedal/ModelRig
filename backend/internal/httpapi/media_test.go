@@ -36,6 +36,12 @@ func TestMediaGatewayPreservesPartialContent(t *testing.T) {
     if recorder.Code != http.StatusPartialContent || recorder.Body.String() != "2345" {
         t.Fatalf("bad partial response: %d %q", recorder.Code, recorder.Body.String())
     }
+    if got := recorder.Header().Get("Cache-Control"); got != "private, no-store" {
+        t.Fatalf("media cache policy missing: %q", got)
+    }
+    if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+        t.Fatalf("media MIME sniff protection missing: %q", got)
+    }
     if got := recorder.Header().Get("Content-Range"); got != "bytes 2-5/10" {
         t.Fatalf("content range lost: %q", got)
     }
