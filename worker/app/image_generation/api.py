@@ -1,0 +1,71 @@
+"""Opt-in image API router factory; never mounted by import.
+
+The host must provide a trusted authenticated owner dependency. No route may
+derive ownership from client-supplied headers, query parameters or JSON.
+"""
+from __future__ import annotations
+
+from typing import Callable
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
+from .jobs import ImageJobManager
+from .service import ImageGenerationService
+
+
+class ImageRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=2000)
+    seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
+
+
+def build_image_router(
+    service: ImageGenerationService,
+    *,
+    authenticated_owner: Callable,
+) -> APIRouter:
+    """Construct routes only when an operator injects a trusted auth resolver."""
+    if not callable(authenticated_owner):
+        raise ValueError("An authenticated owner dependency is required")
+    router = APIRouter(prefix="/experimental/images", tags=["experimental-images"])
+
+    def owner_id(value: object) -> str:
+        if not isinstance(value, str) or not 1 <= len(value) <= 128:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return value
+
+    def public_job(job):
+        return {
+            "id": job.id,
+            "status": job.status.value,
+            "created_at": job.created_at,
+            "completed_at": job.completed_at,
+            "error": job.error,
+        }
+
+    @router.post("/jobs", status_code=202)
+    async def submit_image(
+        request: ImageRequest, identity=Depends(authenticated_owner)
+    ):
+        owner = owner_id(identity)
+        try:
+            job = await service.submit(owner, request.prompt, request.seed)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid image request") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail="Image capacity unavailable") from exc
+        return public_job(job)
+
+    @router.get("/jobs/{job_id}")
+    async def get_image_job(job_id: str, identity=Depends(authenticated_owner)):
+        job = service.manager.get(owner_id(identity), job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Image job not found")
+        return public_job(job)
+
+    @router.delete("/jobs/{job_id}", status_code=204)
+    async def cancel_image_job(job_id: str, identity=Depends(authenticated_owner)):
+        if not await service.manager.cancel(owner_id(identity), job_id):
+            raise HTTPException(status_code=404, detail="Image job not found")
+
+    return router
