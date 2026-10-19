@@ -12,6 +12,7 @@ from typing import Any
 from .comfyui_adapter import ComfyUIAdapter, ComfyUIError
 from .jobs import ImageJob, ImageJobManager
 from .workflow import WorkflowSlots, render_workflow
+from .outputs import select_output_image
 
 
 def _has_image_output(outputs: Any) -> bool:
@@ -66,6 +67,7 @@ class ImageGenerationService:
                     if _has_image_output(entry.get("outputs")):
                         # No arbitrary ComfyUI filename is exposed to clients.
                         # An artifact ingestion service must resolve validated outputs.
+                        select_output_image(entry["outputs"])
                         return prompt_id
                 await asyncio.sleep(self.poll_interval)
             raise ComfyUIError("Image generation timed out")
