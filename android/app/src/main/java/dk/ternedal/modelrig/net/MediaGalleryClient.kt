@@ -25,9 +25,11 @@ class MediaGalleryClient(baseUrl: String, private val token: String) {
     private fun isPrivateRigHost(host: String): Boolean {
         if (host == "localhost" || host == "127.0.0.1" || host == "::1") return true
         val parts = host.split(".")
-        if (parts.size != 4 || parts.any { it.toIntOrNull() !in 0..255 }) return false
-        val first = parts[0].toInt()
-        val second = parts[1].toInt()
+        if (parts.size != 4) return false
+        val octets = parts.map { it.toIntOrNull() ?: return false }
+        if (octets.any { it !in 0..255 }) return false
+        val first = octets[0]
+        val second = octets[1]
         return first == 10 || (first == 172 && second in 16..31) ||
             (first == 192 && second == 168)
     }
