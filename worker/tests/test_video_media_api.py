@@ -34,6 +34,7 @@ class MediaAPITests(unittest.TestCase):
         response = self.client.get("/experimental/media")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["items"][0]["id"], "clip_1")
+        self.assertEqual(response.json()["items"][0]["url"], "/experimental/media/clip_1")
 
     def test_seek(self):
         response = self.client.get("/experimental/media/clip_1", headers={"Range": "bytes=3-5"})
