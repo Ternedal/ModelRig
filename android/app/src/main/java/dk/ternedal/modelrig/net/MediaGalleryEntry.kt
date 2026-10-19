@@ -36,9 +36,9 @@ data class MediaGalleryEntry(
         ): MediaGalleryEntry? {
             if (!SAFE_ID.matches(id) || kind !in setOf("image", "video")) return null
             if (projection !in PROJECTIONS || stereo !in STEREO) return null
-            if (mediaUrl != "/api/v1/media/$id") return null
+            if (mediaUrl != "/api/v1/media/${seg(id)}") return null
             if (thumbnailId != null && !SAFE_ID.matches(thumbnailId)) return null
-            if (thumbnailUrl != thumbnailId?.let { "/api/v1/media/$it" }) return null
+            if (thumbnailUrl != thumbnailId?.let { "/api/v1/media/${seg(it)}" }) return null
             return MediaGalleryEntry(id, kind, projection, stereo, thumbnailId)
         }
     }
