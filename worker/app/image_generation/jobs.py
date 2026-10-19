@@ -51,7 +51,7 @@ class ImageJobManager:
     async def submit(
         self, owner_id: str, run: Callable[[], Awaitable[str]]
     ) -> ImageJob:
-        if not owner_id or len(owner_id) > 128:
+        if not isinstance(owner_id, str) or not owner_id or len(owner_id) > 128:
             raise ValueError("Invalid owner")
         async with self._lock:
             if len(self._jobs) >= self.max_jobs:
