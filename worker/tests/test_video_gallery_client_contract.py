@@ -8,9 +8,9 @@ class GalleryClientContractTests(unittest.TestCase):
     def test_video_projection(self):
         asset = GalleryAsset.from_api({
             "id": "clip_1", "kind": "video",
-            "url": "/experimental/media/clip_1",
+            "url": "/api/v1/media/clip_1",
             "thumbnail_id": "thumb_1",
-            "thumbnail_url": "/experimental/media/thumb_1",
+            "thumbnail_url": "/api/v1/media/thumb_1",
             "projection": "equirectangular_180", "stereo": "left_right",
         })
         self.assertEqual(asset.projection, "equirectangular_180")
@@ -27,7 +27,7 @@ class GalleryClientContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             GalleryAsset.from_api({
                 "id": "../secret", "kind": "image",
-                "url": "/experimental/media/../secret",
+                "url": "/api/v1/media/../secret",
             })
 
     def test_https_origin(self):
