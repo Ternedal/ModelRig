@@ -14,6 +14,22 @@ from .jobs import ImageJob, ImageJobManager
 from .workflow import WorkflowSlots, render_workflow
 
 
+def _has_image_output(outputs: Any) -> bool:
+    """Require a nonempty ComfyUI image descriptor, not just any node output."""
+    if not isinstance(outputs, dict):
+        return False
+    for output in outputs.values():
+        if not isinstance(output, dict):
+            continue
+        images = output.get("images")
+        if isinstance(images, list) and any(
+            isinstance(item, dict) and isinstance(item.get("filename"), str)
+            and bool(item["filename"]) for item in images
+        ):
+            return True
+    return False
+
+
 class ImageGenerationService:
     def __init__(
         self,
@@ -47,7 +63,7 @@ class ImageGenerationService:
                     status = entry.get("status")
                     if isinstance(status, dict) and status.get("status_str") == "error":
                         raise ComfyUIError("Image generation failed")
-                    if isinstance(entry.get("outputs"), dict) and entry["outputs"]:
+                    if _has_image_output(entry.get("outputs")):
                         # No arbitrary ComfyUI filename is exposed to clients.
                         # An artifact ingestion service must resolve validated outputs.
                         return prompt_id
