@@ -55,7 +55,18 @@ class ImageJobManager:
             raise ValueError("Invalid owner")
         async with self._lock:
             if len(self._jobs) >= self.max_jobs:
-                raise RuntimeError("Image job capacity reached")
+                # Reclaim the oldest completed record only. Running/queued
+                # jobs are never evicted, and all eviction is under the lock.
+                finished = [
+                    job for job in self._jobs.values()
+                    if job.status in (
+                        JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED
+                    ) and job.id not in self._tasks
+                ]
+                if not finished:
+                    raise RuntimeError("Image job capacity reached")
+                oldest = min(finished, key=lambda job: job.created_at)
+                self._jobs.pop(oldest.id, None)
             job = ImageJob(id=str(uuid.uuid4()), owner_id=owner_id)
             self._jobs[job.id] = job
             self._tasks[job.id] = asyncio.create_task(self._execute(job, run))
