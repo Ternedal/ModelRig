@@ -51,3 +51,15 @@ def test_rejects_missing_slot_and_unapproved_seed():
 def test_rejects_path_like_node_ids():
     with pytest.raises(ValueError):
         WorkflowSlots(prompt_node="../../etc")
+
+
+def test_comfyui_output_requires_image_descriptor():
+    from app.image_generation.service import _has_image_output
+
+    assert not _has_image_output(None)
+    assert not _has_image_output({"10": {"images": []}})
+    assert not _has_image_output({"10": {"text": ["done"]}})
+    assert not _has_image_output({"10": {"images": [{"filename": ""}]}})
+    assert _has_image_output({
+        "10": {"images": [{"filename": "result.png", "type": "output"}]}
+    })
