@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from .jobs import ImageJobManager
 from .service import ImageGenerationService
 from .artifacts import ImageArtifactStore
+from .ingest import ingest_completed_job
+from .jobs import JobStatus
 
 
 class ImageRequest(BaseModel):
@@ -71,6 +73,25 @@ def build_image_router(
             raise HTTPException(status_code=404, detail="Image job not found")
 
     if artifact_store is not None:
+        @router.post("/jobs/{job_id}/ingest")
+        async def ingest_image_job(
+            job_id: str, identity=Depends(authenticated_owner)
+        ):
+            owner = owner_id(identity)
+            job = service.manager.get(owner, job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail="Image job not found")
+            if job.status != JobStatus.SUCCEEDED:
+                raise HTTPException(status_code=409, detail="Image job is not completed")
+            try:
+                artifact_id = await ingest_completed_job(
+                    owner, job_id, manager=service.manager,
+                    adapter=service.adapter, store=artifact_store,
+                )
+            except (ValueError, RuntimeError) as exc:
+                raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
+            return {"artifact_id": artifact_id}
+
         @router.get("/artifacts/{artifact_id}")
         async def get_image_artifact(
             artifact_id: str, identity=Depends(authenticated_owner)
