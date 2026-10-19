@@ -296,7 +296,9 @@ jobs:
           # runtime's sys.path adjustment is invisible to static analysis.
           # Voice providers import native engines lazily. Include their modules,
           # data and DLLs in the executable, as in the voice-capable v2.0.15.
-          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths . --paths worker --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av worker/run_worker.py
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths . --paths worker --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av --collect-all nvidia worker/run_worker.py
+          python scripts/verify_frozen_voice_package.py dist/modelrig-worker-windows-x64.exe
+          if ($LASTEXITCODE -ne 0) { throw "frozen voice payload verification failed" }
       - name: Build supervisor exe
         # Keeps the worker + server alive at logon (scripts/kaliv-autostart.ps1).
         # go.mod is in backend/, like the server exe above.
@@ -317,7 +319,7 @@ jobs:
           try {
             # onefile exes self-extract on first start; poll instead of guessing a sleep
             $wh = $null
-            foreach ($i in 1..15) {
+            foreach ($i in 1..90) {
               try { $wh = Invoke-RestMethod -Uri http://127.0.0.1:8099/healthz -TimeoutSec 3; break }
               catch { Start-Sleep -Seconds 2 }
             }
