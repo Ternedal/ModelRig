@@ -176,6 +176,12 @@ if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
 mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
 
+# Experimental image routes remain unmounted in standard V1 boots. The
+# explicit integration boundary is imported only; it is not enabled until
+# a trusted auth dependency, reviewed workflow and external volume are wired.
+from .image_generation.production_mount import mount_experimental_images
+mount_experimental_images(fastapi_app)
+
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
 # around the existing scheduler lifespan so process shutdown deterministically
