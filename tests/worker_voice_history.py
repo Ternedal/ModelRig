@@ -25,7 +25,8 @@ def _prior_from_source(history):
     )
     expression = ast.Expression(body=assignment.value)
     return eval(compile(ast.fix_missing_locations(expression), str(SOURCE), "eval"),
-                {"__builtins__": {}}, {"history": history})
+                {"__builtins__": {"isinstance": isinstance, "str": str, "dict": dict}},
+                {"history": history})
 
 
 class VoiceHistoryTests(unittest.TestCase):
