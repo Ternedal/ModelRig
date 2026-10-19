@@ -57,7 +57,10 @@ class ImageArtifactStore:
         """Recheck external volume marker before every store operation."""
         if self._external_volume is None:
             return
-        require_external_media_root(self.root, mounted_volume=self._external_volume)
+        try:
+            require_external_media_root(self.root, mounted_volume=self._external_volume)
+        except (ValueError, OSError) as exc:
+            raise RuntimeError("External media volume unavailable") from exc
         if self._volume_marker is None:
             return
         marker_path = self._external_volume / ".modelrig-volume-id"
