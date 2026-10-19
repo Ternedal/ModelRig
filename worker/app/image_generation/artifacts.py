@@ -16,7 +16,10 @@ class ImageArtifactStore:
     def __init__(self, root: Path, *, max_bytes: int = 16_000_000):
         if not 1 <= max_bytes <= 32_000_000:
             raise ValueError("Invalid artifact size limit")
-        self.root = Path(root).resolve()
+        supplied_root = Path(root).absolute()
+        if supplied_root.is_symlink():
+            raise ValueError("Artifact root cannot be a symlink")
+        self.root = supplied_root.resolve()
         self.max_bytes = max_bytes
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
 
@@ -55,7 +58,10 @@ class ImageArtifactStore:
             safe_id = str(uuid.UUID(artifact_id))
         except (ValueError, TypeError, AttributeError):
             return None
-        path = self.root / self._owner_hash(owner_id) / (safe_id + ".png")
+        directory = self.root / self._owner_hash(owner_id)
+        if directory.is_symlink():
+            return None
+        path = directory / (safe_id + ".png")
         try:
             if path.is_symlink():
                 return None
