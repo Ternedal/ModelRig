@@ -24,6 +24,8 @@ class ImageArtifactStore:
             raise ValueError("Invalid artifact size limit")
         if require_external_volume and external_volume is None:
             raise ValueError("External volume must be configured")
+        self._external_volume = Path(external_volume) if external_volume is not None else None
+        self._volume_marker = volume_marker
         if volume_marker is not None:
             if external_volume is None:
                 raise ValueError("Volume marker requires an external volume")
@@ -51,7 +53,26 @@ class ImageArtifactStore:
             raise ValueError("Invalid owner")
         return hashlib.sha256(owner_id.encode("utf-8")).hexdigest()
 
+    def _assert_volume_available(self) -> None:
+        """Recheck external volume marker before every store operation."""
+        if self._external_volume is None:
+            return
+        require_external_media_root(self.root, mounted_volume=self._external_volume)
+        if self._volume_marker is None:
+            return
+        marker_path = self._external_volume / ".modelrig-volume-id"
+        if marker_path.is_symlink() or not marker_path.is_file():
+            raise RuntimeError("External media volume unavailable")
+        try:
+            if marker_path.stat().st_size > 256 or (
+                marker_path.read_text(encoding="utf-8").strip() != self._volume_marker
+            ):
+                raise RuntimeError("External media volume identity changed")
+        except OSError as exc:
+            raise RuntimeError("External media volume unavailable") from exc
+
     def put_png(self, owner_id: str, data: bytes) -> str:
+        self._assert_volume_available()
         if not isinstance(data, bytes) or not 1 <= len(data) <= self.max_bytes:
             raise ValueError("Invalid artifact payload")
         # Only call this after a full trusted image decode and re-encode.
@@ -76,6 +97,7 @@ class ImageArtifactStore:
         return artifact_id
 
     def get_png(self, owner_id: str, artifact_id: str) -> bytes | None:
+        self._assert_volume_available()
         try:
             safe_id = str(uuid.UUID(artifact_id))
         except (ValueError, TypeError, AttributeError):
@@ -130,6 +152,7 @@ class ImageArtifactStore:
         return result
 
     def list_png_ids(self, owner_id: str, *, limit: int = 100, offset: int = 0) -> list[str]:
+        self._assert_volume_available()
         """List only this owner's private artifacts, newest filename first.
 
         No arbitrary filesystem paths, raw owner names or absolute locations
