@@ -176,10 +176,8 @@ if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
 mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
 
-# Experimental image routes remain unmounted in standard V1 boots. The
-# explicit integration boundary is imported only; it is not enabled until
-# a trusted auth dependency, reviewed workflow and external volume are wired.
-# Experimental image code is imported only after explicit operator opt-in.
+# Experimental image modules are not imported on standard V1 boots.
+# The operator flag fails closed until the reviewed service bootstrap exists.
 # A missing trusted auth/service bootstrap intentionally prevents activation.
 # This is NOT an automatic activation path for V1 or remote clients.
 if os.getenv("KALIV_EXPERIMENTAL_IMAGES_ENABLED", "0") == "1":
