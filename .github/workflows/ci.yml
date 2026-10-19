@@ -32,6 +32,57 @@ jobs:
       # Push/main and workflow_dispatch keep the reusable default=true gate.
       run_stage_b: ${{ github.event_name != 'pull_request' }}
 
+  # Source-mode imports can succeed while the shipped exe lacks a sibling
+  # package. Exercise the frozen entrypoint before a release tag is needed.
+  windows-worker-package:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Build the release worker package
+        run: |
+          pip install -r worker/requirements.txt pyinstaller
+          python scripts/stamp_build_identity.py
+          pyinstaller --onefile --name modelrig-worker-windows-x64 --paths . --paths worker worker/run_worker.py
+      - name: Boot the frozen worker outside the checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = (Get-Content VERSION -Raw).Trim()
+          $exe = (Resolve-Path dist/modelrig-worker-windows-x64.exe).Path
+          $stdout = Join-Path $env:RUNNER_TEMP "worker-package-stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "worker-package-stderr.log"
+          $env:PYTHONPATH = ""
+          $env:MODELRIG_WORKER_HOST = "127.0.0.1"
+          $env:MODELRIG_WORKER_PORT = "8099"
+          $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          $worker = Start-Process -FilePath $exe -WorkingDirectory $env:RUNNER_TEMP -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $health = $null
+            foreach ($i in 1..30) {
+              if ($worker.HasExited) { throw "frozen worker exited with code $($worker.ExitCode)" }
+              try { $health = Invoke-RestMethod http://127.0.0.1:8099/healthz -TimeoutSec 2; break }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $health -or $health.service -ne "modelrig-worker" -or $health.version -ne $expected) {
+              throw "frozen worker health/version check failed"
+            }
+            $full = Invoke-RestMethod http://127.0.0.1:8099/health/full -TimeoutSec 5
+            if ($full.checks.worker.version -ne $expected) { throw "frozen worker full-health version check failed" }
+            Write-Host "frozen worker started outside the checkout: $expected"
+          }
+          finally {
+            if (-not $worker.HasExited) { & taskkill.exe /PID $worker.Id /T /F | Out-Null }
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+          }
+
   # The optional browser runtime stays out of worker/requirements.txt. This job
   # validates the pinned package and locked profile, launches real Chromium
   # against one controlled localhost fixture, then proves the claim-bound CDP
