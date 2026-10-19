@@ -61,8 +61,13 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
         writeErr(w, http.StatusInternalServerError, "invalid media request")
         return
     }
-    if value := r.Header.Get("Range"); value != "" {
-        req.Header.Set("Range", value)
+    // Do not forward ambiguous multi-valued or oversized Range headers.
+    if values := r.Header.Values("Range"); len(values) > 0 {
+        if len(values) != 1 || len(values[0]) > 128 || !strings.HasPrefix(values[0], "bytes=") {
+            writeErr(w, http.StatusBadRequest, "invalid media range")
+            return
+        }
+        req.Header.Set("Range", values[0])
     }
     // Dial the loopback address directly; never resolve a hostname through DNS.
     dialer := &net.Dialer{Timeout: 5 * time.Second}
