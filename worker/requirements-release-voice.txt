@@ -1,0 +1,5 @@
+# Voice engines for the distributed Windows worker. Keep source-only CI light.
+# These are the versions shipped with the voice-capable v2.0.15 package.
+faster-whisper==1.2.1
+soundfile==0.13.1
+piper-tts==1.4.2
