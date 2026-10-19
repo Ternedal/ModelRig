@@ -18,11 +18,24 @@ class ImageArtifactStore:
         self, root: Path, *, max_bytes: int = 16_000_000,
         external_volume: Path | None = None,
         require_external_volume: bool = False,
+        volume_marker: str | None = None,
     ):
         if not 1 <= max_bytes <= 32_000_000:
             raise ValueError("Invalid artifact size limit")
         if require_external_volume and external_volume is None:
             raise ValueError("External volume must be configured")
+        if volume_marker is not None:
+            if external_volume is None:
+                raise ValueError("Volume marker requires an external volume")
+            if not isinstance(volume_marker, str) or not 16 <= len(volume_marker) <= 128:
+                raise ValueError("Invalid volume marker")
+            marker_path = Path(external_volume) / ".modelrig-volume-id"
+            if marker_path.is_symlink() or not marker_path.is_file():
+                raise ValueError("External volume identity marker is missing")
+            if marker_path.stat().st_size > 256:
+                raise ValueError("External volume identity marker is oversized")
+            if marker_path.read_text(encoding="utf-8").strip() != volume_marker:
+                raise ValueError("External volume identity mismatch")
         if external_volume is not None:
             root = require_external_media_root(root, mounted_volume=external_volume)
         supplied_root = Path(root).absolute()
@@ -145,6 +158,6 @@ class ImageArtifactStore:
         return [artifact_id for _, artifact_id in records[offset:offset + limit]]
 
 
-def external_image_artifact_store(root: Path, *, external_volume: Path, max_bytes: int = 16_000_000) -> ImageArtifactStore:
+def external_image_artifact_store(root: Path, *, external_volume: Path, volume_marker: str, max_bytes: int = 16_000_000) -> ImageArtifactStore:
     """Production-facing constructor: never permit local disk fallback."""
-    return ImageArtifactStore(root, max_bytes=max_bytes, external_volume=external_volume, require_external_volume=True)
+    return ImageArtifactStore(root, max_bytes=max_bytes, external_volume=external_volume, require_external_volume=True, volume_marker=volume_marker)
