@@ -2,9 +2,12 @@ package httpapi
 
 import (
     "io"
+    "context"
+    "errors"
     "net/http"
     "regexp"
     "net/url"
+    "net"
     "strconv"
     "strings"
     "time"
@@ -57,7 +60,21 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
     if value := r.Header.Get("Range"); value != "" {
         req.Header.Set("Range", value)
     }
+    // Dial the loopback address directly; never resolve a hostname through DNS.
+    dialer := &net.Dialer{Timeout: 5 * time.Second}
+    transport := &http.Transport{
+        Proxy: nil,
+        DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+            host, port, err := net.SplitHostPort(address)
+            if err != nil { return nil, err }
+            if host == "localhost" { host = "127.0.0.1" }
+            ip := net.ParseIP(host)
+            if ip == nil || !ip.IsLoopback() { return nil, errors.New("non-loopback media upstream") }
+            return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
+        },
+    }
     client := &http.Client{
+        Transport: transport,
         Timeout: 10 * time.Minute,
         CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
     }
