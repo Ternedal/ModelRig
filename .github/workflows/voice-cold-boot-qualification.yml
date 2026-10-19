@@ -1,0 +1,134 @@
+name: voice-cold-boot-v2.0.17
+
+# Supplemental CI evidence; this neither changes the release nor proves rig audio.
+on:
+  push:
+    branches: [test/voice-cold-boot-v2.0.17-20261019]
+    paths: [.github/workflows/voice-cold-boot-qualification.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  supervised-cold-boot:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 3d52cc97735b9572225cc5776d9ebc16656951b6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: "1.23"
+      - name: Build the exact release worker and inspect voice payload
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne "3d52cc97735b9572225cc5776d9ebc16656951b6") { throw "release source mismatch" }
+          $env:GITHUB_SHA = $actual
+          python -m pip install -r worker/requirements.txt -r worker/requirements-release-voice.txt pyinstaller==6.22.3
+          if ($LASTEXITCODE -ne 0) { throw "worker dependencies failed" }
+          python scripts/stamp_build_identity.py
+          if ($LASTEXITCODE -ne 0) { throw "worker identity failed" }
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths . --paths worker --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av --collect-all nvidia worker/run_worker.py
+          if ($LASTEXITCODE -ne 0) { throw "worker build failed" }
+          python scripts/verify_frozen_voice_package.py dist/modelrig-worker-windows-x64.exe
+          if ($LASTEXITCODE -ne 0) { throw "frozen voice payload verification failed" }
+      - name: Build the exact release server and supervisor
+        shell: pwsh
+        working-directory: backend
+        run: |
+          go build -o ../dist/modelrig-server-windows-x64.exe ./cmd/modelrig-server
+          if ($LASTEXITCODE -ne 0) { throw "server build failed" }
+          go build -o ../dist/modelrig-supervisor-windows-x64.exe ./cmd/modelrig-supervisor
+          if ($LASTEXITCODE -ne 0) { throw "supervisor build failed" }
+      - name: Cold boot through the real supervisor and unchanged updater verifier
+        shell: pwsh
+        run: |
+          $env:MODELRIG_VOICE_PACKAGE_BOOT_ROOT = (Resolve-Path dist).Path
+          @'
+          package main
+
+          import (
+            "encoding/json"
+            "fmt"
+            "net/http"
+            "os"
+            "os/exec"
+            "path/filepath"
+            "strconv"
+            "strings"
+            "testing"
+            "time"
+            "modelrig/internal/heartbeat"
+          )
+
+          func TestReleaseVoiceColdBoot(t *testing.T) {
+            root := os.Getenv("MODELRIG_VOICE_PACKAGE_BOOT_ROOT")
+            if root == "" { t.Fatal("missing isolated package root") }
+            state := t.TempDir()
+            logs := filepath.Join(state, "logs")
+            envFile := filepath.Join(state, "modelrig.env")
+            env := strings.Join([]string{
+              "MODELRIG_HOST=127.0.0.1", "MODELRIG_PORT=8080",
+              "MODELRIG_WORKER_HOST=127.0.0.1", "MODELRIG_WORKER_PORT=8099",
+              "MODELRIG_WORKER_URL=http://127.0.0.1:8099",
+              "MODELRIG_OLLAMA_URL=http://127.0.0.1:9",
+            }, "\n")
+            if err := os.WriteFile(envFile, []byte(env), 0600); err != nil { t.Fatal(err) }
+            outputPath := filepath.Join(state, "supervisor.log")
+            output, err := os.Create(outputPath)
+            if err != nil { t.Fatal(err) }
+            defer output.Close()
+            supervisor := exec.Command(filepath.Join(root, "modelrig-supervisor-windows-x64.exe"),
+              "-server", filepath.Join(root, "modelrig-server-windows-x64.exe"),
+              "-worker", filepath.Join(root, "modelrig-worker-windows-x64.exe"),
+              "-env", envFile, "-logs", logs)
+            supervisor.Dir = state
+            supervisor.Stdout, supervisor.Stderr = output, output
+            started := time.Now()
+            if err := supervisor.Start(); err != nil { t.Fatal(err) }
+            defer func() {
+              _ = exec.Command("taskkill.exe", "/PID", strconv.Itoa(supervisor.Process.Pid), "/T", "/F").Run()
+              _ = supervisor.Wait()
+              for _, name := range []string{outputPath, filepath.Join(logs, "server.log"), filepath.Join(logs, "worker.log")} {
+                if data, err := os.ReadFile(name); err == nil { t.Logf("%s:\n%s", filepath.Base(name), data) }
+              }
+            }()
+            // Exercise production verification with its original retry/time budget.
+            if !verify("http://127.0.0.1:8080/healthz", "2.0.17") ||
+               !verify("http://127.0.0.1:8099/healthz", "2.0.17") {
+              t.Fatalf("cold boot failed the installed updater verification budget after %s", time.Since(started))
+            }
+            t.Logf("Updater cold-boot verification accepted in %s", time.Since(started))
+            alive, err := heartbeat.ProveLooping(filepath.Join(logs, "supervisor-heartbeat"), started, 10*time.Second, 45*time.Second)
+            if !alive || err != nil { t.Fatalf("supervisor loop not proven: %v", err) }
+            client := &http.Client{Timeout: 10*time.Second}
+            for _, provider := range []string{"asr", "tts"} {
+              response, err := client.Get(fmt.Sprintf("http://127.0.0.1:8099/voice/%s/status", provider))
+              if err != nil { t.Fatal(err) }
+              var status map[string]any
+              err = json.NewDecoder(response.Body).Decode(&status)
+              response.Body.Close()
+              if err != nil || response.StatusCode != 200 || status["available"] != true {
+                t.Fatalf("%s provider unavailable after supervised boot: %v %v", provider, status, err)
+              }
+            }
+            if data, err := os.ReadFile(outputPath); err != nil {
+              t.Fatal(err)
+            } else if strings.Contains(string(data), "-> restarted") {
+              t.Fatal("supervisor restarted a child during cold boot")
+            }
+            t.Log("PASS: frozen voice package cold boot, existing updater budget and supervisor heartbeat")
+          }
+          '@ | Set-Content -Encoding utf8 backend/cmd/modelrig-updater/voice_package_boot_test.go
+          Push-Location backend
+          try {
+            go test ./cmd/modelrig-updater -run '^TestReleaseVoiceColdBoot$' -count=1 -timeout 3m -v
+            if ($LASTEXITCODE -ne 0) { throw "supervised cold-boot qualification failed" }
+          } finally {
+            Pop-Location
+          }
