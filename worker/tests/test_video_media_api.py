@@ -34,22 +34,22 @@ class MediaAPITests(unittest.TestCase):
         response = self.client.get("/experimental/media")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["items"][0]["id"], "clip_1")
-        self.assertEqual(response.json()["items"][0]["url"], "/experimental/media/clip_1")
+        self.assertEqual(response.json()["items"][0]["url"], "/api/v1/media/clip_1")
 
     def test_seek(self):
-        response = self.client.get("/experimental/media/clip_1", headers={"Range": "bytes=3-5"})
+        response = self.client.get("/api/v1/media/clip_1", headers={"Range": "bytes=3-5"})
         self.assertEqual(response.status_code, 206)
         self.assertEqual(response.content, b"345")
         self.assertEqual(response.headers["content-range"], "bytes 3-5/10")
 
     def test_head(self):
-        response = self.client.head("/experimental/media/clip_1")
+        response = self.client.head("/api/v1/media/clip_1")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-length"], "10")
         self.assertEqual(response.content, b"")
 
     def test_unknown_media(self):
-        self.assertEqual(self.client.get("/experimental/media/nope").status_code, 404)
+        self.assertEqual(self.client.get("/api/v1/media/nope").status_code, 404)
 
 
 if __name__ == "__main__":
