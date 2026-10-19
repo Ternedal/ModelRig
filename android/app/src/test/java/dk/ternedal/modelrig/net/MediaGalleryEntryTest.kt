@@ -9,9 +9,9 @@ class MediaGalleryEntryTest {
     fun parsesVideoForVRPlayback() {
         val entry = MediaGalleryEntry.parse(
             "clip_1", "video", "equirectangular_180", "left_right",
-            "thumb_1", "/experimental/media/clip_1", "/experimental/media/thumb_1"
+            "thumb_1", "/api/v1/media/clip_1", "/api/v1/media/thumb_1"
         )
-        assertEquals("/experimental/media/clip_1", entry?.mediaPath())
+        assertEquals("/api/v1/media/clip_1", entry?.mediaPath())
         assertEquals("equirectangular_180", entry?.projection)
         assertEquals("left_right", entry?.stereo)
     }
@@ -28,7 +28,7 @@ class MediaGalleryEntryTest {
     fun rejectsPathTraversal() {
         assertNull(MediaGalleryEntry.parse(
             "../private", "image", "flat", "mono",
-            null, "/experimental/media/../private", null
+            null, "/api/v1/media/../private", null
         ))
     }
 
@@ -36,7 +36,7 @@ class MediaGalleryEntryTest {
     fun rejectsInvalidThumbnail() {
         assertNull(MediaGalleryEntry.parse(
             "clip_1", "video", "flat", "mono",
-            "thumb_1", "/experimental/media/clip_1", "/experimental/media/other"
+            "thumb_1", "/api/v1/media/clip_1", "/api/v1/media/other"
         ))
     }
 }
