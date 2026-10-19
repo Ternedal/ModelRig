@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .outputs import ImageDescriptor
+
 
 class ComfyUIError(RuntimeError):
     """A bounded, sanitized image-engine error."""
@@ -100,3 +102,31 @@ class ComfyUIAdapter:
         if not isinstance(result, dict):
             raise ComfyUIError("Invalid image engine history response")
         return result
+
+    async def fetch_output(self, descriptor: ImageDescriptor, *, max_bytes: int = 16_000_000) -> bytes:
+        """Fetch a server-selected output with a strict byte limit.
+
+        The returned bytes still require image decoding, dimension limits and
+        metadata policy before they may become a client-visible artifact.
+        """
+        if not 1 <= max_bytes <= 32_000_000:
+            raise ValueError("Invalid output byte limit")
+        try:
+            async with self._client.stream(
+                "GET", "/view",
+                params={"filename": descriptor.filename, "subfolder": "", "type": "output"},
+            ) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+                if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+                    raise ComfyUIError("Unexpected image content type")
+                result = bytearray()
+                async for chunk in response.aiter_bytes():
+                    result.extend(chunk)
+                    if len(result) > max_bytes:
+                        raise ComfyUIError("Image output exceeds byte limit")
+                if not result:
+                    raise ComfyUIError("Empty image output")
+                return bytes(result)
+        except httpx.HTTPError as exc:
+            raise ComfyUIError("Local image output retrieval failed") from exc
