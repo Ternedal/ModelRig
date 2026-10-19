@@ -111,6 +111,18 @@ func TestMediaGatewayRejectsWorkerOriginWithPath(t *testing.T) {
     }
 }
 
+func TestMediaGatewayRejectsAmbiguousPagination(t *testing.T) {
+    s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1", time.Second)}}
+    for _, query := range []string{"limit=1&limit=2", "limit=0", "limit=101", "offset=-1", "offset=abc"} {
+        request := httptest.NewRequest(http.MethodGet, "/api/v1/media?"+query, nil)
+        recorder := httptest.NewRecorder()
+        s.handleMediaGallery(recorder, request)
+        if recorder.Code != http.StatusBadRequest {
+            t.Errorf("%s: expected 400, got %d", query, recorder.Code)
+        }
+    }
+}
+
 func TestMediaGatewayRejectsInvalidIDBeforeForward(t *testing.T) {
     s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1", time.Second)}}
     request := httptest.NewRequest(http.MethodGet, "/api/v1/media/../secret", nil)
