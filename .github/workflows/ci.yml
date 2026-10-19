@@ -38,6 +38,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      EXPECTED_BUILD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,6 +49,9 @@ jobs:
           python-version: "3.11"
       - name: Build the release worker package
         run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_BUILD_SHA) { throw "worker package checkout identity mismatch" }
+          $env:GITHUB_SHA = $actual
           pip install -r worker/requirements.txt pyinstaller
           python scripts/stamp_build_identity.py
           pyinstaller --onefile --name modelrig-worker-windows-x64 --paths . --paths worker worker/run_worker.py
@@ -55,6 +60,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $expected = (Get-Content VERSION -Raw).Trim()
+          $expectedCode = (python -c "import sys; sys.path.insert(0, 'worker'); from app.build_identity import code_fingerprint; print(code_fingerprint())").Trim()
+          if ($LASTEXITCODE -ne 0 -or $expectedCode -notmatch '^[0-9a-f]{64}$') { throw "worker source fingerprint could not be calculated" }
           $exe = (Resolve-Path dist/modelrig-worker-windows-x64.exe).Path
           $stdout = Join-Path $env:RUNNER_TEMP "worker-package-stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "worker-package-stderr.log"
@@ -75,6 +82,8 @@ jobs:
             }
             $full = Invoke-RestMethod http://127.0.0.1:8099/health/full -TimeoutSec 5
             if ($full.checks.worker.version -ne $expected) { throw "frozen worker full-health version check failed" }
+            if ($full.build.frozen -ne $true -or $full.build.commit_sha -ne $env:EXPECTED_BUILD_SHA) { throw "frozen worker commit identity mismatch" }
+            if ($full.build.code_sha256 -ne $expectedCode) { throw "frozen worker source fingerprint mismatch" }
             Write-Host "frozen worker started outside the checkout: $expected"
           }
           finally {
