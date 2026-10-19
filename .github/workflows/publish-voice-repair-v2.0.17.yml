@@ -1,0 +1,86 @@
+name: publish-voice-repair-v2.0.17
+
+# One-use orchestration. Only the normal release workflow publishes assets.
+on:
+  push:
+    branches: [release/publish-voice-repair-v2.0.17-20261019]
+    paths: [.github/workflows/publish-voice-repair-v2.0.17.yml]
+
+permissions:
+  contents: write
+  actions: write
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: publish-voice-repair-v2.0.17-20261019
+  cancel-in-progress: false
+
+jobs:
+  publish-through-existing-release-gates:
+    if: github.repository == 'Ternedal/ModelRig'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: Ternedal/ModelRig
+      EXPECTED_PR_HEAD: de761a91ad129e2c4635619fdfad6c8bc39c894d
+      RELEASE_TAG: v2.0.17
+    steps:
+      - name: Require normal protected merge and successful exact-head Windows voice package
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            pr=$(gh api "repos/$GH_REPO/pulls/2238")
+            test "$(jq -r '.head.sha' <<< "$pr")" = "$EXPECTED_PR_HEAD"
+            test "$(jq -r '.base.ref' <<< "$pr")" = main
+            if [ "$(jq -r '.merged' <<< "$pr")" = true ]; then
+              target=$(jq -r '.merge_commit_sha' <<< "$pr")
+              [[ "$target" =~ ^[0-9a-f]{40}$ ]]
+              test "$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')" = "$target"
+              checks=$(gh api "repos/$GH_REPO/commits/$EXPECTED_PR_HEAD/check-runs?per_page=100")
+              package=$(jq -r '[.check_runs[] | select(.name == "windows-worker-package")] | sort_by(.id) | last | .conclusion' <<< "$checks")
+              if [ "$package" = success ]; then
+                echo "RELEASE_SOURCE_SHA=$target" >> "$GITHUB_ENV"
+                exit 0
+              fi
+              test "$package" != failure
+              test "$package" != cancelled
+            else
+              test "$(jq -r '.state' <<< "$pr")" = open
+            fi
+            sleep 20
+          done
+          echo 'Protected merge or Windows voice package is not yet qualified; no release requested.' >&2
+          exit 1
+      - name: Validate exact version and create only the new patch tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(gh api "repos/$GH_REPO/contents/VERSION?ref=$RELEASE_SOURCE_SHA" --jq '.content' | base64 --decode | tr -d '\r\n')
+          test "$version" = 2.0.17
+          status=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" > "$RUNNER_TEMP/voice-repair-ref.json" 2> "$RUNNER_TEMP/voice-repair-ref.err" && echo found || echo absent)
+          if [ "$status" = found ]; then
+            test "$(jq -r '.object.type' "$RUNNER_TEMP/voice-repair-ref.json")" = commit
+            test "$(jq -r '.object.sha' "$RUNNER_TEMP/voice-repair-ref.json")" = "$RELEASE_SOURCE_SHA"
+          else
+            grep -q 'HTTP 404' "$RUNNER_TEMP/voice-repair-ref.err"
+            jq -n --arg ref "refs/tags/$RELEASE_TAG" --arg sha "$RELEASE_SOURCE_SHA" '{ref: $ref, sha: $sha}' \
+              | gh api --method POST "repos/$GH_REPO/git/refs" --input - > /dev/null
+          fi
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" = "$RELEASE_SOURCE_SHA"
+      - name: Start the full existing release workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          runs=$(gh api "repos/$GH_REPO/actions/workflows/build-and-release.yml/runs?per_page=100")
+          existing=$(jq -r --arg sha "$RELEASE_SOURCE_SHA" --arg tag "$RELEASE_TAG" \
+            '.workflow_runs[] | select(.head_sha == $sha and .head_branch == $tag and (.status != "completed" or .conclusion == "success")) | .html_url' <<< "$runs")
+          if [ -n "$existing" ]; then
+            echo "Release workflow already requested: $existing"
+            exit 0
+          fi
+          jq -n --arg ref "$RELEASE_TAG" '{ref: $ref, inputs: {force_full_matrix: "true"}}' \
+            | gh api --method POST "repos/$GH_REPO/actions/workflows/build-and-release.yml/dispatches" --input -
+          echo "Requested full release for $RELEASE_TAG at $RELEASE_SOURCE_SHA; all normal tests and publication gates apply." >> "$GITHUB_STEP_SUMMARY"
