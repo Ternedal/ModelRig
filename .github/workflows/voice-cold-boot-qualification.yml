@@ -45,15 +45,48 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "server build failed" }
           go build -o ../dist/modelrig-supervisor-windows-x64.exe ./cmd/modelrig-supervisor
           if ($LASTEXITCODE -ne 0) { throw "supervisor build failed" }
+      - name: Download pinned public voice model fixtures
+        shell: pwsh
+        run: |
+          @'
+          import hashlib
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+          from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "voice-fixtures"
+          voices = root / "voices"
+          voices.mkdir(parents=True, exist_ok=True)
+          api = HfApi()
+          voice_revision = api.model_info("rhasspy/piper-voices").sha
+          voice_prefix = "da/da_DK/talesyntese/medium/da_DK-talesyntese-medium.onnx"
+          for suffix in ("", ".json"):
+              path = hf_hub_download("rhasspy/piper-voices", voice_prefix + suffix, revision=voice_revision)
+              shutil.copyfile(path, voices / Path(voice_prefix + suffix).name)
+          whisper_revision = "d90ca5fe260221311c53c58e660288d3deb8d356"
+          snapshot_download("Systran/faster-whisper-tiny", revision=whisper_revision,
+                            local_dir=root / "whisper-tiny",
+                            allow_patterns=["config.json", "model.bin", "tokenizer.json", "vocabulary.txt"])
+          report = {"piper_revision": voice_revision, "whisper_revision": whisper_revision,
+                    "files": {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+                              for p in root.rglob("*") if p.is_file() and ".cache" not in p.parts}}
+          print("Pinned CPU voice fixtures: " + json.dumps(report, sort_keys=True))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "voice model fixtures failed" }
       - name: Cold boot through the real supervisor and unchanged updater verifier
         shell: pwsh
         run: |
           $env:MODELRIG_VOICE_PACKAGE_BOOT_ROOT = (Resolve-Path dist).Path
+          $env:MODELRIG_VOICE_PACKAGE_FIXTURES = Join-Path $env:RUNNER_TEMP "voice-fixtures"
           @'
           package main
 
           import (
+            "bytes"
             "encoding/json"
+            "io"
             "fmt"
             "net/http"
             "os"
@@ -69,6 +102,8 @@ jobs:
           func TestReleaseVoiceColdBoot(t *testing.T) {
             root := os.Getenv("MODELRIG_VOICE_PACKAGE_BOOT_ROOT")
             if root == "" { t.Fatal("missing isolated package root") }
+            fixtures := os.Getenv("MODELRIG_VOICE_PACKAGE_FIXTURES")
+            if fixtures == "" { t.Fatal("missing isolated voice fixtures") }
             state := t.TempDir()
             logs := filepath.Join(state, "logs")
             envFile := filepath.Join(state, "modelrig.env")
@@ -77,6 +112,10 @@ jobs:
               "MODELRIG_WORKER_HOST=127.0.0.1", "MODELRIG_WORKER_PORT=8099",
               "MODELRIG_WORKER_URL=http://127.0.0.1:8099",
               "MODELRIG_OLLAMA_URL=http://127.0.0.1:9",
+              "PYTHONPATH=", "KALIV_ASR_DEVICE=cpu", "KALIV_ASR_COMPUTE=int8",
+              "KALIV_ASR_MODEL=" + filepath.Join(fixtures, "whisper-tiny"),
+              "TTS_PROVIDER=piper", "KALIV_TTS_VOICE=da_DK-talesyntese-medium",
+              "KALIV_TTS_VOICES_DIR=" + filepath.Join(fixtures, "voices"),
             }, "\n")
             if err := os.WriteFile(envFile, []byte(env), 0600); err != nil { t.Fatal(err) }
             outputPath := filepath.Join(state, "supervisor.log")
@@ -117,6 +156,37 @@ jobs:
                 t.Fatalf("%s provider unavailable after supervised boot: %v %v", provider, status, err)
               }
             }
+            client.Timeout = 180 * time.Second
+            post := func(path string, payload map[string]any) map[string]any {
+              data, err := json.Marshal(payload)
+              if err != nil { t.Fatal(err) }
+              response, err := client.Post("http://127.0.0.1:8099"+path, "application/json", bytes.NewReader(data))
+              if err != nil { t.Fatal(err) }
+              defer response.Body.Close()
+              body, err := io.ReadAll(response.Body)
+              if err != nil { t.Fatal(err) }
+              if response.StatusCode != 200 { t.Fatalf("%s returned %d: %s", path, response.StatusCode, body) }
+              var result map[string]any
+              if err := json.Unmarshal(body, &result); err != nil { t.Fatal(err) }
+              return result
+            }
+            wavPath := filepath.Join(fixtures, "synthesized-danish.wav")
+            tts := post("/voice/tts/synthesize", map[string]any{
+              "text": "Hej Kaliv. Dette er en dansk lydtest. Stemmen skal virke.", "out_path": wavPath,
+            })
+            wav, err := os.ReadFile(wavPath)
+            if err != nil { t.Fatal(err) }
+            if len(wav) < 1000 || string(wav[:4]) != "RIFF" || string(wav[8:12]) != "WAVE" {
+              t.Fatal("frozen Piper did not produce a valid nonempty WAV")
+            }
+            t.Logf("Frozen Piper generated Danish WAV: %d bytes; metadata=%v", len(wav), tts)
+            asr := post("/voice/asr/transcribe", map[string]any{"path": wavPath, "language": "da"})
+            text, ok := asr["text"].(string)
+            if !ok || strings.TrimSpace(text) == "" { t.Fatalf("frozen CPU Whisper returned no transcription: %v", asr) }
+            segments, ok := asr["segments"].([]any)
+            if !ok || len(segments) == 0 { t.Fatalf("frozen CPU Whisper returned no segments: %v", asr) }
+            t.Logf("Frozen CPU Whisper transcribed Danish WAV: %q", text)
+            t.Log("PASS: real frozen Danish Piper synthesis and CPU Whisper transcription")
             if data, err := os.ReadFile(outputPath); err != nil {
               t.Fatal(err)
             } else if strings.Contains(string(data), "-> restarted") {
@@ -127,7 +197,7 @@ jobs:
           '@ | Set-Content -Encoding utf8 backend/cmd/modelrig-updater/voice_package_boot_test.go
           Push-Location backend
           try {
-            go test ./cmd/modelrig-updater -run '^TestReleaseVoiceColdBoot$' -count=1 -timeout 3m -v
+            go test ./cmd/modelrig-updater -run '^TestReleaseVoiceColdBoot$' -count=1 -timeout 5m -v
             if ($LASTEXITCODE -ne 0) { throw "supervised cold-boot qualification failed" }
           } finally {
             Pop-Location
