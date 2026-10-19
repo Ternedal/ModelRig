@@ -35,7 +35,9 @@ def mount_experimental_images(
         raise RuntimeError("Experimental image API requires a configured service")
     if not isinstance(artifact_store, ImageArtifactStore):
         raise RuntimeError("Experimental image API requires an external artifact store")
-    if artifact_store._external_volume is None or artifact_store._volume_marker is None:
+    if (not artifact_store._require_external_volume
+            or artifact_store._external_volume is None
+            or artifact_store._volume_marker is None):
         raise RuntimeError("Experimental image API requires a marked external volume")
     artifact_store._assert_volume_available()
     app.include_router(build_image_router(
