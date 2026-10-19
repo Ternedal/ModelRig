@@ -38,6 +38,9 @@ class VideoJobStore:
                 "request_json TEXT NOT NULL, created_at REAL NOT NULL, "
                 "updated_at REAL NOT NULL, artifact_id TEXT, error_code TEXT)"
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(video_jobs)")}
+            if "prompt_id" not in columns:
+                db.execute("ALTER TABLE video_jobs ADD COLUMN prompt_id TEXT")
 
     def _connect(self):
         connection = sqlite3.connect(self.db_path, timeout=5)
@@ -82,6 +85,27 @@ class VideoJobStore:
                 (new_state, time.time(), artifact_id, error_code, job_id, expected),
             )
             return result.rowcount == 1
+
+    def record_prompt(self, job_id: str, prompt_id: str) -> bool:
+        """Persist ComfyUI correlation before a later collector checks history."""
+        if not isinstance(prompt_id, str) or not (1 <= len(prompt_id) <= 128) or not prompt_id.isascii() or not all(c.isalnum() or c in "-_" for c in prompt_id):
+            raise ValueError("Invalid backend prompt ID")
+        with self._connect() as db:
+            result = db.execute(
+                "UPDATE video_jobs SET prompt_id=?, updated_at=? WHERE job_id=? AND state='running' AND prompt_id IS NULL",
+                (prompt_id, time.time(), job_id),
+            )
+            return result.rowcount == 1
+
+    def awaiting_result(self, limit: int = 10) -> list[dict]:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Invalid result limit")
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM video_jobs WHERE state='running' AND prompt_id IS NOT NULL ORDER BY updated_at, job_id LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def queued(self, limit: int = 10) -> list[dict]:
         if type(limit) is not int or not 1 <= limit <= 100:
