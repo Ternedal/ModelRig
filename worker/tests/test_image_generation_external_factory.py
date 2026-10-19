@@ -83,3 +83,17 @@ def test_strict_constructor_rejects_missing_marker(tmp_path):
             require_external_volume=True,
         )
     assert not (volume / "images").exists()
+
+def test_missing_mount_path_fails_closed_at_runtime(tmp_path):
+    volume = tmp_path / "external"
+    volume.mkdir()
+    (volume / ".modelrig-volume-id").write_text("0123456789abcdef")
+    store = external_image_artifact_store(
+        volume / "images", external_volume=volume,
+        volume_marker="0123456789abcdef",
+    )
+    import shutil
+    shutil.rmtree(volume)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        store.list_png_ids("alice")
+    assert not volume.exists()
