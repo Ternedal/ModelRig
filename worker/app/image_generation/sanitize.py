@@ -43,6 +43,9 @@ def sanitize_to_png(
             # Rebuild pixels into a fresh image. Do not preserve EXIF, comments,
             # ICC, ancillary chunks, or embedded metadata.
             oriented = ImageOps.exif_transpose(source)
+            if (oriented.width > max_dimension or oriented.height > max_dimension
+                    or oriented.width * oriented.height > max_pixels):
+                raise InvalidImage("Oriented image exceeds limits")
             if oriented.mode not in {"RGB", "RGBA"}:
                 oriented = oriented.convert("RGBA" if "A" in oriented.getbands() else "RGB")
             clean = Image.new(oriented.mode, oriented.size)
