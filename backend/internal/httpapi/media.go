@@ -1,13 +1,13 @@
 package httpapi
 
 import (
-    "io"
     "context"
     "errors"
-    "net/http"
-    "regexp"
-    "net/url"
+    "io"
     "net"
+    "net/http"
+    "net/url"
+    "regexp"
     "strconv"
     "strings"
     "time"
