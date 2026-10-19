@@ -72,3 +72,14 @@ def test_external_store_rechecks_identity_before_atomic_publish(tmp_path, monkey
         store.put_png("alice", b"\\x89PNG\\r\\n\\x1a\\n" + b"data")
     assert not list((volume / "images").rglob("*.png"))
     assert not list((volume / "images").rglob(".upload-*"))
+
+def test_strict_constructor_rejects_missing_marker(tmp_path):
+    from app.image_generation.artifacts import ImageArtifactStore
+    volume = tmp_path / "external"
+    volume.mkdir()
+    with pytest.raises(ValueError, match="identity marker"):
+        ImageArtifactStore(
+            volume / "images", external_volume=volume,
+            require_external_volume=True,
+        )
+    assert not (volume / "images").exists()
