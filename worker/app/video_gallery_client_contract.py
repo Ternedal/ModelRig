@@ -32,7 +32,7 @@ class GalleryAsset:
         if kind not in ("image", "video"):
             raise ValueError("Invalid media kind")
         url = item.get("url")
-        expected = "/experimental/media/" + media_id
+        expected = "/api/v1/media/" + media_id
         if url != expected:
             raise ValueError("Unexpected media URL")
         thumbnail_url = item.get("thumbnail_url")
@@ -40,7 +40,7 @@ class GalleryAsset:
             thumbnail_id = item.get("thumbnail_id")
             if not isinstance(thumbnail_id, str) or not thumbnail_id.isascii() or not thumbnail_id or not all(
                 ch.isalnum() or ch in "-_" for ch in thumbnail_id
-            ) or thumbnail_url != "/experimental/media/" + thumbnail_id:
+            ) or thumbnail_url != "/api/v1/media/" + thumbnail_id:
                 raise ValueError("Unexpected thumbnail URL")
         projection = item.get("projection", "flat")
         stereo = item.get("stereo", "mono")
