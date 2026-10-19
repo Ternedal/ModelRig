@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .video_contract import VideoRequest
+from .video_storage_config import configured_video_storage
 
 TRANSITIONS = {
     "queued": {"running", "failed", "cancelled"},
@@ -20,6 +21,13 @@ TRANSITIONS = {
 
 
 class VideoJobStore:
+    @classmethod
+    def on_external_volume(cls) -> "VideoJobStore":
+        """Production factory: fail closed rather than using a local SQLite DB."""
+        storage = configured_video_storage()
+        paths = storage.initialize_directories()
+        return cls(paths["jobs"] / "video_jobs.sqlite")
+
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
