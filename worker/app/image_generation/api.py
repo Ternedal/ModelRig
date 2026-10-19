@@ -34,6 +34,7 @@ def build_image_router(
         raise ValueError("An authenticated owner dependency is required")
     router = APIRouter(prefix="/experimental/images", tags=["experimental-images"])
     ingestion_locks: dict[str, asyncio.Lock] = {}
+    ingested_artifacts: dict[str, str] = {}
 
     def owner_id(value: object) -> str:
         if not isinstance(value, str) or not 1 <= len(value) <= 128:
@@ -85,6 +86,12 @@ def build_image_router(
                 raise HTTPException(status_code=404, detail="Image job not found")
             if job.status != JobStatus.SUCCEEDED:
                 raise HTTPException(status_code=409, detail="Image job is not completed")
+            # Keep the in-process ledger bounded to jobs still retained by the manager.
+            for old_id in tuple(ingested_artifacts):
+                if old_id not in service.manager._jobs:
+                    ingested_artifacts.pop(old_id, None)
+            if job_id in ingested_artifacts:
+                return {"artifact_id": ingested_artifacts[job_id]}
             # Prevent concurrent duplicate ingestion of the same completed job.
             # A durable ingestion ledger is required before multi-process enablement.
             lock = ingestion_locks.setdefault(job_id, asyncio.Lock())
@@ -99,6 +106,7 @@ def build_image_router(
                         )
                     except (ValueError, RuntimeError) as exc:
                         raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
+                    ingested_artifacts[job_id] = artifact_id
                     return {"artifact_id": artifact_id}
             finally:
                 # Do not retain a lock for every historical job indefinitely.
