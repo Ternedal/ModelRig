@@ -20,7 +20,7 @@ def sanitize_to_png(
     if not 1 <= max_dimension <= 8192 or not 1 <= max_pixels <= 64_000_000:
         raise ValueError("Invalid image limits")
     try:
-        from PIL import Image, ImageOps, UnidentifiedImageError
+        from PIL import Image, ImageOps
     except ImportError as exc:
         raise RuntimeError("Isolated image decoder is not installed") from exc
 
@@ -34,7 +34,12 @@ def sanitize_to_png(
                 or height > max_dimension or width * height > max_pixels
             ):
                 raise InvalidImage("Image dimensions exceed limits")
-            source.load()
+            # Pillow may emit a warning (rather than an exception) for
+            # decompression bombs. Reject both before pixel allocation.
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                source.load()
             # Rebuild pixels into a fresh image. Do not preserve EXIF, comments,
             # ICC, ancillary chunks, or embedded metadata.
             oriented = ImageOps.exif_transpose(source)
@@ -48,7 +53,7 @@ def sanitize_to_png(
             if len(result) > max_input_bytes:
                 raise InvalidImage("Sanitized image exceeds output size limit")
             return result
-    except (OSError, ValueError, DecompressionBombError) as exc:
+    except (OSError, ValueError, DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise InvalidImage("Unable to decode image safely") from exc
 
 
