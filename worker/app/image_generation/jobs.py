@@ -96,6 +96,8 @@ class ImageJobManager:
             self._tasks.pop(job.id, None)
 
     def get(self, owner_id: str, job_id: str) -> ImageJob | None:
+        if not isinstance(owner_id, str) or not isinstance(job_id, str):
+            return None
         job = self._jobs.get(job_id)
         return job if job is not None and job.owner_id == owner_id else None
 
