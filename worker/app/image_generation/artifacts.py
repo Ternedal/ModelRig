@@ -84,6 +84,38 @@ class ImageArtifactStore:
             raise ValueError("Stored artifact exceeds size limit")
         return payload
 
+
+    def get_thumbnail_png(
+        self, owner_id: str, artifact_id: str, *, max_edge: int = 320,
+    ) -> bytes | None:
+        """Produce a metadata-free bounded thumbnail; no local thumbnail cache."""
+        if not 32 <= max_edge <= 512:
+            raise ValueError("Invalid thumbnail dimension")
+        source = self.get_png(owner_id, artifact_id)
+        if source is None:
+            return None
+        # Decoder dependency is optional in V1 and fails closed when absent.
+        try:
+            from PIL import Image, ImageOps
+        except ImportError as exc:
+            raise RuntimeError("Image decoder is unavailable") from exc
+        import io
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(source)) as original:
+                original.load()
+                if original.format != "PNG":
+                    raise ValueError("Stored image is not PNG")
+                image = ImageOps.exif_transpose(original)
+                image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+                output = io.BytesIO()
+                image.convert("RGB").save(output, format="PNG")
+                result = output.getvalue()
+        if len(result) > self.max_bytes:
+            raise ValueError("Thumbnail exceeds storage size limit")
+        return result
+
     def list_png_ids(self, owner_id: str, *, limit: int = 100, offset: int = 0) -> list[str]:
         """List only this owner's private artifacts, newest filename first.
 
