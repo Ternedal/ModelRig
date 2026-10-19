@@ -29,7 +29,11 @@ def _loopback_url(base_url: str) -> str:
         is_loopback = False
     if not is_loopback or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("ComfyUI endpoint must be an HTTP loopback URL")
-    if parsed.port is None or parsed.port < 1 or parsed.port > 65535:
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Invalid ComfyUI endpoint port") from exc
+    if port is None or not 1 <= port <= 65535:
         raise ValueError("ComfyUI endpoint must specify a valid port")
     if parsed.path not in ("", "/"):
         raise ValueError("ComfyUI endpoint cannot contain a path")
