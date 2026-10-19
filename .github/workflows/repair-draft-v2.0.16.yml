@@ -1,0 +1,93 @@
+name: repair-draft-v2.0.16
+
+# One-use release orchestration on this branch only. It never changes main,
+# publishes a release, skips tests, or uses a personal access token.
+on:
+  push:
+    branches: [release/repair-v2.0.16-20261019]
+
+permissions:
+  contents: write
+  actions: write
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: repair-draft-v2.0.16
+  cancel-in-progress: false
+
+jobs:
+  restart-verified-release:
+    if: github.repository == 'Ternedal/ModelRig'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: Ternedal/ModelRig
+      EXPECTED_PR_HEAD: 9c5203a2d5a7aff4ab8044f58a70682c2b0e73f2
+      ORIGINAL_TAG_SHA: 095aea2eae0f22869a411008b3a7496642f423a4
+      RELEASE_TAG: v2.0.16
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require the reviewed packaging fix to merge normally
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            pr=$(gh api "repos/$GH_REPO/pulls/2237")
+            test "$(jq -r '.head.sha' <<< "$pr")" = "$EXPECTED_PR_HEAD"
+            test "$(jq -r '.base.ref' <<< "$pr")" = main
+            if [ "$(jq -r '.merged' <<< "$pr")" = true ]; then
+              target=$(jq -r '.merge_commit_sha' <<< "$pr")
+              [[ "$target" =~ ^[0-9a-f]{40}$ ]]
+              test "$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')" = "$target"
+              echo "RELEASE_SOURCE_SHA=$target" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            test "$(jq -r '.state' <<< "$pr")" = open
+            sleep 20
+          done
+          echo 'Packaging fix has not merged; the tag and draft are unchanged.' >&2
+          exit 1
+      - name: Require the corrected Windows package check to have passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GH_REPO/commits/$EXPECTED_PR_HEAD/check-runs?per_page=100" \
+            --jq '.check_runs[] | select(.name == "windows-worker-package") | .conclusion' > "$RUNNER_TEMP/package-check.txt"
+          grep -qx success "$RUNNER_TEMP/package-check.txt"
+          git fetch --no-tags --depth=1 origin "$RELEASE_SOURCE_SHA"
+          git checkout --detach "$RELEASE_SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          test "$(tr -d '\r\n' < VERSION)" = '2.0.16'
+      - name: Retarget only the known unpublished draft tag, with a lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=$(gh api "repos/$GH_REPO/releases/417102107")
+          test "$(jq -r '.tag_name' <<< "$release")" = "$RELEASE_TAG"
+          test "$(jq -r '.draft' <<< "$release")" = true
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG")
+          test "$(jq -r '.object.type' <<< "$ref")" = commit
+          previous=$(jq -r '.object.sha' <<< "$ref")
+          if [ "$previous" = "$ORIGINAL_TAG_SHA" ]; then
+            git push --force-with-lease="refs/tags/$RELEASE_TAG:$previous" origin "$RELEASE_SOURCE_SHA:refs/tags/$RELEASE_TAG"
+          else
+            test "$previous" = "$RELEASE_SOURCE_SHA"
+          fi
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" = "$RELEASE_SOURCE_SHA"
+      - name: Dispatch the complete existing release workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/releases/417102107" --jq '.draft')" = true
+          runs=$(gh api "repos/$GH_REPO/actions/workflows/build-and-release.yml/runs?per_page=100")
+          existing=$(jq -r --arg sha "$RELEASE_SOURCE_SHA" --arg tag "$RELEASE_TAG" \
+            '.workflow_runs[] | select(.head_sha == $sha and .head_branch == $tag and (.status != "completed" or .conclusion == "success")) | .html_url' <<< "$runs")
+          if [ -n "$existing" ]; then
+            echo "Release workflow already requested: $existing"
+            exit 0
+          fi
+          jq -n --arg ref "$RELEASE_TAG" '{ref: $ref, inputs: {force_full_matrix: "true"}}' \
+            | gh api --method POST "repos/$GH_REPO/actions/workflows/build-and-release.yml/dispatches" --input -
+          echo "Requested the full release workflow for $RELEASE_TAG at $RELEASE_SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
