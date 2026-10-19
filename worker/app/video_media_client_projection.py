@@ -15,14 +15,14 @@ def gallery_item_for_client(item: dict) -> dict:
     ):
         raise ValueError("Invalid catalog media identifier")
     result = dict(item)
-    result["url"] = "/experimental/media/" + quote(media_id, safe="")
+    result["url"] = "/api/v1/media/" + quote(media_id, safe="")
     thumb = item.get("thumbnail_id")
     if thumb is not None:
         if not isinstance(thumb, str) or not thumb.isascii() or not thumb or not all(
             c.isalnum() or c in "_-" for c in thumb
         ):
             raise ValueError("Invalid thumbnail identifier")
-        result["thumbnail_url"] = "/experimental/media/" + quote(thumb, safe="")
+        result["thumbnail_url"] = "/api/v1/media/" + quote(thumb, safe="")
     else:
         result["thumbnail_url"] = None
     return result
