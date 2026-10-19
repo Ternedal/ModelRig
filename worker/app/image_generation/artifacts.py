@@ -84,11 +84,6 @@ class ImageArtifactStore:
             raise ValueError("Stored artifact exceeds size limit")
         return payload
 
-
-def external_image_artifact_store(root: Path, *, external_volume: Path, max_bytes: int = 16_000_000) -> ImageArtifactStore:
-    """Production-facing constructor: never permit local disk fallback."""
-    return ImageArtifactStore(root, max_bytes=max_bytes, external_volume=external_volume, require_external_volume=True)
-
     def list_png_ids(self, owner_id: str, *, limit: int = 100, offset: int = 0) -> list[str]:
         """List only this owner's private artifacts, newest filename first.
 
@@ -116,3 +111,8 @@ def external_image_artifact_store(root: Path, *, external_volume: Path, max_byte
                 continue
         records.sort(key=lambda item: (item[0], item[1]), reverse=True)
         return [artifact_id for _, artifact_id in records[offset:offset + limit]]
+
+
+def external_image_artifact_store(root: Path, *, external_volume: Path, max_bytes: int = 16_000_000) -> ImageArtifactStore:
+    """Production-facing constructor: never permit local disk fallback."""
+    return ImageArtifactStore(root, max_bytes=max_bytes, external_volume=external_volume, require_external_volume=True)
