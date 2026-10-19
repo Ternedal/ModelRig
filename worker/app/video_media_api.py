@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 
 from .video_media_catalog import MediaCatalog
+from .video_media_client_projection import gallery_item_for_client
 from .video_media_stream import iter_media_bytes, media_response_plan
 from .video_storage import MediaStorageUnavailable
 
@@ -41,7 +42,7 @@ def build_media_router() -> APIRouter:
             items = catalog().list_items(limit=limit, offset=offset)
         except ValueError:
             raise HTTPException(400, "Invalid pagination")
-        return {"schema": "kaliv-media-gallery/v1", "items": items, "limit": limit, "offset": offset}
+        return {"schema": "kaliv-media-gallery/v1", "items": [gallery_item_for_client(item) for item in items], "limit": limit, "offset": offset}
 
     @router.api_route("/{media_id}", methods=["GET", "HEAD"])
     def media(request: Request, media_id: str):
