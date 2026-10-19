@@ -70,3 +70,23 @@ def test_strict_store_and_trusted_dependencies_mount_routes(tmp_path):
     assert "/experimental/images/jobs" in paths
     assert "/experimental/images/artifacts" in paths
     assert "/experimental/images/artifacts/{artifact_id}/thumbnail" in paths
+
+def test_mount_rejects_disconnected_strict_volume(tmp_path):
+    from app.image_generation.artifacts import external_image_artifact_store
+    from app.image_generation.service import ImageGenerationService
+    volume = tmp_path / "external"
+    volume.mkdir()
+    marker = volume / ".modelrig-volume-id"
+    marker.write_text("0123456789abcdef")
+    store = external_image_artifact_store(
+        volume / "images", external_volume=volume,
+        volume_marker="0123456789abcdef",
+    )
+    marker.unlink()
+    app = FastAPI()
+    with pytest.raises(RuntimeError, match="external storage unavailable"):
+        mount_experimental_images(
+            app, enabled=True, authenticated_owner=lambda: "alice",
+            service=object.__new__(ImageGenerationService), artifact_store=store,
+        )
+    assert not any(route.path.startswith("/experimental/images") for route in app.routes)
