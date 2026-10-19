@@ -87,14 +87,17 @@ class ComfyUIAdapter:
     async def submit(self, workflow: dict[str, Any], client_id: str) -> str:
         if not workflow or not isinstance(workflow, dict):
             raise ValueError("A server-owned workflow is required")
-        if not client_id or len(client_id) > 128:
+        if not isinstance(client_id, str) or not client_id or len(client_id) > 128:
             raise ValueError("Invalid client ID")
         data = await self._request(
             "POST", "/prompt", json={"prompt": workflow, "client_id": client_id}
         )
         prompt_id = data.get("prompt_id") if isinstance(data, dict) else None
-        if not isinstance(prompt_id, str) or not prompt_id:
-            raise ComfyUIError("Local image engine returned no prompt ID")
+        import uuid
+        try:
+            prompt_id = str(uuid.UUID(prompt_id))
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ComfyUIError("Local image engine returned an invalid prompt ID") from exc
         return prompt_id
 
     async def history(self, prompt_id: str) -> dict[str, Any]:
