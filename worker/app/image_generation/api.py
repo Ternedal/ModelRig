@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Callable
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from pydantic import BaseModel, Field
 
 from .jobs import ImageJobManager
@@ -76,6 +76,17 @@ def build_image_router(
             raise HTTPException(status_code=404, detail="Image job not found")
 
     if artifact_store is not None:
+        @router.get("/artifacts")
+        async def list_image_artifacts(
+            limit: int = Query(default=50, ge=1, le=200),
+            identity=Depends(authenticated_owner),
+        ):
+            owner = owner_id(identity)
+            return {"artifacts": [
+                {"id": artifact_id, "media_type": "image/png"}
+                for artifact_id in artifact_store.list_png_ids(owner, limit=limit)
+            ]}
+
         @router.post("/jobs/{job_id}/ingest")
         async def ingest_image_job(
             job_id: str, identity=Depends(authenticated_owner)
