@@ -111,6 +111,22 @@ func TestMediaGatewayRejectsWorkerOriginWithPath(t *testing.T) {
     }
 }
 
+func TestMediaGatewayRejectsAmbiguousRangeHeaders(t *testing.T) {
+    s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1", time.Second)}}
+    for _, values := range [][]string{{"bytes=0-1", "bytes=2-3"}, {"items=0-1"}, {"bytes=" + strings.Repeat("1", 130)}} {
+        request := httptest.NewRequest(http.MethodGet, "/api/v1/media/clip_1", nil)
+        request.SetPathValue("id", "clip_1")
+        for _, value := range values {
+            request.Header.Add("Range", value)
+        }
+        recorder := httptest.NewRecorder()
+        s.handleMediaFile(recorder, request)
+        if recorder.Code != http.StatusBadRequest {
+            t.Errorf("range %q: expected 400, got %d", values, recorder.Code)
+        }
+    }
+}
+
 func TestMediaGatewayRejectsAmbiguousPagination(t *testing.T) {
     s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1", time.Second)}}
     for _, query := range []string{"limit=1&limit=2", "limit=0", "limit=101", "offset=-1", "offset=abc"} {
