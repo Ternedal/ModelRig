@@ -69,6 +69,10 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
             w.Header().Set(key, value)
         }
     }
+    // Keep private generated media out of browser and intermediary caches.
+    w.Header().Set("Cache-Control", "private, no-store")
+    w.Header().Set("X-Content-Type-Options", "nosniff")
+    w.Header().Set("X-Frame-Options", "DENY")
     w.WriteHeader(response.StatusCode)
     if r.Method != http.MethodHead {
         _, _ = io.Copy(w, response.Body)
