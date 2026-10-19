@@ -80,6 +80,7 @@ class ImageArtifactStore:
             raise ValueError("PNG payload required")
         directory = self.root / self._owner_hash(owner_id)
         directory.mkdir(mode=0o700, exist_ok=True)
+        self._assert_volume_available()
         if directory.is_symlink():
             raise ValueError("Artifact owner directory cannot be a symlink")
         artifact_id = str(uuid.uuid4())
@@ -90,6 +91,7 @@ class ImageArtifactStore:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())
+            self._assert_volume_available()
             os.replace(temp_name, directory / (artifact_id + ".png"))
         finally:
             if os.path.exists(temp_name):
