@@ -43,11 +43,15 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
                 writeErr(w, http.StatusBadRequest, "unknown media query")
                 return
             }
-            for _, value := range q[key] {
-                if _, err := strconv.Atoi(value); err != nil {
-                    writeErr(w, http.StatusBadRequest, "invalid pagination")
-                    return
-                }
+            if len(q[key]) != 1 {
+                writeErr(w, http.StatusBadRequest, "ambiguous pagination")
+                return
+            }
+            value := q[key][0]
+            number, err := strconv.Atoi(value)
+            if err != nil || number < 0 || (key == "limit" && (number < 1 || number > 100)) {
+                writeErr(w, http.StatusBadRequest, "invalid pagination")
+                return
             }
         }
         target += "?" + q.Encode()
