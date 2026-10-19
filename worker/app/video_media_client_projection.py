@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 def gallery_item_for_client(item: dict) -> dict:
     media_id = item["id"]
-    if not isinstance(media_id, str) or not media_id.isascii() or not media_id or not all(
+    if not isinstance(media_id, str) or not media_id.isascii() or not 1 <= len(media_id) <= 128 or not all(
         c.isalnum() or c in "_-" for c in media_id
     ):
         raise ValueError("Invalid catalog media identifier")
@@ -18,7 +18,7 @@ def gallery_item_for_client(item: dict) -> dict:
     result["url"] = "/api/v1/media/" + quote(media_id, safe="")
     thumb = item.get("thumbnail_id")
     if thumb is not None:
-        if not isinstance(thumb, str) or not thumb.isascii() or not thumb or not all(
+        if not isinstance(thumb, str) or not thumb.isascii() or not 1 <= len(thumb) <= 128 or not all(
             c.isalnum() or c in "_-" for c in thumb
         ):
             raise ValueError("Invalid thumbnail identifier")
