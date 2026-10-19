@@ -39,7 +39,10 @@ def mount_experimental_images(
             or artifact_store._external_volume is None
             or artifact_store._volume_marker is None):
         raise RuntimeError("Experimental image API requires a marked external volume")
-    artifact_store._assert_volume_available()
+    try:
+        artifact_store._assert_volume_available()
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise RuntimeError("Experimental image API external storage unavailable") from exc
     app.include_router(build_image_router(
         service, authenticated_owner=authenticated_owner, artifact_store=artifact_store
     ))
