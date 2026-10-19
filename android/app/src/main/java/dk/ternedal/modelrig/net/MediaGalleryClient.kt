@@ -40,9 +40,9 @@ class MediaGalleryClient(baseUrl: String, private val token: String) {
                         kind = item.optString("kind"),
                         projection = item.optString("projection"),
                         stereo = item.optString("stereo"),
-                        thumbnailId = item.optString("thumbnail_id").ifBlank { null },
+                        thumbnailId = if (item.isNull("thumbnail_id")) null else item.optString("thumbnail_id").ifBlank { null },
                         mediaUrl = item.optString("url"),
-                        thumbnailUrl = item.optString("thumbnail_url").ifBlank { null }
+                        thumbnailUrl = if (item.isNull("thumbnail_url")) null else item.optString("thumbnail_url").ifBlank { null }
                     ) ?: throw ModelRigException("Ugyldige medieoplysninger")
                     add(entry)
                 }
