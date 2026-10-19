@@ -9,7 +9,7 @@ era before the retained implementation is executed.
 from pathlib import Path as _Path
 
 EXPECTED_SOURCE_VERSION = "2.0.12"
-EXPECTED_TARGET_VERSION = "2.0.16"
+EXPECTED_TARGET_VERSION = "2.0.17"
 _RETAINED = _Path(__file__).with_name("stage_b_strict_evidence.retained")
 _source = _RETAINED.read_text(encoding="utf-8")
 _old_source = 'EXPECTED_SOURCE_VERSION = "2.0.11"'
@@ -29,7 +29,7 @@ globals()["__name__"] = "_stage_b_strict_evidence_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
 globals()["__name__"] = _name
 EXPECTED_SOURCE_VERSION = "2.0.12"
-EXPECTED_TARGET_VERSION = "2.0.16"
+EXPECTED_TARGET_VERSION = "2.0.17"
 EXPECTED_SOURCE_REF = f"refs/tags/v{EXPECTED_TARGET_VERSION}"
 
 if _name == "__main__":

@@ -515,6 +515,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_era_pins.py`
 - `tests/workflow_exact_head_concurrency.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_frozen_voice_package.py`
 - `tests/workflow_gates_read_code.py`
 - `tests/workflow_kaliv_env_parser.py`
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
