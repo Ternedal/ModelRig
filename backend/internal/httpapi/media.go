@@ -94,6 +94,11 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
         return
     }
     defer response.Body.Close()
+    // A redirect is never a valid response from the loopback media worker.
+    if response.StatusCode >= 300 && response.StatusCode < 400 {
+        writeErr(w, http.StatusBadGateway, "media worker redirect refused")
+        return
+    }
     for _, key := range []string{
         "Content-Type", "Content-Length", "Content-Range", "Accept-Ranges",
         "Cache-Control", "X-Content-Type-Options",
