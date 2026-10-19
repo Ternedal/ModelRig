@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Run the retained Stage A operator contract against candidate 2.0.14."""
+"""Run the retained Stage A operator contract against candidate 2.0.16."""
 from pathlib import Path
 
-# Release-era wrapper: target 2.0.14; source release 2.0.12
+# Release-era wrapper: target 2.0.16; source release 2.0.12
 
 _source_path = Path(__file__).with_name("workflow_stage_a_physical_operator.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.14"),
-    ("1.58.143", "2.0.14"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.16"),
+    ("1.58.143", "2.0.16"),
     ("1.58.142", "2.0.12"),
     ("#150", "#161"),
 ):
