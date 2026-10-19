@@ -154,12 +154,12 @@ class ImageArtifactStore:
         return result
 
     def list_png_ids(self, owner_id: str, *, limit: int = 100, offset: int = 0) -> list[str]:
-        self._assert_volume_available()
         """List only this owner's private artifacts, newest filename first.
 
         No arbitrary filesystem paths, raw owner names or absolute locations
         are returned to the mobile/VR client.
         """
+        self._assert_volume_available()
         if not 1 <= limit <= 200 or not 0 <= offset <= 10000:
             raise ValueError("Invalid gallery pagination")
         directory = self.root / self._owner_hash(owner_id)
