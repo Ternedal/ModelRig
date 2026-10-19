@@ -6,6 +6,7 @@ derive ownership from client-supplied headers, query parameters or JSON.
 from __future__ import annotations
 
 from typing import Callable
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -32,6 +33,7 @@ def build_image_router(
     if not callable(authenticated_owner):
         raise ValueError("An authenticated owner dependency is required")
     router = APIRouter(prefix="/experimental/images", tags=["experimental-images"])
+    ingestion_locks: dict[str, asyncio.Lock] = {}
 
     def owner_id(value: object) -> str:
         if not isinstance(value, str) or not 1 <= len(value) <= 128:
@@ -83,14 +85,20 @@ def build_image_router(
                 raise HTTPException(status_code=404, detail="Image job not found")
             if job.status != JobStatus.SUCCEEDED:
                 raise HTTPException(status_code=409, detail="Image job is not completed")
-            try:
-                artifact_id = await ingest_completed_job(
-                    owner, job_id, manager=service.manager,
-                    adapter=service.adapter, store=artifact_store,
-                )
-            except (ValueError, RuntimeError) as exc:
-                raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
-            return {"artifact_id": artifact_id}
+            # Prevent concurrent duplicate ingestion of the same completed job.
+            # A durable ingestion ledger is required before multi-process enablement.
+            lock = ingestion_locks.setdefault(job_id, asyncio.Lock())
+            if lock.locked():
+                raise HTTPException(status_code=409, detail="Image ingestion in progress")
+            async with lock:
+                try:
+                    artifact_id = await ingest_completed_job(
+                        owner, job_id, manager=service.manager,
+                        adapter=service.adapter, store=artifact_store,
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
+                return {"artifact_id": artifact_id}
 
         @router.get("/artifacts/{artifact_id}")
         async def get_image_artifact(
