@@ -14,9 +14,9 @@ data class MediaGalleryEntry(
     val stereo: String,
     val thumbnailId: String?
 ) {
-    fun mediaPath(): String = "/experimental/media/$id"
+    fun mediaPath(): String = "/api/v1/media/$id"
 
-    fun thumbnailPath(): String? = thumbnailId?.let { "/experimental/media/$it" }
+    fun thumbnailPath(): String? = thumbnailId?.let { "/api/v1/media/$it" }
 
     companion object {
         private val SAFE_ID = Regex("^[A-Za-z0-9_-]{1,128}$")
@@ -35,9 +35,9 @@ data class MediaGalleryEntry(
         ): MediaGalleryEntry? {
             if (!SAFE_ID.matches(id) || kind !in setOf("image", "video")) return null
             if (projection !in PROJECTIONS || stereo !in STEREO) return null
-            if (mediaUrl != "/experimental/media/$id") return null
+            if (mediaUrl != "/api/v1/media/$id") return null
             if (thumbnailId != null && !SAFE_ID.matches(thumbnailId)) return null
-            if (thumbnailUrl != thumbnailId?.let { "/experimental/media/$it" }) return null
+            if (thumbnailUrl != thumbnailId?.let { "/api/v1/media/$it" }) return null
             return MediaGalleryEntry(id, kind, projection, stereo, thumbnailId)
         }
     }
