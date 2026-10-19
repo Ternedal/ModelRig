@@ -79,12 +79,13 @@ def build_image_router(
         @router.get("/artifacts")
         async def list_image_artifacts(
             limit: int = Query(default=50, ge=1, le=200),
+            offset: int = Query(default=0, ge=0, le=10000),
             identity=Depends(authenticated_owner),
         ):
             owner = owner_id(identity)
             return {"artifacts": [
                 {"id": artifact_id, "media_type": "image/png"}
-                for artifact_id in artifact_store.list_png_ids(owner, limit=limit)
+                for artifact_id in artifact_store.list_png_ids(owner, limit=limit, offset=offset)
             ]}
 
         @router.post("/jobs/{job_id}/ingest")
