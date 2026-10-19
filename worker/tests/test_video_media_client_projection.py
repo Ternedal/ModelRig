@@ -18,6 +18,14 @@ class MediaClientProjectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gallery_item_for_client({"id": "../private"})
 
+    def test_rejects_oversized_id(self):
+        with self.assertRaises(ValueError):
+            gallery_item_for_client({"id": "a" * 129})
+
+    def test_rejects_oversized_thumbnail(self):
+        with self.assertRaises(ValueError):
+            gallery_item_for_client({"id": "valid", "thumbnail_id": "t" * 129})
+
     def test_no_mutation(self):
         original = {"id": "image_1"}
         gallery_item_for_client(original)
