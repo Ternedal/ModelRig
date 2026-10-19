@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .outputs import ImageDescriptor
+from .outputs import ImageDescriptor, select_output_image
 
 
 class ComfyUIError(RuntimeError):
@@ -26,9 +26,11 @@ def _loopback_url(base_url: str) -> str:
     try:
         is_loopback = ipaddress.ip_address(parsed.hostname).is_loopback
     except ValueError:
-        is_loopback = parsed.hostname.lower() == "localhost"
+        is_loopback = False
     if not is_loopback or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("ComfyUI endpoint must be an HTTP loopback URL")
+    if parsed.port is None or parsed.port < 1 or parsed.port > 65535:
+        raise ValueError("ComfyUI endpoint must specify a valid port")
     if parsed.path not in ("", "/"):
         raise ValueError("ComfyUI endpoint cannot contain a path")
     return base_url.rstrip("/")
@@ -109,6 +111,17 @@ class ComfyUIAdapter:
         The returned bytes still require image decoding, dimension limits and
         metadata policy before they may become a client-visible artifact.
         """
+        # Revalidate at the HTTP boundary: dataclass instances can be built by
+        # arbitrary callers, and the path must never be caller-controlled.
+        checked = select_output_image({
+            "verified": {"images": [{
+                "filename": descriptor.filename,
+                "subfolder": descriptor.subfolder,
+                "type": descriptor.kind,
+            }]}
+        })
+        if checked != descriptor:
+            raise ValueError("Invalid output descriptor")
         if not 1 <= max_bytes <= 32_000_000:
             raise ValueError("Invalid output byte limit")
         try:
