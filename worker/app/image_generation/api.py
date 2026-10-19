@@ -126,6 +126,24 @@ def build_image_router(
                 if ingestion_locks.get(job_id) is lock:
                     ingestion_locks.pop(job_id, None)
 
+        @router.get("/artifacts/{artifact_id}/thumbnail")
+        async def get_image_thumbnail(
+            artifact_id: str, identity=Depends(authenticated_owner)
+        ):
+            owner = owner_id(identity)
+            try:
+                payload = artifact_store.get_thumbnail_png(owner, artifact_id)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail="Thumbnail service unavailable") from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="Invalid stored image") from exc
+            if payload is None:
+                raise HTTPException(status_code=404, detail="Image artifact not found")
+            return Response(
+                content=payload, media_type="image/png",
+                headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+            )
+
         @router.get("/artifacts/{artifact_id}")
         async def get_image_artifact(
             artifact_id: str, identity=Depends(authenticated_owner)
