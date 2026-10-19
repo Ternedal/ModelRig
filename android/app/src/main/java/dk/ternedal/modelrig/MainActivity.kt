@@ -14,6 +14,7 @@ import dk.ternedal.modelrig.ui.Agent3ReplanScreen
 import dk.ternedal.modelrig.ui.Agent3ReviewScreen
 import dk.ternedal.modelrig.ui.Agent3Screen
 import dk.ternedal.modelrig.ui.Agent3TaskScreen
+import dk.ternedal.modelrig.ui.MediaGalleryScreen
 import dk.ternedal.modelrig.ui.PersonsScreen
 import dk.ternedal.modelrig.ui.Agent3ValidationScreen
 import dk.ternedal.modelrig.ui.AppEntryUi
@@ -40,6 +41,7 @@ class MainActivity : ComponentActivity() {
         val openAgent3Task =
             intent?.getBooleanExtra(EXTRA_AGENT3_TASK, false) == true ||
                 (intent?.data?.scheme == "kaliv" && intent?.data?.host == "tasks")
+        val openMediaGallery = intent?.getBooleanExtra(EXTRA_MEDIA_GALLERY, false) == true
         val openPersons =
             intent?.getBooleanExtra(EXTRA_PERSONS, false) == true ||
                 (intent?.data?.scheme == "kaliv" && intent?.data?.host == "persons")
@@ -80,6 +82,16 @@ class MainActivity : ComponentActivity() {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
                         ScheduleScreen(store = store, onClose = { finish() })
+                    }
+                }
+                openMediaGallery -> {
+                    val store = remember { TokenStore(this) }
+                    ModelRigTheme(dark = store.darkMode) {
+                        MediaGalleryScreen(
+                            store = store,
+                            onClose = { finish() },
+                            onOpen = { /* Playback intentionally not enabled until authenticated player is ready. */ },
+                        )
                     }
                 }
                 openPersons -> {
@@ -159,6 +171,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_SCHEDULES = "dk.ternedal.modelrig.extra.SCHEDULES"
         const val EXTRA_AGENT3_TASK = "dk.ternedal.modelrig.extra.AGENT3_TASK"
+        const val EXTRA_MEDIA_GALLERY = "dk.ternedal.modelrig.extra.MEDIA_GALLERY"
         const val EXTRA_PERSONS = "dk.ternedal.modelrig.extra.PERSONS"
         const val EXTRA_AGENT3 = "dk.ternedal.modelrig.extra.AGENT3"
         const val EXTRA_AGENT3_MEMORY = "dk.ternedal.modelrig.extra.AGENT3_MEMORY"
