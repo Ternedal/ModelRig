@@ -17,9 +17,12 @@ class ImageArtifactStore:
     def __init__(
         self, root: Path, *, max_bytes: int = 16_000_000,
         external_volume: Path | None = None,
+        require_external_volume: bool = False,
     ):
         if not 1 <= max_bytes <= 32_000_000:
             raise ValueError("Invalid artifact size limit")
+        if require_external_volume and external_volume is None:
+            raise ValueError("External volume must be configured")
         if external_volume is not None:
             root = require_external_media_root(root, mounted_volume=external_volume)
         supplied_root = Path(root).absolute()
