@@ -111,6 +111,25 @@ func TestMediaGatewayRejectsWorkerOriginWithPath(t *testing.T) {
     }
 }
 
+func TestMediaGatewayRefusesWorkerRedirect(t *testing.T) {
+    upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Location", "https://example.org/redirect")
+        w.WriteHeader(http.StatusFound)
+    }))
+    defer upstream.Close()
+    s := &server{Deps: Deps{Worker: proxy.New(upstream.URL, time.Second)}}
+    request := httptest.NewRequest(http.MethodGet, "/api/v1/media/clip_1", nil)
+    request.SetPathValue("id", "clip_1")
+    recorder := httptest.NewRecorder()
+    s.handleMediaFile(recorder, request)
+    if recorder.Code != http.StatusBadGateway {
+        t.Fatalf("expected 502 for upstream redirect, got %d", recorder.Code)
+    }
+    if recorder.Header().Get("Location") != "" {
+        t.Fatal("redirect location leaked")
+    }
+}
+
 func TestMediaGatewayRejectsAmbiguousRangeHeaders(t *testing.T) {
     s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1", time.Second)}}
     for _, values := range [][]string{{"bytes=0-1", "bytes=2-3"}, {"items=0-1"}, {"bytes=" + strings.Repeat("1", 130)}} {
