@@ -28,6 +28,7 @@ def require_external_media_root(
         raise ValueError("Media root must be beneath the configured external volume")
     if root.exists() and root.is_symlink():
         raise ValueError("Media root cannot be a symlink")
+    # Resolve parent symlinks and reject paths redirected outside the volume.
     resolved_root = root.resolve(strict=False)
     if not resolved_root.is_relative_to(resolved_volume) or resolved_root == resolved_volume:
         raise ValueError("Media root escapes configured external volume")
