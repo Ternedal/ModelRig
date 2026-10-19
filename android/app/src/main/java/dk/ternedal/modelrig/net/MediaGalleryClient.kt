@@ -40,6 +40,45 @@ class MediaGalleryClient(baseUrl: String, private val token: String) {
         .followSslRedirects(false)
         .build()
 
+    /**
+     * Read a bounded media segment through the paired backend. No redirects,
+     * no arbitrary URLs, and never buffer an entire video into memory.
+     */
+    fun readRange(entry: MediaGalleryEntry, start: Long, endInclusive: Long): ByteArray {
+        require(start >= 0 && endInclusive >= start && endInclusive - start < 1024 * 1024) {
+            "Media range must be at most 1 MiB"
+        }
+        require(token.isNotBlank()) { "Rig pairing required" }
+        val request = Request.Builder().url(base + entry.mediaPath())
+            .header("Authorization", "Bearer " + token)
+            .header("Range", "bytes=" + start + "-" + endInclusive)
+            .get().build()
+        http.newCall(request).execute().use { response ->
+            if (response.code != 206) {
+                throw ModelRigException("Medieserveren understøtter ikke sikker delvis hentning (" + response.code + ")")
+            }
+            val expected = endInclusive - start + 1
+            val range = response.header("Content-Range").orEmpty()
+            if (!range.startsWith("bytes " + start + "-" + endInclusive + "/")) {
+                throw ModelRigException("Ugyldigt byte-interval fra medieserveren")
+            }
+            val body = response.body ?: throw ModelRigException("Tomt mediesvar")
+            val data = body.byteStream().use { stream ->
+                val bytes = ByteArray(expected.toInt() + 1)
+                var read = 0
+                while (read < bytes.size) {
+                    val n = stream.read(bytes, read, bytes.size - read)
+                    if (n < 0) break
+                    read += n
+                }
+                if (read != expected.toInt()) throw ModelRigException("Ufuldstændigt mediesvar")
+                if (read == bytes.size) throw ModelRigException("For langt mediesvar")
+                bytes.copyOf(read)
+            }
+            return data
+        }
+    }
+
     fun list(limit: Int = 50, offset: Int = 0): List<MediaGalleryEntry> {
         require(limit in 1..100 && offset >= 0)
         require(token.isNotBlank()) { "Rig pairing required" }
