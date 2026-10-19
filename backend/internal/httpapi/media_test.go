@@ -91,6 +91,26 @@ func TestMediaGatewayForwards416ContentRange(t *testing.T) {
     }
 }
 
+func TestMediaGatewayRejectsWorkerOriginWithCredentials(t *testing.T) {
+    s := &server{Deps: Deps{Worker: proxy.New("http://user:secret@127.0.0.1:1", time.Second)}}
+    request := httptest.NewRequest(http.MethodGet, "/api/v1/media", nil)
+    recorder := httptest.NewRecorder()
+    s.handleMediaGallery(recorder, request)
+    if recorder.Code != http.StatusServiceUnavailable {
+        t.Fatalf("expected 503 for credential-bearing origin, got %d", recorder.Code)
+    }
+}
+
+func TestMediaGatewayRejectsWorkerOriginWithPath(t *testing.T) {
+    s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1/other", time.Second)}}
+    request := httptest.NewRequest(http.MethodGet, "/api/v1/media", nil)
+    recorder := httptest.NewRecorder()
+    s.handleMediaGallery(recorder, request)
+    if recorder.Code != http.StatusServiceUnavailable {
+        t.Fatalf("expected 503 for non-origin upstream, got %d", recorder.Code)
+    }
+}
+
 func TestMediaGatewayRejectsInvalidIDBeforeForward(t *testing.T) {
     s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1", time.Second)}}
     request := httptest.NewRequest(http.MethodGet, "/api/v1/media/../secret", nil)
