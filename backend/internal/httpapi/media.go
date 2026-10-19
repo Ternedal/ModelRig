@@ -4,6 +4,7 @@ import (
     "io"
     "net/http"
     "regexp"
+    "net/url"
     "strconv"
     "strings"
     "time"
@@ -25,6 +26,11 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
     path := "/experimental/media"
     if id != "" {
         path += "/" + id
+    }
+    upstream, err := url.Parse(s.Worker.BaseURL)
+    if err != nil || upstream.User != nil || upstream.RawQuery != "" || upstream.Fragment != "" || upstream.Path != "" {
+        writeErr(w, http.StatusServiceUnavailable, "invalid media worker origin")
+        return
     }
     target := strings.TrimRight(s.Worker.BaseURL, "/") + path
     if id == "" {
