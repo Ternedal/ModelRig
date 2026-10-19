@@ -31,7 +31,7 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
         path += "/" + id
     }
     upstream, err := url.Parse(s.Worker.BaseURL)
-    if err != nil || upstream.User != nil || upstream.RawQuery != "" || upstream.Fragment != "" || upstream.Path != "" {
+    if err != nil || upstream.User != nil || upstream.RawQuery != "" || upstream.ForceQuery || upstream.Fragment != "" || upstream.Path != "" || upstream.RawPath != "" {
         writeErr(w, http.StatusServiceUnavailable, "invalid media worker origin")
         return
     }
