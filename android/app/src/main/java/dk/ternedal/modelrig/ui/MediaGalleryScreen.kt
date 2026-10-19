@@ -42,6 +42,7 @@ fun MediaGalleryScreen(
     var items by remember { mutableStateOf<List<MediaGalleryEntry>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
@@ -71,10 +72,14 @@ fun MediaGalleryScreen(
             if (!loading && error == null && items.isEmpty()) {
                 Text("Ingen billeder eller videoer endnu.", color = KalivTheme.colors.textMuted)
             }
+            selected?.let { id ->
+                Text("Valgt medie: " + id + " · afspilning endnu ikke tilgængelig",
+                    color = KalivTheme.colors.textMuted)
+            }
             items.forEach { entry ->
                 Row(
                     modifier = Modifier.fillMaxWidth()
-                        .clickable { onOpen(entry) }
+                        .clickable { selected = entry.id; onOpen(entry) }
                         .padding(vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
