@@ -89,14 +89,14 @@ def external_image_artifact_store(root: Path, *, external_volume: Path, max_byte
     """Production-facing constructor: never permit local disk fallback."""
     return ImageArtifactStore(root, max_bytes=max_bytes, external_volume=external_volume, require_external_volume=True)
 
-    def list_png_ids(self, owner_id: str, *, limit: int = 100) -> list[str]:
+    def list_png_ids(self, owner_id: str, *, limit: int = 100, offset: int = 0) -> list[str]:
         """List only this owner's private artifacts, newest filename first.
 
         No arbitrary filesystem paths, raw owner names or absolute locations
         are returned to the mobile/VR client.
         """
-        if not 1 <= limit <= 200:
-            raise ValueError("Invalid gallery page limit")
+        if not 1 <= limit <= 200 or not 0 <= offset <= 10000:
+            raise ValueError("Invalid gallery pagination")
         directory = self.root / self._owner_hash(owner_id)
         if directory.is_symlink() or not directory.is_dir():
             return []
@@ -115,4 +115,4 @@ def external_image_artifact_store(root: Path, *, external_volume: Path, max_byte
             except (OSError, ValueError):
                 continue
         records.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [artifact_id for _, artifact_id in records[:limit]]
+        return [artifact_id for _, artifact_id in records[offset:offset + limit]]
