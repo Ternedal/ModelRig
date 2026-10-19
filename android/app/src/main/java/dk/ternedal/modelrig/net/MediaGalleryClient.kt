@@ -94,7 +94,22 @@ class MediaGalleryClient(baseUrl: String, private val token: String) {
             if (!response.isSuccessful) {
                 throw ModelRigException("Mediebibliotek utilgængeligt (" + response.code + ")")
             }
-            val json = JSONObject(response.body?.string().orEmpty())
+            val body = response.body ?: throw ModelRigException("Tomt mediebibliotek")
+            val maxBytes = 1024 * 1024
+            if (body.contentLength() > maxBytes) throw ModelRigException("Mediebiblioteket er for stort")
+            val payload = body.byteStream().use { stream ->
+                val buffer = ByteArray(maxBytes + 1)
+                var count = 0
+                while (count < buffer.size) {
+                    val n = stream.read(buffer, count, buffer.size - count)
+                    if (n < 0) break
+                    if (n == 0) continue
+                    count += n
+                }
+                if (count > maxBytes) throw ModelRigException("Mediebiblioteket er for stort")
+                String(buffer, 0, count, Charsets.UTF_8)
+            }
+            val json = JSONObject(payload)
             if (json.optString("schema") != "kaliv-media-gallery/v1") {
                 throw ModelRigException("Ukendt mediebibliotek-format")
             }
