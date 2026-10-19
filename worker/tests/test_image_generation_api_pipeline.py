@@ -21,7 +21,7 @@ def test_image_api_complete_owner_scoped_flow(tmp_path, monkeypatch):
         prompt_id = "00000000-0000-4000-8000-000000000001"
         artifact = b"\x89PNG\r\n\x1a\n" + b"sanitized-fixture"
         submitted = []
-        source_png = (b"\\x89PNG\\r\\n\\x1a\\n" + b"\\x00\\x00\\x00\\x0dIHDR"
+        source_png = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR"
                       + (1).to_bytes(4, "big") + (1).to_bytes(4, "big"))
 
         def engine(request):
