@@ -7,8 +7,8 @@ from app.video_media_client_projection import gallery_item_for_client
 class MediaClientProjectionTests(unittest.TestCase):
     def test_video_url(self):
         item = gallery_item_for_client({"id": "clip_1", "kind": "video", "thumbnail_id": "thumb_1"})
-        self.assertEqual(item["url"], "/experimental/media/clip_1")
-        self.assertEqual(item["thumbnail_url"], "/experimental/media/thumb_1")
+        self.assertEqual(item["url"], "/api/v1/media/clip_1")
+        self.assertEqual(item["thumbnail_url"], "/api/v1/media/thumb_1")
 
     def test_no_thumbnail(self):
         item = gallery_item_for_client({"id": "image_1", "kind": "image"})
