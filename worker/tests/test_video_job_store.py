@@ -39,6 +39,23 @@ class VideoJobStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.transition(job_id, "running", "completed", artifact_id="../bad")
 
+    def test_prompt_correlation_survives_reopen(self):
+        job_id = self.store.create(self.request)
+        self.assertTrue(self.store.transition(job_id, "queued", "running"))
+        self.assertTrue(self.store.record_prompt(job_id, "prompt_123"))
+        self.assertFalse(self.store.record_prompt(job_id, "prompt_456"))
+        reopened = VideoJobStore(self.path)
+        self.assertEqual(reopened.get(job_id)["prompt_id"], "prompt_123")
+        self.assertEqual([row["job_id"] for row in reopened.awaiting_result()], [job_id])
+        self.assertTrue(reopened.transition(job_id, "running", "completed", artifact_id="asset_1"))
+        self.assertEqual(reopened.awaiting_result(), [])
+
+    def test_invalid_prompt_is_rejected(self):
+        job_id = self.store.create(self.request)
+        with self.assertRaises(ValueError):
+            self.store.record_prompt(job_id, "../bad")
+        self.assertFalse(self.store.record_prompt(job_id, "valid_before_running"))
+
     def test_queue_excludes_cancelled(self):
         first = self.store.create(self.request)
         second = self.store.create(self.request)
