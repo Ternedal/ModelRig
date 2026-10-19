@@ -90,15 +90,21 @@ def build_image_router(
             lock = ingestion_locks.setdefault(job_id, asyncio.Lock())
             if lock.locked():
                 raise HTTPException(status_code=409, detail="Image ingestion in progress")
-            async with lock:
-                try:
-                    artifact_id = await ingest_completed_job(
-                        owner, job_id, manager=service.manager,
-                        adapter=service.adapter, store=artifact_store,
-                    )
-                except (ValueError, RuntimeError) as exc:
-                    raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
-                return {"artifact_id": artifact_id}
+            try:
+                async with lock:
+                    try:
+                        artifact_id = await ingest_completed_job(
+                            owner, job_id, manager=service.manager,
+                            adapter=service.adapter, store=artifact_store,
+                        )
+                    except (ValueError, RuntimeError) as exc:
+                        raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
+                    return {"artifact_id": artifact_id}
+            finally:
+                # Do not retain a lock for every historical job indefinitely.
+                # A simultaneous caller observes the held lock and gets 409.
+                if ingestion_locks.get(job_id) is lock:
+                    ingestion_locks.pop(job_id, None)
 
         @router.get("/artifacts/{artifact_id}")
         async def get_image_artifact(
