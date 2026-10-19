@@ -32,3 +32,21 @@ def test_enabled_mount_rejects_local_artifact_store(tmp_path):
             service=object(), artifact_store=ImageArtifactStore(tmp_path),
         )
     assert not any(route.path.startswith("/experimental/images") for route in app.routes)
+
+def test_mount_rejects_permissive_store_even_with_external_marker(tmp_path):
+    from app.image_generation.service import ImageGenerationService
+    volume = tmp_path / "external"
+    volume.mkdir()
+    (volume / ".modelrig-volume-id").write_text("0123456789abcdef")
+    store = ImageArtifactStore(
+        volume / "images", external_volume=volume,
+        volume_marker="0123456789abcdef",
+        require_external_volume=False,
+    )
+    app = FastAPI()
+    with pytest.raises(RuntimeError, match="marked external volume"):
+        mount_experimental_images(
+            app, enabled=True, authenticated_owner=lambda: "alice",
+            service=object.__new__(ImageGenerationService), artifact_store=store,
+        )
+    assert not any(route.path.startswith("/experimental/images") for route in app.routes)
