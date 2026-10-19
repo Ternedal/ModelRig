@@ -6,9 +6,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.ui.Agent3CapabilityScreen
@@ -89,18 +86,12 @@ class MainActivity : ComponentActivity() {
                 }
                 openMediaGallery -> {
                     val store = remember { TokenStore(this) }
-                    var selectedMedia by remember { mutableStateOf<String?>(null) }
                     ModelRigTheme(dark = store.darkMode) {
-                        androidx.compose.foundation.layout.Column {
-                            selectedMedia?.let { id ->
-                                androidx.compose.material3.Text("Valgt medie: " + id + " (afspiller endnu ikke tilsluttet)")
-                            }
                         MediaGalleryScreen(
                             store = store,
                             onClose = { finish() },
-                            onOpen = { selectedMedia = it.id },
+                            onOpen = { /* Selection handled by gallery until secure playback lands. */ },
                         )
-                        }
                     }
                 }
                 openPersons -> {
