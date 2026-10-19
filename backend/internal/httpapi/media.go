@@ -99,6 +99,8 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
         writeErr(w, http.StatusBadGateway, "media worker redirect refused")
         return
     }
+    // Never let upstream Set-Cookie or unexpected response headers escape.
+    // Only a narrow media metadata allowlist is copied below.
     for _, key := range []string{
         "Content-Type", "Content-Length", "Content-Range", "Accept-Ranges",
         "Cache-Control", "X-Content-Type-Options",
@@ -111,6 +113,10 @@ func (s *server) forwardMedia(w http.ResponseWriter, r *http.Request, id string)
     w.Header().Set("Cache-Control", "private, no-store")
     w.Header().Set("X-Content-Type-Options", "nosniff")
     w.Header().Set("X-Frame-Options", "DENY")
+    if response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusNotModified {
+        w.Header().Del("Content-Length")
+        w.Header().Del("Content-Range")
+    }
     w.WriteHeader(response.StatusCode)
     if r.Method != http.MethodHead {
         _, _ = io.Copy(w, response.Body)
