@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from typing import Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .jobs import ImageJobManager
 from .service import ImageGenerationService
+from .artifacts import ImageArtifactStore
 
 
 class ImageRequest(BaseModel):
@@ -23,6 +24,7 @@ def build_image_router(
     service: ImageGenerationService,
     *,
     authenticated_owner: Callable,
+    artifact_store: ImageArtifactStore | None = None,
 ) -> APIRouter:
     """Construct routes only when an operator injects a trusted auth resolver."""
     if not callable(authenticated_owner):
@@ -67,5 +69,24 @@ def build_image_router(
     async def cancel_image_job(job_id: str, identity=Depends(authenticated_owner)):
         if not await service.manager.cancel(owner_id(identity), job_id):
             raise HTTPException(status_code=404, detail="Image job not found")
+
+    if artifact_store is not None:
+        @router.get("/artifacts/{artifact_id}")
+        async def get_image_artifact(
+            artifact_id: str, identity=Depends(authenticated_owner)
+        ):
+            owner = owner_id(identity)
+            payload = artifact_store.get_png(owner, artifact_id)
+            if payload is None:
+                raise HTTPException(status_code=404, detail="Image artifact not found")
+            return Response(
+                content=payload,
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Disposition": 'attachment; filename="generated.png"',
+                },
+            )
 
     return router
