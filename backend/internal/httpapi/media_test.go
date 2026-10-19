@@ -47,6 +47,50 @@ func TestMediaGatewayPreservesPartialContent(t *testing.T) {
     }
 }
 
+func TestMediaGatewayHeadPreservesMetadataWithoutBody(t *testing.T) {
+    upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodHead {
+            t.Errorf("expected HEAD, got %s", r.Method)
+        }
+        w.Header().Set("Content-Type", "video/mp4")
+        w.Header().Set("Content-Length", "1024")
+        w.Header().Set("Accept-Ranges", "bytes")
+        w.WriteHeader(http.StatusOK)
+    }))
+    defer upstream.Close()
+    s := &server{Deps: Deps{Worker: proxy.New(upstream.URL, time.Second)}}
+    request := httptest.NewRequest(http.MethodHead, "/api/v1/media/clip_1", nil)
+    request.SetPathValue("id", "clip_1")
+    recorder := httptest.NewRecorder()
+    s.handleMediaFile(recorder, request)
+    if recorder.Code != http.StatusOK || recorder.Body.Len() != 0 {
+        t.Fatalf("unexpected HEAD response: %d %q", recorder.Code, recorder.Body.String())
+    }
+    if got := recorder.Header().Get("Content-Length"); got != "1024" {
+        t.Fatalf("content length lost: %q", got)
+    }
+}
+
+func TestMediaGatewayForwards416ContentRange(t *testing.T) {
+    upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Range", "bytes */10")
+        w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+    }))
+    defer upstream.Close()
+    s := &server{Deps: Deps{Worker: proxy.New(upstream.URL, time.Second)}}
+    request := httptest.NewRequest(http.MethodGet, "/api/v1/media/clip_1", nil)
+    request.SetPathValue("id", "clip_1")
+    request.Header.Set("Range", "bytes=999-")
+    recorder := httptest.NewRecorder()
+    s.handleMediaFile(recorder, request)
+    if recorder.Code != http.StatusRequestedRangeNotSatisfiable {
+        t.Fatalf("expected 416, got %d", recorder.Code)
+    }
+    if got := recorder.Header().Get("Content-Range"); got != "bytes */10" {
+        t.Fatalf("missing unsatisfiable range metadata: %q", got)
+    }
+}
+
 func TestMediaGatewayRejectsInvalidIDBeforeForward(t *testing.T) {
     s := &server{Deps: Deps{Worker: proxy.New("http://127.0.0.1:1", time.Second)}}
     request := httptest.NewRequest(http.MethodGet, "/api/v1/media/../secret", nil)
