@@ -183,7 +183,6 @@ mount_file_capabilities(fastapi_app)
 # A missing trusted auth/service bootstrap intentionally prevents activation.
 # This is NOT an automatic activation path for V1 or remote clients.
 if os.getenv("KALIV_EXPERIMENTAL_IMAGES_ENABLED", "0") == "1":
-    from .image_generation.production_mount import mount_experimental_images
     raise RuntimeError(
         "Experimental image API cannot be enabled without trusted authentication, "
         "a configured generation service, and a strict external media store"
