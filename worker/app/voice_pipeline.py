@@ -246,12 +246,12 @@ async def converse(
     # Never accept arbitrary roles or unbounded client-supplied context.
     prior = [
         {"role": item["role"], "content": item["content"][:4000]}
-        for item in (history or [])[-12:]
+        for item in (history or [])
         if isinstance(item, dict)
         and item.get("role") in ("user", "assistant")
         and isinstance(item.get("content"), str)
         and item["content"].strip()
-    ]
+    ][-12:]
     messages = prior + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
