@@ -26,6 +26,11 @@ async def ingest_completed_job(
     entry = history.get(job.result)
     if not isinstance(entry, dict):
         raise ComfyUIError("Image history unavailable")
+    status = entry.get("status")
+    if isinstance(status, dict) and status.get("status_str") in {
+        "error", "failed", "cancelled", "interrupted"
+    }:
+        raise ComfyUIError("Image job failed before ingestion")
     descriptor = select_output_image(entry.get("outputs"))
     source = await adapter.fetch_output(descriptor)
     clean_png = sanitize_to_png(source, max_input_bytes=store.max_bytes)
