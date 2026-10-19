@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 _source_path = Path(__file__).with_name("workflow_staged_promotion_runbook.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.16"),
+    ("agent/unified-candidate-1.58.143", "release/kaliv-v2.0.16-prep-20261018"),
     ("1.58.143", "2.0.16"),
     ("1.58.142", "2.0.12"),
     ("draft-PR #150", "origin/release/kaliv-v2.0.16-prep-20261018"),
