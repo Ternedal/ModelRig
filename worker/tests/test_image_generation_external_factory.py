@@ -50,3 +50,25 @@ def test_external_store_rejects_unplugged_volume_after_start(tmp_path):
         store.get_png("alice", "00000000-0000-4000-8000-000000000000")
     with pytest.raises(RuntimeError, match="unavailable"):
         store.list_png_ids("alice")
+
+def test_external_store_rechecks_identity_before_atomic_publish(tmp_path, monkeypatch):
+    volume = tmp_path / "external"
+    volume.mkdir()
+    marker = volume / ".modelrig-volume-id"
+    marker.write_text("0123456789abcdef")
+    store = external_image_artifact_store(
+        volume / "images", external_volume=volume,
+        volume_marker="0123456789abcdef",
+    )
+    import app.image_generation.artifacts as artifacts
+    original_fsync = artifacts.os.fsync
+
+    def unplug_before_publish(fd):
+        original_fsync(fd)
+        marker.unlink()
+
+    monkeypatch.setattr(artifacts.os, "fsync", unplug_before_publish)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        store.put_png("alice", b"\\x89PNG\\r\\n\\x1a\\n" + b"data")
+    assert not list((volume / "images").rglob("*.png"))
+    assert not list((volume / "images").rglob(".upload-*"))
