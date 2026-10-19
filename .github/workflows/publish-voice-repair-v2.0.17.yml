@@ -24,7 +24,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: Ternedal/ModelRig
-      EXPECTED_PR_HEAD: de761a91ad129e2c4635619fdfad6c8bc39c894d
+      EXPECTED_PR_HEAD: f8f3fc8d2bbad1c7cc259f4bfe1f56826bbf1c22
       RELEASE_TAG: v2.0.17
     steps:
       - name: Require normal protected merge and successful exact-head Windows voice package
