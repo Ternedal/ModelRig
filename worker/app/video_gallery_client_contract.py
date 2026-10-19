@@ -24,7 +24,7 @@ class GalleryAsset:
         if not isinstance(item, dict):
             raise ValueError("Invalid gallery item")
         media_id = item.get("id")
-        if not isinstance(media_id, str) or not media_id.isascii() or not media_id or not all(
+        if not isinstance(media_id, str) or not media_id.isascii() or not 1 <= len(media_id) <= 128 or not all(
             ch.isalnum() or ch in "-_" for ch in media_id
         ):
             raise ValueError("Invalid media ID")
@@ -38,10 +38,12 @@ class GalleryAsset:
         thumbnail_url = item.get("thumbnail_url")
         if thumbnail_url is not None:
             thumbnail_id = item.get("thumbnail_id")
-            if not isinstance(thumbnail_id, str) or not thumbnail_id.isascii() or not thumbnail_id or not all(
+            if not isinstance(thumbnail_id, str) or not thumbnail_id.isascii() or not 1 <= len(thumbnail_id) <= 128 or not all(
                 ch.isalnum() or ch in "-_" for ch in thumbnail_id
             ) or thumbnail_url != "/api/v1/media/" + thumbnail_id:
                 raise ValueError("Unexpected thumbnail URL")
+        if thumbnail_url is None and item.get("thumbnail_id") is not None:
+            raise ValueError("Thumbnail ID without URL")
         projection = item.get("projection", "flat")
         stereo = item.get("stereo", "mono")
         if projection not in ("flat", "equirectangular_180", "equirectangular_360"):
