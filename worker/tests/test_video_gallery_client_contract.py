@@ -30,6 +30,22 @@ class GalleryClientContractTests(unittest.TestCase):
                 "url": "/api/v1/media/../secret",
             })
 
+    def test_rejects_oversized_id(self):
+        with self.assertRaises(ValueError):
+            GalleryAsset.from_api({
+                "id": "a" * 129, "kind": "image",
+                "url": "/api/v1/media/" + "a" * 129,
+            })
+
+    def test_rejects_thumbnail_without_url(self):
+        with self.assertRaises(ValueError):
+            GalleryAsset.from_api({
+                "id": "image_1", "kind": "image",
+                "url": "/api/v1/media/image_1",
+                "thumbnail_id": "thumb_1",
+                "thumbnail_url": None,
+            })
+
     def test_https_origin(self):
         self.assertEqual(validate_api_origin("https://rig.example"), "https://rig.example")
         for origin in ("http://rig.example", "https://user:pass@rig.example",
