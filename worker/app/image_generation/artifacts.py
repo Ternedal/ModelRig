@@ -69,7 +69,7 @@ class ImageArtifactStore:
             fd = os.open(path, flags)
             with os.fdopen(fd, "rb") as handle:
                 payload = handle.read(self.max_bytes + 1)
-        except FileNotFoundError:
+        except (FileNotFoundError, IsADirectoryError):
             return None
         if len(payload) > self.max_bytes:
             raise ValueError("Stored artifact exceeds size limit")
