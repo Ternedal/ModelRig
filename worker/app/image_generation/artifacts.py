@@ -34,6 +34,8 @@ class ImageArtifactStore:
             raise ValueError("PNG payload required")
         directory = self.root / self._owner_hash(owner_id)
         directory.mkdir(mode=0o700, exist_ok=True)
+        if directory.is_symlink():
+            raise ValueError("Artifact owner directory cannot be a symlink")
         artifact_id = str(uuid.uuid4())
         fd, temp_name = tempfile.mkstemp(prefix=".upload-", dir=directory)
         try:
@@ -55,7 +57,11 @@ class ImageArtifactStore:
             return None
         path = self.root / self._owner_hash(owner_id) / (safe_id + ".png")
         try:
-            with path.open("rb") as handle:
+            if path.is_symlink():
+                return None
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(path, flags)
+            with os.fdopen(fd, "rb") as handle:
                 payload = handle.read(self.max_bytes + 1)
         except FileNotFoundError:
             return None
