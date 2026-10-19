@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .outputs import ImageDescriptor, select_output_image
+from .image_validation import validate_image_header, InvalidImage
 
 
 class ComfyUIError(RuntimeError):
@@ -144,6 +145,13 @@ class ComfyUIAdapter:
                         raise ComfyUIError("Image output exceeds byte limit")
                 if not result:
                     raise ComfyUIError("Empty image output")
-                return bytes(result)
+                payload = bytes(result)
+                try:
+                    detected_type = validate_image_header(payload)
+                except InvalidImage as exc:
+                    raise ComfyUIError("Invalid image output header") from exc
+                if detected_type != content_type:
+                    raise ComfyUIError("Image content type does not match payload")
+                return payload
         except httpx.HTTPError as exc:
             raise ComfyUIError("Local image output retrieval failed") from exc
