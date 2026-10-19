@@ -22,8 +22,8 @@ class ImageArtifactStore:
     ):
         if not 1 <= max_bytes <= 32_000_000:
             raise ValueError("Invalid artifact size limit")
-        if require_external_volume and external_volume is None:
-            raise ValueError("External volume must be configured")
+        if require_external_volume and (external_volume is None or volume_marker is None):
+            raise ValueError("External volume and identity marker must be configured")
         self._external_volume = Path(external_volume) if external_volume is not None else None
         self._volume_marker = volume_marker
         if volume_marker is not None:
