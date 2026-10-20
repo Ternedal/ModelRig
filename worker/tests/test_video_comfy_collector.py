@@ -53,6 +53,22 @@ class CollectorTests(unittest.TestCase):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
 
+    def test_output_growth_during_copy_is_rejected(self):
+        source = self.output / "result.mp4"
+        source.write_bytes(b"test video")
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        import shutil
+        def growing_copy(src, dst, length):
+            shutil.copyfileobj(src, dst, length)
+            with source.open("ab") as handle:
+                handle.write(b"new bytes")
+        with patch("app.video_comfy_collector.configured_video_storage"), patch(
+            "app.video_comfy_collector.shutil.copyfileobj", side_effect=growing_copy
+        ):
+            self.assertIsNone(self.collector(outputs).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_mixed_valid_and_malformed_outputs_fail_closed(self):
         (self.output / "result.mp4").write_bytes(b"test video")
         outputs = {
