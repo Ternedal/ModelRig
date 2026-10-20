@@ -184,6 +184,27 @@ def _extract_delta(ndjson_line: bytes) -> str:
     return msg.get("content", "") or ""
 
 
+def _bounded_voice_history(history):
+    """Select at most 12 valid turns, newest first, then restore chat order.
+
+    Never materialize/slice every valid client entry: the request schema has no
+    per-history item bound, so validation must stop once 12 turns are found.
+    """
+    prior = []
+    for item in reversed(history or []):
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str) or not content.strip():
+            continue
+        prior.append({"role": role, "content": content[:4000]})
+        if len(prior) == 12:
+            break
+    prior.reverse()
+    return prior
+
+
 async def converse(
     audio_path: str,
     language: str = "da",
@@ -244,14 +265,7 @@ async def converse(
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
     # Never accept arbitrary roles or unbounded client-supplied context.
-    prior = [
-        {"role": item["role"], "content": item["content"][:4000]}
-        for item in (history or [])
-        if isinstance(item, dict)
-        and item.get("role") in ("user", "assistant")
-        and isinstance(item.get("content"), str)
-        and item["content"].strip()
-    ][-12:]
+    prior = _bounded_voice_history(history)
     messages = prior + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
