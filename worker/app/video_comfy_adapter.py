@@ -28,13 +28,18 @@ def _base_url(url: str) -> str:
     return f"http://127.0.0.1:{parsed.port}" if parsed.hostname != "::1" else f"http://[::1]:{parsed.port}"
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise VideoBackendError("ComfyUI redirects are forbidden")
+
+
 class ComfyVideoClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 10.0):
         self.base_url = _base_url(base_url)
         if not 0 < timeout <= 120:
             raise ValueError("Invalid timeout")
         self.timeout = timeout
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
