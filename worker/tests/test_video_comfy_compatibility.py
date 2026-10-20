@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.video_comfy_compatibility import probe_nodes
+from app.video_comfy_compatibility import MAX_TEMPLATE_BYTES, probe_nodes
 
 
 class Response:
@@ -25,6 +25,22 @@ class Response:
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_rejects_oversized_template_without_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_bytes(b"x" * (MAX_TEMPLATE_BYTES + 1))
+            def no_network(*args, **kwargs):
+                self.fail("Oversized template must not contact ComfyUI")
+            self.assertEqual(probe_nodes(path, opener=no_network)["status"], "invalid_template")
+
+    def test_rejects_non_graph_template_without_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text('["not a graph"]')
+            def no_network(*args, **kwargs):
+                self.fail("Invalid graph must not contact ComfyUI")
+            self.assertEqual(probe_nodes(path, opener=no_network)["status"], "invalid_template")
+
     def test_detects_unknown_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"
