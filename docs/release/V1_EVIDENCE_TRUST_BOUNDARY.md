@@ -17,6 +17,6 @@ This note documents the existing release gate; it does **not** qualify or author
 
 ## Merge and release qualification boundary
 
-The temporary freeze on merging ModelRig changes was lifted on 2026-10-20 after the v2.0.18 test. This does **not** constitute approval for any new release, tag or production activation. Any new release candidate must be re-qualified at the exact source head and checked against independently verified cross-repository producer evidence. A structurally valid manifest alone must never set `release_ready=true` or `production_activation=true`.
+The temporary freeze on merging ModelRig changes was lifted on 2026-10-20 after the v2.0.18 test. This does **not** constitute approval for any new release, tag or production activation. Any new release candidate must be re-qualified at the exact source head and checked against independently verified cross-repository producer evidence. A structurally valid manifest with all supplied gates marked PASS **can** result in `QUALIFIED` and `release_ready=true` under the existing `evaluate_manifest()` contract. This records the validator's structural release-readiness verdict, **not** independent proof that referenced producer artifacts or physical approvals are authentic. The structural gate never authorizes `production_activation=true`; actual promotion still requires the separate operator and artifact checks above.
 
 Tracking: #2025, #2111, #2109, #2107.
