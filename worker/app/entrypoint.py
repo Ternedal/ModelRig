@@ -176,15 +176,8 @@ if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
 mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
 
-# Experimental image modules are not imported on standard V1 boots.
-# The operator flag fails closed until the reviewed service bootstrap exists.
-# A missing trusted auth/service bootstrap intentionally prevents activation.
-# This is NOT an automatic activation path for V1 or remote clients.
-if os.getenv("KALIV_EXPERIMENTAL_IMAGES_ENABLED", "0") == "1":
-    raise RuntimeError(
-        "Experimental image API cannot be enabled without trusted authentication, "
-        "a configured generation service, and a strict external media store"
-    )
+# Experimental image modules and routes are deliberately absent from V1 boots.
+# No activation flag is exposed until trusted production wiring is reviewed.
 
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
