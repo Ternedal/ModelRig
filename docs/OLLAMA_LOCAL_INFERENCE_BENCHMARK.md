@@ -67,8 +67,9 @@ skipping model quality evaluations or cutting safety gates are NOT
 acceptable optimizations.
 
 A future performance setting may be trialed on an isolated branch/
-local rig session. It must not update frozen `main`, production settings,
-releases or physical acceptance receipts without deliberate re-freeze.
+local rig session. The merge freeze is lifted, but the tool itself must not
+modify production settings, installed assets, release tags, or physical acceptance
+receipts. A new release still requires explicit approval and qualification.
 
 This tool returns `modelrig_end_to_end_proven=false`,
 `gpu_attribution_proven=false`, `release_ready=false` and
