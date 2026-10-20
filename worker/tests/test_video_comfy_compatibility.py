@@ -25,6 +25,14 @@ class Response:
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_empty_node_class_is_invalid_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(json.dumps({"1": {"class_type": "", "inputs": {}}}))
+            def no_network(*args, **kwargs):
+                self.fail("Empty class type must not contact ComfyUI")
+            self.assertEqual(probe_nodes(path, opener=no_network)["status"], "invalid_template")
+
     def test_malformed_object_info_is_invalid_response(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"
