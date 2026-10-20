@@ -9,12 +9,14 @@ import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 sys.path.insert(0, str(ROOT / "devcontrol" / "src"))
 
 from app.build_identity import _canonical_bytes  # noqa: E402
+from app import build_identity  # noqa: E402
 from kaliv_dev_control.improvement_candidate_provenance import (  # noqa: E402
     CandidateProvenanceError,
     MaterializedCandidateIdentity,
@@ -149,6 +151,50 @@ expect_error(
     ),
     "worker Python symlinks fail closed",
 )
+
+# The frozen worker also executes the sibling BodyRig package. Prove runtime
+# and candidate calculations agree, and that BodyRig-only edits invalidate old
+# evidence while platform line endings and generated worker stamps do not.
+_body_snapshot = _snapshot_lf + (
+    SnapshotEntry("bodyrig/__init__.py", "100644", b""),
+    SnapshotEntry("bodyrig/runtime.py", "100644", b"STATE = 1\n"),
+)
+with tempfile.TemporaryDirectory(prefix="kaliv-runtime-identity-") as _directory:
+    _fixture = Path(_directory)
+    for _entry in _body_snapshot:
+        _path = _fixture / _entry.path
+        _path.parent.mkdir(parents=True, exist_ok=True)
+        _path.write_bytes(_entry.content)
+    with patch.object(build_identity, "_APP", _fixture / "worker/app"), patch.object(
+        build_identity, "_REPO", _fixture
+    ):
+        _before = build_identity._hash_source_tree()
+        check(_before == worker_code_sha256(_body_snapshot), "candidate and runtime fingerprints cover the same worker and BodyRig code")
+        (_fixture / "bodyrig/runtime.py").write_bytes(b"STATE = 1\r\n")
+        check(build_identity._hash_source_tree() == _before, "BodyRig line endings remain platform-independent")
+        (_fixture / "bodyrig/runtime.py").write_bytes(b"STATE = 2\n")
+        _body_changed = tuple(
+            replace(_entry, content=b"STATE = 2\n")
+            if _entry.path == "bodyrig/runtime.py" else _entry
+            for _entry in _body_snapshot
+        )
+        check(build_identity._hash_source_tree() != _before, "a BodyRig-only behavior change invalidates the runtime fingerprint")
+        check(build_identity._hash_source_tree() == worker_code_sha256(_body_changed), "candidate fingerprint tracks the same BodyRig-only change")
+        (_fixture / "worker/app/_build_stamp.py").write_bytes(b"generated = True\n")
+        check(build_identity._hash_source_tree() == worker_code_sha256(_body_changed), "generated worker stamp remains excluded")
+expect_error(
+    CandidateProvenanceError,
+    "symlink",
+    lambda: worker_code_sha256(_snapshot_lf + (SnapshotEntry("bodyrig/runtime.py", "120000", b"elsewhere.py"),)),
+    "BodyRig Python symlinks fail closed like worker Python symlinks",
+)
+_runtime_entries = tuple(
+    SnapshotEntry(_path.relative_to(ROOT).as_posix(), "100644", _path.read_bytes())
+    for _directory in (ROOT / "worker/app", ROOT / "bodyrig")
+    for _path in _directory.rglob("*.py")
+    if "__pycache__" not in _path.parts
+)
+check(build_identity._hash_source_tree() == worker_code_sha256(_runtime_entries), "real checkout and candidate source identity calculations agree")
 
 _task_sha = "2" * 64
 _materialized = MaterializedCandidateIdentity(
