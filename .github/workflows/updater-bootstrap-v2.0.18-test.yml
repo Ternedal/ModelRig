@@ -1,0 +1,112 @@
+name: updater-bootstrap-v2.0.18-test
+
+on:
+  push:
+    branches: [test/updater-bootstrap-v2.0.18-20261020]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-bootstrap:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell.exe, pwsh.exe]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 5d535a8d391f25677c0e3d85e82eb8a9360c796b
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.23'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Exercise the published recovery recipe against updater fixtures
+        env:
+          BOOTSTRAP_TEST_SHELL: ${{ matrix.shell }}
+        run: |
+          @'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tempfile
+
+          # The CLI fixtures emulate only updater replacement observations.
+          # Signing/provenance and real appliance startup have separate tests.
+          source = r'''
+          package main
+          import ("flag"; "os"; "os/exec"; "path/filepath"; "fmt"; "time")
+          func main() {
+              root := flag.String("dir", ".", "fixture root")
+              self := flag.Bool("self-update", false, "fixture self update")
+              version := flag.Bool("version", false, "fixture version")
+              complete := flag.Bool("complete", false, "fixture replacement")
+              flag.Parse()
+              if *version { *root = filepath.Dir(os.Args[0]) }
+              state := filepath.Join(*root, "fixture-version")
+              lock := filepath.Join(*root, "updater.lock")
+              if *complete {
+                  time.Sleep(200*time.Millisecond)
+                  os.WriteFile(state, []byte("2.0.18"), 0600)
+                  os.Remove(lock)
+                  return
+              }
+              if *self {
+                  switch os.Getenv("BOOTSTRAP_TEST_CASE") {
+                  case "self-update-fails": os.Exit(7)
+                  case "no-replacement": return
+                  case "lock-stuck": os.WriteFile(lock, []byte("fixture"), 0600); return
+                  case "ready-now": os.WriteFile(state, []byte("2.0.18"), 0600); return
+                  case "delayed-replacement":
+                      os.WriteFile(lock, []byte("fixture"), 0600)
+                      cmd := exec.Command(os.Args[0], "-complete", "-dir", *root)
+                      if cmd.Start() != nil { os.Exit(8) }
+                      return
+                  }
+              }
+              value, _ := os.ReadFile(state)
+              if *version {
+                  if len(value)==0 { fmt.Println("2.0.16") } else { fmt.Println(string(value)) }
+                  return
+              }
+              if string(value)!="2.0.18" { os.Exit(77) }
+              os.WriteFile(filepath.Join(*root, "appliance-update-ran"), []byte("2.0.18"), 0600)
+          }
+          '''
+          doc = Path('docs/VOICE_STARTUP_RECOVERY.md').read_text(encoding='utf-8')
+          blocks = re.findall(r'```powershell\n(.*?)\n```', doc, re.S)
+          assert len(blocks) == 1
+          recipe = blocks[0]
+          assert recipe.count("$rig = 'C:\\Rig\\ModelRig'") == 1
+          assert recipe.count('AddMinutes(2)') == 1
+          with tempfile.TemporaryDirectory(prefix='bootstrap fixture ') as temporary:
+              root = Path(temporary)
+              go = root / 'updater-fixture.go'
+              go.write_text(source, encoding='utf-8')
+              executable = root / 'modelrig-updater-windows-x64.exe'
+              subprocess.run(['go', 'build', '-o', str(executable), str(go)], check=True)
+              for case in ('ready-now', 'delayed-replacement', 'self-update-fails', 'no-replacement', 'lock-stuck'):
+                  for name in ('fixture-version', 'updater.lock', 'appliance-update-ran'):
+                      (root / name).unlink(missing_ok=True)
+                  # Change only the installation path and timeout duration for
+                  # bounded fixtures. Keep the actual guard and command order.
+                  script = recipe.replace("$rig = 'C:\\Rig\\ModelRig'", "$rig = '" + str(root).replace("'", "''") + "'")
+                  script = script.replace('AddMinutes(2)', 'AddSeconds(3)')
+                  ps = root / 'recovery-recipe.ps1'
+                  ps.write_text(script, encoding='utf-8')
+                  result = subprocess.run([os.environ['BOOTSTRAP_TEST_SHELL'], '-NoLogo', '-NoProfile',
+                      '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(ps)],
+                      capture_output=True, text=True, errors='replace', timeout=20,
+                      env=dict(os.environ, BOOTSTRAP_TEST_CASE=case))
+                  success = case in ('ready-now', 'delayed-replacement')
+                  assert (result.returncode == 0) == success, (case, result.stdout, result.stderr)
+                  assert (root / 'appliance-update-ran').exists() == success, case
+                  print(case + ': PASS', flush=True)
+          print('Recovery recipe guards passed; no real release asset or appliance was changed.')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Updater bootstrap recipe fixture failed' }
