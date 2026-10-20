@@ -43,6 +43,8 @@ class WorkflowTemplateTests(unittest.TestCase):
             {"1": {"class_type": "A", "inputs": {"text": "__KALIV_VIDEO_PROMPT__"}},
              "2": {"class_type": "B", "inputs": {"text": "__KALIV_VIDEO_PROMPT__"}}},
             {"1": {"class_type": "A", "inputs": {"model": "__KALIV_VIDEO_PROMPT__"}}},
+            {"1": {"class_type": "A", "inputs": {"text": ["__KALIV_VIDEO_PROMPT__"]}}},
+            {"1": {"class_type": "A", "inputs": {"text": "__KALIV_VIDEO_PROMPT__", "extra": {"nested": "__KALIV_VIDEO_PROMPT__"}}}},
         ):
             with self.subTest(graph=graph):
                 self.write(graph)
