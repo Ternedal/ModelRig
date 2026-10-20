@@ -67,8 +67,9 @@ class CollectorTests(unittest.TestCase):
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         import shutil
         import os
+        original_copy = shutil.copyfileobj
         def rewriting_copy(src, dst, length):
-            shutil.copyfileobj(src, dst, length)
+            original_copy(src, dst, length)
             before = source.stat()
             source.write_bytes(b"\x00\x00\x00\x18ftypisomother data")
             os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
@@ -84,8 +85,9 @@ class CollectorTests(unittest.TestCase):
         source.write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         import shutil
+        original_copy = shutil.copyfileobj
         def growing_copy(src, dst, length):
-            shutil.copyfileobj(src, dst, length)
+            original_copy(src, dst, length)
             with source.open("ab") as handle:
                 handle.write(b"new bytes")
         with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))), patch(
