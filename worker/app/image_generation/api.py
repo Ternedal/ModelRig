@@ -130,7 +130,14 @@ def build_image_router(
                     # Recheck after acquiring: another request may have finished
                     # ingestion while this coroutine was waiting for the lock.
                     if job_id in ingested_artifacts:
-                        return {"artifact_id": ingested_artifacts[job_id]}
+                        artifact_id = ingested_artifacts[job_id]
+                        try:
+                            available = artifact_store.get_png(owner, artifact_id) is not None
+                        except (ValueError, RuntimeError, OSError) as exc:
+                            raise HTTPException(status_code=503, detail="Image storage unavailable") from exc
+                        if available:
+                            return {"artifact_id": artifact_id}
+                        ingested_artifacts.pop(job_id, None)
                     try:
                         artifact_id = await ingest_completed_job(
                             owner, job_id, manager=service.manager,
