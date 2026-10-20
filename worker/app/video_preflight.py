@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from .video_storage_config import configured_video_storage
+from .video_workflow_template import trusted_text_to_video_factory
 
 
 def probe_nvidia_gpus():
@@ -72,6 +73,23 @@ def check(environ=None):
         result["checks"]["storage"] = "fail"
         result["checks"]["error"] = type(exc).__name__ + ": " + str(exc)
     result["checks"]["gpus"] = probe_nvidia_gpus()
+    template_value = env.get("KALIV_COMFY_WORKFLOW_TEMPLATE", "").strip()
+    if not template_value:
+        result["checks"]["workflow_template"] = "not_configured"
+    elif result["checks"].get("storage") != "pass":
+        result["checks"]["workflow_template"] = "storage_unavailable"
+    else:
+        try:
+            template = Path(template_value)
+            if not template.is_absolute() or template.is_symlink():
+                raise ValueError("Workflow template must be an absolute regular file")
+            if not template.resolve(strict=True).is_relative_to(Path(result["checks"]["media_root"])):
+                raise ValueError("Workflow template must be under media root")
+            trusted_text_to_video_factory(template)
+            result["checks"]["workflow_template"] = "valid_structure"
+        except (OSError, ValueError, RuntimeError) as exc:
+            result["checks"]["workflow_template"] = "invalid"
+            result["checks"]["workflow_error"] = type(exc).__name__ + ": " + str(exc)
     # Inventory alone does not qualify model fit or actual CUDA execution.
     return result
 
