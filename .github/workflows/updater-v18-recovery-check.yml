@@ -1,5 +1,11 @@
 name: updater-v18-recovery-check
 on:
+  workflow_dispatch:
+    inputs:
+      probe_legacy:
+        description: Also run the archived v16 self-update diagnostic against the public GitHub API
+        type: boolean
+        default: false
   push:
     branches: [fix/updater-self-replacement-20261020]
     paths:
@@ -64,7 +70,8 @@ jobs:
             gh attestation verify $exe --repo Ternedal/ModelRig --source-digest $item.Commit --source-ref ('refs/tags/' + $item.Tag) --signer-workflow Ternedal/ModelRig/.github/workflows/build-and-release.yml
             if ($LASTEXITCODE -ne 0) { throw 'Release-bound updater provenance failed' }
           }
-      - name: Native legacy helper reproduction and recovery safety checks
+      - name: Native sharing-lock reproduction and recovery safety checks
         run: |
-          & .\tests\updater_recovery_windows.ps1 -AssetRoot (Join-Path $env:RUNNER_TEMP 'signed-updater-assets')
+          $probe = '${{ inputs.probe_legacy }}' -eq 'true'
+          & .\tests\updater_recovery_windows.ps1 -AssetRoot (Join-Path $env:RUNNER_TEMP 'signed-updater-assets') -ProbeReleasedV16:$probe
           if ($LASTEXITCODE -ne 0) { throw 'Native updater recovery checks failed' }

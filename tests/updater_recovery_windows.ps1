@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$AssetRoot)
+param(
+    [Parameter(Mandatory=$true)][string]$AssetRoot,
+    [switch]$ProbeReleasedV16
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $script = Join-Path $PSScriptRoot '..\scripts\Recover-UpdaterV2018.ps1'
@@ -107,28 +110,6 @@ try {
 } finally { if (-not $holder.HasExited) { $holder.WaitForExit(10000) | Out-Null } }
 Write-Host 'PASS: recovery retried an actual transient Windows sharing violation and retained the original bytes'
 
-# Exercise the actual published v16 updater, including its real detached helper.
-# This records whether the user failure also occurs on a clean hosted Windows
-# runner; it does not mistake that result for evidence from the physical rig.
-$root = Join-Path $env:RUNNER_TEMP ('actual-released-v16-clean-' + [Guid]::NewGuid().ToString('N'))
-[IO.Directory]::CreateDirectory($root) | Out-Null
-$live = Join-Path $root $name
-Copy-Item -LiteralPath $oldAsset -Destination $live
-& $live -self-update -dir $root
-Assert ($LASTEXITCODE -eq 0) 'Actual released v16 updater failed before staging/replacement'
-$deadline = [DateTime]::UtcNow.AddSeconds(30)
-$swapped = $false
-do {
-    if (-not (Test-Path (Join-Path $root 'updater.lock'))) {
-        $swapped = (Get-FileHash $live -Algorithm SHA256).Hash -ceq $newHash
-        if ($swapped) { break }
-    }
-    Start-Sleep -Milliseconds 500
-} while ([DateTime]::UtcNow -lt $deadline)
-Write-Host "ACTUAL RELEASED V16 HELPER: installed-v18=$swapped pending=$(Test-Path ($live + '.pending')) lock=$(Test-Path (Join-Path $root 'updater.lock'))"
-if (-not $swapped) { & $script -RigRoot $root -InstallOnly; Assert-Installed $root }
-Write-Host 'PASS: actual published updater bootstrap finished or was recovered with pinned v18 bytes'
-
 # Exercise the exact immutable-download/bootstrap command in a fresh PowerShell
 # process, with InstallOnly as the sole CI substitution for updating the rig.
 $root = New-Fixture 'downloaded-bootstrap'
@@ -139,3 +120,31 @@ if ((Get-FileHash -LiteralPath $fix -Algorithm SHA256).Hash.ToLowerInvariant() -
 Assert ($LASTEXITCODE -eq 0) 'Downloaded recovery command failed'
 Assert-Installed $root
 Write-Host 'PASS: immutable downloaded recovery command installs exact signed v18 bytes in a fresh PowerShell process'
+
+# The archived v16 executable uses an unauthenticated GitHub metadata request.
+# Its bootstrap defect is already reproduced in runs 39436520247 and 39437312491.
+# Keep this external diagnostic explicit; the recovery and real current helper
+# regression tests run on every push without depending on that old HTTP client.
+if ($ProbeReleasedV16) {
+    # Exercise the actual published v16 updater, including its real detached helper.
+    # This explicit diagnostic records whether the user failure occurs on clean Windows
+    # runner; it does not mistake that result for evidence from the physical rig.
+    $root = Join-Path $env:RUNNER_TEMP ('actual-released-v16-clean-' + [Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    $live = Join-Path $root $name
+    Copy-Item -LiteralPath $oldAsset -Destination $live
+    & $live -self-update -dir $root
+    Assert ($LASTEXITCODE -eq 0) 'Actual released v16 updater failed before staging/replacement'
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    $swapped = $false
+    do {
+        if (-not (Test-Path (Join-Path $root 'updater.lock'))) {
+            $swapped = (Get-FileHash $live -Algorithm SHA256).Hash -ceq $newHash
+            if ($swapped) { break }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Write-Host "ACTUAL RELEASED V16 HELPER: installed-v18=$swapped pending=$(Test-Path ($live + '.pending')) lock=$(Test-Path (Join-Path $root 'updater.lock'))"
+    if (-not $swapped) { & $script -RigRoot $root -InstallOnly; Assert-Installed $root }
+    Write-Host 'PASS: actual published updater bootstrap finished or was recovered with pinned v18 bytes'
+}
