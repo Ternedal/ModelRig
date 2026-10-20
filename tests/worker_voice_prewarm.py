@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import os
 import sys
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -68,6 +69,37 @@ class VoicePrewarmTests(unittest.TestCase):
                         task.cancel()
                         await asyncio.gather(task, return_exceptions=True)
         asyncio.run(run())
+
+    def test_native_load_does_not_block_event_loop_shutdown(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocked_model():
+            started.set()
+            release.wait(timeout=15)
+            return object()
+
+        async def run():
+            with patch("app.voice_asr._get_model", side_effect=blocked_model):
+                task = asyncio.create_task(voice_prewarm.prewarm_asr())
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                loaders = [x for x in threading.enumerate()
+                           if x.name == "asr-prewarm-loader" and x.is_alive()]
+                self.assertTrue(loaders)
+                self.assertTrue(all(x.daemon for x in loaders))
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertEqual(voice_prewarm.prewarm_status()["state"], "cancelled")
+
+        # asyncio.run must complete while native loading is still blocked.
+        # This would otherwise wait up to 15 seconds for the default executor.
+        try:
+            start = time.monotonic()
+            asyncio.run(run())
+            self.assertLess(time.monotonic() - start, 6)
+        finally:
+            release.set()
 
     def test_success_and_failure_never_expose_exception(self):
         async def run():
