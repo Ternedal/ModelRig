@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.client
+import socket
+import threading
 import json
 import math
 import statistics
@@ -76,12 +78,29 @@ def measure_once(
     first_token_ns: int | None = None
     final: dict | None = None
     events = 0
+    # A socket read timeout is per read. Malicious or broken loopback servers
+    # can drip response headers indefinitely without any single read timing out.
+    # An independent deadline watchdog interrupts the socket even during
+    # request() / getresponse(), before streaming response lines are available.
+    def abort_overdue_connection():
+        sock = getattr(conn, "sock", None)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except (OSError, ValueError):
+                pass
+
+    watchdog = threading.Timer(timeout, abort_overdue_connection)
+    watchdog.daemon = True
+    watchdog.start()
     try:
         conn.request("POST", "/api/generate", body=payload, headers={
             "Content-Type": "application/json",
             "Accept": "application/x-ndjson",
         })
         response = conn.getresponse()
+        if time.monotonic_ns() > deadline_ns:
+            raise BenchmarkError("local Ollama overall timeout exceeded")
         if response.status != 200:
             raise BenchmarkError(f"local Ollama returned HTTP {response.status}")
         while True:
@@ -124,6 +143,7 @@ def measure_once(
     except (OSError, TimeoutError, http.client.HTTPException) as exc:
         raise BenchmarkError("local Ollama inference was unavailable or timed out") from exc
     finally:
+        watchdog.cancel()
         conn.close()
 
     if final is None or first_token_ns is None:
