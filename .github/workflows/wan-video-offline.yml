@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# Superseded pushes must not consume runner capacity or report stale results.
+concurrency:
+  group: wan-video-offline-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   video-offline:
     runs-on: ubuntu-latest
