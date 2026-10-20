@@ -7,6 +7,7 @@ ComfyUI node graphs. Runtime video generation is not enabled by this module.
 from __future__ import annotations
 
 import json
+import math
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -36,7 +37,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 class ComfyVideoClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 10.0):
         self.base_url = _base_url(base_url)
-        if not 0 < timeout <= 120:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not 0 < timeout <= 120:
             raise ValueError("Invalid timeout")
         self.timeout = timeout
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
