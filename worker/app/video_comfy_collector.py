@@ -4,7 +4,6 @@ This module has no HTTP routes or automatic background execution.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import uuid
 from pathlib import Path
@@ -80,7 +79,7 @@ class VideoResultCollector:
                     target.unlink(missing_ok=True)
                     raise
                 return media_id
-            except (ValueError, VideoBackendError):
+            except (OSError, ValueError, VideoBackendError):
                 self.store.transition(row["job_id"], "running", "failed", error_code="invalid_backend_output")
                 return None
         return None
