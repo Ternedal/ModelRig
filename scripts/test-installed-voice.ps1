@@ -158,9 +158,14 @@ try {
     Assert-Check 'wav-header' ($wav.Length -gt 44 -and
         [Text.Encoding]::ASCII.GetString($wav, 0, 4) -ceq 'RIFF' -and
         [Text.Encoding]::ASCII.GetString($wav, 8, 4) -ceq 'WAVE') 'TTS output is not a non-empty RIFF/WAVE file.'
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $audioSha = [BitConverter]::ToString($hasher.ComputeHash($wav)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $hasher.Dispose()
+    }
     $report['audio'] = [ordered]@{
-        path = $wavPath; bytes = $wav.Length
-        sha256 = (Get-FileHash -LiteralPath $wavPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        path = $wavPath; bytes = $wav.Length; sha256 = $audioSha
     }
 
     $report.stage = 'cuda-transcription'
@@ -171,7 +176,7 @@ try {
     $report['transcription'] = $asr
     $report['asr_elapsed_ms'] = $clock.ElapsedMilliseconds
     Assert-Check 'asr-result' ($asr.text -is [string] -and -not [string]::IsNullOrWhiteSpace($asr.text) -and
-        @($asr.segments).Count -gt 0 -and $asr.duration -is [ValueType] -and
+        $asr.segments -is [array] -and $asr.segments.Count -gt 0 -and $asr.duration -is [ValueType] -and
         $asr.duration -isnot [bool] -and $asr.duration -gt 0) 'ASR returned no transcript, segments or positive duration.'
 
     $report.stage = 'post-inference-identity'

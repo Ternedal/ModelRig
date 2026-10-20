@@ -135,10 +135,15 @@ class Fixture:
             if case == "asr-503":
                 return 503, {"detail": "fixture: cublas64_12.dll cannot be loaded"}, {}
             self.transcribed = True
+            segments = [{"start": 0, "end": 1, "text": "Hej Kaliv."}]
+            if case == "empty-segments":
+                segments = []
+            elif case == "null-segments":
+                segments = None
             return 200, {
                 "text": "" if case == "empty-transcript" else "Hej Kaliv. Dette er en dansk lydtest.",
                 "duration": 1.0,
-                "segments": [] if case == "empty-segments" else [{"start": 0, "end": 1, "text": "Hej Kaliv."}],
+                "segments": segments,
             }, {}
         return 404, {}, {}
 
@@ -199,7 +204,7 @@ class InstalledVoiceCheck(unittest.TestCase):
                 self.assertFalse(any(method == "POST" for _, method, _ in requests))
 
     def test_rejects_failed_inference_and_changes_during_inference(self):
-        for case in ("missing-wav", "bad-wav", "asr-503", "empty-transcript", "empty-segments",
+        for case in ("missing-wav", "bad-wav", "asr-503", "empty-transcript", "empty-segments", "null-segments",
                      "replaced-worker", "changed-config"):
             with self.subTest(case=case):
                 result, report, requests = self.run_case(case)
