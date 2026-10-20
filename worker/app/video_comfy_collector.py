@@ -37,15 +37,20 @@ class VideoResultCollector:
                 if outputs is None:
                     return None
                 files = []
+                malformed_output = False
                 for node in outputs.values():
                     if not isinstance(node, dict):
                         continue
                     for key in ("gifs", "videos"):
                         entries = node.get(key, [])
                         if not isinstance(entries, list):
+                            malformed_output = True
                             continue
                         for entry in entries:
-                            if not isinstance(entry, dict) or entry.get("type") != "output":
+                            if not isinstance(entry, dict):
+                                malformed_output = True
+                                continue
+                            if entry.get("type") != "output":
                                 continue
                             name = entry.get("filename")
                             folder = entry.get("subfolder", "")
@@ -61,7 +66,7 @@ class VideoResultCollector:
                             resolved = candidate.resolve(strict=True)
                             if resolved.is_relative_to(self.output_root):
                                 files.append(resolved)
-                if len(files) != 1 or not 0 < files[0].stat().st_size <= 2 * 1024 ** 3:
+                if malformed_output or len(files) != 1 or not 0 < files[0].stat().st_size <= 2 * 1024 ** 3:
                     raise ValueError("Expected exactly one valid MP4 output")
                 media_id = uuid.uuid4().hex
                 target = self.catalog.media_root / "Videos" / (media_id + ".mp4")
