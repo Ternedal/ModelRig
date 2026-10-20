@@ -138,6 +138,23 @@ with patch.object(tool.subprocess, "run", side_effect=git_untracked_after_hash):
     assert tool.checkout_identity(ROOT, SHA)["status"] == "BLOCKED"
 assert late_untracked["calls"] == 2, "must recheck extras after hashing"
 
+# A timeout in the FINAL staged-index check is not a Python crash or an
+# unverifiable PASS. It is a structured BLOCKED source result.
+late_index = {"stage_scans": 0}
+def git_final_index_timeout(args, **kwargs):
+    if "ls-files" in args and "--stage" in args:
+        late_index["stage_scans"] += 1
+        if late_index["stage_scans"] == 2:
+            raise tool.subprocess.TimeoutExpired(cmd=args, timeout=20)
+    return git_ok(args, **kwargs)
+
+with patch.object(tool.subprocess, "run", side_effect=git_final_index_timeout):
+    timed_out = tool.checkout_identity(ROOT, SHA)
+assert timed_out["status"] == "BLOCKED", timed_out
+assert timed_out["tracked_bytes_match"] is False
+assert late_index["stage_scans"] == 2
+
+
 
 # A tracked file may be modified after it was hashed while remaining tracked
 # files are still being read. The final metadata snapshot must reject it.
