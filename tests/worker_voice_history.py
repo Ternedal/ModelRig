@@ -1,7 +1,7 @@
 """Regression tests for bounded, validated voice conversation history.
 
 Run without ASR, TTS, Ollama or GPU:
-    python -m unittest tests/worker_voice_history.py
+    python tests/worker_voice_history.py
 """
 import ast
 from pathlib import Path
@@ -11,22 +11,34 @@ SOURCE = Path(__file__).resolve().parents[1] / "worker" / "app" / "voice_pipelin
 
 
 def _prior_from_source(history):
-    """Execute the actual prior-history expression without importing voice backends."""
+    """Execute the actual bounded helper without importing Voice backends."""
     module = ast.parse(SOURCE.read_text(encoding="utf-8"))
+    helper = next(
+        node for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_bounded_voice_history"
+    )
     converse = next(
         node for node in module.body
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "converse"
     )
-    assignment = next(
+    assignments = [
         node for node in ast.walk(converse)
         if isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "prior"
                 for target in node.targets)
-    )
-    expression = ast.Expression(body=assignment.value)
-    return eval(compile(ast.fix_missing_locations(expression), str(SOURCE), "eval"),
-                {"__builtins__": {"isinstance": isinstance, "str": str, "dict": dict}},
-                {"history": history})
+    ]
+    if len(assignments) != 1 or not isinstance(assignments[0].value, ast.Call):
+        raise AssertionError("converse must call the bounded history helper")
+    callee = assignments[0].value.func
+    if not isinstance(callee, ast.Name) or callee.id != "_bounded_voice_history":
+        raise AssertionError("converse must use _bounded_voice_history")
+    namespace = {}
+    isolated_module = ast.fix_missing_locations(ast.Module(body=[helper], type_ignores=[]))
+    exec(compile(isolated_module, str(SOURCE), "exec"),
+         {"__builtins__": {"isinstance": isinstance, "dict": dict,
+                            "str": str, "reversed": reversed, "len": len}},
+         namespace)
+    return namespace["_bounded_voice_history"](history)
 
 
 class VoiceHistoryTests(unittest.TestCase):
@@ -50,6 +62,24 @@ class VoiceHistoryTests(unittest.TestCase):
                    {"role": "assistant", "content": "x" * 5000}]
         self.assertEqual(_prior_from_source(history),
                          [{"role": "assistant", "content": "x" * 4000}])
+
+    def test_scanning_stops_after_twelve_valid_turns(self):
+        class CountedHistory(list):
+            scanned = 0
+            def __reversed__(self):
+                for value in super().__reversed__():
+                    self.scanned += 1
+                    if self.scanned > 12:
+                        raise AssertionError("scanned beyond 12 valid recent turns")
+                    yield value
+
+        history = CountedHistory(
+            [{"role": "user", "content": "old"}] * 50000
+            + [{"role": "assistant", "content": str(i)} for i in range(12)]
+        )
+        self.assertEqual([item["content"] for item in _prior_from_source(history)],
+                         [str(i) for i in range(12)])
+        self.assertEqual(history.scanned, 12)
 
 
 if __name__ == "__main__":
