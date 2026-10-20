@@ -37,7 +37,7 @@ def build_image_router(
     ingested_artifacts: dict[str, str] = {}
 
     def owner_id(value: object) -> str:
-        if not isinstance(value, str) or not 1 <= len(value) <= 128:
+        if (not isinstance(value, str) or not 1 <= len(value) <= 128\n                or value != value.strip() or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)):
             raise HTTPException(status_code=401, detail="Authentication required")
         return value
 
