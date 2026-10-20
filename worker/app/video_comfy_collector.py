@@ -60,10 +60,20 @@ class VideoResultCollector:
                                 continue
                             if Path(folder).is_absolute() or ".." in Path(folder).parts or "\\\\" in folder or ":" in folder:
                                 continue
-                            candidate = self.output_root / folder / name
-                            if candidate.is_symlink() or not candidate.is_file():
+                            # Reject symlinked parent directories too: resolving
+                            # a path inside the root is not sufficient if a
+                            # subfolder is an alias to another writable tree.
+                            relative = Path(folder) / name
+                            cursor = self.output_root
+                            symlinked = False
+                            for part in relative.parts:
+                                cursor = cursor / part
+                                if cursor.is_symlink():
+                                    symlinked = True
+                                    break
+                            if symlinked or not cursor.is_file():
                                 continue
-                            resolved = candidate.resolve(strict=True)
+                            resolved = cursor.resolve(strict=True)
                             if resolved.is_relative_to(self.output_root):
                                 files.append(resolved)
                 if malformed_output or len(files) != 1 or not 0 < files[0].stat().st_size <= 2 * 1024 ** 3:
