@@ -42,6 +42,31 @@ class VideoPreflightTests(unittest.TestCase):
                 report = check({})
             self.assertEqual(report["checks"]["workflow_template"], "not_configured")
 
+    def test_cli_fails_when_only_storage_passes(self):
+        import contextlib
+        import io
+        from app.video_preflight import main
+        with patch("app.video_preflight.check", return_value={
+            "ready": False,
+            "checks": {"storage": "pass", "workflow_template": "not_configured",
+                       "gpus": {"status": "detected"}},
+            "limitations": [],
+        }), patch("sys.argv", ["video_preflight"]), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(), 2)
+
+    def test_cli_reports_diagnostics_pass_without_claiming_ready(self):
+        import contextlib
+        import io
+        from app.video_preflight import main
+        with patch("app.video_preflight.check", return_value={
+            "ready": False,
+            "checks": {"storage": "pass", "workflow_template": "valid_structure",
+                       "comfy_nodes": {"status": "compatible"},
+                       "gpus": {"status": "detected"}},
+            "limitations": ["Physical drive not attested"],
+        }), patch("sys.argv", ["video_preflight"]), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(), 0)
+
     def test_missing_configuration_fails(self):
         report = check({})
         self.assertFalse(report["ready"])
