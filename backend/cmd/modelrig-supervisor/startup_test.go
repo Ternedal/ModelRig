@@ -20,7 +20,7 @@ func (c *startingChild) startupPending() bool { return c.process.startupPending(
 func newStartingChild() *startingChild {
 	return &startingChild{
 		fakeChild: fakeChild{nm: "worker", run: true},
-		process: procChild{alive: true, startedAt: time.Now(), startupGrace: startup.GracePeriod},
+		process:   procChild{alive: true, startedAt: time.Now(), startupGrace: startup.GracePeriod},
 	}
 }
 

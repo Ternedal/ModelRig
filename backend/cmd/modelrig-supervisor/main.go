@@ -132,10 +132,10 @@ type procChild struct {
 	alive bool
 	// What a bare "restarted" line could never tell you: which process was
 	// started, and how the previous one ended.
-	startedPID int
-	lastExit   string
-	startedAt time.Time
-	ready bool
+	startedPID   int
+	lastExit     string
+	startedAt    time.Time
+	ready        bool
 	startupGrace time.Duration
 }
 

@@ -26,9 +26,9 @@ func TestVerifyWaitsPastOldFifteenAttemptLimit(t *testing.T) {
 
 func TestVerifyNeverAcceptsBadStatusOrWrongVersion(t *testing.T) {
 	for _, tc := range []struct {
-		name string
+		name   string
 		status int
-		body string
+		body   string
 	}{
 		{"error with expected version", 503, `{"version":"2.0.18"}`},
 		{"old version", 200, `{"version":"2.0.16"}`},
