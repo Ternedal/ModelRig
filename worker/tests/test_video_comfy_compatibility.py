@@ -33,6 +33,14 @@ class CompatibilityTests(unittest.TestCase):
                 self.fail("Oversized template must not contact ComfyUI")
             self.assertEqual(probe_nodes(path, opener=no_network)["status"], "invalid_template")
 
+    def test_rejects_malformed_json_without_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'workflow.json'
+            path.write_text('{not valid json')
+            def no_network(*args, **kwargs):
+                self.fail('Malformed JSON must not contact ComfyUI')
+            self.assertEqual(probe_nodes(path, opener=no_network)['status'], 'invalid_template')
+
     def test_rejects_non_graph_template_without_network(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"
