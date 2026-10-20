@@ -1,0 +1,115 @@
+name: released-v2.0.18-startup-check
+
+on:
+  push:
+    branches: [test/released-v2.0.18-startup-20261020]
+    paths: [validation/start-released-v2.0.18-check.txt]
+
+permissions:
+  contents: read
+  actions: read
+  attestations: read
+
+jobs:
+  verify-downloaded-windows-appliance:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_HEAD: 5d535a8d391f25677c0e3d85e82eb8a9360c796b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 5d535a8d391f25677c0e3d85e82eb8a9360c796b
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: stable
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+      - name: Require the successful signed release at the intended commit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $run = gh api repos/Ternedal/ModelRig/actions/runs/39379849897 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.status -ne 'completed' -or $run.conclusion -ne 'success' -or $run.head_sha -ne $env:EXPECTED_HEAD -or $run.head_branch -ne 'v2.0.18' -or $run.path -ne '.github/workflows/build-and-release.yml') { throw 'Expected release run is not successful at the pinned commit' }
+          $tag = gh api repos/Ternedal/ModelRig/git/ref/tags/v2.0.18 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $tag.object.type -ne 'commit' -or $tag.object.sha -ne $env:EXPECTED_HEAD) { throw 'Release tag identity changed' }
+          $release = gh api repos/Ternedal/ModelRig/releases/418070031 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.tag_name -ne 'v2.0.18' -or $release.draft -ne $false -or $release.prerelease -ne $false) { throw 'Expected stable release is not published' }
+          $expected = @('kaliv-latest.apk', 'Kaliv-windows-x64-2.0.18.jar', 'modelrig-server-windows-x64.exe', 'modelrig-supervisor-windows-x64.exe', 'modelrig-updater-windows-x64.exe', 'modelrig-v2.0.18.apk', 'modelrig-v2.0.18.zip', 'modelrig-worker-windows-x64.exe', 'SHA256SUMS.txt')
+          $names = @($release.assets | ForEach-Object { $_.name })
+          if ($names.Count -ne 9 -or (Compare-Object $expected $names -CaseSensitive) -or @($release.assets | Where-Object { $_.size -le 0 }).Count -gt 0) { throw 'Published release asset inventory differs from the complete expected set' }
+          Write-Host 'Published v2.0.18 inventory and exact release identity verified'
+      - name: Download and verify the released executables before running them
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'released-v2.0.18-appliance'
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          $files = @('SHA256SUMS.txt', 'modelrig-server-windows-x64.exe', 'modelrig-supervisor-windows-x64.exe', 'modelrig-updater-windows-x64.exe', 'modelrig-worker-windows-x64.exe')
+          foreach ($name in $files) {
+            gh release download v2.0.18 --repo Ternedal/ModelRig --pattern $name --dir $root --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Download failed: $name" }
+          }
+          $hashes = @{}
+          foreach ($line in (Get-Content (Join-Path $root 'SHA256SUMS.txt'))) {
+            if (-not ($line -match '^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$')) { throw 'Malformed release checksum manifest' }
+            if ($hashes.ContainsKey($Matches[2])) { throw 'Duplicate release checksum entry' }
+            $hashes[$Matches[2]] = $Matches[1]
+          }
+          if ($hashes.Count -ne 8) { throw 'Incomplete release checksum manifest' }
+          foreach ($name in $files) {
+            $path = Join-Path $root $name
+            if ($name -ne 'SHA256SUMS.txt' -and (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hashes[$name]) { throw "Checksum mismatch: $name" }
+            gh attestation verify $path --repo Ternedal/ModelRig --source-digest $env:EXPECTED_HEAD --source-ref refs/tags/v2.0.18 --signer-workflow Ternedal/ModelRig/.github/workflows/build-and-release.yml
+            if ($LASTEXITCODE -ne 0) { throw "Release-bound provenance failed: $name" }
+          }
+          $updater = Join-Path $root 'modelrig-updater-windows-x64.exe'
+          $version = (& $updater -version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -ne '2.0.18') { throw 'Downloaded updater version mismatch' }
+          "MODELRIG_COLD_BOOT_WORKER_EXE=$(Join-Path $root 'modelrig-worker-windows-x64.exe')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "MODELRIG_COLD_BOOT_SERVER_EXE=$(Join-Path $root 'modelrig-server-windows-x64.exe')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "MODELRIG_COLD_BOOT_SUPERVISOR_EXE=$(Join-Path $root 'modelrig-supervisor-windows-x64.exe')" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Downloaded worker survives a delayed startup under the released supervisor
+        shell: pwsh
+        working-directory: backend
+        run: |
+          go test -v ./cmd/modelrig-updater -run '^TestFrozenVoiceWorkerSlowBootUnderSupervisor$' -count=1 -timeout=8m
+          if ($LASTEXITCODE -ne 0) { throw 'Downloaded appliance failed delayed startup/recovery verification' }
+      - name: Confirm packaged voice providers and immutable runtime identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedCode = (python -c "import sys; sys.path.insert(0, 'worker'); from app.build_identity import code_fingerprint; print(code_fingerprint())").Trim()
+          if ($LASTEXITCODE -ne 0 -or $expectedCode -notmatch '^[0-9a-f]{64}$') { throw 'Cannot determine expected source fingerprint' }
+          $expectedArtifact = (Get-FileHash $env:MODELRIG_COLD_BOOT_WORKER_EXE -Algorithm SHA256).Hash.ToLowerInvariant()
+          $env:PYTHONPATH = ''
+          $env:MODELRIG_WORKER_HOST = '127.0.0.1'
+          $env:MODELRIG_WORKER_PORT = '8099'
+          $env:MODELRIG_OLLAMA_URL = 'http://127.0.0.1:9'
+          $out = Join-Path $env:RUNNER_TEMP 'released-worker-stdout.log'
+          $err = Join-Path $env:RUNNER_TEMP 'released-worker-stderr.log'
+          $worker = Start-Process -FilePath $env:MODELRIG_COLD_BOOT_WORKER_EXE -WorkingDirectory $env:RUNNER_TEMP -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          try {
+            $health = $null
+            foreach ($i in 1..90) {
+              if ($worker.HasExited) { throw 'Downloaded worker exited before readiness' }
+              try { $health = Invoke-RestMethod http://127.0.0.1:8099/healthz -TimeoutSec 2; break }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $health -or $health.version -ne '2.0.18' -or $health.service -ne 'modelrig-worker') { throw 'Downloaded worker health/version mismatch' }
+            $full = Invoke-RestMethod http://127.0.0.1:8099/health/full -TimeoutSec 10
+            if ($full.build.frozen -ne $true -or $full.build.commit_sha -ne $env:EXPECTED_HEAD -or $full.build.code_sha256 -ne $expectedCode -or $full.build.artifact_sha256 -ne $expectedArtifact) { throw 'Downloaded worker runtime identity mismatch' }
+            if ($full.capabilities.asr -ne $true -or $full.capabilities.tts -ne $true) { throw 'Downloaded worker is missing voice capabilities' }
+            $asr = Invoke-RestMethod http://127.0.0.1:8099/voice/asr/status -TimeoutSec 10
+            $tts = Invoke-RestMethod http://127.0.0.1:8099/voice/tts/status -TimeoutSec 10
+            if ($asr.available -ne $true -or $tts.available -ne $true) { throw 'Downloaded voice providers are unavailable' }
+            Write-Host "Downloaded release PASS: version 2.0.18, commit $($full.build.commit_sha), executable SHA256 $expectedArtifact; ASR/TTS available."
+            Write-Host 'This hosted Windows check does not claim physical GPU, microphone or Android acceptance.'
+          } finally {
+            if (-not $worker.HasExited) { & taskkill.exe /PID $worker.Id /T /F | Out-Null }
+            if (Test-Path $out) { Get-Content $out }
+            if (Test-Path $err) { Get-Content $err }
+          }
