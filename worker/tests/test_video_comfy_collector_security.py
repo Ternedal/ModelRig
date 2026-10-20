@@ -138,6 +138,27 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 "job1", "running", "failed", error_code="invalid_backend_output"
             )
 
+    def test_malformed_output_containers_fail_without_crash(self):
+        for outputs in ([], "not a mapping", {"node1": None},
+                        {"node1": {"videos": "not a list"}}):
+            with self.subTest(outputs=outputs), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                store = Mock()
+                store.awaiting_result.return_value = [
+                    {"job_id": "job1", "prompt_id": "prompt1"}
+                ]
+                store.transition.return_value = True
+                client = Mock()
+                client.completed_outputs.return_value = outputs
+                catalog = Mock()
+                with patch("app.video_comfy_collector.configured_video_storage"):
+                    collector = VideoResultCollector(store, client, catalog, output)
+                    self.assertIsNone(collector.collect_one())
+                catalog.register.assert_not_called()
+                store.transition.assert_called_once_with(
+                    "job1", "running", "failed", error_code="invalid_backend_output"
+                )
+
     def test_pending_history_keeps_job_running(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
