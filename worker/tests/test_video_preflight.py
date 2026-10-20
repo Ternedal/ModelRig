@@ -11,7 +11,7 @@ from app.video_storage import ExternalMediaStorage
 class VideoPreflightTests(unittest.TestCase):
     def test_gpu_inventory_parses_two_independent_cards(self):
         from subprocess import CompletedProcess
-        output = '0, NVIDIA GeForce RTX 3060, 12288\\n1, NVIDIA GeForce RTX 3060, 12288\\n'
+        output = '0, NVIDIA GeForce RTX 3060, 12288\n1, NVIDIA GeForce RTX 3060, 12288\n'
         with patch('app.video_preflight.subprocess.run', return_value=CompletedProcess([], 0, output, '')):
             report = probe_nvidia_gpus()
         self.assertEqual(report['status'], 'detected')
