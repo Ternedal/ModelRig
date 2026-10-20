@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from .video_storage_config import configured_video_storage
+from .video_comfy_compatibility import probe_nodes
 from .video_workflow_template import trusted_text_to_video_factory
 
 
@@ -87,6 +88,7 @@ def check(environ=None):
                 raise ValueError("Workflow template must be under media root")
             trusted_text_to_video_factory(template)
             result["checks"]["workflow_template"] = "valid_structure"
+            result["checks"]["comfy_nodes"] = probe_nodes(template)
         except (OSError, ValueError, RuntimeError) as exc:
             result["checks"]["workflow_template"] = "invalid"
             result["checks"]["workflow_error"] = type(exc).__name__ + ": " + str(exc)
