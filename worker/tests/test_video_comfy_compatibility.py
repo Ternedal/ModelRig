@@ -25,6 +25,21 @@ class Response:
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_malformed_object_info_is_invalid_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(json.dumps({"1": {"class_type": "WanNode", "inputs": {}}}))
+            class BrokenResponse:
+                status = 200
+                def __enter__(self):
+                    return self
+                def __exit__(self, *_):
+                    return False
+                def read(self, size):
+                    return b"{broken json"
+            report = probe_nodes(path, opener=lambda *a, **kw: BrokenResponse())
+            self.assertEqual(report["status"], "invalid_response")
+
     def test_rejects_oversized_template_without_network(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"
