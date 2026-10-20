@@ -45,6 +45,31 @@ class ComfyAdapterSecurityTests(unittest.TestCase):
             self.assertEqual(request.full_url, "http://127.0.0.1:8188/prompt")
             self.assertEqual(request.get_method(), "POST")
 
+    def test_oversized_response_is_rejected(self):
+        client = ComfyVideoClient()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b"x" * 2_000_001
+        with patch.object(client._opener, "open", return_value=response):
+            with self.assertRaises(VideoBackendError):
+                client.submit_trusted_workflow({"node": {}})
+
+    def test_non_object_json_is_rejected(self):
+        client = ComfyVideoClient()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = b"[]"
+        with patch.object(client._opener, "open", return_value=response):
+            with self.assertRaises(VideoBackendError):
+                client.submit_trusted_workflow({"node": {}})
+
+    def test_invalid_timeout_is_rejected(self):
+        for timeout in (0, -1, 121, float("nan"), float("inf"), True):
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                ComfyVideoClient(timeout=timeout)
+
     def test_invalid_prompt_id_fails_closed(self):
         client = ComfyVideoClient()
         with patch.object(client._opener, "open",
