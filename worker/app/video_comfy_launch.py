@@ -29,8 +29,9 @@ def build_comfy_launch_plan(python_executable: str, main_py: str,
     if not main.is_absolute() or not main.is_file() or main.name != "main.py":
         raise ValueError("Absolute existing ComfyUI main.py required")
     user_dir = storage.root / "ComfyUI" / "user"
-    if user_dir.is_symlink():
-        raise ValueError("ComfyUI user path is a symlink")
+    # Check the parent too: ComfyUI -> another volume would redirect user data.
+    if user_dir.parent.is_symlink() or user_dir.is_symlink():
+        raise ValueError("ComfyUI user path or parent is a symlink")
     user_dir.mkdir(parents=True, exist_ok=True)
     if not user_dir.resolve().is_relative_to(storage.root):
         raise ValueError("ComfyUI user path escaped external root")
