@@ -75,11 +75,25 @@ func assertReplacementResult(t *testing.T, live, pending, lock string) {
 
 func TestNativeReplacementHelperRetainsOriginalAndUnlocks(t *testing.T) {
 	live, pending, lock, output := replacementFixture(t)
-	if err := spawnWindowsReplacementHelper(deadReplacementParent(t), pending, live, lock); err != nil {
-		t.Fatal(err)
+	parent := exec.Command(os.Args[0], "-test.run=^TestReplacementLauncherProcess$")
+	parent.Env = append(os.Environ(), "MODELRIG_TEST_REPLACEMENT_ROOT="+filepath.Dir(live))
+	if b, err := parent.CombinedOutput(); err != nil {
+		t.Fatalf("replacement launcher failed: %v, %s", err, b)
 	}
 	waitForReplacementLog(t, output, "Updater replacement complete")
 	assertReplacementResult(t, live, pending, lock)
+}
+
+func TestReplacementLauncherProcess(t *testing.T) {
+	root := os.Getenv("MODELRIG_TEST_REPLACEMENT_ROOT")
+	if root == "" {
+		return
+	}
+	live := filepath.Join(root, updaterAssetName)
+	if err := spawnWindowsReplacementHelper(os.Getpid(), live+".pending", live, filepath.Join(root, "updater.lock")); err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(0)
 }
 
 func TestNativeReplacementHelperRetriesWindowsSharingViolation(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	updaterAssetName   = "modelrig-updater-windows-x64.exe"
+	updaterAssetName    = "modelrig-updater-windows-x64.exe"
 	releaseWorkflowPath = ".github/workflows/build-and-release.yml"
 )
 
@@ -279,11 +279,22 @@ func replacementHelperScript(pid int, pending, live, lockPath string) string {
 $pending=%s
 $live=%s
 $lockPath=%s
+function FileDigest([string]$path) {
+    $stream=[IO.File]::OpenRead($path)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
 try {
-    if (Get-Process -Id %d -ErrorAction SilentlyContinue) {
-        Wait-Process -Id %d -Timeout 120 -ErrorAction Stop
+    $parent=$null
+    try { $parent=[Diagnostics.Process]::GetProcessById(%d) }
+    catch [ArgumentException] { }
+    if ($null -ne $parent) {
+        try {
+            if (-not $parent.WaitForExit(120000)) { throw 'Updater parent did not exit within 120 seconds' }
+        } finally { $parent.Dispose() }
     }
-    $expected=(Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash
+    $expected=FileDigest $pending
     $backup=$live+'.previous-'+[Guid]::NewGuid().ToString('N')
     $deadline=[DateTime]::UtcNow.AddSeconds(45)
     $reportedSharing=$false
@@ -297,23 +308,23 @@ try {
             $code=$cause.HResult -band 0xffff
             if ($code -notin @(32,33) -or [DateTime]::UtcNow -ge $deadline) { throw }
             if (-not $reportedSharing) {
-                Write-Output ('Replacement waiting for file handle release: '+$_.Exception.Message)
+                [Console]::WriteLine(('Replacement waiting for file handle release: '+$_.Exception.Message))
                 $reportedSharing=$true
             }
-            Start-Sleep -Milliseconds 500
+            [Threading.Thread]::Sleep(500)
         }
     }
-    if ((Get-FileHash -LiteralPath $live -Algorithm SHA256).Hash -cne $expected) {
+    if ((FileDigest $live) -cne $expected) {
         throw 'Installed updater checksum differs from the verified pending file'
     }
-    Remove-Item -LiteralPath $lockPath -Force -ErrorAction Stop
-    Write-Output ('Updater replacement complete; original kept at '+$backup)
+    [IO.File]::Delete($lockPath)
+    [Console]::WriteLine(('Updater replacement complete; original kept at '+$backup))
     exit 0
 } catch {
     [Console]::Error.WriteLine(('Updater replacement failed; lock and recovery files retained: '+$_))
     exit 1
 }`,
-		powershellLiteral(pending), powershellLiteral(live), powershellLiteral(lockPath), pid, pid,
+		powershellLiteral(pending), powershellLiteral(live), powershellLiteral(lockPath), pid,
 	)
 }
 
