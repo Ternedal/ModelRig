@@ -55,10 +55,13 @@ class VideoResultCollector:
                             name = entry.get("filename")
                             folder = entry.get("subfolder", "")
                             if not isinstance(name, str) or not isinstance(folder, str):
+                                malformed_output = True
                                 continue
                             if Path(name).name != name or "\\\\" in name or ":" in name or not name.lower().endswith(".mp4"):
+                                malformed_output = True
                                 continue
                             if Path(folder).is_absolute() or ".." in Path(folder).parts or "\\\\" in folder or ":" in folder:
+                                malformed_output = True
                                 continue
                             # Reject symlinked parent directories too: resolving
                             # a path inside the root is not sufficient if a
@@ -72,10 +75,13 @@ class VideoResultCollector:
                                     symlinked = True
                                     break
                             if symlinked or not cursor.is_file():
+                                malformed_output = True
                                 continue
                             resolved = cursor.resolve(strict=True)
                             if resolved.is_relative_to(self.output_root):
                                 files.append(resolved)
+                            else:
+                                malformed_output = True
                 if malformed_output or len(files) != 1 or not 0 < files[0].stat().st_size <= 2 * 1024 ** 3:
                     raise ValueError("Expected exactly one valid MP4 output")
                 # A file that is still being written must not be published.
