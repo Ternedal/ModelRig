@@ -106,6 +106,7 @@ def build_image_router(
             for old_id in tuple(ingested_artifacts):
                 if old_id not in service.manager._jobs:
                     ingested_artifacts.pop(old_id, None)
+                    ingestion_locks.pop(old_id, None)
             if job_id in ingested_artifacts:
                 return {"artifact_id": ingested_artifacts[job_id]}
             # Prevent concurrent duplicate ingestion of the same completed job.
@@ -115,6 +116,10 @@ def build_image_router(
                 raise HTTPException(status_code=409, detail="Image ingestion in progress")
             try:
                 async with lock:
+                    # Recheck after acquiring: another request may have finished
+                    # ingestion while this coroutine was waiting for the lock.
+                    if job_id in ingested_artifacts:
+                        return {"artifact_id": ingested_artifacts[job_id]}
                     try:
                         artifact_id = await ingest_completed_job(
                             owner, job_id, manager=service.manager,
@@ -127,10 +132,10 @@ def build_image_router(
                     ingested_artifacts[job_id] = artifact_id
                     return {"artifact_id": artifact_id}
             finally:
-                # Do not retain a lock for every historical job indefinitely.
-                # A simultaneous caller observes the held lock and gets 409.
-                if ingestion_locks.get(job_id) is lock:
-                    ingestion_locks.pop(job_id, None)
+                # Keep the lock associated with its retained job. Removing it
+                # here allows a third request to create a different lock while
+                # an earlier waiter is still blocked on the first one.
+                # Prune locks only when their jobs leave the manager.
 
         @router.get("/artifacts/{artifact_id}/thumbnail")
         async def get_image_thumbnail(
