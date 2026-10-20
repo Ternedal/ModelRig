@@ -18,6 +18,10 @@ jobs:
   video-offline:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
     defaults:
       run:
         working-directory: worker
@@ -25,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
       - name: Install API test dependencies
         run: python -m pip install fastapi httpx
       - name: Run offline video tests
