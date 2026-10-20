@@ -51,7 +51,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
             media = root / "Media"
             (media / "Videos").mkdir(parents=True)
             source = output / "clip.mp4"
-            payload = b"\x00\x00\x00\x18ftypisom" + b"\\x00" * 24
+            payload = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
             source.write_bytes(payload)
             store = Mock()
             store.awaiting_result.return_value = [
@@ -85,7 +85,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
             output.mkdir()
             for name in ("first.mp4", "second.mp4"):
                 (output / name).write_bytes(
-                    b"\x00\x00\x00\x18ftypisom" + b"\\x00" * 24
+                    b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
                 )
             store = Mock()
             store.awaiting_result.return_value = [
@@ -114,7 +114,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
             output = root / "output"
             output.mkdir()
             (output / "clip.mp4").write_bytes(
-                b"\x00\x00\x00\x18ftypisom" + b"\\x00" * 24
+                b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
             )
             store = Mock()
             store.awaiting_result.return_value = [
