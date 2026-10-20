@@ -42,6 +42,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_AGENT3_VALIDATION_REPORT` | `(unset)` |
 | `KALIV_AGENT4_OPERATOR_API` | `0` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
+| `KALIV_COMFY_WORKFLOW_TEMPLATE` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
 | `KALIV_COMPUTER_USE` | `0` |
 | `KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED` | `0` |
