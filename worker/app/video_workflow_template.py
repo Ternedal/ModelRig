@@ -1,8 +1,8 @@
 """Operator-owned ComfyUI workflow template binding (offline, no execution).
 
 The graph is loaded from a locally provisioned JSON file, never from a request.
-Only the literal prompt placeholder is substituted; no user text becomes a
-node ID, class type, model path, or graph structure.
+Only allowlisted literal placeholders are substituted; user input never
+becomes a node ID, class type, model path, or graph structure.
 """
 from __future__ import annotations
 
@@ -11,6 +11,13 @@ from pathlib import Path
 
 from .video_contract import VideoRequest
 
+SLOTS = {
+    "__KALIV_VIDEO_PROMPT__": ("text", "prompt"),
+    "__KALIV_VIDEO_WIDTH__": ("width", "width"),
+    "__KALIV_VIDEO_HEIGHT__": ("height", "height"),
+    "__KALIV_VIDEO_FPS__": ("fps", "fps"),
+    "__KALIV_VIDEO_FRAMES__": ("length", "frames"),
+}
 PROMPT_SLOT = "__KALIV_VIDEO_PROMPT__"
 MAX_TEMPLATE_BYTES = 1_000_000
 
@@ -29,30 +36,36 @@ def trusted_text_to_video_factory(template_path: Path):
     graph = json.loads(raw)
     if not isinstance(graph, dict) or not graph:
         raise ValueError("Expected ComfyUI API-format workflow object")
-    slots = 0
+    found = {}
     for node_id, node in graph.items():
         if not isinstance(node_id, str) or not node_id.isdecimal() or not isinstance(node, dict):
             raise ValueError("Invalid ComfyUI workflow node")
         if not isinstance(node.get("class_type"), str) or not isinstance(node.get("inputs"), dict):
             raise ValueError("Invalid ComfyUI workflow node definition")
         for key, value in node["inputs"].items():
-            # A placeholder nested in a list/dict must not be sent to ComfyUI
-            # unchanged; accept only the single top-level text slot.
-            if PROMPT_SLOT in json.dumps(value, ensure_ascii=True):
-                if key != "text" or value != PROMPT_SLOT:
-                    raise ValueError("Prompt placeholder must be a direct text input")
-                slots += 1
-    if slots != 1:
-        raise ValueError("Exactly one text prompt placeholder is required")
+            serialized = json.dumps(value, ensure_ascii=True)
+            for marker, (expected_key, _) in SLOTS.items():
+                if marker not in serialized:
+                    continue
+                if key != expected_key or value != marker or marker in found:
+                    raise ValueError("Invalid or duplicate workflow parameter slot")
+                found[marker] = (node_id, key)
+    if set(found) != set(SLOTS):
+        raise ValueError("Workflow must bind prompt, width, height, fps and frames exactly once")
 
     def build(request: VideoRequest) -> dict:
         if request.kind != "text_to_video" or request.output_profile != "flat_2d":
             raise ValueError("Template only supports flat text-to-video")
-        # JSON roundtrip copies graph and ensures only JSON-compatible values.
         result = json.loads(json.dumps(graph))
-        for node in result.values():
-            if node["inputs"].get("text") == PROMPT_SLOT:
-                node["inputs"]["text"] = request.prompt
+        values = {
+            "prompt": request.prompt,
+            "width": request.width,
+            "height": request.height,
+            "fps": request.fps,
+            "frames": request.fps * request.duration_seconds + 1,
+        }
+        for marker, (node_id, key) in found.items():
+            result[node_id]["inputs"][key] = values[SLOTS[marker][1]]
         return result
 
     return build
