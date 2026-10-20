@@ -142,8 +142,11 @@ def is_available() -> bool:
         # broken wheels, and reports all of them as "unavailable" with no
         # reason -- which is the one failure mode most likely to cost an
         # evening, because ASR is the capability with the deepest native stack.
-        logging.getLogger(__name__).info(
-            "faster-whisper er ikke tilgængelig (tale-genkendelse slået fra): %r", exc)
+        # The worker configures a visible handler on "modelrig.worker"; the
+        # module INFO logger is otherwise silent under the default root WARNING.
+        logging.getLogger("modelrig.worker").warning(
+            "level=warn asr=import_unavailable exception_type=%s detail=%r",
+            type(exc).__name__, exc)
         return False
 
 
