@@ -35,12 +35,18 @@ def _canonical_bytes(path: "Path") -> bytes:
 
 
 def _hash_source_tree() -> str:
-    """Fingerprint every worker module that can execute on the rig."""
+    """Fingerprint worker and bundled BodyRig code using repository paths."""
+    sources = []
+    for prefix, directory in (("worker/app", _APP), ("bodyrig", _REPO / "bodyrig")):
+        for path in directory.rglob("*.py"):
+            relative = path.relative_to(directory).as_posix()
+            if "__pycache__" in path.parts:
+                continue
+            if prefix == "worker/app" and relative == "_build_stamp.py":
+                continue
+            sources.append((f"{prefix}/{relative}", path))
     h = hashlib.sha256()
-    for path in sorted(_APP.rglob("*.py")):
-        if "__pycache__" in path.parts or path.name == "_build_stamp.py":
-            continue
-        rel = path.relative_to(_APP).as_posix()
+    for rel, path in sorted(sources):
         h.update(rel.encode("utf-8"))
         h.update(b"\0")
         h.update(hashlib.sha256(_canonical_bytes(path)).digest())

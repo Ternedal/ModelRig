@@ -6,7 +6,9 @@
 
 The repository audit dated 2026-10-16 reports a tracked Android keystore and plaintext signing properties in a public repository. Assume that signing material has been exposed. Do not repeat passwords, private keys or keystore bytes in tickets, CI logs or this document. Publication of credentials does not by itself establish that a malicious APK exists.
 
-## Immediate safeguards
+`SECURITY.md` D1 (2026-07-13) explicitly accepts this exposure for the documented solo, sideload-only deployment and requires reassessment if distribution, users or app-identity assumptions change. This plan does **not** supersede that owner decision or independently authorize key rotation.
+
+## Proposed inventory and safeguards (non-disruptive)
 
 - Restrict signing/release permissions and audit who can publish distribution artifacts.
 - Inventory signing configuration in all Android build variants and workflows, including which identity signed currently installed APKs.
@@ -14,7 +16,7 @@ The repository audit dated 2026-10-16 reports a tracked Android keystore and pla
 - Preserve existing working app and rollback options until the migration has been tested.
 - Scan current and historical build artifacts and logs for accidental key distribution without copying secrets into reports.
 
-## Decision branches (requires owner approval)
+## Migration options if D1's accepted-risk assumptions change (requires owner approval)
 
 1. **Managed app signing:** verify whether an official key-upgrade mechanism is supported for the actual distribution channel, and distinguish upload key from app-signing key.
 2. **Direct/self-signed APK distribution:** assess Android-supported signing certificate lineage and target device compatibility. Do not assume a newly signed APK can update an existing installation in place.
@@ -30,8 +32,8 @@ The repository audit dated 2026-10-16 reports a tracked Android keystore and pla
 - [ ] Historical repository exposure evaluated; history rewrite is not mistaken for revocation.
 - [ ] Release candidate re-qualified at exact SHA after approved changes.
 
-## Freeze boundary
+## Governance boundary
 
-This branch is documentation-only. Do not modify protected main, signing files, worker 8099, release tags or installed apps. A new release requires fresh exact-head qualification and all applicable physical gates.
+The temporary v2.0.18 merge freeze was lifted on 2026-10-20. This document can be reviewed and merged without authorizing changes to signing files, installed APKs, application ID, worker 8099 or release tags. Any later key migration still requires an explicit risk-owner decision, test-device evidence, a verified upgrade/rollback path and fresh release qualification.
 
 Reference: `docs/audits/MODELRIG_REPOSITORY_AUDIT_2026-10-16.md`.
