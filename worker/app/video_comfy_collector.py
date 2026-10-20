@@ -4,6 +4,7 @@ This module has no HTTP routes or automatic background execution.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -65,8 +66,12 @@ class VideoResultCollector:
                 media_id = uuid.uuid4().hex
                 target = self.catalog.media_root / "Videos" / (media_id + ".mp4")
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with files[0].open("rb") as source, target.open("xb") as destination:
-                    shutil.copyfileobj(source, destination, length=1024 * 1024)
+                try:
+                    with files[0].open("rb") as source, target.open("xb") as destination:
+                        shutil.copyfileobj(source, destination, length=1024 * 1024)
+                except Exception:
+                    target.unlink(missing_ok=True)
+                    raise
                 try:
                     self.catalog.register(MediaItem(media_id=media_id, kind="video"), target)
                     if not self.store.transition(row["job_id"], "running", "completed", artifact_id=media_id):
