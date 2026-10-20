@@ -139,14 +139,18 @@ supervisor at a different file with `-env <path>` if needed. On every release th
 updater now verifies BOTH backend and worker `/healthz` report the new version,
 and rolls back if either doesn't.
 
-### Updating the updater itself (one-time)
+### Updating the updater itself
 
-`modelrig-updater` updates the server, worker and supervisor — but a running exe
-can't overwrite itself on Windows, so it does **not** replace itself. An existing
-rig therefore keeps running whatever updater version it was installed with. To get
-new updater logic (e.g. the 1.58.15 SHA-256 verification), replace
-`modelrig-updater-windows-x64.exe` **once, by hand** from the release, while the
-updater isn't running. After that, future updates verify checksums.
+`modelrig-updater-windows-x64.exe -self-update -dir C:\Rig\ModelRig` downloads
+and verifies the latest updater with checksums and release-bound provenance. A
+detached helper waits for the running updater to exit, replaces it and releases
+the update lock. Verify the new `-version` and wait for that lock to disappear
+before starting another update.
+
+For the frozen voice worker startup repair, the old updater must be replaced
+**before** the appliance update, so its old readiness deadline cannot roll back
+the new worker again. Follow the guarded PowerShell sequence in
+[the startup recovery runbook](../docs/VOICE_STARTUP_RECOVERY.md).
 
 ### Supervisor heartbeat (v1.58.23+)
 

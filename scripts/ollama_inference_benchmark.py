@@ -201,7 +201,7 @@ def benchmark(*, base_url: str, model: str, warmup: int = 1,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://127.0.0.1:11435")
+    parser.add_argument("--base-url", default="http://127.0.0.1:11434")
     parser.add_argument("--model", required=True)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--repetitions", type=int, default=3)

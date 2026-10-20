@@ -1,8 +1,7 @@
 # Local Ollama inference performance — bounded benchmark (experimental)
 
 **This is an opt-in local timing probe. It is not a release, security,
-quality, physical GPU or four-repository qualification. The frozen ModelRig
-V1 software and protected `main` stay unchanged.**
+quality, physical GPU or four-repository qualification. The temporary ModelRig v2.0.18 merge freeze was lifted on 2026-10-20. This diagnostic does not affect a running rig or authorize a new release.**
 
 ## Why this measurement exists
 
@@ -37,9 +36,9 @@ text or raw prompt; only the prompt's SHA-256.
 ```powershell
 cd C:\Rig\src\ModelRig
 # Only run from the experimental branch or from an explicitly downloaded,
-# reviewed copy of this nonproduction script. Do not switch frozen main.
+# reviewed copy of this nonproduction script. Do not replace or overwrite a checked-out release tree.
 python .\scripts\ollama_inference_benchmark.py `
-  --base-url http://127.0.0.1:11435 `
+  --base-url http://127.0.0.1:11434 `
   --model gemma4:26b --num-ctx 8192 `
   --warmup 1 --repetitions 3 `
   --output .\validation\ollama-local-benchmark.json
