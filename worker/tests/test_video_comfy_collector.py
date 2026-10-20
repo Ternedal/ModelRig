@@ -47,6 +47,17 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.job_id)["state"], "completed")
         self.assertEqual(self.catalog.resolve(media_id)[0].read_bytes(), b"test video")
 
+    def test_malformed_output_collection_fails_closed(self):
+        outputs = {"1": {"gifs": {"filename": "result.mp4"}}}
+        with patch("app.video_comfy_collector.configured_video_storage"):
+            self.assertIsNone(self.collector(outputs).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+
+    def test_pending_output_remains_running(self):
+        with patch("app.video_comfy_collector.configured_video_storage"):
+            self.assertIsNone(self.collector(None).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "running")
+
     def test_path_traversal_is_rejected(self):
         outputs = {"1": {"gifs": [{"type": "output", "filename": "bad.mp4", "subfolder": "../"}]}}
         with patch("app.video_comfy_collector.configured_video_storage"):
