@@ -8,6 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
+import threading
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 FILE = ROOT / "scripts" / "ollama_inference_benchmark.py"
@@ -168,5 +170,44 @@ with patch.object(benchmark.http.client, "HTTPConnection", FakeConnection):
         # Never overwrite even when output filename already exists.
         assert benchmark.main(["--model", "gemma4:26b", "--warmup", "0",
                                "--repetitions", "1", "--output", str(path)]) == 2
+
+# Absolute deadline also covers a peer dripping HTTP *headers*, not only
+# NDJSON lines. Simulate blocked getresponse() with a shutdown-aware socket.
+class HungHeaderSocket:
+    def __init__(self):
+        self.interrupted = threading.Event()
+
+    def shutdown(self, how):
+        self.interrupted.set()
+
+
+class HungHeaderConnection:
+    last_socket = None
+
+    def __init__(self, host, port, timeout):
+        self.sock = HungHeaderSocket()
+        type(self).last_socket = self.sock
+
+    def request(self, *args, **kwargs):
+        pass
+
+    def getresponse(self):
+        if not self.sock.interrupted.wait(timeout=4):
+            raise AssertionError("HTTP header acquisition exceeded absolute deadline")
+        raise TimeoutError("simulated header drip interrupted by watchdog")
+
+    def close(self):
+        pass
+
+
+with patch.object(benchmark.http.client, "HTTPConnection", HungHeaderConnection):
+    started = time.monotonic()
+    reject(lambda: benchmark.measure_once(
+        ("127.0.0.1", 11434), "gemma4:26b",
+        num_ctx=8192, num_predict=96,
+        prompt=benchmark.DEFAULT_PROMPT, timeout=1,
+    ), "unavailable or timed out")
+    assert time.monotonic() - started < 3
+    assert HungHeaderConnection.last_socket.interrupted.is_set()
 
 print("PASS: local Ollama inference benchmark; no external network or release authority")
