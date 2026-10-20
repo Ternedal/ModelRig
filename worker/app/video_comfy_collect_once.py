@@ -23,8 +23,8 @@ def collect_once() -> str | None:
     output = os.environ.get("COMFYUI_OUTPUT_DIRECTORY", "").strip()
     if not output or not Path(output).is_absolute():
         raise ValueError("COMFYUI_OUTPUT_DIRECTORY must be an absolute path")
-    output_root = Path(output).resolve(strict=True)
-    if not output_root.is_relative_to(storage.root):
+    output_root = Path(output)
+    if output_root.is_symlink() or not output_root.resolve(strict=True).is_relative_to(storage.root):
         raise ValueError("ComfyUI output must reside on configured external volume")
     store = VideoJobStore(paths["jobs"] / "video_jobs.sqlite")
     catalog = MediaCatalog(storage.root)
