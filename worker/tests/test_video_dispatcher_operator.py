@@ -19,6 +19,7 @@ class DispatcherOperatorTests(unittest.TestCase):
         self.workflow_factory = Mock(return_value={"node": {"class_type": "Example"}})
         self.ready = patch("app.video_dispatcher.configured_video_storage")
         self.storage = self.ready.start()
+        self.storage.return_value.assert_ready = Mock()
         self.addCleanup(self.ready.stop)
 
     def test_valid_job_submits_and_persists_prompt(self):
