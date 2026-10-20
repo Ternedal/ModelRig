@@ -84,6 +84,12 @@ jobs:
           done
           exit "$status"
 
+      - name: Experimental video worker unit tests (offline)
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHONPATH=worker python3 -m unittest discover -s worker/tests -p 'test_video_*.py' -v 2>&1 | tee -a /tmp/modelrig-ci-test.log
+
       - name: DevControl DC-L01 through DC-L14 tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
