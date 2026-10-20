@@ -1,6 +1,8 @@
 # Kaliv release acceptance matrix — operator baseline
 
 > This document is a **planning and evidence-capture template**, not an assertion that tests passed. Never promote a release based on this file alone. Exact-head gates and independent physical qualification remain authoritative.
+>
+> **Historical baseline (16 October 2026):** The checklist below is an unfilled template, not the live status of installed v2.0.18. The temporary v2.0.18 merge freeze was lifted on 20 October 2026; merging documentation does not constitute release approval. Capture fresh evidence for the actual target SHA and published assets before any later promotion.
 
 ## Candidate identity
 

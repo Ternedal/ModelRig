@@ -82,6 +82,7 @@ func TestParseAutomaticSelfUpdateArgsConsumesAllMainStringFlagValues(t *testing.
 		"--worker-health", "http://127.0.0.1:8099/healthz",
 		"--heartbeat", `C:\Rig\logs\heartbeat`,
 		"--supervisor-interval=10s",
+		"--startup-timeout", "5m",
 		"--supervisor-task", "KalivSupervisor",
 		"--dir", root,
 		"--repo", "Example/Repo",

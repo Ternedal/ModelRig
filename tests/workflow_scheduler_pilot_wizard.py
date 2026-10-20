@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Run the retained scheduler pilot contract against candidate 2.0.14."""
+"""Run the retained scheduler pilot contract against candidate 2.0.18."""
 from pathlib import Path
 
 _source_path = Path(__file__).with_name("workflow_scheduler_pilot_wizard.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.14"),
-    ("1.58.143", "2.0.14"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.18"),
+    ("1.58.143", "2.0.18"),
     ("1.58.142", "2.0.12"),
     ("#150", "#161"),
 ):
