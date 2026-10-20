@@ -1270,6 +1270,9 @@ private fun ChatScreen(
 
                 streamError?.let { (status, detail) ->
                     voiceError = friendlyError(RuntimeException("voice ($status): $detail"))
+                    // A terminal error is not a completed assistant turn.
+                    // Never persist partial generated chunks as conversation memory.
+                    return@launch
                 }
 
                 // Persist the finished turn like a normal rig turn.
