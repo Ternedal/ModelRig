@@ -104,10 +104,13 @@ def build_image_router(
             if job.status != JobStatus.SUCCEEDED:
                 raise HTTPException(status_code=409, detail="Image job is not completed")
             # Keep the in-process ledger bounded to jobs still retained by the manager.
+            for old_id in tuple(ingestion_locks):
+                if old_id not in service.manager._jobs and not ingestion_locks[old_id].locked():
+                    ingestion_locks.pop(old_id, None)
+                    ingested_artifacts.pop(old_id, None)
             for old_id in tuple(ingested_artifacts):
                 if old_id not in service.manager._jobs:
                     ingested_artifacts.pop(old_id, None)
-                    ingestion_locks.pop(old_id, None)
             if job_id in ingested_artifacts:
                 artifact_id = ingested_artifacts[job_id]
                 try:
