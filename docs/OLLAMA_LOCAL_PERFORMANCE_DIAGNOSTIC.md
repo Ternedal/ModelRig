@@ -1,4 +1,4 @@
-# Local ModelRig/Ollama inference speed — read-only diagnostics (DRAFT)
+# Local ModelRig/Ollama inference speed — read-only diagnostics
 
 This is **not** Stage-B CI speed. The ongoing Stage-B work shortens
 the test/release pipeline. This probe measures real token-generation
@@ -27,7 +27,7 @@ GPU/CPU split or per-GPU placement.** Use `ollama ps` and `nvidia-smi`
 on the rig for that. The first request may already be warm; later
 requests are called "warm repeats" only for grouping.
 
-## Run in PowerShell on the rig (after checking out the qualified diagnostic branch)
+## Run in PowerShell on the rig (from a checkout containing this tool)
 
 ```powershell
 cd C:\Rig\src\ModelRig
@@ -83,12 +83,7 @@ checks are unchanged**.
 
 ## Safety and release authority
 
-This is a **separate draft branch off frozen ModelRig V1**, with only
-a stand-alone diagnostic script, pure offline negative tests and this
-documentation. It does not modify the worker's Ollama client or any
-release/physical gate. The JSON output is an **observation**, not proof
-that system latency meets a target. No merge into frozen main without
-explicit release authorization.
+This standalone diagnostic is proposed against the current **ModelRig v2.0.18 `main`**. The temporary merge freeze was lifted on 2026-10-20. The change is limited to an offline-tested read-only diagnostic script, its tests, CI contract, generated test inventory and this documentation. It does not modify the worker's Ollama client or any release/physical gate. The JSON output is an **observation**, not proof that system latency meets a target. Any merge still requires current-head CI and review; a subsequent software release or production activation requires separate authorization and qualification.
 
 ## Repeatable baseline protocol (no automatic tuning)
 
