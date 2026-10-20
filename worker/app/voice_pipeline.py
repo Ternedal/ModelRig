@@ -109,6 +109,29 @@ _ASR_LOCK = asyncio.Lock()
 _TTS_LOCK = asyncio.Lock()
 
 
+async def _run_backend_to_completion(fn, *args, **kwargs):
+    """Keep the caller's backend lock held until a to_thread worker exits.
+
+    Cancelling asyncio.to_thread only cancels its awaiting coroutine, not the
+    running OS thread. Shield the worker and join it before propagating
+    cancellation so locks and temporary WAV paths remain valid.
+    """
+    worker = asyncio.create_task(asyncio.to_thread(fn, *args, **kwargs))
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        # The outer voice producer is cancelled on disconnect. Do not release
+        # its ASR/TTS lock until the offloaded synchronous call has terminated.
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        raise
+
+
 def has_speech(text: str) -> bool:
     """Is there anything here a voice could actually say?
 
@@ -170,6 +193,7 @@ async def converse(
     llm_api_key: str | None = None,
     on_chunk: "Callable[[dict], Awaitable[None]] | None" = None,
     on_transcript: "Callable[[str], Awaitable[None]] | None" = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict:
     """Run one full spoken turn from an audio file.
 
@@ -212,14 +236,23 @@ async def converse(
     # event loop used to serialize these by accident, and the faster-whisper
     # model is shared state. Keep the serialization; drop the freeze.
     async with _ASR_LOCK:
-        asr = await asyncio.to_thread(voice_asr.transcribe_wav, audio_path, language)
+        asr = await _run_backend_to_completion(voice_asr.transcribe_wav, audio_path, language)
     transcript = asr["text"]
     if on_transcript is not None:
         await on_transcript(transcript)
 
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
-    messages = [{"role": "user", "content": transcript}]
+    # Never accept arbitrary roles or unbounded client-supplied context.
+    prior = [
+        {"role": item["role"], "content": item["content"][:4000]}
+        for item in (history or [])[-12:]
+        if isinstance(item, dict)
+        and item.get("role") in ("user", "assistant")
+        and isinstance(item.get("content"), str)
+        and item["content"].strip()
+    ]
+    messages = prior + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
     chunks: list[dict] = []
@@ -243,7 +276,7 @@ async def converse(
         # Piper is a subprocess and a loaded model: same reasoning as ASR.
         # Serialized so sentences still reach the phone in order.
         async with _TTS_LOCK:
-            result = await asyncio.to_thread(voice_tts.synthesize_to_wav, speakable, wav)
+            result = await _run_backend_to_completion(voice_tts.synthesize_to_wav, speakable, wav)
         # Belt and braces: even with the guard above, TTS may hand back silence
         # for text it cannot voice. Emitting a chunk with no audio would make
         # the client show a bubble it can never play.
