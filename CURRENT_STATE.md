@@ -66,6 +66,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
+| `KALIV_EXPERIMENTAL_MEDIA_OPERATOR_API` | `0` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
