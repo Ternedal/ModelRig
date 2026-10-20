@@ -32,6 +32,94 @@ jobs:
       # Push/main and workflow_dispatch keep the reusable default=true gate.
       run_stage_b: ${{ github.event_name != 'pull_request' }}
 
+  # Source-mode imports can succeed while the shipped exe lacks a sibling
+  # package. Exercise the frozen entrypoint before a release tag is needed.
+  windows-worker-package:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      EXPECTED_BUILD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.23"
+      - name: Build the release worker package
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_BUILD_SHA) { throw "worker package checkout identity mismatch" }
+          $env:GITHUB_SHA = $actual
+          python -m pip install -r worker/requirements.txt -r worker/requirements-release-voice.txt pyinstaller==6.22.3
+          python scripts/stamp_build_identity.py
+          pyinstaller --noconfirm --onefile --name modelrig-worker-windows-x64 --paths . --paths worker --collect-all faster_whisper --collect-all ctranslate2 --collect-all soundfile --collect-all piper --collect-all onnxruntime --collect-all av --collect-all nvidia worker/run_worker.py
+          python scripts/verify_frozen_voice_package.py dist/modelrig-worker-windows-x64.exe
+          if ($LASTEXITCODE -ne 0) { throw "frozen voice payload verification failed" }
+      - name: Boot the frozen worker outside the checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expected = (Get-Content VERSION -Raw).Trim()
+          $expectedCode = (python -c "import sys; sys.path.insert(0, 'worker'); from app.build_identity import code_fingerprint; print(code_fingerprint())").Trim()
+          if ($LASTEXITCODE -ne 0 -or $expectedCode -notmatch '^[0-9a-f]{64}$') { throw "worker source fingerprint could not be calculated" }
+          $exe = (Resolve-Path dist/modelrig-worker-windows-x64.exe).Path
+          $stdout = Join-Path $env:RUNNER_TEMP "worker-package-stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "worker-package-stderr.log"
+          $env:PYTHONPATH = ""
+          $env:MODELRIG_WORKER_HOST = "127.0.0.1"
+          $env:MODELRIG_WORKER_PORT = "8099"
+          $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          $worker = Start-Process -FilePath $exe -WorkingDirectory $env:RUNNER_TEMP -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $health = $null
+            foreach ($i in 1..90) {
+              if ($worker.HasExited) { throw "frozen worker exited with code $($worker.ExitCode)" }
+              try { $health = Invoke-RestMethod http://127.0.0.1:8099/healthz -TimeoutSec 2; break }
+              catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $health -or $health.service -ne "modelrig-worker" -or $health.version -ne $expected) {
+              throw "frozen worker health/version check failed"
+            }
+            $full = Invoke-RestMethod http://127.0.0.1:8099/health/full -TimeoutSec 5
+            if ($full.checks.worker.version -ne $expected) { throw "frozen worker full-health version check failed" }
+            if ($full.build.frozen -ne $true -or $full.build.commit_sha -ne $env:EXPECTED_BUILD_SHA) { throw "frozen worker commit identity mismatch" }
+            if ($full.build.code_sha256 -ne $expectedCode) { throw "frozen worker source fingerprint mismatch" }
+            if ($full.capabilities.asr -ne $true -or $full.capabilities.tts -ne $true) {
+              throw "Frozen release worker must include ASR and TTS: $($full.capabilities | ConvertTo-Json -Compress)"
+            }
+            $asr = Invoke-RestMethod http://127.0.0.1:8099/voice/asr/status -TimeoutSec 10
+            $tts = Invoke-RestMethod http://127.0.0.1:8099/voice/tts/status -TimeoutSec 10
+            if ($asr.available -ne $true -or $tts.available -ne $true) { throw "frozen voice providers are unavailable" }
+            Write-Host "frozen worker started outside the checkout: $expected"
+          }
+          finally {
+            if (-not $worker.HasExited) { & taskkill.exe /PID $worker.Id /T /F | Out-Null }
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+          }
+
+      - name: Delayed frozen worker survives supervisor and updater readiness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:MODELRIG_COLD_BOOT_WORKER_EXE = (Resolve-Path dist/modelrig-worker-windows-x64.exe).Path
+          $env:MODELRIG_COLD_BOOT_SUPERVISOR_EXE = Join-Path $env:RUNNER_TEMP 'startup-supervisor.exe'
+          $env:MODELRIG_COLD_BOOT_SERVER_EXE = Join-Path $env:RUNNER_TEMP 'startup-server.exe'
+          Push-Location backend
+          try {
+            go build -o $env:MODELRIG_COLD_BOOT_SUPERVISOR_EXE ./cmd/modelrig-supervisor
+            if ($LASTEXITCODE -ne 0) { throw 'supervisor build failed' }
+            go build -o $env:MODELRIG_COLD_BOOT_SERVER_EXE ./cmd/modelrig-server
+            if ($LASTEXITCODE -ne 0) { throw 'server build failed' }
+            go test -v ./cmd/modelrig-updater -run '^TestFrozenVoiceWorkerSlowBootUnderSupervisor$' -count=1 -timeout=8m
+            if ($LASTEXITCODE -ne 0) { throw 'delayed frozen appliance startup failed' }
+          } finally { Pop-Location }
+
   # The optional browser runtime stays out of worker/requirements.txt. This job
   # validates the pinned package and locked profile, launches real Chromium
   # against one controlled localhost fixture, then proves the claim-bound CDP
