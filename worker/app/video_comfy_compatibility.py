@@ -19,7 +19,10 @@ def probe_nodes(template_path, *, opener=urlopen):
             raw_template = stream.read(MAX_TEMPLATE_BYTES + 1)
         if len(raw_template) > MAX_TEMPLATE_BYTES:
             return {"status": "invalid_template"}
-        graph = json.loads(raw_template)
+        try:
+            graph = json.loads(raw_template)
+        except (ValueError, UnicodeError):
+            return {"status": "invalid_template"}
         if not isinstance(graph, dict) or not graph or any(
             not isinstance(node, dict) or not isinstance(node.get("class_type"), str)
             or not isinstance(node.get("inputs", {}), dict) for node in graph.values()
