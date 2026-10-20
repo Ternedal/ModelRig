@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
+import os
 from pathlib import Path
 
 from .video_comfy_adapter import ComfyVideoClient, VideoBackendError
@@ -68,6 +69,8 @@ class VideoResultCollector:
                 try:
                     with files[0].open("rb") as source, target.open("xb") as destination:
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
+                        destination.flush()
+                        os.fsync(destination.fileno())
                 except Exception:
                     target.unlink(missing_ok=True)
                     raise
