@@ -27,7 +27,27 @@ def probe_nodes(template_path, *, opener=urlopen):
         if not isinstance(installed, dict):
             return {"status": "invalid_response", "required": required}
         missing = sorted(set(required) - set(installed))
-        return {"status": "compatible" if not missing else "missing_nodes",
-                "required": required, "missing": missing}
+        invalid_inputs = []
+        # Links and dynamic widget values are not validated here.
+        for node_id, node in graph.items():
+            class_type = node["class_type"]
+            if class_type in missing:
+                continue
+            info = installed.get(class_type)
+            if not isinstance(info, dict) or not isinstance(info.get("input"), dict):
+                return {"status": "invalid_response", "required": required}
+            declared = info["input"]
+            allowed = set()
+            for section in ("required", "optional", "hidden"):
+                fields = declared.get(section, {})
+                if not isinstance(fields, dict):
+                    return {"status": "invalid_response", "required": required}
+                allowed.update(fields)
+            for field in node.get("inputs", {}):
+                if field not in allowed:
+                    invalid_inputs.append({"node_id": node_id, "class_type": class_type, "input": field})
+        status = "missing_nodes" if missing else "invalid_inputs" if invalid_inputs else "compatible"
+        return {"status": status, "required": required,
+                "missing": missing, "invalid_inputs": invalid_inputs}
     except (OSError, ValueError, KeyError, TypeError, HTTPError, URLError, TimeoutError):
         return {"status": "unavailable"}
