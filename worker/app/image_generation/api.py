@@ -125,8 +125,7 @@ def build_image_router(
             lock = ingestion_locks.setdefault(job_id, asyncio.Lock())
             if lock.locked():
                 raise HTTPException(status_code=409, detail="Image ingestion in progress")
-            try:
-                async with lock:
+            async with lock:
                     # Recheck after acquiring: another request may have finished
                     # ingestion while this coroutine was waiting for the lock.
                     if job_id in ingested_artifacts:
@@ -149,12 +148,7 @@ def build_image_router(
                         raise HTTPException(status_code=422, detail="Image ingestion failed") from exc
                     ingested_artifacts[job_id] = artifact_id
                     return {"artifact_id": artifact_id}
-            finally:
-                # Keep the lock associated with its retained job. Removing it
-                # here allows a third request to create a different lock while
-                # an earlier waiter is still blocked on the first one.
-                # Prune locks only when their jobs leave the manager.
-                pass
+
 
         @router.get("/artifacts/{artifact_id}/thumbnail")
         async def get_image_thumbnail(
