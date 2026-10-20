@@ -51,7 +51,7 @@ class VideoResultCollector:
                             folder = entry.get("subfolder", "")
                             if not isinstance(name, str) or not isinstance(folder, str):
                                 continue
-                            if Path(name).name != name or not name.lower().endswith(".mp4"):
+                            if Path(name).name != name or "\\\\" in name or ":" in name or not name.lower().endswith(".mp4"):
                                 continue
                             if Path(folder).is_absolute() or ".." in Path(folder).parts or "\\\\" in folder or ":" in folder:
                                 continue
