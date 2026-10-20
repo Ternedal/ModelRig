@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.MediaGalleryClient
 import dk.ternedal.modelrig.net.MediaGalleryEntry
+import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,7 +59,7 @@ fun MediaGalleryScreen(
     }
 
     LaunchedEffect(Unit) { refresh() }
-    Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize()) {
+    Surface(color = KalivTheme.colors.background, modifier = Modifier.fillMaxSize().kalivScreenInsets()) {
         Column(Modifier.fillMaxSize().padding(18.dp).verticalScroll(rememberScrollState())) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onClose) { Text("Tilbage") }
