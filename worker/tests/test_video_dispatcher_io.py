@@ -2,7 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.video_contract import VideoRequest
 from app.video_dispatcher import VideoDispatcher
@@ -18,7 +18,7 @@ class DispatcherIOTests(unittest.TestCase):
                 def submit_trusted_workflow(self, workflow):
                     return "prompt_123"
             dispatcher = VideoDispatcher(store, Client(), lambda request: {"node": {"class_type": "Example"}})
-            with patch("app.video_dispatcher.configured_video_storage"), patch.object(
+            with patch("app.video_dispatcher.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))), patch.object(
                 store, "record_prompt", side_effect=OSError("disk unavailable")
             ):
                 self.assertIsNone(dispatcher.dispatch_one())
