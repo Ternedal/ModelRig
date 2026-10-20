@@ -53,6 +53,20 @@ class CollectorTests(unittest.TestCase):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
 
+    def test_copy_failure_removes_partial_file(self):
+        (self.output / "result.mp4").write_bytes(b"test video")
+        outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        from unittest.mock import patch as mock_patch
+        def interrupted_copy(source, destination, length):
+            destination.write(b"partial")
+            raise OSError("disk full")
+        with mock_patch("app.video_comfy_collector.configured_video_storage"), mock_patch(
+            "app.video_comfy_collector.shutil.copyfileobj", side_effect=interrupted_copy
+        ):
+            self.assertIsNone(self.collector(outputs).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_pending_output_remains_running(self):
         with patch("app.video_comfy_collector.configured_video_storage"):
             self.assertIsNone(self.collector(None).collect_one())
