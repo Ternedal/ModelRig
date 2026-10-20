@@ -28,6 +28,7 @@ def probe_nodes(template_path, *, opener=urlopen):
             return {"status": "invalid_response", "required": required}
         missing = sorted(set(required) - set(installed))
         invalid_inputs = []
+        invalid_choices = []
         # Links and dynamic widget values are not validated here.
         for node_id, node in graph.items():
             class_type = node["class_type"]
@@ -46,8 +47,25 @@ def probe_nodes(template_path, *, opener=urlopen):
             for field in node.get("inputs", {}):
                 if field not in allowed:
                     invalid_inputs.append({"node_id": node_id, "class_type": class_type, "input": field})
-        status = "missing_nodes" if missing else "invalid_inputs" if invalid_inputs else "compatible"
+                    continue
+                value = node["inputs"][field]
+                # ComfyUI enumerated widget options include available checkpoint
+                # filenames. Literal selections must match; placeholders and links
+                # are intentionally deferred until request binding/runtime.
+                if isinstance(value, str) and value.startswith("__KALIV_VIDEO_"):
+                    continue
+                if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str) and value[0] in graph and type(value[1]) is int:
+                    continue
+                definition = next((declared[section][field] for section in ("required", "optional", "hidden")
+                                   if field in declared.get(section, {})), None)
+                if (isinstance(definition, list) and definition
+                        and isinstance(definition[0], list)
+                        and isinstance(value, str) and value not in definition[0]):
+                    invalid_choices.append({"node_id": node_id, "class_type": class_type, "input": field})
+        status = ("missing_nodes" if missing else "invalid_inputs" if invalid_inputs
+                  else "invalid_choices" if invalid_choices else "compatible")
         return {"status": status, "required": required,
-                "missing": missing, "invalid_inputs": invalid_inputs}
+                "missing": missing, "invalid_inputs": invalid_inputs,
+                "invalid_choices": invalid_choices}
     except (OSError, ValueError, KeyError, TypeError, HTTPError, URLError, TimeoutError):
         return {"status": "unavailable"}
