@@ -26,6 +26,16 @@ class ComfyVideoClientTests(unittest.TestCase):
             with self.subTest(prompt_id=prompt_id), self.assertRaises(ValueError):
                 ComfyVideoClient().history(prompt_id)
 
+    def test_inconsistent_completion_status_stays_pending(self):
+        client = ComfyVideoClient()
+        for status in ({"completed": True, "status_str": "running"},
+                       {"completed": True},
+                       {"status_str": "success"}):
+            with self.subTest(status=status), patch.object(client, "history", return_value={
+                "prompt_1": {"status": status, "outputs": {"node": {"videos": []}}}
+            }):
+                self.assertIsNone(client.completed_outputs("prompt_1"))
+
     def test_outputs_are_not_ready_until_completed(self):
         client = ComfyVideoClient()
         with patch.object(client, "history", return_value={
