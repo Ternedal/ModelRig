@@ -69,7 +69,8 @@ class VideoResultCollector:
                 if malformed_output or len(files) != 1 or not 0 < files[0].stat().st_size <= 2 * 1024 ** 3:
                     raise ValueError("Expected exactly one valid MP4 output")
                 # A file that is still being written must not be published.
-                initial_size = files[0].stat().st_size
+                initial_stat = files[0].stat()
+                initial_size = initial_stat.st_size
                 media_id = uuid.uuid4().hex
                 target = self.catalog.media_root / "Videos" / (media_id + ".mp4")
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -78,7 +79,10 @@ class VideoResultCollector:
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
                         destination.flush()
                         os.fsync(destination.fileno())
-                if files[0].stat().st_size != initial_size or target.stat().st_size != initial_size:
+                final_stat = files[0].stat()
+                if (final_stat.st_size != initial_size or
+                    final_stat.st_mtime_ns != initial_stat.st_mtime_ns or
+                    target.stat().st_size != initial_size):
                     target.unlink(missing_ok=True)
                     raise ValueError("ComfyUI output changed during copy")
                 except Exception:
