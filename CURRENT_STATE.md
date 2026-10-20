@@ -70,6 +70,8 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_EXPERIMENTAL_MEDIA_OPERATOR_API` | `0` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
+| `KALIV_MEDIA_MIN_FREE_GB` | `20` |
+| `KALIV_MEDIA_ROOT` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
