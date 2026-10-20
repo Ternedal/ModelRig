@@ -40,7 +40,7 @@ class VideoDispatcher:
                 if not self.store.record_prompt(job_id, prompt_id):
                     raise VideoBackendError("Cannot persist backend prompt ID")
                 return prompt_id
-            except (VideoBackendError, ValueError, TypeError, KeyError):
+            except (VideoBackendError, ValueError, TypeError, KeyError, OSError):
                 self.store.transition(job_id, "running", "failed", error_code="submission_failed")
                 return None
         return None
