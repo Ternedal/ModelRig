@@ -1,0 +1,60 @@
+name: validate-v18-download-check
+
+on:
+  push:
+    branches: [test/released-v2.0.18-startup-20261020]
+    paths:
+      - .github/workflows/released-v2.0.18-startup-check.yml
+      - .github/workflows/validate-v18-download-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  parse-powershell-without-executing-release-commands:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.11'
+      - name: Extract the four prepared native release checks
+        shell: python
+        run: |
+          import os
+          import re
+          import textwrap
+          from pathlib import Path
+          source = Path('.github/workflows/released-v2.0.18-startup-check.yml').read_text(encoding='utf-8')
+          blocks = re.findall(r'(?m)^        run: \|\n((?:(?: {10}[^\n]*|)\n)+)', source)
+          assert len(blocks) == 4, 'Expected the four exact workflow run blocks'
+          root = Path(os.environ['RUNNER_TEMP']) / 'v18-powershell-parse'
+          root.mkdir()
+          for index, block in enumerate(blocks):
+              (root / f'check-{index}.ps1').write_text(textwrap.dedent(block), encoding='utf-8')
+          parser = '''param([string]$Root)
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in (Get-ChildItem -LiteralPath $Root -Filter 'check-*.ps1')) {
+              $tokens = $null
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+              if ($errors.Count -gt 0) {
+                  $errors | Format-List | Out-Host
+                  throw ('PowerShell parse failed: ' + $file.Name)
+              }
+          }
+          Write-Host ('All four release-check scripts parse on PowerShell ' + $PSVersionTable.PSVersion.ToString())
+          '''
+          (root / 'parse.ps1').write_text(textwrap.dedent(parser), encoding='utf-8')
+      - name: Parse with Windows PowerShell 5.1 and PowerShell 7
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'v18-powershell-parse'
+          foreach ($shell in @('powershell.exe', 'pwsh.exe')) {
+            & $shell -NoProfile -NonInteractive -File (Join-Path $root 'parse.ps1') -Root $root
+            if ($LASTEXITCODE -ne 0) { throw "Release-check syntax failed in $shell" }
+          }
+          Write-Host 'Syntax validation only: no release downloads or appliance commands were executed.'
