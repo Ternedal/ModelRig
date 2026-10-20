@@ -36,10 +36,13 @@ class VideoResultCollector:
                 outputs = self.client.completed_outputs(row["prompt_id"])
                 if outputs is None:
                     return None
+                if not isinstance(outputs, dict):
+                    raise ValueError("Malformed ComfyUI output collection")
                 files = []
                 malformed_output = False
                 for node in outputs.values():
                     if not isinstance(node, dict):
+                        malformed_output = True
                         continue
                     for key in ("gifs", "videos"):
                         entries = node.get(key, [])
