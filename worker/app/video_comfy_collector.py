@@ -71,6 +71,10 @@ class VideoResultCollector:
                 # A file that is still being written must not be published.
                 initial_stat = files[0].stat()
                 initial_size = initial_stat.st_size
+                with files[0].open("rb") as probe:
+                    header = probe.read(12)
+                if len(header) != 12 or header[4:8] != b"ftyp" or int.from_bytes(header[:4], "big") < 12:
+                    raise ValueError("ComfyUI output is not an MP4 container")
                 media_id = uuid.uuid4().hex
                 target = self.catalog.media_root / "Videos" / (media_id + ".mp4")
                 target.parent.mkdir(parents=True, exist_ok=True)
