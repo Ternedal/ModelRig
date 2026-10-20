@@ -53,6 +53,24 @@ class CollectorTests(unittest.TestCase):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
 
+    def test_same_size_output_rewrite_is_rejected(self):
+        source = self.output / "result.mp4"
+        source.write_bytes(b"test video")
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        import shutil
+        import os
+        def rewriting_copy(src, dst, length):
+            shutil.copyfileobj(src, dst, length)
+            before = source.stat()
+            source.write_bytes(b"other data")
+            os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+        with patch("app.video_comfy_collector.configured_video_storage"), patch(
+            "app.video_comfy_collector.shutil.copyfileobj", side_effect=rewriting_copy
+        ):
+            self.assertIsNone(self.collector(outputs).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_output_growth_during_copy_is_rejected(self):
         source = self.output / "result.mp4"
         source.write_bytes(b"test video")
