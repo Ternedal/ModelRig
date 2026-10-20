@@ -6,10 +6,31 @@ on:
       - scripts/Recover-UpdaterV2018.ps1
       - tests/updater_recovery_windows.ps1
       - .github/workflows/updater-v18-recovery-check.yml
+      - backend/cmd/modelrig-updater/self_update*.go
 permissions:
   contents: read
   attestations: read
 jobs:
+  replacement-helper:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: stable
+      - name: Real replacement process, sharing violation retry and durable failure log
+        shell: pwsh
+        working-directory: backend
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @('cmd/modelrig-updater/self_update.go', 'cmd/modelrig-updater/self_update_process_windows.go', 'cmd/modelrig-updater/self_update_process_windows_test.go', 'cmd/modelrig-updater/self_update_test.go')
+          $unformatted = @(gofmt -l @files)
+          if ($LASTEXITCODE -ne 0 -or $unformatted.Count -gt 0) { throw "Unformatted Go files: $unformatted" }
+          go test -v ./cmd/modelrig-updater -count=1 -timeout=5m
+          if ($LASTEXITCODE -ne 0) { throw 'Native replacement helper tests failed' }
   released-updater-recovery:
     runs-on: windows-latest
     timeout-minutes: 10

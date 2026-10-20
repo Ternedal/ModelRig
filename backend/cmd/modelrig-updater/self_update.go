@@ -275,8 +275,45 @@ func powershellLiteral(value string) string {
 
 func replacementHelperScript(pid int, pending, live, lockPath string) string {
 	return fmt.Sprintf(
-		"$ErrorActionPreference='Stop'; Wait-Process -Id %d -ErrorAction SilentlyContinue; try { Move-Item -LiteralPath %s -Destination %s -Force } finally { Remove-Item -LiteralPath %s -Force -ErrorAction SilentlyContinue }",
-		pid, powershellLiteral(pending), powershellLiteral(live), powershellLiteral(lockPath),
+		`$ErrorActionPreference='Stop'
+$pending=%s
+$live=%s
+$lockPath=%s
+try {
+    if (Get-Process -Id %d -ErrorAction SilentlyContinue) {
+        Wait-Process -Id %d -Timeout 120 -ErrorAction Stop
+    }
+    $expected=(Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash
+    $backup=$live+'.previous-'+[Guid]::NewGuid().ToString('N')
+    $deadline=[DateTime]::UtcNow.AddSeconds(45)
+    $reportedSharing=$false
+    while ($true) {
+        try {
+            [IO.File]::Replace($pending,$live,$backup)
+            break
+        } catch {
+            $cause=$_.Exception
+            while ($cause.InnerException) { $cause=$cause.InnerException }
+            $code=$cause.HResult -band 0xffff
+            if ($code -notin @(32,33) -or [DateTime]::UtcNow -ge $deadline) { throw }
+            if (-not $reportedSharing) {
+                Write-Output ('Replacement waiting for file handle release: '+$_.Exception.Message)
+                $reportedSharing=$true
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if ((Get-FileHash -LiteralPath $live -Algorithm SHA256).Hash -cne $expected) {
+        throw 'Installed updater checksum differs from the verified pending file'
+    }
+    Remove-Item -LiteralPath $lockPath -Force -ErrorAction Stop
+    Write-Output ('Updater replacement complete; original kept at '+$backup)
+    exit 0
+} catch {
+    [Console]::Error.WriteLine(('Updater replacement failed; lock and recovery files retained: '+$_))
+    exit 1
+}`,
+		powershellLiteral(pending), powershellLiteral(live), powershellLiteral(lockPath), pid, pid,
 	)
 }
 
