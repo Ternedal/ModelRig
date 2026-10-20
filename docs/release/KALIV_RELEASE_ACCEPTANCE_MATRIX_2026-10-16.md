@@ -13,6 +13,8 @@
 | VoiceRig commit SHA | NOT_RECORDED |
 | VisionRig commit SHA | NOT_RECORDED |
 | GitHub release tag + release URL and publish timestamp | NOT_RECORDED |
+| Immutable release asset inventory (asset filename, published URL, size and SHA-256 for every shipped artifact) | NOT_RECORDED |
+| Signed/released distribution bundle or archive SHA-256 and attestation subject | NOT_RECORDED |
 | Android application ID/version/signing fingerprint | NOT_RECORDED |
 | Go backend + Python worker build IDs | NOT_RECORDED |
 | Signed APK SHA-256 (versioned APK and kaliv-latest.apk) | NOT_RECORDED |
@@ -24,14 +26,14 @@
 
 ## Evidence vocabulary
 
-Use only `PASS`, `FAIL`, `BLOCKED`, or `NOT_RUN`. `PASS` requires dated, linked evidence for the **exact source and installed artifact bytes** (SHA-256, signature and provenance, not just a release name). A PR description or CI pass cannot substitute for a real device test. Do not silently reuse a receipt from a rebuilt artifact with the same version.
+Use only `PASS`, `FAIL`, `BLOCKED`, or `NOT_RUN`. `PASS` requires dated, linked evidence for the **exact source and installed artifact bytes** (SHA-256, signature and provenance, not just a release name). A PR description or CI pass cannot substitute for a real device test. For **every physical observation**, record the source repository and exact commit, release tag, installed asset filenames, independently computed SHA-256 per installed APK/JAR/EXE/bundle, signing-certificate fingerprint where applicable, and verification of each attestation subject against those bytes; link the receipt to that immutable asset inventory. If any subject, hash, signature or installer identity is absent or mismatched, mark the affected gate `BLOCKED`, not `PASS`. Do not silently reuse a receipt from a rebuilt artifact with the same version.
 
 ## Mandatory acceptance
 
 | Gate | Status | Required evidence |
 | --- | --- | --- |
 | All required exact-head CI and CodeQL | NOT_RUN | GitHub run URLs and candidate SHAs |
-| Release asset completeness, hashes and provenance | NOT_RUN | Verify each expected APK/JAR/EXE/bundle/checksum and signed attestation against the exact release; record SHA-256 for every asset and link verification logs |
+| Release asset completeness, hashes and provenance | NOT_RUN | Verify published asset names, SHA-256 hashes, signatures and attestation subjects against each installed APK/JAR/EXE/bundle/archive and checksum. Cross-check the release asset manifest and physical receipt hashes; missing identities or mismatches are BLOCKED |
 | Cross-repo inventory/source authority | NOT_RUN | Bound manifests and reviewed transition receipts |
 | Android mic permission and capture | NOT_RUN | Device log and operator result |
 | Android → authenticated Go proxy → worker | NOT_RUN | Correlated request trace with credentials redacted |
