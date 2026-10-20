@@ -78,12 +78,13 @@ def measure_once(
     first_token_ns: int | None = None
     final: dict | None = None
     events = 0
+    active_socket = [None]  # getresponse() may detach conn.sock on Connection: close
     # A socket read timeout is per read. Malicious or broken loopback servers
     # can drip response headers indefinitely without any single read timing out.
     # An independent deadline watchdog interrupts the socket even during
     # request() / getresponse(), before streaming response lines are available.
     def abort_overdue_connection():
-        sock = getattr(conn, "sock", None)
+        sock = active_socket[0] or getattr(conn, "sock", None)
         if sock is not None:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
@@ -98,6 +99,7 @@ def measure_once(
             "Content-Type": "application/json",
             "Accept": "application/x-ndjson",
         })
+        active_socket[0] = getattr(conn, "sock", None)
         response = conn.getresponse()
         if time.monotonic_ns() > deadline_ns:
             raise BenchmarkError("local Ollama overall timeout exceeded")
