@@ -22,6 +22,26 @@ class VideoPreflightTests(unittest.TestCase):
         with patch('app.video_preflight.subprocess.run', side_effect=TimeoutExpired('nvidia-smi', 8)):
             self.assertEqual(probe_nvidia_gpus()['status'], 'unavailable')
 
+    def test_workflow_template_outside_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "media"
+            root.mkdir()
+            outside = base / "workflow.json"
+            outside.write_text("{}", encoding="utf-8")
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch("app.video_preflight.configured_video_storage", return_value=storage):
+                report = check({"KALIV_COMFY_WORKFLOW_TEMPLATE": str(outside)})
+            self.assertEqual(report["checks"]["workflow_template"], "invalid")
+            self.assertFalse(report["ready"])
+
+    def test_missing_workflow_template_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = ExternalMediaStorage(tmp, minimum_free_gb=1)
+            with patch("app.video_preflight.configured_video_storage", return_value=storage):
+                report = check({})
+            self.assertEqual(report["checks"]["workflow_template"], "not_configured")
+
     def test_missing_configuration_fails(self):
         report = check({})
         self.assertFalse(report["ready"])
