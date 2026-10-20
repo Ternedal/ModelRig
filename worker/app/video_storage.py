@@ -45,8 +45,11 @@ class ExternalMediaStorage:
             "cache": self.root / "Cache",
         }
         for path in paths.values():
-            if path.is_symlink():
-                raise MediaStorageUnavailable("Symlinked media subdirectory forbidden")
+            # Reject symlinks in every existing component, including Media itself.
+            # Checking only the leaf misses Media -> another volume.
+            for component in (path.parent, path):
+                if component.is_symlink():
+                    raise MediaStorageUnavailable("Symlinked media directory forbidden")
             path.mkdir(parents=True, exist_ok=True)
             if not path.resolve().is_relative_to(self.root):
                 raise MediaStorageUnavailable("Media path escaped configured root")
