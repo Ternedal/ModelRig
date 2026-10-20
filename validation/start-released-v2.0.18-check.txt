@@ -1,0 +1,5 @@
+Verify the published v2.0.18 Windows downloads.
+Release ID: 418070031
+Successful normal release run: 39379849897
+Release commit: 5d535a8d391f25677c0e3d85e82eb8a9360c796b
+Published at: 2026-10-20T10:05:01Z
