@@ -35,7 +35,10 @@ def probe_nodes(template_path, *, opener=urlopen):
             raw = response.read(MAX_RESPONSE_BYTES + 1)
         if len(raw) > MAX_RESPONSE_BYTES:
             return {"status": "invalid_response", "required": required}
-        installed = json.loads(raw)
+        try:
+            installed = json.loads(raw)
+        except (ValueError, UnicodeError):
+            return {"status": "invalid_response", "required": required}
         if not isinstance(installed, dict):
             return {"status": "invalid_response", "required": required}
         missing = sorted(set(required) - set(installed))
