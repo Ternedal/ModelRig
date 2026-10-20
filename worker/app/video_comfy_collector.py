@@ -21,7 +21,10 @@ class VideoResultCollector:
         self.store = store
         self.client = client
         self.catalog = catalog
-        self.output_root = Path(output_root).resolve(strict=True)
+        supplied_root = Path(output_root)
+        if supplied_root.is_symlink():
+            raise ValueError("Symlinked ComfyUI output root is forbidden")
+        self.output_root = supplied_root.resolve(strict=True)
         if not self.output_root.is_dir():
             raise ValueError("ComfyUI output root is required")
 
@@ -37,7 +40,10 @@ class VideoResultCollector:
                     if not isinstance(node, dict):
                         continue
                     for key in ("gifs", "videos"):
-                        for entry in node.get(key, []):
+                        entries = node.get(key, [])
+                        if not isinstance(entries, list):
+                            continue
+                        for entry in entries:
                             if not isinstance(entry, dict) or entry.get("type") != "output":
                                 continue
                             name = entry.get("filename")
@@ -46,7 +52,7 @@ class VideoResultCollector:
                                 continue
                             if Path(name).name != name or not name.lower().endswith(".mp4"):
                                 continue
-                            if Path(folder).is_absolute() or ".." in Path(folder).parts:
+                            if Path(folder).is_absolute() or ".." in Path(folder).parts or "\\\\" in folder or ":" in folder:
                                 continue
                             candidate = self.output_root / folder / name
                             if candidate.is_symlink() or not candidate.is_file():
