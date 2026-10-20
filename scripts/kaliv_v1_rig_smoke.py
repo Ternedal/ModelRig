@@ -180,7 +180,8 @@ def tracked_bytes_match(root: Path) -> bool:
         for local, recorded in snapshots:
             if not safe_root(local.parent) or _file_fingerprint(local) != recorded:
                 return False
-    except (OSError, ValueError):
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        # A stalled final Git query means the checkout cannot be certified.
         return False
     return True
 
