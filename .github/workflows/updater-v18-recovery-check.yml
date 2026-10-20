@@ -6,8 +6,14 @@ on:
         description: Also run the archived v16 self-update diagnostic against the public GitHub API
         type: boolean
         default: false
+  pull_request:
+    paths:
+      - scripts/Recover-UpdaterV2018.ps1
+      - tests/updater_recovery_windows.ps1
+      - .github/workflows/updater-v18-recovery-check.yml
+      - backend/cmd/modelrig-updater/self_update*.go
   push:
-    branches: [fix/updater-self-replacement-20261020]
+    branches: [main, fix/updater-self-replacement-20261020]
     paths:
       - scripts/Recover-UpdaterV2018.ps1
       - tests/updater_recovery_windows.ps1
