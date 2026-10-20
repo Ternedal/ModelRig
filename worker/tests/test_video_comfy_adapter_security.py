@@ -2,7 +2,7 @@
 import io
 import json
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, patch
 
 from app.video_comfy_adapter import ComfyVideoClient, VideoBackendError
 
@@ -47,9 +47,9 @@ class ComfyAdapterSecurityTests(unittest.TestCase):
 
     def test_oversized_response_is_rejected(self):
         client = ComfyVideoClient()
-        response = Mock()
-        response.__enter__ = Mock(return_value=response)
-        response.__exit__ = Mock(return_value=False)
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
         response.read.return_value = b"x" * 2_000_001
         with patch.object(client._opener, "open", return_value=response):
             with self.assertRaises(VideoBackendError):
@@ -57,9 +57,9 @@ class ComfyAdapterSecurityTests(unittest.TestCase):
 
     def test_non_object_json_is_rejected(self):
         client = ComfyVideoClient()
-        response = Mock()
-        response.__enter__ = Mock(return_value=response)
-        response.__exit__ = Mock(return_value=False)
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
         response.read.return_value = b"[]"
         with patch.object(client._opener, "open", return_value=response):
             with self.assertRaises(VideoBackendError):
