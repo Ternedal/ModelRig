@@ -1152,6 +1152,10 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        // Capture the original target on the Compose/UI dispatcher, never from IO.
+        // A navigation change during ASR/TTS must not retarget persistence.
+        val conversationAtVoiceStart = convId
+        val modelAtVoiceStart = currentModel
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
         voiceJob = scope.launch {
@@ -1276,11 +1280,18 @@ private fun ChatScreen(
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
                 }
+                // Preserve the original conversation target and do not save a
+                // stopped turn (including when the user navigated away).
+                if (playbackStop.get() || convId != conversationAtVoiceStart) return@launch
+                val cid = conversationAtVoiceStart ?: withContext(Dispatchers.IO) {
+                    db.newConversation("rig", modelAtVoiceStart, transcriptText.ifBlank { "tale" }.take(40))
+                }
+                if (playbackStop.get() || convId != conversationAtVoiceStart) return@launch
+                if (conversationAtVoiceStart == null) convId = cid
+                // Both messages are one durable SQLite transaction. Do not
+                // read/write Compose navigation state from an IO dispatcher.
                 withContext(Dispatchers.IO) {
-                    val cid = convId ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
-                    if (convId == null) convId = cid
-                    if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
-                    if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
+                    db.addCompletedVoiceTurn(cid, transcriptText, finalReply)
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
