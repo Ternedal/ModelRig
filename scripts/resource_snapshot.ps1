@@ -2,7 +2,7 @@
 # PowerShell 7; no prompts, secrets, service changes or persistent files.
 param(
     [ValidatePattern('^http://127[.]0[.]0[.]1:[0-9]{1,5}$')]
-    [string]$OllamaUrl = 'http://127.0.0.1:11435'
+    [string]$OllamaUrl = 'http://127.0.0.1:11434'
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
