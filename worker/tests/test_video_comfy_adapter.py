@@ -26,6 +26,30 @@ class ComfyVideoClientTests(unittest.TestCase):
             with self.subTest(prompt_id=prompt_id), self.assertRaises(ValueError):
                 ComfyVideoClient().history(prompt_id)
 
+    def test_outputs_are_not_ready_until_completed(self):
+        client = ComfyVideoClient()
+        with patch.object(client, "history", return_value={
+            "prompt_1": {"status": {"completed": False, "status_str": "running"},
+                         "outputs": {"node": {"videos": []}}}
+        }):
+            self.assertIsNone(client.completed_outputs("prompt_1"))
+
+    def test_explicit_backend_error_raises(self):
+        client = ComfyVideoClient()
+        with patch.object(client, "history", return_value={
+            "prompt_1": {"status": {"completed": False, "status_str": "error"}, "outputs": {}}
+        }):
+            with self.assertRaises(VideoBackendError):
+                client.completed_outputs("prompt_1")
+
+    def test_completed_backend_returns_outputs(self):
+        client = ComfyVideoClient()
+        expected = {"node": {"videos": []}}
+        with patch.object(client, "history", return_value={
+            "prompt_1": {"status": {"completed": True, "status_str": "success"}, "outputs": expected}
+        }):
+            self.assertEqual(client.completed_outputs("prompt_1"), expected)
+
     def test_redirect_to_external_host_is_rejected(self):
         client = ComfyVideoClient()
         request = __import__("urllib.request", fromlist=["Request"]).Request(client.base_url + "/history/abc")
