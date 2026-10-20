@@ -1,5 +1,4 @@
 """Regression: cached ingestion must not hide an unavailable external media volume."""
-import asyncio
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -50,3 +49,35 @@ def test_cached_ingestion_rechecks_external_storage(monkeypatch):
     assert unavailable.status_code == 503
     assert len(calls) == 1
     assert "stored-image" not in unavailable.text
+
+
+def test_cached_ingestion_recovers_when_file_was_deleted(monkeypatch):
+    job = ImageJob(id="completed-job", owner_id="alice", status=JobStatus.SUCCEEDED)
+    manager = SimpleNamespace(_jobs={job.id: job}, get=lambda owner, key: job if owner == "alice" and key == job.id else None)
+    service = SimpleNamespace(manager=manager, adapter=object())
+    stored = set()
+    calls = []
+
+    async def fake_ingest(owner, job_id, **kwargs):
+        artifact_id = f"image-{len(calls) + 1}"
+        calls.append(artifact_id)
+        stored.add(artifact_id)
+        return artifact_id
+
+    class Store:
+        def get_png(self, owner, artifact_id):
+            return b"PNG" if owner == "alice" and artifact_id in stored else None
+
+    monkeypatch.setattr(image_api, "ingest_completed_job", fake_ingest)
+    app = FastAPI()
+    app.include_router(image_api.build_image_router(
+        service, authenticated_owner=lambda: "alice", artifact_store=Store()
+    ))
+    client = TestClient(app)
+    url = "/experimental/images/jobs/completed-job/ingest"
+    assert client.post(url).json() == {"artifact_id": "image-1"}
+    stored.clear()
+    recovered = client.post(url)
+    assert recovered.status_code == 200
+    assert recovered.json() == {"artifact_id": "image-2"}
+    assert calls == ["image-1", "image-2"]
