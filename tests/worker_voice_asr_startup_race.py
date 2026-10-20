@@ -68,8 +68,10 @@ class ASRImportStatusTests(unittest.TestCase):
                 raise ImportError("missing native dependency for ASR")
             return original_import(name, *args, **kwargs)
 
-        with patch("builtins.__import__", side_effect=block_native_import), \\
-             self.assertLogs("modelrig.worker", level="WARNING") as captured:
+        with (
+            patch("builtins.__import__", side_effect=block_native_import),
+            self.assertLogs("modelrig.worker", level="WARNING") as captured,
+        ):
             result = voice_asr.status()
 
         self.assertFalse(result["ok"])
