@@ -54,7 +54,8 @@ class VideoJobStore:
         now = time.time()
         with self._connect() as db:
             db.execute(
-                "INSERT INTO video_jobs VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO video_jobs (job_id, state, request_json, created_at, updated_at, artifact_id, error_code) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (job_id, "queued", json.dumps(asdict(request)), now, now, None, None),
             )
         return job_id
