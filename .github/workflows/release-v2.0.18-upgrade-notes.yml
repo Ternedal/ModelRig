@@ -86,7 +86,13 @@ jobs:
           '''
           tag = api('/git/ref/tags/' + TAG)
           run = api('/actions/runs/' + str(RUN))
-          release = api('/releases/tags/' + TAG)
+          # GitHub's tag lookup can omit drafts. Select this exact draft from
+          # the authenticated release list and mutate it only by release ID.
+          matches = [item for item in api('/releases?per_page=100')
+                     if item['tag_name'] == TAG]
+          if len(matches) != 1:
+              raise SystemExit('Expected exactly one v2.0.18 release draft.')
+          release = matches[0]
           validate_target(tag, run, release, notes)
           # Metadata only: do not publish, change latest, touch assets or tags,
           # or dispatch another release. Normal release gates own publication.
