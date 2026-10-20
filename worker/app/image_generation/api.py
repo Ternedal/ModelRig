@@ -109,7 +109,14 @@ def build_image_router(
                     ingested_artifacts.pop(old_id, None)
                     ingestion_locks.pop(old_id, None)
             if job_id in ingested_artifacts:
-                return {"artifact_id": ingested_artifacts[job_id]}
+                artifact_id = ingested_artifacts[job_id]
+                try:
+                    available = artifact_store.get_png(owner, artifact_id) is not None
+                except (ValueError, RuntimeError, OSError) as exc:
+                    raise HTTPException(status_code=503, detail="Image storage unavailable") from exc
+                if available:
+                    return {"artifact_id": artifact_id}
+                ingested_artifacts.pop(job_id, None)
             # Prevent concurrent duplicate ingestion of the same completed job.
             # A durable ingestion ledger is required before multi-process enablement.
             lock = ingestion_locks.setdefault(job_id, asyncio.Lock())
