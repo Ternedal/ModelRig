@@ -71,13 +71,10 @@ class VideoResultCollector:
                 except Exception:
                     target.unlink(missing_ok=True)
                     raise
-                try:
-                    self.catalog.register(MediaItem(media_id=media_id, kind="video"), target)
-                    if not self.store.transition(row["job_id"], "running", "completed", artifact_id=media_id):
-                        raise ValueError("Job transition failed")
-                except Exception:
-                    target.unlink(missing_ok=True)
-                    raise
+                # Never delete a registered asset if the final job update fails.
+                self.catalog.register(MediaItem(media_id=media_id, kind="video"), target)
+                if not self.store.transition(row["job_id"], "running", "completed", artifact_id=media_id):
+                    raise ValueError("Job transition failed")
                 return media_id
             except (OSError, ValueError, VideoBackendError):
                 self.store.transition(row["job_id"], "running", "failed", error_code="invalid_backend_output")
