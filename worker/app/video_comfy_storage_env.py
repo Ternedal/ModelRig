@@ -33,8 +33,12 @@ def comfy_external_environment(environ: dict[str, str] | None = None) -> dict[st
         "TEMP": paths["temp"],
         "TMP": paths["temp"],
     }
+    # Validate the shared parent before creating any directories: otherwise
+    # ComfyUI -> another volume could receive caches before the escape check.
+    if comfy_root.is_symlink():
+        raise ValueError("ComfyUI parent path is a symlink")
     for path in dirs.values():
-        if path.is_symlink():
+        if comfy_root.is_symlink() or path.is_symlink():
             raise ValueError("ComfyUI path is a symlink")
         path.mkdir(parents=True, exist_ok=True)
         if path.is_symlink() or not path.resolve().is_relative_to(root):
