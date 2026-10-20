@@ -88,8 +88,11 @@ class ComfyVideoClient:
         if not isinstance(record, dict):
             return None
         status = record.get("status")
-        if isinstance(status, dict) and status.get("status_str") == "error":
-            raise VideoBackendError("ComfyUI job failed")
+        if isinstance(status, dict):
+            if status.get("status_str") == "error":
+                raise VideoBackendError("ComfyUI job failed")
+            if status.get("completed") is not True:
+                return None
         outputs = record.get("outputs")
         if not isinstance(outputs, dict):
             return None
