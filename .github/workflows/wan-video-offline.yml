@@ -1,0 +1,32 @@
+name: Wan video offline tests
+
+on:
+  push:
+    branches:
+      - feat/wan-video-generation
+  pull_request:
+    paths:
+      - 'worker/app/video_*.py'
+      - 'worker/tests/test_video_*.py'
+      - '.github/workflows/wan-video-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  video-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run offline video tests
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -p 'test_video_*.py' -v
