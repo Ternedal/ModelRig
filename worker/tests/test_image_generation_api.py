@@ -41,3 +41,15 @@ def test_image_api_requires_auth_dependency():
     import pytest
     with pytest.raises(ValueError):
         build_image_router(FakeService(), authenticated_owner=None)
+
+
+def test_image_api_rejects_malformed_trusted_owner():
+    app = FastAPI()
+    def identity():
+        return "alice"
+    app.include_router(build_image_router(FakeService(), authenticated_owner=identity))
+    client = TestClient(app)
+    for malformed in ("", " alice", "alice ", "alice\\nadmin", "alice\\x00", "x" * 129):
+        app.dependency_overrides[identity] = lambda value=malformed: value
+        response = client.post("/experimental/images/jobs", json={"prompt": "test"})
+        assert response.status_code == 401
