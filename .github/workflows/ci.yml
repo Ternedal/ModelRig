@@ -47,6 +47,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.23"
       - name: Build the release worker package
         run: |
           $actual = (git rev-parse HEAD).Trim()
@@ -99,6 +102,23 @@ jobs:
             if (Test-Path $stdout) { Get-Content $stdout }
             if (Test-Path $stderr) { Get-Content $stderr }
           }
+
+      - name: Delayed frozen worker survives supervisor and updater readiness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:MODELRIG_COLD_BOOT_WORKER_EXE = (Resolve-Path dist/modelrig-worker-windows-x64.exe).Path
+          $env:MODELRIG_COLD_BOOT_SUPERVISOR_EXE = Join-Path $env:RUNNER_TEMP 'startup-supervisor.exe'
+          $env:MODELRIG_COLD_BOOT_SERVER_EXE = Join-Path $env:RUNNER_TEMP 'startup-server.exe'
+          Push-Location backend
+          try {
+            go build -o $env:MODELRIG_COLD_BOOT_SUPERVISOR_EXE ./cmd/modelrig-supervisor
+            if ($LASTEXITCODE -ne 0) { throw 'supervisor build failed' }
+            go build -o $env:MODELRIG_COLD_BOOT_SERVER_EXE ./cmd/modelrig-server
+            if ($LASTEXITCODE -ne 0) { throw 'server build failed' }
+            go test -v ./cmd/modelrig-updater -run '^TestFrozenVoiceWorkerSlowBootUnderSupervisor$' -count=1 -timeout=8m
+            if ($LASTEXITCODE -ne 0) { throw 'delayed frozen appliance startup failed' }
+          } finally { Pop-Location }
 
   # The optional browser runtime stays out of worker/requirements.txt. This job
   # validates the pinned package and locked profile, launches real Chromium
