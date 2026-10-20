@@ -138,6 +138,7 @@ func parseAutomaticSelfUpdateArgs(args []string, defaultRoot string) (automaticS
 			flag.name == "current" || flag.name == "server-health" ||
 			flag.name == "worker-health" || flag.name == "heartbeat" ||
 			flag.name == "supervisor-interval" || flag.name == "supervisor-task" ||
+			flag.name == "startup-timeout" ||
 			flag.name == "baseline-commit":
 			value, err := observedStringValue(flag, args, &i)
 			if err != nil {

@@ -628,7 +628,9 @@ check("asyncio.to_thread" in src_c, "T28: confirm() -- which executes -- is offl
 # milliseconds: whisper is blocking CUDA work.
 from app import voice_pipeline as _vp  # noqa: E402
 src_v = _i.getsource(_vp.converse)
-check("to_thread" in src_v and "transcribe_wav" in src_v,
+check(("to_thread" in src_v or "_run_backend_to_completion" in src_v)
+      and "transcribe_wav" in src_v
+      and "to_thread" in _i.getsource(_vp._run_backend_to_completion),
       "T28: ASR is offloaded from the event loop")
 check("_ASR_LOCK" in src_v and "_TTS_LOCK" in src_v,
       "T28: ASR and TTS stay serialized -- the loop used to serialize them by accident")

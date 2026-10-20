@@ -1,6 +1,6 @@
 # Performance experiment convergence — 2026-10-12
 
-Status: **planning and evidence inventory only**. Base: `experiment/resource-benchmark-capture-20261012`; frozen `main` unchanged.
+Status: **historical 2026-10-12 planning and evidence inventory only**. The merge freeze was lifted on 2026-10-20. This isolated read-only snapshot candidate does not change runtime configuration, publish a release or count as a physical qualification. The experiment branch counts below were recorded in the original inventory and are not current branch counts.
 
 ## Existing isolated work
 
@@ -23,7 +23,7 @@ These branches are independent experiments. **Do not merge wholesale or interpre
 
 ## Non-negotiable release boundary
 
-No direct writes to main, no activation or release claims from these experiments, no production configuration changes, no cloud fallback as an implicit optimization. Hardware acceptance and signed release evidence remain separate.
+Any integration to protected main must use reviewed PRs and passing required checks; no activation or release claims from these experiments, no production configuration changes, no cloud fallback as an implicit optimization. Hardware acceptance and signed release evidence remain separate.
 
 ## Current gaps
 
