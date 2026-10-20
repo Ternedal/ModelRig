@@ -354,6 +354,12 @@ check(
     "manual scoring requires numeric stop latency",
 )
 
+with tempfile.TemporaryDirectory(prefix="kaliv_voice_stream_") as voice_temp_dir:
+    check(
+        str(Path(voice_temp_dir).resolve()) in vb._voice_temp_entries(),
+        "cleanup probe detects Kaliv streaming temp directories",
+    )
+
 old_temp_entries = vb._voice_temp_entries
 samples = iter([{"old", "new"}, {"old"}])
 vb._voice_temp_entries = lambda: next(samples, {"old"})

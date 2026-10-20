@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Run the retained combined-pilots contract against candidate 2.0.14."""
+"""Run the retained combined-pilots contract against candidate 2.0.18."""
 from pathlib import Path
 
 _source_path = Path(__file__).with_name("workflow_remaining_physical_pilots.retained")
 _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.14"),
-    ("1.58.143", "2.0.14"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.18"),
+    ("1.58.143", "2.0.18"),
     ("1.58.142", "2.0.12"),
     ("#150", "#161"),
 ):
@@ -94,8 +94,8 @@ _source = _source.replace(
     'for forbidden in (\n',
     'rigdag = (ROOT / "RIGDAG_SIMPEL.md").read_text(encoding="utf-8")\n'
     'check(\n'
-    '    "origin/physical-proof/2.0.14" in rigdag,\n'
-    '    "rig-day authority is the fetched remote 2.0.14 candidate branch",\n'
+    '    "origin/release/kaliv-v2.0.18-prep-20261020" in rigdag,\n'
+    '    "rig-day authority is the fetched remote 2.0.18 candidate branch",\n'
     ')\n'
     'check(\n'
     '    "candidate_freeze_check.py --expected-sha $CandidateSha" in rigdag,\n'

@@ -1,7 +1,7 @@
 """Evidence-only binding from a materialized RSI candidate to measured runtime code.
 
 A complete candidate-tree snapshot must reproduce the root tree from
-LocalCandidateMaterializationReceipt. The worker/app Python subset is then hashed
+LocalCandidateMaterializationReceipt. The worker/app and BodyRig Python code is hashed
 with the same semantics as worker/app/build_identity.py and must equal the exact
 Agent 3 eval identity already accepted by CandidateRegressionProof.
 
@@ -199,14 +199,13 @@ def worker_code_sha256(entries: tuple[SnapshotEntry, ...]) -> str:
     """Match worker/app/build_identity.py::_hash_source_tree semantics."""
 
     mapped = _snapshot_map(entries)
-    prefix = "worker/app/"
     selected: list[tuple[str, bytes]] = []
+    has_worker_source = False
     for path, entry in mapped.items():
-        if not path.startswith(prefix) or not path.endswith(".py"):
+        if not path.startswith(("worker/app/", "bodyrig/")) or not path.endswith(".py"):
             continue
-        relative = path[len(prefix):]
-        parts = relative.split("/")
-        if "__pycache__" in parts or parts[-1] == "_build_stamp.py":
+        parts = path.split("/")
+        if "__pycache__" in parts or path == "worker/app/_build_stamp.py":
             continue
         # Git stores a symlink's target string while Path.read_bytes() follows
         # the link. Without a separately verified resolved target, pretending
@@ -215,8 +214,9 @@ def worker_code_sha256(entries: tuple[SnapshotEntry, ...]) -> str:
             raise CandidateProvenanceError(
                 "worker Python symlink cannot be fingerprinted from Git blob bytes"
             )
-        selected.append((relative, entry.content))
-    if not selected:
+        selected.append((path, entry.content))
+        has_worker_source = has_worker_source or path.startswith("worker/app/")
+    if not has_worker_source:
         raise CandidateProvenanceError(
             "candidate snapshot contains no worker/app Python source"
         )

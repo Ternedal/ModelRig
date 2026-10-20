@@ -198,7 +198,7 @@ def measure(
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--url", default="http://127.0.0.1:11435")
+    p.add_argument("--url", default="http://127.0.0.1:11434")
     p.add_argument("--model", required=True)
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--num-predict", type=int, default=96)

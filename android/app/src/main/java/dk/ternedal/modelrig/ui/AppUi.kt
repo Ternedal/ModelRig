@@ -1203,12 +1203,17 @@ private fun ChatScreen(
                 withContext(Dispatchers.IO) {
                     val b64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
                     val key = if (voiceUsesCloud) store.cloudKey else null
+                    // Snapshot before ASR appends the current turn; do not echo it twice.
+                    val voiceHistory = messages.filter { it.role == "user" || it.role == "assistant" }
+                        .filter { !it.streaming && it.text.isNotBlank() }
+                        .takeLast(12).map { it.role to it.text.take(4000) }
                     ModelRigClient(store.baseUrl ?: "", store.token).voiceConverseStream(
                         b64,
                         language = "da",
                         model = if (key != null) store.voiceCloudModel else currentModel,
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
+                        history = voiceHistory,
                         registerCall = { c -> activeCall = c },
                         onTranscript = { t ->
                             val tt = t.trim()

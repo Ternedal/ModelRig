@@ -7,7 +7,7 @@ behavior on the actual Windows/WSL2 GPU rig.
 ## What this measures
 
 The probe talks **only to a loopback IP** (default
-http://127.0.0.1:11435). No remote URLs or redirects are allowed, proxy
+http://127.0.0.1:11434). Pass `--url http://127.0.0.1:11435` for an isolated local test instance. No remote URLs or redirects are allowed, proxy
 variables are ignored, and it will **not pull** a missing model. The model
 must already appear in Ollama's `/api/tags`. It sends one fixed,
 non-sensitive Danish prompt, without tools, code execution or filesystem
@@ -27,7 +27,7 @@ GPU/CPU split or per-GPU placement.** Use `ollama ps` and `nvidia-smi`
 on the rig for that. The first request may already be warm; later
 requests are called "warm repeats" only for grouping.
 
-## Run in PowerShell on the rig (after fetching this draft branch)
+## Run in PowerShell on the rig (after checking out the qualified diagnostic branch)
 
 ```powershell
 cd C:\Rig\src\ModelRig
