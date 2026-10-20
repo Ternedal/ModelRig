@@ -79,12 +79,11 @@ class VideoResultCollector:
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
                         destination.flush()
                         os.fsync(destination.fileno())
-                final_stat = files[0].stat()
-                if (final_stat.st_size != initial_size or
-                    final_stat.st_mtime_ns != initial_stat.st_mtime_ns or
-                    target.stat().st_size != initial_size):
-                    target.unlink(missing_ok=True)
-                    raise ValueError("ComfyUI output changed during copy")
+                    final_stat = files[0].stat()
+                    if (final_stat.st_size != initial_size or
+                        final_stat.st_mtime_ns != initial_stat.st_mtime_ns or
+                        target.stat().st_size != initial_size):
+                        raise ValueError("ComfyUI output changed during copy")
                 except Exception:
                     target.unlink(missing_ok=True)
                     raise
