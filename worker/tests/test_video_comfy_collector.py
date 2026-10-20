@@ -40,7 +40,7 @@ class CollectorTests(unittest.TestCase):
     def test_completed_mp4_is_registered(self):
         (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)) as storage:
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))) as storage:
             storage.return_value.assert_ready.return_value = None
             media_id = self.collector(outputs).collect_one()
         self.assertIsNotNone(media_id)
@@ -49,14 +49,14 @@ class CollectorTests(unittest.TestCase):
 
     def test_malformed_output_collection_fails_closed(self):
         outputs = {"1": {"gifs": {"filename": "result.mp4"}}}
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)):
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
 
     def test_mp4_extension_with_invalid_header_is_rejected(self):
         (self.output / "result.mp4").write_bytes(b"not a video")
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)):
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
@@ -72,7 +72,7 @@ class CollectorTests(unittest.TestCase):
             before = source.stat()
             source.write_bytes(b"\x00\x00\x00\x18ftypisomother data")
             os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)), patch(
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))), patch(
             "app.video_comfy_collector.shutil.copyfileobj", side_effect=rewriting_copy
         ):
             self.assertIsNone(self.collector(outputs).collect_one())
@@ -88,7 +88,7 @@ class CollectorTests(unittest.TestCase):
             shutil.copyfileobj(src, dst, length)
             with source.open("ab") as handle:
                 handle.write(b"new bytes")
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)), patch(
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))), patch(
             "app.video_comfy_collector.shutil.copyfileobj", side_effect=growing_copy
         ):
             self.assertIsNone(self.collector(outputs).collect_one())
@@ -101,7 +101,7 @@ class CollectorTests(unittest.TestCase):
             "valid": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]},
             "malformed": {"gifs": {"filename": "ignored.mp4"}},
         }
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)):
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
@@ -109,7 +109,7 @@ class CollectorTests(unittest.TestCase):
     def test_catalog_failure_removes_unregistered_copy(self):
         (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)), patch.object(
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))), patch.object(
             self.catalog, "register", side_effect=ValueError("catalog unavailable")
         ):
             self.assertIsNone(self.collector(outputs).collect_one())
@@ -123,7 +123,7 @@ class CollectorTests(unittest.TestCase):
         def interrupted_copy(source, destination, length):
             destination.write(b"partial")
             raise OSError("disk full")
-        with mock_patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)), mock_patch(
+        with mock_patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))), mock_patch(
             "app.video_comfy_collector.shutil.copyfileobj", side_effect=interrupted_copy
         ):
             self.assertIsNone(self.collector(outputs).collect_one())
@@ -131,13 +131,13 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
 
     def test_pending_output_remains_running(self):
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)):
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
             self.assertIsNone(self.collector(None).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "running")
 
     def test_path_traversal_is_rejected(self):
         outputs = {"1": {"gifs": [{"type": "output", "filename": "bad.mp4", "subfolder": "../"}]}}
-        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(unsafe=True)):
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
 
