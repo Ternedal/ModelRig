@@ -8,6 +8,7 @@ import fnmatch
 import importlib
 import importlib.util
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -129,6 +130,7 @@ check(
 expected_stage_b_names = (
     "midchain-1",
     "midchain-2",
+    "midchain-2b",
     "midchain-3",
     "downstream-1",
     "downstream-2",
@@ -148,11 +150,60 @@ for name in expected_stage_b_names:
         f"- name: {name}" in stage_b_workflow,
         f"Stage-B reusable workflow retains {name} qualification",
     )
-for shard in ("1/3", "2/3", "3/3"):
+for shard in ("1/3", "2/3", "2a/3", "2b/3", "3/3"):
     check(
         f'shard: "{shard}"' in stage_b_workflow,
         f"Stage-B reusable workflow retains shard {shard}",
     )
+# The 355-minute hosted job limit cannot accommodate 12 slow contracts
+# serially in midchain-2. Keep the original required status context, but
+# split its workload into two independently REQUIRED matrix participants.
+check(
+    '- name: midchain-2\n            slice: midchain\n            shard: "2a/3"'
+    in stage_b_workflow
+    and '- name: midchain-2b\n            slice: midchain\n            shard: "2b/3"'
+    in stage_b_workflow,
+    "midchain-2 keeps its original status name and requires the second half",
+)
+_midchain_spec = importlib.util.spec_from_file_location(
+    "stage_b_midchain_partition_under_test",
+    root / "tests/support/rsi_pilot_exact_task_stage_b_midchain_driver.py",
+)
+assert _midchain_spec is not None and _midchain_spec.loader is not None
+_midchain_module = importlib.util.module_from_spec(_midchain_spec)
+_midchain_spec.loader.exec_module(_midchain_module)
+_old_shard = os.environ.get("MODELRIG_STAGE_B_CONTRACT_SHARD")
+_partitions = {}
+try:
+    for _shard in ("1/3", "2/3", "2a/3", "2b/3", "3/3"):
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _shard
+        _partitions[_shard] = _midchain_module._selected_contract_files()
+finally:
+    if _old_shard is None:
+        os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    else:
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _old_shard
+_hosted_parts = (
+    list(_partitions["1/3"]) + list(_partitions["2a/3"])
+    + list(_partitions["2b/3"]) + list(_partitions["3/3"])
+)
+check(
+    len(_hosted_parts) == len(set(_hosted_parts))
+    == len(_midchain_module._CONTRACT_FILES)
+    and set(_hosted_parts) == set(_midchain_module._CONTRACT_FILES)
+    and set(_partitions["2a/3"]).isdisjoint(_partitions["2b/3"])
+    and set(_partitions["2a/3"]) | set(_partitions["2b/3"])
+    == set(_partitions["2/3"]),
+    "the hosted shards execute every original midchain contract exactly once",
+)
+check(
+    all(
+        _midchain_module._worker_count(len(_partitions[_shard])) == 1
+        for _shard in ("2a/3", "2b/3")
+    ),
+    "each deep half-shard remains serial to avoid nested runner oversubscription",
+)
+
 check(
     stage_b_workflow.count("timeout-minutes: 355") == 2,
     "admission and shard jobs stay below the GitHub-hosted six-hour job ceiling",
