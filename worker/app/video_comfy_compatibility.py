@@ -9,13 +9,22 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_TEMPLATE_BYTES = 2 * 1024 * 1024
 OBJECT_INFO_URL = "http://127.0.0.1:8188/object_info"
 
 
 def probe_nodes(template_path, *, opener=urlopen):
     try:
-        with open(template_path, "r", encoding="utf-8") as stream:
-            graph = json.load(stream)
+        with open(template_path, "rb") as stream:
+            raw_template = stream.read(MAX_TEMPLATE_BYTES + 1)
+        if len(raw_template) > MAX_TEMPLATE_BYTES:
+            return {"status": "invalid_template"}
+        graph = json.loads(raw_template)
+        if not isinstance(graph, dict) or not graph or any(
+            not isinstance(node, dict) or not isinstance(node.get("class_type"), str)
+            or not isinstance(node.get("inputs", {}), dict) for node in graph.values()
+        ):
+            return {"status": "invalid_template"}
         required = sorted({node["class_type"] for node in graph.values()})
         with opener(OBJECT_INFO_URL, timeout=5) as response:
             if response.status != 200:
@@ -67,5 +76,5 @@ def probe_nodes(template_path, *, opener=urlopen):
         return {"status": status, "required": required,
                 "missing": missing, "invalid_inputs": invalid_inputs,
                 "invalid_choices": invalid_choices}
-    except (OSError, ValueError, KeyError, TypeError, HTTPError, URLError, TimeoutError):
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError, HTTPError, URLError, TimeoutError):
         return {"status": "unavailable"}
