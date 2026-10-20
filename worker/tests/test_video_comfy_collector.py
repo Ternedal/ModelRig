@@ -38,14 +38,14 @@ class CollectorTests(unittest.TestCase):
         return VideoResultCollector(self.store, FakeClient(outputs), self.catalog, self.output)
 
     def test_completed_mp4_is_registered(self):
-        (self.output / "result.mp4").write_bytes(b"test video")
+        (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         with patch("app.video_comfy_collector.configured_video_storage") as storage:
             storage.return_value.assert_ready.return_value = None
             media_id = self.collector(outputs).collect_one()
         self.assertIsNotNone(media_id)
         self.assertEqual(self.store.get(self.job_id)["state"], "completed")
-        self.assertEqual(self.catalog.resolve(media_id)[0].read_bytes(), b"test video")
+        self.assertEqual(self.catalog.resolve(media_id)[0].read_bytes(), b"\x00\x00\x00\x18ftypisomtest video")
 
     def test_malformed_output_collection_fails_closed(self):
         outputs = {"1": {"gifs": {"filename": "result.mp4"}}}
@@ -53,16 +53,24 @@ class CollectorTests(unittest.TestCase):
             self.assertIsNone(self.collector(outputs).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
 
+    def test_mp4_extension_with_invalid_header_is_rejected(self):
+        (self.output / "result.mp4").write_bytes(b"not a video")
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        with patch("app.video_comfy_collector.configured_video_storage"):
+            self.assertIsNone(self.collector(outputs).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_same_size_output_rewrite_is_rejected(self):
         source = self.output / "result.mp4"
-        source.write_bytes(b"test video")
+        source.write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         import shutil
         import os
         def rewriting_copy(src, dst, length):
             shutil.copyfileobj(src, dst, length)
             before = source.stat()
-            source.write_bytes(b"other data")
+            source.write_bytes(b"\x00\x00\x00\x18ftypisomother data")
             os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
         with patch("app.video_comfy_collector.configured_video_storage"), patch(
             "app.video_comfy_collector.shutil.copyfileobj", side_effect=rewriting_copy
@@ -73,7 +81,7 @@ class CollectorTests(unittest.TestCase):
 
     def test_output_growth_during_copy_is_rejected(self):
         source = self.output / "result.mp4"
-        source.write_bytes(b"test video")
+        source.write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         import shutil
         def growing_copy(src, dst, length):
@@ -88,7 +96,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
 
     def test_mixed_valid_and_malformed_outputs_fail_closed(self):
-        (self.output / "result.mp4").write_bytes(b"test video")
+        (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {
             "valid": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]},
             "malformed": {"gifs": {"filename": "ignored.mp4"}},
@@ -99,7 +107,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
 
     def test_catalog_failure_removes_unregistered_copy(self):
-        (self.output / "result.mp4").write_bytes(b"test video")
+        (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         with patch("app.video_comfy_collector.configured_video_storage"), patch.object(
             self.catalog, "register", side_effect=ValueError("catalog unavailable")
@@ -109,7 +117,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
 
     def test_copy_failure_removes_partial_file(self):
-        (self.output / "result.mp4").write_bytes(b"test video")
+        (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         from unittest.mock import patch as mock_patch
         def interrupted_copy(source, destination, length):
