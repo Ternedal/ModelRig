@@ -108,6 +108,36 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 "job1", "running", "failed", error_code="invalid_backend_output"
             )
 
+    def test_valid_file_plus_traversal_entry_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "output"
+            output.mkdir()
+            (output / "clip.mp4").write_bytes(
+                b"\\x00\\x00\\x00\\x18ftypisom" + b"\\x00" * 24
+            )
+            store = Mock()
+            store.awaiting_result.return_value = [
+                {"job_id": "job1", "prompt_id": "prompt1"}
+            ]
+            store.transition.return_value = True
+            client = Mock()
+            client.completed_outputs.return_value = {
+                "node1": {"videos": [
+                    {"type": "output", "subfolder": "", "filename": "clip.mp4"},
+                    {"type": "output", "subfolder": "../outside",
+                     "filename": "escape.mp4"},
+                ]}
+            }
+            catalog = Mock()
+            with patch("app.video_comfy_collector.configured_video_storage"):
+                collector = VideoResultCollector(store, client, catalog, output)
+                self.assertIsNone(collector.collect_one())
+            catalog.register.assert_not_called()
+            store.transition.assert_called_once_with(
+                "job1", "running", "failed", error_code="invalid_backend_output"
+            )
+
     def test_pending_history_keeps_job_running(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
