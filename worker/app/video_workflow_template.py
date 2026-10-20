@@ -36,9 +36,11 @@ def trusted_text_to_video_factory(template_path: Path):
         if not isinstance(node.get("class_type"), str) or not isinstance(node.get("inputs"), dict):
             raise ValueError("Invalid ComfyUI workflow node definition")
         for key, value in node["inputs"].items():
-            if value == PROMPT_SLOT:
-                if key != "text":
-                    raise ValueError("Prompt placeholder must be a text input")
+            # A placeholder nested in a list/dict must not be sent to ComfyUI
+            # unchanged; accept only the single top-level text slot.
+            if PROMPT_SLOT in json.dumps(value, ensure_ascii=True):
+                if key != "text" or value != PROMPT_SLOT:
+                    raise ValueError("Prompt placeholder must be a direct text input")
                 slots += 1
     if slots != 1:
         raise ValueError("Exactly one text prompt placeholder is required")
