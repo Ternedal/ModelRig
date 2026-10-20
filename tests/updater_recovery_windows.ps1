@@ -110,7 +110,7 @@ Write-Host 'PASS: recovery retried an actual transient Windows sharing violation
 # Exercise the actual published v16 updater, including its real detached helper.
 # This records whether the user failure also occurs on a clean hosted Windows
 # runner; it does not mistake that result for evidence from the physical rig.
-$root = Join-Path $suite 'actual-released-v16'
+$root = Join-Path $env:RUNNER_TEMP ('actual-released-v16-clean-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
 $live = Join-Path $root $name
 Copy-Item -LiteralPath $oldAsset -Destination $live
@@ -128,3 +128,14 @@ do {
 Write-Host "ACTUAL RELEASED V16 HELPER: installed-v18=$swapped pending=$(Test-Path ($live + '.pending')) lock=$(Test-Path (Join-Path $root 'updater.lock'))"
 if (-not $swapped) { & $script -RigRoot $root -InstallOnly; Assert-Installed $root }
 Write-Host 'PASS: actual published updater bootstrap finished or was recovered with pinned v18 bytes'
+
+# Exercise the exact immutable-download/bootstrap command in a fresh PowerShell
+# process, with InstallOnly as the sole CI substitution for updating the rig.
+$root = New-Fixture 'downloaded-bootstrap'
+$fix = Join-Path $root 'Recover-UpdaterV2018.ps1'
+Invoke-WebRequest 'https://raw.githubusercontent.com/Ternedal/ModelRig/e57653fc6df979e420bc0cac9edab06f438670c0/scripts/Recover-UpdaterV2018.ps1' -OutFile $fix -UseBasicParsing
+if ((Get-FileHash -LiteralPath $fix -Algorithm SHA256).Hash.ToLowerInvariant() -cne '93c9afb9e6526bbe544076259a56fea8d8c0c72c2d09a92a00efd09bfb1a8226') { throw 'Downloaded recovery script checksum differs' }
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $fix -RigRoot $root -InstallOnly
+Assert ($LASTEXITCODE -eq 0) 'Downloaded recovery command failed'
+Assert-Installed $root
+Write-Host 'PASS: immutable downloaded recovery command installs exact signed v18 bytes in a fresh PowerShell process'
