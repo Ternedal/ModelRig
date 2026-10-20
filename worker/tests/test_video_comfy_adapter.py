@@ -26,6 +26,12 @@ class ComfyVideoClientTests(unittest.TestCase):
             with self.subTest(prompt_id=prompt_id), self.assertRaises(ValueError):
                 ComfyVideoClient().history(prompt_id)
 
+    def test_redirect_to_external_host_is_rejected(self):
+        client = ComfyVideoClient()
+        request = __import__("urllib.request", fromlist=["Request"]).Request(client.base_url + "/history/abc")
+        with self.assertRaises(VideoBackendError):
+            next(handler for handler in client._opener.handlers if handler.__class__.__name__ == "_NoRedirect").redirect_request(request, None, 302, "Found", {}, "https://example.com/")
+
     def test_missing_backend_is_reported(self):
         client = ComfyVideoClient()
         with patch.object(client._opener, "open", side_effect=urllib.error.URLError("offline")):
