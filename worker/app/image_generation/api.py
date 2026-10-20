@@ -136,6 +136,7 @@ def build_image_router(
                 # here allows a third request to create a different lock while
                 # an earlier waiter is still blocked on the first one.
                 # Prune locks only when their jobs leave the manager.
+                pass
 
         @router.get("/artifacts/{artifact_id}/thumbnail")
         async def get_image_thumbnail(
