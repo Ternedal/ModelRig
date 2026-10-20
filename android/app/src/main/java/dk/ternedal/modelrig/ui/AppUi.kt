@@ -852,6 +852,8 @@ private fun ChatScreen(
 
     val messages = remember { mutableStateListOf<Msg>() }
     var convId by remember { mutableStateOf<Long?>(null) }
+    // Navigation generation distinguishes A -> B -> A from an unchanged target.
+    var voiceNavigationRevision by remember { mutableStateOf(0) }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
@@ -1155,6 +1157,7 @@ private fun ChatScreen(
         // Capture the original target on the Compose/UI dispatcher, never from IO.
         // A navigation change during ASR/TTS must not retarget persistence.
         val conversationAtVoiceStart = convId
+        val navigationRevisionAtVoiceStart = voiceNavigationRevision
         val modelAtVoiceStart = currentModel
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
@@ -1282,12 +1285,17 @@ private fun ChatScreen(
                 }
                 // Preserve the original conversation target and do not save a
                 // stopped turn (including when the user navigated away).
-                if (playbackStop.get() || convId != conversationAtVoiceStart) return@launch
+                if (playbackStop.get() || convId != conversationAtVoiceStart ||
+                    voiceNavigationRevision != navigationRevisionAtVoiceStart) return@launch
                 val cid = conversationAtVoiceStart ?: withContext(Dispatchers.IO) {
                     db.newConversation("rig", modelAtVoiceStart, transcriptText.ifBlank { "tale" }.take(40))
                 }
-                if (playbackStop.get() || convId != conversationAtVoiceStart) return@launch
-                if (conversationAtVoiceStart == null) convId = cid
+                if (playbackStop.get() || convId != conversationAtVoiceStart ||
+                    voiceNavigationRevision != navigationRevisionAtVoiceStart) return@launch
+                if (conversationAtVoiceStart == null) {
+                    convId = cid
+                    onConvChanged(cid)
+                }
                 // Both messages are one durable SQLite transaction. Do not
                 // read/write Compose navigation state from an IO dispatcher.
                 withContext(Dispatchers.IO) {
@@ -1442,6 +1450,7 @@ private fun ChatScreen(
         // convId already exists). Only a switch to a DIFFERENT conversation
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
+        voiceNavigationRevision++
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
