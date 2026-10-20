@@ -37,7 +37,7 @@ class VideoJob:
         if target not in _ALLOWED.get(self.state, set()):
             raise ValueError(f"Invalid video job transition: {self.state.value} -> {target.value}")
         if target == VideoJobState.FAILED:
-            if not error_code or len(error_code) > 64 or not error_code.isascii():
+            if not error_code or len(error_code) > 64 or not error_code.isascii() or not all(c.islower() or c.isdigit() or c == "_" for c in error_code):
                 raise ValueError("A bounded error code is required")
             self.error_code = error_code
         elif error_code is not None:
