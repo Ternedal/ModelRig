@@ -22,6 +22,12 @@ class FakeResponse:
 
 
 class ComfyAdapterSecurityTests(unittest.TestCase):
+    def test_invalid_timeout_values_are_rejected(self):
+        for timeout in (0, -1, 121, float("nan"), float("inf"),
+                        float("-inf"), True, "10", None):
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                ComfyVideoClient(timeout=timeout)
+
     def test_remote_endpoint_is_rejected(self):
         for endpoint in ("http://example.com:8188", "https://127.0.0.1:8188",
                          "http://127.0.0.1:8188/redirect",
