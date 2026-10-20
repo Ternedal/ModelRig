@@ -45,6 +45,7 @@ import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.logic.TurnStatus
+import dk.ternedal.modelrig.logic.mayPersistCompletedVoiceTurn
 import dk.ternedal.modelrig.net.VoiceCapability
 import dk.ternedal.modelrig.net.WorkerCapabilities
 import dk.ternedal.modelrig.net.IngestCapability
@@ -1288,13 +1289,17 @@ private fun ChatScreen(
                 }
                 // Preserve the original conversation target and do not save a
                 // stopped turn (including when the user navigated away).
-                if (playbackStop.get() || convId != conversationAtVoiceStart ||
-                    voiceNavigationRevision != navigationRevisionAtVoiceStart) return@launch
+                if (!mayPersistCompletedVoiceTurn(
+                        conversationAtVoiceStart, convId, navigationRevisionAtVoiceStart,
+                        voiceNavigationRevision, playbackStop.get()
+                    )) return@launch
                 val cid = conversationAtVoiceStart ?: withContext(Dispatchers.IO) {
                     db.newConversation("rig", modelAtVoiceStart, transcriptText.ifBlank { "tale" }.take(40))
                 }
-                if (playbackStop.get() || convId != conversationAtVoiceStart ||
-                    voiceNavigationRevision != navigationRevisionAtVoiceStart) return@launch
+                if (!mayPersistCompletedVoiceTurn(
+                        conversationAtVoiceStart, convId, navigationRevisionAtVoiceStart,
+                        voiceNavigationRevision, playbackStop.get()
+                    )) return@launch
                 if (conversationAtVoiceStart == null) {
                     convId = cid
                     onConvChanged(cid)
