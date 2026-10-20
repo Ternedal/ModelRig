@@ -15,8 +15,8 @@ This note documents the existing release gate; it does **not** qualify or author
 5. Treat missing, stale, untrusted, unverifiable or revision-mismatched evidence as PENDING or FAIL. Never infer PASS from GitHub CI alone.
 6. Confirm the release version, signed update/rollback plan and explicit human release approval before creating any tag or activating production.
 
-## Current freeze rule
+## Merge and release qualification boundary
 
-This documentation branch does not alter protected `main`, the production worker or any release gate. Do not merge into a frozen candidate without explicitly re-qualifying the changed exact head and cross-repository evidence. Until independent artifact verification is implemented and completed, keep `release_ready=false` and `production_activation=false`.
+The temporary freeze on merging ModelRig changes was lifted on 2026-10-20 after the v2.0.18 test. This does **not** constitute approval for any new release, tag or production activation. Any new release candidate must be re-qualified at the exact source head and checked against independently verified cross-repository producer evidence. A structurally valid manifest alone must never set `release_ready=true` or `production_activation=true`.
 
 Tracking: #2025, #2111, #2109, #2107.

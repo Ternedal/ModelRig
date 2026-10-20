@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"modelrig/internal/heartbeat"
+	"modelrig/internal/startup"
 )
 
 // child is the seam that makes the loop testable: the real implementation shells
@@ -84,6 +85,14 @@ func superviseOnce(children []child, fails map[string]int, maxFails int, restart
 			fails[c.name()] = 0
 			continue
 		}
+		// A onefile worker can still be unpacking its native voice libraries.
+		// Only a live child that has never been ready gets this bounded grace;
+		// exits above and failures after first readiness retain normal recovery.
+		if pending, ok := c.(interface{ startupPending() bool }); ok && pending.startupPending() {
+			fails[c.name()] = 0
+			log.Printf("supervisor: %s starting; waiting within startup grace", c.name())
+			continue
+		}
 		fails[c.name()]++
 		log.Printf("supervisor: %s unhealthy (%d/%d)", c.name(), fails[c.name()], maxFails)
 		if fails[c.name()] >= maxFails {
@@ -123,8 +132,11 @@ type procChild struct {
 	alive bool
 	// What a bare "restarted" line could never tell you: which process was
 	// started, and how the previous one ended.
-	startedPID int
-	lastExit   string
+	startedPID   int
+	lastExit     string
+	startedAt    time.Time
+	ready        bool
+	startupGrace time.Duration
 }
 
 func (p *procChild) name() string { return p.label }
@@ -133,6 +145,18 @@ func (p *procChild) running() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.alive
+}
+
+func (p *procChild) startupPending() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.alive && !p.ready && !p.startedAt.IsZero() && time.Since(p.startedAt) < p.startupGrace
+}
+
+func (p *procChild) markReady() {
+	p.mu.Lock()
+	p.ready = true
+	p.mu.Unlock()
 }
 
 // exitNote returns how the last child ended, or "" if none has ended yet.
@@ -157,7 +181,11 @@ func (p *procChild) healthy() bool {
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode == http.StatusOK
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	p.markReady()
+	return true
 }
 
 func (p *procChild) restart() error {
@@ -188,6 +216,8 @@ func (p *procChild) restart() error {
 	p.alive = true
 	p.startedPID = cmd.Process.Pid
 	p.lastExit = ""
+	p.startedAt = time.Now()
+	p.ready = false
 	// Adopt immediately, so anything the child spawns is already inside the job.
 	if err := p.tree.adopt(cmd.Process); err != nil {
 		log.Printf("supervisor: %s not adopted into the process tree: %v", p.label, err)
@@ -242,11 +272,15 @@ func main() {
 	envFile := flag.String("env", filepath.Join(root, "modelrig.env"), "KEY=VALUE file of env vars for the children (e.g. MODELRIG_HOST=0.0.0.0)")
 	every := flag.Duration("interval", 10*time.Second, "supervision interval")
 	maxFails := flag.Int("max-fails", 3, "consecutive unhealthy polls before restart")
+	startupGrace := flag.Duration("startup-grace", startup.GracePeriod, "grace for a live child before its first healthy response; does not delay crash recovery")
 	logMB := flag.Int64("log-max-mb", 20, "rotate a child log when it passes this size (MB)")
 	minFreeGB := flag.Float64("min-free-gb", 5, "warn when free disk falls below this (GB)")
 	vramPct := flag.Float64("vram-warn-pct", 95, "warn when VRAM usage exceeds this (%)")
 	resEvery := flag.Duration("resource-cooldown", 10*time.Minute, "minimum gap between repeats of the same resource warning")
 	flag.Parse()
+	if *startupGrace < 0 {
+		log.Fatal("supervisor: -startup-grace must not be negative")
+	}
 
 	if err := os.MkdirAll(*logDir, 0o755); err != nil {
 		log.Fatalf("supervisor: cannot create log dir %s: %v", *logDir, err)
@@ -288,12 +322,12 @@ func main() {
 	worker := &procChild{
 		label: "worker", exePath: *workerExe, workDir: filepath.Dir(*workerExe),
 		healthURL: *workerHealth, logPath: filepath.Join(*logDir, "worker.log"), logMaxMB: *logMB,
-		extraEnv: childEnv, tree: tree,
+		extraEnv: childEnv, tree: tree, startupGrace: *startupGrace,
 	}
 	server := &procChild{
 		label: "server", exePath: *serverExe, workDir: filepath.Dir(*serverExe),
 		healthURL: *serverHealth, logPath: filepath.Join(*logDir, "server.log"), logMaxMB: *logMB,
-		extraEnv: childEnv, tree: tree,
+		extraEnv: childEnv, tree: tree, startupGrace: *startupGrace,
 	}
 
 	// Start the worker first and give it a moment to bind before the server
@@ -318,8 +352,8 @@ func main() {
 	_ = heartbeat.Write(hbPath) // write once up front so the file exists immediately
 	ticker := time.NewTicker(*every)
 	defer ticker.Stop()
-	log.Printf("supervising every %s (restart after %d unhealthy polls); warn under %.0f GB free or over %.0f%% VRAM",
-		*every, *maxFails, *minFreeGB, *vramPct)
+	log.Printf("supervising every %s (startup grace %s; restart after %d unhealthy polls once ready or grace expires); warn under %.0f GB free or over %.0f%% VRAM",
+		*every, *startupGrace, *maxFails, *minFreeGB, *vramPct)
 	for {
 		select {
 		case <-ctx.Done():
