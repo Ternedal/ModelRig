@@ -210,4 +210,31 @@ with patch.object(benchmark.http.client, "HTTPConnection", HungHeaderConnection)
     assert time.monotonic() - started < 3
     assert HungHeaderConnection.last_socket.interrupted.is_set()
 
+# An HTTP/1.1 response may detach HTTPConnection.sock while the streaming
+# response still reads it; keep the original transport under the same deadline.
+class DetachedStreamConnection(HungHeaderConnection):
+    def getresponse(self):
+        original_socket = self.sock
+        self.sock = None
+
+        class DetachedStreamResponse:
+            status = 200
+            def readline(self, limit):
+                if not original_socket.interrupted.wait(timeout=4):
+                    raise AssertionError("detached stream escaped deadline")
+                raise TimeoutError("simulated stalled detached body")
+
+        return DetachedStreamResponse()
+
+
+with patch.object(benchmark.http.client, "HTTPConnection", DetachedStreamConnection):
+    started = time.monotonic()
+    reject(lambda: benchmark.measure_once(
+        ("127.0.0.1", 11434), "gemma4:26b",
+        num_ctx=8192, num_predict=96,
+        prompt=benchmark.DEFAULT_PROMPT, timeout=1,
+    ), "unavailable or timed out")
+    assert time.monotonic() - started < 3
+    assert DetachedStreamConnection.last_socket.interrupted.is_set()
+
 print("PASS: local Ollama inference benchmark; no external network or release authority")
