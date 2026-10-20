@@ -4,11 +4,24 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.video_preflight import check
+from app.video_preflight import check, probe_nvidia_gpus
 from app.video_storage import ExternalMediaStorage
 
 
 class VideoPreflightTests(unittest.TestCase):
+    def test_gpu_inventory_parses_two_independent_cards(self):
+        from subprocess import CompletedProcess
+        output = '0, NVIDIA GeForce RTX 3060, 12288\\n1, NVIDIA GeForce RTX 3060, 12288\\n'
+        with patch('app.video_preflight.subprocess.run', return_value=CompletedProcess([], 0, output, '')):
+            report = probe_nvidia_gpus()
+        self.assertEqual(report['status'], 'detected')
+        self.assertEqual([d['memory_mib'] for d in report['devices']], [12288, 12288])
+
+    def test_gpu_inventory_times_out_safely(self):
+        from subprocess import TimeoutExpired
+        with patch('app.video_preflight.subprocess.run', side_effect=TimeoutExpired('nvidia-smi', 8)):
+            self.assertEqual(probe_nvidia_gpus()['status'], 'unavailable')
+
     def test_missing_configuration_fails(self):
         report = check({})
         self.assertFalse(report["ready"])
