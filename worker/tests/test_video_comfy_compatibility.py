@@ -35,6 +35,18 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(report["status"], "invalid_inputs")
             self.assertEqual(report["invalid_inputs"][0]["input"], "obsolete")
 
+    def test_missing_model_choice_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(json.dumps({"1": {"class_type": "CheckpointLoaderSimple",
+                                             "inputs": {"ckpt_name": "missing.safetensors"}}}))
+            report = probe_nodes(path, opener=lambda *a, **kw: Response({
+                "CheckpointLoaderSimple": {"input": {"required": {
+                    "ckpt_name": [["installed.safetensors"], {}]}}}
+            }))
+            self.assertEqual(report["status"], "invalid_choices")
+            self.assertEqual(report["invalid_choices"][0]["input"], "ckpt_name")
+
     def test_compatible_input_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"
