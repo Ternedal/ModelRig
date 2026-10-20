@@ -26,6 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install API test dependencies
+        run: python -m pip install fastapi httpx
       - name: Run offline video tests
         env:
           PYTHONPATH: .
