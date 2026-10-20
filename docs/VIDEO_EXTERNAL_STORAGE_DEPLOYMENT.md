@@ -24,9 +24,7 @@ There is **no automatic fallback to C:, the repository, or /tmp**.
    approved external disk, or another explicitly approved external disk.
    ComfyUI may write large intermediate tensors or videos before ModelRig
    receives an artifact. ModelRig's admission check alone cannot prevent this.
-3. Put the video jobs SQLite DB on that volume as well; current
-   `VideoJobStore` takes a caller-supplied path and is not wired to the media
-   root yet.
+3. The operator enqueue/dispatch/collect entrypoints use `VideoJobStore.on_external_volume()`, which places SQLite under the configured media root. The lower-level `VideoJobStore(db_path)` constructor still accepts arbitrary paths for tests and internal callers; audit any new runtime callers to ensure they use the external-volume factory.
 4. Validate available space before *and during* long jobs; clean abandoned
    intermediates and avoid following symlinks or junctions into system storage.
 5. Verify the volume identity after remount/reboot to avoid accidentally
