@@ -28,6 +28,8 @@ def probe_nodes(template_path, *, opener=urlopen):
             or not isinstance(node.get("inputs", {}), dict) for node in graph.values()
         ):
             return {"status": "invalid_template"}
+        if any(not node["class_type"] for node in graph.values()):
+            return {"status": "invalid_template"}
         required = sorted({node["class_type"] for node in graph.values()})
         with opener(OBJECT_INFO_URL, timeout=5) as response:
             if response.status != 200:
