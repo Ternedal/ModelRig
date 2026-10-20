@@ -84,9 +84,15 @@ def run(source: str, target: str, reader) -> None:
             )
 
     rigdag = reader("RIGDAG_SIMPEL.md")
+    # A release-preparation candidate uses its own fetched branch authority;
+    # retained physical-proof branches remain valid for older campaigns.
+    candidate_refs = (
+        f"origin/physical-proof/{target}",
+        *re.findall(rf"origin/release/kaliv-v{re.escape(target)}-prep-\d{{8}}", rigdag),
+    )
     check(
-        f"origin/physical-proof/{target}" in rigdag,
-        f"RIGDAG_SIMPEL.md names origin/physical-proof/{target}",
+        any(ref in rigdag for ref in candidate_refs),
+        f"RIGDAG_SIMPEL.md names a fetched candidate branch for {target}",
     )
     check(
         f"Kildereleasen er den signerede {source}; target er {target}." in rigdag,
