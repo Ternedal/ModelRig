@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -32,6 +33,7 @@ import (
 	"time"
 
 	"modelrig/internal/heartbeat"
+	"modelrig/internal/startup"
 )
 
 // target is one binary the updater manages: its name on the release, and where
@@ -321,24 +323,53 @@ func restore(targets []target, backupDir string) error {
 	return firstErr
 }
 
-// verify checks that the server answers /healthz with the expected version.
+// verify retains the default-budget entrypoint used by cold-boot qualification.
 func verify(healthURL, wantVersion string) bool {
+	return verifyWithin(healthURL, wantVersion, startup.HealthTimeout, 2*time.Second)
+}
+
+// verifyWithin bounds the whole readiness wait, including a request in flight.
+// A fixed attempt count gave a refused connection only ~30 seconds of grace,
+// too little for a first boot of the native voice payload on the Windows rig.
+func verifyWithin(healthURL, wantVersion string, budget, interval time.Duration) bool {
+	if budget <= 0 || interval <= 0 {
+		log.Printf("health verification requires positive timeout and poll interval")
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
 	client := http.Client{Timeout: 5 * time.Second}
-	for i := 0; i < 15; i++ {
-		resp, err := client.Get(healthURL)
+	last := "no response"
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			log.Printf("health verification: %v", err)
+			return false
+		}
+		resp, err := client.Do(req)
 		if err == nil {
 			var body struct {
 				Version string `json:"version"`
 			}
-			b, _ := io.ReadAll(resp.Body)
+			b, readErr := io.ReadAll(io.LimitReader(resp.Body, 16385))
 			resp.Body.Close()
-			if json.Unmarshal(b, &body) == nil && body.Version == wantVersion {
+			if resp.StatusCode == http.StatusOK && readErr == nil && len(b) <= 16384 &&
+				json.Unmarshal(b, &body) == nil && body.Version == wantVersion {
 				return true
 			}
+			last = fmt.Sprintf("HTTP %d, version %q (want %q)", resp.StatusCode, body.Version, wantVersion)
+		} else {
+			last = err.Error()
 		}
-		time.Sleep(2 * time.Second)
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			log.Printf("health verification timed out after %s for %s: %s", budget, healthURL, last)
+			return false
+		case <-timer.C:
+		}
 	}
-	return false
 }
 
 func ps(args ...string) error {
@@ -406,6 +437,7 @@ func main() {
 	workerHealth := flag.String("worker-health", "http://127.0.0.1:8099/healthz", "worker health URL")
 	heartbeatPath := flag.String("heartbeat", "", "supervisor heartbeat file (default: <dir>/logs/supervisor-heartbeat)")
 	superInterval := flag.Duration("supervisor-interval", 10*time.Second, "supervisor tick interval; used to prove the heartbeat advances after an update")
+	startupTimeout := flag.Duration("startup-timeout", startup.HealthTimeout, "maximum readiness wait per service after update or rollback")
 	noHeartbeat := flag.Bool("no-heartbeat-check", false, "skip the post-update supervisor-liveness check")
 	task := flag.String("supervisor-task", "KalivSupervisor", "scheduled task that runs the supervisor")
 	checkOnly := flag.Bool("check", false, "report whether an update is available and exit")
@@ -413,6 +445,9 @@ func main() {
 	skipVerify := flag.Bool("insecure-skip-verify", false, "install without checking SHA256SUMS.txt (only for a release predating checksums)")
 	skipAttestation := flag.Bool("skip-attestation", false, "install without checking GitHub build provenance (only for a release predating v1.58.72, which is when signing started)")
 	flag.Parse()
+	if *startupTimeout <= 0 {
+		log.Fatal("-startup-timeout must be positive")
+	}
 	if *heartbeatPath == "" {
 		*heartbeatPath = filepath.Join(*root, "logs", "supervisor-heartbeat")
 	}
@@ -636,7 +671,9 @@ func main() {
 	// Both must report the new version. The backend's /healthz stays green even
 	// if the worker is dead, so checking only the backend would bless a release
 	// with a broken worker; require the worker too before keeping the swap.
-	healthOK := verify(*serverHealth, newVersion) && verify(*workerHealth, newVersion)
+	log.Printf("waiting up to %s per service for version %s", *startupTimeout, newVersion)
+	healthOK := verifyWithin(*serverHealth, newVersion, *startupTimeout, 2*time.Second) &&
+		verifyWithin(*workerHealth, newVersion, *startupTimeout, 2*time.Second)
 	// A supervisor that started the children then died would still pass the
 	// health checks above while leaving the rig with no crash-recovery. Require
 	// proof it is alive AND looping: a heartbeat newer than the restart that then
@@ -680,7 +717,8 @@ func main() {
 	_ = heartbeat.Remove(*heartbeatPath)
 	rollbackAt := time.Now()
 	_ = ps(fmt.Sprintf("Start-ScheduledTask -TaskName '%s'", *task))
-	oldRuntimeOK := verify(*serverHealth, cur) && verify(*workerHealth, cur)
+	oldRuntimeOK := verifyWithin(*serverHealth, cur, *startupTimeout, 2*time.Second) &&
+		verifyWithin(*workerHealth, cur, *startupTimeout, 2*time.Second)
 	oldSuperOK := true
 	if !*noHeartbeat {
 		alive, herr := heartbeat.ProveLooping(*heartbeatPath, rollbackAt, *superInterval, 45*time.Second)
