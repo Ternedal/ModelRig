@@ -20,6 +20,7 @@ Run: python3 scripts/current_state.py [--check]
 """
 from __future__ import annotations
 
+import difflib
 import os
 import re
 import subprocess
@@ -268,6 +269,7 @@ if __name__ == "__main__":
         current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
         if current != text:
             print("CURRENT_STATE.md is stale. Run: python3 scripts/current_state.py")
+            print("".join(difflib.unified_diff(current.splitlines(keepends=True), text.splitlines(keepends=True), fromfile="committed/CURRENT_STATE.md", tofile="generated/CURRENT_STATE.md"))[:12000])
             raise SystemExit(1)
         print("CURRENT_STATE.md is current")
         raise SystemExit(0)
