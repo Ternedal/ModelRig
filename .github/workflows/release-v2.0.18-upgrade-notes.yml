@@ -32,6 +32,8 @@ jobs:
           TAG = 'v2.0.18'
           HEAD = '5d535a8d391f25677c0e3d85e82eb8a9360c796b'
           RUN = 39379849897
+          RELEASE_ID = 418070031
+          DRAFT_TAG = 'untagged-0994774277ab6d6e2f1a'
 
           def api(path, method='GET', payload=None):
               request = urllib.request.Request(
@@ -54,10 +56,14 @@ jobs:
                       or run['event'] != 'workflow_dispatch'
                       or run['conclusion'] not in (None, 'success')):
                   raise SystemExit('Unexpected release workflow identity or result.')
-              if release['tag_name'] != TAG or not release['draft']:
+              if (release['id'] != RELEASE_ID or release['name'] != TAG
+                      or release['tag_name'] not in (TAG, DRAFT_TAG)
+                      or not release['draft']):
                   raise SystemExit('Expected the unpublished v2.0.18 draft.')
               if (release.get('body') or '').strip() not in ('', notes.strip()):
                   raise SystemExit('Release notes changed; refusing to overwrite them.')
+              if release['tag_name'] == DRAFT_TAG and release.get('body') != notes:
+                  raise SystemExit('Only repair the temporary tag of our own notes update.')
 
           document = Path('docs/VOICE_STARTUP_RECOVERY.md').read_text(encoding='utf-8')
           recipes = re.findall(r'```powershell\n(.*?)```', document, re.S)
@@ -86,17 +92,15 @@ jobs:
           '''
           tag = api('/git/ref/tags/' + TAG)
           run = api('/actions/runs/' + str(RUN))
-          # GitHub's tag lookup can omit drafts. Select this exact draft from
-          # the authenticated release list and mutate it only by release ID.
-          matches = [item for item in api('/releases?per_page=100')
-                     if item['tag_name'] == TAG]
-          if len(matches) != 1:
-              raise SystemExit('Expected exactly one v2.0.18 release draft.')
-          release = matches[0]
+          # The ID was observed on the draft created by this release run.
+          # A draft can receive a temporary untagged name on a metadata PATCH;
+          # explicitly retain its already-existing, SHA-verified release tag.
+          release = api('/releases/' + str(RELEASE_ID))
           validate_target(tag, run, release, notes)
           # Metadata only: do not publish, change latest, touch assets or tags,
           # or dispatch another release. Normal release gates own publication.
-          updated = api('/releases/' + str(release['id']), 'PATCH', {'body': notes})
+          updated = api('/releases/' + str(RELEASE_ID), 'PATCH',
+                        {'tag_name': TAG, 'body': notes})
           if updated['tag_name'] != TAG or updated['body'] != notes:
               raise SystemExit('Release notes update was not confirmed.')
           print('Guarded updater-first instructions saved on draft', TAG, flush=True)
