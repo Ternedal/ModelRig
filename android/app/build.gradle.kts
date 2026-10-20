@@ -29,8 +29,8 @@ android {
         applicationId = "dk.ternedal.modelrig"
         minSdk = 26
         targetSdk = 35
-        versionCode = 297          // monotonic, bumped every release (not tied to semver)
-        versionName = "2.0.17"
+        versionCode = 298          // monotonic, bumped every release (not tied to semver)
+        versionName = "2.0.18"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
