@@ -50,6 +50,7 @@ From the repository root with the worker Python environment activated:
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\worker).Path
+python -m app.video_comfy_enqueue_once --prompt 'Clouds over the sea' --width 512 --height 320 --fps 16 --seconds 3
 python -m app.video_comfy_dispatch_once
 python -m app.video_comfy_collect_once
 ```
@@ -58,7 +59,7 @@ The dispatcher takes at most one queued job; the collector takes at most
 one finished job. They are **not** a scheduler. The operator must configure
 `COMFYUI_OUTPUT_DIRECTORY` on the external volume and ensure the ComfyUI
 output node writes exactly one MP4 with a successful history record.
-No job is submitted unless it already exists in the external SQLite queue.
+The first command explicitly creates a validated job in the external SQLite queue; the second submits it. No HTTP request can enqueue arbitrary workflow JSON.
 
 ## Qualification gates
 
