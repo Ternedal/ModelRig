@@ -47,6 +47,27 @@ class CompatibilityTests(unittest.TestCase):
             self.assertEqual(report["status"], "invalid_choices")
             self.assertEqual(report["invalid_choices"][0]["input"], "ckpt_name")
 
+    def test_installed_model_choice_is_compatible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(json.dumps({"1": {"class_type": "CheckpointLoaderSimple",
+                                             "inputs": {"ckpt_name": "installed.safetensors"}}}))
+            report = probe_nodes(path, opener=lambda *a, **kw: Response({
+                "CheckpointLoaderSimple": {"input": {"required": {
+                    "ckpt_name": [["installed.safetensors"], {}]}}}
+            }))
+            self.assertEqual(report["status"], "compatible")
+
+    def test_unbound_request_placeholder_is_not_a_missing_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflow.json"
+            path.write_text(json.dumps({"1": {"class_type": "PromptNode",
+                                             "inputs": {"text": "__KALIV_VIDEO_PROMPT__"}}}))
+            report = probe_nodes(path, opener=lambda *a, **kw: Response({
+                "PromptNode": {"input": {"required": {"text": [["example"], {}]}}}
+            }))
+            self.assertEqual(report["status"], "compatible")
+
     def test_compatible_input_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workflow.json"
