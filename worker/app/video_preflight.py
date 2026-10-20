@@ -102,7 +102,13 @@ def main():
     args = parser.parse_args()
     report = check()
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0 if report["checks"].get("storage") == "pass" else 2
+    checks = report["checks"]
+    diagnostics_pass = (checks.get("storage") == "pass"
+                        and checks.get("workflow_template") == "valid_structure"
+                        and checks.get("comfy_nodes", {}).get("status") == "compatible"
+                        and checks.get("gpus", {}).get("status") == "detected")
+    # Exit 0 means diagnostics passed, never production qualification.
+    return 0 if diagnostics_pass else 2
 
 
 if __name__ == "__main__":
