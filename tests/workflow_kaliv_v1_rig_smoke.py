@@ -365,4 +365,42 @@ with patch.object(tool.subprocess, "run", side_effect=bad_utf8_git):
 assert malformed["status"] == "UNVERIFIED"
 assert malformed["clean"] is False
 
+# The checked-out helper source must win even when an ignored timestamp-valid
+# __pycache__ file was compiled from a DIFFERENT copy of the same-size source.
+import py_compile
+with tempfile.TemporaryDirectory() as td:
+    isolated = Path(td)
+    original_script = ROOT / "scripts" / "kaliv_v1_rig_smoke.py"
+    original_helper = ROOT / "scripts" / "voice_runtime_preflight.py"
+    (isolated / original_script.name).write_bytes(original_script.read_bytes())
+    clean_helper = original_helper.read_bytes()
+    poisoned_suffix = b"\\n_CACHED_ONLY_MARKER = True\\n"
+    safe_suffix = b"\\n#" + b" " * (len(poisoned_suffix) - 2)
+    assert len(poisoned_suffix) == len(safe_suffix)
+    helper = isolated / original_helper.name
+    helper.write_bytes(clean_helper + poisoned_suffix)
+    py_compile.compile(str(helper), doraise=True)
+    cached_stat = helper.stat()
+    helper.write_bytes(clean_helper + safe_suffix)
+    os.utime(helper, ns=(cached_stat.st_atime_ns, cached_stat.st_mtime_ns))
+    assert helper.stat().st_size == cached_stat.st_size
+    spec_cached = importlib.util.spec_from_file_location(
+        "kaliv_smoke_ignores_cached_helper", isolated / original_script.name
+    )
+    assert spec_cached and spec_cached.loader
+    isolated_tool = importlib.util.module_from_spec(spec_cached)
+    old_module = sys.modules.pop("voice_runtime_preflight", None)
+    old_sys_path = list(sys.path)
+    try:
+        spec_cached.loader.exec_module(isolated_tool)
+        assert not hasattr(isolated_tool.voice, "_CACHED_ONLY_MARKER"), (
+            "ignored helper .pyc was executed instead of the checked-out source"
+        )
+    finally:
+        sys.path[:] = old_sys_path
+        if old_module is not None:
+            sys.modules["voice_runtime_preflight"] = old_module
+        else:
+            sys.modules.pop("voice_runtime_preflight", None)
+
 print("kaliv V1 rig smoke contract PASS")
