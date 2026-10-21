@@ -38,10 +38,12 @@ def build_media_router() -> APIRouter:
     @router.get("")
     def gallery(request: Request, limit: int = 50, offset: int = 0):
         operator_only(request)
+        if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
+            raise HTTPException(400, "Invalid pagination")
         try:
             items = catalog().list_items(limit=limit, offset=offset)
-        except ValueError:
-            raise HTTPException(400, "Invalid pagination")
+        except (ValueError, OSError):
+            raise HTTPException(503, "Media catalog unavailable")
         return {"schema": "kaliv-media-gallery/v1", "items": [gallery_item_for_client(item) for item in items], "limit": limit, "offset": offset}
 
     @router.api_route("/{media_id}", methods=["GET", "HEAD"])
