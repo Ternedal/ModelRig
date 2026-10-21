@@ -13,7 +13,7 @@ from .video_media_ranges import UnsatisfiableRange, parse_single_range
 
 def iter_media_bytes(path: Path, start: int, length: int, chunk_size: int = 256 * 1024) -> Iterator[bytes]:
     """Stream at most length bytes from a validated media file."""
-    if start < 0 or length < 0 or chunk_size <= 0:
+    if any(type(value) is not int for value in (start, length, chunk_size)) or start < 0 or length < 0 or chunk_size <= 0:
         raise ValueError("Invalid stream bounds")
     with Path(path).open("rb") as source:
         source.seek(start)
