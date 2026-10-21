@@ -25,7 +25,7 @@ class VideoStorageConfigTests(unittest.TestCase):
     def test_windows_resolved_system_drive_alias_is_rejected(self):
         with tempfile.TemporaryDirectory() as parent:
             with patch("app.video_storage_config.os") as mock_os, \
-                 patch("app.video_storage_config.ExternalMediaStorage") as mock_storage:
+                 patch("app.video_storage_config.ExternalMediaStorage", autospec=True) as mock_storage:
                 mock_os.name = "nt"
                 mock_storage.return_value.root.drive = "C:"
                 with self.assertRaisesRegex(MediaStorageUnavailable, "Resolved media root"):
