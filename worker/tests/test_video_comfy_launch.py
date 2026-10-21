@@ -64,6 +64,21 @@ class ComfyLaunchTests(unittest.TestCase):
                     build_comfy_launch_plan(str(py), str(main), {})
             self.assertFalse((other / "user").exists())
 
+    def test_launch_plan_rejects_missing_user_dir_without_provisioning_caches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            py, main = root / "python.exe", root / "main.py"
+            py.touch()
+            main.touch()
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch("app.video_comfy_launch.configured_video_storage", return_value=storage), patch(
+                "app.video_comfy_storage_env.configured_video_storage", return_value=storage
+            ), patch("app.video_comfy_launch.comfy_external_environment") as provision:
+                with self.assertRaisesRegex(ValueError, "must be provisioned"):
+                    build_comfy_launch_plan(str(py), str(main), {})
+            provision.assert_not_called()
+            self.assertFalse((root / "ComfyUI").exists())
+
     def test_rejects_missing_executable(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
