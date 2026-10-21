@@ -14,6 +14,12 @@ class ComfyVideoClientTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 ComfyVideoClient(url)
 
+    def test_malformed_endpoint_port_is_rejected(self):
+        for url in ("http://127.0.0.1:invalid", "http://localhost:99999",
+                    "http://[::1", None, 8188):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                ComfyVideoClient(url)
+
     def test_defaults_to_loopback(self):
         self.assertEqual(ComfyVideoClient().base_url, "http://127.0.0.1:8188")
 
