@@ -37,6 +37,14 @@ class MediaStreamTests(unittest.TestCase):
         self.assertEqual(length, 123)
         self.assertEqual(headers["Content-Type"], "image/png")
 
+    def test_malformed_method_and_mime_rejected(self):
+        for method in (None, 1, ["GET"], "POST"):
+            with self.subTest(method=method), self.assertRaises(ValueError):
+                media_response_plan(size=10, mime_type="video/mp4", method=method)
+        for mime in (None, 1, ["video/mp4"], "text/html"):
+            with self.subTest(mime=mime), self.assertRaises(ValueError):
+                media_response_plan(size=10, mime_type=mime)
+
     def test_invalid_file_reader_bounds_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "test.mp4"
