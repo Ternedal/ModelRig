@@ -66,7 +66,7 @@ _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 
 _MD_CODE_FENCE = re.compile(r"```[\s\S]*?```")          # fenced blocks: drop entirely
 _MD_STRIKE = re.compile(r"~~([^~\n]+)~~")               # ~~deleted~~ -> deleted
-_MD_BARE_URL = re.compile(r"""https?://[^\s<>()\[\]{}'"\x60]+""")  # stop before markup delimiters
+_MD_BARE_URL = re.compile(r"""https?://[^\s<>\[\]{}'"`]+""")  # balanced URL path parentheses
 _MD_EMPTY_WRAPPERS = re.compile(r"(?:\(\s*\)|\[\s*\]|\x60\s*\x60)")  # URL-only markup
 _MD_RESIDUAL_MARKERS = re.compile(r"(?:\*{2,}|_{2,}|~{2,}|`{2,})")  # orphaned markup
 _MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")             # `code` -> code
@@ -152,6 +152,17 @@ def has_speech(text: str) -> bool:
     return any(ch.isalnum() for ch in text)
 
 
+def _remove_bare_url(match: re.Match[str]) -> str:
+    """Remove full URLs, preserving punctuation and unmatched outer delimiters."""
+    url = match.group(0)
+    excess = max(0, url.count(")") - url.count("("))
+    suffix = ")" * excess
+    if excess:
+        url = url[:-excess]
+    punctuation = url[len(url.rstrip(".,;:!?")):]
+    return " " + suffix + punctuation
+
+
 def strip_markdown(text: str) -> str:
     """Turn markdown into something a TTS voice can read naturally.
 
@@ -165,7 +176,7 @@ def strip_markdown(text: str) -> str:
     t = _MD_HRULE.sub(" ", t)
     t = _MD_IMAGE.sub(r"\1", t)
     t = _MD_LINK.sub(r"\1", t)
-    t = _MD_BARE_URL.sub(" ", t)
+    t = _MD_BARE_URL.sub(_remove_bare_url, t)
     t = _MD_EMPTY_WRAPPERS.sub(" ", t)
     t = _MD_STRIKE.sub(r"\1", t)
     t = _MD_INLINE_CODE.sub(r"\1", t)
