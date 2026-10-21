@@ -9,6 +9,20 @@ from app.video_storage import ExternalMediaStorage
 
 
 class ComfyStorageEnvironmentTests(unittest.TestCase):
+    def test_creates_all_cache_directories_under_external_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch("app.video_comfy_storage_env.configured_video_storage", return_value=storage):
+                env = comfy_external_environment({})
+            for name, value in env.items():
+                with self.subTest(name=name):
+                    path = Path(value)
+                    self.assertTrue(path.is_dir())
+                    self.assertTrue(path.resolve().is_relative_to(root.resolve()))
+            self.assertEqual(env["TEMP"], env["TMP"])
+            self.assertEqual(env["TEMP"], env["TMPDIR"])
+
     def test_rejects_symlinked_temp_before_creating_comfy_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
