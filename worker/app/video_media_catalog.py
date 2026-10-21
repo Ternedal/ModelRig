@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
 from pathlib import Path
 
 from .video_media_contract import MediaItem
