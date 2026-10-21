@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import queue
 import statistics
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -59,11 +61,32 @@ def _request_json(base: str, route: str, *, body: dict | None, timeout: float):
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="GET" if body is None else "POST",
     )
+    # urllib's socket timeout is PER operation: a peer can drip bytes forever.
+    # A daemon reader isolates headers + body behind one absolute deadline.
+    # At most one abandoned daemon can exist, because this probe aborts after
+    # the first timeout. No external URL, model pull or configuration writes.
+    outcome: queue.Queue = queue.Queue(maxsize=1)
+
+    def read_once():
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                result = response.read(_MAX_REPLY + 1)
+            outcome.put((True, result))
+        except Exception as exc:  # noqa: BLE001 — surface only error TYPE
+            outcome.put((False, exc))
+
+    reader = threading.Thread(target=read_once, daemon=True, name="ollama-probe-io")
+    reader.start()
     try:
-        with opener.open(request, timeout=timeout) as response:
-            payload = response.read(_MAX_REPLY + 1)
-    except (HTTPError, URLError, OSError, TimeoutError) as exc:
-        raise ProbeError("Local Ollama request failed: " + type(exc).__name__) from exc
+        ok, payload = outcome.get(timeout=timeout)
+    except queue.Empty:
+        raise ProbeError("Local Ollama absolute request timeout exceeded") from None
+    if not ok:
+        if isinstance(payload, ProbeError):
+            raise payload
+        if isinstance(payload, (HTTPError, URLError, OSError, TimeoutError)):
+            raise ProbeError("Local Ollama request failed: " + type(payload).__name__) from payload
+        raise ProbeError("Local Ollama request failed: " + type(payload).__name__) from payload
     if len(payload) > _MAX_REPLY:
         raise ProbeError("Local Ollama response exceeds size limit")
     try:
