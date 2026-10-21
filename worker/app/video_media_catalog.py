@@ -79,7 +79,13 @@ class MediaCatalog:
                 "ORDER BY created_at DESC, media_id DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
-        return [json.loads(row["metadata_json"]) for row in rows]
+        items = []
+        for row in rows:
+            metadata = json.loads(row["metadata_json"])
+            if not isinstance(metadata, dict) or not isinstance(metadata.get("id"), str):
+                raise ValueError("Invalid catalog gallery metadata")
+            items.append(metadata)
+        return items
 
     def resolve(self, media_id: str) -> tuple[Path, dict] | None:
         if not isinstance(media_id, str) or not 1 <= len(media_id) <= 128 or not media_id.isascii() or not all(
