@@ -82,6 +82,49 @@ one finished job. They are **not** a scheduler. The operator must configure
 output node writes exactly one MP4 with a successful history record.
 The first command explicitly creates a validated job in the external SQLite queue; the second submits it. No HTTP request can enqueue arbitrary workflow JSON.
 
+## Physical storage and MP4 evidence (operator-only)
+
+Before starting a generation, verify that the configured root really belongs to
+an external disk. The code can reject a system-drive path or a junction pointing
+back to it, but **cannot attest USB/SATA device identity**. On Windows, inspect
+both the volume and its backing disk (run in PowerShell):
+
+```powershell
+$root = $env:KALIV_MEDIA_ROOT
+if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) {
+    throw 'KALIV_MEDIA_ROOT must name an existing external directory.'
+}
+$resolved = (Resolve-Path -LiteralPath $root).ProviderPath
+$volume = Get-Volume -FilePath $resolved
+$partition = Get-Partition -DriveLetter $volume.DriveLetter
+$disk = $partition | Get-Disk
+$disk | Format-List Number,FriendlyName,BusType,SerialNumber,IsBoot,IsSystem
+if ($disk.IsBoot -or $disk.IsSystem) { throw 'Media root is on the OS disk.' }
+Write-Host "Operator must confirm physical external disk identity: $resolved"
+```
+
+This is a diagnostic, not automatic approval: volume mount arrangements and
+virtual disks may require manual inspection. Do not start a job if the disk
+identity is ambiguous.
+
+After generating an MP4, use `ffprobe` (if installed) to validate the actual
+video stream rather than relying on the collector's MP4 header check:
+
+```powershell
+$mp4 = Read-Host 'Absolute path of generated MP4 on the external volume'
+if (-not (Test-Path -LiteralPath $mp4 -PathType Leaf)) { throw 'MP4 missing' }
+if (-not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+    throw 'Install ffprobe before codec/playback qualification'
+}
+ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,nb_frames -show_entries format=duration -of json -- $mp4
+if ($LASTEXITCODE -ne 0) { throw 'MP4 probing failed' }
+```
+
+Inspect the JSON for the expected codec, dimensions, duration and frame count;
+missing `nb_frames` is possible with some containers and must be checked via
+decoding or frame counting instead. Then independently play the file on each
+supported client. A successful `ffprobe` alone is not playback acceptance.
+
 ## Qualification gates
 
 - Run the Python video unit tests and the repository's complete CI suite.
