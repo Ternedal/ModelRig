@@ -44,6 +44,27 @@ working until the checks below pass.
 4. Set `KALIV_COMFY_WORKFLOW_TEMPLATE` to the absolute path of that JSON
    file. The dispatcher rejects templates outside the media volume.
 
+## Read-only admission before any generation
+
+Run this from the repository root with the worker Python environment active,
+**before** enqueueing a job. It does not launch ComfyUI, download models,
+create directories, or allocate GPU memory:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\worker).Path
+python -m app.video_preflight --json
+if ($LASTEXITCODE -ne 0) { throw 'Wan preflight diagnostics failed; do not enqueue.' }
+```
+
+A zero exit code means only that configured storage, workflow structure,
+ComfyUI node compatibility and GPU inventory passed their *read-only*
+checks. The JSON `ready` field remains `false` until the operator separately
+verifies physical external-drive identity, effective ComfyUI model/cache
+paths, GPU memory fit and actual MP4 generation/playback. Never interpret
+this diagnostic result as release acceptance. If ComfyUI is not already
+running locally, node compatibility reports unavailable and the preflight
+fails safely.
+
 ## One-shot operator sequence
 
 From the repository root with the worker Python environment activated:
