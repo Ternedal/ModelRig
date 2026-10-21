@@ -66,6 +66,9 @@ eq("Det er ~~forkert~~ rigtigt.", "Det er forkert rigtigt.",
    "strikethrough markers removed, words preserved")
 eq("Se https://example.org/path?x=123 for detaljer", "Se for detaljer",
    "raw web address omitted rather than pronounced")
+eq("Læs `https://example.org` nu", "Læs nu", "inline URL delimiters removed")
+eq("(https://example.org)", "", "parenthesized URL leaves no spoken symbol")
+eq("Se [https://example.org] bagefter", "Se bagefter", "bracketed URL leaves no symbol")
 eq("Husk testordet **blå elefant**.", "Husk testordet blå elefant.",
    "markdown around Danish recall phrase omitted")
 eq("Vores svar er ***vigtigt***!", "Vores svar er vigtigt!",
