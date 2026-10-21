@@ -44,13 +44,17 @@ class ExternalMediaStorage:
             "temp": self.root / "Temp",
             "cache": self.root / "Cache",
         }
+        # Preflight every destination before writing to any of them.
         for path in paths.values():
-            # Reject symlinks in every existing component, including Media itself.
-            # Checking only the leaf misses Media -> another volume.
-            for component in (path.parent, path):
+            component = path
+            while component != self.root and component != component.parent:
                 if component.is_symlink():
                     raise MediaStorageUnavailable("Symlinked media directory forbidden")
-            path.mkdir(parents=True, exist_ok=True)
+                component = component.parent
             if not path.resolve().is_relative_to(self.root):
+                raise MediaStorageUnavailable("Media path escaped configured root")
+        for path in paths.values():
+            path.mkdir(parents=True, exist_ok=True)
+            if path.is_symlink() or not path.resolve().is_relative_to(self.root):
                 raise MediaStorageUnavailable("Media path escaped configured root")
         return paths
