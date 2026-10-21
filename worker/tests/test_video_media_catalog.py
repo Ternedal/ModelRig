@@ -42,6 +42,18 @@ class MediaCatalogTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.catalog.resolve("../private")
 
+    def test_rejects_unsafe_catalog_paths(self):
+        path = self.root / "Media" / "Videos" / "clip.mp4"
+        path.write_bytes(b"example")
+        self.catalog.register(MediaItem("vid_1", "video"), path)
+        for unsafe in ("../secret.mp4", "/tmp/secret.mp4"):
+            with self.subTest(path=unsafe):
+                with self.catalog._connect() as db:
+                    db.execute("UPDATE media_items SET relative_path=? WHERE media_id=?",
+                               (unsafe, "vid_1"))
+                with self.assertRaises(ValueError):
+                    self.catalog.resolve("vid_1")
+
     def test_missing_file_not_resolved(self):
         path = self.root / "Media" / "Videos" / "clip.mp4"
         path.write_bytes(b"example")
