@@ -225,32 +225,29 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
                 throw ModelRigException("voice stream failed (${resp.code}): $text")
             }
             val source = resp.body?.source() ?: throw ModelRigException("empty response body")
-            // Voice had the worst version of the bug: if the stream ended
-            // without "done", NO callback fired at all -- not onDone, not
-            // onError -- so the turn just hung there spinning.
-            var sawTerminal = false
-            while (!source.exhausted()) {
+            // The application-level NDJSON done/error event is final even
+            // when a proxy keeps HTTP open. use{} closes the OkHttp response.
+            while (true) {
                 val line = source.readUtf8Line() ?: break
                 when (val ev = StreamContract.parse(line)) {
-                    is StreamEvent.Phase -> Unit  // stemmestroemmen udsender ingen faser endnu
+                    is StreamEvent.Phase -> Unit
                     is StreamEvent.Transcript -> onTranscript(ev.text)
                     is StreamEvent.Chunk -> onChunk(ev.index, ev.text, ev.audioB64, ev.utteranceId)
                     is StreamEvent.Done -> {
-                        sawTerminal = true
                         onDone(ev.reply, ev.model, ev.viaCloud)
+                        return@use
                     }
                     is StreamEvent.Failure -> {
-                        sawTerminal = true
                         onError(ev.status, ev.message)
+                        return@use
                     }
                     else -> {}
                 }
             }
-            if (!sawTerminal) {
-                throw ModelRigException(
-                    "stemmesvaret blev afbrudt — forbindelsen lukkede før riggen var færdig; prøv igen"
-                )
-            }
+            // HTTP 200 with EOF but without a terminal event is truncated.
+            throw ModelRigException(
+                "stemmesvaret blev afbrudt — forbindelsen lukkede før riggen var færdig; prøv igen"
+            )
         }
     }
 
