@@ -82,6 +82,12 @@ class MediaAPITests(unittest.TestCase):
         self.assertEqual(response.headers["content-range"], "bytes 3-5/10")
         self.assertEqual(response.content, b"")
 
+    def test_media_stat_io_failure_is_service_error(self):
+        with patch("app.video_media_api.media_response_plan", side_effect=OSError("disk unavailable")):
+            response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "External media storage unavailable")
+
     def test_media_catalog_io_failure_is_service_error(self):
         with patch.object(self.catalog, "resolve", side_effect=OSError("disk disconnected")):
             response = self.client.get("/experimental/media/clip_1")
