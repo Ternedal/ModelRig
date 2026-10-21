@@ -1,14 +1,11 @@
-"""Fail-closed external-media storage for future image-generation jobs.
-
-This module deliberately does not expose HTTP routes or start model inference.
-It is safe to import without an external drive attached.
-"""
+"""Fail-closed image asset storage on an explicitly mounted media volume."""
 from __future__ import annotations
 
 import hashlib
 import os
 from pathlib import Path
 import re
+import shutil
 import tempfile
 import uuid
 
@@ -20,41 +17,41 @@ class MediaStorageError(RuntimeError):
     pass
 
 
-def _real(path: Path) -> Path:
-    return path.resolve(strict=True)
-
-
 class ExternalMediaStore:
-    """Storage gate: caller supplies explicit external volume roots.
+    """Require a separate mounted filesystem selected by deployment.
 
-    external_roots must be configured by deployment, not by the client.
-    Never infer an external drive from the presence of a writable directory.
+    A mount point is not proof of a physically external disk. Deployment must
+    additionally validate the actual backing device, especially on Windows/WSL.
     """
 
     def __init__(self, root: str, external_roots: list[str], *, min_free_bytes: int = 2 * 1024**3):
         if not root or not Path(root).is_absolute() or not external_roots:
-            raise MediaStorageError("explicit absolute media root and external roots required")
+            raise MediaStorageError("absolute media root and external roots required")
         candidate = Path(root)
         if candidate.is_symlink() or not candidate.is_dir():
             raise MediaStorageError("media root must be an existing real directory")
-        self.root = _real(candidate)
-        permitted = []
+        self.root = candidate.resolve(strict=True)
+        allowed = False
         for item in external_roots:
             p = Path(item)
             if not p.is_absolute() or p.is_symlink() or not p.is_dir():
                 continue
-            permitted.append(_real(p))
-        if not any(self.root == p or p in self.root.parents for p in permitted):
-            raise MediaStorageError("media root is outside configured external volumes")
+            mounted = p.resolve(strict=True)
+            if not os.path.ismount(mounted):
+                continue
+            if self.root == mounted or mounted in self.root.parents:
+                allowed = True
+                break
+        if not allowed:
+            raise MediaStorageError("media root is not on a configured mounted volume")
         if min_free_bytes < 0:
             raise ValueError("min_free_bytes must be nonnegative")
         self.min_free_bytes = min_free_bytes
         self._check_free()
 
     def _check_free(self) -> None:
-        import shutil
         if shutil.disk_usage(self.root).free < self.min_free_bytes:
-            raise MediaStorageError("external media volume below free-space floor")
+            raise MediaStorageError("media volume below free-space floor")
 
     def publish(self, data: bytes, extension: str = ".png") -> dict[str, str | int]:
         if extension not in _ALLOWED or not data:
