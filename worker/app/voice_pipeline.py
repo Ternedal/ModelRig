@@ -66,7 +66,8 @@ _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 
 _MD_CODE_FENCE = re.compile(r"```[\s\S]*?```")          # fenced blocks: drop entirely
 _MD_STRIKE = re.compile(r"~~([^~\n]+)~~")               # ~~deleted~~ -> deleted
-_MD_BARE_URL = re.compile(r"https?://[^\s<>]+")         # do not read URLs aloud
+_MD_BARE_URL = re.compile(r"""https?://[^\s<>()\[\]{}'"\x60]+""")  # stop before markup delimiters
+_MD_EMPTY_WRAPPERS = re.compile(r"(?:\(\s*\)|\[\s*\]|\x60\s*\x60)")  # URL-only markup
 _MD_RESIDUAL_MARKERS = re.compile(r"(?:\*{2,}|_{2,}|~{2,}|`{2,})")  # orphaned markup
 _MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")             # `code` -> code
 _MD_BOLD_ITALIC = re.compile(r"(\*{1,3})(\S(?:.*?\S)?)\1")  # **x** *x* ***x*** -> x
@@ -165,6 +166,7 @@ def strip_markdown(text: str) -> str:
     t = _MD_IMAGE.sub(r"\1", t)
     t = _MD_LINK.sub(r"\1", t)
     t = _MD_BARE_URL.sub(" ", t)
+    t = _MD_EMPTY_WRAPPERS.sub(" ", t)
     t = _MD_STRIKE.sub(r"\1", t)
     t = _MD_INLINE_CODE.sub(r"\1", t)
     t = _MD_BOLD_ITALIC.sub(r"\2", t)
