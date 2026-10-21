@@ -27,7 +27,9 @@ class MediaCoordinator:
             prompt_id = self.transport.submit_prompt(workflow, job.id)
             self._prompts[job.id] = prompt_id
         except Exception:
-            self.queue.fail(job.id, "generation_failed")
+            # start() can reject a queued job when the worker is occupied.
+            if self.queue.get(job.id).state in {MediaJobState.QUEUED, MediaJobState.RUNNING}:
+                self.queue.fail(job.id, "generation_failed")
             raise
         return job.id
 
