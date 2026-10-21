@@ -77,6 +77,13 @@ eq("2 * 3 = 6", "2 * 3 = 6", "math operator not confused with markdown")
 eq("Ord ** løs markør", "Ord løs markør",
    "unmatched multi-asterisk marker does not get pronounced")
 
+eq("Se https://en.wikipedia.org/wiki/Function_(mathematics) for mere", "Se for mere",
+   "balanced parentheses inside URL are not spoken")
+eq("Læs (https://en.wikipedia.org/wiki/Function_(mathematics)) nu", "Læs nu",
+   "URL with internal and outer parentheses leaves no wrappers")
+eq("Læs `https://en.wikipedia.org/wiki/Function_(mathematics)` nu", "Læs nu",
+   "inline-code URL with parentheses leaves no backticks")
+
 # --- combined ---
 eq("**Vigtigt** 🎯 se her", "Vigtigt se her", "markdown + emoji together")
 
