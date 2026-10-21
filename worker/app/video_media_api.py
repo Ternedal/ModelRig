@@ -64,7 +64,9 @@ def build_media_router() -> APIRouter:
                 size=size, mime_type=metadata["mime_type"],
                 range_header=request.headers.get("range"), method=request.method
             )
-        except (OSError, ValueError, KeyError):
+        except OSError:
+            raise HTTPException(503, "External media storage unavailable")
+        except (ValueError, KeyError):
             raise HTTPException(404, "Media unavailable")
         if request.method == "HEAD" or status == 416:
             return Response(status_code=status, headers=headers)
