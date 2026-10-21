@@ -60,8 +60,11 @@ def check(environ=None):
                          "ComfyUI/user", "ComfyUI/huggingface",
                          "ComfyUI/torch", "ComfyUI/xdg-cache"):
             path = root / relative
-            if path.is_symlink():
-                raise ValueError("Symlink forbidden: " + relative)
+            current = path
+            while current != root and current != current.parent:
+                if current.is_symlink():
+                    raise ValueError("Symlink forbidden: " + relative)
+                current = current.parent
             if path.exists() and not path.resolve().is_relative_to(root):
                 raise ValueError("Directory escapes media root: " + relative)
         usage = shutil.disk_usage(root)
