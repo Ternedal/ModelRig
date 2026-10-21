@@ -93,7 +93,10 @@ class MediaCatalog:
             ).fetchone()
         if row is None:
             return None
-        candidate = self.root / row["relative_path"]
+        relative = Path(row["relative_path"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("Invalid catalog media path")
+        candidate = self.root / relative
         if candidate.is_symlink() or not candidate.is_file():
             return None
         resolved = candidate.resolve(strict=True)
