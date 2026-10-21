@@ -100,6 +100,8 @@ class MediaCatalog:
         if candidate.is_symlink() or not candidate.is_file():
             return None
         resolved = candidate.resolve(strict=True)
+        if row["kind"] not in _KIND_DIRS:
+            raise ValueError("Invalid catalog media kind")
         directory = (self.media_root / _KIND_DIRS[row["kind"]]).resolve(strict=True)
         if not resolved.is_relative_to(directory):
             raise ValueError("Catalog entry escaped approved media directory")
