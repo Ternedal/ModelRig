@@ -1,4 +1,5 @@
 """Offline tests for the external media catalog and gallery contract."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -120,6 +121,38 @@ class MediaCatalogTests(unittest.TestCase):
         with self.catalog._connect() as db:
             db.execute("UPDATE media_items SET metadata_json=? WHERE media_id=?",
                        ('{"id":"different","kind":"video"}', "vid_1"))
+        with self.assertRaises(ValueError):
+            self.catalog.resolve("vid_1")
+
+    def test_catalog_rejects_mime_mismatch_and_strips_extra_fields(self):
+        path = self.root / "Media" / "Images" / "picture.png"
+        path.write_bytes(b"example")
+        self.catalog.register(MediaItem("img_1", "image", mime_type="image/png"), path)
+        original = self.catalog.list_items()[0]
+        extra = dict(original, private_path="/secret/location")
+        with self.catalog._connect() as db:
+            db.execute("UPDATE media_items SET metadata_json=? WHERE media_id=?",
+                       (json.dumps(extra), "img_1"))
+        self.assertNotIn("private_path", self.catalog.list_items()[0])
+        self.assertNotIn("private_path", self.catalog.resolve("img_1")[1])
+        extra["mime_type"] = "image/jpeg"
+        with self.catalog._connect() as db:
+            db.execute("UPDATE media_items SET metadata_json=? WHERE media_id=?",
+                       (json.dumps(extra), "img_1"))
+        with self.assertRaises(ValueError):
+            self.catalog.resolve("img_1")
+
+    def test_catalog_rejects_corrupt_playback_metadata(self):
+        path = self.root / "Media" / "Videos" / "clip.mp4"
+        path.write_bytes(b"example")
+        self.catalog.register(MediaItem("vid_1", "video"), path)
+        metadata = self.catalog.list_items()[0]
+        metadata["playback"] = {"supports_range": False}
+        with self.catalog._connect() as db:
+            db.execute("UPDATE media_items SET metadata_json=? WHERE media_id=?",
+                       (json.dumps(metadata), "vid_1"))
+        with self.assertRaises(ValueError):
+            self.catalog.list_items()
         with self.assertRaises(ValueError):
             self.catalog.resolve("vid_1")
 
