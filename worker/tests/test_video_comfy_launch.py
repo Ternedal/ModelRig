@@ -16,6 +16,7 @@ class ComfyLaunchTests(unittest.TestCase):
             main = root / "main.py"
             py.touch()
             main.touch()
+            (root / "ComfyUI" / "user").mkdir(parents=True)
             storage = ExternalMediaStorage(root, minimum_free_gb=1)
             with patch("app.video_comfy_launch.configured_video_storage", return_value=storage), patch(
                 "app.video_comfy_storage_env.configured_video_storage", return_value=storage
@@ -26,6 +27,20 @@ class ComfyLaunchTests(unittest.TestCase):
                 self.assertTrue(Path(argv[argv.index(flag) + 1]).is_relative_to(root))
             for name in ("HF_HOME", "TORCH_HOME", "TMPDIR", "TEMP", "TMP"):
                 self.assertTrue(Path(env[name]).is_relative_to(root))
+
+    def test_missing_user_directory_fails_without_creating_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            py, main = root / "python.exe", root / "main.py"
+            py.touch()
+            main.touch()
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch("app.video_comfy_launch.configured_video_storage", return_value=storage), patch(
+                "app.video_comfy_storage_env.configured_video_storage", return_value=storage
+            ):
+                with self.assertRaisesRegex(ValueError, "must be provisioned"):
+                    build_comfy_launch_plan(str(py), str(main), {})
+            self.assertFalse((root / "ComfyUI").exists())
 
     def test_rejects_symlinked_comfy_parent(self):
         with tempfile.TemporaryDirectory() as tmp:
