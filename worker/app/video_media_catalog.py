@@ -111,6 +111,8 @@ class MediaCatalog:
         directory = (self.media_root / _KIND_DIRS[row["kind"]]).resolve(strict=True)
         if not resolved.is_relative_to(directory):
             raise ValueError("Catalog entry escaped approved media directory")
+        if resolved.suffix.lower() not in _ALLOWED_EXTENSIONS.values():
+            raise ValueError("Invalid catalog media extension")
         metadata = json.loads(row["metadata_json"])
         if not isinstance(metadata, dict) or metadata.get("kind") != row["kind"] or metadata.get("id") != media_id:
             raise ValueError("Invalid catalog media metadata")
