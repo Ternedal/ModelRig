@@ -68,11 +68,21 @@ class ASRImportStatusTests(unittest.TestCase):
                 raise ImportError("missing native dependency for ASR")
             return original_import(name, *args, **kwargs)
 
-        with (
-            patch("builtins.__import__", side_effect=block_native_import),
-            self.assertLogs("modelrig.worker", level="WARNING") as captured,
-        ):
-            result = voice_asr.status()
+        with voice_asr._import_warning_lock:
+            prior = set(voice_asr._import_warning_signatures)
+            voice_asr._import_warning_signatures.clear()
+        try:
+            with (
+                patch("builtins.__import__", side_effect=block_native_import),
+                self.assertLogs("modelrig.worker", level="WARNING") as captured,
+            ):
+                for _ in range(3):
+                    result = voice_asr.status()
+        finally:
+            with voice_asr._import_warning_lock:
+                voice_asr._import_warning_signatures.clear()
+                voice_asr._import_warning_signatures.update(prior)
+        self.assertEqual(len(captured.output), 1, "repeated probes must not spam warnings")
 
         self.assertFalse(result["ok"])
         self.assertIsNone(result["model"])
