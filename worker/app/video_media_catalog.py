@@ -75,14 +75,14 @@ class MediaCatalog:
             raise ValueError("Invalid offset")
         with self._connect() as db:
             rows = db.execute(
-                "SELECT metadata_json FROM media_items "
+                "SELECT media_id,kind,metadata_json FROM media_items "
                 "ORDER BY created_at DESC, media_id DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
         items = []
         for row in rows:
             metadata = json.loads(row["metadata_json"])
-            if not isinstance(metadata, dict) or not isinstance(metadata.get("id"), str):
+            if not isinstance(metadata, dict) or metadata.get("id") != row["media_id"] or metadata.get("kind") != row["kind"]:
                 raise ValueError("Invalid catalog gallery metadata")
             items.append(metadata)
         return items
