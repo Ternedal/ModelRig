@@ -53,6 +53,8 @@ def build_media_router() -> APIRouter:
             resolved = catalog().resolve(media_id)
         except ValueError:
             raise HTTPException(404, "Unknown media")
+        except OSError:
+            raise HTTPException(503, "Media catalog unavailable")
         if resolved is None:
             raise HTTPException(404, "Unknown media")
         path, metadata = resolved
