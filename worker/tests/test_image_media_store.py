@@ -20,6 +20,12 @@ class MediaStoreTests(unittest.TestCase):
             with self.assertRaises(MediaStorageError):
                 ExternalMediaStore(directory, ["/definitely-not-mounted"], min_free_bytes=0)
 
+    def test_rejects_system_root_even_if_mounted(self):
+        root = str(Path("/").resolve())
+        with patch("app.image_media_store.os.path.ismount", return_value=True):
+            with self.assertRaises(MediaStorageError):
+                ExternalMediaStore(root, [root], min_free_bytes=0)
+
     def test_rejects_non_mount_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch("app.image_media_store.os.path.ismount", return_value=False):
