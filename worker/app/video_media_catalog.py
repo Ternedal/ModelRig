@@ -122,6 +122,8 @@ class MediaCatalog:
         if relative.is_absolute() or ".." in relative.parts or relative.drive:
             raise ValueError("Invalid catalog media path")
         candidate = self.root / relative
+        if relative.parts[:2] not in (("Media", "Images"), ("Media", "Videos")):
+            raise ValueError("Catalog path must be inside the media directory")
         if candidate.is_symlink() or not candidate.is_file():
             return None
         resolved = candidate.resolve(strict=True)
