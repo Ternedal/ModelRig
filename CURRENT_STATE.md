@@ -520,10 +520,14 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_gates_read_code.py`
 - `tests/workflow_kaliv_env_parser.py`
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
+- `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
 - `tests/workflow_mrbody_cross_repo_contract.py`
+- `tests/workflow_ollama_inference_benchmark.py`
+- `tests/workflow_ollama_local_perf_probe.py`
+- `tests/workflow_ollama_local_perf_probe_edges.py`
 - `tests/workflow_pairing_link_parity.py`
 - `tests/workflow_person_create.py`
 - `tests/workflow_physical_reservation_authority_races.py`
