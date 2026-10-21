@@ -94,7 +94,7 @@ class MediaCatalog:
         if row is None:
             return None
         relative = Path(row["relative_path"])
-        if relative.is_absolute() or ".." in relative.parts:
+        if relative.is_absolute() or ".." in relative.parts or relative.drive:
             raise ValueError("Invalid catalog media path")
         candidate = self.root / relative
         if candidate.is_symlink() or not candidate.is_file():
