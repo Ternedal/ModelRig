@@ -38,6 +38,10 @@ _model_lock = threading.Lock()
 _load_error: Optional[str] = None
 _dll_dirs_added = False
 _registered_dll_dirs: list[str] = []
+# Limit repeated optional-backend warnings from health/capability probes.
+_import_warning_lock = threading.Lock()
+_import_warning_signatures: set[tuple[str, str]] = set()
+
 
 
 def registered_dll_dirs() -> list[str]:
@@ -135,6 +139,8 @@ def is_available() -> bool:
     """True if faster-whisper can be imported (installed)."""
     try:
         import faster_whisper  # noqa: F401
+        with _import_warning_lock:
+            _import_warning_signatures.clear()  # a new failure episode may be diagnosed
         return True
     except Exception as exc:  # noqa: BLE001
         # Fail-closed is right: no faster-whisper, no speech recognition.
@@ -144,9 +150,13 @@ def is_available() -> bool:
         # evening, because ASR is the capability with the deepest native stack.
         # The worker configures a visible handler on "modelrig.worker"; the
         # module INFO logger is otherwise silent under the default root WARNING.
-        logging.getLogger("modelrig.worker").warning(
-            "level=warn asr=import_unavailable exception_type=%s detail=%r",
-            type(exc).__name__, exc)
+        signature = (type(exc).__name__, str(exc)[:240])
+        with _import_warning_lock:
+            if signature not in _import_warning_signatures and len(_import_warning_signatures) < 16:
+                _import_warning_signatures.add(signature)
+                logging.getLogger("modelrig.worker").warning(
+                    "level=warn asr=import_unavailable exception_type=%s detail=%r",
+                    type(exc).__name__, exc)
         return False
 
 
