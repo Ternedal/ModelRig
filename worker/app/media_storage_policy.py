@@ -21,7 +21,7 @@ def validate_media_root(configured: str | None, *, system_drive: str | None = No
     require a mounted filesystem distinct from the filesystem holding /.
     This is conservative: no automatic fallback to internal storage.
     """
-    if not configured or not configured.strip():
+    if not isinstance(configured, str) or not configured.strip():
         raise MediaStorageError("External media root must be configured")
     candidate = Path(configured).expanduser()
     if not candidate.is_absolute() or not candidate.exists() or not candidate.is_dir():
@@ -41,7 +41,7 @@ def validate_media_root(configured: str | None, *, system_drive: str | None = No
 
 def safe_media_target(root: Path, filename: str) -> Path:
     """Resolve a single generated filename without traversal or symlink escape."""
-    if not filename or filename in {".", ".."} or "/" in filename or "\\" in filename:
+    if not isinstance(filename, str) or not filename or filename in {".", ".."} or "/" in filename or "\\" in filename:
         raise MediaStorageError("Invalid media filename")
     target = root / filename
     if target.is_symlink() or target.exists():
@@ -52,13 +52,13 @@ def safe_media_target(root: Path, filename: str) -> Path:
 
 
 def write_media_exclusive(root: Path, filename: str, payload: bytes, *, max_bytes: int = 100_000_000) -> Path:
-    """Atomically create a media file without following an existing symlink.
+    """Exclusively create a media file without following an existing symlink.
 
     Caller must validate the external root at admission time. Revalidate here
     to fail closed if the mount disappears before writing.
     """
     root = validate_media_root(str(root))
-    if not isinstance(payload, bytes) or not payload or len(payload) > max_bytes:
+    if not isinstance(max_bytes, int) or max_bytes < 1 or not isinstance(payload, bytes) or not payload or len(payload) > max_bytes:
         raise MediaStorageError("Invalid media payload size")
     target = safe_media_target(root, filename)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
