@@ -88,6 +88,18 @@ class MediaCatalogTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.catalog.resolve("vid_1")
 
+    def test_catalog_resolution_rejects_unsupported_extension(self):
+        path = self.root / "Media" / "Videos" / "clip.mp4"
+        path.write_bytes(b"example")
+        self.catalog.register(MediaItem("vid_1", "video"), path)
+        other = path.with_suffix(".txt")
+        path.rename(other)
+        with self.catalog._connect() as db:
+            db.execute("UPDATE media_items SET relative_path=? WHERE media_id=?",
+                       ("Media/Videos/clip.txt", "vid_1"))
+        with self.assertRaises(ValueError):
+            self.catalog.resolve("vid_1")
+
     def test_gallery_rejects_mismatched_identity(self):
         path = self.root / "Media" / "Videos" / "clip.mp4"
         path.write_bytes(b"example")
