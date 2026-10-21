@@ -37,15 +37,22 @@ class ImageJobStore:
         connection.execute("PRAGMA busy_timeout=10000")
         return connection
 
-    def submit(self, owner: str, prompt: str, *, max_queued: int = 16) -> dict:
+    def submit(self, owner: str, prompt: str, *, max_queued: int = 16, max_owner_active: int = 3) -> dict:
         if not owner or not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
             raise ImageJobError("invalid owner or prompt")
+        if max_queued < 1 or max_owner_active < 1:
+            raise ImageJobError("invalid queue limits")
         job_id, now = uuid.uuid4().hex, time.time()
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             queued = db.execute("SELECT count(*) FROM image_jobs WHERE state='queued'").fetchone()[0]
             if queued >= max_queued:
                 raise ImageJobError("image job queue full")
+            owner_active = db.execute(
+                "SELECT count(*) FROM image_jobs WHERE owner=? AND state IN ('queued','running')",
+                (owner,)).fetchone()[0]
+            if owner_active >= max_owner_active:
+                raise ImageJobError("owner image job limit reached")
             db.execute("INSERT INTO image_jobs (id,owner,prompt,state,created,updated) VALUES (?,?,?,?,?,?)",
                        (job_id, owner, prompt, "queued", now, now))
         return {"job_id": job_id, "state": "queued"}
