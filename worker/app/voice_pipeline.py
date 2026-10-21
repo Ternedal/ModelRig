@@ -65,6 +65,10 @@ _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 # lone underscore in a filename isn't touched).
 
 _MD_CODE_FENCE = re.compile(r"```[\s\S]*?```")          # fenced blocks: drop entirely
+_MD_STRIKE = re.compile(r"~~([^~\n]+)~~")               # ~~deleted~~ -> deleted
+_MD_BARE_URL = re.compile(r"""https?://[^\s<>()\[\]{}'"\x60]+""")  # stop before markup delimiters
+_MD_EMPTY_WRAPPERS = re.compile(r"(?:\(\s*\)|\[\s*\]|\x60\s*\x60)")  # URL-only markup
+_MD_RESIDUAL_MARKERS = re.compile(r"(?:\*{2,}|_{2,}|~{2,}|`{2,})")  # orphaned markup
 _MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")             # `code` -> code
 _MD_BOLD_ITALIC = re.compile(r"(\*{1,3})(\S(?:.*?\S)?)\1")  # **x** *x* ***x*** -> x
 _MD_UNDERSCORE = re.compile(r"(?<!\w)(_{1,3})(\S(?:.*?\S)?)\1(?!\w)")  # _x_ -> x
@@ -161,6 +165,9 @@ def strip_markdown(text: str) -> str:
     t = _MD_HRULE.sub(" ", t)
     t = _MD_IMAGE.sub(r"\1", t)
     t = _MD_LINK.sub(r"\1", t)
+    t = _MD_BARE_URL.sub(" ", t)
+    t = _MD_EMPTY_WRAPPERS.sub(" ", t)
+    t = _MD_STRIKE.sub(r"\1", t)
     t = _MD_INLINE_CODE.sub(r"\1", t)
     t = _MD_BOLD_ITALIC.sub(r"\2", t)
     t = _MD_UNDERSCORE.sub(r"\2", t)
@@ -168,6 +175,7 @@ def strip_markdown(text: str) -> str:
     t = _MD_BLOCKQUOTE.sub("", t)
     t = _MD_BULLET.sub("", t)
     t = _MD_NUMLIST.sub("", t)
+    t = _MD_RESIDUAL_MARKERS.sub(" ", t)
     t = _EMOJI.sub(" ", t)  # emojis are unspeakable; drop them (chat keeps them)
     t = _WS.sub(" ", t)
     return t.strip()
@@ -182,6 +190,27 @@ def _extract_delta(ndjson_line: bytes) -> str:
         return ""
     msg = obj.get("message") or {}
     return msg.get("content", "") or ""
+
+
+def _bounded_voice_history(history):
+    """Select at most 12 valid turns, newest first, then restore chat order.
+
+    Never materialize/slice every valid client entry: the request schema has no
+    per-history item bound, so validation must stop once 12 turns are found.
+    """
+    prior = []
+    for item in reversed(history or []):
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, str) or not content.strip():
+            continue
+        prior.append({"role": role, "content": content[:4000]})
+        if len(prior) == 12:
+            break
+    prior.reverse()
+    return prior
 
 
 async def converse(
@@ -244,14 +273,7 @@ async def converse(
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
     # Never accept arbitrary roles or unbounded client-supplied context.
-    prior = [
-        {"role": item["role"], "content": item["content"][:4000]}
-        for item in (history or [])[-12:]
-        if isinstance(item, dict)
-        and item.get("role") in ("user", "assistant")
-        and isinstance(item.get("content"), str)
-        and item["content"].strip()
-    ]
+    prior = _bounded_voice_history(history)
     messages = prior + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
