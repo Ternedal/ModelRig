@@ -36,6 +36,18 @@ class MediaAPITests(unittest.TestCase):
         self.assertEqual(response.json()["items"][0]["id"], "clip_1")
         self.assertEqual(response.json()["items"][0]["url"], "/api/v1/media/clip_1")
 
+    def test_invalid_pagination_is_client_error(self):
+        self.assertEqual(self.client.get("/experimental/media?limit=0").status_code, 400)
+        self.assertEqual(self.client.get("/experimental/media?offset=-1").status_code, 400)
+
+    def test_corrupt_catalog_is_service_error(self):
+        with self.catalog._connect() as db:
+            db.execute("UPDATE media_items SET metadata_json=? WHERE media_id=?",
+                       ('{"id":"wrong","kind":"video"}', "clip_1"))
+        response = self.client.get("/experimental/media")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Media catalog unavailable")
+
     def test_seek(self):
         response = self.client.get("/experimental/media/clip_1", headers={"Range": "bytes=3-5"})
         self.assertEqual(response.status_code, 206)
