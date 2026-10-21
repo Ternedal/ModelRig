@@ -81,6 +81,23 @@ class VideoPreflightTests(unittest.TestCase):
             self.assertFalse(report["ready"])
             self.assertTrue(report["limitations"])
 
+    def test_nested_comfy_symlink_fails_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            root.mkdir()
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            try:
+                (root / "ComfyUI").symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(str(exc))
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch("app.video_preflight.configured_video_storage", return_value=storage):
+                report = check({})
+            self.assertEqual(report["checks"]["storage"], "fail")
+            self.assertFalse(report["ready"])
+            self.assertEqual(list(outside.iterdir()), [])
+
     def test_symlinked_cache_fails_without_writing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "root"
