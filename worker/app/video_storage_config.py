@@ -32,5 +32,9 @@ def configured_video_storage(environ: dict[str, str] | None = None) -> ExternalM
     if not root.is_dir():
         raise MediaStorageUnavailable("Configured media volume not mounted")
     storage = ExternalMediaStorage(root, minimum_free_gb=reserve)
+    # Resolve junctions and symlinks before accepting the Windows volume.
+    # A non-system-drive alias must not redirect media writes to C:.
+    if os.name == "nt" and storage.root.drive.casefold() == system_drive:
+        raise MediaStorageUnavailable("Resolved media root is on the system drive")
     storage.assert_ready()
     return storage
