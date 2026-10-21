@@ -22,6 +22,29 @@ _ALLOWED_EXTENSIONS = {
 _KIND_DIRS = {"image": "Images", "video": "Videos"}
 
 
+def _validated_metadata(raw: str, media_id: str, kind: str) -> dict:
+    """Reject corrupt records and return only contract-defined client fields."""
+    try:
+        metadata = json.loads(raw)
+        if not isinstance(metadata, dict) or metadata.get("id") != media_id or metadata.get("kind") != kind:
+            raise ValueError("Catalog metadata identity mismatch")
+        item = MediaItem(
+            media_id=metadata["id"],
+            kind=metadata["kind"],
+            projection=metadata["projection"],
+            stereo=metadata["stereo"],
+            mime_type=metadata["mime_type"],
+            duration_seconds=metadata["duration_seconds"],
+            thumbnail_id=metadata["thumbnail_id"],
+        )
+        canonical = item.public_metadata()
+        if metadata.get("playback") != canonical["playback"]:
+            raise ValueError("Invalid catalog playback metadata")
+        return canonical
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid catalog media metadata") from exc
+
+
 class MediaCatalog:
     def __init__(self, root: Path):
         self.root = Path(root).resolve(strict=True)
@@ -81,10 +104,7 @@ class MediaCatalog:
             ).fetchall()
         items = []
         for row in rows:
-            metadata = json.loads(row["metadata_json"])
-            if not isinstance(metadata, dict) or metadata.get("id") != row["media_id"] or metadata.get("kind") != row["kind"]:
-                raise ValueError("Invalid catalog gallery metadata")
-            items.append(metadata)
+            items.append(_validated_metadata(row["metadata_json"], row["media_id"], row["kind"]))
         return items
 
     def resolve(self, media_id: str) -> tuple[Path, dict] | None:
@@ -113,7 +133,7 @@ class MediaCatalog:
             raise ValueError("Catalog entry escaped approved media directory")
         if resolved.suffix.lower() not in _ALLOWED_EXTENSIONS.values():
             raise ValueError("Invalid catalog media extension")
-        metadata = json.loads(row["metadata_json"])
-        if not isinstance(metadata, dict) or metadata.get("kind") != row["kind"] or metadata.get("id") != media_id:
-            raise ValueError("Invalid catalog media metadata")
+        metadata = _validated_metadata(row["metadata_json"], media_id, row["kind"])
+        if resolved.suffix.lower() != _ALLOWED_EXTENSIONS[metadata["mime_type"]]:
+            raise ValueError("Catalog MIME type does not match file extension")
         return resolved, metadata
