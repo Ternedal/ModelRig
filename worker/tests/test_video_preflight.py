@@ -81,6 +81,18 @@ class VideoPreflightTests(unittest.TestCase):
             self.assertFalse(report["ready"])
             self.assertTrue(report["limitations"])
 
+    def test_read_only_preflight_does_not_provision_media_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch("app.video_preflight.configured_video_storage", return_value=storage):
+                report = check({})
+            self.assertEqual(report["checks"]["storage"], "pass")
+            for name in ("Media", "Jobs", "Temp", "Cache", "ComfyUI"):
+                with self.subTest(name=name):
+                    self.assertFalse((root / name).exists())
+            self.assertFalse(report["ready"])
+
     def test_nested_comfy_symlink_fails_without_writing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "root"
