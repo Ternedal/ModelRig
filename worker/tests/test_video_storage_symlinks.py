@@ -25,6 +25,25 @@ class VideoStorageSymlinkTests(unittest.TestCase):
                     storage.initialize_directories()
             self.assertFalse((target / "Images").exists())
 
+    def test_late_symlink_rejected_before_any_media_directories_created(self):
+        with tempfile.TemporaryDirectory() as parent:
+            base = Path(parent)
+            root = base / "external"
+            root.mkdir()
+            target = base / "other"
+            target.mkdir()
+            try:
+                (root / "Cache").symlink_to(target, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"Symlinks unavailable: {exc}")
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch.object(storage, "assert_ready"):
+                with self.assertRaises(MediaStorageUnavailable):
+                    storage.initialize_directories()
+            self.assertFalse((root / "Media").exists())
+            self.assertFalse((root / "Jobs").exists())
+            self.assertEqual(list(target.iterdir()), [])
+
     def test_leaf_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as parent:
             base = Path(parent)
