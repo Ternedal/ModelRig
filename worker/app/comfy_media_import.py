@@ -5,13 +5,12 @@ ComfyUI history. This module never exposes ComfyUI's output directory.
 """
 from __future__ import annotations
 
-import json
 from urllib.parse import urlencode
 from urllib.request import Request
 from urllib.error import URLError
 
 from worker.app.comfy_transport import ComfyTransport, ComfyTransportError
-from worker.app.media_storage_policy import write_media_exclusive, MediaStorageError
+from worker.app.media_storage_policy import write_media_exclusive
 from pathlib import Path
 
 
