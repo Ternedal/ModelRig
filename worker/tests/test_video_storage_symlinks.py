@@ -25,6 +25,18 @@ class VideoStorageSymlinkTests(unittest.TestCase):
                     storage.initialize_directories()
             self.assertFalse((target / "Images").exists())
 
+    def test_provisions_expected_media_directories_on_approved_root(self):
+        with tempfile.TemporaryDirectory() as parent:
+            root = Path(parent)
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch.object(storage, "assert_ready"):
+                paths = storage.initialize_directories()
+            self.assertEqual(set(paths), {"images", "videos", "vr", "jobs", "temp", "cache"})
+            for name, path in paths.items():
+                with self.subTest(name=name):
+                    self.assertTrue(path.is_dir())
+                    self.assertTrue(path.resolve().is_relative_to(root.resolve()))
+
     def test_late_symlink_rejected_before_any_media_directories_created(self):
         with tempfile.TemporaryDirectory() as parent:
             base = Path(parent)
