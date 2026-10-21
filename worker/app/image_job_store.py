@@ -5,14 +5,10 @@ After a process restart, previously running jobs are failed, not silently rerun.
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-
-_STATES = {"queued", "running", "completed", "failed", "cancelled"}
-_TERMINAL = {"completed", "failed", "cancelled"}
 
 
 class ImageJobError(ValueError):
@@ -38,7 +34,9 @@ class ImageJobStore:
         return connection
 
     def submit(self, owner: str, prompt: str, *, max_queued: int = 16, max_owner_active: int = 3) -> dict:
-        if not owner or not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
+        if not isinstance(owner, str) or not owner.strip() or len(owner) > 256 or (
+            not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000
+        ):
             raise ImageJobError("invalid owner or prompt")
         if max_queued < 1 or max_owner_active < 1:
             raise ImageJobError("invalid queue limits")
