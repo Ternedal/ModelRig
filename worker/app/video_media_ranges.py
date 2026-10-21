@@ -47,6 +47,10 @@ def parse_single_range(header: str | None, size: int) -> ByteRange | None:
         raise UnsatisfiableRange("Empty range")
     if not all(part.isascii() and part.isdecimal() for part in (first, last) if part):
         raise UnsatisfiableRange("Non-numeric range")
+    # Bound decimal parsing before int(): very long Range headers can
+    # otherwise raise Python's digit-limit ValueError instead of HTTP 416.
+    if any(len(part) > 20 for part in (first, last)):
+        raise UnsatisfiableRange("Range number too long")
     if size == 0:
         raise UnsatisfiableRange("Empty file")
     if not first:
