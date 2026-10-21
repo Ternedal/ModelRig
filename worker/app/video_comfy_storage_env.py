@@ -48,4 +48,8 @@ def comfy_external_environment(environ: dict[str, str] | None = None) -> dict[st
             raise ValueError("ComfyUI path escaped approved media root")
     for path in set(dirs.values()):
         path.mkdir(parents=True, exist_ok=True)
+        # Recheck after creation: a mount or link may have changed between
+        # validation and mkdir. Never return an escaped cache path.
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise ValueError("ComfyUI path escaped approved media root")
     return {key: str(value) for key, value in dirs.items()}
