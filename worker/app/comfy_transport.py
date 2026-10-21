@@ -17,7 +17,12 @@ class ComfyTransportError(RuntimeError):
 
 
 def validate_comfy_url(base_url: str) -> str:
-    parsed = urlsplit(base_url)
+    if not isinstance(base_url, str):
+        raise ComfyTransportError("ComfyUI URL must be a string")
+    try:
+        parsed = urlsplit(base_url)
+    except ValueError as exc:
+        raise ComfyTransportError("Invalid ComfyUI URL") from exc
     if parsed.scheme != "http" or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ComfyTransportError("ComfyUI must use plain HTTP loopback without credentials or query")
     if parsed.path not in {"", "/"} or parsed.hostname is None:
