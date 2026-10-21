@@ -88,6 +88,19 @@ class MediaCatalogTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.catalog.resolve("vid_1")
 
+    def test_gallery_rejects_mismatched_identity(self):
+        path = self.root / "Media" / "Videos" / "clip.mp4"
+        path.write_bytes(b"example")
+        self.catalog.register(MediaItem("vid_1", "video"), path)
+        for payload in ('{"id":"different","kind":"video"}',
+                        '{"id":"vid_1","kind":"image"}'):
+            with self.subTest(payload=payload):
+                with self.catalog._connect() as db:
+                    db.execute("UPDATE media_items SET metadata_json=? WHERE media_id=?",
+                               (payload, "vid_1"))
+                with self.assertRaises(ValueError):
+                    self.catalog.list_items()
+
     def test_metadata_id_mismatch_rejected(self):
         path = self.root / "Media" / "Videos" / "clip.mp4"
         path.write_bytes(b"example")
