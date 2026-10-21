@@ -284,7 +284,8 @@ async def converse(
     # 2+3+4. Stream the LLM; chunk on sentence boundaries; TTS each sentence as
     # soon as it completes, so first audio is ready ASAP.
     # Never accept arbitrary roles or unbounded client-supplied context.
-    prior = _bounded_voice_history(history)
+    # Cloud voice consent is scoped to this transcript, not prior local turns.
+    prior = [] if (llm_base_url or llm_api_key) else _bounded_voice_history(history)
     messages = prior + [{"role": "user", "content": transcript}]
     buffer = ""
     reply_parts: list[str] = []
