@@ -49,3 +49,28 @@ def safe_media_target(root: Path, filename: str) -> Path:
     if target.parent.resolve(strict=True) != root.resolve(strict=True):
         raise MediaStorageError("Media target escapes configured root")
     return target
+
+
+def write_media_exclusive(root: Path, filename: str, payload: bytes, *, max_bytes: int = 100_000_000) -> Path:
+    """Atomically create a media file without following an existing symlink.
+
+    Caller must validate the external root at admission time. Revalidate here
+    to fail closed if the mount disappears before writing.
+    """
+    root = validate_media_root(str(root))
+    if not isinstance(payload, bytes) or not payload or len(payload) > max_bytes:
+        raise MediaStorageError("Invalid media payload size")
+    target = safe_media_target(root, filename)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(target, flags, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+    return target
