@@ -1,7 +1,7 @@
 """Offline checks for fail-closed video storage configuration."""
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 from app.video_storage import MediaStorageUnavailable
@@ -27,7 +27,7 @@ class VideoStorageConfigTests(unittest.TestCase):
             with patch("app.video_storage_config.os") as mock_os, \
                  patch("app.video_storage_config.ExternalMediaStorage", autospec=True) as mock_storage:
                 mock_os.name = "nt"
-                mock_storage.return_value.root.drive = "C:"
+                mock_storage.return_value.root = PureWindowsPath("C:/InternalMedia")
                 with self.assertRaisesRegex(MediaStorageUnavailable, "Resolved media root"):
                     configured_video_storage({"KALIV_MEDIA_ROOT": parent, "SystemDrive": "C:"})
                 mock_storage.return_value.assert_ready.assert_not_called()
