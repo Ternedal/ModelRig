@@ -82,6 +82,12 @@ class MediaAPITests(unittest.TestCase):
         self.assertEqual(response.headers["content-range"], "bytes 3-5/10")
         self.assertEqual(response.content, b"")
 
+    def test_media_catalog_io_failure_is_service_error(self):
+        with patch.object(self.catalog, "resolve", side_effect=OSError("disk disconnected")):
+            response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Media catalog unavailable")
+
     def test_unknown_media(self):
         self.assertEqual(self.client.get("/experimental/media/nope").status_code, 404)
 
