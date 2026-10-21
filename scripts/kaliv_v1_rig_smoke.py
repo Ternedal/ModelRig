@@ -11,12 +11,18 @@ import os
 import re
 import stat
 import subprocess
+import types
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import voice_runtime_preflight as voice  # noqa: E402
+# Do not import an ignored/stale scripts/__pycache__/voice_runtime_preflight*.pyc.
+# Compile the actual checked-out .py bytes explicitly: dont_write_bytecode
+# prevents new cache files, but would not disable reading an existing cache.
+_voice_source = Path(__file__).resolve().parent / "voice_runtime_preflight.py"
+voice = types.ModuleType("voice_runtime_preflight")
+voice.__file__ = str(_voice_source)
+exec(compile(_voice_source.read_bytes(), str(_voice_source), "exec"), voice.__dict__)
 
 SCHEMA = "kaliv-v1-readonly-rig-smoke/v1"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
