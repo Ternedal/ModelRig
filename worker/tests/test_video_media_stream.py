@@ -51,7 +51,7 @@ class MediaStreamTests(unittest.TestCase):
             path.write_bytes(b"0123456789")
             for start, length, chunk in ((True, 2, 1), (0, 1.5, 1),
                                          (0, 2, False), (-1, 1, 1),
-                                         (0, -1, 1), (0, 2, 0)):
+                                         (0, -1, 1), (0, 2, 0), (0, 2, 1024 * 1024 + 1)):
                 with self.subTest(bounds=(start, length, chunk)), self.assertRaises(ValueError):
                     b"".join(iter_media_bytes(path, start, length, chunk))
 
