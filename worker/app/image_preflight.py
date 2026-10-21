@@ -32,6 +32,8 @@ def check_media(root: str, external_root: str, min_free_gib: float) -> dict:
     # Ensure the configured external root is a distinct mount, not an ordinary
     # folder on the OS filesystem. This is necessary but not sufficient to prove
     # the backing drive is physically external (USB/SATA/other).
+    if external_real == Path(external_real.anchor):
+        raise MediaStorageError("OS filesystem root cannot be an external media mount")
     if os.path.ismount(external_real) is False:
         raise MediaStorageError("configured external root is not a mount point")
     usage = shutil.disk_usage(media_real)
