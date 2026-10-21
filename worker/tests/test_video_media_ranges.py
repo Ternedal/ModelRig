@@ -31,6 +31,13 @@ class MediaRangeTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(UnsatisfiableRange):
                 parse_single_range(value, 1000)
 
+    def test_excessively_long_numeric_ranges_are_unsatisfiable(self):
+        for header in ("bytes=" + "9" * 5000 + "-",
+                       "bytes=-" + "9" * 5000,
+                       "bytes=0-" + "9" * 5000):
+            with self.subTest(length=len(header)), self.assertRaises(UnsatisfiableRange):
+                parse_single_range(header, 1000)
+
     def test_empty_file(self):
         with self.assertRaises(UnsatisfiableRange):
             parse_single_range("bytes=0-", 0)
