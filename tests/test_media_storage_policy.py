@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from worker.app.media_storage_policy import MediaStorageError, safe_media_target, validate_media_root
+from worker.app.media_storage_policy import MediaStorageError, safe_media_target, validate_media_root, write_media_exclusive
 
 
 class MediaStoragePolicyTests(unittest.TestCase):
@@ -38,6 +38,18 @@ class MediaStoragePolicyTests(unittest.TestCase):
             (root / "alias.png").symlink_to(root / "missing.png")
             with self.assertRaises(MediaStorageError):
                 safe_media_target(root, "alias.png")
+
+    def test_exclusive_write_and_size_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("worker.app.media_storage_policy.validate_media_root", return_value=root):
+                output = write_media_exclusive(root, "image.png", b"image", max_bytes=16)
+                self.assertEqual(output.read_bytes(), b"image")
+                with self.assertRaises(MediaStorageError):
+                    write_media_exclusive(root, "image.png", b"second")
+                with self.assertRaises(MediaStorageError):
+                    write_media_exclusive(root, "oversize.png", b"too long", max_bytes=2)
+                self.assertFalse((root / "oversize.png").exists())
 
 
 if __name__ == "__main__":
