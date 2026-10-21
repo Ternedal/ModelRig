@@ -16,6 +16,12 @@ class ImagePreflightTests(unittest.TestCase):
                 with self.assertRaises(MediaStorageError):
                     check_media(folder, folder, 0)
 
+    def test_rejects_os_root_even_if_mounted(self):
+        root = str(Path("/").resolve())
+        with patch("app.image_preflight.os.path.ismount", return_value=True):
+            with self.assertRaises(MediaStorageError):
+                check_media(root, root, 0)
+
     def test_accepts_configured_mount(self):
         with tempfile.TemporaryDirectory() as folder:
             with patch("app.image_preflight.os.path.ismount", return_value=True):
