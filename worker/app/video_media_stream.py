@@ -32,11 +32,11 @@ def media_response_plan(*, size: int, mime_type: str, range_header: str | None =
 
     The caller must map 416 and send its headers; HEAD must send no body.
     """
-    if method not in ("GET", "HEAD"):
+    if type(method) is not str or method not in ("GET", "HEAD"):
         raise ValueError("Unsupported method")
     if type(size) is not int or size < 0:
         raise ValueError("Invalid file size")
-    if mime_type not in ("video/mp4", "image/png", "image/jpeg", "image/webp"):
+    if type(mime_type) is not str or mime_type not in ("video/mp4", "image/png", "image/jpeg", "image/webp"):
         raise ValueError("Unsupported media MIME")
     headers = {
         "Accept-Ranges": "bytes",
