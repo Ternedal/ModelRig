@@ -40,6 +40,19 @@ class ImageJobTests(unittest.TestCase):
         with self.assertRaises(ImageJobError):
             self.store.submit("a", "second", max_queued=1)
 
+    def test_owner_quota_isolated(self):
+        self.store.submit("a", "first", max_owner_active=1)
+        with self.assertRaises(ImageJobError):
+            self.store.submit("a", "second", max_owner_active=1)
+        other = self.store.submit("b", "other", max_owner_active=1)
+        self.assertEqual(self.store.get(other["job_id"], "b")["state"], "queued")
+
+    def test_running_job_counts_toward_owner_limit(self):
+        self.store.submit("a", "first", max_owner_active=1)
+        self.store.claim()
+        with self.assertRaises(ImageJobError):
+            self.store.submit("a", "second", max_owner_active=1)
+
     def test_invalid_prompt(self):
         with self.assertRaises(ImageJobError):
             self.store.submit("a", " ")
