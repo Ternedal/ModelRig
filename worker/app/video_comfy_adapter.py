@@ -19,14 +19,21 @@ class VideoBackendError(RuntimeError):
 
 
 def _base_url(url: str) -> str:
-    parsed = urllib.parse.urlsplit(url)
+    if not isinstance(url, str):
+        raise ValueError("ComfyUI endpoint must be a URL string")
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Invalid ComfyUI endpoint") from exc
     if parsed.scheme != "http" or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("ComfyUI endpoint must be a plain loopback HTTP URL")
-    if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+    if hostname not in ("localhost", "127.0.0.1", "::1"):
         raise ValueError("ComfyUI must be on loopback")
-    if not parsed.port or parsed.path not in ("", "/"):
+    if not port or parsed.path not in ("", "/"):
         raise ValueError("ComfyUI endpoint must specify a port and no path")
-    return f"http://127.0.0.1:{parsed.port}" if parsed.hostname != "::1" else f"http://[::1]:{parsed.port}"
+    return f"http://127.0.0.1:{port}" if hostname != "::1" else f"http://[::1]:{port}"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
