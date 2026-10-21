@@ -21,7 +21,6 @@ def build_comfy_launch_plan(python_executable: str, main_py: str,
     """
     env = os.environ.copy() if environ is None else dict(environ)
     storage = configured_video_storage(env)
-    paths = comfy_external_environment(env)
     py = Path(python_executable)
     main = Path(main_py)
     if not py.is_absolute() or not py.is_file():
@@ -36,6 +35,7 @@ def build_comfy_launch_plan(python_executable: str, main_py: str,
         raise ValueError("ComfyUI user directory must be provisioned on external storage before launch")
     if not user_dir.resolve().is_relative_to(storage.root):
         raise ValueError("ComfyUI user path escaped external root")
+    paths = comfy_external_environment(env)
     argv = [
         str(py), str(main),
         "--listen", "127.0.0.1",
