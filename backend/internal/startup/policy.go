@@ -5,6 +5,6 @@ package startup
 import "time"
 
 const (
-	GracePeriod   = 3 * time.Minute
+	GracePeriod   = 4*time.Minute + 30*time.Second
 	HealthTimeout = 5 * time.Minute
 )
