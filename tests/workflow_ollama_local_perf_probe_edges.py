@@ -96,6 +96,41 @@ with patch.object(probe, "build_opener", side_effect=fake_build_opener):
     assert probe._request_json("http://127.0.0.1:11435", "/api/tags",
                                body=None, timeout=10) == {"models": []}
 
+# A dripping localhost peer cannot exceed the TOTAL deadline across
+# HTTP headers and body, even if socket-level read operations keep progressing.
+import threading
+import time
+
+class HangingResponse(FakeResponse):
+    def __init__(self, signal):
+        self.signal = signal
+    def read(self, size):
+        if not self.signal.wait(2):
+            raise AssertionError("slow body escaped its absolute deadline")
+        return b'{"models": []}'
+
+class HangingOpener:
+    def __init__(self, signal, stall_on):
+        self.signal = signal
+        self.stall_on = stall_on
+    def open(self, request, timeout):
+        if self.stall_on == "headers":
+            if not self.signal.wait(2):
+                raise AssertionError("slow headers escaped the deadline")
+        return HangingResponse(self.signal) if self.stall_on == "body" else FakeResponse()
+
+for stall_on in ("headers", "body"):
+    finish = threading.Event()
+    with patch.object(probe, "build_opener", return_value=HangingOpener(finish, stall_on)):
+        started = time.monotonic()
+        try:
+            must_refuse(lambda: probe._request_json(
+                "http://127.0.0.1:11435", "/api/tags", body=None, timeout=0.04
+            ), "absolute request timeout")
+        finally:
+            finish.set()  # avoid a long-lived daemon in the test process
+        assert time.monotonic() - started < 0.5
+
 # Reject oversized and invalid JSON responses without retaining their content.
 class StubResponse:
     def __init__(self, payload):
