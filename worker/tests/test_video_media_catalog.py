@@ -54,6 +54,16 @@ class MediaCatalogTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.catalog.resolve("vid_1")
 
+    def test_invalid_catalog_kind_fails_closed(self):
+        path = self.root / "Media" / "Videos" / "clip.mp4"
+        path.write_bytes(b"example")
+        self.catalog.register(MediaItem("vid_1", "video"), path)
+        with self.catalog._connect() as db:
+            db.execute("UPDATE media_items SET kind=? WHERE media_id=?",
+                       ("unknown", "vid_1"))
+        with self.assertRaises(ValueError):
+            self.catalog.resolve("vid_1")
+
     def test_missing_file_not_resolved(self):
         path = self.root / "Media" / "Videos" / "clip.mp4"
         path.write_bytes(b"example")
