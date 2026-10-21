@@ -53,6 +53,12 @@ class ImageJobTests(unittest.TestCase):
         with self.assertRaises(ImageJobError):
             self.store.submit("a", "second", max_owner_active=1)
 
+    def test_invalid_owner(self):
+        for owner in (None, 42, "", " ", "x" * 257):
+            with self.subTest(owner=owner):
+                with self.assertRaises(ImageJobError):
+                    self.store.submit(owner, "prompt")
+
     def test_invalid_prompt(self):
         with self.assertRaises(ImageJobError):
             self.store.submit("a", " ")
