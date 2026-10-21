@@ -37,6 +37,8 @@ class ExternalMediaStore:
             if not p.is_absolute() or p.is_symlink() or not p.is_dir():
                 continue
             mounted = p.resolve(strict=True)
+            if mounted == Path(mounted.anchor):
+                continue
             if not os.path.ismount(mounted):
                 continue
             if self.root == mounted or mounted in self.root.parents:
