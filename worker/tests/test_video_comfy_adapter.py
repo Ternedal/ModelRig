@@ -66,6 +66,20 @@ class ComfyVideoClientTests(unittest.TestCase):
         with self.assertRaises(VideoBackendError):
             next(handler for handler in client._opener.handlers if handler.__class__.__name__ == "_NoRedirect").redirect_request(request, None, 302, "Found", {}, "https://example.com/")
 
+    def test_oversized_backend_response_is_rejected(self):
+        import io
+        from contextlib import contextmanager
+        client = ComfyVideoClient()
+
+        @contextmanager
+        def fake_open(*args, **kwargs):
+            response = io.BytesIO(b"x" * 2_000_001)
+            yield response
+
+        with patch.object(client._opener, "open", side_effect=fake_open):
+            with self.assertRaisesRegex(VideoBackendError, "too large"):
+                client.history("abc-123")
+
     def test_missing_backend_is_reported(self):
         client = ComfyVideoClient()
         with patch.object(client._opener, "open", side_effect=urllib.error.URLError("offline")):
