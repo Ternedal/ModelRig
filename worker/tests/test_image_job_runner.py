@@ -1,0 +1,47 @@
+"""Tests for the image executor using a deterministic fake renderer."""
+import tempfile
+import unittest
+from pathlib import Path
+
+from app.image_job_store import ImageJobStore
+from app.image_media_store import ExternalMediaStore
+from app.image_job_runner import ImageJobRunner, RenderedImage
+
+
+class ImageRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.jobs = ImageJobStore(str(root / "jobs.sqlite3"))
+        self.media = ExternalMediaStore(str(root), [str(root)], min_free_bytes=0)
+
+    def test_successful_render(self):
+        job = self.jobs.submit("client-a", "blue elephant")
+        runner = ImageJobRunner(self.jobs, self.media,
+                                lambda prompt: RenderedImage(b"fixture" + prompt.encode()))
+        result = runner.run_one()
+        self.assertEqual(result["state"], "completed")
+        self.assertEqual(self.jobs.get(job["job_id"], "client-a")["state"], "completed")
+        self.assertEqual(self.media.resolve(result["asset_id"], ".png").read_bytes(),
+                         b"fixtureblue elephant")
+        self.assertIsNone(runner.run_one())
+
+    def test_renderer_failure(self):
+        job = self.jobs.submit("client-a", "prompt")
+        def broken(_prompt):
+            raise RuntimeError("sensitive renderer failure")
+        result = ImageJobRunner(self.jobs, self.media, broken).run_one()
+        self.assertEqual(result["state"], "failed")
+        stored = self.jobs.get(job["job_id"], "client-a")
+        self.assertEqual(stored["error"], "image_generation_failed")
+        self.assertNotIn("sensitive", stored["error"])
+
+    def test_invalid_renderer_output(self):
+        self.jobs.submit("client-a", "prompt")
+        result = ImageJobRunner(self.jobs, self.media, lambda _: None).run_one()
+        self.assertEqual(result["state"], "failed")
+
+
+if __name__ == "__main__":
+    unittest.main()
