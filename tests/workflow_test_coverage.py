@@ -196,11 +196,20 @@ check(
     == set(_partitions["2/3"]),
     "the hosted shards execute every original midchain contract exactly once",
 )
+_deep_worker_counts = {}
+try:
+    for _shard in ("2a/3", "2b/3"):
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _shard
+        _deep_worker_counts[_shard] = _midchain_module._worker_count(
+            len(_partitions[_shard])
+        )
+finally:
+    if _old_shard is None:
+        os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    else:
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _old_shard
 check(
-    all(
-        _midchain_module._worker_count(len(_partitions[_shard])) == 1
-        for _shard in ("2a/3", "2b/3")
-    ),
+    all(_deep_worker_counts[_shard] == 1 for _shard in ("2a/3", "2b/3")),
     "each deep half-shard remains serial to avoid nested runner oversubscription",
 )
 
