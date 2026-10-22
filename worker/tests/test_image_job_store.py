@@ -1,5 +1,7 @@
 """Image job state machine tests, without GPU or HTTP dependencies."""
 import tempfile
+import sqlite3
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -52,6 +54,24 @@ class ImageJobTests(unittest.TestCase):
         self.store.claim()
         with self.assertRaises(ImageJobError):
             self.store.submit("a", "second", max_owner_active=1)
+
+    def test_sqlite_connections_close_on_success_and_error(self):
+        real_connect = sqlite3.connect
+        connections = []
+
+        class TrackedConnection(sqlite3.Connection):
+            def close(self):
+                connections.append("closed")
+                super().close()
+
+        with patch("app.image_job_store.sqlite3.connect",
+                   side_effect=lambda *args, **kwargs: real_connect(
+                       *args, **kwargs, factory=TrackedConnection)):
+            job = self.store.submit("a", "first", max_queued=1)
+            self.assertEqual(self.store.get(job["job_id"], "a")["state"], "queued")
+            with self.assertRaises(ImageJobError):
+                self.store.submit("a", "second", max_queued=1)
+        self.assertEqual(len(connections), 3)
 
     def test_invalid_owner(self):
         for owner in (None, 42, "", " ", "x" * 257):
