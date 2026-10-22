@@ -10,6 +10,7 @@ from contextlib import contextmanager
 import time
 import uuid
 from pathlib import Path
+from typing import Callable
 
 
 class ImageJobError(ValueError):
@@ -17,7 +18,10 @@ class ImageJobError(ValueError):
 
 
 class ImageJobStore:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, *, volume_guard: Callable[[], None] | None = None):
+        self._volume_guard = volume_guard
+        if self._volume_guard is not None:
+            self._volume_guard()
         self.path = Path(db_path)
         if not self.path.parent.is_dir():
             raise ImageJobError("job database parent directory does not exist")
@@ -30,6 +34,8 @@ class ImageJobStore:
 
     @contextmanager
     def _db(self):
+        if self._volume_guard is not None:
+            self._volume_guard()
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=10000")
