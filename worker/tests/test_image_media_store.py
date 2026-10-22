@@ -56,6 +56,16 @@ class MediaStoreTests(unittest.TestCase):
                     store.resolve(asset["asset_id"], ".png")
             self.assertEqual(len(list(Path(directory).glob("*.png"))), 1)
 
+    def test_changed_mount_device_identity_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            store._device_id = -1  # Simulate a different volume at the same mount path.
+            with self.assertRaises(MediaStorageError):
+                store.publish(b"must-not-write")
+            with self.assertRaises(MediaStorageError):
+                store.resolve("a" * 32, ".png")
+            self.assertFalse(list(Path(directory).glob("*.png")))
+
     def test_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)
