@@ -155,7 +155,8 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 client = Mock()
                 client.completed_outputs.return_value = outputs
                 catalog = Mock()
-            catalog.media_root = root / "Media"
+                catalog.media_root = output / "Media"
+                root = output
                 with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                     collector = VideoResultCollector(store, client, catalog, output)
                     self.assertIsNone(collector.collect_one())
