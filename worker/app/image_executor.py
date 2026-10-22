@@ -53,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     if not cache_path.is_absolute() or cache_path.is_symlink():
         raise RuntimeError("HF_HOME must be an absolute non-symlink path")
     cache_root = cache_path.resolve(strict=True)
+    # Refuse an implicit Hugging Face fallback to ~/.cache when the operator
+    # configured a path that does not actually exist on the mounted volume.
     if cache_root != media.root and media.root not in cache_root.parents:
         raise RuntimeError("HF_HOME must be on the external media volume")
     media._check_mount()
