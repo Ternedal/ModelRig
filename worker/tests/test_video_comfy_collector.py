@@ -137,6 +137,14 @@ class CollectorTests(unittest.TestCase):
             self.assertIsNone(self.collector(None).collect_one())
         self.assertEqual(self.store.get(self.job_id)["state"], "running")
 
+    def test_windows_separator_in_filename_is_rejected(self):
+        # A backslash is a path separator on Windows, even when Linux accepts it in a name.
+        (self.output / "nested\\\\result.mp4").write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        outputs = {"1": {"videos": [{"type": "output", "filename": "nested\\\\result.mp4", "subfolder": ""}]}}
+        with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
+            self.assertIsNone(self.collector(outputs).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+
     def test_path_traversal_is_rejected(self):
         outputs = {"1": {"gifs": [{"type": "output", "filename": "bad.mp4", "subfolder": "../"}]}}
         with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
