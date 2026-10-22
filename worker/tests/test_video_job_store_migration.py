@@ -19,8 +19,12 @@ class VideoJobStoreMigrationTests(unittest.TestCase):
     def test_existing_seven_column_database_is_upgraded(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "jobs.sqlite"
-            with sqlite3.connect(path) as db:
-                db.execute("CREATE TABLE video_jobs (job_id TEXT PRIMARY KEY, state TEXT NOT NULL, request_json TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, artifact_id TEXT, error_code TEXT)")
+            db = sqlite3.connect(path)
+            try:
+                with db:
+                    db.execute("CREATE TABLE video_jobs (job_id TEXT PRIMARY KEY, state TEXT NOT NULL, request_json TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, artifact_id TEXT, error_code TEXT)")
+            finally:
+                db.close()
             store = VideoJobStore(path)
             job_id = store.create(VideoRequest(kind="text_to_video", prompt="Clouds"))
             self.assertTrue(store.transition(job_id, "queued", "running"))
