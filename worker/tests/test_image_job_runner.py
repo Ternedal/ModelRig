@@ -15,8 +15,10 @@ class ImageRunnerTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.jobs = ImageJobStore(str(root / "jobs.sqlite3"))
-        with patch("app.image_media_store.os.path.ismount", return_value=True):
-            self.media = ExternalMediaStore(str(root), [str(root)], min_free_bytes=0)
+        mount_patch = patch("app.image_media_store.os.path.ismount", return_value=True)
+        mount_patch.start()
+        self.addCleanup(mount_patch.stop)
+        self.media = ExternalMediaStore(str(root), [str(root)], min_free_bytes=0)
 
     def test_successful_render(self):
         job = self.jobs.submit("client-a", "blue elephant")
