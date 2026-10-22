@@ -94,6 +94,11 @@ eq("Læs https://example.org…og fortsæt.", "Læs …og fortsæt.",
 eq("2 ** 3 = 8", "2 ** 3 = 8", "exponent operator survives")
 eq("foo__bar", "foo__bar", "identifier underscores survive")
 
+eq("Se (https://example.org). Næste", "Se . Næste",
+   "punctuation after parenthesized URL survives")
+eq("Se (https://example.org), næste", "Se , næste",
+   "comma after parenthesized URL survives")
+
 # --- combined ---
 eq("**Vigtigt** 🎯 se her", "Vigtigt se her", "markdown + emoji together")
 
