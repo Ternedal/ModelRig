@@ -60,10 +60,10 @@ class VideoResultCollector:
                             if not isinstance(name, str) or not isinstance(folder, str):
                                 malformed_output = True
                                 continue
-                            if Path(name).name != name or "\\\\" in name or ":" in name or not name.lower().endswith(".mp4"):
+                            if Path(name).name != name or "\\" in name or ":" in name or not name.lower().endswith(".mp4"):
                                 malformed_output = True
                                 continue
-                            if Path(folder).is_absolute() or ".." in Path(folder).parts or "\\\\" in folder or ":" in folder:
+                            if Path(folder).is_absolute() or ".." in Path(folder).parts or "\\" in folder or ":" in folder:
                                 malformed_output = True
                                 continue
                             # Reject symlinked parent directories too: resolving
