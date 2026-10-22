@@ -6,6 +6,7 @@ Supports HEAD and bounded streaming of GET/Range without loading a video into RA
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import BinaryIO
 from pathlib import Path
 
 from .video_media_ranges import UnsatisfiableRange, parse_single_range
@@ -24,6 +25,24 @@ def iter_media_bytes(path: Path, start: int, length: int, chunk_size: int = 256 
                 break
             remaining -= len(block)
             yield block
+
+
+def iter_open_media_bytes(source: BinaryIO, start: int, length: int,
+                          chunk_size: int = 256 * 1024) -> Iterator[bytes]:
+    """Stream from an already-open descriptor; always close it, including on cancellation."""
+    try:
+        if any(type(value) is not int for value in (start, length, chunk_size)) or start < 0 or length < 0 or not 0 < chunk_size <= 1024 * 1024:
+            raise ValueError("Invalid stream bounds")
+        source.seek(start)
+        remaining = length
+        while remaining:
+            block = source.read(min(chunk_size, remaining))
+            if not block:
+                break
+            remaining -= len(block)
+            yield block
+    finally:
+        source.close()
 
 
 def media_response_plan(*, size: int, mime_type: str, range_header: str | None = None,
