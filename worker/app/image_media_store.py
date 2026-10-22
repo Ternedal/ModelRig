@@ -33,6 +33,7 @@ class ExternalMediaStore:
         self.root = candidate.resolve(strict=True)
         allowed = False
         self._mount = None
+        self._device_id = None
         for item in external_roots:
             p = Path(item)
             if not p.is_absolute() or p.is_symlink() or not p.is_dir():
@@ -45,6 +46,7 @@ class ExternalMediaStore:
             if self.root == mounted or mounted in self.root.parents:
                 allowed = True
                 self._mount = mounted
+                self._device_id = mounted.stat().st_dev
                 break
         if not allowed:
             raise MediaStorageError("media root is not on a configured mounted volume")
@@ -61,8 +63,10 @@ class ExternalMediaStore:
                 or self.root.is_symlink()
                 or self._mount not in (self.root, *self.root.parents)):
             raise MediaStorageError("external media mount is unavailable")
-        if self.root.stat().st_dev != self._mount.stat().st_dev:
-            raise MediaStorageError("media root no longer belongs to external mount")
+        if (self._mount.is_symlink()
+                or self._mount.stat().st_dev != self._device_id
+                or self.root.stat().st_dev != self._device_id):
+            raise MediaStorageError("external media volume identity changed")
 
     def _check_free(self) -> None:
         self._check_mount()
