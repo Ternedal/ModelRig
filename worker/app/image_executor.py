@@ -33,8 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     volume = os.getenv("KALIV_IMAGE_EXTERNAL_MOUNT", "")
     database = os.getenv("KALIV_IMAGE_JOBS_DB", "")
     model = os.getenv("KALIV_IMAGE_MODEL_ID", "")
-    if not all((root, volume, database, model)):
-        print("Image executor requires external volume, root, database and model", file=sys.stderr)
+    cache = os.getenv("HF_HOME", "")
+    if not all((root, volume, database, model, cache)):
+        print("Image executor requires external volume, root, database, model and HF_HOME", file=sys.stderr)
         return 2
 
     # The mount guard is checked for every database connection, including
@@ -46,6 +47,13 @@ def main(argv: list[str] | None = None) -> int:
     parent = db_path.parent.resolve(strict=True)
     if parent != media.root and media.root not in parent.parents:
         raise RuntimeError("image database must reside on external media volume")
+    cache_path = Path(cache)
+    if not cache_path.is_absolute() or cache_path.is_symlink():
+        raise RuntimeError("HF_HOME must be an absolute non-symlink path")
+    cache_root = cache_path.resolve(strict=True)
+    if cache_root != media.root and media.root not in cache_root.parents:
+        raise RuntimeError("HF_HOME must be on the external media volume")
+    media._check_mount()
     jobs = ImageJobStore(str(db_path), volume_guard=media._check_mount)
 
     # No automatic model downloads on the normal worker path. The operator
