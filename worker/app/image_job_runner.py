@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .image_job_store import ImageJobStore
-from .image_media_store import ExternalMediaStore
+from .image_media_store import ExternalMediaStore, MediaStorageError
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,13 @@ class ImageJobRunner:
                 # returning success; garbage collection is a separate concern.
                 raise RuntimeError("job completion transition rejected")
             return {"job_id": job_id, "state": "completed", "asset_id": published["asset_id"]}
+        except MediaStorageError:
+            # A disappeared external disk is a fatal safety event. Do not
+            # touch SQLite or attempt to create a fallback on the system disk.
+            raise
         except Exception:
             # Do not persist model exceptions containing prompts or local paths.
+            # If the volume vanished during inference, the guarded database
+            # connection will raise and terminate the executor.
             self.jobs.finish(job_id, error="image_generation_failed")
             return {"job_id": job_id, "state": "failed", "error": "image_generation_failed"}
