@@ -34,7 +34,8 @@ class MediaAPITests(unittest.TestCase):
         response = self.client.get("/experimental/media")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["items"][0]["id"], "clip_1")
-        self.assertEqual(response.json()["items"][0]["url"], "/api/v1/media/clip_1")
+        self.assertEqual(response.json()["items"][0]["url"], "/experimental/media/clip_1")
+        self.assertEqual(self.client.get(response.json()["items"][0]["url"]).content, b"0123456789")
 
     def test_gallery_projection_failure_is_service_error(self):
         with patch("app.video_media_api.gallery_item_for_client", side_effect=ValueError("bad projection")):
