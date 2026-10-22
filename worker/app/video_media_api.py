@@ -44,7 +44,11 @@ def build_media_router() -> APIRouter:
             items = catalog().list_items(limit=limit, offset=offset)
         except (ValueError, OSError):
             raise HTTPException(503, "Media catalog unavailable")
-        return {"schema": "kaliv-media-gallery/v1", "items": [gallery_item_for_client(item) for item in items], "limit": limit, "offset": offset}
+        try:
+            projected = [gallery_item_for_client(item) for item in items]
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(503, "Media catalog unavailable")
+        return {"schema": "kaliv-media-gallery/v1", "items": projected, "limit": limit, "offset": offset}
 
     @router.api_route("/{media_id}", methods=["GET", "HEAD"])
     def media(request: Request, media_id: str):
