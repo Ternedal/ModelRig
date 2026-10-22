@@ -1,4 +1,5 @@
 """API contract tests with an injected external-volume catalog."""
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +50,19 @@ class MediaAPITests(unittest.TestCase):
             response = self.client.get("/experimental/media/clip_1")
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "Media unavailable")
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "Requires O_NOFOLLOW support")
+    def test_symlink_swap_after_catalog_resolution_is_rejected(self):
+        # Simulate an attacker replacing the catalog-validated path before open.
+        with tempfile.TemporaryDirectory() as tmp:
+            secret = Path(tmp) / "secret.txt"
+            secret.write_bytes(b"private data")
+            swapped = Path(tmp) / "swapped.mp4"
+            swapped.symlink_to(secret)
+            with patch.object(self.catalog, "resolve", return_value=(swapped, {"mime_type": "video/mp4"})):
+                response = self.client.get("/experimental/media/clip_1")
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn(b"private data", response.content)
 
     def test_descriptor_closed_when_fdopen_fails(self):
         with patch("app.video_media_api.os.fdopen", side_effect=OSError("cannot wrap")):
