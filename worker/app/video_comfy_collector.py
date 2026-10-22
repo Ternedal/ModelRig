@@ -30,7 +30,12 @@ class VideoResultCollector:
             raise ValueError("ComfyUI output root is required")
 
     def collect_one(self) -> str | None:
-        configured_video_storage().assert_ready()
+        storage = configured_video_storage()
+        storage.assert_ready()
+        if not self.output_root.is_relative_to(storage.root):
+            raise ValueError("ComfyUI output root must be inside approved external storage")
+        if not self.catalog.media_root.resolve().is_relative_to(storage.root):
+            raise ValueError("Media catalog must be inside approved external storage")
         for row in self.store.awaiting_result(limit=1):
             try:
                 outputs = self.client.completed_outputs(row["prompt_id"])
