@@ -9,9 +9,14 @@ from app.image_media_store import ExternalMediaStore, MediaStorageError
 
 
 class MediaStoreTests(unittest.TestCase):
+    def setUp(self):
+        # Fixtures use a temporary directory, not a real external mount.
+        mount_patch = patch("app.image_media_store.os.path.ismount", return_value=True)
+        mount_patch.start()
+        self.addCleanup(mount_patch.stop)
+
     def _store(self, directory, *, min_free_bytes=0):
-        with patch("app.image_media_store.os.path.ismount", return_value=True):
-            return ExternalMediaStore(directory, [directory], min_free_bytes=min_free_bytes)
+        return ExternalMediaStore(directory, [directory], min_free_bytes=min_free_bytes)
 
     def test_requires_explicit_external_root(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -39,6 +44,17 @@ class MediaStoreTests(unittest.TestCase):
             result = store.publish(payload)
             self.assertEqual(result["sha256"], hashlib.sha256(payload).hexdigest())
             self.assertEqual(store.resolve(result["asset_id"], ".png").read_bytes(), payload)
+
+    def test_unplugged_mount_blocks_publish_and_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            asset = store.publish(b"fixture")
+            with patch("app.image_media_store.os.path.ismount", return_value=False):
+                with self.assertRaises(MediaStorageError):
+                    store.publish(b"must-not-write")
+                with self.assertRaises(MediaStorageError):
+                    store.resolve(asset["asset_id"], ".png")
+            self.assertEqual(len(list(Path(directory).glob("*.png"))), 1)
 
     def test_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
