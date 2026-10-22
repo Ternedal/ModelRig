@@ -84,6 +84,16 @@ eq("Læs (https://en.wikipedia.org/wiki/Function_(mathematics)) nu", "Læs nu",
 eq("Læs `https://en.wikipedia.org/wiki/Function_(mathematics)` nu", "Læs nu",
    "inline-code URL with parentheses leaves no backticks")
 
+# --- review regressions: prose separators and real operators ---
+eq("Læs https://example.org—og fortsæt.", "Læs —og fortsæt.",
+   "bare URL must not consume em dash or following word")
+eq("Læs https://example.org–og fortsæt.", "Læs –og fortsæt.",
+   "bare URL must not consume en dash or following word")
+eq("Læs https://example.org…og fortsæt.", "Læs …og fortsæt.",
+   "bare URL must not consume ellipsis or following word")
+eq("2 ** 3 = 8", "2 ** 3 = 8", "exponent operator survives")
+eq("foo__bar", "foo__bar", "identifier underscores survive")
+
 # --- combined ---
 eq("**Vigtigt** 🎯 se her", "Vigtigt se her", "markdown + emoji together")
 
