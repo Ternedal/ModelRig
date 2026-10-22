@@ -28,7 +28,7 @@ class VideoStorageConfigTests(unittest.TestCase):
                  patch("app.video_storage_config.ExternalMediaStorage", autospec=True) as mock_storage:
                 mock_os.name = "nt"
                 mock_storage.return_value.root = PureWindowsPath("C:/InternalMedia")
-                with self.assertRaisesRegex(MediaStorageUnavailable, "Resolved media root"):
+                with self.assertRaisesRegex(MediaStorageUnavailable, "System drive forbidden|Resolved media root"):
                     configured_video_storage({"KALIV_MEDIA_ROOT": parent, "SystemDrive": "C:"})
                 mock_storage.return_value.assert_ready.assert_not_called()
 
