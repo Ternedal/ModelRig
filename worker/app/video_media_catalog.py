@@ -6,6 +6,7 @@ must enforce ownership/authorization before exposing records or bytes.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
 
@@ -64,10 +65,15 @@ class MediaCatalog:
         storage.initialize_directories()
         return cls(storage.root)
 
+    @contextmanager
     def _connect(self):
         db = sqlite3.connect(self.db_path, timeout=5)
-        db.row_factory = sqlite3.Row
-        return db
+        try:
+            db.row_factory = sqlite3.Row
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def register(self, item: MediaItem, file_path: Path) -> None:
         """Register an existing file under the approved media root only."""
