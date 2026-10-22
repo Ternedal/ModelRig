@@ -35,6 +35,20 @@ class VideoPreflightTests(unittest.TestCase):
             self.assertEqual(report["checks"]["workflow_template"], "invalid")
             self.assertFalse(report["ready"])
 
+    def test_preflight_accepts_canonical_root_with_alias_path(self):
+        # Windows temp paths can have 8.3 and long-name aliases for the same directory.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow = root / "workflow.json"
+            workflow.write_text("{}", encoding="utf-8")
+            storage = ExternalMediaStorage(root, minimum_free_gb=1)
+            with patch("app.video_preflight.configured_video_storage", return_value=storage), \\
+                 patch("app.video_preflight.trusted_text_to_video_factory", return_value=lambda _: {}), \\
+                 patch("app.video_preflight.probe_nodes", return_value={"status": "compatible"}):
+                report = check({"KALIV_COMFY_WORKFLOW_TEMPLATE": str(workflow)})
+            self.assertEqual(report["checks"]["storage"], "pass")
+            self.assertEqual(report["checks"]["workflow_template"], "valid_structure")
+
     def test_missing_workflow_template_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
             storage = ExternalMediaStorage(tmp, minimum_free_gb=1)
