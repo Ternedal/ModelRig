@@ -3,8 +3,8 @@
 Run on a controlled worker environment, not on the production worker:
     python scripts/asr_cold_warm_probe.py --audio path/to/test.wav --runs 3
 
-Each process starts with an unloaded model. The first call includes model
-construction; later calls reuse the singleton. No environment is modified.
+Each process starts with an unloaded model. Model construction is timed
+separately from the first and subsequent transcriptions. No environment is modified.
 """
 from __future__ import annotations
 
@@ -31,6 +31,9 @@ def main() -> int:
 
     durations = []
     try:
+        load_start = time.perf_counter()
+        voice_asr._get_model()
+        model_load_seconds = round(time.perf_counter() - load_start, 3)
         for _ in range(args.runs):
             start = time.perf_counter()
             result = voice_asr.transcribe_wav(str(args.audio))
@@ -47,10 +50,11 @@ def main() -> int:
         "device": voice_asr._device(),
         "model": voice_asr._model_name(),
         "compute": voice_asr._compute_type(),
-        "cold_seconds": durations[0],
+        "model_load_seconds": model_load_seconds,
+        "first_inference_seconds": durations[0],
         "warm_seconds": warm,
         "warm_median_seconds": round(statistics.median(warm), 3),
-        "cold_to_warm_ratio": round(durations[0] / statistics.median(warm), 2)
+        "first_to_warm_ratio": round(durations[0] / statistics.median(warm), 2)
             if statistics.median(warm) > 0 else None,
     }, sort_keys=True))
     return 0
