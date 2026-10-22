@@ -117,8 +117,6 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_IMAGE_MEDIA_PILOT` | `0` | slukket |
 | `KALIV_IMAGE_MEDIA_ROOT` | `(tom)` | indstilling |
 | `KALIV_IMAGE_MODEL_ID` | `(tom)` | indstilling |
-| `KALIV_IMAGE_MODEL_ID` | `(tom)` | indstilling |
-| `KALIV_IMAGE_MODEL_ID` | `(tom)` | indstilling |
 | `KALIV_MAX_UPLOAD_MB` | `25` | indstilling |
 | `KALIV_MEMORY4_CHAT_ENABLED` | `0` | slukket |
 | `KALIV_MEMORY4_CHAT_WRITE_ENABLED` | `0` | slukket |
