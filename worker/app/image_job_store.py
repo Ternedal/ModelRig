@@ -6,6 +6,7 @@ After a process restart, previously running jobs are failed, not silently rerun.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 import time
 import uuid
 from pathlib import Path
@@ -27,11 +28,16 @@ class ImageJobStore:
                 asset_id TEXT, error TEXT)""")
             db.execute("CREATE INDEX IF NOT EXISTS image_jobs_state ON image_jobs(state, created)")
 
+    @contextmanager
     def _db(self):
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=10000")
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def submit(self, owner: str, prompt: str, *, max_queued: int = 16, max_owner_active: int = 3) -> dict:
         if not isinstance(owner, str) or not owner.strip() or len(owner) > 256 or (
