@@ -37,6 +37,19 @@ class MediaAPITests(unittest.TestCase):
         self.assertEqual(response.json()["items"][0]["url"], "/experimental/media/clip_1")
         self.assertEqual(self.client.get(response.json()["items"][0]["url"]).content, b"0123456789")
 
+    def test_media_replaced_during_open_is_rejected(self):
+        from unittest.mock import Mock
+        from app.video_media_api import os as media_os
+        real_fstat = media_os.fstat
+        def altered_stat(fd):
+            actual = real_fstat(fd)
+            return Mock(st_dev=actual.st_dev, st_ino=actual.st_ino + 1,
+                        st_mode=actual.st_mode, st_size=actual.st_size)
+        with patch("app.video_media_api.os.fstat", side_effect=altered_stat):
+            response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Media unavailable")
+
     def test_descriptor_closed_when_fdopen_fails(self):
         with patch("app.video_media_api.os.fdopen", side_effect=OSError("cannot wrap")):
             with patch("app.video_media_api.os.close", wraps=__import__("os").close) as close:
