@@ -10,6 +10,15 @@ class MediaClientProjectionTests(unittest.TestCase):
         self.assertEqual(item["url"], "/api/v1/media/clip_1")
         self.assertEqual(item["thumbnail_url"], "/api/v1/media/thumb_1")
 
+    def test_operator_urls(self):
+        item = gallery_item_for_client({"id": "clip_1", "thumbnail_id": "thumb_1"}, url_prefix="/experimental/media")
+        self.assertEqual(item["url"], "/experimental/media/clip_1")
+        self.assertEqual(item["thumbnail_url"], "/experimental/media/thumb_1")
+
+    def test_rejects_untrusted_url_prefix(self):
+        with self.assertRaises(ValueError):
+            gallery_item_for_client({"id": "clip_1"}, url_prefix="//evil.example")
+
     def test_no_thumbnail(self):
         item = gallery_item_for_client({"id": "image_1", "kind": "image"})
         self.assertIsNone(item["thumbnail_url"])
