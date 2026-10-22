@@ -21,7 +21,8 @@ class ProbeTests(unittest.TestCase):
         calls = []
         fake_asr = types.ModuleType("app.voice_asr")
         secret = "PRIVATE TRANSCRIPT NEVER LOG"
-        def transcribe(path):
+        def transcribe(path, language="da"):
+            self.assertEqual(language, "da")
             calls.append(path)
             return {"text": secret}
         fake_asr.transcribe_wav = transcribe
@@ -41,6 +42,7 @@ class ProbeTests(unittest.TestCase):
                 self.assertEqual(probe.main(), 0)
             payload = json.loads(out.getvalue())
             self.assertTrue(payload["ok"])
+            self.assertEqual(payload["language"], "da")
             self.assertIn("model_load_seconds", payload)
             self.assertIn("first_inference_seconds", payload)
             self.assertEqual(len(calls), 3)
@@ -50,7 +52,7 @@ class ProbeTests(unittest.TestCase):
 
     def test_failure_does_not_leak_exception_details(self):
         fake_asr = types.ModuleType("app.voice_asr")
-        def fail(_path):
+        def fail(_path, language="da"):
             raise RuntimeError("secret user audio path and transcript")
         fake_asr.transcribe_wav = fail
         fake_asr._get_model = lambda: object()
