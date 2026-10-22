@@ -34,7 +34,8 @@ class CollectorPathSecurityTests(unittest.TestCase):
                                       "filename": "clip.mp4"}]}
             }
             catalog = Mock()
-            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))) as storage:
+            catalog.media_root = root / "Media"
+            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))) as storage:
                 collector = VideoResultCollector(store, client, catalog, output)
                 self.assertIsNone(collector.collect_one())
             storage.return_value.assert_ready.assert_called_once_with()
@@ -64,8 +65,9 @@ class CollectorPathSecurityTests(unittest.TestCase):
                                       "filename": "clip.mp4"}]}
             }
             catalog = Mock()
+            catalog.media_root = root / "Media"
             catalog.media_root = media
-            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
+            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                 collector = VideoResultCollector(store, client, catalog, output)
                 media_id = collector.collect_one()
             self.assertIsInstance(media_id, str)
@@ -100,7 +102,8 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 ]}
             }
             catalog = Mock()
-            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
+            catalog.media_root = root / "Media"
+            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                 collector = VideoResultCollector(store, client, catalog, output)
                 self.assertIsNone(collector.collect_one())
             catalog.register.assert_not_called()
@@ -130,7 +133,8 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 ]}
             }
             catalog = Mock()
-            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
+            catalog.media_root = root / "Media"
+            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                 collector = VideoResultCollector(store, client, catalog, output)
                 self.assertIsNone(collector.collect_one())
             catalog.register.assert_not_called()
@@ -151,7 +155,8 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 client = Mock()
                 client.completed_outputs.return_value = outputs
                 catalog = Mock()
-                with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
+            catalog.media_root = root / "Media"
+                with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                     collector = VideoResultCollector(store, client, catalog, output)
                     self.assertIsNone(collector.collect_one())
                 catalog.register.assert_not_called()
@@ -169,7 +174,8 @@ class CollectorPathSecurityTests(unittest.TestCase):
             client = Mock()
             client.completed_outputs.return_value = None
             catalog = Mock()
-            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(unsafe=True))):
+            catalog.media_root = root / "Media"
+            with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                 collector = VideoResultCollector(store, client, catalog, output)
                 self.assertIsNone(collector.collect_one())
             store.transition.assert_not_called()
