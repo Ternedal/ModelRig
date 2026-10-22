@@ -32,6 +32,7 @@ class ExternalMediaStore:
             raise MediaStorageError("media root must be an existing real directory")
         self.root = candidate.resolve(strict=True)
         allowed = False
+        self._mount = None
         for item in external_roots:
             p = Path(item)
             if not p.is_absolute() or p.is_symlink() or not p.is_dir():
@@ -43,6 +44,7 @@ class ExternalMediaStore:
                 continue
             if self.root == mounted or mounted in self.root.parents:
                 allowed = True
+                self._mount = mounted
                 break
         if not allowed:
             raise MediaStorageError("media root is not on a configured mounted volume")
@@ -51,7 +53,19 @@ class ExternalMediaStore:
         self.min_free_bytes = min_free_bytes
         self._check_free()
 
+    def _check_mount(self) -> None:
+        # Recheck every access: an unplugged disk must never cause writes to
+        # the now-exposed directory on the system filesystem.
+        if (self._mount is None or not os.path.ismount(self._mount)
+                or not self.root.is_dir()
+                or self.root.is_symlink()
+                or self._mount not in (self.root, *self.root.parents)):
+            raise MediaStorageError("external media mount is unavailable")
+        if self.root.stat().st_dev != self._mount.stat().st_dev:
+            raise MediaStorageError("media root no longer belongs to external mount")
+
     def _check_free(self) -> None:
+        self._check_mount()
         if shutil.disk_usage(self.root).free < self.min_free_bytes:
             raise MediaStorageError("media volume below free-space floor")
 
@@ -61,6 +75,7 @@ class ExternalMediaStore:
         self._check_free()
         asset_id = uuid.uuid4().hex
         final = self.root / (asset_id + extension)
+        self._check_mount()
         fd, temp_path = tempfile.mkstemp(prefix=".media-", suffix=".part", dir=self.root)
         try:
             with os.fdopen(fd, "wb") as stream:
@@ -78,6 +93,7 @@ class ExternalMediaStore:
     def resolve(self, asset_id: str, extension: str) -> Path:
         if not _ASSET_ID.fullmatch(asset_id) or extension not in _ALLOWED:
             raise MediaStorageError("invalid asset identifier")
+        self._check_mount()
         path = self.root / (asset_id + extension)
         if path.is_symlink() or not path.is_file() or path.resolve().parent != self.root:
             raise MediaStorageError("asset not found or unsafe")
