@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 41 feature-switches er tændt som default.** (37 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -111,6 +111,11 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_FILE_WORKSPACE_ROOT` | `(tom)` | indstilling |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` | slukket |
 | `KALIV_HOME_RIG_PILOT` | `0` | slukket |
+| `KALIV_IMAGE_EXTERNAL_MOUNT` | `(tom)` | slukket |
+| `KALIV_IMAGE_INTERNAL_SECRET` | `(tom)` | indstilling |
+| `KALIV_IMAGE_JOBS_DB` | `(tom)` | indstilling |
+| `KALIV_IMAGE_MEDIA_PILOT` | `0` | slukket |
+| `KALIV_IMAGE_MEDIA_ROOT` | `(tom)` | indstilling |
 | `KALIV_MAX_UPLOAD_MB` | `25` | indstilling |
 | `KALIV_MEMORY4_CHAT_ENABLED` | `0` | slukket |
 | `KALIV_MEMORY4_CHAT_WRITE_ENABLED` | `0` | slukket |
