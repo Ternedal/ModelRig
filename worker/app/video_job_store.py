@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import sqlite3
 import time
 import uuid
@@ -42,10 +43,15 @@ class VideoJobStore:
             if "prompt_id" not in columns:
                 db.execute("ALTER TABLE video_jobs ADD COLUMN prompt_id TEXT")
 
+    @contextmanager
     def _connect(self):
         connection = sqlite3.connect(self.db_path, timeout=5)
-        connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def create(self, request: VideoRequest) -> str:
         if not isinstance(request, VideoRequest):
