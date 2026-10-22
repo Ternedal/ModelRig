@@ -174,20 +174,50 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		"upstream": map[string]any{
 			"ollama": s.Ollama.Reachable(),
+			"llm":    func() bool {
+			if s.LLM != nil {
+				return s.LLM.Reachable()
+			}
+			return s.Ollama != nil && s.Ollama.Reachable()
+		}(),
 			"worker": s.Worker.Reachable(),
 		},
+		"model_provider": func() string {
+			if s.LLM != nil {
+				return s.LLM.Name()
+			}
+			if s.Ollama != nil {
+				return "ollama"
+			}
+			return "unavailable"
+		}(),
 	})
 }
 
-// handleModels proxies Ollama's model list (GET /api/tags).
+// handleModels preserves the existing ModelRig/Ollama-shaped model-list
+// contract while delegating discovery to the selected LLM runtime.
 func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
-	s.Ollama.Forward(w, r, "/api/tags")
+	if s.LLM != nil {
+		s.LLM.Models(w, r)
+		return
+	}
+	// Backward-compatible fallback for legacy tests/embedders that construct a
+	// server directly instead of through New(). Ollama remains the baseline.
+	if s.Ollama != nil {
+		s.Ollama.Forward(w, r, "/api/tags")
+		return
+	}
+	writeErr(w, http.StatusServiceUnavailable, "model provider unavailable")
 }
 
 // handleModelsRunning proxies Ollama's list of currently loaded models
 // (GET /api/ps) -- shows VRAM usage and expiry, for a "what's actually
 // running right now" view distinct from "what's installed" (handleModels).
 func (s *server) handleModelsRunning(w http.ResponseWriter, r *http.Request) {
+	if s.LLM != nil && s.LLM.Name() != "ollama" {
+		writeErr(w, http.StatusNotImplemented, "running-model inspection is currently Ollama-only")
+		return
+	}
 	s.Ollama.Forward(w, r, "/api/ps")
 }
 
@@ -197,6 +227,10 @@ func (s *server) handleModelsRunning(w http.ResponseWriter, r *http.Request) {
 // flushes as bytes arrive, so progress reaches the client live, same as
 // streaming chat.
 func (s *server) handleModelsPull(w http.ResponseWriter, r *http.Request) {
+	if s.LLM != nil && s.LLM.Name() != "ollama" {
+		writeErr(w, http.StatusNotImplemented, "model pull is currently Ollama-only")
+		return
+	}
 	// A pull can legitimately run far past the chat timeout (a ~9 GB model on
 	// a home line is 15+ minutes; http.Client.Timeout bounds the WHOLE
 	// exchange incl. the streamed body). With the default timeout the stream
@@ -211,6 +245,10 @@ func (s *server) handleModelsPull(w http.ResponseWriter, r *http.Request) {
 // {"model":"<name>"}). Irreversible on the Ollama side -- the client is
 // expected to confirm with the user before calling this.
 func (s *server) handleModelsDelete(w http.ResponseWriter, r *http.Request) {
+	if s.LLM != nil && s.LLM.Name() != "ollama" {
+		writeErr(w, http.StatusNotImplemented, "model deletion is currently Ollama-only")
+		return
+	}
 	s.Ollama.Forward(w, r, "/api/delete")
 }
 
@@ -321,9 +359,20 @@ func (s *server) handleTokenRotate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleChat proxies Ollama chat (POST /api/chat), streaming NDJSON through.
+// handleChat keeps the public Ollama-shaped chat contract stable while the
+// selected provider may be Ollama itself or an OpenAI-compatible runtime.
 func (s *server) handleChat(w http.ResponseWriter, r *http.Request) {
-	s.Ollama.Forward(w, r, "/api/chat")
+	if s.LLM != nil {
+		s.LLM.Chat(w, r)
+		return
+	}
+	// Keep the pre-provider contract intact for direct server fixtures and
+	// embedders. Runtime-created servers still receive an explicit provider.
+	if s.Ollama != nil {
+		s.Ollama.Forward(w, r, "/api/chat")
+		return
+	}
+	writeErr(w, http.StatusServiceUnavailable, "chat model provider unavailable")
 }
 
 func (s *server) handleRagQuery(w http.ResponseWriter, r *http.Request) {

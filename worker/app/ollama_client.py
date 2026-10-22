@@ -7,6 +7,7 @@ of leaking a stack trace.
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import socket
 from urllib.parse import urlparse
@@ -16,6 +17,9 @@ import httpx
 OLLAMA_URL = os.getenv("MODELRIG_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 EMBED_MODEL = os.getenv("MODELRIG_EMBED_MODEL", "nomic-embed-text")
 GEN_MODEL = os.getenv("MODELRIG_GEN_MODEL", "qwen2.5-coder:7b")
+LLM_PROVIDER = os.getenv("MODELRIG_LLM_PROVIDER", "ollama").strip().lower() or "ollama"
+LLM_URL = os.getenv("MODELRIG_LLM_URL", "http://127.0.0.1:1337/v1").rstrip("/")
+LLM_KEY = os.getenv("MODELRIG_LLM_KEY", "")
 # Timeout for calls to Ollama. The default must accommodate a COLD model: a
 # first voice turn (or first chat) makes Ollama load e.g. hermes3:8b (~4.7 GB)
 # into VRAM before generating a single token, which alone can exceed 60s.
@@ -35,7 +39,25 @@ KEEP_ALIVE = os.getenv("MODELRIG_OLLAMA_KEEP_ALIVE", "30m")
 
 
 class OllamaError(RuntimeError):
-    """Any failure talking to Ollama (unreachable, non-200, malformed body)."""
+    """Any model-runtime failure (kept for backward compatibility)."""
+
+
+def _uses_openai_compatible() -> bool:
+    return LLM_PROVIDER in {"jan", "openai-compatible"}
+
+
+def _llm_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {LLM_KEY}"} if LLM_KEY else {}
+
+
+def _openai_message(body: dict) -> dict:
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise OllamaError("OpenAI-compatible response missing choices")
+    message = choices[0].get("message") or {}
+    if not isinstance(message, dict):
+        raise OllamaError("OpenAI-compatible response missing message")
+    return message
 
 
 async def embed(text: str, model: str | None = None) -> list[float]:
@@ -73,6 +95,20 @@ async def embed(text: str, model: str | None = None) -> list[float]:
 
 async def chat(messages: list[dict], model: str | None = None) -> str:
     model = model or GEN_MODEL
+    if _uses_openai_compatible():
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+                r = await c.post(
+                    f"{LLM_URL}/chat/completions",
+                    json={"model": model, "messages": messages, "stream": False},
+                    headers=_llm_headers(),
+                )
+        except httpx.HTTPError as e:
+            raise OllamaError(f"cannot reach {LLM_PROVIDER} at {LLM_URL}: {e}") from e
+        if r.status_code != 200:
+            raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
+        return str(_openai_message(r.json()).get("content") or "")
+
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as c:
             r = await c.post(f"{OLLAMA_URL}/api/chat",
@@ -143,6 +179,22 @@ async def chat_tools(messages: list[dict], tools: list[dict],
     model = model or GEN_MODEL
     if base_url:
         _validate_cloud_url(base_url)
+    if not base_url and _uses_openai_compatible():
+        payload: dict = {"model": model, "messages": messages, "stream": False}
+        if tools:
+            payload["tools"] = tools
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+                r = await c.post(
+                    f"{LLM_URL}/chat/completions",
+                    json=payload,
+                    headers=_llm_headers(),
+                )
+        except httpx.HTTPError as e:
+            raise OllamaError(f"cannot reach {LLM_PROVIDER} at {LLM_URL}: {e}") from e
+        if r.status_code != 200:
+            raise OllamaError(f"chat failed ({r.status_code}): {r.text[:200]}")
+        return _openai_message(r.json())
     # keep_alive is a local-VRAM directive; don't send it to a cloud upstream
     # (same fix as chat_stream -- it can hang the cloud request).
     payload: dict = {"model": model, "messages": messages, "stream": False}
@@ -179,6 +231,43 @@ async def chat_stream(messages: list[dict], model: str | None = None,
     model = model or GEN_MODEL
     if base_url:
         _validate_cloud_url(base_url)
+    if not base_url and _uses_openai_compatible():
+        client = httpx.AsyncClient(timeout=TIMEOUT)
+        try:
+            async with client.stream(
+                "POST",
+                f"{LLM_URL}/chat/completions",
+                headers=_llm_headers(),
+                json={"model": model, "messages": messages, "stream": True},
+            ) as r:
+                if r.status_code != 200:
+                    body = await r.aread()
+                    raise OllamaError(f"chat failed ({r.status_code}): {body[:200]!r}")
+                async for line in r.aiter_lines():
+                    line = line.strip()
+                    if not line or line.startswith(":") or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        yield (json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}) + "\n").encode()
+                        return
+                    try:
+                        chunk = json.loads(data)
+                        choice = (chunk.get("choices") or [{}])[0]
+                        delta = choice.get("delta") or {}
+                    except (ValueError, TypeError, IndexError):
+                        continue
+                    content = delta.get("content")
+                    if content:
+                        yield (json.dumps({"message": {"role": delta.get("role") or "assistant", "content": content}, "done": False}) + "\n").encode()
+                    if choice.get("finish_reason") is not None:
+                        yield (json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}) + "\n").encode()
+                        return
+        except httpx.HTTPError as e:
+            raise OllamaError(f"cannot reach {LLM_PROVIDER} at {LLM_URL}: {e}") from e
+        finally:
+            await client.aclose()
+        return
     url = (base_url or OLLAMA_URL).rstrip("/")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     # keep_alive tells a LOCAL Ollama how long to keep the model in VRAM. Ollama
