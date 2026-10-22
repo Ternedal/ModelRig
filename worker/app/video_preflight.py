@@ -65,7 +65,7 @@ def check(environ=None):
                 if current.is_symlink():
                     raise ValueError("Symlink forbidden: " + relative)
                 current = current.parent
-            if path.exists() and not path.resolve().is_relative_to(root):
+            if path.exists() and not path.resolve().is_relative_to(root.resolve()):
                 raise ValueError("Directory escapes media root: " + relative)
         usage = shutil.disk_usage(root)
         result["checks"]["media_root"] = str(root)
@@ -87,7 +87,7 @@ def check(environ=None):
             template = Path(template_value)
             if not template.is_absolute() or template.is_symlink():
                 raise ValueError("Workflow template must be an absolute regular file")
-            if not template.resolve(strict=True).is_relative_to(Path(result["checks"]["media_root"])):
+            if not template.resolve(strict=True).is_relative_to(Path(result["checks"]["media_root"]).resolve(strict=True)):
                 raise ValueError("Workflow template must be under media root")
             trusted_text_to_video_factory(template)
             result["checks"]["workflow_template"] = "valid_structure"
