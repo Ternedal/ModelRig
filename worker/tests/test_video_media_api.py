@@ -37,6 +37,13 @@ class MediaAPITests(unittest.TestCase):
         self.assertEqual(response.json()["items"][0]["url"], "/experimental/media/clip_1")
         self.assertEqual(self.client.get(response.json()["items"][0]["url"]).content, b"0123456789")
 
+    def test_descriptor_closed_when_fdopen_fails(self):
+        with patch("app.video_media_api.os.fdopen", side_effect=OSError("cannot wrap")):
+            with patch("app.video_media_api.os.close", wraps=__import__("os").close) as close:
+                response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 503)
+        close.assert_called_once()
+
     def test_gallery_projection_failure_is_service_error(self):
         with patch("app.video_media_api.gallery_item_for_client", side_effect=ValueError("bad projection")):
             response = self.client.get("/experimental/media")
