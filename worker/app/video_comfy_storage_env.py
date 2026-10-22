@@ -20,6 +20,7 @@ def comfy_external_environment(environ: dict[str, str] | None = None) -> dict[st
     storage = configured_video_storage(environ)
     root = storage.root
     comfy_root = root / "ComfyUI"
+    root_canonical = root.resolve(strict=True)
     dirs = {
         "COMFYUI_INPUT_DIRECTORY": comfy_root / "input",
         "COMFYUI_OUTPUT_DIRECTORY": comfy_root / "output",
@@ -44,12 +45,12 @@ def comfy_external_environment(environ: dict[str, str] | None = None) -> dict[st
             if current.is_symlink():
                 raise ValueError("ComfyUI path is a symlink")
             current = current.parent
-        if not path.resolve().is_relative_to(root.resolve()):
+        if not path.resolve().is_relative_to(root_canonical):
             raise ValueError("ComfyUI path escaped approved media root")
     for path in set(dirs.values()):
         path.mkdir(parents=True, exist_ok=True)
         # Recheck after creation: a mount or link may have changed between
         # validation and mkdir. Never return an escaped cache path.
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+        if path.is_symlink() or not path.resolve().is_relative_to(root_canonical):
             raise ValueError("ComfyUI path escaped approved media root")
     return {key: str(value) for key, value in dirs.items()}
