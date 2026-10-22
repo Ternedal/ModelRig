@@ -20,6 +20,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audio", required=True, type=Path)
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--language", default="da", choices=("da", "en"))
     args = parser.parse_args()
     if args.runs < 2 or args.runs > 20:
         parser.error("--runs must be between 2 and 20")
@@ -36,7 +37,7 @@ def main() -> int:
         model_load_seconds = round(time.perf_counter() - load_start, 3)
         for _ in range(args.runs):
             start = time.perf_counter()
-            result = voice_asr.transcribe_wav(str(args.audio))
+            result = voice_asr.transcribe_wav(str(args.audio), language=args.language)
             elapsed = time.perf_counter() - start
             durations.append(round(elapsed, 3))
             if not isinstance(result, dict):
@@ -50,6 +51,7 @@ def main() -> int:
         "device": voice_asr._device(),
         "model": voice_asr._model_name(),
         "compute": voice_asr._compute_type(),
+        "language": args.language,
         "model_load_seconds": model_load_seconds,
         "first_inference_seconds": durations[0],
         "warm_seconds": warm,
