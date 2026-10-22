@@ -24,7 +24,7 @@ class ComfyLaunchTests(unittest.TestCase):
                 argv, env = build_comfy_launch_plan(str(py), str(main), {})
             self.assertEqual(argv[argv.index("--listen") + 1], "127.0.0.1")
             for flag in ("--input-directory", "--output-directory", "--temp-directory", "--user-directory"):
-                self.assertTrue(Path(argv[argv.index(flag) + 1]).is_relative_to(root))
+                self.assertTrue(Path(argv[argv.index(flag) + 1]).resolve().is_relative_to(root.resolve()))
             for name in ("HF_HOME", "TORCH_HOME", "TMPDIR", "TEMP", "TMP"):
                 self.assertTrue(Path(env[name]).is_relative_to(root))
 
