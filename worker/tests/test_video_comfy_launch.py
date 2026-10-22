@@ -26,7 +26,7 @@ class ComfyLaunchTests(unittest.TestCase):
             for flag in ("--input-directory", "--output-directory", "--temp-directory", "--user-directory"):
                 self.assertTrue(Path(argv[argv.index(flag) + 1]).resolve().is_relative_to(root.resolve()))
             for name in ("HF_HOME", "TORCH_HOME", "TMPDIR", "TEMP", "TMP"):
-                self.assertTrue(Path(env[name]).is_relative_to(root))
+                self.assertTrue(Path(env[name]).resolve().is_relative_to(root.resolve()))
 
     def test_missing_user_directory_fails_without_creating_it(self):
         with tempfile.TemporaryDirectory() as tmp:
