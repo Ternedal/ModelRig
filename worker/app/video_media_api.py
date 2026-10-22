@@ -74,8 +74,8 @@ def build_media_router() -> APIRouter:
                 os.close(fd)
                 raise
             file_info = os.fstat(source.fileno())
-            path_info = path.stat()
-            if (file_info.st_dev, file_info.st_ino) != (path_info.st_dev, path_info.st_ino):
+            path_info = path.stat(follow_symlinks=False)
+            if stat.S_ISLNK(path_info.st_mode) or (file_info.st_dev, file_info.st_ino) != (path_info.st_dev, path_info.st_ino):
                 raise ValueError("Media changed during open")
             if not stat.S_ISREG(file_info.st_mode):
                 raise ValueError("Media is not a regular file")
