@@ -66,6 +66,13 @@ func (s *server) routes() {
 	}
 
 	// Protected (Bearer token required)
+	// Image generation pilot: explicit opt-in, paired-device auth, loopback worker.
+	if imageMediaPilotEnabled() {
+		s.mux.Handle("POST /api/v1/media/images/jobs", s.authMW(http.HandlerFunc(s.handleImageMedia)))
+		s.mux.Handle("GET /api/v1/media/images/jobs/{id}", s.authMW(http.HandlerFunc(s.handleImageMedia)))
+		s.mux.Handle("POST /api/v1/media/images/jobs/{id}/cancel", s.authMW(http.HandlerFunc(s.handleImageMedia)))
+		s.mux.Handle("GET /api/v1/media/images/assets/{id}", s.authMW(http.HandlerFunc(s.handleImageMedia)))
+	}
 	s.mux.Handle("GET /api/v1/status", s.authMW(http.HandlerFunc(s.handleStatus)))
 	s.mux.Handle("GET /api/v1/health/deep", s.authMW(http.HandlerFunc(s.handleHealthDeep)))
 	s.mux.Handle("GET /api/v1/health/full", s.authMW(http.HandlerFunc(s.handleHealthFull)))
