@@ -64,6 +64,25 @@ class MediaAPITests(unittest.TestCase):
             self.assertEqual(response.status_code, 503)
             self.assertNotIn(b"private data", response.content)
 
+    def test_symlink_swap_rejected_without_no_follow_flag(self):
+        # Verify the identity check still rejects a symlink on platforms lacking O_NOFOLLOW.
+        with tempfile.TemporaryDirectory() as tmp:
+            secret = Path(tmp) / "secret.txt"
+            secret.write_bytes(b"private data")
+            swapped = Path(tmp) / "swapped.mp4"
+            try:
+                swapped.symlink_to(secret)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation not available")
+            real_open = os.open
+            def open_without_no_follow(path, flags, *args, **kwargs):
+                return real_open(path, flags & ~getattr(os, "O_NOFOLLOW", 0), *args, **kwargs)
+            with patch.object(self.catalog, "resolve", return_value=(swapped, {"mime_type": "video/mp4"})):
+                with patch("app.video_media_api.os.open", side_effect=open_without_no_follow):
+                    response = self.client.get("/experimental/media/clip_1")
+            self.assertEqual(response.status_code, 404)
+            self.assertNotIn(b"private data", response.content)
+
     def test_descriptor_closed_when_fdopen_fails(self):
         with patch("app.video_media_api.os.fdopen", side_effect=OSError("cannot wrap")):
             with patch("app.video_media_api.os.close", wraps=__import__("os").close) as close:
