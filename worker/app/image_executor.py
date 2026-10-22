@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("HF_HOME must be on the external media volume")
     media._check_mount()
     jobs = ImageJobStore(str(db_path), volume_guard=media._check_mount)
+    jobs.recover_interrupted()
 
     # No automatic model downloads on the normal worker path. The operator
     # explicitly starts this process after choosing a model/cache location.
