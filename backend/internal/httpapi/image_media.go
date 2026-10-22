@@ -61,6 +61,10 @@ func (s *server) handleImageMedia(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    // Images and job metadata belong to the paired device. The generic
+    // proxy intentionally does not forward arbitrary upstream cache headers.
+    w.Header().Set("Cache-Control", "private, no-store")
+    w.Header().Set("X-Content-Type-Options", "nosniff")
     s.Worker.ForwardWithHeaders(w, r, upstream, map[string]string{
         "X-Verified-Owner": device.ID,
         "X-Internal-Media-Secret": secret,
