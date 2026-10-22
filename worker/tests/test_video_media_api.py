@@ -36,6 +36,12 @@ class MediaAPITests(unittest.TestCase):
         self.assertEqual(response.json()["items"][0]["id"], "clip_1")
         self.assertEqual(response.json()["items"][0]["url"], "/api/v1/media/clip_1")
 
+    def test_gallery_projection_failure_is_service_error(self):
+        with patch("app.video_media_api.gallery_item_for_client", side_effect=ValueError("bad projection")):
+            response = self.client.get("/experimental/media")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Media catalog unavailable")
+
     def test_invalid_pagination_is_client_error(self):
         self.assertEqual(self.client.get("/experimental/media?limit=0").status_code, 400)
         self.assertEqual(self.client.get("/experimental/media?offset=-1").status_code, 400)
