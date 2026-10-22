@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.image_job_store import ImageJobStore
-from app.image_media_store import ExternalMediaStore
+from app.image_media_store import ExternalMediaStore, MediaStorageError
 from app.image_job_runner import ImageJobRunner, RenderedImage
 
 
@@ -40,6 +40,16 @@ class ImageRunnerTests(unittest.TestCase):
         stored = self.jobs.get(job["job_id"], "client-a")
         self.assertEqual(stored["error"], "image_generation_failed")
         self.assertNotIn("sensitive", stored["error"])
+
+    def test_storage_loss_stops_executor_without_fallback(self):
+        job = self.jobs.submit("client-a", "prompt")
+        def missing_disk(_prompt):
+            raise MediaStorageError("external drive disappeared")
+        with self.assertRaises(MediaStorageError):
+            ImageJobRunner(self.jobs, self.media, missing_disk).run_one()
+        self.assertEqual(self.jobs.get(job["job_id"], "client-a")["state"], "running")
+        self.assertEqual(self.jobs.recover_interrupted(), 1)
+        self.assertEqual(self.jobs.get(job["job_id"], "client-a")["state"], "failed")
 
     def test_invalid_renderer_output(self):
         self.jobs.submit("client-a", "prompt")
