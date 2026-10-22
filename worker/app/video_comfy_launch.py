@@ -33,7 +33,7 @@ def build_comfy_launch_plan(python_executable: str, main_py: str,
         raise ValueError("ComfyUI user path or parent is a symlink")
     if not user_dir.is_dir():
         raise ValueError("ComfyUI user directory must be provisioned on external storage before launch")
-    if not user_dir.resolve().is_relative_to(storage.root):
+    if not user_dir.resolve().is_relative_to(storage.root.resolve()):
         raise ValueError("ComfyUI user path escaped external root")
     paths = comfy_external_environment(env)
     argv = [
