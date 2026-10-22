@@ -42,8 +42,8 @@ class VideoPreflightTests(unittest.TestCase):
             workflow = root / "workflow.json"
             workflow.write_text("{}", encoding="utf-8")
             storage = ExternalMediaStorage(root, minimum_free_gb=1)
-            with patch("app.video_preflight.configured_video_storage", return_value=storage), \\
-                 patch("app.video_preflight.trusted_text_to_video_factory", return_value=lambda _: {}), \\
+            with patch("app.video_preflight.configured_video_storage", return_value=storage), \
+                 patch("app.video_preflight.trusted_text_to_video_factory", return_value=lambda _: {}), \
                  patch("app.video_preflight.probe_nodes", return_value={"status": "compatible"}):
                 report = check({"KALIV_COMFY_WORKFLOW_TEMPLATE": str(workflow)})
             self.assertEqual(report["checks"]["storage"], "pass")
