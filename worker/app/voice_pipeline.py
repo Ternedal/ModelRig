@@ -66,7 +66,7 @@ _SENTENCE_END = re.compile(r"([.!?])(\s|$)")
 
 _MD_CODE_FENCE = re.compile(r"```[\s\S]*?```")          # fenced blocks: drop entirely
 _MD_STRIKE = re.compile(r"~~([^~\n]+)~~")               # ~~deleted~~ -> deleted
-_MD_BARE_URL = re.compile(r"""https?://[^\s<>\[\]{}'"`]+""")  # balanced URL path parentheses
+_MD_BARE_URL = re.compile(r"""https?://[^\s<>\[\]{}'"`—–…]+""")  # stop at prose separators
 _MD_EMPTY_WRAPPERS = re.compile(r"(?:\(\s*\)|\[\s*\]|\x60\s*\x60)")  # URL-only markup
 _MD_RESIDUAL_MARKERS = re.compile(r"(?:\*{2,}|_{2,}|~{2,}|`{2,})")  # orphaned markup
 _MD_INLINE_CODE = re.compile(r"`([^`\n]+)`")             # `code` -> code
