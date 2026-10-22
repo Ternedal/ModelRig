@@ -68,7 +68,11 @@ def build_media_router() -> APIRouter:
             flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
             flags |= getattr(os, "O_NOFOLLOW", 0)
             fd = os.open(path, flags)
-            source = os.fdopen(fd, "rb")
+            try:
+                source = os.fdopen(fd, "rb")
+            except BaseException:
+                os.close(fd)
+                raise
             file_info = os.fstat(source.fileno())
             if not stat.S_ISREG(file_info.st_mode):
                 raise ValueError("Media is not a regular file")
