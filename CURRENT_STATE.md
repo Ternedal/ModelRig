@@ -74,6 +74,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_IMAGE_MEDIA_PILOT` | `0` |
 | `KALIV_IMAGE_MEDIA_ROOT` | `` |
 | `KALIV_IMAGE_MODEL_ID` | `` |
+| `KALIV_IMAGE_MODEL_ID` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
