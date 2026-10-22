@@ -37,9 +37,8 @@ def mount_image_media(app: FastAPI) -> bool:
         raise RuntimeError("image jobs database must live under the external media root")
     store._check_mount()
     jobs = ImageJobStore(str(db_path), volume_guard=store._check_mount)
-    # A crashed renderer must not leave running jobs stuck forever.
-    # This only updates rows on the verified external volume.
-    jobs.recover_interrupted()
+    # The API must never recover jobs: its restart may overlap a live executor.
+    # Recovery belongs exclusively to the single executor at its startup.
     configure_image_routes(jobs, store, internal_secret=secret)
     app.include_router(router)
     return True
