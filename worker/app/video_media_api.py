@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import stat
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response
 
 from .video_media_catalog import MediaCatalog
 from .video_media_client_projection import gallery_item_for_client
-from .video_media_stream import iter_media_bytes, media_response_plan
+from .video_media_stream import iter_open_media_bytes, media_response_plan
 from .video_storage import MediaStorageUnavailable
 
 
@@ -62,20 +63,32 @@ def build_media_router() -> APIRouter:
         if resolved is None:
             raise HTTPException(404, "Unknown media")
         path, metadata = resolved
+        source = None
         try:
-            size = path.stat().st_size
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(path, flags)
+            source = os.fdopen(fd, "rb")
+            file_info = os.fstat(source.fileno())
+            if not stat.S_ISREG(file_info.st_mode):
+                raise ValueError("Media is not a regular file")
             status, headers, start, length = media_response_plan(
-                size=size, mime_type=metadata["mime_type"],
+                size=file_info.st_size, mime_type=metadata["mime_type"],
                 range_header=request.headers.get("range"), method=request.method
             )
         except OSError:
+            if source is not None:
+                source.close()
             raise HTTPException(503, "External media storage unavailable")
         except (ValueError, KeyError):
+            if source is not None:
+                source.close()
             raise HTTPException(404, "Media unavailable")
         if request.method == "HEAD" or status == 416:
+            source.close()
             return Response(status_code=status, headers=headers)
         return StreamingResponse(
-            iter_media_bytes(path, start, length), status_code=status, headers=headers
+            iter_open_media_bytes(source, start, length), status_code=status, headers=headers
         )
 
     return router
