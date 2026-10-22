@@ -40,7 +40,10 @@ def _owner(verified_owner: str | None, supplied_secret: str | None) -> str:
     if _internal_secret is None or supplied_secret is None or not hmac.compare_digest(
             supplied_secret, _internal_secret):
         raise HTTPException(status_code=401, detail="internal authentication required")
-    if not verified_owner or not verified_owner.strip() or len(verified_owner) > 256:
+    if (not isinstance(verified_owner, str) or not verified_owner.strip()
+            or verified_owner != verified_owner.strip()
+            or len(verified_owner) > 256
+            or any(ord(char) < 32 or ord(char) == 127 for char in verified_owner)):
         raise HTTPException(status_code=401, detail="verified owner required")
     return verified_owner
 
