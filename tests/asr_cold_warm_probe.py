@@ -25,6 +25,7 @@ class ProbeTests(unittest.TestCase):
             calls.append(path)
             return {"text": secret}
         fake_asr.transcribe_wav = transcribe
+        fake_asr._get_model = lambda: object()
         fake_asr._device = lambda: "cuda"
         fake_asr._model_name = lambda: "large-v3"
         fake_asr._compute_type = lambda: "int8"
@@ -40,6 +41,8 @@ class ProbeTests(unittest.TestCase):
                 self.assertEqual(probe.main(), 0)
             payload = json.loads(out.getvalue())
             self.assertTrue(payload["ok"])
+            self.assertIn("model_load_seconds", payload)
+            self.assertIn("first_inference_seconds", payload)
             self.assertEqual(len(calls), 3)
             self.assertEqual(len(payload["warm_seconds"]), 2)
             self.assertNotIn(secret, out.getvalue())
@@ -50,6 +53,7 @@ class ProbeTests(unittest.TestCase):
         def fail(_path):
             raise RuntimeError("secret user audio path and transcript")
         fake_asr.transcribe_wav = fail
+        fake_asr._get_model = lambda: object()
         fake_app = types.ModuleType("app")
         fake_app.voice_asr = fake_asr
         with tempfile.TemporaryDirectory() as temp:
