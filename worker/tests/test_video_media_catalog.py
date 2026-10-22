@@ -24,7 +24,7 @@ class MediaCatalogTests(unittest.TestCase):
         items = self.catalog.list_items()
         self.assertEqual([item["id"] for item in items], ["img_1"])
         resolved = self.catalog.resolve("img_1")
-        self.assertEqual(resolved[0], path)
+        self.assertEqual(resolved[0].resolve(), path.resolve())
         self.assertNotIn("relative_path", items[0])
 
     def test_rejects_file_outside_media_root(self):
