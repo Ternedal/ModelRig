@@ -34,8 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     database = os.getenv("KALIV_IMAGE_JOBS_DB", "")
     model = os.getenv("KALIV_IMAGE_MODEL_ID", "")
     cache = os.getenv("HF_HOME", "")
-    if not all((root, volume, database, model, cache)):
-        print("Image executor requires external volume, root, database, model and HF_HOME", file=sys.stderr)
+    offline = os.getenv("HF_HUB_OFFLINE", "")
+    if not all((root, volume, database, model, cache)) or offline != "1":
+        print("Image executor requires external volume, root, database, model, HF_HOME and HF_HUB_OFFLINE=1", file=sys.stderr)
         return 2
 
     # The mount guard is checked for every database connection, including
