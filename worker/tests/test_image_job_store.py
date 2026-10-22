@@ -15,6 +15,26 @@ class ImageJobTests(unittest.TestCase):
         self.db = str(Path(self.temp.name) / "jobs.sqlite3")
         self.store = ImageJobStore(self.db)
 
+    def test_volume_guard_blocks_database_access_after_unmount(self):
+        from app.image_media_store import MediaStorageError
+        mounted = [True]
+
+        def guard():
+            if not mounted[0]:
+                raise MediaStorageError("external volume disappeared")
+
+        guarded = ImageJobStore(self.db, volume_guard=guard)
+        guarded.submit("device-a", "before unmount")
+        mounted[0] = False
+        for operation in (
+            lambda: guarded.submit("device-a", "after unmount"),
+            lambda: guarded.claim(),
+            lambda: guarded.get("a" * 32, "device-a"),
+            lambda: guarded.recover_interrupted(),
+        ):
+            with self.assertRaises(MediaStorageError):
+                operation()
+
     def test_submit_claim_complete(self):
         job = self.store.submit("device-a", "blue elephant")
         self.assertEqual(self.store.claim()["id"], job["job_id"])
