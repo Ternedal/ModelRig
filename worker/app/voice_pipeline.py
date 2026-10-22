@@ -153,13 +153,12 @@ def has_speech(text: str) -> bool:
 
 
 def _remove_bare_url(match: re.Match[str]) -> str:
-    """Remove full URLs, preserving punctuation and unmatched outer delimiters."""
+    """Remove URLs without swallowing punctuation or closing wrappers."""
     url = match.group(0)
-    excess = max(0, url.count(")") - url.count("("))
-    suffix = ")" * excess
-    if excess:
-        url = url[:-excess]
     punctuation = url[len(url.rstrip(".,;:!?")):]
+    core = url[:-len(punctuation)] if punctuation else url
+    excess = max(0, core.count(")") - core.count("("))
+    suffix = ")" * excess
     return " " + suffix + punctuation
 
 
