@@ -112,6 +112,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/backend_smoke.py`
 - `tests/backend_v1.py`
 - `tests/e2e.py`
+- `tests/test_comfy_history.py`
+- `tests/test_comfy_media_import.py`
+- `tests/test_comfy_transport.py`
+- `tests/test_media_admission.py`
+- `tests/test_media_coordinator.py`
+- `tests/test_media_jobs.py`
+- `tests/test_media_storage_policy.py`
 - `tests/worker_agent3_approval.py`
 - `tests/worker_agent3_approval_api.py`
 - `tests/worker_agent3_approval_concurrency.py`
