@@ -45,6 +45,26 @@ class ProbeTests(unittest.TestCase):
             self.assertNotIn(secret, out.getvalue())
             self.assertNotIn(str(audio), out.getvalue())
 
+    def test_failure_does_not_leak_exception_details(self):
+        fake_asr = types.ModuleType("app.voice_asr")
+        def fail(_path):
+            raise RuntimeError("secret user audio path and transcript")
+        fake_asr.transcribe_wav = fail
+        fake_app = types.ModuleType("app")
+        fake_app.voice_asr = fake_asr
+        with tempfile.TemporaryDirectory() as temp:
+            audio = Path(temp) / "sensitive.wav"
+            audio.write_bytes(b"x")
+            out = io.StringIO()
+            with patch.object(sys, "argv", ["probe", "--audio", str(audio)]), \
+                 patch.dict(sys.modules, {"app": fake_app, "app.voice_asr": fake_asr}), \
+                 contextlib.redirect_stdout(out):
+                self.assertEqual(probe.main(), 1)
+            payload = json.loads(out.getvalue())
+            self.assertEqual(payload, {"ok": False, "error_type": "RuntimeError"})
+            self.assertNotIn("secret user", out.getvalue())
+            self.assertNotIn(str(audio), out.getvalue())
+
     def test_rejects_single_run(self):
         with tempfile.TemporaryDirectory() as temp:
             audio = Path(temp) / "test.wav"
