@@ -1,9 +1,10 @@
 """Offline tests for streaming plans and bounded file reads."""
+import io
 import tempfile
 import unittest
 from pathlib import Path
 
-from app.video_media_stream import iter_media_bytes, media_response_plan
+from app.video_media_stream import iter_media_bytes, iter_open_media_bytes, media_response_plan
 
 
 class MediaStreamTests(unittest.TestCase):
@@ -54,6 +55,18 @@ class MediaStreamTests(unittest.TestCase):
                                          (0, -1, 1), (0, 2, 0), (0, 2, 1024 * 1024 + 1)):
                 with self.subTest(bounds=(start, length, chunk)), self.assertRaises(ValueError):
                     b"".join(iter_media_bytes(path, start, length, chunk))
+
+    def test_preopened_reader_closes_after_consumption(self):
+        source = io.BytesIO(b"0123456789")
+        self.assertEqual(b"".join(iter_open_media_bytes(source, 3, 4, chunk_size=2)), b"3456")
+        self.assertTrue(source.closed)
+
+    def test_preopened_reader_closes_on_early_close(self):
+        source = io.BytesIO(b"0123456789")
+        stream = iter_open_media_bytes(source, 0, 10, chunk_size=2)
+        self.assertEqual(next(stream), b"01")
+        stream.close()
+        self.assertTrue(source.closed)
 
     def test_chunked_file_reader(self):
         with tempfile.TemporaryDirectory() as tmp:
