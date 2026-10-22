@@ -199,15 +199,16 @@ check(
     and 'stage_b_slice in ("midchain", "downstream")' in stage_b_driver,
     "midchain/downstream consume only a validated preloaded proof+ledger root",
 )
-for label, source in (
-    ("midchain", midchain_driver),
-    ("downstream", downstream_driver),
-):
-    check(
-        "_REQUIRED_SHARD_COUNT = 3" in source
-        and "_CONTRACT_FILES[index - 1 :: total]" in source,
-        f"{label} uses the locked three-way strided shard partition",
-    )
+check(
+    "_REQUIRED_SHARD_COUNT = 3" in midchain_driver
+    and "measured_midchain_shards(_CONTRACT_FILES)[index - 1]" in midchain_driver,
+    "midchain uses explicit measured three-way, fail-closed sharding",
+)
+check(
+    "_REQUIRED_SHARD_COUNT = 3" in downstream_driver
+    and "_CONTRACT_FILES[index - 1 :: total]" in downstream_driver,
+    "downstream retains unchanged locked three-way strided partition",
+)
 
 command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "

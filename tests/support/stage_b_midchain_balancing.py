@@ -1,0 +1,141 @@
+"""Fail-closed, measured Stage-B midchain partition (experiment, not V1 authority).
+
+Values are per-contract elapsed seconds from the successful, source-pinned
+ModelRig main exact-head qualification run 37845235363 (2026-10-09), jobs:
+midchain-1 113575752307, midchain-2 113575752249,
+midchain-3 113575752334. One observation, NOT guaranteed future runtimes.
+
+Keep the two >1800s deep nested contracts alone in serial shard 2. Other
+contract costs are greedily packed onto the estimated currently least-busy
+worker slot in shards 1 and 3, modeled in the canonical order actually submitted.
+Every original subprocess and timeout remains owned by the existing driver.
+"""
+from __future__ import annotations
+
+from stage_b_weighted_sharding import weighted_shards
+
+MEASUREMENT_RUN_ID = 37845235363
+MEASURED_MAIN_SHA = "0b2ff455116f4f28a1a41704d9cb81503f17d2df"
+MIDCHAIN_SECONDS = {
+    "rsi_pilot_exact_task_execution_plan_requirements_contract.py": 316.1,
+    "rsi_pilot_exact_task_development_task_binding_contract.py": 317.2,
+    "rsi_pilot_exact_task_development_task_binding_live_provenance_contract.py": 160.8,
+    "rsi_pilot_exact_task_executor_capability_live_guard_contract.py": 325.6,
+    "rsi_pilot_exact_task_executor_secret_custody_contract.py": 0.6,
+    "rsi_pilot_exact_task_executor_capability_semantics_contract.py": 161.4,
+    "rsi_pilot_exact_task_execution_plan_contract.py": 318.6,
+    "rsi_pilot_exact_task_prelaunch_reservation_contract.py": 314.8,
+    "rsi_pilot_exact_task_execution_transaction_contract.py": 161.5,
+    "rsi_pilot_exact_task_post_execution_evaluation_contract.py": 318.1,
+    "rsi_pilot_exact_task_local_commit_plan_contract.py": 320.0,
+    "rsi_pilot_exact_task_local_commit_object_identity_contract.py": 166.2,
+    "rsi_pilot_exact_task_local_commit_write_authorization_contract.py": 331.2,
+    "rsi_pilot_exact_task_local_commit_transaction_contract.py": 345.0,
+    "rsi_pilot_exact_task_post_commit_integration_evaluation_contract.py": 190.2,
+    "rsi_pilot_exact_task_integration_readiness_contract.py": 416.6,
+    "rsi_pilot_exact_task_remote_publication_plan_contract.py": 498.2,
+    "rsi_pilot_exact_task_remote_state_observation_contract.py": 412.3,
+    "rsi_pilot_exact_task_remote_publication_authorization_contract.py": 1101.7,
+    "rsi_pilot_exact_task_remote_publication_transaction_contract.py": 2031.3,
+    "rsi_pilot_exact_task_remote_publication_recovery_contract.py": 457.4,
+    "rsi_pilot_exact_task_post_publication_attestation_contract.py": 1143.8,
+    "rsi_pilot_exact_task_pr_lifecycle_authorization_contract.py": 1124.0,
+    "rsi_pilot_exact_task_pr_lifecycle_transaction_contract.py": 616.7,
+    "rsi_pilot_exact_task_pr_lifecycle_recovery_contract.py": 1178.8,
+    "rsi_pilot_exact_task_post_lifecycle_attestation_contract.py": 1158.5,
+    "rsi_pilot_exact_task_review_state_attestation_contract.py": 610.9,
+    "rsi_pilot_exact_task_merge_readiness_evaluation_contract.py": 1164.9,
+    "rsi_pilot_exact_task_merge_authorization_contract.py": 1163.0,
+    "rsi_pilot_exact_task_merge_transaction_contract.py": 620.1,
+    "rsi_pilot_exact_task_merge_recovery_contract.py": 1159.7,
+    "rsi_pilot_exact_task_post_merge_attestation_contract.py": 2659.9,
+    "rsi_pilot_exact_task_release_readiness_evaluation_contract.py": 625.5,
+    "rsi_pilot_exact_task_release_plan_contract.py": 1151.7,
+    "rsi_pilot_exact_task_release_state_observation_contract.py": 1145.7,
+    "rsi_pilot_exact_task_release_authorization_contract.py": 615.1,
+}
+# These two measured >1800s. Shard 2 uses one worker and a 2400s default,
+# plus the existing targeted 3600s post-merge bound. Do not move either
+# into a parallel/default-1800s shard by an automated heuristic.
+SERIAL_DEEP_CONTRACTS = frozenset({
+    "rsi_pilot_exact_task_remote_publication_transaction_contract.py",
+    "rsi_pilot_exact_task_post_merge_attestation_contract.py",
+})
+WORKER_SLOTS = (2, 1, 2)
+
+
+
+def modeled_midchain_makespans(
+    groups: list[list[str]] | tuple[tuple[str, ...], ...],
+    costs: dict[str, float],
+    canonical_files: tuple[str, ...],
+) -> tuple[float, float, float]:
+    """Predict per-shard completion using the driver's actual submission order.
+
+    This is a single-run cost heuristic, never actual CI runtime evidence.
+    """
+    if len(groups) != len(WORKER_SLOTS):
+        raise AssertionError("Stage-B modeled shard count changed")
+    index = {name: i for i, name in enumerate(canonical_files)}
+    totals = []
+    for group, slot_count in zip(groups, WORKER_SLOTS):
+        slots = [0.0] * slot_count
+        for filename in sorted(group, key=index.__getitem__):
+            earliest = min(range(slot_count), key=lambda pos: (slots[pos], pos))
+            slots[earliest] += float(costs[filename])
+        totals.append(max(slots))
+    return tuple(totals)  # type: ignore[return-value]
+
+def measured_midchain_shards(
+    contract_files: tuple[str, ...],
+    costs: dict[str, float] | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    files = tuple(contract_files)
+    measured = MIDCHAIN_SECONDS if costs is None else costs
+    # The existing pure weighted primitive performs strict uniqueness, range,
+    # finite/positive-cost and exact-file-key coverage checks. Use its proven
+    # validation but not its homogeneous one-slot scheduling policy.
+    weighted_shards(files, measured, len(WORKER_SLOTS))
+    if not SERIAL_DEEP_CONTRACTS.issubset(files):
+        raise AssertionError("Stage-B required deep serial contracts missing")
+    # Any newly expensive >1800s contract would be unsafe on the unchanged
+    # 1800s default timeout in parallel shards. Re-measure/review explicitly,
+    # never silently route it through a shorter-bound worker.
+    observed_deep = {name for name in files if float(measured[name]) > 1800}
+    if observed_deep != SERIAL_DEEP_CONTRACTS:
+        raise AssertionError("Stage-B measured deep serial contract set changed; review required")
+    if any(measured[name] <= 1800 for name in SERIAL_DEEP_CONTRACTS):
+        raise AssertionError("Stage-B pinned serial contract costs changed unexpectedly")
+
+    by_index = {name: i for i, name in enumerate(files)}
+    members: list[list[str]] = [[], [], []]
+    for name in sorted(SERIAL_DEEP_CONTRACTS, key=by_index.__getitem__):
+        members[1].append(name)
+
+    for name in sorted(
+        (name for name in files if name not in SERIAL_DEEP_CONTRACTS),
+        key=lambda value: (-float(measured[value]), by_index[value]),
+    ):
+        # The driver submits each shard in CANONICAL source order. Its executor
+        # picks the earliest-free worker as each subprocess finishes, so every
+        # candidate MUST be scored after replaying that actual order. Estimating
+        # sorted-descending execution then restoring source order is unsound.
+        candidates = []
+        for shard_index in range(len(WORKER_SLOTS)):
+            trial = [list(group) for group in members]
+            trial[shard_index].append(name)
+            modeled = modeled_midchain_makespans(trial, measured, files)
+            candidates.append((max(modeled), sum(modeled), shard_index))
+        _max_seconds, _sum_seconds, shard_index = min(candidates)
+        members[shard_index].append(name)
+
+    for group in members:
+        group.sort(key=by_index.__getitem__)
+    flattened = [name for group in members for name in group]
+    if len(flattened) != len(files) or set(flattened) != set(files):
+        raise AssertionError("Stage-B midchain must run every canonical contract once")
+    if any(not group for group in members):
+        raise AssertionError("Stage-B midchain produced an empty shard")
+    if any(name in members[0] or name in members[2] for name in SERIAL_DEEP_CONTRACTS):
+        raise AssertionError("Stage-B deep contracts must remain serial on shard 2")
+    return tuple(tuple(group) for group in members)  # type: ignore[return-value]

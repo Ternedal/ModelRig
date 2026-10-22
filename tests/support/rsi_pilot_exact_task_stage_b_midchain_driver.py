@@ -15,6 +15,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from stage_b_midchain_balancing import measured_midchain_shards
+
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _PER_CONTRACT_TIMEOUT_SECONDS = 1800
@@ -23,6 +25,7 @@ _TARGETED_DEEP_TIMEOUT_SECONDS = 3600
 _TARGETED_DEEP_TIMEOUT_CONTRACTS = frozenset(
     {"rsi_pilot_exact_task_post_merge_attestation_contract.py"}
 )
+# Weighted, pinned-heavy sharding is selected by stage_b_midchain_balancing.py.
 # These contracts are CPU-heavy nested provenance qualifications. Two workers are
 # useful for the ordinary shards, but shard 2/3 contains the publication/merge
 # tail where each contract recursively rebuilds most of ADR-034+. Running two of
@@ -91,7 +94,7 @@ def _selected_contract_files() -> tuple[str, ...]:
         raise AssertionError(
             f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
         )
-    selected = _CONTRACT_FILES[index - 1 :: total]
+    selected = measured_midchain_shards(_CONTRACT_FILES)[index - 1]
     if not selected:
         raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
     return selected
@@ -110,9 +113,22 @@ def _contract_timeout_seconds(filename: str | None = None) -> int:
     if filename in _TARGETED_DEEP_TIMEOUT_CONTRACTS:
         return _TARGETED_DEEP_TIMEOUT_SECONDS
     shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
+    if not shard or filename is None:
+        # Unsharded runs remain 1800s by default. The header-only invocation
+        # keeps its old shard-2 display but has no contract authority.
+        return (
+            _DEEP_SHARD_TIMEOUT_SECONDS
+            if shard == "2/3"
+            else _PER_CONTRACT_TIMEOUT_SECONDS
+        )
+    # Preserve every filename's *original* strided-shard timeout even after
+    # measured balancing moves it to another shard. A formerly shard-2 file
+    # must not lose 2400s when dispatched on shard 1/3; conversely a formerly
+    # shard-1/3 file must not silently gain 2400s by moving to shard 2.
+    original_deep = filename in _CONTRACT_FILES[1::_REQUIRED_SHARD_COUNT]
     return (
         _DEEP_SHARD_TIMEOUT_SECONDS
-        if shard == "2/3"
+        if original_deep
         else _PER_CONTRACT_TIMEOUT_SECONDS
     )
 
