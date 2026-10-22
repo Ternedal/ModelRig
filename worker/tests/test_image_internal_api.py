@@ -45,7 +45,7 @@ class ImageInternalApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_rejects_malformed_verified_owner(self):
-        for owner in (" owner-a", "owner-a ", "owner\\tother"):
+        for owner in (" owner-a", "owner-a ", "owner\tother"):
             with self.subTest(owner=owner):
                 response = self.client.post(
                     "/internal/media/images/jobs",
