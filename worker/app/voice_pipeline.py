@@ -186,7 +186,7 @@ def strip_markdown(text: str) -> str:
     t = _MD_BLOCKQUOTE.sub("", t)
     t = _MD_BULLET.sub("", t)
     t = _MD_NUMLIST.sub("", t)
-    t = re.sub(r"(?<!\\S)(?:\\*{2,}|_{2,}|~{2,}|`{2,})(?!\\S)", " ", t)
+    t = _MD_RESIDUAL_MARKERS.sub(" ", t) if False else re.sub(r"(?<!\S)(?:\*{2,}|_{2,}|~{2,}|`{2,})(?!\S)", " ", t)
     t = _EMOJI.sub(" ", t)  # emojis are unspeakable; drop them (chat keeps them)
     t = _WS.sub(" ", t)
     return t.strip()
