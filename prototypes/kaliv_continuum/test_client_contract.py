@@ -15,7 +15,7 @@ class ClientContractTests(unittest.TestCase):
             result = snapshot(path, task.task_id)
             self.assertEqual(result["state"], State.QUEUED.value)
             self.assertEqual(result["presentation"]["phase"], "queued")
-            self.assertEqual(result["events"], [])
+            self.assertEqual(result["events"], [{"revision": 0, "state": "queued"}])
             self.assertEqual(result["commands"], [])
             self.assertFalse(result["presentation"]["is_running"])
             self.assertFalse(result["presentation"]["terminal"])
