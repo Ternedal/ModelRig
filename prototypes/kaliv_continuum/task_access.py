@@ -1,8 +1,7 @@
-"""Read-only per-task authorization policy prototype.
+"""Read-only task access checks without exposing task existence.
 
-This is a local policy model, not an authenticated identity provider.
-Callers must derive actor identity from a trusted gateway, never from
-untrusted request parameters.
+Identity is supplied by a trusted caller, never inferred from request
+parameters. ACL management remains out of the HTTP API.
 """
 import sqlite3
 
@@ -28,11 +27,15 @@ class TaskAccess:
                        (task_id, actor_id, permission))
 
     def revoke(self, task_id, actor_id, permission):
+        if permission not in ("read", "approve"):
+            raise ValueError("unsupported permission")
         with sqlite3.connect(self.database) as db:
             db.execute("DELETE FROM task_acl WHERE task_id=? AND actor_id=? AND permission=?",
                        (task_id, actor_id, permission))
 
     def require(self, task_id, actor_id, permission):
+        if not all(isinstance(x, str) and x for x in (task_id, actor_id)):
+            raise PermissionError("task access denied")
         if permission not in ("read", "approve"):
             raise PermissionError("unsupported permission")
         with sqlite3.connect(self.database) as db:
