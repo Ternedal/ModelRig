@@ -13,6 +13,7 @@ from outbox_inspector import OutboxInspector
 from task_snapshot import snapshot
 from task_access import TaskAccess
 from read_identity import ReadIdentity
+from approval_audit_inspector import ApprovalAuditInspector
 
 def serve(db_path, token=None, host="127.0.0.1", port=8769):
     if token is not None:
@@ -21,6 +22,7 @@ def serve(db_path, token=None, host="127.0.0.1", port=8769):
         raise ValueError("Prototype must bind to loopback")
     store = TaskStore(db_path)
     inspector = OutboxInspector(db_path)
+    approval_audit = ApprovalAuditInspector(db_path)
     access = TaskAccess(db_path)
     identities = ReadIdentity(db_path)
 
@@ -51,16 +53,20 @@ def serve(db_path, token=None, host="127.0.0.1", port=8769):
             parts = path.strip("/").split("/")
             if len(parts) not in (2, 3) or parts[0] != "tasks" or not parts[1]:
                 return self.reply(404, {"error": "not_found"})
-            if len(parts) == 3 and parts[2] not in ("events", "commands", "snapshot"):
+            if len(parts) == 3 and parts[2] not in ("events", "commands", "snapshot", "approvals"):
                 return self.reply(404, {"error": "not_found"})
             task_id = unquote(parts[1])
             if task_id in (".", "..") or "/" in task_id or "\\" in task_id:
                 return self.reply(404, {"error": "not_found"})
             try:
-                access.require(task_id, actor_id, "read")
+                access.require(task_id, actor_id,
+                               "approve" if len(parts) == 3 and parts[2] == "approvals" else "read")
             except PermissionError:
                 return self.reply(404, {"error": "not_found"})
             try:
+                if len(parts) == 3 and parts[2] == "approvals":
+                    return self.reply(200, {"task_id": task_id,
+                                            "approvals": approval_audit.list_for_task(task_id)})
                 if len(parts) == 3 and parts[2] == "snapshot":
                     return self.reply(200, snapshot(db_path, task_id))
                 task = store.get(task_id)
