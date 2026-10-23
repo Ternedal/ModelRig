@@ -59,7 +59,8 @@ class ReadIdentity:
         old_digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
         new_token = secrets.token_urlsafe(32)
         new_digest = hashlib.sha256(new_token.encode("utf-8")).hexdigest()
-        with sqlite3.connect(self.database) as db:
+        with sqlite3.connect(self.database, timeout=5) as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("""SELECT actor_id FROM read_identities WHERE digest=?
                 AND revoked=0 AND expires_at>?""", (old_digest, int(time.time()))).fetchone()
             if row is None:
