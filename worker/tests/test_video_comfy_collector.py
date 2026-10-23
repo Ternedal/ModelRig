@@ -43,7 +43,7 @@ class CollectorTests(unittest.TestCase):
         outside.mkdir()
         (outside / "result.mp4").write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
         with patch("app.video_comfy_collector.configured_video_storage",
-                   return_value=Mock(root=self.media)):
+                   return_value=Mock(root=self.media, unsafe=True)):
             collector = VideoResultCollector(self.store, FakeClient(outputs), self.catalog, outside)
             with self.assertRaisesRegex(ValueError, "approved external storage"):
                 collector.collect_one()
