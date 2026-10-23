@@ -10,7 +10,7 @@ Android deployment or public/LAN exposure. Keep draft PR separate from main.
   reservation and command outbox (simulation only).
 - Bounded Swarm DAG planner and deny-by-default dry-run worker.
 - Per-actor read credentials (random tokens, SHA-256 digests in SQLite,
-  individual revocation) and deny-by-default task ACLs.
+  individual revocation, one-hour default expiry, and atomic rotation)\n  plus deny-by-default task ACLs.
 - Loopback read-only HTTP API with per-task authorization on all routes:
   `GET /tasks/{id}`, `GET /tasks/{id}/events`,
   `GET /tasks/{id}/commands`, `GET /tasks/{id}/snapshot`.
@@ -69,8 +69,8 @@ curl -H "Authorization: Bearer YOUR_TEST_TOKEN" \
   http://127.0.0.1:8769/tasks/demo/snapshot
 ```
 
-An unknown or revoked token receives HTTP 401; an authenticated actor
-without the task's read ACL receives HTTP 404. No POST/PATCH/DELETE routes.
+An unknown, expired, or revoked token receives HTTP 401; an authenticated actor
+without the task's read ACL receives HTTP 404. Rotating a token revokes the\nold credential immediately; the new token inherits the same actor ACL.\nTokens have a maximum lifetime of 24 hours; legacy credentials without an\nexpiry fail closed. No POST/PATCH/DELETE routes.
 
 ## Next gate
 
