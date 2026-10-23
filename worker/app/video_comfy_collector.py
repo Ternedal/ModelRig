@@ -37,6 +37,7 @@ class VideoResultCollector:
             raise ValueError("ComfyUI output root must be inside approved external storage")
         if not self.catalog.media_root.resolve().is_relative_to(approved_root):
             raise ValueError("Media catalog must be inside approved external storage")
+        # Production database paths must remain on the approved volume.
         for row in self.store.awaiting_result(limit=1):
             try:
                 outputs = self.client.completed_outputs(row["prompt_id"])
