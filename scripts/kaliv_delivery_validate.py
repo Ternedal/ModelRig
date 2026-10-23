@@ -11,6 +11,8 @@ from kaliv_delivery_report import REPOS
 
 def validate(payload, owner="Ternedal"):
     errors = []
+    if not isinstance(payload, dict):
+        return ["payload_not_object"]
     if payload.get("schema") != "kaliv.delivery-report.v1":
         errors.append("invalid_schema")
     repos = payload.get("repositories")
@@ -18,6 +20,8 @@ def validate(payload, owner="Ternedal"):
         return ["repositories_not_list"]
     expected = {owner + "/" + name for name in REPOS}
     names = [r.get("repository") for r in repos if isinstance(r, dict)]
+    if any(not isinstance(name, str) for name in names):
+        return errors + ["invalid_repository_name"]
     if len(names) != len(repos):
         errors.append("malformed_repository_entry")
     if len(names) != len(set(names)):
