@@ -41,7 +41,7 @@ class CollectorTests(unittest.TestCase):
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         outside = self.media.parent / "unapproved"
         outside.mkdir()
-        (outside / "result.mp4").write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        (outside / "result.mp4").write_bytes(bytes.fromhex("000000186674797069736f6d") + b"test video")
         with patch("app.video_comfy_collector.configured_video_storage",
                    return_value=Mock(root=self.media, unsafe=True)):
             collector = VideoResultCollector(self.store, FakeClient(outputs), self.catalog, outside)
@@ -71,7 +71,7 @@ class CollectorTests(unittest.TestCase):
             destination.symlink_to(outside, target_is_directory=True)
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"Directory symlinks unavailable: {exc}")
-        (self.output / "result.mp4").write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        (self.output / "result.mp4").write_bytes(bytes.fromhex("000000186674797069736f6d") + b"test video")
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         with patch("app.video_comfy_collector.configured_video_storage",
                    return_value=Mock(root=self.media, unsafe=True)):
