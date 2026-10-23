@@ -37,6 +37,39 @@ class CollectorTests(unittest.TestCase):
     def collector(self, outputs):
         return VideoResultCollector(self.store, FakeClient(outputs), self.catalog, self.output)
 
+    def test_rejects_source_redirected_outside_output_before_copy(self):
+        source = self.output / "result.mp4"
+        source.write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        outside = self.media.parent / "outside.mp4"
+        outside.write_bytes(source.read_bytes())
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        original_open = Path.open
+        redirected = False
+
+        def redirect_after_probe(path, *args, **kwargs):
+            nonlocal redirected
+            mode = args[0] if args else kwargs.get("mode", "r")
+            if path == source and mode == "rb" and not redirected:
+                handle = original_open(path, *args, **kwargs)
+                redirected = True
+                source.unlink()
+                try:
+                    source.symlink_to(outside)
+                except (OSError, NotImplementedError) as exc:
+                    handle.close()
+                    self.skipTest(f"File symlinks unavailable: {exc}")
+                return handle
+            return original_open(path, *args, **kwargs)
+
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)), patch.object(
+            Path, "open", autospec=True, side_effect=redirect_after_probe
+        ), patch.object(self.catalog, "register", wraps=self.catalog.register) as register:
+            self.assertIsNone(self.collector(outputs).collect_one())
+            register.assert_not_called()
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_rejects_symlinked_job_database_outside_approved_root(self):
         outside = self.media.parent / "redirected_jobs.sqlite"
         outside.write_bytes(b"")
