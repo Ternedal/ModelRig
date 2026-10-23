@@ -1,0 +1,29 @@
+name: Kaliv Continuum prototype tests
+
+on:
+  pull_request:
+    paths:
+      - 'prototypes/kaliv_continuum/**'
+      - '.github/workflows/kaliv-continuum-prototype.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prototype:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile prototype
+        run: python -m compileall -q prototypes/kaliv_continuum
+      - name: Run isolated unit tests
+        working-directory: prototypes/kaliv_continuum
+        run: python -m unittest discover -p 'test_*.py' -v
