@@ -19,7 +19,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.KALIV_REPORT_READ_TOKEN }}
         run: |
-          test -n "$GITHUB_TOKEN" || { echo "KALIV_REPORT_READ_TOKEN is required"; exit 1; }
+          if [ -z "$GITHUB_TOKEN" ]; then echo "No cross-repository token; public-only read mode (private repositories remain unknown)."; fi
           python scripts/kaliv_delivery_report.py --output kaliv-delivery.json
       - name: Render human-readable report
         run: python scripts/kaliv_delivery_markdown.py kaliv-delivery.json --output kaliv-delivery.md
