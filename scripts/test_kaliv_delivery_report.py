@@ -94,6 +94,22 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["status"], "unknown")
         self.assertIn("github_api_error:OSError", result["warnings"])
 
+    def test_malformed_issue_entry_is_not_counted(self):
+        def opener(request, timeout):
+            return Response(json.dumps([None] if "/issues?" in request.full_url else []).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertEqual(result["status"], "unknown")
+        self.assertIsNone(result["open_issues"])
+        self.assertIn("github_api_error:ValueError", result["warnings"])
+
+    def test_malformed_pr_entry_is_not_counted(self):
+        def opener(request, timeout):
+            return Response(json.dumps([None] if "/pulls?" in request.full_url else []).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertNotEqual(result["status"], "collected")
+        self.assertIsNone(result["open_prs"])
+        self.assertIn("github_api_error:ValueError", result["warnings"])
+
     def test_optional_token_and_rejects_absolute_urls(self):
         client = GitHubReadClient("")
         self.assertIsNone(client.token) if client.token is None else self.assertEqual(client.token, "")
