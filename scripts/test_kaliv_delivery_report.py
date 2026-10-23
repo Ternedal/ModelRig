@@ -78,6 +78,15 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertIsNone(result["stale_prs"])
         self.assertIn("pagination_limit_reached", result["warnings"])
 
+    def test_malformed_workflow_response_is_partial(self):
+        def opener(request, timeout):
+            value = [] if "/actions/runs?" in request.full_url else []
+            return Response(json.dumps(value).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "Kaliv")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["workflow"], "unknown")
+        self.assertIn("github_api_error:ValueError", result["warnings"])
+
     def test_requires_token_and_rejects_absolute_urls(self):
         with self.assertRaises(ValueError):
             GitHubReadClient("")
