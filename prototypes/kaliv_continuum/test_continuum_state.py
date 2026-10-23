@@ -1,14 +1,16 @@
-"""Basic isolated tests for Continuum transitions."""
+"""Isolated Continuum transition tests."""
 import unittest
 from continuum_state import Task, State, transition
 
 class ContinuumTests(unittest.TestCase):
-    def test_requires_approval(self):
+    def test_requires_verified_approval(self):
         t = transition(Task("one"), State.PLANNING, expected_revision=0)
         t = transition(t, State.AWAITING_APPROVAL, expected_revision=1)
         with self.assertRaises(PermissionError):
             transition(t, State.EXECUTING, expected_revision=2)
-        t = transition(t, State.EXECUTING, expected_revision=2, approval_token="approved")
+        with self.assertRaises(TypeError):
+            transition(t, State.EXECUTING, expected_revision=2, approval_token="anything")
+        t = transition(t, State.EXECUTING, expected_revision=2, verified_approval=True)
         self.assertEqual(t.revision, 3)
 
     def test_rejects_stale_revision(self):
