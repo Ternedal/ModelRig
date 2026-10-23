@@ -38,6 +38,14 @@ class SnapshotValidationTests(unittest.TestCase):
         payload["repositories"][0]["workflow"] = "unknown"
         self.assertTrue(any(x.startswith("unknown_workflow:") for x in validate(payload)))
 
+    def test_non_object_payload_fails_closed(self):
+        self.assertEqual(validate([]), ["payload_not_object"])
+
+    def test_unhashable_repository_name_fails_closed(self):
+        payload = sample()
+        payload["repositories"][0]["repository"] = ["invalid"]
+        self.assertIn("invalid_repository_name", validate(payload))
+
     def test_boolean_is_not_a_count(self):
         payload = sample()
         payload["repositories"][0]["open_issues"] = True
