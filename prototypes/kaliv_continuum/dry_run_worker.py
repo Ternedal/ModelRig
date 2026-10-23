@@ -1,8 +1,7 @@
 """Fail-closed, no-side-effect outbox worker prototype.
 
-It claims a reserved command atomically and records a dry-run receipt. It
-never dispatches external tools. Production execution requires a separate
-policy-enforced dispatcher and crash/retry protocol.
+The caller supplies an explicit capability allowlist. Empty by default.
+No external tools are dispatched; no production runtime wiring.
 """
 import sqlite3
 import time
@@ -16,8 +15,11 @@ class DryRunReceipt:
     status: str
 
 class DryRunWorker:
-    def __init__(self, database):
+    def __init__(self, database, *, allowed_capabilities=()):
         self.database = str(database)
+        self.allowed_capabilities = frozenset(allowed_capabilities)
+        if any(not isinstance(x, str) or not x for x in self.allowed_capabilities):
+            raise ValueError("invalid capability allowlist")
         with sqlite3.connect(self.database) as db:
             db.execute("""CREATE TABLE IF NOT EXISTS dry_run_receipts (
                 operation_id TEXT PRIMARY KEY,
@@ -26,7 +28,7 @@ class DryRunWorker:
                 created_at INTEGER NOT NULL)""")
 
     def run_once(self):
-        """Claim one command and persist a receipt in the same transaction."""
+        """Only simulate a reserved command with an explicitly allowed capability."""
         with sqlite3.connect(self.database, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("""SELECT operation_id,task_id,capability
@@ -35,6 +37,8 @@ class DryRunWorker:
             if row is None:
                 return None
             operation_id, task_id, capability = row
+            if capability not in self.allowed_capabilities:
+                raise PermissionError("worker capability not allowed")
             db.execute("""INSERT INTO dry_run_receipts VALUES (?,?,?,?)""",
                        (operation_id, task_id, capability, int(time.time())))
             changed = db.execute("""UPDATE command_outbox SET status='simulated'
