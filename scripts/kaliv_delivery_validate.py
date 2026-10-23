@@ -38,6 +38,8 @@ def validate(payload, owner="Ternedal"):
                 errors.append("invalid_" + key + ":" + name)
         if r.get("warnings"):
             errors.append("warnings:" + name)
+        if not isinstance(r.get("workflow"), str) or r.get("workflow") == "unknown":
+            errors.append("unknown_workflow:" + name)
     return errors
 
 def main():
