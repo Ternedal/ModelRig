@@ -25,7 +25,21 @@ def serve(db_path, token=None, host="127.0.0.1", port=8769):
     identities = ReadIdentity(db_path)
 
     class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            return self.reply(405, {"error": "method_not_allowed"})
+
+        def do_PUT(self):
+            return self.reply(405, {"error": "method_not_allowed"})
+
+        def do_PATCH(self):
+            return self.reply(405, {"error": "method_not_allowed"})
+
+        def do_DELETE(self):
+            return self.reply(405, {"error": "method_not_allowed"})
+
         def do_GET(self):
+            if len(self.path) > 2048:
+                return self.reply(414, {"error": "uri_too_long"})
             authorization = self.headers.get("Authorization", "")
             if not authorization.startswith("Bearer "):
                 return self.reply(401, {"error": "unauthorized"})
@@ -72,6 +86,8 @@ def serve(db_path, token=None, host="127.0.0.1", port=8769):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Allow", "GET")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
