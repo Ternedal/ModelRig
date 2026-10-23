@@ -23,6 +23,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
             except (OSError, NotImplementedError):
                 self.skipTest("Filesystem does not support symlinks")
             store = Mock()
+            store.db_path = Path(directory) / "Jobs" / "video_jobs.sqlite"
             store.awaiting_result.return_value = [
                 {"job_id": "job1", "prompt_id": "prompt1"}
             ]
@@ -34,6 +35,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
                                       "filename": "clip.mp4"}]}
             }
             catalog = Mock()
+            catalog.db_path = Path(directory) / "Jobs" / "media_catalog.sqlite"
             catalog.media_root = root / "Media"
             with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))) as storage:
                 collector = VideoResultCollector(store, client, catalog, output)
@@ -55,6 +57,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
             payload = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
             source.write_bytes(payload)
             store = Mock()
+            store.db_path = Path(directory) / "Jobs" / "video_jobs.sqlite"
             store.awaiting_result.return_value = [
                 {"job_id": "job1", "prompt_id": "prompt1"}
             ]
@@ -65,6 +68,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
                                       "filename": "clip.mp4"}]}
             }
             catalog = Mock()
+            catalog.db_path = Path(directory) / "Jobs" / "media_catalog.sqlite"
             catalog.media_root = root / "Media"
             catalog.media_root = media
             with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
@@ -90,6 +94,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
                     b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
                 )
             store = Mock()
+            store.db_path = Path(directory) / "Jobs" / "video_jobs.sqlite"
             store.awaiting_result.return_value = [
                 {"job_id": "job1", "prompt_id": "prompt1"}
             ]
@@ -102,6 +107,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 ]}
             }
             catalog = Mock()
+            catalog.db_path = Path(directory) / "Jobs" / "media_catalog.sqlite"
             catalog.media_root = root / "Media"
             with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                 collector = VideoResultCollector(store, client, catalog, output)
@@ -120,6 +126,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
             )
             store = Mock()
+            store.db_path = Path(directory) / "Jobs" / "video_jobs.sqlite"
             store.awaiting_result.return_value = [
                 {"job_id": "job1", "prompt_id": "prompt1"}
             ]
@@ -133,6 +140,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 ]}
             }
             catalog = Mock()
+            catalog.db_path = Path(directory) / "Jobs" / "media_catalog.sqlite"
             catalog.media_root = root / "Media"
             with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
                 collector = VideoResultCollector(store, client, catalog, output)
@@ -148,6 +156,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
             with self.subTest(outputs=outputs), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory)
                 store = Mock()
+                store.db_path = Path(directory) / "Jobs" / "video_jobs.sqlite"
                 store.awaiting_result.return_value = [
                     {"job_id": "job1", "prompt_id": "prompt1"}
                 ]
@@ -155,6 +164,7 @@ class CollectorPathSecurityTests(unittest.TestCase):
                 client = Mock()
                 client.completed_outputs.return_value = outputs
                 catalog = Mock()
+                catalog.db_path = Path(directory) / "Jobs" / "media_catalog.sqlite"
                 catalog.media_root = output / "Media"
                 root = output
                 with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
@@ -169,12 +179,14 @@ class CollectorPathSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             store = Mock()
+            store.db_path = Path(directory) / "Jobs" / "video_jobs.sqlite"
             store.awaiting_result.return_value = [
                 {"job_id": "job1", "prompt_id": "prompt1"}
             ]
             client = Mock()
             client.completed_outputs.return_value = None
             catalog = Mock()
+            catalog.db_path = Path(directory) / "Jobs" / "media_catalog.sqlite"
             root = output
             catalog.media_root = root / "Media"
             with patch("app.video_comfy_collector.configured_video_storage", new_callable=lambda: Mock(return_value=Mock(root=root, unsafe=True))):
