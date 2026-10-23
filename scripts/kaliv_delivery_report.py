@@ -1,7 +1,7 @@
 """Read-only cross-repository delivery snapshot using GitHub REST API.
 
 No write endpoints. Missing/failed API data is reported as unknown, never green.
-Requires GITHUB_TOKEN with read-only metadata, issues, pull requests and actions.
+Optional GITHUB_TOKEN for private repositories; public-only reads work without it.
 """
 import argparse
 import datetime as dt
@@ -58,8 +58,12 @@ def summarize_repo(client, owner, repo):
         issues, issues_truncated = client.pages(path + "/issues?state=open")
         prs, prs_truncated = client.pages(path + "/pulls?state=open")
         if not issues_truncated:
+            if any(not isinstance(issue, dict) for issue in issues):
+                raise ValueError("invalid issue entry")
             output["open_issues"] = sum("pull_request" not in issue for issue in issues)
         if not prs_truncated:
+            if any(not isinstance(pr, dict) for pr in prs):
+                raise ValueError("invalid pull request entry")
             output["open_prs"] = len(prs)
         now = dt.datetime.now(dt.timezone.utc)
         if not prs_truncated:
