@@ -69,7 +69,9 @@ def summarize_repo(client, owner, repo):
         if issues_truncated or prs_truncated:
             output["warnings"].append("pagination_limit_reached")
         runs = client.get(path + "/actions/runs?per_page=1")
-        latest = runs.get("workflow_runs", [])
+        if not isinstance(runs, dict) or not isinstance(runs.get("workflow_runs"), list):
+            raise ValueError("invalid workflow response")
+        latest = runs["workflow_runs"]
         if latest:
             run = latest[0]
             output["workflow"] = (run.get("conclusion") or run.get("status") or "unknown")
