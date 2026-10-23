@@ -80,7 +80,7 @@ def summarize_repo(client, owner, repo):
             output["warnings"].append("no_workflow_runs")
         output["status"] = "partial" if output["warnings"] else "collected"
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
-            ValueError, KeyError, TypeError) as error:
+            ValueError, KeyError, TypeError, OSError) as error:
         output["warnings"].append("github_api_error:" + type(error).__name__)
         output["status"] = "partial" if (output["open_issues"] is not None or output["open_prs"] is not None) else "unknown"
     return output
