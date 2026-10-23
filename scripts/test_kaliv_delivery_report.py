@@ -87,6 +87,13 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["workflow"], "unknown")
         self.assertIn("github_api_error:ValueError", result["warnings"])
 
+    def test_io_error_is_reported_as_unknown(self):
+        def fail(request, timeout):
+            raise OSError("local transport failure")
+        result = summarize_repo(GitHubReadClient("test", fail), "Ternedal", "ModelRig")
+        self.assertEqual(result["status"], "unknown")
+        self.assertIn("github_api_error:OSError", result["warnings"])
+
     def test_optional_token_and_rejects_absolute_urls(self):
         client = GitHubReadClient("")
         self.assertIsNone(client.token) if client.token is None else self.assertEqual(client.token, "")
