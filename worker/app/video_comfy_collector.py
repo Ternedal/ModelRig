@@ -117,6 +117,12 @@ class VideoResultCollector:
                             opened_stat.st_size != initial_size):
                             raise ValueError("ComfyUI output changed before copy")
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
+                        copied_stat = os.fstat(source.fileno())
+                        if (copied_stat.st_dev != opened_stat.st_dev or
+                            copied_stat.st_ino != opened_stat.st_ino or
+                            copied_stat.st_size != opened_stat.st_size or
+                            copied_stat.st_mtime_ns != opened_stat.st_mtime_ns):
+                            raise ValueError("ComfyUI output changed during copy")
                         destination.flush()
                         os.fsync(destination.fileno())
                     final_stat = files[0].stat()
