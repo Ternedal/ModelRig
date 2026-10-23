@@ -61,6 +61,23 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(len(result["repositories"]), 1)
         self.assertNotIn("secret-value", json.dumps(result))
 
+    def test_truncated_pages_are_unknown_not_false_counts(self):
+        def opener(request, timeout):
+            url = request.full_url
+            if "/issues?" in url or "/pulls?" in url:
+                value = [{"number": i, "updated_at": "2020-01-01T00:00:00Z"}
+                         for i in range(100)]
+            else:
+                value = {"workflow_runs": [{"conclusion": "success"}]}
+            return Response(json.dumps(value).encode())
+        with patch("kaliv_delivery_report.MAX_PAGES", 1):
+            result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertEqual(result["status"], "partial")
+        self.assertIsNone(result["open_issues"])
+        self.assertIsNone(result["open_prs"])
+        self.assertIsNone(result["stale_prs"])
+        self.assertIn("pagination_limit_reached", result["warnings"])
+
     def test_requires_token_and_rejects_absolute_urls(self):
         with self.assertRaises(ValueError):
             GitHubReadClient("")
