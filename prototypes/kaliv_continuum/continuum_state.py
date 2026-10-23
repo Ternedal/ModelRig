@@ -1,7 +1,10 @@
-"""Dependency-free Continuum task transition model. Prototype only; no runtime wiring."""
+"""Dependency-free Continuum task transition model. Prototype only; no runtime wiring.
+
+No caller-supplied token can authorize a transition. A verified approval must
+be supplied by the transactional store, never directly by an API client.
+"""
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Optional
 
 class State(str, Enum):
     QUEUED = "queued"
@@ -34,15 +37,17 @@ class Task:
     approved: bool = False
     requires_approval: bool = True
 
-def transition(task: Task, target: State, *, expected_revision: int, approval_token: Optional[str] = None) -> Task:
-    """Optimistic concurrency; approval is explicit and cannot be inherited implicitly."""
+def transition(task: Task, target: State, *, expected_revision: int,
+               verified_approval: bool = False) -> Task:
+    """Pure state validation. Only a trusted transactional caller may verify grants."""
     if expected_revision != task.revision:
         raise ValueError("stale task revision")
     if target not in ALLOWED[task.state]:
         raise ValueError(f"invalid transition: {task.state} -> {target}")
-    if target == State.EXECUTING and task.requires_approval and not (task.approved or approval_token):
-        raise PermissionError("approval required")
-    if target == State.EXECUTING and task.requires_approval and task.state != State.AWAITING_APPROVAL:
-        raise PermissionError("approval checkpoint required")
+    if target == State.EXECUTING and task.requires_approval:
+        if task.state != State.AWAITING_APPROVAL:
+            raise PermissionError("approval checkpoint required")
+        if verified_approval is not True:
+            raise PermissionError("verified approval required")
     return replace(task, state=target, revision=task.revision + 1,
-                   approved=task.approved or bool(approval_token))
+                   approved=(verified_approval is True and target == State.EXECUTING))
