@@ -37,6 +37,19 @@ class CollectorTests(unittest.TestCase):
     def collector(self, outputs):
         return VideoResultCollector(self.store, FakeClient(outputs), self.catalog, self.output)
 
+    def test_rejects_output_directory_outside_approved_root(self):
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        outside = self.media.parent / "unapproved"
+        outside.mkdir()
+        (outside / "result.mp4").write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media)):
+            collector = VideoResultCollector(self.store, FakeClient(outputs), self.catalog, outside)
+            with self.assertRaisesRegex(ValueError, "approved external storage"):
+                collector.collect_one()
+        self.assertEqual(self.store.get(self.job_id)["state"], "running")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_completed_mp4_is_registered(self):
         (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
