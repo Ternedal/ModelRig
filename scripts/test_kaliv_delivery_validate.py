@@ -6,7 +6,7 @@ def sample():
     return {"schema": "kaliv.delivery-report.v1",
             "repositories": [
                 {"repository": "Ternedal/" + name, "status": "collected",
-                 "open_issues": 0, "open_prs": 0, "stale_prs": 0, "warnings": []}
+                 "open_issues": 0, "open_prs": 0, "stale_prs": 0, "workflow": "success", "warnings": []}
                 for name in REPOS]}
 
 class SnapshotValidationTests(unittest.TestCase):
@@ -32,6 +32,11 @@ class SnapshotValidationTests(unittest.TestCase):
         payload = sample()
         payload["repositories"].append(dict(payload["repositories"][0]))
         self.assertIn("duplicate_repositories", validate(payload))
+
+    def test_unknown_workflow_is_incomplete(self):
+        payload = sample()
+        payload["repositories"][0]["workflow"] = "unknown"
+        self.assertTrue(any(x.startswith("unknown_workflow:") for x in validate(payload)))
 
     def test_boolean_is_not_a_count(self):
         payload = sample()
