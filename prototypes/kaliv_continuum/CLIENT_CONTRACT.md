@@ -3,7 +3,7 @@
 The read-only endpoint `GET /tasks/{task_id}/snapshot` returns JSON from a
 single SQLite read transaction. Access requires `Authorization: Bearer <token>`
 for an individually registered actor with the task's read ACL; the server
-is loopback-only. Unknown/revoked credentials return 401, and tasks without
+is loopback-only. Unknown, expired, or revoked credentials return 401, and tasks without
 read permission return 404. This is **not** a production API.
 
 Example shape (illustrative values):
@@ -29,6 +29,14 @@ Example shape (illustrative values):
   "commands": []
 }
 ```
+
+Approval audit metadata is available separately at
+`GET /tasks/{task_id}/approvals`. This endpoint requires the actor's
+**approve** ACL for that task; read access alone is insufficient. It returns
+`{"task_id":"demo-1","approvals":[{"audit_id":1,"approver_id":"alice","executor_id":"worker","capability":"nas.read","revision":2,"issued_at":1000,"expires_at":1300,"consumed_at":null}]}`
+(illustrative values). Neither raw approval secrets nor their digests are
+returned. Clients must not mistake this history for permission to issue or
+execute a new approval.
 
 Clients should treat `presentation` as a rendering hint, not a grant or
 permission. `can_request_approval` does not imply that a user is authorized
