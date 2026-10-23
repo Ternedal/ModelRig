@@ -18,9 +18,7 @@ BASE = "https://api.github.com"
 MAX_PAGES = 10
 
 class GitHubReadClient:
-    def __init__(self, token, opener=None):
-        if not token:
-            raise ValueError("GITHUB_TOKEN required")
+    def __init__(self, token=None, opener=None):
         self.token = token
         self.opener = opener or urllib.request.urlopen
 
@@ -28,11 +26,13 @@ class GitHubReadClient:
         if not path.startswith("/") or path.startswith("//"):
             raise ValueError("relative GitHub API path required")
         url = BASE + path
-        request = urllib.request.Request(url, headers={
-            "Authorization": "Bearer " + self.token,
+        headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "kaliv-delivery-report/1.0"})
+            "User-Agent": "kaliv-delivery-report/1.0"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
+        request = urllib.request.Request(url, headers=headers)
         with self.opener(request, timeout=15) as response:
             return json.load(response)
 
