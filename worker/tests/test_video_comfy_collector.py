@@ -62,6 +62,24 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.job_id)["state"], "running")
         catalog.register.assert_not_called()
 
+    def test_rejects_symlinked_catalog_root_outside_approved_volume(self):
+        outside = self.media.parent / "redirected_media"
+        outside.mkdir()
+        redirected = self.media / "MediaRedirect"
+        try:
+            redirected.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Directory symlinks unavailable: {exc}")
+        catalog = Mock(media_root=redirected)
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)):
+            collector = VideoResultCollector(self.store, FakeClient(None), catalog, self.output)
+            with self.assertRaisesRegex(ValueError, "Media catalog must be inside approved external storage"):
+                collector.collect_one()
+        self.assertEqual(self.store.get(self.job_id)["state"], "running")
+        catalog.register.assert_not_called()
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_rejects_symlinked_video_destination_before_copy(self):
         outside = self.media.parent / "redirected_videos"
         outside.mkdir()
