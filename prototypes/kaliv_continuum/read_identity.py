@@ -4,7 +4,6 @@ Tokens are never stored in plaintext. The resolver is NOT an identity
 provider; registration must happen in a separate trusted admin process.
 """
 import hashlib
-import hmac
 import secrets
 import sqlite3
 
@@ -33,7 +32,7 @@ class ReadIdentity:
         with sqlite3.connect(self.database) as db:
             row = db.execute("""SELECT actor_id,revoked FROM read_identities
                 WHERE digest=?""", (digest,)).fetchone()
-        if row is None or row[1] or not hmac.compare_digest(row[0], row[0]):
+        if row is None or row[1]:
             raise PermissionError("invalid credential")
         return row[0]
 
