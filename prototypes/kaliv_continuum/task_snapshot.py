@@ -1,9 +1,6 @@
-"""Read-only, single-transaction snapshot of a Continuum task.
-
-A single SQLite read transaction ensures task, events and command records
-describe one database point in time, even while another worker writes.
-"""
+"""Read-only, single-transaction snapshot of a Continuum task."""
 import sqlite3
+from task_presentation import present
 
 def snapshot(database, task_id):
     with sqlite3.connect(str(database), timeout=5) as db:
@@ -22,6 +19,7 @@ def snapshot(database, task_id):
         "state": task[1],
         "revision": task[2],
         "requires_approval": bool(task[3]),
+        "presentation": present(task[1]),
         "events": [{"revision": revision, "state": state}
                    for revision, state in events],
         "commands": [{"operation_id": operation_id, "revision": revision,
