@@ -107,6 +107,10 @@ class VideoResultCollector:
                         probe_stat.st_size != initial_size):
                         raise ValueError("ComfyUI output changed before header validation")
                     header = probe.read(12)
+                    after_probe = os.fstat(probe.fileno())
+                    if (after_probe.st_size != probe_stat.st_size or
+                        after_probe.st_mtime_ns != probe_stat.st_mtime_ns):
+                        raise ValueError("ComfyUI output changed during header validation")
                 if len(header) != 12 or header[4:8] != b"ftyp" or int.from_bytes(header[:4], "big") < 12:
                     raise ValueError("ComfyUI output is not an MP4 container")
                 media_id = uuid.uuid4().hex
