@@ -2,7 +2,9 @@
 
 The read-only endpoint `GET /tasks/{task_id}/snapshot` returns JSON from a
 single SQLite read transaction. Access requires `Authorization: Bearer <token>`
-and the server is loopback-only by default. This is **not** a production API.
+for an individually registered actor with the task's read ACL; the server
+is loopback-only. Unknown/revoked credentials return 401, and tasks without
+read permission return 404. This is **not** a production API.
 
 Example shape (illustrative values):
 
@@ -35,5 +37,6 @@ marked `simulated` were **not** executed against external systems.
 
 For Android, Windows and Quest, use the same fields and tolerate unknown
 `phase` values. Preserve `revision` to avoid showing stale data. Never
-expose the bearer token in URLs or telemetry. Do not expose the loopback
+expose the bearer token in URLs or telemetry. The prototype does not
+provide login or remote client connectivity. Do not expose the loopback
 service on a public network without a separate authenticated gateway.
