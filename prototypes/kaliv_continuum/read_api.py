@@ -1,11 +1,9 @@
-"""Read-only HTTP projection of Continuum prototype tasks and commands.
+"""Read-only Continuum HTTP API with per-actor task authorization.
 
-Not wired into production. Bind to loopback and require a bearer token.
-Usage: KALIV_CONTINUUM_TOKEN=... python read_api.py /path/to/tasks.sqlite
+Prototype only: local loopback, no external execution or production wiring.
+An administrator must provision actor credentials and task ACLs separately.
 """
-import hmac
 import json
-import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
@@ -13,16 +11,27 @@ from urllib.parse import unquote, urlsplit
 from task_store import TaskStore
 from outbox_inspector import OutboxInspector
 from task_snapshot import snapshot
+from task_access import TaskAccess
+from read_identity import ReadIdentity
 
-def serve(db_path, token, host="127.0.0.1", port=8769):
-    if not token or len(token) < 24:
-        raise ValueError("Set a random token of at least 24 characters")
+def serve(db_path, token=None, host="127.0.0.1", port=8769):
+    if token is not None:
+        raise ValueError("Shared bearer token mode is disabled; provision actor credentials")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        raise ValueError("Prototype must bind to loopback")
     store = TaskStore(db_path)
     inspector = OutboxInspector(db_path)
+    access = TaskAccess(db_path)
+    identities = ReadIdentity(db_path)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
+            authorization = self.headers.get("Authorization", "")
+            if not authorization.startswith("Bearer "):
+                return self.reply(401, {"error": "unauthorized"})
+            try:
+                actor_id = identities.resolve(authorization[7:])
+            except PermissionError:
                 return self.reply(401, {"error": "unauthorized"})
             path = urlsplit(self.path).path
             parts = path.strip("/").split("/")
@@ -32,6 +41,10 @@ def serve(db_path, token, host="127.0.0.1", port=8769):
                 return self.reply(404, {"error": "not_found"})
             task_id = unquote(parts[1])
             if task_id in (".", "..") or "/" in task_id or "\\" in task_id:
+                return self.reply(404, {"error": "not_found"})
+            try:
+                access.require(task_id, actor_id, "read")
+            except PermissionError:
                 return self.reply(404, {"error": "not_found"})
             try:
                 if len(parts) == 3 and parts[2] == "snapshot":
@@ -72,4 +85,4 @@ def serve(db_path, token, host="127.0.0.1", port=8769):
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("Usage: python read_api.py /path/to/tasks.sqlite")
-    serve(sys.argv[1], os.environ.get("KALIV_CONTINUUM_TOKEN", ""))
+    serve(sys.argv[1])
