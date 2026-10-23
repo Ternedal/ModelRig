@@ -99,7 +99,7 @@ func TestPowerShellLiteralEscapesSingleQuote(t *testing.T) {
 	}
 }
 
-func TestReplacementHelperWaitsMovesThenReleasesLock(t *testing.T) {
+func TestReplacementHelperWaitsReplacesThenReleasesLock(t *testing.T) {
 	script := replacementHelperScript(
 		1234,
 		`C:\Rig\updater.exe.pending`,
@@ -107,20 +107,25 @@ func TestReplacementHelperWaitsMovesThenReleasesLock(t *testing.T) {
 		`C:\Rig\updater.lock`,
 	)
 	for _, required := range []string{
-		"Wait-Process -Id 1234",
-		"Move-Item -LiteralPath 'C:\\Rig\\updater.exe.pending'",
-		"-Destination 'C:\\Rig\\updater.exe' -Force",
-		"finally { Remove-Item -LiteralPath 'C:\\Rig\\updater.lock'",
+		"[Diagnostics.Process]::GetProcessById(1234)",
+		"$parent.WaitForExit(120000)",
+		"$pending='C:\\Rig\\updater.exe.pending'",
+		"$live='C:\\Rig\\updater.exe'",
+		"[IO.File]::Replace($pending,$live,$backup)",
+		"$code -notin @(32,33)",
+		"AddSeconds(45)",
+		"[IO.File]::Delete($lockPath)",
+		"lock and recovery files retained",
 	} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("helper script missing %q: %s", required, script)
 		}
 	}
-	waitAt := strings.Index(script, "Wait-Process")
-	moveAt := strings.Index(script, "Move-Item")
-	unlockAt := strings.Index(script, "Remove-Item")
+	waitAt := strings.Index(script, "$parent.WaitForExit")
+	moveAt := strings.Index(script, "[IO.File]::Replace")
+	unlockAt := strings.Index(script, "[IO.File]::Delete")
 	if waitAt < 0 || moveAt < 0 || unlockAt < 0 || !(waitAt < moveAt && moveAt < unlockAt) {
-		t.Fatalf("helper order must be wait -> move -> unlock: %s", script)
+		t.Fatalf("helper order must be wait -> replace -> unlock: %s", script)
 	}
 }
 
@@ -177,7 +182,7 @@ func releaseAttestationBody(t *testing.T, repo, ref, workflowPath, digest string
 		"_type":         "https://in-toto.io/Statement/v1",
 		"predicateType": "https://slsa.dev/provenance/v1",
 		"subject": []any{map[string]any{
-			"name": updaterAssetName,
+			"name":   updaterAssetName,
 			"digest": map[string]string{"sha256": digest},
 		}},
 		"predicate": map[string]any{
