@@ -346,6 +346,32 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
 
+    def test_source_mutation_during_header_probe_is_rejected(self):
+        source = self.output / "result.mp4"
+        source.write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        original_open = Path.open
+        changed = False
+
+        def mutate_on_header_read(path, *args, **kwargs):
+            nonlocal changed
+            mode = args[0] if args else kwargs.get("mode", "r")
+            handle = original_open(path, *args, **kwargs)
+            if path == source and mode == "rb" and not changed:
+                changed = True
+                with original_open(source, "ab") as writer:
+                    writer.write(b"new bytes")
+            return handle
+
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)), patch.object(
+            Path, "open", autospec=True, side_effect=mutate_on_header_read
+        ), patch.object(self.catalog, "register", wraps=self.catalog.register) as register:
+            self.assertIsNone(self.collector(outputs).collect_one())
+            register.assert_not_called()
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_copy_failure_removes_partial_file(self):
         (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
