@@ -37,7 +37,10 @@ class VideoResultCollector:
             raise ValueError("ComfyUI output root must be inside approved external storage")
         if not self.catalog.media_root.resolve().is_relative_to(approved_root):
             raise ValueError("Media catalog must be inside approved external storage")
-        # TODO: enforce containment for both SQLite database paths before collection.
+        if not Path(self.store.db_path).resolve().is_relative_to(approved_root):
+            raise ValueError("Video job database must be inside approved external storage")
+        if not Path(self.catalog.db_path).resolve().is_relative_to(approved_root):
+            raise ValueError("Media catalog database must be inside approved external storage")
         for row in self.store.awaiting_result(limit=1):
             try:
                 outputs = self.client.completed_outputs(row["prompt_id"])
