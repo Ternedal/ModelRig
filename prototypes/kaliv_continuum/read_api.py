@@ -12,6 +12,7 @@ from urllib.parse import unquote, urlsplit
 
 from task_store import TaskStore
 from outbox_inspector import OutboxInspector
+from task_snapshot import snapshot
 
 def serve(db_path, token, host="127.0.0.1", port=8769):
     if not token or len(token) < 24:
@@ -24,16 +25,17 @@ def serve(db_path, token, host="127.0.0.1", port=8769):
             if not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
                 return self.reply(401, {"error": "unauthorized"})
             path = urlsplit(self.path).path
-            # Do not decode slashes into task IDs or permit ambiguous path segments.
             parts = path.strip("/").split("/")
             if len(parts) not in (2, 3) or parts[0] != "tasks" or not parts[1]:
                 return self.reply(404, {"error": "not_found"})
-            if len(parts) == 3 and parts[2] not in ("events", "commands"):
+            if len(parts) == 3 and parts[2] not in ("events", "commands", "snapshot"):
                 return self.reply(404, {"error": "not_found"})
             task_id = unquote(parts[1])
             if task_id in (".", "..") or "/" in task_id or "\\" in task_id:
                 return self.reply(404, {"error": "not_found"})
             try:
+                if len(parts) == 3 and parts[2] == "snapshot":
+                    return self.reply(200, snapshot(db_path, task_id))
                 task = store.get(task_id)
                 if len(parts) == 3 and parts[2] == "events":
                     return self.reply(200, {"task_id": task_id, "events": [
