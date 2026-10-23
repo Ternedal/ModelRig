@@ -62,6 +62,23 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.job_id)["state"], "running")
         catalog.register.assert_not_called()
 
+    def test_rejects_symlinked_video_destination_before_copy(self):
+        outside = self.media.parent / "redirected_videos"
+        outside.mkdir()
+        destination = self.media / "Media" / "Videos"
+        destination.rmdir()
+        try:
+            destination.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"Directory symlinks unavailable: {exc}")
+        (self.output / "result.mp4").write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)):
+            self.assertIsNone(self.collector(outputs).collect_one())
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_completed_mp4_is_registered(self):
         (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
