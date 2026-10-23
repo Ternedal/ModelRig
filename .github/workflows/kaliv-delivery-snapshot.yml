@@ -31,3 +31,5 @@ jobs:
             kaliv-delivery.json
             kaliv-delivery.md
           retention-days: 14
+      - name: Validate completeness after preserving artifact
+        run: cd scripts && python kaliv_delivery_validate.py ../kaliv-delivery.json
