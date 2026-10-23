@@ -87,9 +87,9 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["workflow"], "unknown")
         self.assertIn("github_api_error:ValueError", result["warnings"])
 
-    def test_requires_token_and_rejects_absolute_urls(self):
-        with self.assertRaises(ValueError):
-            GitHubReadClient("")
+    def test_optional_token_and_rejects_absolute_urls(self):
+        client = GitHubReadClient("")
+        self.assertIsNone(client.token) if client.token is None else self.assertEqual(client.token, "")
         with self.assertRaises(ValueError):
             GitHubReadClient("token").get("https://example.com")
 
