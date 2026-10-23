@@ -57,12 +57,15 @@ def summarize_repo(client, owner, repo):
     try:
         issues, issues_truncated = client.pages(path + "/issues?state=open")
         prs, prs_truncated = client.pages(path + "/pulls?state=open")
-        output["open_issues"] = sum("pull_request" not in issue for issue in issues)
-        output["open_prs"] = len(prs)
+        if not issues_truncated:
+            output["open_issues"] = sum("pull_request" not in issue for issue in issues)
+        if not prs_truncated:
+            output["open_prs"] = len(prs)
         now = dt.datetime.now(dt.timezone.utc)
-        output["stale_prs"] = sum(
-            (now - dt.datetime.fromisoformat(p["updated_at"].replace("Z", "+00:00"))).days >= 3
-            for p in prs)
+        if not prs_truncated:
+            output["stale_prs"] = sum(
+                (now - dt.datetime.fromisoformat(p["updated_at"].replace("Z", "+00:00"))).days >= 3
+                for p in prs)
         if issues_truncated or prs_truncated:
             output["warnings"].append("pagination_limit_reached")
         runs = client.get(path + "/actions/runs?per_page=1")
@@ -77,6 +80,7 @@ def summarize_repo(client, owner, repo):
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
             ValueError, KeyError, TypeError) as error:
         output["warnings"].append("github_api_error:" + type(error).__name__)
+        output["status"] = "partial" if (output["open_issues"] is not None or output["open_prs"] is not None) else "unknown"
     return output
 
 def report(client, owner="Ternedal", repositories=REPOS):
