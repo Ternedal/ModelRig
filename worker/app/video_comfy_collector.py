@@ -111,6 +111,11 @@ class VideoResultCollector:
                     raise ValueError("Video destination must remain on approved external storage")
                 try:
                     with files[0].open("rb") as source, target.open("xb") as destination:
+                        opened_stat = os.fstat(source.fileno())
+                        if (opened_stat.st_dev != initial_stat.st_dev or
+                            opened_stat.st_ino != initial_stat.st_ino or
+                            opened_stat.st_size != initial_size):
+                            raise ValueError("ComfyUI output changed before copy")
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
                         destination.flush()
                         os.fsync(destination.fileno())
