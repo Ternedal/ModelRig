@@ -103,6 +103,8 @@ class VideoResultCollector:
                 media_id = uuid.uuid4().hex
                 target = self.catalog.media_root / "Videos" / (media_id + ".mp4")
                 target.parent.mkdir(parents=True, exist_ok=True)
+                if target.parent.is_symlink() or not target.parent.resolve(strict=True).is_relative_to(approved_root):
+                    raise ValueError("Video destination must remain on approved external storage")
                 try:
                     with files[0].open("rb") as source, target.open("xb") as destination:
                         shutil.copyfileobj(source, destination, length=1024 * 1024)
