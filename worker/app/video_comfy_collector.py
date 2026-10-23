@@ -112,6 +112,8 @@ class VideoResultCollector:
                 try:
                     with files[0].open("rb") as source, target.open("xb") as destination:
                         opened_stat = os.fstat(source.fileno())
+                        if not files[0].resolve(strict=True).is_relative_to(self.output_root):
+                            raise ValueError("ComfyUI source escaped approved output root")
                         if (opened_stat.st_dev != initial_stat.st_dev or
                             opened_stat.st_ino != initial_stat.st_ino or
                             opened_stat.st_size != initial_size):
