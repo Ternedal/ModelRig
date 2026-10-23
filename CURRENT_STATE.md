@@ -228,6 +228,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent_continue.py`
 - `tests/worker_agent_multistep.py`
 - `tests/worker_approval_receipts.py`
+- `tests/worker_asr_cold_warm_probe.py`
 - `tests/worker_audit.py`
 - `tests/worker_backup.py`
 - `tests/worker_body_assets.py`
