@@ -44,6 +44,17 @@ class TaskAccess:
             changed = db.execute("DELETE FROM task_acl WHERE task_id=? AND actor_id=? AND permission=?",
                                  (task_id, actor_id, permission))
             if changed.rowcount:
+                if permission == "approve":
+                    # Invalidate all outstanding grants issued by this approver.
+                    # Older databases may predate the issuance-audit table.
+                    audit_table = db.execute("""SELECT 1 FROM sqlite_master
+                        WHERE type='table' AND name='approval_issue_audit'""").fetchone()
+                    if audit_table:
+                        db.execute("""UPDATE continuum_approvals SET consumed_at=?
+                            WHERE consumed_at IS NULL AND digest IN (
+                                SELECT grant_digest FROM approval_issue_audit
+                                WHERE task_id=? AND approver_id=?)""",
+                            (int(time.time()), task_id, actor_id))
                 db.execute("INSERT INTO task_acl_audit(task_id,actor_id,permission,action,administrator_id,occurred_at) VALUES (?,?,?,?,?,?)",
                            (task_id, actor_id, permission, "revoke", administrator_id, int(time.time())))
 
