@@ -200,7 +200,8 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         onError: (status: Int, detail: String) -> Unit,
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
-        if (history.isNotEmpty()) {
+        // Cloud consent applies only to this turn; keep earlier local turns private.
+        if (cloudBaseUrl == null && cloudKey == null && history.isNotEmpty()) {
             val previous = org.json.JSONArray()
             history.takeLast(12).forEach { (role, content) ->
                 if ((role == "user" || role == "assistant") && content.isNotBlank()) {
