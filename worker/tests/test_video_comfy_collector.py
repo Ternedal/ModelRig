@@ -37,6 +37,39 @@ class CollectorTests(unittest.TestCase):
     def collector(self, outputs):
         return VideoResultCollector(self.store, FakeClient(outputs), self.catalog, self.output)
 
+    def test_rejects_symlinked_job_database_outside_approved_root(self):
+        outside = self.media.parent / "redirected_jobs.sqlite"
+        outside.write_bytes(b"")
+        linked = self.media / "Jobs" / "redirected_jobs.sqlite"
+        try:
+            linked.symlink_to(outside)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"File symlinks unavailable: {exc}")
+        store = Mock(db_path=str(linked))
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)):
+            collector = VideoResultCollector(store, FakeClient(None), self.catalog, self.output)
+            with self.assertRaisesRegex(ValueError, "Video job database"):
+                collector.collect_one()
+        store.awaiting_result.assert_not_called()
+
+    def test_rejects_symlinked_catalog_database_outside_approved_root(self):
+        outside = self.media.parent / "redirected_catalog.sqlite"
+        outside.write_bytes(b"")
+        linked = self.media / "Jobs" / "redirected_catalog.sqlite"
+        try:
+            linked.symlink_to(outside)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"File symlinks unavailable: {exc}")
+        catalog = Mock(media_root=self.catalog.media_root, db_path=linked)
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)):
+            collector = VideoResultCollector(self.store, FakeClient(None), catalog, self.output)
+            with self.assertRaisesRegex(ValueError, "Media catalog database"):
+                collector.collect_one()
+        self.assertEqual(self.store.get(self.job_id)["state"], "running")
+        catalog.register.assert_not_called()
+
     def test_rejects_job_database_outside_approved_root(self):
         outside = self.media.parent / "outside_jobs.sqlite"
         store = Mock(db_path=str(outside))
