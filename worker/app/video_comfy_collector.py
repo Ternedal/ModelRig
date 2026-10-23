@@ -101,6 +101,11 @@ class VideoResultCollector:
                 initial_stat = files[0].stat()
                 initial_size = initial_stat.st_size
                 with files[0].open("rb") as probe:
+                    probe_stat = os.fstat(probe.fileno())
+                    if (probe_stat.st_dev != initial_stat.st_dev or
+                        probe_stat.st_ino != initial_stat.st_ino or
+                        probe_stat.st_size != initial_size):
+                        raise ValueError("ComfyUI output changed before header validation")
                     header = probe.read(12)
                 if len(header) != 12 or header[4:8] != b"ftyp" or int.from_bytes(header[:4], "big") < 12:
                     raise ValueError("ComfyUI output is not an MP4 container")
