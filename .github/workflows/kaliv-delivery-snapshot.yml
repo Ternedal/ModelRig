@@ -1,0 +1,33 @@
+name: Kaliv Delivery Snapshot
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect read-only cross-repository data
+        env:
+          GITHUB_TOKEN: ${{ secrets.KALIV_REPORT_READ_TOKEN }}
+        run: |
+          test -n "$GITHUB_TOKEN" || { echo "KALIV_REPORT_READ_TOKEN is required"; exit 1; }
+          python scripts/kaliv_delivery_report.py --output kaliv-delivery.json
+      - name: Render human-readable report
+        run: python scripts/kaliv_delivery_markdown.py kaliv-delivery.json --output kaliv-delivery.md
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaliv-delivery-snapshot
+          path: |
+            kaliv-delivery.json
+            kaliv-delivery.md
+          retention-days: 14
