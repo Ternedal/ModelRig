@@ -1,26 +1,51 @@
-# Continuum prototype integration and security checklist
+# Kaliv Continuum prototype — status and security gates
 
-This prototype is NOT a production API and must not be exposed to LAN or internet.
+**Isolated prototype only.** No ModelRig production wiring, external tool
+execution, Android deployment, or LAN/public exposure. Keep the draft PR
+separate from protected `main`.
 
-## What exists
-- Pure Python task state transitions.
-- SQLite task persistence and event history.
-- Loopback-only authenticated read API for GET /tasks/{id} and GET /tasks/{id}/events.
-- Unit test sources for state transitions and persistence.
+## Implemented
 
-## Known blockers before production
-1. Current transition() accepts any nonempty approval_token. This is a placeholder, not authentication. Do not connect write capabilities to it. Replace with signed, scoped, expiring, one-use approval grants bound to actor, task, action, revision and policy version.
-2. approved boolean currently persists across transitions; scope and expiration are not represented. Do not use it for authorization.
-3. No ownership/tenant isolation; a holder of the read API token can read any task ID. Add authenticated actor identity and per-task authorization.
-4. SQLite persistence has no encrypted-at-rest or retention policy. Use an explicit private data directory with restrictive permissions and backups.
-5. Read API has no TLS, request quotas, lifecycle management, health checks or production deployment. Loopback only.
-6. No full end-to-end test evidence. Run tests in a clean environment before any promotion.
-7. Existing ModelRig capability descriptor authority is kaliv-capability/v2; do not introduce a parallel permission source. Map the future Nexus registry through that authority.
-8. Event log records state transitions only; not yet a durable execution/outbox system. Do not claim exactly-once tool execution.
-9. The API intentionally has no POST/PATCH/DELETE endpoints.
+- State transitions, optimistic task revisions, SQLite persistence and events.
+- Scoped expiring one-use approval grants; `reserve_execution()` consumes
+  a matching grant, transitions the task and writes a command outbox record
+  in one SQLite transaction.
+- Bounded Swarm DAG planning, capability-filtered simulation, and a
+  deny-by-default dry-run worker that records receipts without external effects.
+- Read-only authenticated loopback HTTP API:
+  `GET /tasks/{id}`, `GET /tasks/{id}/events`,
+  `GET /tasks/{id}/commands`, `GET /tasks/{id}/snapshot`.
+- Transaction-consistent snapshots and client presentation hints.
+  See [CLIENT_CONTRACT.md](CLIENT_CONTRACT.md).
+- Isolated Python 3.11/3.12 CI workflow and unit/integration tests.
 
-## Run prototype tests
-From the repository root:
+## Security and production blockers
+
+1. **Grant issuance is not trusted yet.** `ApprovalStore.issue()` can be
+   called directly by code with database access. There is no authenticated
+   approval UI, actor identity, policy-version binding, or authorization
+   gateway. Do not connect real capabilities.
+2. `transition(..., verified_approval=True)` is a pure internal helper;
+   its flag is not proof of authorization. The trusted path is the atomic
+   store reservation, and only after grant issuance is properly secured.
+3. No per-task ownership/tenant isolation. Anyone with the read bearer
+   token can read all known task IDs. Never expose the service beyond
+   loopback without a gateway enforcing actor and task authorization.
+4. SQLite has no configured encryption-at-rest, retention policy or
+   backup/recovery procedures. Use a private data directory.
+5. The HTTP server has no TLS, rate limits, health checks or lifecycle
+   management. It is local-only.
+6. The outbox dry-run receipts demonstrate transactional deduplication
+   **inside SQLite only**. They do not prove exactly-once external effects,
+   retries, leases, or crash-safe real dispatch.
+7. Swarm capability allowlists are prototype checks, not a substitute
+   for the existing `kaliv-capability/v2` policy authority.
+8. `presentation.can_request_approval` is a UI hint, **not** permission
+   to issue or approve a grant.
+9. No write API exists. Do not infer production readiness from green
+   prototype CI.
+
+## Run isolated tests
 
 ```bash
 cd prototypes/kaliv_continuum
@@ -28,7 +53,9 @@ python -m unittest discover -p 'test_*.py' -v
 ```
 
 ## Local-only smoke test
-Create a disposable SQLite file and a random bearer token. Never reuse production credentials. The API intentionally cannot create tasks.
+
+Use a disposable SQLite file and a random token; do not reuse production
+credentials. The API cannot create tasks.
 
 ```bash
 cd prototypes/kaliv_continuum
@@ -37,7 +64,12 @@ export KALIV_CONTINUUM_TOKEN="$(python -c 'import secrets; print(secrets.token_u
 python read_api.py demo.sqlite
 ```
 
-In a separate terminal with the same token, request GET http://127.0.0.1:8769/tasks/demo using Authorization: Bearer <token>.
+In another terminal, pass the same token in an Authorization header to
+`http://127.0.0.1:8769/tasks/demo/snapshot`.
 
-## Next implementation gate
-Implement verified approval grants, per-actor task authorization and durable idempotent command handling before exposing write operations. Keep default-off behind a feature flag and preserve current release gates.
+## Next gate
+
+Add trusted policy-authorized grant issuance and per-actor task access,
+then a properly bounded and auditable worker dispatch protocol. Keep all
+mutating endpoints and production integrations disabled until those
+controls have independent tests and review.
