@@ -24,6 +24,7 @@ jobs:
       - name: Render human-readable report
         run: python scripts/kaliv_delivery_markdown.py kaliv-delivery.json --output kaliv-delivery.md
       - name: Upload report artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kaliv-delivery-snapshot
@@ -31,5 +32,6 @@ jobs:
             kaliv-delivery.json
             kaliv-delivery.md
           retention-days: 14
+          if-no-files-found: warn
       - name: Validate completeness after preserving artifact
         run: cd scripts && python kaliv_delivery_validate.py ../kaliv-delivery.json
