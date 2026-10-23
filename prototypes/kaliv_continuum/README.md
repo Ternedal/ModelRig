@@ -13,8 +13,8 @@ Android deployment or public/LAN exposure. Keep draft PR separate from main.
   individual revocation, one-hour default expiry, and atomic rotation)\n  plus deny-by-default task ACLs.
 - Loopback read-only HTTP API with per-task authorization on all routes:
   `GET /tasks/{id}`, `GET /tasks/{id}/events`,
-  `GET /tasks/{id}/commands`, `GET /tasks/{id}/snapshot`.
-- Transaction-consistent snapshots and presentation hints.
+  `GET /tasks/{id}/commands`, `GET /tasks/{id}/snapshot`,\n  `GET /tasks/{id}/approvals` (requires separate `approve` ACL).
+- Atomic approval issuance with exact task revision, explicit `approve` ACL,\n  and redacted audit history; no trusted identity provider or policy authority.\n- Transaction-consistent snapshots and presentation hints.
   See [CLIENT_CONTRACT.md](CLIENT_CONTRACT.md).
 - Isolated Python 3.11/3.12 CI workflow and tests.
 
