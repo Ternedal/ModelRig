@@ -37,6 +37,27 @@ class CollectorTests(unittest.TestCase):
     def collector(self, outputs):
         return VideoResultCollector(self.store, FakeClient(outputs), self.catalog, self.output)
 
+    def test_rejects_job_database_outside_approved_root(self):
+        outside = self.media.parent / "outside_jobs.sqlite"
+        store = Mock(db_path=str(outside))
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)):
+            collector = VideoResultCollector(store, FakeClient(None), self.catalog, self.output)
+            with self.assertRaisesRegex(ValueError, "Video job database"):
+                collector.collect_one()
+        store.awaiting_result.assert_not_called()
+
+    def test_rejects_catalog_database_outside_approved_root(self):
+        outside = self.media.parent / "outside_catalog.sqlite"
+        catalog = Mock(media_root=self.catalog.media_root, db_path=outside)
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)):
+            collector = VideoResultCollector(self.store, FakeClient(None), catalog, self.output)
+            with self.assertRaisesRegex(ValueError, "Media catalog database"):
+                collector.collect_one()
+        catalog.register.assert_not_called()
+        self.assertEqual(self.store.get(self.job_id)["state"], "running")
+
     def test_rejects_output_directory_outside_approved_root(self):
         outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
         outside = self.media.parent / "unapproved"
