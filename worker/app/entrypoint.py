@@ -13,6 +13,7 @@ from .agent3.cancellation_status import install_termination_contract
 from .agent3.production_mount import mount_agent3
 from .control_center_api import build_control_center_router
 from .file_capabilities_mount import mount_file_capabilities
+from .image_media_mount import mount_image_media
 from .e2e_latency_voice import mount as mount_e2e_latency_voice
 from .hardening import harden
 from .main import app as fastapi_app
@@ -175,6 +176,9 @@ if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
 # no file route is added here and no absolute path becomes model-controlled.
 mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
+
+# Local image generation is an explicit opt-in; absent by default.
+mount_image_media(fastapi_app)
 
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed

@@ -136,7 +136,17 @@ func (c *Client) forward(
 		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
 	}
 
-	resp, err := c.http.Do(req)
+	// Gateway-injected identity/secret headers must never follow an upstream
+	// redirect to a different host. Preserve the redirect response instead.
+	client := c.http
+	if len(headers) > 0 {
+		clone := *c.http
+		clone.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		client = &clone
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "upstream unreachable: "+err.Error(), http.StatusBadGateway)
 		return
