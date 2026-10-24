@@ -104,7 +104,8 @@ class VideoResultCollector:
                     probe_stat = os.fstat(probe.fileno())
                     if (probe_stat.st_dev != initial_stat.st_dev or
                         probe_stat.st_ino != initial_stat.st_ino or
-                        probe_stat.st_size != initial_size):
+                        probe_stat.st_size != initial_size or
+                        probe_stat.st_mtime_ns != initial_stat.st_mtime_ns):
                         raise ValueError("ComfyUI output changed before header validation")
                     header = probe.read(12)
                     after_probe = os.fstat(probe.fileno())
