@@ -48,5 +48,19 @@ class SigningAuditTests(unittest.TestCase):
             self.assertEqual(audit.main(["--enforce"]), 0)
 
 
+
+    def test_block_new_allows_only_known_legacy_paths(self):
+        from unittest.mock import patch
+        legacy = ["android/signing/modelrig.keystore", "android/signing/keystore.properties"]
+        with patch.object(audit, "tracked_signing_files", return_value=legacy):
+            self.assertEqual(audit.main(["--block-new"]), 0)
+
+    def test_block_new_rejects_new_signing_material(self):
+        from unittest.mock import patch
+        paths = ["android/signing/modelrig.keystore", "android/signing/extra.jks"]
+        with patch.object(audit, "tracked_signing_files", return_value=paths):
+            self.assertEqual(audit.main(["--block-new"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
