@@ -25,3 +25,7 @@ No Android signing identity change is accepted without: approved migration decis
 ## Scope of this PR
 
 Only preventive `.gitignore` rules and this incident playbook. **No private keys are read into output, removed, rotated, or replaced here.** No changes to build/release behavior or the running rig.
+
+## Verified release-pipeline dependency
+
+The current `.github/workflows/build-and-release.yml` performs a normal checkout and then `:app:testDebugUnitTest` and `:app:assembleRelease`; it does **not** inject signing files from an external secret store. `android/app/build.gradle.kts` uses the repository-local signing properties for both debug and release. **Removing tracked signing files before provisioning a replacement secret-backed build path will break or change the release pipeline.** Keep remediation sequenced: introduce secure signing provision + test reproducibility, validate device update path, then remove tracked credentials and clean future workflows. Git history exposure remains even after removal.
