@@ -402,6 +402,31 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(self.store.get(self.job_id)["state"], "failed")
         self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
 
+    def test_source_path_replaced_after_copy_is_rejected(self):
+        source = self.output / "result.mp4"
+        source.write_bytes(b"\\x00\\x00\\x00\\x18ftypisomtest video")
+        outputs = {"1": {"videos": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
+        import os
+        import shutil
+        original_copy = shutil.copyfileobj
+
+        def replace_after_copy(opened_source, destination, length):
+            original_copy(opened_source, destination, length)
+            stat = source.stat()
+            replacement = self.output / "replacement.mp4"
+            replacement.write_bytes(source.read_bytes())
+            os.utime(replacement, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            os.replace(replacement, source)
+
+        with patch("app.video_comfy_collector.configured_video_storage",
+                   return_value=Mock(root=self.media, unsafe=True)), patch(
+            "app.video_comfy_collector.shutil.copyfileobj", side_effect=replace_after_copy
+        ), patch.object(self.catalog, "register", wraps=self.catalog.register) as register:
+            self.assertIsNone(self.collector(outputs).collect_one())
+            register.assert_not_called()
+        self.assertEqual(self.store.get(self.job_id)["state"], "failed")
+        self.assertEqual(list((self.media / "Media" / "Videos").glob("*.mp4")), [])
+
     def test_copy_failure_removes_partial_file(self):
         (self.output / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypisomtest video")
         outputs = {"1": {"gifs": [{"type": "output", "filename": "result.mp4", "subfolder": ""}]}}
