@@ -26,7 +26,7 @@ if (signingKeystorePath != null) {
 if (externalSigningProperties != null) {
     require(signingKeystorePath != null) { "External signing properties require KALIV_SIGNING_KEYSTORE_FILE" }
 }
-val signingKeystoreFile = signingKeystorePath?.let { java.io.File(it) }
+val signingKeystoreFile = signingKeystorePath?.let { File(it) }
     ?: rootProject.file(ksProps.getProperty("storeFile") ?: "signing/modelrig.keystore")
 if (signingKeystorePath != null) {
     require(signingKeystoreFile.isFile) { "KALIV_SIGNING_KEYSTORE_FILE must point to an existing file" }
