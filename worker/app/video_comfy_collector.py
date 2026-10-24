@@ -138,7 +138,9 @@ class VideoResultCollector:
                         destination.flush()
                         os.fsync(destination.fileno())
                     final_stat = files[0].stat()
-                    if (final_stat.st_size != initial_size or
+                    if (final_stat.st_dev != initial_stat.st_dev or
+                        final_stat.st_ino != initial_stat.st_ino or
+                        final_stat.st_size != initial_size or
                         final_stat.st_mtime_ns != initial_stat.st_mtime_ns or
                         target.stat().st_size != initial_size):
                         raise ValueError("ComfyUI output changed during copy")
