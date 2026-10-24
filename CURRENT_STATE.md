@@ -489,6 +489,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_android_palette_divergence.py`
 - `tests/workflow_android_scheduler_picker.py`
+- `tests/workflow_android_signing_audit.py`
 - `tests/workflow_app_backend_route_contract.py`
 - `tests/workflow_appliance_lifecycle_updater_chain.py`
 - `tests/workflow_baseline_one_click.py`
