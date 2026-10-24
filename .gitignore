@@ -180,3 +180,11 @@ renderers/bodyrig-unity/Assets/BodyRig/Scenes.meta
 /validation/kaliv-vr-quest-latest.json.tmp
 /validation/kaliv-vr-unity-build.log
 /validation/kaliv-vr-quest-logcat.txt
+
+# Android signing identity: never add new private material to Git.
+# NOTE: these patterns do NOT untrack files already in Git history.
+/android/signing/*.keystore
+/android/signing/*.jks
+/android/signing/*.p12
+/android/signing/*.pfx
+/android/signing/keystore.properties
