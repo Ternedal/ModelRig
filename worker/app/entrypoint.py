@@ -176,6 +176,10 @@ if os.getenv("KALIV_AGENT4_OPERATOR_API", "0") == "1":
 mount_web_research(fastapi_app)
 mount_file_capabilities(fastapi_app)
 
+# Experimental local-only media gallery. Disabled unless explicitly opted in.
+from .video_media_api import mount_media_operator_api  # noqa: E402
+mount_media_operator_api(fastapi_app)
+
 # The raw route app stays inert for unit tests. Only the documented production
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
 # around the existing scheduler lifespan so process shutdown deterministically
