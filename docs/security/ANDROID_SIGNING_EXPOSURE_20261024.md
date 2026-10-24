@@ -29,3 +29,7 @@ Only preventive `.gitignore` rules and this incident playbook. **No private keys
 ## Verified release-pipeline dependency
 
 The current `.github/workflows/build-and-release.yml` performs a normal checkout and then `:app:testDebugUnitTest` and `:app:assembleRelease`; it does **not** inject signing files from an external secret store. `android/app/build.gradle.kts` uses the repository-local signing properties for both debug and release. **Removing tracked signing files before provisioning a replacement secret-backed build path will break or change the release pipeline.** Keep remediation sequenced: introduce secure signing provision + test reproducibility, validate device update path, then remove tracked credentials and clean future workflows. Git history exposure remains even after removal.
+
+## CI audit implemented on this branch
+
+`scripts/audit_android_signing.py` inspects tracked **paths only** using `git ls-files -z`; it never opens credential files. `.github/workflows/android-signing-audit.yml` runs its path-classification unit test and audit on PRs/main. During migration, the default audit is deliberately non-blocking and reports the **count only**. Once signing material is no longer tracked, change CI to invoke `python3 scripts/audit_android_signing.py --enforce` as a blocking check. This guard is limited to Android signing paths and is **not** a general secret scanner.
