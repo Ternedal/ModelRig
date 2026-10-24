@@ -32,5 +32,21 @@ class SigningAuditTests(unittest.TestCase):
                 self.assertFalse(audit.is_signing_material(path))
 
 
+    def test_audit_mode_does_not_block_legacy_files(self):
+        from unittest.mock import patch
+        with patch.object(audit, "tracked_signing_files", return_value=["android/signing/modelrig.keystore"]):
+            self.assertEqual(audit.main([]), 0)
+
+    def test_enforce_mode_blocks_legacy_files(self):
+        from unittest.mock import patch
+        with patch.object(audit, "tracked_signing_files", return_value=["android/signing/modelrig.keystore"]):
+            self.assertEqual(audit.main(["--enforce"]), 1)
+
+    def test_enforce_mode_passes_after_migration(self):
+        from unittest.mock import patch
+        with patch.object(audit, "tracked_signing_files", return_value=[]):
+            self.assertEqual(audit.main(["--enforce"]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
