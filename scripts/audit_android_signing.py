@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from pathlib import PurePosixPath
 
 PRIVATE_SUFFIXES = (".keystore", ".jks", ".p12", ".pfx")
 SIGNING_PROPERTIES = "android/signing/keystore.properties"
