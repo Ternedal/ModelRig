@@ -105,9 +105,16 @@ jobs:
           - name: midchain-1
             slice: midchain
             shard: "1/3"
+          # Keep the established midchain-2 status context while splitting
+          # its serial contracts across two separately gated hosted jobs.
+          # Both jobs are part of this matrix and must succeed for the
+          # reusable Stage-B workflow / exact-head qualifier to pass.
           - name: midchain-2
             slice: midchain
-            shard: "2/3"
+            shard: "2a/3"
+          - name: midchain-2b
+            slice: midchain
+            shard: "2b/3"
           - name: midchain-3
             slice: midchain
             shard: "3/3"
