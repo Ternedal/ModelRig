@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -10,7 +11,7 @@ plugins {
 // This compatibility fallback is temporary: see security migration issue #2269.
 // Prefer an external properties file, and never log its contents.
 val externalSigningProperties = providers.environmentVariable("KALIV_SIGNING_PROPERTIES_FILE").orNull
-val signingPropertiesFile = externalSigningProperties?.let { java.io.File(it) }
+val signingPropertiesFile = externalSigningProperties?.let { File(it) }
     ?: rootProject.file("signing/keystore.properties")
 if (externalSigningProperties != null) {
     require(signingPropertiesFile.isFile) { "KALIV_SIGNING_PROPERTIES_FILE must point to an existing file" }
