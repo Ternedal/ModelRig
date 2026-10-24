@@ -32,4 +32,6 @@ The current `.github/workflows/build-and-release.yml` performs a normal checkout
 
 ## CI audit implemented on this branch
 
-`scripts/audit_android_signing.py` inspects tracked **paths only** using `git ls-files -z`; it never opens credential files. `.github/workflows/android-signing-audit.yml` runs its path-classification unit test and audit on PRs/main. During migration, the default audit is deliberately non-blocking and reports the **count only**. Once signing material is no longer tracked, change CI to invoke `python3 scripts/audit_android_signing.py --enforce` as a blocking check. This guard is limited to Android signing paths and is **not** a general secret scanner.
+`scripts/audit_android_signing.py` inspects tracked **paths only** using `git ls-files -z`; it never opens credential files. `.github/workflows/android-signing-audit.yml` runs path-classification and enforcement tests. The CI gate now runs `--block-new`: it **fails on newly tracked Android signing files**, while temporarily allowing only the two explicitly known legacy paths needed by the current release build. The audit prints counts, not credential contents.
+
+**The legacy allowlist is temporary risk acceptance, not a finding that those files are safe.** After secure signing provision and verified device migration, remove the legacy tracked files and change CI to `python3 scripts/audit_android_signing.py --enforce`, which fails on *any* tracked signing material. This is a narrowly scoped signing-path guard, not a general secret scanner.
