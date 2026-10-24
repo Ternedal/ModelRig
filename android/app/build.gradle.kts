@@ -19,6 +19,9 @@ val ksProps = Properties().apply {
     if (signingPropertiesFile.isFile) signingPropertiesFile.inputStream().use { load(it) }
 }
 val signingKeystorePath = providers.environmentVariable("KALIV_SIGNING_KEYSTORE_FILE").orNull
+if (externalSigningProperties != null) {
+    require(signingKeystorePath != null) { "External signing properties require KALIV_SIGNING_KEYSTORE_FILE" }
+}
 val signingKeystoreFile = signingKeystorePath?.let { java.io.File(it) }
     ?: rootProject.file(ksProps.getProperty("storeFile") ?: "signing/modelrig.keystore")
 if (signingKeystorePath != null) {
