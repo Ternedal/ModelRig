@@ -196,6 +196,25 @@ jobs:
           if echo "$BADGING" | grep -q "application-debuggable"; then echo "release APK is DEBUGGABLE -- wrong build"; exit 1; fi
           echo "release APK OK: signed, package dk.ternedal.modelrig, versionName $VER, not debuggable"
 
+      # Staged security gate: require an independently verified certificate
+      # fingerprint before any APK is named or uploaded. This repository
+      # variable must be provisioned before merging this change.
+      - name: Verify pinned Android signing certificate
+        working-directory: android
+        env:
+          EXPECTED_CERT_SHA256: ${{ vars.KALIV_ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::KALIV_ANDROID_SIGNING_CERT_SHA256 is not configured; refusing APK release"
+            exit 1
+          fi
+          BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
+          python3 ../scripts/verify_android_apk_certificate.py \\
+            --apksigner "$BT/apksigner" \\
+            --apk app/build/outputs/apk/release/app-release.apk \\
+            --expected-sha256 "$EXPECTED_CERT_SHA256"
+
       - name: Name APK with the release tag
         working-directory: android
         run: cp app/build/outputs/apk/release/app-release.apk "../modelrig-${{ github.ref_name }}.apk"
