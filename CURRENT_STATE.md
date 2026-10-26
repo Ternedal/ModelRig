@@ -365,6 +365,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_file_capabilities_scope_authority.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
+- `tests/worker_home_rig_e2e_fixture.py`
 - `tests/worker_home_rig_runtime.py`
 - `tests/worker_jobs.py`
 - `tests/worker_kaliv_bodyrig_digital_twin_m6_qualifier.py`
