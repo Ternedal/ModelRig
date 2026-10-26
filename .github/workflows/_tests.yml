@@ -66,7 +66,7 @@ jobs:
           set -o pipefail
           : > /tmp/modelrig-ci-test.log
           status=0
-          for f in tests/backend_*.py tests/e2e.py tests/worker_*.py tests/workflow_*.py; do
+          for f in tests/backend_*.py tests/comfy_*.py tests/e2e.py tests/test_comfy_*.py tests/test_media_*.py tests/worker_*.py tests/workflow_*.py; do
             [ -e "$f" ] || continue
             if [ "$f" = "tests/workflow_stage_b_physical_gate.py" ]; then
               echo "DELEGATED: $f -> _stage_b_slices.yml"
@@ -74,7 +74,7 @@ jobs:
             fi
             echo "::group::$f"
             echo "===== $f =====" | tee -a /tmp/modelrig-ci-test.log
-            PYTHONPATH=worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-ci-test.log || {
+            PYTHONPATH=.:worker python3 "$f" 2>&1 | tee -a /tmp/modelrig-ci-test.log || {
               status=${PIPESTATUS[0]}
               echo "FAILED: $f (exit $status)" | tee -a /tmp/modelrig-ci-test.log
               echo "::endgroup::"
