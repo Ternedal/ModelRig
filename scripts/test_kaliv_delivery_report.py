@@ -107,6 +107,24 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["workflow"], "unknown")
         self.assertIn("github_api_error:ValueError", result["warnings"])
 
+    def test_malformed_workflow_run_fails_closed(self):
+        def opener(request, timeout):
+            value = {"workflow_runs": [None]} if "/actions/runs?" in request.full_url else []
+            return Response(json.dumps(value).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["workflow"], "unknown")
+        self.assertIn("github_api_error:ValueError", result["warnings"])
+
+    def test_missing_workflow_status_is_partial(self):
+        def opener(request, timeout):
+            value = {"workflow_runs": [{}]} if "/actions/runs?" in request.full_url else []
+            return Response(json.dumps(value).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["workflow"], "unknown")
+        self.assertIn("workflow_status_unavailable", result["warnings"])
+
     def test_io_error_is_reported_as_unknown(self):
         def fail(request, timeout):
             raise OSError("local transport failure")
