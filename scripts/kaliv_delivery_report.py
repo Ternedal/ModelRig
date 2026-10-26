@@ -54,8 +54,14 @@ def summarize_repo(client, owner, repo):
     output = {"repository": owner + "/" + repo, "status": "unknown",
               "open_issues": None, "open_prs": None, "stale_prs": None,
               "draft_prs": None, "ready_prs": None,
+              "stale_ready_prs": None, "default_branch": None,
               "workflow": "unknown", "warnings": []}
     try:
+        meta = client.get(path)
+        if not isinstance(meta, dict) or not isinstance(meta.get("default_branch"), str) or not meta["default_branch"]:
+            raise ValueError("missing default branch metadata")
+        default_branch = meta["default_branch"]
+        output["default_branch"] = default_branch
         issues, issues_truncated = client.pages(path + "/issues?state=open")
         prs, prs_truncated = client.pages(path + "/pulls?state=open")
         if not issues_truncated:
@@ -76,9 +82,15 @@ def summarize_repo(client, owner, repo):
             output["stale_prs"] = sum(
                 (now - dt.datetime.fromisoformat(p["updated_at"].replace("Z", "+00:00"))).days >= 3
                 for p in prs)
+            if output["draft_prs"] is not None:
+                output["stale_ready_prs"] = sum(
+                    not p["draft"] and
+                    (now - dt.datetime.fromisoformat(p["updated_at"].replace("Z", "+00:00"))).days >= 3
+                    for p in prs)
         if issues_truncated or prs_truncated:
             output["warnings"].append("pagination_limit_reached")
-        runs = client.get(path + "/actions/runs?per_page=1")
+        runs = client.get(path + "/actions/runs?branch=" +
+                          urllib.parse.quote(default_branch, safe="") + "&per_page=1")
         if not isinstance(runs, dict) or not isinstance(runs.get("workflow_runs"), list):
             raise ValueError("invalid workflow response")
         latest = runs["workflow_runs"]
@@ -91,7 +103,8 @@ def summarize_repo(client, owner, repo):
             if output["workflow"] == "unknown":
                 output["warnings"].append("workflow_status_unavailable")
         else:
-            output["warnings"].append("no_workflow_runs")
+            # Explicit absence of Actions on default branch is not an API failure.
+            output["workflow"] = "none"
         output["status"] = "partial" if output["warnings"] else "collected"
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
             ValueError, KeyError, TypeError, OSError) as error:
