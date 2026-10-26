@@ -434,6 +434,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_scheduler_time_store.py`
 - `tests/worker_toolhost.py`
 - `tests/worker_tools.py`
+- `tests/worker_tools_cloud_history_wire.py`
 - `tests/worker_tools_guardrail.py`
 - `tests/worker_tools_readtools.py`
 - `tests/worker_unit.py`

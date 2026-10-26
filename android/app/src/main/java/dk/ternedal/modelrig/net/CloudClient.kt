@@ -10,6 +10,22 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
+ * What a direct cloud chat call may carry: the leading system instructions and
+ * the current user message. Nothing else.
+ *
+ * Anders 2026-10-26 (#2275, samarbejdsaftale v1.1 §3): only the current user
+ * message may reach Ollama Cloud; earlier turns stay on the device and the rig.
+ * Enforced at the one place the app talks to the cloud directly, so every call
+ * site (chat, retry, rig-down fallback) gets it, including future ones.
+ * Instructions are kept: they are not conversation.
+ */
+internal fun cloudTurnMessages(messages: List<Pair<String, String>>): List<Pair<String, String>> {
+    val instructions = messages.takeWhile { it.first == "system" }
+    val current = messages.lastOrNull { it.first == "user" }
+    return instructions + listOfNotNull(current)
+}
+
+/**
  * Direct client for Ollama Cloud (https://ollama.com/api) — no local rig needed.
  *
  * Auth is the account API key as a bearer token. The chat endpoint is the native
@@ -94,14 +110,15 @@ class CloudClient(private val apiKey: String, baseUrl: String = "https://ollama.
         onDelta: (String) -> Unit,
     ) {
         val arr = JSONArray()
-        for ((i, m) in messages.withIndex()) {
+        val turn = cloudTurnMessages(messages)
+        for ((i, m) in turn.withIndex()) {
             val (role, content) = m
             val msg = JSONObject().put("role", role).put("content", content)
             // Ollama vision: attach base64 images (no data-URI prefix) to a
             // message via an "images" array. We only ever attach to the LAST
             // message (the current user turn) -- history images aren't resent,
             // same pragmatic scope as RAG. Requires a vision-capable model.
-            if (imageB64 != null && i == messages.lastIndex && role == "user") {
+            if (imageB64 != null && i == turn.lastIndex && role == "user") {
                 msg.put("images", JSONArray().put(imageB64))
             }
             arr.put(msg)
