@@ -62,7 +62,8 @@ def render(payload):
                   "4. Reconcile priorities with the Kaliv master tracking issue (#2264).",
                   "", "## Data limitations", "",
                   "- Open issues and PRs are counts, not completion or velocity metrics.",
-                  "- Latest workflow is scoped to the repository default branch, not a rollup of all required checks.\n                  "- Workflow `none` means no Actions runs on the default branch; it is not a success.",
+                  "- Latest workflow is scoped to the repository default branch, not a rollup of all required checks.",
+                  "- Workflow `none` means no Actions runs on the default branch; it is not a success.",
                   "- No evidence of release readiness, user journeys, physical acceptance or blockers is inferred.",
                   "- Truncated pagination and API errors must remain visible as warnings.",
                   ""])
