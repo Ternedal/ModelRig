@@ -147,14 +147,17 @@ de gengives IKKE her (A4-005's stopregel gælder ogsaa for denne fil):
     - **Uændrede grænser, som skal vurderes særskilt:** systemprompts,
       read-tool-resultater fra samme tur (SECURITY.md åbent punkt 6) og RAG,
       som kræver D4-samtykke.
-    - **Konsekvens, som er accepteret:** cloud kan ikke svare på
-      opfølgningsspørgsmål. Den fysiske verifikation venter på rig-vinduet
-      (#2274/#2278).
+    - **Konsekvens, som er accepteret:** cloud kan ikke besvare
+      opfølgningsspørgsmål, der afhænger af tidligere kontekst i samtalen. Et
+      spørgsmål, der kan stå alene, virker som før. Den fysiske verifikation
+      venter på rig-vinduet (#2274/#2278).
 19. **Claude og ChatGPT koordinerer på GitHub, ikke gennem Anders.**
     Grundlaget er samarbejdsaftale v1.1 og #2275, som Anders besluttede 26/10.
     - **Hvor:** #2275 er den overordnede koordinering. Overdragelser skrives
-      som kommentarer på opgavens issue eller PR. En GitHub-kommentar vækker
-      ikke en session, så Anders beder den anden part om at "tjekke GitHub".
+      som kommentarer på opgavens issue eller PR. Hver agent gennemgår selv
+      sin issue- og PR-kø ved starten af sin næste session, som en bruger har
+      startet. En GitHub-kommentar vækker ikke en session; det er en
+      begrænsning i driften, ikke en del af protokollen.
     - **Grænser for arbejdet:** højst 5 aktive feature-punkter, delt mellem
       begge. Labels `owner:claude`/`owner:chatgpt` og
       `review:claude`/`review:chatgpt`. Ingen direkte push til `main`.
