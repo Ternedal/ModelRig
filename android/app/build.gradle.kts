@@ -124,8 +124,8 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Screenshot-regression: Robolectric 4.17 (SDK 36 + JDK 21) + Roborazzi.
     testImplementation("org.robolectric:robolectric:4.17")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.73.0")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.73.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.76.0")
     testImplementation(platform("androidx.compose:compose-bom:2026.08.00"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test.ext:junit:1.3.0")
