@@ -38,6 +38,22 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["stale_prs"], 1)
         self.assertEqual(result["workflow"], "failure")
 
+    def test_missing_draft_metadata_is_partial_not_false_ready(self):
+        def opener(request, timeout):
+            if "/pulls?" in request.full_url:
+                value = [{"updated_at": "2020-01-01T00:00:00Z"}]
+            elif "/actions/runs?" in request.full_url:
+                value = {"workflow_runs": [{"conclusion": "success"}]}
+            else:
+                value = []
+            return Response(json.dumps(value).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["open_prs"], 1)
+        self.assertIsNone(result["draft_prs"])
+        self.assertIsNone(result["ready_prs"])
+        self.assertIn("draft_status_unavailable", result["warnings"])
+
     def test_api_failure_never_becomes_green(self):
         def fail(request, timeout):
             raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
