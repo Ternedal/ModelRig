@@ -17,6 +17,8 @@ class Response(io.BytesIO):
 class DeliveryReportTests(unittest.TestCase):
     def test_collects_issue_pr_and_workflow(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             self.assertEqual(timeout, 15)
             self.assertEqual(request.get_method(), "GET")
             url = request.full_url
@@ -36,10 +38,14 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["draft_prs"], 0)
         self.assertEqual(result["ready_prs"], 1)
         self.assertEqual(result["stale_prs"], 1)
+        self.assertEqual(result["stale_ready_prs"], 1)
+        self.assertEqual(result["default_branch"], "main")
         self.assertEqual(result["workflow"], "failure")
 
     def test_missing_draft_metadata_is_partial_not_false_ready(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             if "/pulls?" in request.full_url:
                 value = [{"updated_at": "2020-01-01T00:00:00Z"}]
             elif "/actions/runs?" in request.full_url:
@@ -54,6 +60,39 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertIsNone(result["ready_prs"])
         self.assertIn("draft_status_unavailable", result["warnings"])
 
+    def test_workflow_is_scoped_to_default_branch_not_feature_branch(self):
+        seen = []
+        def opener(request, timeout):
+            seen.append(request.full_url)
+            if request.full_url.endswith("/repos/Ternedal/ModelRig"):
+                value = {"default_branch": "stable/release"}
+            elif "/actions/runs?" in request.full_url:
+                value = {"workflow_runs": []}
+            else:
+                value = []
+            return Response(json.dumps(value).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertEqual(result["workflow"], "none")
+        self.assertEqual(result["status"], "collected")
+        self.assertTrue(any("branch=stable%2Frelease&per_page=1" in u for u in seen))
+        self.assertFalse(any("/actions/runs?per_page=1" in u for u in seen))
+
+    def test_stale_draft_does_not_trigger_ready_staleness(self):
+        def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig"):
+                value = {"default_branch": "main"}
+            elif "/pulls?" in request.full_url:
+                value = [{"updated_at": "2020-01-01T00:00:00Z", "draft": True}]
+            elif "/actions/runs?" in request.full_url:
+                value = {"workflow_runs": [{"conclusion": "success"}]}
+            else:
+                value = []
+            return Response(json.dumps(value).encode())
+        result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
+        self.assertEqual(result["stale_prs"], 1)
+        self.assertEqual(result["stale_ready_prs"], 0)
+        self.assertEqual(result["status"], "collected")
+
     def test_api_failure_never_becomes_green(self):
         def fail(request, timeout):
             raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
@@ -65,14 +104,19 @@ class DeliveryReportTests(unittest.TestCase):
 
     def test_empty_workflows_are_partial_not_success(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             value = {"workflow_runs": []} if "/actions/runs?" in request.full_url else []
             return Response(json.dumps(value).encode())
         result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "VoiceRig")
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["workflow"], "unknown")
+        self.assertEqual(result["status"], "collected")
+        self.assertEqual(result["workflow"], "none")
+        self.assertEqual(result["default_branch"], "main")
 
     def test_report_scope_and_no_token_in_output(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             value = {"workflow_runs": []} if "/actions/runs?" in request.full_url else []
             return Response(json.dumps(value).encode())
         result = report(GitHubReadClient("secret-value", opener), repositories=("ModelRig",))
@@ -81,6 +125,8 @@ class DeliveryReportTests(unittest.TestCase):
 
     def test_truncated_pages_are_unknown_not_false_counts(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             url = request.full_url
             if "/issues?" in url or "/pulls?" in url:
                 value = [{"number": i, "updated_at": "2020-01-01T00:00:00Z"}
@@ -100,6 +146,8 @@ class DeliveryReportTests(unittest.TestCase):
 
     def test_malformed_workflow_response_is_partial(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             value = [] if "/actions/runs?" in request.full_url else []
             return Response(json.dumps(value).encode())
         result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "Kaliv")
@@ -109,6 +157,8 @@ class DeliveryReportTests(unittest.TestCase):
 
     def test_malformed_workflow_run_fails_closed(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             value = {"workflow_runs": [None]} if "/actions/runs?" in request.full_url else []
             return Response(json.dumps(value).encode())
         result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
@@ -118,6 +168,8 @@ class DeliveryReportTests(unittest.TestCase):
 
     def test_missing_workflow_status_is_partial(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             value = {"workflow_runs": [{}]} if "/actions/runs?" in request.full_url else []
             return Response(json.dumps(value).encode())
         result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
@@ -134,6 +186,8 @@ class DeliveryReportTests(unittest.TestCase):
 
     def test_malformed_issue_entry_is_not_counted(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             return Response(json.dumps([None] if "/issues?" in request.full_url else []).encode())
         result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
         self.assertEqual(result["status"], "unknown")
@@ -142,6 +196,8 @@ class DeliveryReportTests(unittest.TestCase):
 
     def test_malformed_pr_entry_is_not_counted(self):
         def opener(request, timeout):
+            if request.full_url.endswith("/repos/Ternedal/ModelRig") or request.full_url.endswith("/repos/Ternedal/Kaliv") or request.full_url.endswith("/repos/Ternedal/VoiceRig"):
+                return Response(b'{"default_branch":"main"}')
             return Response(json.dumps([None] if "/pulls?" in request.full_url else []).encode())
         result = summarize_repo(GitHubReadClient("test", opener), "Ternedal", "ModelRig")
         self.assertNotEqual(result["status"], "collected")
