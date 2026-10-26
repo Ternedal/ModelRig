@@ -28,6 +28,22 @@ class SnapshotValidationTests(unittest.TestCase):
         self.assertTrue(any(x.startswith("invalid_open_prs:") for x in errors))
         self.assertTrue(any(x.startswith("warnings:") for x in errors))
 
+    def test_pr_split_reconciles_with_total(self):
+        payload = sample()
+        repo = payload["repositories"][0]
+        repo.update(open_prs=3, draft_prs=1, ready_prs=2)
+        self.assertEqual(validate(payload), [])
+        repo["ready_prs"] = 1
+        self.assertTrue(any(x.startswith("invalid_pr_split:") for x in validate(payload)))
+
+    def test_missing_or_boolean_pr_split_fails_closed(self):
+        payload = sample()
+        repo = payload["repositories"][0]
+        repo.update(open_prs=1, draft_prs=None, ready_prs=1)
+        self.assertTrue(any(x.startswith("invalid_pr_split:") for x in validate(payload)))
+        repo["draft_prs"] = False
+        self.assertTrue(any(x.startswith("invalid_pr_split:") for x in validate(payload)))
+
     def test_duplicate_fails(self):
         payload = sample()
         payload["repositories"].append(dict(payload["repositories"][0]))
