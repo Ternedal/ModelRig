@@ -12,6 +12,7 @@ import (
 
 	"modelrig/internal/auth"
 	"modelrig/internal/config"
+	"modelrig/internal/llmprovider"
 	"modelrig/internal/proxy"
 	"modelrig/internal/store"
 )
@@ -21,6 +22,7 @@ type Deps struct {
 	Cfg    config.Config
 	Store  *store.Store
 	Ollama *proxy.Client
+	LLM    llmprovider.Provider
 	Worker *proxy.Client
 	// WorkerSlow is the same worker upstream with a long timeout, for
 	// requests that legitimately take minutes: voice turns (Whisper loads
@@ -36,6 +38,11 @@ type server struct {
 
 // New wires routes and returns the top-level handler (logging wraps everything).
 func New(d Deps) http.Handler {
+	// Backward-compatible construction for tests and older embedders: if no
+	// provider is injected, the existing Ollama client remains the model runtime.
+	if d.LLM == nil && d.Ollama != nil {
+		d.LLM = llmprovider.NewOllama(d.Ollama)
+	}
 	s := &server{
 		Deps:         d,
 		mux:          http.NewServeMux(),

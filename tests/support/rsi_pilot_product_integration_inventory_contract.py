@@ -36,6 +36,9 @@ UI_HANDOFF_PATH = (
 SENSOR_CONTROL_HANDOFF_PATH = (
     ROOT / "docs" / "devcontrol" / "dc-l16" / "visionrig-sensor-control-handoff.json"
 )
+LLM_PROVIDER_HANDOFF_PATH = (
+    ROOT / "docs" / "devcontrol" / "dc-l16" / "llm-provider-source-transition.json"
+)
 SELECTION_REQUIREMENTS_PATH = (
     ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-selection-requirements.json"
 )
@@ -187,6 +190,11 @@ def run_contract() -> None:
         if SENSOR_CONTROL_HANDOFF_PATH.is_file()
         else None
     )
+    llm_provider_handoff = (
+        _load(LLM_PROVIDER_HANDOFF_PATH)
+        if LLM_PROVIDER_HANDOFF_PATH.is_file()
+        else None
+    )
 
     assert inventory["schema"] == "kaliv-rsi-dc-l16-product-integration-inventory/v1"
     assert inventory["repository"] == "Ternedal/ModelRig"
@@ -223,6 +231,25 @@ def run_contract() -> None:
             "582b163d7a71a934b43671ddad62a5644df3087e"
         )
         transitions.setdefault(sensor_transition["path"], []).append(sensor_transition)
+
+    if llm_provider_handoff is not None:
+        llm_transition = llm_provider_handoff["tracked_source_transition"]
+        assert llm_provider_handoff["schema"] == (
+            "kaliv-rsi-dc-l16-llm-provider-source-transition/v1"
+        )
+        assert llm_provider_handoff["repository"] == "Ternedal/ModelRig"
+        assert llm_transition["path"] == "backend/internal/httpapi/server.go"
+        assert llm_transition["from_git_blob_sha"] == (
+            "f9b646350c70900ec256387b7a7e544d2de3eb0b"
+        )
+        assert llm_provider_handoff["authority_state"] == {
+            "runtime_provider_selection_only": True,
+            "production_activation_authorized": False,
+            "merge_authorized": False,
+            "release_authorized": False,
+            "authority": "llm-provider-source-transition-only",
+        }
+        transitions.setdefault(llm_transition["path"], []).append(llm_transition)
 
     candidates = inventory["candidate_surfaces"]
     assert len(candidates) == len(EXPECTED) == 3
