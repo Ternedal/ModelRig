@@ -81,5 +81,41 @@ class ASRStartupRaceTests(unittest.TestCase):
             voice_asr._load_error = original_error
 
 
+class ASRImportStatusTests(unittest.TestCase):
+    def test_native_import_failure_is_visible_in_worker_log(self):
+        # Simulate a broken native dependency, not a model download or GPU load.
+        import builtins
+        original_import = builtins.__import__
+
+        def block_native_import(name, *args, **kwargs):
+            if name == "faster_whisper":
+                raise ImportError("missing native dependency for ASR")
+            return original_import(name, *args, **kwargs)
+
+        with voice_asr._import_warning_lock:
+            prior = set(voice_asr._import_warning_signatures)
+            voice_asr._import_warning_signatures.clear()
+        try:
+            with (
+                patch("builtins.__import__", side_effect=block_native_import),
+                self.assertLogs("modelrig.worker", level="WARNING") as captured,
+            ):
+                for _ in range(3):
+                    result = voice_asr.status()
+        finally:
+            with voice_asr._import_warning_lock:
+                voice_asr._import_warning_signatures.clear()
+                voice_asr._import_warning_signatures.update(prior)
+        self.assertEqual(len(captured.output), 1, "repeated probes must not spam warnings")
+
+        self.assertFalse(result["ok"])
+        self.assertIsNone(result["model"])
+        self.assertIsNone(result["device"])
+        self.assertIn("native dependency", result["detail"])
+        self.assertNotIn("missing native dependency for ASR", result["detail"])
+        self.assertTrue(any("ImportError" in line and "missing native dependency" in line
+                            for line in captured.output))
+
+
 if __name__ == "__main__":
     unittest.main()

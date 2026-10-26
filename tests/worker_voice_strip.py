@@ -61,6 +61,44 @@ eq("### Overskrift", "Overskrift", "heading marker dropped")
 eq("- punkt et", "punkt et", "bullet dropped")
 eq("[ModelRig](https://x.dev)", "ModelRig", "link text kept, url dropped")
 
+# --- tokens that TTS must never spell aloud (historical voice regression) ---
+eq("Det er ~~forkert~~ rigtigt.", "Det er forkert rigtigt.",
+   "strikethrough markers removed, words preserved")
+eq("Se https://example.org/path?x=123 for detaljer", "Se for detaljer",
+   "raw web address omitted rather than pronounced")
+eq("Læs `https://example.org` nu", "Læs nu", "inline URL delimiters removed")
+eq("(https://example.org)", "", "parenthesized URL leaves no spoken symbol")
+eq("Se [https://example.org] bagefter", "Se bagefter", "bracketed URL leaves no symbol")
+eq("Husk testordet **blå elefant**.", "Husk testordet blå elefant.",
+   "markdown around Danish recall phrase omitted")
+eq("Vores svar er ***vigtigt***!", "Vores svar er vigtigt!",
+   "triple emphasis still preserves the spoken word")
+eq("2 * 3 = 6", "2 * 3 = 6", "math operator not confused with markdown")
+eq("Ord ** løs markør", "Ord løs markør",
+   "unmatched multi-asterisk marker does not get pronounced")
+
+eq("Se https://en.wikipedia.org/wiki/Function_(mathematics) for mere", "Se for mere",
+   "balanced parentheses inside URL are not spoken")
+eq("Læs (https://en.wikipedia.org/wiki/Function_(mathematics)) nu", "Læs nu",
+   "URL with internal and outer parentheses leaves no wrappers")
+eq("Læs `https://en.wikipedia.org/wiki/Function_(mathematics)` nu", "Læs nu",
+   "inline-code URL with parentheses leaves no backticks")
+
+# --- review regressions: prose separators and real operators ---
+eq("Læs https://example.org—og fortsæt.", "Læs —og fortsæt.",
+   "bare URL must not consume em dash or following word")
+eq("Læs https://example.org–og fortsæt.", "Læs –og fortsæt.",
+   "bare URL must not consume en dash or following word")
+eq("Læs https://example.org…og fortsæt.", "Læs …og fortsæt.",
+   "bare URL must not consume ellipsis or following word")
+eq("2 ** 3 = 8", "2 ** 3 = 8", "exponent operator survives")
+eq("foo__bar", "foo__bar", "identifier underscores survive")
+
+eq("Se (https://example.org). Næste", "Se . Næste",
+   "punctuation after parenthesized URL survives")
+eq("Se (https://example.org), næste", "Se , næste",
+   "comma after parenthesized URL survives")
+
 # --- combined ---
 eq("**Vigtigt** 🎯 se her", "Vigtigt se her", "markdown + emoji together")
 
