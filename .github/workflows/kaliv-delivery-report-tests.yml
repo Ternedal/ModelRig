@@ -1,0 +1,54 @@
+name: Kaliv Delivery Report Tests
+on:
+  push:
+    paths:
+      - 'scripts/kaliv_delivery_report.py'
+      - 'scripts/test_kaliv_delivery_report.py'
+      - 'scripts/kaliv_delivery_markdown.py'
+      - 'scripts/test_kaliv_delivery_markdown.py'
+      - 'scripts/kaliv_delivery_demo.py'
+      - 'scripts/kaliv_delivery_validate.py'
+      - 'scripts/test_kaliv_delivery_validate.py'
+      - '.github/workflows/kaliv-delivery-report-tests.yml'
+  pull_request:
+    paths:
+      - 'scripts/kaliv_delivery_report.py'
+      - 'scripts/test_kaliv_delivery_report.py'
+      - 'scripts/kaliv_delivery_markdown.py'
+      - 'scripts/test_kaliv_delivery_markdown.py'
+      - 'scripts/kaliv_delivery_demo.py'
+      - 'scripts/kaliv_delivery_validate.py'
+      - 'scripts/test_kaliv_delivery_validate.py'
+      - '.github/workflows/kaliv-delivery-report-tests.yml'
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m py_compile scripts/kaliv_delivery_report.py scripts/test_kaliv_delivery_report.py scripts/kaliv_delivery_markdown.py scripts/test_kaliv_delivery_markdown.py scripts/kaliv_delivery_validate.py scripts/test_kaliv_delivery_validate.py
+      - name: Offline tests
+        run: cd scripts && python -m unittest test_kaliv_delivery_report test_kaliv_delivery_markdown test_kaliv_delivery_validate -v
+  demo-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Render synthetic smoke-test artifact
+        run: cd scripts && python kaliv_delivery_demo.py
+      - name: Upload clearly labeled synthetic report
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaliv-delivery-SYNTHETIC-demo
+          path: scripts/kaliv-report-demo/
+          retention-days: 7
