@@ -11,6 +11,8 @@ $phoneScript = Join-Path $PSScriptRoot "stage-a-phone-test.ps1"
 $stackScript = Join-Path $PSScriptRoot "start-stage-a-validation-stack.ps1"
 $phoneStatePath = Join-Path $repoRoot "validation\stage-a-runtime\phone-test-state.json"
 $manualPath = Join-Path $repoRoot "validation\voice-manual-observations.json"
+$changePath = Join-Path $repoRoot "validation\voice-change-observations.json"
+$script:changeIncomplete = $false
 $reportPath = Join-Path $repoRoot "validation\voice-baseline-latest.json"
 $fixtureReportPath = Join-Path $repoRoot "validation\voice-baseline-fixture-check.json"
 $agent3ReportPath = Join-Path $repoRoot "validation\agent3-rig-validation-latest.json"
@@ -118,6 +120,20 @@ try {
         throw "Den manuelle Pixel-matrix blev gemt, men bestod ikke. Voice-baseline køres derfor ikke."
     }
 
+    # Ændringerne siden v2.0.15: kontekst, cloud-reglen (D5), persistens og afslutning.
+    # INCOMPLETE (exit 3, fx ingen cloud-nøgle) stopper ikke baselinen; den meldes til sidst.
+    & python (Join-Path $PSScriptRoot "voice_change_observations.py") `
+        --phone-state $phoneStatePath `
+        --manual $manualPath `
+        --output $changePath
+    if ($LASTEXITCODE -eq 3) {
+        $script:changeIncomplete = $true
+        Write-Warning "Voice-ændringsforsøgene er ufuldstændige. Baselinen køres, men resultatet bliver ikke grønt."
+    }
+    elseif ($LASTEXITCODE -ne 0) {
+        throw "Voice-ændringsforsøgene er gemt, men bestod ikke. Voice-baseline køres derfor ikke."
+    }
+
     Write-Host ""
     Write-Host "  Kontrollerer de 20 WAV-filer..." -ForegroundColor Cyan
     & python (Join-Path $PSScriptRoot "voice_baseline.py") `
@@ -169,13 +185,24 @@ try {
         throw "Voice-baselinen bestod ikke. Den konkrete rapport er bevaret i validation\voice-baseline-latest.json."
     }
 
-    Write-Host ""
-    Write-Host "===============================================================" -ForegroundColor Green
-    Write-Host "  VOICE-BEVISET BESTOD" -ForegroundColor Green
-    Write-Host "===============================================================" -ForegroundColor Green
-    Write-Host "  Rapport: validation\voice-baseline-latest.json"
-    Write-Host "  Ingen JSON blev redigeret manuelt."
-    Write-Host "  production_activation=false"
+    if ($script:changeIncomplete) {
+        Write-Host ""
+        Write-Host "===============================================================" -ForegroundColor Yellow
+        Write-Host "  BASELINE BESTOD - ÆNDRINGSFORSØG UFULDSTÆNDIGE" -ForegroundColor Yellow
+        Write-Host "===============================================================" -ForegroundColor Yellow
+        Write-Host "  Rapporter: validation\voice-baseline-latest.json og validation\voice-change-observations.json"
+        Write-Host "  Mindst ét ændringsforsøg blev ikke kørt. Det er ikke et grønt voice-bevis."
+        Write-Host "  production_activation=false"
+    }
+    else {
+        Write-Host ""
+        Write-Host "===============================================================" -ForegroundColor Green
+        Write-Host "  VOICE-BEVISET BESTOD" -ForegroundColor Green
+        Write-Host "===============================================================" -ForegroundColor Green
+        Write-Host "  Rapport: validation\voice-baseline-latest.json og validation\voice-change-observations.json"
+        Write-Host "  Ingen JSON blev redigeret manuelt."
+        Write-Host "  production_activation=false"
+    }
 }
 finally {
     try {
@@ -186,3 +213,4 @@ finally {
     }
     Pop-Location
 }
+if ($script:changeIncomplete) { exit 3 }
