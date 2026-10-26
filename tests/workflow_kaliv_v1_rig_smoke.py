@@ -374,8 +374,8 @@ with tempfile.TemporaryDirectory() as td:
     original_helper = ROOT / "scripts" / "voice_runtime_preflight.py"
     (isolated / original_script.name).write_bytes(original_script.read_bytes())
     clean_helper = original_helper.read_bytes()
-    poisoned_suffix = b"\\n_CACHED_ONLY_MARKER = True\\n"
-    safe_suffix = b"\\n#" + b" " * (len(poisoned_suffix) - 2)
+    poisoned_suffix = b"\n_CACHED_ONLY_MARKER = True\n"
+    safe_suffix = b"\n#" + b" " * (len(poisoned_suffix) - 2)
     assert len(poisoned_suffix) == len(safe_suffix)
     helper = isolated / original_helper.name
     helper.write_bytes(clean_helper + poisoned_suffix)
