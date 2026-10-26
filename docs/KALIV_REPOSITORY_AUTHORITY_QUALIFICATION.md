@@ -14,6 +14,16 @@ in the four core repositories:
 The qualifier itself is read-only. It does not change branch protection,
 rulesets, checks, permissions, merge policy, or production activation.
 
+> **V1 operator warning (2026-10-09):** the actual repository
+> `verify-repository-authority.ps1` interfaces differ. ModelRig and BodyRig
+> accept `-Json`, but VisionRig and VoiceRig are text-only and do not verify
+> a clean, SHA-bound checkout. See
+> [V1 repository authority preflight](V1_REPOSITORY_AUTHORITY_PREFLIGHT.md)
+> and [issue #2109](https://github.com/Ternedal/ModelRig/issues/2109).
+> Do not translate a text-only PASS, manually asserted true flag, or
+> invented opaque evidence ref into a canonical release PASS. All four live,
+> independently reviewed, revision-bound sources are still required.
+
 Each input entry must bind one exact 40-hex Git SHA to
 `live_repository_authority_passed=true` and a distinct immutable evidence
 reference. Mutable branch or tag identity is rejected.
