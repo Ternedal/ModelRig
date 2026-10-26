@@ -21,9 +21,14 @@ It checks the read-only journey and its negative edges:
 * the bearer and Home Assistant attributes never appear in the receipt,
   audit log, sharing ledger, log output or the report.
 
-``--report PATH`` writes a verifiable JSON report; ``--check PATH`` validates a
-stored one. Production activation stays false; nothing here contacts a real
-Home Assistant. The consented live read is a separate, PENDING step.
+``--report PATH`` writes a JSON report bound to the checkout that produced it.
+``--check PATH`` re-checks a stored report against the current checkout: its
+summary must match its cases, its candidate commit must equal ``HEAD``, and
+every file-under-test hash must equal the file on disk. The report is **not
+signed**. Anyone who can rerun the test can produce a new one, so it is
+consistency evidence for an exact commit, not proof of who produced it.
+Production activation stays false; nothing here contacts a real Home
+Assistant. The consented live read is a separate, PENDING step.
 """
 from __future__ import annotations
 
@@ -274,15 +279,17 @@ def read(runtime, entity_id: str, permission_id: str):
         return None, type(exc).__name__
 
 
-def git_sha() -> str | None:
-    env = os.environ.get("GITHUB_SHA")
-    if env:
-        return env
+def checkout_head() -> str | None:
+    """The commit actually checked out, not what the environment claims."""
     try:
         return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True,
                               text=True, timeout=10, check=True).stdout.strip() or None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def git_sha() -> str | None:
+    return checkout_head() or os.environ.get("GITHUB_SHA") or None
 
 
 def files_sha256() -> dict[str, str]:
@@ -508,8 +515,13 @@ def summarize(items: list[dict]) -> dict:
     return {"status": status, "passed": len(items) - len(bad), "failed": len(bad), "missing": missing}
 
 
-def validate(report: dict) -> list[str]:
-    """Return problems with a stored report; empty means it is consistent."""
+def validate(report: dict, *, against_checkout: bool = False) -> list[str]:
+    """Return problems with a report; empty means it is consistent.
+
+    With ``against_checkout`` the report must also describe THIS checkout: the
+    recorded commit equals ``HEAD`` and every recorded file hash equals the
+    file on disk. Without it, only internal consistency is checked.
+    """
     problems = []
     if report.get("schema") != SCHEMA:
         problems.append("unexpected schema")
@@ -527,16 +539,56 @@ def validate(report: dict) -> list[str]:
     for item in items:
         if item.get("result") not in ("pass", "fail"):
             problems.append(f"case {item.get('id')} has no pass/fail result")
-    files = (report.get("candidate") or {}).get("files_sha256") or {}
+    candidate = report.get("candidate") or {}
+    files = candidate.get("files_sha256") or {}
     if sorted(files) != sorted(UNDER_TEST):
         problems.append("candidate does not pin every file under test")
+    if against_checkout:
+        head = checkout_head()
+        if head is None or not candidate.get("git_sha"):
+            problems.append("report cannot be bound to a commit (no git HEAD or no recorded sha)")
+        elif candidate["git_sha"] != head:
+            problems.append(f"report was produced at {candidate['git_sha'][:12]}, checkout is {head[:12]}")
+        else:
+            dirty = subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD", "--", *UNDER_TEST],
+                                   capture_output=True, timeout=10).returncode
+            if dirty != 0:
+                problems.append("files under test have uncommitted changes, so HEAD does not describe them")
+        actual = files_sha256()
+        for rel in UNDER_TEST:
+            if files.get(rel) != actual[rel]:
+                problems.append(f"file hash differs from the checkout: {rel}")
     return problems
+
+
+def tamper_self_test(report: dict) -> None:
+    """Each forgery of a real report must be rejected by --check."""
+    bindable = checkout_head() is not None
+    check(not validate(report, against_checkout=bindable),
+          "the fresh report validates against this checkout" if bindable else
+          "the fresh report is internally consistent (no git HEAD to bind to)")
+    forgeries = {
+        "a summary flipped to PASS over a failed case":
+            lambda r: (r["cases"][0].update(result="fail")),
+        "a live result claimed": lambda r: r.update(live_test="PASS"),
+        "a production activation claimed": lambda r: r.update(production_activation=True),
+        "a file hash that does not match the checkout":
+            lambda r: r["candidate"]["files_sha256"].update({UNDER_TEST[0]: "0" * 64}),
+        "a file under test dropped from the candidate":
+            lambda r: r["candidate"]["files_sha256"].pop(UNDER_TEST[-1]),
+    }
+    if bindable:
+        forgeries["a report from another commit"] = lambda r: r["candidate"].update(git_sha="f" * 40)
+    for name, forge in forgeries.items():
+        forged = json.loads(json.dumps(report))
+        forge(forged)
+        check(bool(validate(forged, against_checkout=bindable)), f"--check rejects {name}")
 
 
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[0] == "--check":
         report = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
-        problems = validate(report)
+        problems = validate(report, against_checkout=True)
         for problem in problems:
             print(f"  INVALID: {problem}")
         status = report.get("summary", {}).get("status")
@@ -549,8 +601,7 @@ def main(argv: list[str]) -> int:
         print("usage: worker_home_rig_e2e_fixture.py [--report PATH | --check PATH]")
         return 2
     report = run()
-    problems = validate(report)
-    check(not problems, "the report validates against its own checker" + (f": {problems}" if problems else ""))
+    tamper_self_test(report)
     if report_path is not None:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
