@@ -56,6 +56,7 @@ from .consciousness_core.status_api import build_consciousness_status_router
 from .schedule_api import build_schedule_router
 from .web_research_mount import mount_web_research
 from .schedule_runtime import scheduler_lifespan
+from .voice_prewarm import compose_asr_prewarm_lifespan
 
 # Route construction is side-effect free: no schedule/job/audit DB is opened and
 # ToolGate is not imported until an operator explicitly calls an admin route.
@@ -180,7 +181,7 @@ mount_file_capabilities(fastapi_app)
 # entrypoint owns process lifecycle. Memory 4 query/write resources are composed
 # around the existing scheduler lifespan so process shutdown deterministically
 # closes both optional substrates without transferring lifecycle ownership.
-fastapi_app.router.lifespan_context = compose_autonomous_scheduler_lifespan(
+fastapi_app.router.lifespan_context = compose_asr_prewarm_lifespan(compose_autonomous_scheduler_lifespan(
     compose_shutdown_self_state_checkpoint_lifespan(
         compose_policy_checkpoint_service_lifespan(
             compose_cognitive_session_lifespan(
@@ -201,5 +202,5 @@ fastapi_app.router.lifespan_context = compose_autonomous_scheduler_lifespan(
             )
         )
     )
-)
+))
 app = harden(fastapi_app)
