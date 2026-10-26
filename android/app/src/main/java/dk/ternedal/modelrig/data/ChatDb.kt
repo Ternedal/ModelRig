@@ -94,6 +94,43 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
     }
 
+    /**
+     * Atomically persist a completed spoken turn in the intended conversation.
+     * A failed second insert rolls back the first; a removed conversation gets
+     * no orphan records. Empty turns do not update conversation recency.
+     */
+    fun addCompletedVoiceTurn(convId: Long, transcript: String, reply: String) {
+        if (transcript.isBlank() && reply.isBlank()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.rawQuery("SELECT 1 FROM conversation WHERE id=?", arrayOf(convId.toString())).use {
+                if (!it.moveToFirst()) {
+                    db.setTransactionSuccessful()
+                    return
+                }
+            }
+            val now = System.currentTimeMillis()
+            var inserted = 0
+            for ((role, content) in listOf("user" to transcript, "assistant" to reply)) {
+                if (content.isBlank()) continue
+                db.insertOrThrow("message", null, ContentValues().apply {
+                    put("conv_id", convId)
+                    put("role", role)
+                    put("content", content)
+                    put("created_at", now)
+                })
+                inserted++
+            }
+            if (inserted > 0) {
+                db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun loadMessages(convId: Long): List<Pair<String, String>> {
         val out = mutableListOf<Pair<String, String>>()
         readableDatabase.rawQuery(
