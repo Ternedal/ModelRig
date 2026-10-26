@@ -228,6 +228,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_agent_continue.py`
 - `tests/worker_agent_multistep.py`
 - `tests/worker_approval_receipts.py`
+- `tests/worker_asr_cold_warm_probe.py`
 - `tests/worker_audit.py`
 - `tests/worker_backup.py`
 - `tests/worker_body_assets.py`
@@ -433,12 +434,14 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_scheduler_time_store.py`
 - `tests/worker_toolhost.py`
 - `tests/worker_tools.py`
+- `tests/worker_tools_cloud_history_wire.py`
 - `tests/worker_tools_guardrail.py`
 - `tests/worker_tools_readtools.py`
 - `tests/worker_unit.py`
 - `tests/worker_vision.py`
 - `tests/worker_voice_asr_startup_race.py`
 - `tests/worker_voice_baseline.py`
+- `tests/worker_voice_cloud_history_wire.py`
 - `tests/worker_voice_history.py`
 - `tests/worker_voice_stream.py`
 - `tests/worker_voice_stream_cleanup.py`
@@ -486,9 +489,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent4_pr_description.py`
 - `tests/workflow_agent4_read_product_integration.py`
 - `tests/workflow_agent4_storage_boundary.py`
+- `tests/workflow_android_apk_certificate.py`
 - `tests/workflow_android_credential_commit.py`
 - `tests/workflow_android_palette_divergence.py`
 - `tests/workflow_android_scheduler_picker.py`
+- `tests/workflow_android_signing_audit.py`
 - `tests/workflow_app_backend_route_contract.py`
 - `tests/workflow_appliance_lifecycle_updater_chain.py`
 - `tests/workflow_baseline_one_click.py`

@@ -200,7 +200,8 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         onError: (status: Int, detail: String) -> Unit,
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
-        // Cloud consent applies only to this turn; keep earlier local turns private.
+        // Voice cloud consent authorizes only this turn, not prior local chat.
+        // Block context egress at the client as well as at the worker.
         if (cloudBaseUrl == null && cloudKey == null && history.isNotEmpty()) {
             val previous = org.json.JSONArray()
             history.takeLast(12).forEach { (role, content) ->
@@ -842,7 +843,11 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         // Without history, turning Tools on made Kaliv amnesiac: "write down
         // what we just discussed" had nothing to write. The rig trims it again
         // on arrival; this is the polite bound, not the enforced one.
-        if (history.isNotEmpty()) {
+        // Cloud gets the current message only (Anders 2026-10-26, #2275). The
+        // rig enforces it too; this keeps an honest client from sending what
+        // the rig would drop anyway.
+        val viaCloud = cloudBaseUrl != null || cloudKey != null
+        if (history.isNotEmpty() && !viaCloud) {
             val arr = JSONArray()
             for ((role, content) in history) {
                 arr.put(JSONObject().put("role", role).put("content", content))

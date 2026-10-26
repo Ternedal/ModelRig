@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -6,13 +7,29 @@ plugins {
     id("io.github.takahirom.roborazzi")
 }
 
-// Stable signing identity across build machines/sessions. Keystore + properties
-// live in the (private) repo on purpose: this is a personal, sideloaded app —
-// the win is that every APK, from any session or CI, installs over the previous
-// one. Keep a copy of the password in Notion Secrets as backup.
+// The historical signing identity is exposed in public Git history.
+// This compatibility fallback is temporary: see security migration issue #2269.
+// Prefer an external properties file, and never log its contents.
+val externalSigningProperties = providers.environmentVariable("KALIV_SIGNING_PROPERTIES_FILE").orNull
+val signingPropertiesFile = externalSigningProperties?.let { File(it) }
+    ?: rootProject.file("signing/keystore.properties")
+if (externalSigningProperties != null) {
+    require(signingPropertiesFile.isFile) { "KALIV_SIGNING_PROPERTIES_FILE must point to an existing file" }
+}
 val ksProps = Properties().apply {
-    val f = rootProject.file("signing/keystore.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
+    if (signingPropertiesFile.isFile) signingPropertiesFile.inputStream().use { load(it) }
+}
+val signingKeystorePath = providers.environmentVariable("KALIV_SIGNING_KEYSTORE_FILE").orNull
+if (signingKeystorePath != null) {
+    require(externalSigningProperties != null) { "External signing keystore requires KALIV_SIGNING_PROPERTIES_FILE" }
+}
+if (externalSigningProperties != null) {
+    require(signingKeystorePath != null) { "External signing properties require KALIV_SIGNING_KEYSTORE_FILE" }
+}
+val signingKeystoreFile = signingKeystorePath?.let { File(it) }
+    ?: rootProject.file(ksProps.getProperty("storeFile") ?: "signing/modelrig.keystore")
+if (signingKeystorePath != null) {
+    require(signingKeystoreFile.isFile) { "KALIV_SIGNING_KEYSTORE_FILE must point to an existing file" }
 }
 
 android {
@@ -36,7 +53,7 @@ android {
 
     signingConfigs {
         create("modelrig") {
-            storeFile = rootProject.file(ksProps.getProperty("storeFile") ?: "signing/modelrig.keystore")
+            storeFile = signingKeystoreFile
             storePassword = ksProps.getProperty("storePassword")
             keyAlias = ksProps.getProperty("keyAlias") ?: "modelrig"
             keyPassword = ksProps.getProperty("keyPassword")
