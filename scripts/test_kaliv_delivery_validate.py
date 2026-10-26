@@ -54,6 +54,22 @@ class SnapshotValidationTests(unittest.TestCase):
         payload["repositories"][0]["workflow"] = "unknown"
         self.assertTrue(any(x.startswith("unknown_workflow:") for x in validate(payload)))
 
+    def test_no_workflow_runs_is_explicit_not_an_api_error(self):
+        payload = sample()
+        payload["repositories"][0]["workflow"] = "none"
+        self.assertEqual(validate(payload), [])
+
+    def test_stale_ready_subset_reconciles(self):
+        payload = sample()
+        repo = payload["repositories"][0]
+        repo.update(open_prs=3, draft_prs=1, ready_prs=2,
+                    stale_prs=2, stale_ready_prs=1)
+        self.assertEqual(validate(payload), [])
+        repo["stale_ready_prs"] = 3
+        self.assertTrue(any(x.startswith("invalid_stale_ready_prs:") for x in validate(payload)))
+        repo["stale_ready_prs"] = True
+        self.assertTrue(any(x.startswith("invalid_stale_ready_prs:") for x in validate(payload)))
+
     def test_non_object_payload_fails_closed(self):
         self.assertEqual(validate([]), ["payload_not_object"])
 
