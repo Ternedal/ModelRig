@@ -127,6 +127,43 @@ de gengives IKKE her (A4-005's stopregel gælder ogsaa for denne fil):
     Model-hurtigskift, Tænke-tilstand (riggen har FASER, ikke modellens
     tanker — en tankestrøm ville være attrap). Afventer: Eksport & backup,
     KalivDev.
+18. **Cloud får kun den aktuelle brugerbesked.** Anders besluttede det
+    26/10 i samarbejdsaftale v1.1 og i #2275. Reglen gælder **både tale og
+    tekst**. Den bindende ordlyd er: *"Kun den aktuelle brugerbesked må
+    sendes til cloud. Tidligere voice-historik må ikke medsendes. Politikken
+    skal håndhæves i ModelRig-backend/worker, ikke alene i Android-klienten.
+    Regressionstests skal dokumentere, at historik ikke utilsigtet sendes
+    videre til cloud. Andre datatyper, eksempelvis systeminstruktioner og
+    nødvendige protokolmetadata, skal vurderes særskilt og må ikke bruges til
+    at omgå begrænsningen."*
+
+    - **Håndhævelse:** i workeren for tale (`voice_pipeline`, #2248) og tekst
+      (`_tools_chat_turn`, #2276), og i klienterne (`CloudClient` på Android,
+      `ChatRouter` på desktop).
+    - **Bevis på wire-niveau:** `worker_voice_cloud_history_wire`,
+      `worker_tools_cloud_history_wire`, `CloudCurrentMessageOnlyTest` og
+      `ChatRouterSystemAuthorityTest`. Beslutningen er registreret som D5 i
+      `SECURITY.md`.
+    - **Uændrede grænser, som skal vurderes særskilt:** systemprompts,
+      read-tool-resultater fra samme tur (SECURITY.md åbent punkt 6) og RAG,
+      som kræver D4-samtykke.
+    - **Konsekvens, som er accepteret:** cloud kan ikke svare på
+      opfølgningsspørgsmål. Den fysiske verifikation venter på rig-vinduet
+      (#2274/#2278).
+19. **Claude og ChatGPT koordinerer på GitHub, ikke gennem Anders.**
+    Grundlaget er samarbejdsaftale v1.1 og #2275, som Anders besluttede 26/10.
+    - **Hvor:** #2275 er den overordnede koordinering. Overdragelser skrives
+      som kommentarer på opgavens issue eller PR. En GitHub-kommentar vækker
+      ikke en session, så Anders beder den anden part om at "tjekke GitHub".
+    - **Grænser for arbejdet:** højst 5 aktive feature-punkter, delt mellem
+      begge. Labels `owner:claude`/`owner:chatgpt` og
+      `review:claude`/`review:chatgpt`. Ingen direkte push til `main`.
+    - **Kræver Anders' eksplicitte godkendelse:**
+      - produktions-releases og ændring af signing-nøgler;
+      - sikkerhed og ekstern dataoverførsel;
+      - destruktive migrationer og sletning af branches eller historik;
+      - juridiske eller persondata-konsekvenser;
+      - aktivering af slået-fra højrisiko-funktionalitet.
 
 ---
 
