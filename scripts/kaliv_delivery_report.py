@@ -53,6 +53,7 @@ def summarize_repo(client, owner, repo):
                                  urllib.parse.quote(repo, safe=""))
     output = {"repository": owner + "/" + repo, "status": "unknown",
               "open_issues": None, "open_prs": None, "stale_prs": None,
+              "draft_prs": None, "ready_prs": None,
               "workflow": "unknown", "warnings": []}
     try:
         issues, issues_truncated = client.pages(path + "/issues?state=open")
@@ -65,6 +66,10 @@ def summarize_repo(client, owner, repo):
             if any(not isinstance(pr, dict) for pr in prs):
                 raise ValueError("invalid pull request entry")
             output["open_prs"] = len(prs)
+            if any("draft" not in pr or not isinstance(pr["draft"], bool) for pr in prs):
+                raise ValueError("missing_or_invalid_draft_status")
+            output["draft_prs"] = sum(pr["draft"] for pr in prs)
+            output["ready_prs"] = len(prs) - output["draft_prs"]
         now = dt.datetime.now(dt.timezone.utc)
         if not prs_truncated:
             output["stale_prs"] = sum(
