@@ -846,6 +846,15 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         # A system prompt is in force (the caller's, or the registry's): drop
         # any duplicate -- or a client-side legacy persona -- from history.
         trimmed = [m for m in trimmed if m.role != "system"]
+    if req.cloud_key or req.cloud_base_url:
+        # Anders 2026-10-26 (#2275, samarbejdsaftale v1.1 §3): only the current
+        # user message may reach a cloud model -- no earlier turns, for text as
+        # for voice. Enforced here, not in the client: an old or modified APK
+        # still sends history, and the rig is where the egress happens. A
+        # leading legacy persona (old APKs put it at the head of history) is an
+        # instruction, not conversation, and is kept. Either field counts: a
+        # cloud URL without a key is still a cloud upstream.
+        trimmed = [m for m in trimmed[:1] if m.role == "system"]
     messages.extend(m.model_dump() for m in trimmed)
 
     sources: list[str] = []

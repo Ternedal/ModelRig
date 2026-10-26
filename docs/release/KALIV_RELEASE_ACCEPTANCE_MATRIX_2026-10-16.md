@@ -41,10 +41,11 @@ Use only `PASS`, `FAIL`, `BLOCKED`, or `NOT_RUN`. `PASS` requires dated, linked 
 | TTS audible first chunk and complete playback | NOT_RUN | Operator observation and timing |
 | Stop during network stream cancels upstream work | NOT_RUN | Android, Go and worker cancellation evidence |
 | Barge-in prevents stale audio and frees resources | NOT_RUN | Two-turn physical replay |
-| Voice history recalls prior turn without system-role injection | NOT_RUN | Bounded two-turn replay and negative test |
+| Voice history recalls prior turn without system-role injection | NOT_RUN | Bounded two-turn replay and negative test; physical: `change-01` in `validation/voice-change-observations.json` (`START_STAGE_A_VOICE_TEST.cmd`) |
+| Completed voice turns survive app restart; a finished turn returns to idle | NOT_RUN | `change-03` and `change-04` in `validation/voice-change-observations.json` (#2243, #2242) |
 | Temporary WAV cleanup after interruption | NOT_RUN | Post-run filesystem inventory |
 | Offline/reconnect and repeat turn | NOT_RUN | Device test and recovery trace |
-| Cloud opt-in and privacy boundary | NOT_RUN | Local-only and explicitly cloud-enabled probes |
+| Cloud opt-in and privacy boundary | NOT_RUN | Local-only and explicitly cloud-enabled probes; only the current user message may reach the cloud (SECURITY.md D5): `change-02` in `validation/voice-change-observations.json` must show the cloud model did not know an earlier turn. `not_run` there keeps this row NOT_RUN |
 | Installed-app upgrade retains app data | NOT_RUN | Version/signature/device-data evidence |
 | Rollback/recovery | NOT_RUN | Approved operator runbook and recovery test |
 | Existing signing-key risk decision still applies | NOT_RUN | Record evidence of whether the app remains solo, sideload-only, and on the user's own backend/Tailscale per `SECURITY.md` D1 (2026-07-13). If public distribution, additional users, or application-ID protection assumptions change, mark BLOCKED until explicit owner-approved risk reassessment and migration plan |
