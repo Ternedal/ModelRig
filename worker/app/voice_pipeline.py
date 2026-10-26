@@ -246,7 +246,9 @@ async def converse(
     # Never accept arbitrary roles or unbounded client-supplied context.
     prior = [
         {"role": item["role"], "content": item["content"][:4000]}
-        for item in (history or [])[-12:]
+        # Cloud voice consent covers the current ASR transcript only.
+        # Never forward earlier local conversation turns without a separate opt-in.
+        for item in (() if (llm_base_url or llm_api_key) else (history or [])[-12:])
         if isinstance(item, dict)
         and item.get("role") in ("user", "assistant")
         and isinstance(item.get("content"), str)
