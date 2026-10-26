@@ -215,12 +215,25 @@ def validate(value: Any, candidate: dict[str, str] | None = None) -> dict[str, A
         )["result"]
         if recomputed != trial.get("result"):
             raise ChangeObservationError(f"{trial['id']}: resultatet passer ikke med svaret")
-    words = [t.get("word") for t in trials if t.get("word")]
+        # The recall trials mean nothing without the word they asked about: a
+        # report without it could pass change-02 on any non-answer. Trials that
+        # ask about no word must not carry one.
+        word = trial.get("word")
+        if spec.get("needs_word"):
+            if not isinstance(word, str) or word not in WORDS:
+                raise ChangeObservationError(f"{trial['id']}: mangler et gyldigt testord")
+        elif "word" in trial:
+            raise ChangeObservationError(f"{trial['id']}: har et testord, som forsøget ikke bruger")
+    words = [t["word"] for t in trials if "word" in t]
     if len(words) != len(set(words)):
         raise ChangeObservationError("samme testord er brugt i flere forsøg")
     summary = summarize(trials)
     if summary["status"] == "INVALID":
         raise ChangeObservationError("forsøgene er ufuldstændige eller i forkert rækkefølge")
+    # A stored summary is what a reader sees first. It must say exactly what the
+    # trials say; a report without one (written before it existed) is still read.
+    if "summary" in value and value["summary"] != summary:
+        raise ChangeObservationError("den gemte summary passer ikke med forsøgene")
     return summary
 
 
