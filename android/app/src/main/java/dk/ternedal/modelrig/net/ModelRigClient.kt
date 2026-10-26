@@ -200,7 +200,9 @@ class ModelRigClient(baseUrl: String, private val token: String? = null) {
         onError: (status: Int, detail: String) -> Unit,
     ) {
         val payload = JSONObject().put("audio_base64", audioB64).put("language", language)
-        if (history.isNotEmpty()) {
+        // Voice cloud consent authorizes only this turn, not prior local chat.
+        // Block context egress at the client as well as at the worker.
+        if (cloudBaseUrl == null && cloudKey == null && history.isNotEmpty()) {
             val previous = org.json.JSONArray()
             history.takeLast(12).forEach { (role, content) ->
                 if ((role == "user" || role == "assistant") && content.isNotBlank()) {
