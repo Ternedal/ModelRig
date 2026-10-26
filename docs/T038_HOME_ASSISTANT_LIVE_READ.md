@@ -50,7 +50,8 @@ The test covers:
 - That the token file on the **Windows rig** is protected. The file-mode check
   in `_load_bearer` applies only on POSIX. On Windows no ACL check is made, so
   the protection rests on the folder's permissions. This is a known limitation
-  and is not changed here.
+  and is not changed here. A narrow, default-deny design for checking the
+  Windows DACL is in `docs/T038_WINDOWS_TOKEN_ACL_DESIGN.md`.
 
 ## Operator entry point
 
