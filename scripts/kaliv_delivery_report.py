@@ -84,8 +84,12 @@ def summarize_repo(client, owner, repo):
         latest = runs["workflow_runs"]
         if latest:
             run = latest[0]
+            if not isinstance(run, dict):
+                raise ValueError("invalid workflow run entry")
             output["workflow"] = (run.get("conclusion") or run.get("status") or "unknown")
             output["workflow_url"] = run.get("html_url")
+            if output["workflow"] == "unknown":
+                output["warnings"].append("workflow_status_unavailable")
         else:
             output["warnings"].append("no_workflow_runs")
         output["status"] = "partial" if output["warnings"] else "collected"
