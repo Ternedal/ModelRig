@@ -7,6 +7,7 @@ Run: PYTHONPATH=worker python3 tests/worker_scheduler.py
 """
 from __future__ import annotations
 
+import calendar
 import os
 import sys
 import time
@@ -57,17 +58,20 @@ for bad in ("", "hourly", "daily:24:00", "daily:3:00", "every:-1", "cron:* * * *
 
 # --- next_run ---------------------------------------------------------------
 
-base = time.mktime((2026, 7, 17, 10, 0, 0, 0, 0, -1))
+# These cases schedule in "UTC", so their wall-clock times are built and read
+# in UTC as well. Built with the machine's own zone they were green in CI (UTC)
+# and red on the rig (Europe/Copenhagen), with the scheduler correct both times.
+base = calendar.timegm((2026, 7, 17, 10, 0, 0, 0, 0, 0))
 check(S.next_run(S.Cadence("every", seconds=900), base, "UTC") == base + 900, "interval fires 900s later")
 
 nxt = S.next_run(S.Cadence("daily", hour=3, minute=0), base, "UTC")
-lt = time.localtime(nxt)
+lt = time.gmtime(nxt)
 check((lt.tm_hour, lt.tm_min) == (3, 0) and nxt > base,
       "daily:03:00 from 10:00 fires at 03:00 -- tomorrow, not in the past")
 
-early = time.mktime((2026, 7, 17, 1, 0, 0, 0, 0, -1))
+early = calendar.timegm((2026, 7, 17, 1, 0, 0, 0, 0, 0))
 nxt2 = S.next_run(S.Cadence("daily", hour=3, minute=0), early, "UTC")
-check(time.localtime(nxt2).tm_mday == 17 and nxt2 - early == 7200,
+check(time.gmtime(nxt2).tm_mday == 17 and nxt2 - early == 7200,
       "daily:03:00 from 01:00 fires the SAME day, two hours later")
 check(raises(S.next_run, S.Cadence("mystery"), base, "UTC") is not None,
       "an unknown cadence kind fails closed instead of being treated as daily")
@@ -75,8 +79,8 @@ check(raises(S.next_run, S.Cadence("mystery"), base, "UTC") is not None,
 # --- the rig was off: missed runs are reported, never replayed --------------
 
 cad = S.Cadence("daily", hour=3, minute=0)
-due = time.mktime((2026, 7, 10, 3, 0, 0, 0, 0, -1))
-now = time.mktime((2026, 7, 17, 10, 0, 0, 0, 0, -1))
+due = calendar.timegm((2026, 7, 10, 3, 0, 0, 0, 0, 0))
+now = calendar.timegm((2026, 7, 17, 10, 0, 0, 0, 0, 0))
 missed, next_due = S.catch_up(cad, due, now, "UTC")
 # 10/7 03:00 through 17/7 03:00 inclusive is EIGHT fire times, not seven: one
 # fires now, seven were missed. My first expectation here said six, and the
