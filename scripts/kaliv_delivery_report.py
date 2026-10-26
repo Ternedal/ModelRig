@@ -66,10 +66,11 @@ def summarize_repo(client, owner, repo):
             if any(not isinstance(pr, dict) for pr in prs):
                 raise ValueError("invalid pull request entry")
             output["open_prs"] = len(prs)
-            if any("draft" not in pr or not isinstance(pr["draft"], bool) for pr in prs):
-                raise ValueError("missing_or_invalid_draft_status")
-            output["draft_prs"] = sum(pr["draft"] for pr in prs)
-            output["ready_prs"] = len(prs) - output["draft_prs"]
+            if all(isinstance(pr.get("draft"), bool) for pr in prs):
+                output["draft_prs"] = sum(pr["draft"] for pr in prs)
+                output["ready_prs"] = len(prs) - output["draft_prs"]
+            else:
+                output["warnings"].append("draft_status_unavailable")
         now = dt.datetime.now(dt.timezone.utc)
         if not prs_truncated:
             output["stale_prs"] = sum(
