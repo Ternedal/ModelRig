@@ -48,6 +48,13 @@ def validate(payload, owner="Ternedal"):
                     type(ready) is not int or ready < 0 or
                     type(total) is not int or draft + ready != total):
                 errors.append("invalid_pr_split:" + name)
+        if "stale_ready_prs" in r:
+            stale_ready = r.get("stale_ready_prs")
+            if (type(stale_ready) is not int or stale_ready < 0 or
+                    type(r.get("stale_prs")) is not int or stale_ready > r["stale_prs"] or
+                    ("ready_prs" in r and
+                     (type(r.get("ready_prs")) is not int or stale_ready > r["ready_prs"]))):
+                errors.append("invalid_stale_ready_prs:" + name)
         if r.get("warnings"):
             errors.append("warnings:" + name)
         if not isinstance(r.get("workflow"), str) or r.get("workflow") == "unknown":
