@@ -25,8 +25,8 @@ def render(payload):
         "",
         "**Source:** GitHub REST read-only snapshot. Latest workflow is not a required-check gate.",
         "",
-        "| Repository | Data status | Open issues | Open PRs | Stale PRs (3+ days) | Latest workflow | Warnings |",
-        "| --- | --- | ---: | ---: | ---: | --- | --- |",
+        "| Repository | Data status | Open issues | Open PRs | Draft PRs | Ready PRs | Stale PRs (3+ days) | Latest workflow | Warnings |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for repo in repositories:
         warnings = repo.get("warnings") or []
@@ -34,7 +34,8 @@ def render(payload):
             warnings = ["invalid_warnings"]
         lines.append("| " + " | ".join(cell(v) for v in (
             repo.get("repository"), repo.get("status"), repo.get("open_issues"),
-            repo.get("open_prs"), repo.get("stale_prs"), repo.get("workflow"),
+            repo.get("open_prs"), repo.get("draft_prs"), repo.get("ready_prs"),
+            repo.get("stale_prs"), repo.get("workflow"),
             ", ".join(map(str, warnings)) or "none")) + " |")
     lines.extend(["", "## Attention required", ""])
     flagged = [repo for repo in repositories
