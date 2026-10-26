@@ -125,6 +125,34 @@ reused["trials"][1]["word"] = reused["trials"][0]["word"]
 check(raises(lambda: m.validate(reused, candidate)),
       "the cloud trial cannot reuse the local trial's word")
 
+# ChatGPT review on #2279 (5652695748): integrity of a stored report.
+wordless = json.loads(json.dumps(report))
+for t in wordless["trials"]:
+    t.pop("word", None)
+check(raises(lambda: m.validate(wordless, candidate)),
+      "recall trials without their test word are rejected, not PASS")
+for trial_index in (0, 1):
+    missing = json.loads(json.dumps(report))
+    del missing["trials"][trial_index]["word"]
+    check(raises(lambda: m.validate(missing, candidate)),
+          f"{missing['trials'][trial_index]['id']} without a word is rejected")
+foreign = json.loads(json.dumps(report))
+foreign["trials"][0]["word"] = "kodeord"
+check(raises(lambda: m.validate(foreign, candidate)), "a word outside the fixed list is rejected")
+spurious = json.loads(json.dumps(report))
+spurious["trials"][2]["word"] = "giraf"
+check(raises(lambda: m.validate(spurious, candidate)),
+      "a trial that asks about no word cannot carry one")
+incomplete = {**json.loads(json.dumps(report)), "trials": full({**all_pass, "change-02": None})}
+forged = {**incomplete, "summary": {**m.summarize(incomplete["trials"]), "status": "PASS"}}
+check(raises(lambda: m.validate(forged, candidate)),
+      "a stored PASS summary over an INCOMPLETE report is rejected")
+honest = {**incomplete, "summary": m.summarize(incomplete["trials"])}
+check(m.validate(honest, candidate)["status"] == "INCOMPLETE",
+      "a stored summary that matches the trials is accepted")
+check(m.validate(incomplete, candidate)["status"] == "INCOMPLETE",
+      "a report without a stored summary is still read")
+
 # Resume: answered trials are kept for the same candidate, archived for another.
 base = m._base()
 validation = ROOT / "validation"
