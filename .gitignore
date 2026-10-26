@@ -1,5 +1,10 @@
 # Go
 /backend/modelrig-server
+# `go build ./cmd/...` run from backend/ drops binaries named after the
+# package here. Two were committed by accident (17 MB, Linux ELF, unused).
+/backend/modelrig-supervisor
+/backend/modelrig-updater
+/backend/modelrig-*
 *.exe
 modelrig-data.json
 modelrig-data.json.tmp
