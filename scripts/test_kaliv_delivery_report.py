@@ -23,7 +23,7 @@ class DeliveryReportTests(unittest.TestCase):
             if "/issues?" in url:
                 value = [{"number": 1}, {"number": 2, "pull_request": {}}]
             elif "/pulls?" in url:
-                value = [{"updated_at": "2020-01-01T00:00:00Z"}]
+                value = [{"updated_at": "2020-01-01T00:00:00Z", "draft": False}]
             elif "/actions/runs?" in url:
                 value = {"workflow_runs": [{"conclusion": "failure", "html_url": "https://github.com/example/run"}]}
             else:
@@ -33,6 +33,8 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["status"], "collected")
         self.assertEqual(result["open_issues"], 1)
         self.assertEqual(result["open_prs"], 1)
+        self.assertEqual(result["draft_prs"], 0)
+        self.assertEqual(result["ready_prs"], 1)
         self.assertEqual(result["stale_prs"], 1)
         self.assertEqual(result["workflow"], "failure")
 
@@ -75,6 +77,8 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertIsNone(result["open_issues"])
         self.assertIsNone(result["open_prs"])
+        self.assertIsNone(result["draft_prs"])
+        self.assertIsNone(result["ready_prs"])
         self.assertIsNone(result["stale_prs"])
         self.assertIn("pagination_limit_reached", result["warnings"])
 
