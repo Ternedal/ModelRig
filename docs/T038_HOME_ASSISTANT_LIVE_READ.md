@@ -11,8 +11,20 @@ ModelRig #2264.
 
 `tests/worker_home_rig_e2e_fixture.py` runs the whole read path. The only
 fixture is the Home Assistant server itself, a stdlib HTTP server on
-`127.0.0.1`. The workflow `t038-home-assistant-e2e` runs it, validates its
-JSON report with `--check`, and keeps the report as an artifact.
+`127.0.0.1`. The workflow `t038-home-assistant-e2e` runs it, re-checks its
+JSON report with `--check` against the same checkout, and keeps the report as
+an artifact.
+
+`--check` confirms four things:
+
+- the summary matches the cases;
+- the recorded commit equals `HEAD`;
+- the files under test have no uncommitted changes;
+- every recorded file hash equals the file on disk.
+
+The report is **not signed**. It is consistency evidence for one exact
+commit, not proof of who produced it, because anyone who can rerun the test
+can produce a new report.
 
 The test covers:
 
