@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 40 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -137,6 +137,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `MODELRIG_CONFIG` | `(unset)` | indstilling |
 | `MODELRIG_DATA` | `(unset)` | slukket |
 | `MODELRIG_EMBED_MODEL` | `nomic-embed-text` | indstilling |
+| `MODELRIG_EXPERIMENTAL_CHAT_PROFILE` | `(tom)` | slukket |
 | `MODELRIG_GEN_MODEL` | `qwen2.5-coder:7b` | indstilling |
 | `MODELRIG_HOST` | `(unset)` | indstilling |
 | `MODELRIG_OLLAMA_KEEP_ALIVE` | `30m` | indstilling |
