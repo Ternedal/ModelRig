@@ -1,0 +1,162 @@
+"""API contract tests with an injected external-volume catalog."""
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.video_media_api import build_media_router
+from app.video_media_catalog import MediaCatalog
+from app.video_media_contract import MediaItem
+
+
+class MediaAPITests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        for folder in ("Jobs", "Media/Images", "Media/Videos"):
+            (root / folder).mkdir(parents=True)
+        self.catalog = MediaCatalog(root)
+        path = root / "Media" / "Videos" / "clip.mp4"
+        path.write_bytes(b"0123456789")
+        self.catalog.register(MediaItem("clip_1", "video"), path)
+        app = FastAPI()
+        app.include_router(build_media_router())
+        self.client = TestClient(app, client=("127.0.0.1", 51000))
+        patcher = patch("app.video_media_api.MediaCatalog.on_external_volume", return_value=self.catalog)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_gallery(self):
+        response = self.client.get("/experimental/media")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"][0]["id"], "clip_1")
+        self.assertEqual(response.json()["items"][0]["url"], "/experimental/media/clip_1")
+        self.assertEqual(self.client.get(response.json()["items"][0]["url"]).content, b"0123456789")
+
+    def test_media_replaced_during_open_is_rejected(self):
+        from unittest.mock import Mock
+        from app.video_media_api import os as media_os
+        real_fstat = media_os.fstat
+        def altered_stat(fd):
+            actual = real_fstat(fd)
+            return Mock(st_dev=actual.st_dev, st_ino=actual.st_ino + 1,
+                        st_mode=actual.st_mode, st_size=actual.st_size)
+        with patch("app.video_media_api.os.fstat", side_effect=altered_stat):
+            response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Media unavailable")
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "Requires O_NOFOLLOW support")
+    def test_symlink_swap_after_catalog_resolution_is_rejected(self):
+        # Simulate an attacker replacing the catalog-validated path before open.
+        with tempfile.TemporaryDirectory() as tmp:
+            secret = Path(tmp) / "secret.txt"
+            secret.write_bytes(b"private data")
+            swapped = Path(tmp) / "swapped.mp4"
+            swapped.symlink_to(secret)
+            with patch.object(self.catalog, "resolve", return_value=(swapped, {"mime_type": "video/mp4"})):
+                response = self.client.get("/experimental/media/clip_1")
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn(b"private data", response.content)
+
+    def test_symlink_swap_rejected_without_no_follow_flag(self):
+        # Verify the identity check still rejects a symlink on platforms lacking O_NOFOLLOW.
+        with tempfile.TemporaryDirectory() as tmp:
+            secret = Path(tmp) / "secret.txt"
+            secret.write_bytes(b"private data")
+            swapped = Path(tmp) / "swapped.mp4"
+            try:
+                swapped.symlink_to(secret)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation not available")
+            real_open = os.open
+            def open_without_no_follow(path, flags, *args, **kwargs):
+                return real_open(path, flags & ~getattr(os, "O_NOFOLLOW", 0), *args, **kwargs)
+            with patch.object(self.catalog, "resolve", return_value=(swapped, {"mime_type": "video/mp4"})):
+                with patch("app.video_media_api.os.open", side_effect=open_without_no_follow):
+                    response = self.client.get("/experimental/media/clip_1")
+            self.assertEqual(response.status_code, 404)
+            self.assertNotIn(b"private data", response.content)
+
+    def test_descriptor_closed_when_fdopen_fails(self):
+        with patch("app.video_media_api.os.fdopen", side_effect=OSError("cannot wrap")):
+            with patch("app.video_media_api.os.close", wraps=__import__("os").close) as close:
+                response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 503)
+        close.assert_called_once()
+
+    def test_gallery_projection_failure_is_service_error(self):
+        with patch("app.video_media_api.gallery_item_for_client", side_effect=ValueError("bad projection")):
+            response = self.client.get("/experimental/media")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Media catalog unavailable")
+
+    def test_invalid_pagination_is_client_error(self):
+        self.assertEqual(self.client.get("/experimental/media?limit=0").status_code, 400)
+        self.assertEqual(self.client.get("/experimental/media?offset=-1").status_code, 400)
+
+    def test_corrupt_catalog_is_service_error(self):
+        with self.catalog._connect() as db:
+            db.execute("UPDATE media_items SET metadata_json=? WHERE media_id=?",
+                       ('{"id":"wrong","kind":"video"}', "clip_1"))
+        response = self.client.get("/experimental/media")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Media catalog unavailable")
+
+    def test_seek(self):
+        response = self.client.get("/experimental/media/clip_1", headers={"Range": "bytes=3-5"})
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, b"345")
+        self.assertEqual(response.headers["content-range"], "bytes 3-5/10")
+
+    def test_head(self):
+        response = self.client.head("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-length"], "10")
+        self.assertEqual(response.content, b"")
+
+    def test_non_loopback_client_is_denied(self):
+        app = FastAPI()
+        app.include_router(build_media_router())
+        remote = TestClient(app, client=("192.0.2.10", 51000))
+        self.assertEqual(remote.get("/experimental/media").status_code, 403)
+        self.assertEqual(remote.get("/experimental/media/clip_1").status_code, 403)
+
+    def test_unsatisfiable_range(self):
+        response = self.client.get(
+            "/experimental/media/clip_1", headers={"Range": "bytes=999-"}
+        )
+        self.assertEqual(response.status_code, 416)
+        self.assertEqual(response.headers["content-range"], "bytes */10")
+
+    def test_head_with_range(self):
+        response = self.client.head(
+            "/experimental/media/clip_1", headers={"Range": "bytes=3-5"}
+        )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.headers["content-range"], "bytes 3-5/10")
+        self.assertEqual(response.content, b"")
+
+    def test_media_stat_io_failure_is_service_error(self):
+        with patch("app.video_media_api.media_response_plan", side_effect=OSError("disk unavailable")):
+            response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "External media storage unavailable")
+
+    def test_media_catalog_io_failure_is_service_error(self):
+        with patch.object(self.catalog, "resolve", side_effect=OSError("disk disconnected")):
+            response = self.client.get("/experimental/media/clip_1")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Media catalog unavailable")
+
+    def test_unknown_media(self):
+        self.assertEqual(self.client.get("/experimental/media/nope").status_code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()

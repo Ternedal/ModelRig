@@ -43,6 +43,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_AGENT4_OPERATOR_API` | `0` |
 | `KALIV_ALLOW_RAG_CLOUD` | `` |
 | `KALIV_CLOUD_ALLOW_PRIVATE` | `0` |
+| `KALIV_COMFY_WORKFLOW_TEMPLATE` | `` |
 | `KALIV_COMPUTER_USE` | `0` |
 | `KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED` | `0` |
 | `KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED` | `0` |
@@ -66,9 +67,12 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED` | `0` |
 | `KALIV_DATA_DIR` | `(unset)` |
 | `KALIV_EGRESS_GATE` | `` |
+| `KALIV_EXPERIMENTAL_MEDIA_OPERATOR_API` | `0` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
+| `KALIV_MEDIA_MIN_FREE_GB` | `20` |
+| `KALIV_MEDIA_ROOT` | `` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
 | `KALIV_SCHEDULER` | `` |

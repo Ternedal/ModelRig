@@ -67,6 +67,14 @@ func (s *server) routes() {
 
 	// Protected (Bearer token required)
 	s.mux.Handle("GET /api/v1/status", s.authMW(http.HandlerFunc(s.handleStatus)))
+	// Experimental media: paired bearer token at the gateway, loopback-only worker.
+	// Must be explicitly enabled on both services; no default remote exposure.
+	if os.Getenv("KALIV_EXPERIMENTAL_MEDIA_OPERATOR_API") == "1" {
+		s.mux.Handle("GET /api/v1/media", s.authMW(http.HandlerFunc(s.handleMediaGallery)))
+		s.mux.Handle("GET /api/v1/media/{id}", s.authMW(http.HandlerFunc(s.handleMediaFile)))
+		s.mux.Handle("HEAD /api/v1/media/{id}", s.authMW(http.HandlerFunc(s.handleMediaFile)))
+	}
+
 	s.mux.Handle("GET /api/v1/health/deep", s.authMW(http.HandlerFunc(s.handleHealthDeep)))
 	s.mux.Handle("GET /api/v1/health/full", s.authMW(http.HandlerFunc(s.handleHealthFull)))
 	s.mux.Handle("GET /api/v1/control-center/status", s.authMW(http.HandlerFunc(s.handleControlCenterStatus)))

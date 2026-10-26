@@ -46,6 +46,18 @@ check(r.returncode == 0,
       if r.returncode == 0
       else f"CURRENT_STATE.md HAS DRIFTED -- run: python3 scripts/current_state.py ({r.stdout.strip()})")
 
+if r.returncode != 0 and doc.exists():
+    # Show the exact generated-file delta in CI instead of guessing which
+    # newly introduced configuration key changed the inventory.
+    import difflib
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import current_state as _state_diagnostic
+    expected = _state_diagnostic.render().splitlines(keepends=True)
+    actual = doc.read_text(encoding="utf-8").splitlines(keepends=True)
+    print("".join(difflib.unified_diff(actual, expected,
+                                       fromfile="CURRENT_STATE.md",
+                                       tofile="generated CURRENT_STATE.md"))[:12000])
+
 text = doc.read_text(encoding="utf-8")
 version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 check(f"**Version:** {version}" in text, f"the doc names the real version ({version})")
