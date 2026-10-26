@@ -23,7 +23,9 @@ on the default branch. Download `kaliv-delivery-snapshot` artifact, containing
 private repository metadata; review who can access workflow artifacts.
 The artifact expires after 14 days.
 
-The upload step uses `always()` to preserve any available diagnostics even when an earlier step fails. If collection fails before writing files, there may be no artifact; inspect the workflow logs.\n\nThe report collects open issue/PR counts, PR age, and the latest workflow
+The upload step uses `always()` to preserve any available diagnostics even when an earlier step fails. If collection fails before writing files, there may be no artifact; inspect the workflow logs.
+
+The report collects open issue/PR counts, PR age, and the latest workflow
 conclusion. It does **not** prove required checks, production readiness,
 physical acceptance, release status, or that a critical user journey works.
 HTTP failures and incomplete pagination must remain visible as warnings.
