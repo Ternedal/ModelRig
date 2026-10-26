@@ -2,7 +2,7 @@
 
 **Status: PENDING, not run.** Nobody has read a real Home Assistant through
 T-038 yet. This page says what the fixture evidence proves, what it does not
-prove, and what is still missing before a live read can be run reproducibly.
+prove, and how the consented live read is run and recorded.
 
 Tracking: KalivNexus #1, and P0 "Read-only NAS/Home Assistant journey" in
 ModelRig #2264.
@@ -40,18 +40,32 @@ The test covers:
   the protection rests on the folder's permissions. This is a known limitation
   and is not changed here.
 
-## Missing before the live test can run
+## Operator entry point
 
-**There is no deterministic operator entry point for a read.** A read happens
-only through the ToolGate tool `home_assistant_read`, which a model must
-choose to call. The loopback routers create grants (`/home-rig/grants`) and
-approve T-032 permissions (`/home-rig/sharing/...`), but they do not perform a
-read. A live test that depends on a model choosing a tool cannot be repeated
-reliably, so the test stays **PENDING** until a bounded, loopback-only,
-single-entity operator read exists. That is a separate slice and needs its own
-review.
+A read used to happen only through the ToolGate tool `home_assistant_read`,
+which a model must choose to call, so a live test could not be repeated.
+`scripts/t038_operator_read.py` is now the deterministic operator entry point.
+It adds no capability: it runs the same `HomeRigRuntime.read` with the
+worker's own grant store, audit log and T-032 ledger, and the same deployment
+settings. It reads exactly one entity, once, and has no rig, preview or write
+path.
 
-## Live test protocol, for when that entry point exists
+Before it makes any network or credential access, it refuses unless
+`KALIV_HOME_RIG_PILOT=1` is set and `--confirm-live-read` is given.
+
+Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | observed and fresh |
+| 3 | Home Assistant unavailable (`unknown`) |
+| 1 | denied, or a configuration failure |
+| 2 | refused |
+
+`tests/worker_t038_operator_read.py` runs the script as a real subprocess
+against the loopback fixture.
+
+## Live test protocol
 
 These steps require Anders' explicit consent for each run. Use one entity,
 and only one with harmless data (for example a temperature sensor).
@@ -75,7 +89,15 @@ and only one with harmless data (for example a temperature sensor).
    /home-rig/sharing/permissions` with the `expected_request_digest` from the
    preview, then `POST /home-rig/sharing/permissions/<id>/approve` with
    `{"confirm": true}`.
-5. **Read** the entity once through the operator entry point (not yet built).
+5. **Read** the entity once, in the worker's environment (same `KALIV_*`
+   settings, so the same stores are used):
+
+   ```powershell
+   python scripts\t038_operator_read.py --entity sensor.<one_entity> --permission-id dsp_<id> --confirm-live-read --evidence validation\t038-live-read.json
+   ```
+
+   The evidence file holds the receipt, the result and only the origin's
+   scheme. It holds no token, no attributes and no host.
 6. **Record the evidence:**
    - the receipt: `state`, `source_id`, `observed_at`, `freshness`;
    - the `/home-rig/audit` row;
@@ -88,5 +110,4 @@ and only one with harmless data (for example a temperature sensor).
    the token file, and revoke the token in Home Assistant.
 
 The result counts as **PASS** only when all of these have been observed and
-recorded. Missing credentials or a missing operator entry point mean
-**PENDING**, never PASS.
+recorded. Missing credentials or consent mean **PENDING**, never PASS.
