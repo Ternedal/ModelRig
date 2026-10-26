@@ -14,6 +14,8 @@ class MarkdownReportTests(unittest.TestCase):
                         "stale_prs": None, "workflow": "unknown",
                         "warnings": ["github_api_error:HTTPError"]}]}
         result = render(payload)
+        self.assertIn("Draft PRs", result)
+        self.assertIn("Ready PRs", result)
         self.assertIn("failure", result)
         self.assertIn("unknown", result)
         self.assertIn("stale PR(s)", result)
