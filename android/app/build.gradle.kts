@@ -96,6 +96,11 @@ android.testOptions {
     unitTests {
         // Robolectric skal bruge rigtige ressourcer (temaer, fonte) til screenshots.
         isIncludeAndroidResources = true
+        // Robolectric 4.17 kalder jdk.internal.access.SharedSecrets fra
+        // AndroidInterceptors (FileDescriptor.setInt$), som JDK 17+ ikke
+        // eksporterer til unnamed modules. Uden flaget fejler alle screenshot-
+        // tests med IllegalAccessException (#1866). Gaelder kun test-JVM'en.
+        all { it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED") }
     }
 }
 
@@ -117,8 +122,8 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("androidx.camera:camera-view:1.4.2")
     testImplementation("junit:junit:4.13.2")
-    // Screenshot-regression: Robolectric 4.16 (SDK 36 + JDK 21) + Roborazzi.
-    testImplementation("org.robolectric:robolectric:4.16.1")
+    // Screenshot-regression: Robolectric 4.17 (SDK 36 + JDK 21) + Roborazzi.
+    testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.73.0")
     testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.73.0")
     testImplementation(platform("androidx.compose:compose-bom:2026.08.00"))
