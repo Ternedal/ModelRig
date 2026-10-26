@@ -79,6 +79,16 @@ TRIALS: tuple[dict[str, Any], ...] = (
         ),
         "question": "Sagde Kaliv '{word}' i svaret på spørgsmål 2? [J/N]",
         "expected": False,
+        # A non-recall only means something if the cloud actually answered: a bad
+        # key or a failed request also "does not know" the word. Without a real
+        # cloud answer to both turns the privacy property was not observed.
+        "preconditions": (
+            ("Har Kaliv-appen en Ollama Cloud-nøgle, så cloud kan slås til? [J/N]",
+             "ingen Ollama Cloud-nøgle på telefonen"),
+            ("Kom der et rigtigt svar på BEGGE spørgsmål, markeret som cloud-svar i appen "
+             "(ikke en fejlmeddelelse)? [J/N]",
+             "cloud svarede ikke på begge ture; privatlivsegenskaben blev ikke observeret"),
+        ),
     },
     {
         "id": "change-03",
@@ -243,18 +253,33 @@ def _load_state(base, path: Path, candidate: dict[str, str]) -> dict[str, Any]:
     return value
 
 
+def _not_run(spec: dict[str, Any], word: str | None, reason: str) -> dict[str, Any]:
+    print(f"  Registreres som IKKE KØRT ({reason}).")
+    print("  Hele resultatet bliver dermed INCOMPLETE, ikke PASS. Forsøget tilbydes igen ved genoptag.")
+    return trial_record(spec, ran=False, observed=None, word=word, reason=reason)
+
+
+def retry_indices(trials: list[dict[str, Any]]) -> list[int]:
+    """Saved trials that were not run and may be offered again on resume."""
+    return [i for i, t in enumerate(trials) if isinstance(t, dict) and t.get("result") == "not_run"]
+
+
 def _collect_one(base, spec: dict[str, Any], number: int, word: str | None) -> dict[str, Any]:
     print("\n" + "=" * 68)
     print(f"  ÆNDRINGSFORSØG {number}/{len(TRIALS)} — {spec['title']}")
     print(f"  ({spec['change']})")
     print("=" * 68)
     print("  " + spec["instruction"].format(word=word or ""))
-    if spec.get("cloud"):
-        if not base._yes_no("\n  Har Kaliv-appen en Ollama Cloud-nøgle, så cloud kan slås til? [J/N]"):
-            print("  Registreres som IKKE KØRT. Hele resultatet bliver dermed INCOMPLETE, ikke PASS.")
-            return trial_record(spec, ran=False, observed=None, word=word,
-                                reason="ingen Ollama Cloud-nøgle på telefonen")
+    preconditions = spec.get("preconditions", ())
+    if preconditions:
+        # The first is asked before the trial (can it run at all), the rest after.
+        question, reason = preconditions[0]
+        if not base._yes_no("\n  " + question):
+            return _not_run(spec, word, reason)
     input("\n  Tryk Enter, når forsøget er udført på telefonen ... ")
+    for question, reason in preconditions[1:]:
+        if not base._yes_no("  " + question):
+            return _not_run(spec, word, reason)
     observed = base._yes_no("  " + spec["question"].format(word=word or ""))
     record = trial_record(spec, ran=True, observed=observed, word=word)
     print("  Resultat: " + ("BESTÅET" if record["result"] == "pass" else "IKKE BESTÅET"))
@@ -279,9 +304,19 @@ def collect(args: argparse.Namespace) -> int:
         raise ChangeObservationError("resume-filen indeholder forsøg i forkert rækkefølge")
     words = iter(state["words"])
     word_for = {spec["id"]: next(words) for spec in TRIALS if spec.get("needs_word")}
+    # A trial recorded as not_run (no cloud key, no cloud answer) is offered again,
+    # so adding a key and relaunching can finish the evidence without hand-editing
+    # the resume file. Answered trials are never repeated.
+    for index in retry_indices(done):
+        spec = TRIALS[index]
+        reason = done[index].get("not_run_reason") or "ikke kørt"
+        if base._yes_no(f"\n  {spec['id']} blev ikke kørt sidst ({reason}). Kør det nu? [J/N]"):
+            done[index] = _collect_one(base, spec, index + 1, word_for.get(spec["id"]))
+            state["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            base._write_json_atomic(resume_path, state)
     for index in range(len(done), len(TRIALS)):
         spec = TRIALS[index]
-        state["trials"].append(_collect_one(base, spec, index + 1, word_for.get(spec["id"])))
+        done.append(_collect_one(base, spec, index + 1, word_for.get(spec["id"])))
         state["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         base._write_json_atomic(resume_path, state)
         print(f"  Gemt: {index + 1}/{len(TRIALS)}. Kan genoptages uden at gentage forsøget.")

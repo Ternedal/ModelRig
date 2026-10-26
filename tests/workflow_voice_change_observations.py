@@ -150,6 +150,68 @@ finally:
             if "voice-change" in leftover.read_text(encoding="utf-8", errors="ignore"):
                 leftover.unlink()
 
+# Codex review on #2279: a failed cloud exchange must not count as non-recall,
+# and a skipped trial must be offered again on resume.
+check([q[1] for q in specs["change-02"]["preconditions"]] ==
+      ["ingen Ollama Cloud-nøgle på telefonen",
+       "cloud svarede ikke på begge ture; privatlivsegenskaben blev ikke observeret"],
+      "the cloud trial requires a key and a real cloud answer to both turns")
+check(m.retry_indices(full({**all_pass, "change-02": None})) == [1],
+      "a not_run trial is identified for retry on resume")
+
+
+class _Script:
+    """Replays the operator's J/N answers and records every question asked."""
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.asked = []
+
+    def __call__(self, message):
+        self.asked.append(message.strip())
+        return self.answers.pop(0)
+
+
+import builtins  # noqa: E402
+
+saved = {k: getattr(base, k) for k in ("_candidate", "_phone_state", "_device_metadata", "_yes_no")}
+saved_input, saved_base = builtins.input, m._base
+temp = Path(tempfile.mkdtemp(prefix="voice-change-collect-", dir=validation))
+try:
+    base._candidate = lambda: candidate
+    base._phone_state = lambda path, cand: {}
+    base._device_metadata = lambda cand: {"model": "Pixel 6a", "os_version": "17", "app_version": "2.0.18"}
+    builtins.input = lambda message="": ""
+    m._base = lambda: base
+
+    def run(answers):
+        script = _Script(answers)
+        base._yes_no = script
+        args = type("Args", (), {})()
+        rel = temp.relative_to(ROOT)
+        args.phone_state = rel / "phone.json"
+        args.manual = rel / "manual.json"
+        args.resume = rel / "resume.json"
+        args.output = rel / "out.json"
+        code = m.collect(args)
+        return code, json.loads((temp / "out.json").read_text(encoding="utf-8")), script.asked
+
+    # change-01 J, key J, cloud answered N (bad key / failed request), 03 J, 04 J.
+    code, report, _ = run([True, True, False, True, True])
+    check(code == 3 and report["trials"][1]["result"] == "not_run",
+          "a configured key without a real cloud answer is not_run, not a privacy PASS")
+    # Resume after fixing the key: retry J, key J, answered J, recalled N -> PASS.
+    code, report, asked = run([True, True, True, False])
+    check(code == 0 and report["summary"]["status"] == "PASS",
+          "the skipped cloud trial is offered again on resume and can complete the evidence")
+    check(len(asked) == 4 and "change-02" in asked[0],
+          "answered trials are not repeated when the skipped one is retried")
+finally:
+    for k, v in saved.items():
+        setattr(base, k, v)
+    builtins.input, m._base = saved_input, saved_base
+    shutil.rmtree(temp, ignore_errors=True)
+
 orchestrator = code_of(ORCHESTRATOR)
 order = [
     orchestrator.index("stage_a_voice_observations.py"),
