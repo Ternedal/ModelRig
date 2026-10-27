@@ -19,6 +19,11 @@ from typing import Iterable
 
 SYSTEM_SID = "S-1-5-18"
 ADMINISTRATORS_SID = "S-1-5-32-544"
+# OWNER RIGHTS is not another principal: it stands for whoever owns the object
+# and replaces the owner's implicit rights. It is trusted only because the owner
+# itself has already been verified as trusted. Observed on the Windows runner:
+# inherited from the temp folder with full control, kept by icacls /inheritance:r.
+OWNER_RIGHTS_SID = "S-1-3-4"
 
 ACCESS_ALLOWED_ACE_TYPE = 0
 ACCESS_DENIED_ACE_TYPE = 1
@@ -95,7 +100,8 @@ def evaluate_credential_acl(
     """Return (acceptable, reason). Refuses unless privacy is positively shown.
 
     Accepted only when the owner is the process user, LocalSystem or
-    Administrators, and every allow ACE for any other principal holds nothing
+    Administrators, and every allow ACE for any other principal (OWNER RIGHTS
+    counts as the owner, so it is trusted once the owner is) holds nothing
     beyond SYNCHRONIZE, FILE_READ_ATTRIBUTES and READ_CONTROL. Deny ACEs never
     make a file acceptable: allow ACEs alone decide, which is conservative by
     construction. Inherited and inherit-only ACEs count like explicit ones.
@@ -114,6 +120,7 @@ def evaluate_credential_acl(
         return False, "file owner is unknown"
     if owner not in trusted:
         return False, "file is owned by another principal"
+    trusted.add(OWNER_RIGHTS_SID)  # only after the owner is known to be trusted
     if dacl is None:
         return False, "NULL DACL grants everyone full access"
     try:
