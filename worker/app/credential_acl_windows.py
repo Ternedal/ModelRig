@@ -5,9 +5,10 @@ pure judgment; this module turns a real Windows security descriptor into its
 inputs. It is still **not wired into any loader**: no behaviour changes.
 
 Pattern follows ``windows_runtime_guard``: the file is opened with
-READ_CONTROL only and FILE_FLAG_OPEN_REPARSE_POINT, so a symlink or junction is
-never followed, and the descriptor is read from that handle (GetSecurityInfo),
-not by name -- no window between looking the name up and reading it.
+READ_CONTROL | FILE_READ_ATTRIBUTES only (never its contents) and
+FILE_FLAG_OPEN_REPARSE_POINT, so a symlink or junction is never followed; the
+opened handle's own attributes must show a regular, non-reparse file; and the
+descriptor is read from that handle (GetSecurityInfo), not by name.
 
 Fail closed: any API failure, a reparse point, a missing owner, an ACL or ACE
 whose size does not add up, or an invalid SID raises ``CredentialAclUnavailable``;
@@ -29,7 +30,9 @@ from .credential_acl import (
 ERROR_SUCCESS = 0
 ERROR_INSUFFICIENT_BUFFER = 122
 INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+FILE_ATTRIBUTE_DIRECTORY = 0x00000010
 FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+FILE_READ_ATTRIBUTES = 0x00000080
 FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
 FILE_SHARE_READ = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
@@ -61,6 +64,15 @@ class _ACE_HEADER(ctypes.Structure):
     _fields_ = [("AceType", ctypes.c_ubyte), ("AceFlags", ctypes.c_ubyte), ("AceSize", ctypes.c_ushort)]
 
 
+class _BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
+    _fields_ = [("dwFileAttributes", ctypes.c_uint32), ("ftCreationTime", ctypes.c_uint64),
+                ("ftLastAccessTime", ctypes.c_uint64), ("ftLastWriteTime", ctypes.c_uint64),
+                ("dwVolumeSerialNumber", ctypes.c_uint32), ("nFileSizeHigh", ctypes.c_uint32),
+                ("nFileSizeLow", ctypes.c_uint32), ("nNumberOfLinks", ctypes.c_uint32),
+                ("nFileIndexHigh", ctypes.c_uint32), ("nFileIndexLow", ctypes.c_uint32)]
+    _pack_ = 4
+
+
 class _SID_AND_ATTRIBUTES(ctypes.Structure):
     _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", ctypes.c_uint32)]
 
@@ -86,6 +98,8 @@ class _Api:
         k32.GetFileAttributesW.restype = ctypes.c_uint32
         k32.LocalFree.argtypes = [ctypes.c_void_p]
         k32.LocalFree.restype = ctypes.c_void_p
+        k32.GetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.POINTER(_BY_HANDLE_FILE_INFORMATION)]
+        k32.GetFileInformationByHandle.restype = ctypes.c_int
         adv.OpenProcessToken.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p)]
         adv.OpenProcessToken.restype = ctypes.c_int
         adv.GetTokenInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32,
@@ -153,13 +167,24 @@ def read_credential_security(path: str | os.PathLike[str]) -> tuple[str, list[Ac
         raise api.fail("GetFileAttributesW")
     if attributes & FILE_ATTRIBUTE_REPARSE_POINT:
         raise CredentialAclUnavailable("credential path is a symlink or junction")
-    handle = api.k32.CreateFileW(name, READ_CONTROL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    handle = api.k32.CreateFileW(name, READ_CONTROL | FILE_READ_ATTRIBUTES,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                  None, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, None)
     value = ctypes.cast(handle, ctypes.c_void_p).value
     if not value or value == INVALID_HANDLE_VALUE:
         raise api.fail("CreateFileW(READ_CONTROL)")
     descriptor = ctypes.c_void_p()
     try:
+        # Authoritative check, on the object actually opened (Codex P2 4387779979):
+        # FILE_FLAG_OPEN_REPARSE_POINT opens a link instead of refusing it, so a
+        # path swapped for a symlink after GetFileAttributesW must be caught here.
+        info = _BY_HANDLE_FILE_INFORMATION()
+        if not api.k32.GetFileInformationByHandle(ctypes.c_void_p(value), ctypes.byref(info)):
+            raise api.fail("GetFileInformationByHandle")
+        if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT:
+            raise CredentialAclUnavailable("opened object is a symlink or junction")
+        if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY:
+            raise CredentialAclUnavailable("opened object is a directory")
         owner, group, dacl, sacl = (ctypes.c_void_p() for _ in range(4))
         code = int(api.adv.GetSecurityInfo(ctypes.c_void_p(value), SE_FILE_OBJECT,
                                            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,

@@ -77,6 +77,13 @@ check("FILE_FLAG_OPEN_REPARSE_POINT" in args, "the open never follows a symlink 
 check("GetSecurityInfo" in source and "GetNamedSecurityInfo" not in source,
       "the descriptor is read from the handle, not looked up again by name")
 check("FILE_ATTRIBUTE_REPARSE_POINT" in source, "a reparse point is refused before opening")
+order = [source.find(marker) for marker in ("api.k32.CreateFileW(", "GetFileInformationByHandle(ctypes",
+                                              "info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT",
+                                              "api.adv.GetSecurityInfo(")]
+check(all(i >= 0 for i in order) and order == sorted(order),
+      "the OPENED handle's attributes are checked for a reparse point before its descriptor is read "
+      "(Codex P2 4387779979: a swap after the name check is still caught)")
+check("info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY" in source, "an opened directory is refused")
 
 print("== not wired yet")
 for rel in ("worker/app/home_assistant_provider_transport.py", "worker/app/riggate_provider_transport.py",

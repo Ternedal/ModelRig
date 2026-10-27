@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "worker"))
 
+import app.credential_acl_windows as reader_module  # noqa: E402
 from app.credential_acl_windows import (  # noqa: E402
     CredentialAclUnavailable,
     credential_file_private,
@@ -105,6 +106,33 @@ def main() -> int:
                 check(False, "a symlink to a private file is refused, not followed")
             except CredentialAclUnavailable:
                 check(True, "a symlink to a private file is refused, not followed")
+
+            # Codex P2 4387779979: the path is swapped for a symlink AFTER the name check.
+            # Simulate it by making GetFileAttributesW report a plain file for the link.
+            class _LyingKernel32:
+                def __init__(self, real):
+                    self._real = real
+
+                def __getattr__(self, name):
+                    return getattr(self._real, name)
+
+                def GetFileAttributesW(self, name):  # noqa: N802
+                    return 0x00000020  # FILE_ATTRIBUTE_ARCHIVE: "a regular file"
+
+            real_api = reader_module._Api
+
+            class _RacedApi(real_api):
+                def __init__(self):
+                    super().__init__()
+                    self.k32 = _LyingKernel32(self.k32)
+
+            reader_module._Api = _RacedApi
+            try:
+                ok, reason = credential_file_private(link)
+                check(ok is False and "symlink or junction" in reason,
+                      f"a symlink swapped in after the name check is refused on the opened handle ({reason})")
+            finally:
+                reader_module._Api = real_api
     print(f"\n===== WINDOWS CREDENTIAL ACL CONTRACT: {passed} passed, {failed} failed =====")
     return 1 if failed else 0
 
