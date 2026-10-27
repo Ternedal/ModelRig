@@ -23,14 +23,33 @@ ADMINISTRATORS_SID = "S-1-5-32-544"
 ACCESS_ALLOWED_ACE_TYPE = 0
 ACCESS_DENIED_ACE_TYPE = 1
 
-# Rights that let a principal read the token or give itself the right to.
+# Access-mask bits named in tests and docs.
 FILE_READ_DATA = 0x0000_0001
+FILE_WRITE_DATA = 0x0000_0002
+FILE_APPEND_DATA = 0x0000_0004
+FILE_EXECUTE = 0x0000_0020
+FILE_READ_ATTRIBUTES = 0x0000_0080
+DELETE = 0x0001_0000
+READ_CONTROL = 0x0002_0000
 WRITE_DAC = 0x0004_0000
 WRITE_OWNER = 0x0008_0000
+SYNCHRONIZE = 0x0010_0000
 MAXIMUM_ALLOWED = 0x0200_0000
 GENERIC_ALL = 0x1000_0000
+GENERIC_EXECUTE = 0x2000_0000
+GENERIC_WRITE = 0x4000_0000
 GENERIC_READ = 0x8000_0000
-RISKY_RIGHTS = FILE_READ_DATA | WRITE_DAC | WRITE_OWNER | MAXIMUM_ALLOWED | GENERIC_ALL | GENERIC_READ
+
+# Allowlist, not denylist: another principal may hold ONLY rights that can
+# neither read the token nor tamper with it (replace, append, delete, re-permission,
+# take ownership, map/execute). Any other bit -- known or not -- refuses.
+BENIGN_RIGHTS = SYNCHRONIZE | FILE_READ_ATTRIBUTES | READ_CONTROL
+
+# Canonical SID bounds (MS-DTYP 2.4.2): revision 1, 48-bit identifier
+# authority, 1..15 subauthorities of 32 bits each, ASCII decimal only.
+_MAX_AUTHORITY = (1 << 48) - 1
+_MAX_SUBAUTHORITY = (1 << 32) - 1
+_MAX_SUBAUTHORITIES = 15
 
 
 @dataclass(frozen=True)
@@ -41,10 +60,29 @@ class Ace:
     sid: str
 
 
-def _sid(value: object) -> str | None:
-    if not isinstance(value, str) or not value.startswith("S-1-") or len(value) > 184:
+def _ascii_decimal(text: str, maximum: int) -> int | None:
+    # str.isdigit() accepts "\u00b2" and other non-ASCII digits; only 0-9 are valid here.
+    if not text or len(text) > 20 or any(c not in "0123456789" for c in text):
         return None
-    if any(not (part.isdigit()) for part in value[2:].split("-")):
+    if len(text) > 1 and text[0] == "0":
+        return None  # canonical form has no leading zeros
+    value = int(text)
+    return value if value <= maximum else None
+
+
+def _sid(value: object) -> str | None:
+    """Return the SID if it is canonical "S-1-<authority>-<sub>..." text, else None."""
+    if not isinstance(value, str) or len(value) > 184:
+        return None
+    parts = value.split("-")
+    if len(parts) < 4 or parts[0] != "S" or parts[1] != "1":
+        return None
+    if _ascii_decimal(parts[2], _MAX_AUTHORITY) is None:
+        return None
+    subauthorities = parts[3:]
+    if not 1 <= len(subauthorities) <= _MAX_SUBAUTHORITIES:
+        return None
+    if any(_ascii_decimal(part, _MAX_SUBAUTHORITY) is None for part in subauthorities):
         return None
     return value
 
@@ -56,11 +94,16 @@ def evaluate_credential_acl(
 ) -> tuple[bool, str]:
     """Return (acceptable, reason). Refuses unless privacy is positively shown.
 
-    Accepted only when the owner and every principal holding a risky right in
-    an allow ACE is the process user, LocalSystem or Administrators. Deny ACEs
-    never make a file acceptable: who can read is decided by allow ACEs alone,
-    which is conservative by construction. Inherited and inherit-only ACEs
-    count like explicit ones.
+    Accepted only when the owner is the process user, LocalSystem or
+    Administrators, and every allow ACE for any other principal holds nothing
+    beyond SYNCHRONIZE, FILE_READ_ATTRIBUTES and READ_CONTROL. Deny ACEs never
+    make a file acceptable: allow ACEs alone decide, which is conservative by
+    construction. Inherited and inherit-only ACEs count like explicit ones.
+
+    ``dacl=None`` means a NULL DACL (everyone has full access) and refuses.
+    ``dacl=[]`` means an empty DACL (nobody is granted access); the judgment
+    accepts it as private, and the actual read then fails on its own. A reader
+    that cannot tell these apart, or fails, must not call this at all: refuse.
     """
     process = _sid(process_sid)
     if process is None:
@@ -87,6 +130,6 @@ def evaluate_credential_acl(
         sid = _sid(ace.sid)
         if sid is None:
             return False, "DACL entry names an unknown principal"
-        if ace.ace_type == ACCESS_ALLOWED_ACE_TYPE and sid not in trusted and ace.mask & RISKY_RIGHTS:
-            return False, "another principal can read the file or change its permissions"
-    return True, "only the process user, SYSTEM and Administrators can read or re-permission the file"
+        if ace.ace_type == ACCESS_ALLOWED_ACE_TYPE and sid not in trusted and ace.mask & ~BENIGN_RIGHTS:
+            return False, "another principal can read, change, delete or re-permission the file"
+    return True, "only the process user, SYSTEM and Administrators can read or change the file"

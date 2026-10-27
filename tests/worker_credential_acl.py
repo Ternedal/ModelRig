@@ -16,13 +16,22 @@ sys.path.insert(0, str(ROOT / "tests" / "support"))
 
 from app.credential_acl import (  # noqa: E402
     ADMINISTRATORS_SID,
-    SYSTEM_SID,
-    Ace,
+    DELETE,
+    FILE_APPEND_DATA,
+    FILE_EXECUTE,
+    FILE_READ_ATTRIBUTES,
     FILE_READ_DATA,
+    FILE_WRITE_DATA,
     GENERIC_ALL,
+    GENERIC_EXECUTE,
     GENERIC_READ,
+    GENERIC_WRITE,
+    READ_CONTROL,
+    SYNCHRONIZE,
+    SYSTEM_SID,
     WRITE_DAC,
     WRITE_OWNER,
+    Ace,
     evaluate_credential_acl,
 )
 from source_code import code_of  # noqa: E402
@@ -66,8 +75,11 @@ check(ok(ME, [allow(ME)]), "only the process user")
 check(ok(ME, [allow(ME), allow(SYSTEM_SID), allow(ADMINISTRATORS_SID)]),
       "process user + SYSTEM + Administrators (the usual locked-down file)")
 check(ok(ADMINISTRATORS_SID, [allow(ME, READ)]), "owned by Administrators, readable by the process user")
-check(ok(ME, [allow(ME), allow(USERS, 0x0010_0000)]),
-      "another principal with SYNCHRONIZE only cannot read or re-permission")
+check(ok(ME, [allow(ME), allow(USERS, SYNCHRONIZE | FILE_READ_ATTRIBUTES | READ_CONTROL)]),
+      "another principal with only SYNCHRONIZE, READ_ATTRIBUTES and READ_CONTROL")
+check(ok(ME, []), "an empty DACL (nobody granted anything) is private; the read itself would then fail")
+check(ok("S-1-5-21-1-2-3-4-5-6-7-8-9-10-11-12-13-14", [], process="S-1-5-21-1-2-3-4-5-6-7-8-9-10-11-12-13-14"),
+      "a canonical SID with the maximum 15 subauthorities")
 check(ok(ME, [allow(ME), deny(EVERYONE)]), "a deny ACE does not make a private file unacceptable")
 
 print("== refused")
@@ -86,6 +98,28 @@ check(not ok(ME, [deny(USERS, READ), allow(USERS, READ), allow(ME)]),
       "a deny ACE before an allow does not rescue a readable file (allow ACEs decide)")
 check(not ok(ME, [allow(ME), Ace(5, 0, READ, USERS)]), "an object/callback ACE type is not understood")
 check(not ok(ME, [allow(ME), Ace(0, 0, READ, "not-a-sid")]), "a malformed principal")
+
+print("== tampering rights are refused, not only read rights (review 5660140985)")
+for name, mask in (("GENERIC_WRITE", GENERIC_WRITE), ("GENERIC_EXECUTE", GENERIC_EXECUTE),
+                   ("FILE_WRITE_DATA", FILE_WRITE_DATA), ("FILE_APPEND_DATA", FILE_APPEND_DATA),
+                   ("DELETE", DELETE), ("FILE_EXECUTE", FILE_EXECUTE),
+                   ("an unknown bit (ACCESS_SYSTEM_SECURITY)", 0x0100_0000)):
+    check(not ok(ME, [allow(ME), allow(OTHER_USER, mask)]), f"another principal with {name}")
+
+print("== malformed SIDs fail closed (Codex P2 4383338384, review 5660140985)")
+check(not ok(SYSTEM_SID, [], process="S-1-5-4294967296"),
+      "Codex example: process SID with an out-of-range subauthority")
+MALFORMED = (
+    "S-1-", "S-1-5-", "S-1-5", "S-2-5-18", "s-1-5-18", " S-1-5-18", "S-1-5-18 ",
+    "S-1-5-\u00b2", "S-1-5-01", "S-1--5-18", "S-1-5-18-",
+    "S-1-281474976710656-1",              # identifier authority above 48 bits
+    "S-1-5-" + "-".join(["1"] * 16),      # 16 subauthorities
+    "S-1-5-+18", "S-1-5-0x12",
+)
+for bad in MALFORMED:
+    check(not ok(ME, [allow(ME)], process=bad), f"process SID {bad!r}")
+    check(not ok(bad, [allow(ME)]), f"owner SID {bad!r}")
+    check(not ok(ME, [allow(ME), deny(bad, READ)]), f"principal {bad!r} in a deny ACE")
 check(not ok(ME, [allow(ME), Ace(0, 0, -1, USERS)]), "an invalid access mask")
 check(not ok(ME, [allow(ME), "garbage"]), "an entry that is not an ACE")
 check(not ok(ME, 12345), "a DACL that cannot be iterated")
@@ -94,7 +128,8 @@ check(not ok(ME, [allow(ME)], process=None), "unknown process user")
 check(not ok(ME, [allow(ME)], process="S-1-5-21-x"), "malformed process user SID")
 
 reason = evaluate_credential_acl(ME, [allow(ME), allow(EVERYONE, READ)], ME)[1]
-check("another principal" in reason and ME not in reason, "the refusal reason names no SID")
+check("another principal" in reason and ME not in reason and EVERYONE not in reason,
+      "the refusal reason names no SID")
 
 print("== not wired yet (no behaviour change in this step)")
 for rel in ("worker/app/home_assistant_provider_transport.py", "worker/app/riggate_provider_transport.py",
