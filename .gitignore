@@ -153,6 +153,7 @@ kaliv-tools-state.json.tmp
 # Only a manually reviewed, dated evidence report may be committed.
 /validation/voice-fixtures/
 /validation/voice-baseline-latest.json
+/validation/t038-live-read.json
 /validation/voice-baseline-latest.json.tmp
 /validation/voice-baseline-fixture-check.json
 /validation/voice-baseline-fixture-check.json.tmp
