@@ -166,6 +166,20 @@ def main() -> int:
             check(replaced.returncode == 0 and ha.count() == start + 1,
                   "the refusal did not burn the permission; --overwrite then reads once and replaces it")
 
+            if os.name == "posix":
+                print("== evidence is never written through a symbolic link (review 5662685431)")
+                target = root / "evidence" / "elsewhere.json"
+                link = root / "evidence" / "linked.json"
+                os.symlink(target, link)  # dangling: Path.exists() says False for it
+                start = ha.count()
+                for extra in ((), ("--overwrite",)):
+                    linked = run("--entity", "sensor.gpu_temp", "--permission-id", permit(),
+                                 "--confirm-live-read", "--evidence", str(link), *extra)
+                    check(linked.returncode == 2 and "symbolic link" in linked.stdout and ha.count() == start
+                          and not target.exists() and link.is_symlink(),
+                          f"dangling symlink{' with --overwrite' if extra else ''} -> refused, zero requests, "
+                          "nothing created through it")
+
             print("== the permission is single use, the scope is exact")
             start = ha.count()
             again = run("--entity", "sensor.gpu_temp", "--permission-id", permission, "--confirm-live-read")
@@ -207,7 +221,49 @@ def main() -> int:
     check(operator_read.project_receipt("not a dict") == {"omitted_fields": ["<receipt is not an object>"]},
           "a malformed receipt projects to nothing")
 
+    print("== the evidence writer itself: exclusive, owner-only, atomic, never through a link")
+    with tempfile.TemporaryDirectory(prefix="modelrig-t038-evidence-") as wd:
+        wd = Path(wd)
+        fresh = wd / "fresh.json"
+        operator_read.write_evidence(fresh, "one\n", overwrite=False)
+        check(fresh.read_text() == "one\n", "a new evidence file is created")
+        if os.name == "posix":
+            check(oct(fresh.stat().st_mode & 0o777) == "0o600", "the evidence file is owner-only (0600)")
+        try:
+            operator_read.write_evidence(fresh, "two\n", overwrite=False)
+            check(False, "a file that appeared after the check is not overwritten")
+        except FileExistsError:
+            check(fresh.read_text() == "one\n", "a file that appeared after the check is not overwritten")
+        operator_read.write_evidence(fresh, "three\n", overwrite=True)
+        check(fresh.read_text() == "three\n" and sorted(p.name for p in wd.iterdir()) == ["fresh.json"],
+              "--overwrite replaces atomically and leaves no temp file")
+        try:
+            (wd / "adir").mkdir()
+            operator_read.write_evidence(wd / "adir", "x", overwrite=True)
+            check(False, "--overwrite refuses a path that is not a regular file")
+        except (IsADirectoryError, OSError):
+            check((wd / "adir").is_dir(), "--overwrite refuses a path that is not a regular file")
+        if os.name == "posix":
+            target = wd / "target.json"
+            link = wd / "race.json"
+            os.symlink(target, link)
+            real_is_symlink = Path.is_symlink
+            Path.is_symlink = lambda self: False  # the link appeared after every name check
+            try:
+                for overwrite in (False, True):
+                    try:
+                        operator_read.write_evidence(link, "x", overwrite=overwrite)
+                        raised = False
+                    except OSError:
+                        raised = True
+                    check(raised and not target.exists(),
+                          f"race: a symlink missed by the name check is still not followed (overwrite={overwrite})")
+            finally:
+                Path.is_symlink = real_is_symlink
+
     source = code_of(SCRIPT)
+    check("write_text(" not in source and ".exists()" not in source,
+          "evidence is written only through write_evidence (no exists()/write_text())")
     check(source.count("json.loads(raw)") == 1 and "project_receipt(json.loads(raw))" in source,
           "the raw receipt is parsed once, straight into the projection")
     for forbidden in ("urllib.request", "http.client", "requests.", "socket.", "preview(", '"rig"',

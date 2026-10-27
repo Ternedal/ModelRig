@@ -125,6 +125,12 @@ and only one with harmless data (for example a temperature sensor).
    `--overwrite` is given. That check runs before the read, so a refusal does
    not use up the one-use permission.
 
+   The file is written owner-only. A new file is created exclusively
+   (`O_EXCL`), so if a file or link appears after the check, the write fails
+   rather than overwriting it. `--overwrite` swaps the file atomically. A
+   symbolic link at the evidence path is always refused; nothing is ever
+   written through one.
+
    The evidence file is not secret, but it shows the entity's state. Keep it
    in a folder only you can read. On Windows, lock it down the same way as
    the token file:

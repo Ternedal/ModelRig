@@ -61,6 +61,42 @@ def project_receipt(receipt: dict) -> dict:
     return projected
 
 
+def write_evidence(path: Path, text: str, *, overwrite: bool) -> None:
+    """Create the evidence file exclusively (owner-only), or replace it atomically.
+
+    Without ``overwrite`` the file is created with O_CREAT|O_EXCL, so a file or
+    symlink that appeared after the pre-read check makes this fail instead of
+    being overwritten or followed. With ``overwrite`` the new content goes to
+    an exclusive temp file in the same directory and ``os.replace`` swaps it
+    in, which replaces a regular file but never writes through a symlink.
+    """
+    path = Path(path)
+    if path.is_symlink():
+        raise PermissionError("evidence path is a symbolic link")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    data = text.encode("utf-8")
+    if not overwrite:
+        fd = os.open(path, flags, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        return
+    if os.path.lexists(path) and not path.is_file():
+        raise IsADirectoryError("evidence path exists and is not a regular file")
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = os.open(temp, flags, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(temp, path)
+    except BaseException:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise
+
+
 def _git_sha() -> str | None:
     try:
         return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True,
@@ -85,10 +121,16 @@ def main(argv: list[str] | None = None) -> int:
     if not args.confirm_live_read:
         print("REFUSED: pass --confirm-live-read to contact Home Assistant once. Nothing was read.")
         return 2
-    if args.evidence is not None and args.evidence.exists() and not args.overwrite:
+    if args.evidence is not None:
         # Checked before the read, so a refusal never burns the one-use permission.
-        print(f"REFUSED: {args.evidence} already exists; pass --overwrite to replace it. Nothing was read.")
-        return 2
+        # lexists, not exists: Path.exists() follows a dangling symlink and says False.
+        if args.evidence.is_symlink():
+            print(f"REFUSED: {args.evidence} is a symbolic link; evidence is never written through one. "
+                  "Nothing was read.")
+            return 2
+        if os.path.lexists(args.evidence) and not args.overwrite:
+            print(f"REFUSED: {args.evidence} already exists; pass --overwrite to replace it. Nothing was read.")
+            return 2
 
     sys.path.insert(0, str(ROOT / "worker"))
     import app.home_rig_tool as runtime_module  # noqa: E402  (paths resolve from this process's env)
@@ -125,8 +167,12 @@ def main(argv: list[str] | None = None) -> int:
             "result": "observed" if observed else "unavailable",
             "production_activation": False,
         }
-        args.evidence.parent.mkdir(parents=True, exist_ok=True)
-        args.evidence.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            write_evidence(args.evidence, json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+                           overwrite=args.overwrite)
+        except (FileExistsError, IsADirectoryError, PermissionError, OSError) as exc:
+            print(f"EVIDENCE NOT WRITTEN: {exc.__class__.__name__}: {args.evidence} changed after the check.")
+            return 1
         print(f"evidence: {args.evidence}")
     return 0 if observed else 3
 
