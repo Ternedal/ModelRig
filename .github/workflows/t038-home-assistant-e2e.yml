@@ -1,0 +1,63 @@
+name: t038-home-assistant-e2e
+
+# KalivNexus #1 / ModelRig #2264: the read-only Home Assistant journey end to
+# end on the real wire. Only Home Assistant is a fixture (loopback HTTP); the
+# runtime, T-032 gate, resolver and pinned transport run unpatched. The report
+# is validated and kept as evidence. No live provider, no activation.
+
+on:
+  pull_request:
+    paths:
+      - "worker/app/home_rig_tool.py"
+      - "worker/app/home_rig_read_boundary.py"
+      - "worker/app/home_rig_provider_gate.py"
+      - "worker/app/home_rig_connector_contract.py"
+      - "worker/app/home_assistant_provider_transport.py"
+      - "worker/app/home_assistant_state_contract.py"
+      - "worker/app/data_sharing.py"
+      - "tests/worker_home_rig_e2e_fixture.py"
+      - ".github/workflows/t038-home-assistant-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install worker deps
+        run: python -m pip install -q -r worker/requirements.txt
+      - name: Run the end-to-end fixture journey
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+          GITHUB_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: python3 tests/worker_home_rig_e2e_fixture.py --report "$RUNNER_TEMP/home-rig-e2e-report.json"
+      - name: Validate the stored report
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: python3 tests/worker_home_rig_e2e_fixture.py --check "$RUNNER_TEMP/home-rig-e2e-report.json"
+      - name: Keep the report as evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: home-rig-e2e-report
+          path: ${{ runner.temp }}/home-rig-e2e-report.json
+          if-no-files-found: error
+          retention-days: 30
