@@ -109,8 +109,29 @@ and only one with harmless data (for example a temperature sensor).
    python scripts\t038_operator_read.py --entity sensor.<one_entity> --permission-id dsp_<id> --confirm-live-read --evidence validation\t038-live-read.json
    ```
 
-   The evidence file holds the receipt, the result and only the origin's
-   scheme. It holds no token, no attributes and no host.
+   Only an explicit allowlist of receipt fields reaches the terminal and the
+   evidence file:
+
+   - schema, grant and scope IDs;
+   - source and target;
+   - state, timestamps and freshness;
+   - the activation flag.
+
+   Any field the runtime adds later is dropped and named in `omitted_fields`
+   instead of being copied. The evidence file also records the result and
+   only the origin's scheme; it never contains the token, attributes or host.
+
+   The script refuses to replace an existing evidence file unless
+   `--overwrite` is given. That check runs before the read, so a refusal does
+   not use up the one-use permission.
+
+   The evidence file is not secret, but it shows the entity's state. Keep it
+   in a folder only you can read. On Windows, lock it down the same way as
+   the token file:
+
+   ```powershell
+   icacls validation\t038-live-read.json /inheritance:r /grant:r "$env:USERNAME`:F"
+   ```
 6. **Record the evidence:**
    - the receipt: `state`, `source_id`, `observed_at`, `freshness`;
    - the `/home-rig/audit` row;

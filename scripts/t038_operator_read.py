@@ -34,6 +34,32 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_SCHEMA = "kaliv-home-rig-live-read/v1"
 
+# Only these receipt fields ever reach the terminal or the evidence file
+# (review 5660163195). A field the runtime adds later is dropped and named in
+# "omitted_fields" instead of being copied silently.
+RECEIPT_FIELDS = (
+    "schema", "grant_id", "scope_sha256", "fulfilled_at", "authority_rechecked", "production_activation",
+)
+OBSERVATION_FIELDS = (
+    "schema", "source", "source_id", "capability_id", "target_kind", "target_id", "operation",
+    "state", "checked_at", "observed_at", "freshness", "freshness_seconds", "max_freshness_seconds",
+    "production_activation",
+)
+
+
+def project_receipt(receipt: dict) -> dict:
+    """Return only allowlisted receipt fields, plus the names of any dropped ones."""
+    if not isinstance(receipt, dict):
+        return {"omitted_fields": ["<receipt is not an object>"]}
+    observation = receipt.get("observation")
+    observation = observation if isinstance(observation, dict) else {}
+    omitted = sorted(k for k in receipt if k not in RECEIPT_FIELDS and k != "observation")
+    omitted += sorted(f"observation.{k}" for k in observation if k not in OBSERVATION_FIELDS)
+    projected = {k: receipt[k] for k in RECEIPT_FIELDS if k in receipt}
+    projected["observation"] = {k: observation[k] for k in OBSERVATION_FIELDS if k in observation}
+    projected["omitted_fields"] = omitted
+    return projected
+
 
 def _git_sha() -> str | None:
     try:
@@ -50,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--confirm-live-read", action="store_true",
                         help="required: this contacts the configured Home Assistant once")
     parser.add_argument("--evidence", type=Path, help="write a kaliv-home-rig-live-read/v1 evidence file")
+    parser.add_argument("--overwrite", action="store_true", help="allow replacing an existing evidence file")
     args = parser.parse_args(argv)
 
     if os.getenv("KALIV_HOME_RIG_PILOT", "0").strip().lower() not in {"1", "true", "on"}:
@@ -57,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not args.confirm_live_read:
         print("REFUSED: pass --confirm-live-read to contact Home Assistant once. Nothing was read.")
+        return 2
+    if args.evidence is not None and args.evidence.exists() and not args.overwrite:
+        # Checked before the read, so a refusal never burns the one-use permission.
+        print(f"REFUSED: {args.evidence} already exists; pass --overwrite to replace it. Nothing was read.")
         return 2
 
     sys.path.insert(0, str(ROOT / "worker"))
@@ -78,10 +109,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"CONFIGURATION FAILED: {exc}")
         return 1
 
-    receipt = json.loads(raw)
-    observation = receipt.get("observation", {})
+    projected = project_receipt(json.loads(raw))
+    observation = projected["observation"]
     observed = observation.get("state") != "unknown" and observation.get("freshness") == "fresh"
-    print(json.dumps(receipt, indent=2, sort_keys=True))
+    print(json.dumps(projected, indent=2, sort_keys=True))
 
     if args.evidence is not None:
         scheme = urlsplit(os.getenv("KALIV_HOME_ASSISTANT_ORIGIN", "")).scheme or None
@@ -90,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
             "candidate": {"git_sha": _git_sha()},
             "recorded_at": int(time.time()),
             "origin_scheme": scheme,
-            "receipt": receipt,
+            "receipt": projected,
             "result": "observed" if observed else "unavailable",
             "production_activation": False,
         }

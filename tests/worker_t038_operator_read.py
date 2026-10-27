@@ -14,6 +14,7 @@ script itself has no HTTP client, write or rig path of its own.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import secrets
@@ -36,6 +37,9 @@ from source_code import code_of  # noqa: E402
 from worker_home_rig_e2e_fixture import SENTINEL, FixtureHomeAssistant, write_token  # noqa: E402
 
 SCRIPT = ROOT / "scripts" / "t038_operator_read.py"
+_spec = importlib.util.spec_from_file_location("t038_operator_read_contract", SCRIPT)
+operator_read = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(operator_read)
 passed = failed = 0
 
 
@@ -145,6 +149,22 @@ def main() -> int:
                   "receipt is the fresh, source-bound T-038 observation")
             check(bearer not in ok.stdout + ok.stderr and SENTINEL not in ok.stdout + ok.stderr,
                   "script output carries no bearer or HA attributes")
+            check(receipt.get("omitted_fields") == [] and set(obs) == set(operator_read.OBSERVATION_FIELDS),
+                  "the allowlist covers today's whole receipt (nothing omitted, nothing missing)")
+
+            print("== an existing evidence file is never overwritten by accident")
+            before = evidence.read_bytes() if evidence.exists() else b""
+            start = ha.count()
+            fresh_permission = permit()
+            again_evidence = run("--entity", "sensor.gpu_temp", "--permission-id", fresh_permission,
+                                 "--confirm-live-read", "--evidence", str(evidence))
+            check(again_evidence.returncode == 2 and "REFUSED" in again_evidence.stdout and ha.count() == start
+                  and evidence.read_bytes() == before,
+                  "existing evidence -> refused (exit 2), zero requests, file unchanged")
+            replaced = run("--entity", "sensor.gpu_temp", "--permission-id", fresh_permission,
+                           "--confirm-live-read", "--evidence", str(evidence), "--overwrite")
+            check(replaced.returncode == 0 and ha.count() == start + 1,
+                  "the refusal did not burn the permission; --overwrite then reads once and replaces it")
 
             print("== the permission is single use, the scope is exact")
             start = ha.count()
@@ -166,7 +186,30 @@ def main() -> int:
             audit.close()
             sharing.close()
 
+    print("== only allowlisted receipt fields reach the terminal or evidence (review 5660163195)")
+    future = {
+        "schema": "kaliv-home-rig-read-receipt/v1", "grant_id": "g", "scope_sha256": "s" * 64,
+        "fulfilled_at": 1, "authority_rechecked": True, "production_activation": False,
+        "future_debug": SENTINEL,
+        "observation": {"schema": "x", "source": "home_assistant", "source_id": "home_assistant:sensor.x",
+                        "capability_id": "c", "target_kind": "entity", "target_id": "sensor.x",
+                        "operation": "entity_state", "state": "1", "checked_at": "t", "observed_at": "t",
+                        "freshness": "fresh", "freshness_seconds": 0, "max_freshness_seconds": 120,
+                        "production_activation": False, "attributes": {"secret": SENTINEL}, "peer": "127.0.0.1"},
+    }
+    projected = operator_read.project_receipt(future)
+    check(SENTINEL not in json.dumps(projected) and "127.0.0.1" not in json.dumps(projected),
+          "a field the runtime might add later never reaches output or evidence")
+    check(projected["omitted_fields"] == ["future_debug", "observation.attributes", "observation.peer"],
+          "dropped fields are named, not silently copied")
+    check(projected["observation"]["state"] == "1" and projected["grant_id"] == "g",
+          "allowlisted fields are kept")
+    check(operator_read.project_receipt("not a dict") == {"omitted_fields": ["<receipt is not an object>"]},
+          "a malformed receipt projects to nothing")
+
     source = code_of(SCRIPT)
+    check(source.count("json.loads(raw)") == 1 and "project_receipt(json.loads(raw))" in source,
+          "the raw receipt is parsed once, straight into the projection")
     for forbidden in ("urllib.request", "http.client", "requests.", "socket.", "preview(", '"rig"',
                       "production_activation=True", "subprocess.Popen", "os.system"):
         check(forbidden not in source, f"script has no own network, rig, preview or shell path: {forbidden}")

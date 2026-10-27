@@ -49,10 +49,17 @@ Reading the descriptor and judging it are separate steps.
      `S-1-5-32-544` (Administrators): refuse.
    - Any ACE type other than `ACCESS_ALLOWED` or `ACCESS_DENIED` (object,
      callback or conditional ACEs): refuse, because it is not understood.
-   - Any `ACCESS_ALLOWED` ACE for any other SID whose mask contains a read or
-     escalation right: refuse. The rights are `FILE_READ_DATA` (0x1),
-     `GENERIC_READ`, `GENERIC_ALL`, `WRITE_DAC`, `WRITE_OWNER` and
-     `MAXIMUM_ALLOWED`.
+   - Any `ACCESS_ALLOWED` ACE for any other SID that holds **anything
+     beyond** `SYNCHRONIZE | FILE_READ_ATTRIBUTES | READ_CONTROL`: refuse.
+     This is an allowlist, not a denylist. It covers reading, tampering
+     (`FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `GENERIC_WRITE`, `DELETE`),
+     execution and mapping (`FILE_EXECUTE`, `GENERIC_EXECUTE`), changing
+     permissions or ownership (`WRITE_DAC`, `WRITE_OWNER`), and any unknown
+     bit. The allowlist was adopted after review 5660140985 and is
+     implemented in #2291.
+   - SIDs are parsed canonically: `S-1-`, ASCII decimal digits, no leading
+     zeros, a 48-bit identifier authority, and 1–15 subauthorities of 32
+     bits each. Anything else refuses (Codex P2 on #2291).
    - `ACCESS_DENIED` ACEs never make a file acceptable. They are ignored, and
      only allow ACEs decide who can read. That is conservative by
      construction.
