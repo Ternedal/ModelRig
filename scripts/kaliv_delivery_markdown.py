@@ -40,6 +40,7 @@ def render(payload):
     lines.extend(["", "## Attention required", ""])
     flagged = [repo for repo in repositories
                if repo.get("status") != "collected"
+               or bool(repo.get("warnings"))
                or repo.get("workflow") in ("failure", "cancelled", "timed_out", "unknown")
                or (isinstance(repo.get("stale_ready_prs"), int) and repo["stale_ready_prs"] > 0)]
     if not flagged:
@@ -50,6 +51,8 @@ def render(payload):
             reasons = []
             if repo.get("status") != "collected":
                 reasons.append("incomplete or unavailable data")
+            if repo.get("warnings"):
+                reasons.append("collector warnings: " + cell(", ".join(map(str, repo["warnings"]))))
             if repo.get("workflow") in ("failure", "cancelled", "timed_out", "unknown"):
                 reasons.append("latest workflow: " + cell(repo.get("workflow")))
             if isinstance(repo.get("stale_ready_prs"), int) and repo["stale_ready_prs"] > 0:
