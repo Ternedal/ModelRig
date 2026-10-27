@@ -89,12 +89,26 @@ and only one with harmless data (for example a temperature sensor).
    Assistant token locally and store it on one line in a file that only your
    user can read, for example `C:\Rig\secrets\ha.token`. Never put it in chat,
    in an issue or in a log. On Windows the worker **refuses** the file unless
-   it is locked to the account the worker runs as (SYSTEM and Administrators
-   may stay), so lock it down before the first read:
+   it is locked to **the account the worker runs as** (SYSTEM and
+   Administrators may stay). That is not necessarily you: the worker is a child
+   of the `KalivSupervisor` scheduled task, so take the account from the task
+   and from the running worker, and check that they agree:
 
    ```powershell
-   icacls C:\Rig\secrets\ha.token /inheritance:r /grant:r "$env:USERNAME`:R"
+   (Get-ScheduledTask -TaskName KalivSupervisor).Principal.UserId
+   Get-CimInstance Win32_Process -Filter "Name='modelrig-worker-windows-x64.exe'" | Invoke-CimMethod -MethodName GetOwner
    ```
+
+   Then lock the file to that account (replace `<account>` with the value,
+   for example `RIG\anders`):
+
+   ```powershell
+   icacls C:\Rig\secrets\ha.token /inheritance:r /grant:r "<account>:R"
+   icacls C:\Rig\secrets\ha.token
+   ```
+
+   The second command must list only that account (and optionally SYSTEM and
+   Administrators). This has **not** been run on the rig yet.
 
    A refused token file shows up only as `unknown`; the receipt does not say
    why. If an otherwise correct read returns `unknown`, check the file with

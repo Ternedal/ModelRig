@@ -108,14 +108,19 @@ stays as it is.
 
 ## Operator guidance
 
-Lock the file to the account the worker runs as:
+Lock the file to **the account the worker runs as**. The check uses the
+process user, not whoever created the file. On the rig the worker is a child
+of the `KalivSupervisor` scheduled task, so read the account from there and
+from the running worker rather than assuming it is `$env:USERNAME` (review
+5673456488):
 
 ```powershell
-icacls C:\Rig\secrets\ha.token /inheritance:r /grant:r "$env:USERNAME`:R"
+(Get-ScheduledTask -TaskName KalivSupervisor).Principal.UserId
+Get-CimInstance Win32_Process -Filter "Name='modelrig-worker-windows-x64.exe'" | Invoke-CimMethod -MethodName GetOwner
+icacls C:\Rig\secrets\ha.token /inheritance:r /grant:r "<account>:R"
 ```
 
-If the worker runs as a different account (a service), grant that account
-instead. The check uses the **process** user, not whoever created the file.
+The full steps are in `docs/T038_HOME_ASSISTANT_LIVE_READ.md`, step 1.
 
 ## Step 3: one handle for the judgment and the read
 
