@@ -343,6 +343,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_control_center_api.py`
 - `tests/worker_control_center_status.py`
 - `tests/worker_control_center_vision.py`
+- `tests/worker_credential_acl.py`
 - `tests/worker_d4_auto_routing.py`
 - `tests/worker_data_sharing_policy.py`
 - `tests/worker_desktop_action_plan.py`
@@ -365,6 +366,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_file_capabilities_scope_authority.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
+- `tests/worker_home_rig_e2e_fixture.py`
 - `tests/worker_home_rig_runtime.py`
 - `tests/worker_jobs.py`
 - `tests/worker_kaliv_bodyrig_digital_twin_m6_qualifier.py`
@@ -432,6 +434,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_scheduler_single_flight_lease.py`
 - `tests/worker_scheduler_time.py`
 - `tests/worker_scheduler_time_store.py`
+- `tests/worker_t038_operator_read.py`
 - `tests/worker_toolhost.py`
 - `tests/worker_tools.py`
 - `tests/worker_tools_cloud_history_wire.py`
