@@ -22,6 +22,16 @@ class MarkdownReportTests(unittest.TestCase):
         self.assertIn("not a rollup of all required checks", result)
         self.assertIn("default branch", result)
 
+    def test_collected_with_warnings_requires_attention(self):
+        result = render({"schema": "kaliv.delivery-report.v1",
+                         "repositories": [{"repository": "Ternedal/ModelRig",
+                             "status": "collected", "workflow": "success",
+                             "stale_ready_prs": 0,
+                             "warnings": ["pagination_truncated"]}]})
+        self.assertIn("## Attention required", result)
+        self.assertIn("collector warnings: pagination_truncated", result)
+        self.assertNotIn("No warning conditions detected", result)
+
     def test_parked_draft_not_flagged_as_stale_ready(self):
         result = render({"schema": "kaliv.delivery-report.v1",
                          "repositories": [{"repository": "Ternedal/ModelRig",
