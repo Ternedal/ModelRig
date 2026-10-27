@@ -16,6 +16,8 @@ on:
       - "worker/app/home_assistant_state_contract.py"
       - "worker/app/data_sharing.py"
       - "tests/worker_home_rig_e2e_fixture.py"
+      - "tests/worker_t038_operator_read.py"
+      - "scripts/t038_operator_read.py"
       - ".github/workflows/t038-home-assistant-e2e.yml"
   workflow_dispatch:
 
@@ -53,6 +55,12 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: worker
         run: python3 tests/worker_home_rig_e2e_fixture.py --check "$RUNNER_TEMP/home-rig-e2e-report.json"
+      - name: Operator entry point for the consented live read
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: worker
+        run: python3 tests/worker_t038_operator_read.py
       - name: Keep the report as evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
