@@ -66,6 +66,16 @@ def _open_worker_status(request: urllib.request.Request):
     return opener.open(request, timeout=4)
 
 
+def _reject_duplicate_json_keys(pairs):
+    """Reject ambiguous status fields instead of accepting the last value."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("worker returned duplicate JSON keys")
+        result[key] = value
+    return result
+
+
 def query_worker(base: str, path: str) -> dict:
     request = urllib.request.Request(
         base + path, method="GET", headers={"Accept": "application/json"}
@@ -84,8 +94,8 @@ def query_worker(base: str, path: str) -> dict:
     if len(raw) > MAX_STATUS_BYTES:
         raise ValueError("worker status response exceeds size limit")
     try:
-        payload = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        payload = json.loads(raw, object_pairs_hook=_reject_duplicate_json_keys)
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
         raise ValueError("worker returned invalid JSON") from None
     if not isinstance(payload, dict) or type(payload.get("available")) is not bool:
         raise ValueError("worker returned an invalid voice availability contract")
