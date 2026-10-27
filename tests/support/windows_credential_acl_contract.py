@@ -55,6 +55,8 @@ def main() -> int:
         check(process.startswith("S-1-5-") and owner.startswith("S-1-"), "reads owner and process SIDs")
         check(isinstance(dacl, list), "reads the DACL as a list of ACEs")
         print(f"  info: owner={owner} process={process} inherited ACEs={len(dacl or [])}")
+        for ace in dacl or []:
+            print(f"  info: probe ACE type={ace.ace_type} flags=0x{ace.flags:02x} mask=0x{ace.mask:08x} sid={ace.sid}")
 
         counter = iter(range(1000))
 
@@ -66,6 +68,13 @@ def main() -> int:
                 icacls(path, *extra)
             ok, reason = credential_file_private(path)
             check(ok is expected, f"{name} -> {'accepted' if expected else 'refused'} ({reason})")
+            if ok is not expected:
+                o, aces, p = read_credential_security(path)
+                print(f"    diag: owner={o} process={p}")
+                for ace in aces or []:
+                    print(f"    diag: type={ace.ace_type} flags=0x{ace.flags:02x} mask=0x{ace.mask:08x} sid={ace.sid}")
+                listing = subprocess.run(["icacls", str(path)], capture_output=True, text=True, timeout=30)
+                print("    diag icacls: " + " | ".join(line.strip() for line in listing.stdout.splitlines() if line.strip()))
 
         case("only the process user (inheritance removed)", (), True)
         case("plus SYSTEM and Administrators", ("/grant", "*S-1-5-18:(F)", "/grant", "*S-1-5-32-544:(F)"), True)
