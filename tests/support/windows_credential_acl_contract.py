@@ -61,7 +61,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="kaliv-cred-acl-") as td:
         root = Path(td)
         probe = root / "probe.token"
-        probe.write_text(DUMMY + "\n", encoding="ascii")
+        probe.write_bytes((DUMMY + "\n").encode("ascii"))  # write_text would add \r on Windows
         owner, dacl, process = read_credential_security(probe)
         check(process.startswith("S-1-5-") and owner.startswith("S-1-"), "reads owner and process SIDs")
         check(isinstance(dacl, list), "reads the DACL as a list of ACEs")
@@ -155,7 +155,7 @@ def main() -> int:
 
         def fresh(name: str, *extra: str) -> Path:
             path = root / name
-            path.write_text(DUMMY + "\n", encoding="ascii")
+            path.write_bytes((DUMMY + "\n").encode("ascii"))
             icacls(path, "/inheritance:r", "/grant:r", f"*{process}:(R)")
             if extra:
                 icacls(path, *extra)

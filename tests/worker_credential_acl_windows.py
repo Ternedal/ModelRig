@@ -211,8 +211,11 @@ check(kind == "not_regular" and "CreateFileW" not in names(calls), "a symlinked 
 data, kind, calls = run(handle_attrs=reader.FILE_ATTRIBUTE_REPARSE_POINT | REGULAR)
 check(kind == "not_regular" and "GetSecurityInfo" not in names(calls) and names(calls)[-1] == "CloseHandle",
       "a symlink swapped in after the name check is caught on the handle and closed")
+data, kind, calls = run(attrs=reader.FILE_ATTRIBUTE_DIRECTORY)
+check(kind == "not_regular" and "CreateFileW" not in names(calls),
+      "a directory named directly refuses as not_regular before opening (found on the Windows runner)")
 data, kind, calls = run(handle_attrs=reader.FILE_ATTRIBUTE_DIRECTORY)
-check(kind == "not_regular" and "ReadFile" not in names(calls), "a directory refuses")
+check(kind == "not_regular" and "ReadFile" not in names(calls), "a directory swapped in is refused on the handle")
 data, kind, calls = run(attrs=reader.INVALID_FILE_ATTRIBUTES)
 check(kind == "unavailable" and "CreateFileW" not in names(calls), "a missing file is unavailable")
 data, kind, calls = run(create_error=reader.ERROR_SHARING_VIOLATION)

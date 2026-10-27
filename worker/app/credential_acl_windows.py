@@ -188,6 +188,10 @@ def _open_regular(api: _Api, name: str, access: int, share: int) -> tuple[int, _
         raise _OpenRefused("unavailable", f"GetFileAttributesW failed (WinError {api.last_error()})")
     if attributes & FILE_ATTRIBUTE_REPARSE_POINT:
         raise _OpenRefused("not_regular", "credential path is a symlink or junction")
+    if attributes & FILE_ATTRIBUTE_DIRECTORY:
+        # Without FILE_FLAG_BACKUP_SEMANTICS CreateFileW would fail on it with
+        # ACCESS_DENIED; refuse it for what it is. The handle check stays authoritative.
+        raise _OpenRefused("not_regular", "credential path is a directory")
     handle = api.k32.CreateFileW(name, access, share, None, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, None)
     value = ctypes.cast(handle, ctypes.c_void_p).value
     if not value or value == INVALID_HANDLE_VALUE:
