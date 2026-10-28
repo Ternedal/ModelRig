@@ -884,6 +884,15 @@ private fun ChatScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    // Explicit, local-only Cast voice configuration.
+    val castPrefs = remember(context) {
+        context.getSharedPreferences("kaliv_cast", android.content.Context.MODE_PRIVATE)
+    }
+    var castReceiverId by remember { mutableStateOf(castPrefs.getString("receiver_app_id", "").orEmpty()) }
+    var castVoiceEnabled by remember { mutableStateOf(castPrefs.getBoolean("voice_display_enabled", false)) }
+    var showCastSetup by remember { mutableStateOf(false) }
+    var savedCastReceiverId by remember { mutableStateOf(castPrefs.getString("receiver_app_id", "").orEmpty()) }
+    var savedCastVoiceEnabled by remember { mutableStateOf(castPrefs.getBoolean("voice_display_enabled", false)) }
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
     // regnskab — riggen kender den ikke, og INTET herfra sendes af sig selv.
     val queueStore = remember {
@@ -919,6 +928,7 @@ private fun ChatScreen(
     var recording by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    var castDeliveryStatus by remember { mutableStateOf("Ikke tilsluttet") }
 
     // Rigens EGNE evner (GET /capabilities), hentet en gang pr. forbindelse.
     // Skal ligge i tilstand frem for at blive hentet paa stedet: onOpenVoice
@@ -1160,6 +1170,35 @@ private fun ChatScreen(
         val conversationAtVoiceStart = convId
         val navigationRevisionAtVoiceStart = voiceNavigationRevision
         val modelAtVoiceStart = currentModel
+        // Cast display is best-effort. The phone remains the audio output.
+        // Do not initialize the Cast SDK unless a user-established session exists.
+        castDeliveryStatus = "Ikke tilsluttet"
+        var castAckSender: dk.ternedal.modelrig.voice.KalivCastVoiceSender? = null
+        val castDisplay = runCatching {
+            val sender = dk.ternedal.modelrig.voice.KalivCastVoiceSender(context)
+            if (sender.activeDeviceId() == null) null
+            else {
+                castDeliveryStatus = "Afventer Nest Hub"
+                val sessionId = java.util.UUID.randomUUID().toString().replace("-", "")
+                val listening = sender.listenForVoiceAck(
+                        sessionId,
+                        onAck = { messageId, kind, value ->
+                            android.util.Log.d("KalivCast", "Receiver acknowledged $messageId ($kind: $value)")
+                            castDeliveryStatus = "Nest Hub modtager beskeder"
+                        },
+                        timeout = { messageId ->
+                            android.util.Log.w("KalivCast", "Receiver ACK timed out: $messageId")
+                            castDeliveryStatus = "Nest Hub svarer ikke – lyden fortsætter på telefonen"
+                        },
+                    )
+                if (listening) castAckSender = sender
+                else castDeliveryStatus = "Kunne ikke lytte efter Nest Hub-kvitteringer"
+                dk.ternedal.modelrig.voice.CastVoiceDisplayBridge(
+                    send = { message -> sender.send(message) },
+                    sessionId = sessionId,
+                )
+            }
+        }.getOrNull()
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
         voiceJob = scope.launch {
@@ -1177,6 +1216,7 @@ private fun ChatScreen(
             var usedModel: String? = null
             var usedCloud = false
             var streamError: Pair<Int, String>? = null
+            castDisplay?.thinking()
 
             // Player: pull decoded WAVs and play each in order via playWav, which
             // blocks until that sentence finishes (or barge-in/stop cuts it).
@@ -1229,6 +1269,7 @@ private fun ChatScreen(
                                 transcriptShown = true
                                 transcriptText = tt
                                 voiceTranscript = tt
+                                castDisplay?.transcript(tt)
                                 // messages is a SnapshotStateList -- safe to mutate
                                 // from this IO thread; the recomposer picks it up.
                                 // Set replyIdx synchronously (the callbacks run in
@@ -1243,6 +1284,7 @@ private fun ChatScreen(
                         onChunk = { _, text, chunkB64, utteranceId ->
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
+                            castDisplay?.speaking(text.trim())
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
                             }
@@ -1253,6 +1295,7 @@ private fun ChatScreen(
                         },
                         onDone = { reply, m, cloud ->
                             usedModel = m; usedCloud = cloud
+                            // Keep the receiver in speaking state until queued audio finishes.
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(
@@ -1261,13 +1304,14 @@ private fun ChatScreen(
                                 )
                             }
                         },
-                        onError = { status, detail -> streamError = status to detail },
+                        onError = { status, detail -> streamError = status to detail; castDisplay?.error() },
                     )
                 }
                 // The network stream is done; close the channel so the player
                 // finishes the queued sentences, then wait for it.
                 audioChan.close()
                 player.join()
+                if (streamError == null && !playbackStop.get()) castDisplay?.idle()
 
                 streamError?.let { (status, detail) ->
                     voiceError = friendlyError(RuntimeException("voice ($status): $detail"))
@@ -1318,7 +1362,16 @@ private fun ChatScreen(
                 voiceError = e.message ?: "stemme-fejl"
                 audioChan.close()
             } finally {
+                // On cancellation or transport failure, clear stale speaking text.
+                // Cast sessions remain user-controlled; only the ACK listener is removed.
+                if (wasInterrupted || voiceError != null) castDisplay?.idle()
                 activeCall = null
+                castAckSender?.closeAckListener()
+                // The final idle message is asynchronous and its ACK may arrive
+                // after this voice turn ends. Do not misreport it as a timeout.
+                if (castAckSender != null && castDeliveryStatus == "Afventer Nest Hub") {
+                    castDeliveryStatus = "Stemmevisning afsluttet – levering ikke bekræftet"
+                }
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
@@ -2251,6 +2304,7 @@ private fun ChatScreen(
                         )
                         dialogWindow?.setDimAmount(0f)
                     }
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
                     dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
                         modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                         pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",
@@ -2291,7 +2345,77 @@ private fun ChatScreen(
                             showVoice = false
                         },
                     )
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.align(Alignment.TopEnd)
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // Cast discovery/selection uses Google's supported MediaRouteButton.
+                        // A real custom receiver ID must be saved before the route picker is shown.
+                        if (Regex("[A-Fa-f0-9]{8}").matches(savedCastReceiverId) && savedCastVoiceEnabled && !savedCastReceiverId.equals("CC1AD845", ignoreCase = true)) {
+                            androidx.compose.ui.viewinterop.AndroidView(
+                                factory = { viewContext ->
+                                    androidx.mediarouter.app.MediaRouteButton(viewContext).apply {
+                                        com.google.android.gms.cast.framework.CastButtonFactory
+                                            .setUpMediaRouteButton(viewContext, this)
+                                    }
+                                },
+                            )
+                        }
+                        androidx.compose.material3.Text(castDeliveryStatus, style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
+                        androidx.compose.material3.TextButton(onClick = {
+                            castReceiverId = savedCastReceiverId
+                            castVoiceEnabled = savedCastVoiceEnabled
+                            showCastSetup = true
+                        }) {
+                            androidx.compose.material3.Text("Nest Hub / Cast-opsætning")
+                        }
+                    }
+                    }
                 }
+            }
+
+            if (showCastSetup) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showCastSetup = false },
+                    title = { androidx.compose.material3.Text("Nest Hub – stemmevisning") },
+                    text = {
+                        androidx.compose.foundation.layout.Column {
+                            androidx.compose.material3.Text("Indtast dit registrerede Cast Receiver App ID (8 hex-tegn). Genstart appen efter ændring, så Cast SDK indlæser det nye ID.")
+                            androidx.compose.material3.OutlinedTextField(
+                                value = castReceiverId,
+                                onValueChange = { castReceiverId = it.trim().take(8) },
+                                label = { androidx.compose.material3.Text("Receiver App ID") },
+                                singleLine = true,
+                            )
+                            androidx.compose.foundation.layout.Row {
+                                androidx.compose.material3.Checkbox(
+                                    checked = castVoiceEnabled,
+                                    onCheckedChange = { castVoiceEnabled = it },
+                                )
+                                androidx.compose.material3.Text("Vis stemmesamtaler på Nest Hub")
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            val valid = Regex("[A-Fa-f0-9]{8}").matches(castReceiverId) && !castReceiverId.equals("CC1AD845", ignoreCase = true)
+                            castPrefs.edit()
+                                .putString("receiver_app_id", if (valid) castReceiverId else "")
+                                .putBoolean("voice_display_enabled", valid && castVoiceEnabled)
+                                .apply()
+                            savedCastReceiverId = if (valid) castReceiverId else ""
+                            savedCastVoiceEnabled = valid && castVoiceEnabled
+                            showCastSetup = false
+                        }) { androidx.compose.material3.Text("Gem") }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = { showCastSetup = false }) {
+                            androidx.compose.material3.Text("Annuller")
+                        }
+                    },
+                )
             }
 
             // Persistent routing strip: always shows, at a glance, WHICH model
