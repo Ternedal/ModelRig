@@ -891,7 +891,8 @@ private fun ChatScreen(
     var castReceiverId by remember { mutableStateOf(castPrefs.getString("receiver_app_id", "").orEmpty()) }
     var castVoiceEnabled by remember { mutableStateOf(castPrefs.getBoolean("voice_display_enabled", false)) }
     var showCastSetup by remember { mutableStateOf(false) }
-    var castSettingsRevision by remember { mutableIntStateOf(0) }
+    var savedCastReceiverId by remember { mutableStateOf(castPrefs.getString("receiver_app_id", "").orEmpty()) }
+    var savedCastVoiceEnabled by remember { mutableStateOf(castPrefs.getBoolean("voice_display_enabled", false)) }
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
     // regnskab — riggen kender den ikke, og INTET herfra sendes af sig selv.
     val queueStore = remember {
@@ -2322,7 +2323,7 @@ private fun ChatScreen(
                     ) {
                         // Cast discovery/selection uses Google's supported MediaRouteButton.
                         // A real custom receiver ID must be saved before the route picker is shown.
-                        if (castSettingsRevision >= 0 && Regex("[A-Fa-f0-9]{8}").matches(castPrefs.getString("receiver_app_id", "").orEmpty()) && castPrefs.getBoolean("voice_display_enabled", false) && !castPrefs.getString("receiver_app_id", "").equals("CC1AD845", ignoreCase = true)) {
+                        if (Regex("[A-Fa-f0-9]{8}").matches(savedCastReceiverId) && savedCastVoiceEnabled && !savedCastReceiverId.equals("CC1AD845", ignoreCase = true)) {
                             androidx.compose.ui.viewinterop.AndroidView(
                                 factory = { viewContext ->
                                     androidx.mediarouter.app.MediaRouteButton(viewContext).apply {
@@ -2369,7 +2370,8 @@ private fun ChatScreen(
                                 .putString("receiver_app_id", if (valid) castReceiverId else "")
                                 .putBoolean("voice_display_enabled", valid && castVoiceEnabled)
                                 .apply()
-                            castSettingsRevision++
+                            savedCastReceiverId = if (valid) castReceiverId else ""
+                            savedCastVoiceEnabled = valid && castVoiceEnabled
                             showCastSetup = false
                         }) { androidx.compose.material3.Text("Gem") }
                     },
