@@ -36,7 +36,7 @@ class KalivCastVoiceSender(private val context: Context) {
     private var ackSession: CastSession? = null
     private var ackListener: com.google.android.gms.cast.Cast.MessageReceivedCallback? = null
 
-    fun listenForStatusAck(sessionId: String, onAck: (String) -> Unit): Boolean {
+    fun listenForVoiceAck(sessionId: String, onAck: (String, String) -> Unit): Boolean {
         if (!Regex("[A-Za-z0-9_-]{8,64}").matches(sessionId)) return false
         closeAckListener()
         val active = session() ?: return false
@@ -45,11 +45,22 @@ class KalivCastVoiceSender(private val context: Context) {
             val data = try { org.json.JSONObject(payload) } catch (_: Exception) { return@MessageReceivedCallback }
             if (data.optInt("version") != KalivCastVoiceProtocol.VERSION ||
                 data.optString("type") != "kaliv_voice_ack" ||
-                data.optString("session_id") != sessionId ||
-                data.optString("phase") !in setOf("listening", "thinking", "speaking", "idle", "error")) {
+                data.optString("session_id") != sessionId) {
                 return@MessageReceivedCallback
             }
-            onAck(data.optString("phase"))
+            when (data.optString("kind")) {
+                "text" -> {
+                    val role = data.optString("role")
+                    if (role !in setOf("user", "assistant")) return@MessageReceivedCallback
+                    onAck("text", role)
+                }
+                "" -> {
+                    val phase = data.optString("phase")
+                    if (phase !in setOf("listening", "thinking", "speaking", "idle", "error")) return@MessageReceivedCallback
+                    onAck("status", phase)
+                }
+                else -> return@MessageReceivedCallback
+            }
         }
         return try {
             active.setMessageReceivedCallbacks(KalivCastVoiceProtocol.NAMESPACE, callback)
