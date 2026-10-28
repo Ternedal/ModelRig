@@ -1,9 +1,11 @@
-"""Real-Windows contract for the credential-file DACL reader (step 2, not wired).
+"""Real-Windows contract for the credential-file DACL reader and its wiring (steps 2 and 3).
 
 Run on the Windows gate: ``PYTHONPATH=worker python tests/support/windows_credential_acl_contract.py``.
 Each case is a fresh temp file holding a dummy token whose ACL is set with
 icacls; no real credential is involved. The reader reads the real security
-descriptor and credential_acl judges it.
+descriptor and credential_acl judges it. Step 3: credential_file reads the
+bytes through the same handle, and the three bearer loaders refuse a token file
+other users can read -- with their existing error messages.
 """
 from __future__ import annotations
 
@@ -21,6 +23,14 @@ from app.credential_acl_windows import (  # noqa: E402
     credential_file_private,
     read_credential_security,
 )
+from app.credential_file import CredentialFileRefused, read_private_credential  # noqa: E402
+from app.github_connector_transport import FileGitHubCredentialProvider, GitHubCredentialError  # noqa: E402
+from app.home_assistant_provider_transport import HomeAssistantTransportError  # noqa: E402
+from app.home_assistant_provider_transport import _load_bearer as ha_load  # noqa: E402
+from app.riggate_provider_transport import RigGateTransportError  # noqa: E402
+from app.riggate_provider_transport import _load_bearer as rg_load  # noqa: E402
+
+DUMMY = "dummy-token-not-a-secret-000000000000"
 
 USERS = "S-1-5-32-545"
 EVERYONE = "S-1-1-0"
@@ -51,7 +61,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="kaliv-cred-acl-") as td:
         root = Path(td)
         probe = root / "probe.token"
-        probe.write_text("dummy-token-not-a-secret-000000000000\n", encoding="ascii")
+        probe.write_bytes((DUMMY + "\n").encode("ascii"))  # write_text would add \r on Windows
         owner, dacl, process = read_credential_security(probe)
         check(process.startswith("S-1-5-") and owner.startswith("S-1-"), "reads owner and process SIDs")
         check(isinstance(dacl, list), "reads the DACL as a list of ACEs")
@@ -133,6 +143,59 @@ def main() -> int:
                       f"a symlink swapped in after the name check is refused on the opened handle ({reason})")
             finally:
                 reader_module._Api = real_api
+
+        print("== step 3: credential_file and the three loaders")
+
+        def kind_of(path: Path) -> str | None:
+            try:
+                read_private_credential(path, max_bytes=4098)
+            except CredentialFileRefused as exc:
+                return exc.kind
+            return None
+
+        def fresh(name: str, *extra: str) -> Path:
+            path = root / name
+            path.write_bytes((DUMMY + "\n").encode("ascii"))
+            icacls(path, "/inheritance:r", "/grant:r", f"*{process}:(R)")
+            if extra:
+                icacls(path, *extra)
+            return path
+
+        private = fresh("s3-private.token")
+        check(read_private_credential(private, max_bytes=4098) == (DUMMY + "\n").encode("ascii"),
+              "a private token file is read byte for byte through the judged handle")
+        check(read_private_credential(probe, max_bytes=4098) == (DUMMY + "\n").encode("ascii"),
+              "a file with this runner's inherited temp ACL is accepted (see RUNNER_DACL)")
+        broad = fresh("s3-broad.token", "/grant", f"*{USERS}:(R)")
+        check(kind_of(broad) == "permissions", "Users:R refuses as permissions")
+        check(kind_of(fresh("s3-everyone.token", "/grant", f"*{EVERYONE}:(R)")) == "permissions",
+              "Everyone:R refuses as permissions")
+        check(kind_of(missing) == "unavailable", "a missing file is unavailable")
+        check(kind_of(root) == "not_regular", "a directory is not regular")
+        if link.exists() or os.path.lexists(link):
+            check(kind_of(link) == "not_regular", "a symlink to a private file is refused, not followed")
+        held = fresh("s3-held.token", "/grant", f"*{process}:(M)")  # the writer below needs write access
+        with open(held, "a", encoding="ascii"):
+            check(kind_of(held) == "read", "a token file held open for writing elsewhere is refused (sharing)")
+        check(kind_of(held) is None, "the same file is read once the writer has closed it")
+
+        for name, load, error in (("Home Assistant", ha_load, HomeAssistantTransportError),
+                                  ("RigGate", rg_load, RigGateTransportError)):
+            check(load(private) == DUMMY, f"{name}: a private token loads on Windows")
+            try:
+                load(broad)
+                check(False, f"{name}: Users:R is refused on Windows")
+            except error as exc:
+                check(str(exc) == f"{name} credential file permissions are too broad",
+                      f"{name}: Users:R is refused on Windows with the existing message")
+        check(FileGitHubCredentialProvider(account="Ternedal", token_file=private).bearer_token() == DUMMY,
+              "GitHub: a private token loads on Windows")
+        try:
+            FileGitHubCredentialProvider(account="Ternedal", token_file=broad).bearer_token()
+            check(False, "GitHub: Users:R is refused on Windows")
+        except GitHubCredentialError as exc:
+            check(str(exc) == "GitHub credential file permissions are too broad",
+                  "GitHub: Users:R is refused on Windows with the existing message")
     print(f"\n===== WINDOWS CREDENTIAL ACL CONTRACT: {passed} passed, {failed} failed =====")
     return 1 if failed else 0
 
