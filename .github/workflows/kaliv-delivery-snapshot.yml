@@ -1,0 +1,37 @@
+name: Kaliv Delivery Snapshot
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Collect read-only cross-repository data
+        env:
+          GITHUB_TOKEN: ${{ secrets.KALIV_REPORT_READ_TOKEN }}
+        run: |
+          if [ -z "$GITHUB_TOKEN" ]; then echo "No cross-repository token; public-only read mode (private repositories remain unknown)."; fi
+          python scripts/kaliv_delivery_report.py --output kaliv-delivery.json
+      - name: Render human-readable report
+        run: python scripts/kaliv_delivery_markdown.py kaliv-delivery.json --output kaliv-delivery.md
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kaliv-delivery-snapshot
+          path: |
+            kaliv-delivery.json
+            kaliv-delivery.md
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Validate completeness after preserving artifact
+        run: cd scripts && python kaliv_delivery_validate.py ../kaliv-delivery.json
