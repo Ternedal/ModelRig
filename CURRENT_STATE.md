@@ -529,6 +529,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_freeze_check.py`
 - `tests/workflow_frozen_voice_package.py`
 - `tests/workflow_gates_read_code.py`
+- `tests/workflow_kaliv_delivery_report.py`
 - `tests/workflow_kaliv_env_parser.py`
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
 - `tests/workflow_kaliv_v1_rig_smoke.py`
