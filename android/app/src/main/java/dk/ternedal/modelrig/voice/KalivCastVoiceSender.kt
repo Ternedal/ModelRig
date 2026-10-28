@@ -13,6 +13,10 @@ import com.google.android.gms.cast.framework.CastSession
  */
 class KalivCastVoiceSender(private val context: Context) {
     private fun session(): CastSession? = try {
+        val prefs = context.getSharedPreferences("kaliv_cast", Context.MODE_PRIVATE)
+        val receiverId = prefs.getString("receiver_app_id", null)?.trim().orEmpty()
+        if (!Regex("[A-Fa-f0-9]{8}").matches(receiverId) ||
+            !prefs.getBoolean("voice_display_enabled", false)) return null
         CastContext.getSharedInstance(context).sessionManager.currentCastSession
             ?.takeIf { it.isConnected }
     } catch (_: Exception) {
