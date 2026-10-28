@@ -533,6 +533,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
 - `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
+- `tests/workflow_media_request_validation.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
 - `tests/workflow_mrbody_cross_repo_contract.py`
