@@ -70,6 +70,14 @@ class SnapshotValidationTests(unittest.TestCase):
         repo["stale_ready_prs"] = True
         self.assertTrue(any(x.startswith("invalid_stale_ready_prs:") for x in validate(payload)))
 
+    def test_stale_prs_cannot_exceed_open_prs(self):
+        payload = sample()
+        repo = payload["repositories"][0]
+        repo.update(open_prs=1, stale_prs=2)
+        self.assertTrue(any(x.startswith("invalid_stale_pr_subset:") for x in validate(payload)))
+        repo["open_prs"] = 2
+        self.assertEqual(validate(payload), [])
+
     def test_non_object_payload_fails_closed(self):
         self.assertEqual(validate([]), ["payload_not_object"])
 
