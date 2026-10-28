@@ -40,6 +40,10 @@ def validate(payload, owner="Ternedal"):
             value = r.get(key)
             if type(value) is not int or value < 0:
                 errors.append("invalid_" + key + ":" + name)
+        # A stale PR is necessarily an open PR; reject inconsistent snapshots.
+        if (type(r.get("open_prs")) is int and type(r.get("stale_prs")) is int
+                and r["stale_prs"] > r["open_prs"]):
+            errors.append("invalid_stale_pr_subset:" + name)
         # Optional v1 extension: if supplied, draft/ready counts must be
         # complete, nonnegative integers that reconcile with open PRs.
         if "draft_prs" in r or "ready_prs" in r:
