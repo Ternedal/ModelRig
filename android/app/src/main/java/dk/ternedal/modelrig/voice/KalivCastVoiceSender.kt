@@ -28,6 +28,49 @@ class KalivCastVoiceSender(private val context: Context) {
     }
     }
 
+    /**
+     * Listen for receiver-side acknowledgements on the existing Cast namespace.
+     * The callback is invoked only for a matching session and validated status.
+     * Call closeAckListener() when leaving the voice screen.
+     */
+    private var ackSession: CastSession? = null
+    private var ackListener: com.google.android.gms.cast.Cast.MessageReceivedCallback? = null
+
+    fun listenForStatusAck(sessionId: String, onAck: (String) -> Unit): Boolean {
+        if (!Regex("[A-Za-z0-9_-]{8,64}").matches(sessionId)) return false
+        closeAckListener()
+        val active = session() ?: return false
+        val callback = com.google.android.gms.cast.Cast.MessageReceivedCallback { _, namespace, payload ->
+            if (namespace != KalivCastVoiceProtocol.NAMESPACE) return@MessageReceivedCallback
+            val data = try { org.json.JSONObject(payload) } catch (_: Exception) { return@MessageReceivedCallback }
+            if (data.optInt("version") != KalivCastVoiceProtocol.VERSION ||
+                data.optString("type") != "kaliv_voice_ack" ||
+                data.optString("session_id") != sessionId ||
+                data.optString("phase") !in setOf("listening", "thinking", "speaking", "idle", "error")) {
+                return@MessageReceivedCallback
+            }
+            onAck(data.optString("phase"))
+        }
+        return try {
+            active.setMessageReceivedCallbacks(KalivCastVoiceProtocol.NAMESPACE, callback)
+            ackSession = active
+            ackListener = callback
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun closeAckListener() {
+        val active = ackSession
+        ackSession = null
+        ackListener = null
+        if (active != null) {
+            try { active.removeMessageReceivedCallbacks(KalivCastVoiceProtocol.NAMESPACE) }
+            catch (_: Exception) { /* Cast may have disconnected */ }
+        }
+    }
+
     fun activeDeviceId(): String? =
         session()?.castDevice?.deviceId
 
