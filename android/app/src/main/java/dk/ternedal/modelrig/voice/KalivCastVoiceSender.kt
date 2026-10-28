@@ -36,7 +36,7 @@ class KalivCastVoiceSender(private val context: Context) {
     private var ackSession: CastSession? = null
     private var ackListener: com.google.android.gms.cast.Cast.MessageReceivedCallback? = null
 
-    fun listenForVoiceAck(sessionId: String, onAck: (String, String) -> Unit): Boolean {
+    fun listenForVoiceAck(sessionId: String, onAck: (String, String, String) -> Unit): Boolean {
         if (!Regex("[A-Za-z0-9_-]{8,64}").matches(sessionId)) return false
         closeAckListener()
         val active = session() ?: return false
@@ -48,16 +48,18 @@ class KalivCastVoiceSender(private val context: Context) {
                 data.optString("session_id") != sessionId) {
                 return@MessageReceivedCallback
             }
+            val messageId = data.optString("message_id")
+            if (!Regex("[0-9a-fA-F-]{36}").matches(messageId)) return@MessageReceivedCallback
             when (data.optString("kind")) {
                 "text" -> {
                     val role = data.optString("role")
                     if (role !in setOf("user", "assistant")) return@MessageReceivedCallback
-                    onAck("text", role)
+                    onAck(messageId, "text", role)
                 }
                 "" -> {
                     val phase = data.optString("phase")
                     if (phase !in setOf("listening", "thinking", "speaking", "idle", "error")) return@MessageReceivedCallback
-                    onAck("status", phase)
+                    onAck(messageId, "status", phase)
                 }
                 else -> return@MessageReceivedCallback
             }
@@ -93,6 +95,7 @@ class KalivCastVoiceSender(private val context: Context) {
         if (message.optInt("version") != KalivCastVoiceProtocol.VERSION) return false
         val sessionId = message.optString("session_id")
         if (!Regex("[A-Za-z0-9_-]{8,64}").matches(sessionId)) return false
+        if (!Regex("[0-9a-fA-F-]{36}").matches(message.optString("message_id"))) return false
         when (message.optString("type")) {
             "kaliv_voice_status" -> {
                 if (message.optString("phase") !in setOf("listening", "thinking", "speaking", "idle", "error")) return false
