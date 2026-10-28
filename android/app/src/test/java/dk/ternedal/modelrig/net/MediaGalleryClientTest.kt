@@ -100,6 +100,29 @@ class MediaGalleryClientTest {
     }
 
     @Test
+    fun `an injected client that follows redirects still never follows one`() {
+        // Review 5684792570: the guard must hold for the effective client, not
+        // only for defaultHttp(). The target would answer 200 if it were reached.
+        val elsewhere = MockWebServer().apply { start() }
+        try {
+            repeat(3) {
+                elsewhere.enqueue(json(page(emptyList())))
+                server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", elsewhere.url("/steal").toString()))
+            }
+            val following = okhttp3.OkHttpClient.Builder().followRedirects(true).followSslRedirects(true).build()
+            val injected = MediaGalleryClient(server.url("/").toString().trimEnd('/'), "device-token", following)
+            listOf({ injected.page() }, { injected.thumbnail(item) }, { injected.image(item) }).forEach { call ->
+                val e = assertThrows(MediaGalleryException::class.java) { call() }
+                assertEquals(Reason.REDIRECT_REFUSED, e.reason)
+            }
+            assertEquals(3, server.requestCount)
+            assertEquals("the redirect target was never contacted", 0, elsewhere.requestCount)
+        } finally {
+            elsewhere.shutdown()
+        }
+    }
+
+    @Test
     fun `thumbnail and image are fetched from paths derived from the id`() {
         val png = byteArrayOf(1, 2, 3)
         server.enqueue(bytes(png))

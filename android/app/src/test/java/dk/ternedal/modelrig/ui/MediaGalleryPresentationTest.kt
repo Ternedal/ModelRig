@@ -49,6 +49,15 @@ class MediaGalleryPresentationTest {
     }
 
     @Test
+    fun `a page of only invalid items with a cursor is not the end`() {
+        // Review 5684792570: later valid pages must stay reachable.
+        val state = MediaGalleryPaging.refreshed(MediaPage(emptyList(), "c1", skipped = 2))
+        assertFalse(state.isEmpty)
+        assertTrue(state.canLoadMore)
+        assertEquals(2, state.skipped)
+    }
+
+    @Test
     fun `every reason has its own danish text without server detail`() {
         val texts = Reason.entries.map(::mediaGalleryMessage)
         assertEquals(texts.size, texts.toSet().size)

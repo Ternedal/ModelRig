@@ -21,7 +21,13 @@ data class MediaGalleryState(
     val loaded: Boolean = false,
 ) {
     val canLoadMore: Boolean get() = loaded && !loading && !endReached && error == null
-    val isEmpty: Boolean get() = loaded && items.isEmpty() && error == null
+
+    /**
+     * The library really is empty: nothing shown AND no further pages. A page
+     * whose items were all invalid but which has a next_cursor is not empty;
+     * the screen must still offer load-more (#2301 review 5684792570).
+     */
+    val isEmpty: Boolean get() = loaded && items.isEmpty() && endReached && error == null
 }
 
 /** Paging transitions. A refresh starts over; load-more appends and de-duplicates by ID. */

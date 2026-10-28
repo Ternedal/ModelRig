@@ -78,9 +78,19 @@ object MediaOriginPolicy {
 class MediaGalleryClient(
     pairedOrigin: String?,
     private val token: String?,
-    private val http: OkHttpClient = defaultHttp(),
+    http: OkHttpClient = defaultHttp(),
 ) : MediaGallerySource {
     private val origin: HttpUrl = MediaOriginPolicy.requireAllowed(pairedOrigin)
+
+    /**
+     * The client actually used. Redirects are switched off here, whatever the
+     * injected client says: one that follows a 302 would do so before
+     * [readBounded] could refuse it (#2301 review 5684792570).
+     */
+    private val http: OkHttpClient = http.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
 
     init {
         if (token.isNullOrBlank()) {

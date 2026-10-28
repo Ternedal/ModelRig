@@ -97,6 +97,22 @@ class MediaGalleryScreenTest {
     }
 
     @Test
+    fun allInvalidFirstPageStillOffersLoadMore() {
+        // Review 5684792570: zero valid items + next_cursor must not look empty.
+        val source = FakeSource(mutableListOf(
+            Result.success(MediaPage(emptyList(), "c1", skipped = 2)),
+            Result.success(MediaPage(listOf(item("later")), null, skipped = 0)),
+        ))
+        show(source)
+        assertEquals(0, compose.onAllNodesWithText("Ingen billeder eller videoer endnu.").fetchSemanticsNodes().size)
+        compose.onNodeWithText("2 medier kunne ikke vises.").assertIsDisplayed()
+        compose.onNodeWithText("Hent flere").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(null, "c1"), source.cursors)
+        compose.onNodeWithContentDescription("Billede", substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun staleCursorAsksForRefreshAndStartsOver() {
         val source = FakeSource(mutableListOf(
             Result.success(MediaPage(listOf(item("a")), "old", 0)),
