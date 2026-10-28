@@ -6,6 +6,7 @@ It intentionally never allocates CUDA memory or downloads models.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 
 class ImageGpuAdmissionError(RuntimeError):
@@ -23,9 +24,11 @@ class GpuBudget:
 
 def inspect_cuda_budget(index: int, *, reserve_gib: float = 3.0,
                         min_usable_gib: float = 6.0) -> GpuBudget:
-    if not isinstance(index, int) or index < 0:
+    if type(index) is not int or index < 0:
         raise ImageGpuAdmissionError("invalid GPU index")
-    if reserve_gib < 0 or min_usable_gib <= 0:
+    if (type(reserve_gib) not in (int, float) or type(min_usable_gib) not in (int, float)
+            or not math.isfinite(reserve_gib) or not math.isfinite(min_usable_gib)
+            or reserve_gib < 0 or min_usable_gib <= 0):
         raise ImageGpuAdmissionError("invalid GPU budget")
     try:
         import torch

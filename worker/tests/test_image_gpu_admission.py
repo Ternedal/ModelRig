@@ -42,6 +42,17 @@ class ImageGpuAdmissionTests(unittest.TestCase):
             with self.assertRaises(ImageGpuAdmissionError):
                 inspect_cuda_budget(1)
 
+    def test_rejects_bool_index_and_nonfinite_budget(self):
+        for index in (True, False, 1.5, '0'):
+            with self.subTest(index=index), self.assertRaises(ImageGpuAdmissionError):
+                inspect_cuda_budget(index)
+        for reserve in (float('nan'), float('inf'), True, '3'):
+            with self.subTest(reserve=reserve), self.assertRaises(ImageGpuAdmissionError):
+                inspect_cuda_budget(0, reserve_gib=reserve)
+        for minimum in (float('nan'), float('-inf'), False, '6'):
+            with self.subTest(minimum=minimum), self.assertRaises(ImageGpuAdmissionError):
+                inspect_cuda_budget(0, min_usable_gib=minimum)
+
     def test_invalid_budget(self):
         with self.assertRaises(ImageGpuAdmissionError):
             inspect_cuda_budget(-1)
