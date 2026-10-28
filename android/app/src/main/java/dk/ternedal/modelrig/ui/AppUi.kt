@@ -1180,7 +1180,7 @@ private fun ChatScreen(
             else {
                 castDeliveryStatus = "Afventer Nest Hub"
                 val sessionId = java.util.UUID.randomUUID().toString().replace("-", "")
-                if (sender.listenForVoiceAck(
+                val listening = sender.listenForVoiceAck(
                         sessionId,
                         onAck = { messageId, kind, value ->
                             android.util.Log.d("KalivCast", "Receiver acknowledged $messageId ($kind: $value)")
@@ -1190,7 +1190,9 @@ private fun ChatScreen(
                             android.util.Log.w("KalivCast", "Receiver ACK timed out: $messageId")
                             castDeliveryStatus = "Nest Hub svarer ikke – lyden fortsætter på telefonen"
                         },
-                    )) castAckSender = sender
+                    )
+                if (listening) castAckSender = sender
+                else castDeliveryStatus = "Kunne ikke lytte efter Nest Hub-kvitteringer"
                 dk.ternedal.modelrig.voice.CastVoiceDisplayBridge(
                     send = { message -> sender.send(message) },
                     sessionId = sessionId,
@@ -1361,6 +1363,9 @@ private fun ChatScreen(
             } finally {
                 activeCall = null
                 castAckSender?.closeAckListener()
+                if (castAckSender != null && castDeliveryStatus == "Afventer Nest Hub") {
+                    castDeliveryStatus = "Ingen kvittering modtaget fra Nest Hub"
+                }
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
