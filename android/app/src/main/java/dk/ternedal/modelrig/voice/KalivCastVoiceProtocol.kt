@@ -20,6 +20,7 @@ object KalivCastVoiceProtocol {
             .put("type", "kaliv_voice_status")
             .put("version", VERSION)
             .put("session_id", sessionId)
+            .put("message_id", java.util.UUID.randomUUID().toString())
             .put("phase", phase)
     }
 
@@ -31,6 +32,7 @@ object KalivCastVoiceProtocol {
             .put("type", "kaliv_voice_text")
             .put("version", VERSION)
             .put("session_id", sessionId)
+            .put("message_id", java.util.UUID.randomUUID().toString())
             .put("role", role)
             .put("text", value)
     }
