@@ -38,7 +38,12 @@ class KalivCastVoiceSender(private val context: Context) {
         val configuredId = prefs.getString("receiver_app_id", null)?.trim().orEmpty()
         if (!Regex("[A-Fa-f0-9]{8}").matches(configuredId) ||
             configuredId.equals("CC1AD845", ignoreCase = true)) return false
+        // Never route to a different receiver merely because another Cast session
+        // is active. The configured custom app must own this session.
         val current = session() ?: return false
+        if (!current.applicationMetadata?.applicationId.equals(configuredId, ignoreCase = true)) {
+            return false
+        }
         return try {
             current.sendMessage(KalivCastVoiceProtocol.NAMESPACE, message.toString())
             true
