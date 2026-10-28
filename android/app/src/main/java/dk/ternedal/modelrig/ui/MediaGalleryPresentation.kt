@@ -73,6 +73,7 @@ fun mediaGalleryMessage(reason: Reason): String = when (reason) {
     Reason.PROTOCOL -> "Riggen svarede i et format, appen ikke kender."
     Reason.NETWORK -> "Riggen kan ikke nås. Tjek at den kører, og at telefonen er på samme netværk."
     Reason.HTTP -> "Mediebiblioteket svarede med en fejl."
+    Reason.UNPLAYABLE -> "Videoen kan ikke afspilles på telefonen."
 }
 
 fun skippedMessage(count: Int): String? = when {

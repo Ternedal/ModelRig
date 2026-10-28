@@ -214,5 +214,6 @@ class MediaGalleryException(val reason: Reason, message: String) : RuntimeExcept
         PROTOCOL,
         NETWORK,
         HTTP,
+        UNPLAYABLE,
     }
 }

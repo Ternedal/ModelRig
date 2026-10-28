@@ -145,6 +145,13 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    // Videoafspilning i mediegalleriet (ModelRig #2275, godkendt af Anders
+    // 28/10-2026): samme bibliotek som SkyPlayer (Media3/ExoPlayer). OkHttp-
+    // modulet saa video gaar gennem galleriets egen klient: token kun til den
+    // parrede rig, ingen redirects, Range-streaming. Ingen disk-cache.
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively
