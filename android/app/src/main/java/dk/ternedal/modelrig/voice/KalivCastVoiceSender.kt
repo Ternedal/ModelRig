@@ -49,7 +49,8 @@ class KalivCastVoiceSender(private val context: Context) {
             }
             else -> return false
         }
-        if (message.optString("type") !in setOf("kaliv_voice_status", "kaliv_voice_text")) return false
+        // A Cast sendTask may fail asynchronously; do not report delivery here.
+        // Keep this method's Boolean strictly as a local submission result.
         val prefs = context.getSharedPreferences("kaliv_cast", Context.MODE_PRIVATE)
         val configuredId = prefs.getString("receiver_app_id", null)?.trim().orEmpty()
         if (!Regex("[A-Fa-f0-9]{8}").matches(configuredId) ||
