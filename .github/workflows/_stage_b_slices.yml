@@ -15,8 +15,18 @@ jobs:
     name: stage-b-admission
     runs-on: ubuntu-latest
     timeout-minutes: 355
+    # One admission lane per calling workflow and SHA. A lane shared by every
+    # caller of the same SHA evicted gates: on a push to main, ci,
+    # agent3-full-diagnostics and exact-head-qualification all start Stage-B
+    # at once, GitHub keeps one running and ONE pending member per group, and
+    # the third arrival replaced the pending one (exact-head 40773791392 on
+    # c68ba07e, 28 Oct 2026). In a called workflow github.workflow is the
+    # caller's name. The per-SHA cache below still serves a later admission.
+    # Tradeoff, chosen deliberately: on a main push, concurrent admissions
+    # no longer share one build. That costs extra runner time and
+    # concurrency, which is not free just because the repository is public.
     concurrency:
-      group: modelrig-stage-b-admission-${{ inputs.head_sha }}
+      group: modelrig-stage-b-admission-${{ inputs.head_sha }}-${{ github.workflow }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
