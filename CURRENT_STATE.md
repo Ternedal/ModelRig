@@ -345,6 +345,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_control_center_vision.py`
 - `tests/worker_credential_acl.py`
 - `tests/worker_credential_acl_windows.py`
+- `tests/worker_credential_file.py`
 - `tests/worker_d4_auto_routing.py`
 - `tests/worker_data_sharing_policy.py`
 - `tests/worker_desktop_action_plan.py`
