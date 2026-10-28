@@ -78,6 +78,13 @@ check(ok(ADMINISTRATORS_SID, [allow(ME, READ)]), "owned by Administrators, reada
 check(ok(ME, [allow(ME), allow(USERS, SYNCHRONIZE | FILE_READ_ATTRIBUTES | READ_CONTROL)]),
       "another principal with only SYNCHRONIZE, READ_ATTRIBUTES and READ_CONTROL")
 check(ok(ME, []), "an empty DACL (nobody granted anything) is private; the read itself would then fail")
+OWNER_RIGHTS = "S-1-3-4"
+# Exactly the DACL the Windows runner produced after icacls /inheritance:r /grant:r <me>:(R):
+RUNNER_DACL = [allow(ME, 0x00120089), allow(SYSTEM_SID, FULL), allow(ADMINISTRATORS_SID, FULL), allow(OWNER_RIGHTS, FULL)]
+check(ok(ADMINISTRATORS_SID, RUNNER_DACL), "OWNER RIGHTS with a trusted owner is the owner, not another principal (runner DACL)")
+check(not ok(OTHER_USER, [allow(ME), allow(OWNER_RIGHTS, FULL)]),
+      "OWNER RIGHTS never rescues a file owned by another principal")
+check(not ok(OWNER_RIGHTS, [allow(ME)]), "OWNER RIGHTS itself is never an acceptable owner")
 check(ok("S-1-5-21-1-2-3-4-5-6-7-8-9-10-11-12-13-14", [], process="S-1-5-21-1-2-3-4-5-6-7-8-9-10-11-12-13-14"),
       "a canonical SID with the maximum 15 subauthorities")
 check(ok(ME, [allow(ME), deny(EVERYONE)]), "a deny ACE does not make a private file unacceptable")
