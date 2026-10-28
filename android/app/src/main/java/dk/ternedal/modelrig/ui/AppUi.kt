@@ -1171,13 +1171,20 @@ private fun ChatScreen(
         val modelAtVoiceStart = currentModel
         // Cast display is best-effort. The phone remains the audio output.
         // Do not initialize the Cast SDK unless a user-established session exists.
+        var castAckSender: dk.ternedal.modelrig.voice.KalivCastVoiceSender? = null
         val castDisplay = runCatching {
             val sender = dk.ternedal.modelrig.voice.KalivCastVoiceSender(context)
             if (sender.activeDeviceId() == null) null
-            else dk.ternedal.modelrig.voice.CastVoiceDisplayBridge(
-                send = { message -> sender.send(message) },
-                sessionId = java.util.UUID.randomUUID().toString().replace("-", ""),
-            )
+            else {
+                val sessionId = java.util.UUID.randomUUID().toString().replace("-", "")
+                if (sender.listenForStatusAck(sessionId) { phase ->
+                        android.util.Log.d("KalivCast", "Receiver acknowledged voice phase: $phase")
+                    }) castAckSender = sender
+                dk.ternedal.modelrig.voice.CastVoiceDisplayBridge(
+                    send = { message -> sender.send(message) },
+                    sessionId = sessionId,
+                )
+            }
         }.getOrNull()
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
@@ -1342,6 +1349,7 @@ private fun ChatScreen(
                 audioChan.close()
             } finally {
                 activeCall = null
+                castAckSender?.closeAckListener()
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
