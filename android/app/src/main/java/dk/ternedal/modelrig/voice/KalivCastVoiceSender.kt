@@ -33,6 +33,8 @@ class KalivCastVoiceSender(private val context: Context) {
      * The callback is invoked only for a matching session and validated status.
      * Call closeAckListener() when leaving the voice screen.
      */
+    private val pending = mutableMapOf<String, Pair<String, Long>>()
+    private val ackTimeoutMs = 10_000L
     private var ackSession: CastSession? = null
     private var ackListener: com.google.android.gms.cast.Cast.MessageReceivedCallback? = null
 
@@ -50,15 +52,24 @@ class KalivCastVoiceSender(private val context: Context) {
             }
             val messageId = data.optString("message_id")
             if (!Regex("[0-9a-fA-F-]{36}").matches(messageId)) return@MessageReceivedCallback
+            val expected = pending[messageId] ?: return@MessageReceivedCallback
+            if (android.os.SystemClock.elapsedRealtime() - expected.second > ackTimeoutMs) {
+                pending.remove(messageId)
+                return@MessageReceivedCallback
+            }
             when (data.optString("kind")) {
                 "text" -> {
                     val role = data.optString("role")
                     if (role !in setOf("user", "assistant")) return@MessageReceivedCallback
+                    if (expected.first != "text:$role") return@MessageReceivedCallback
+                    pending.remove(messageId)
                     onAck(messageId, "text", role)
                 }
                 "" -> {
                     val phase = data.optString("phase")
                     if (phase !in setOf("listening", "thinking", "speaking", "idle", "error")) return@MessageReceivedCallback
+                    if (expected.first != "status:$phase") return@MessageReceivedCallback
+                    pending.remove(messageId)
                     onAck(messageId, "status", phase)
                 }
                 else -> return@MessageReceivedCallback
@@ -78,6 +89,7 @@ class KalivCastVoiceSender(private val context: Context) {
         val active = ackSession
         ackSession = null
         ackListener = null
+        pending.clear()
         if (active != null) {
             try { active.removeMessageReceivedCallbacks(KalivCastVoiceProtocol.NAMESPACE) }
             catch (_: Exception) { /* Cast may have disconnected */ }
@@ -121,9 +133,17 @@ class KalivCastVoiceSender(private val context: Context) {
         return try {
             // CastSession.sendMessage is asynchronous. A successful call only
             // means the message was submitted, not displayed by the receiver.
+            val kind = if (message.optString("type") == "kaliv_voice_status")
+                "status:" + message.optString("phase") else "text:" + message.optString("role")
+            val messageId = message.optString("message_id")
+            val now = android.os.SystemClock.elapsedRealtime()
+            pending.entries.removeAll { now - it.value.second > ackTimeoutMs }
+            if (pending.size >= 128) pending.remove(pending.keys.first())
+            pending[messageId] = kind to now
             current.sendMessage(KalivCastVoiceProtocol.NAMESPACE, message.toString())
             true
         } catch (_: Exception) {
+            pending.remove(message.optString("message_id"))
             false
         }
     }
