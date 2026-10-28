@@ -37,6 +37,18 @@ class KalivCastVoiceSender(private val context: Context) {
      */
     fun send(message: org.json.JSONObject): Boolean {
         if (message.optInt("version") != KalivCastVoiceProtocol.VERSION) return false
+        val sessionId = message.optString("session_id")
+        if (!Regex("[A-Za-z0-9_-]{8,64}").matches(sessionId)) return false
+        when (message.optString("type")) {
+            "kaliv_voice_status" -> {
+                if (message.optString("phase") !in setOf("listening", "thinking", "speaking", "idle", "error")) return false
+            }
+            "kaliv_voice_text" -> {
+                if (message.optString("role") !in setOf("user", "assistant")) return false
+                if (message.optString("text").length > 4000) return false
+            }
+            else -> return false
+        }
         if (message.optString("type") !in setOf("kaliv_voice_status", "kaliv_voice_text")) return false
         val prefs = context.getSharedPreferences("kaliv_cast", Context.MODE_PRIVATE)
         val configuredId = prefs.getString("receiver_app_id", null)?.trim().orEmpty()
