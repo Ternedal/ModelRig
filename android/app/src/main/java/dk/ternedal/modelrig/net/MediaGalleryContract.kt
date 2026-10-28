@@ -5,6 +5,8 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.format.DateTimeParseException
 
@@ -72,11 +74,18 @@ object MediaGalleryContract {
 
     fun isSafeId(value: String): Boolean = SAFE_ID.matches(value)
 
-    /** A safe ID needs no percent-encoding, so the path is the ID verbatim. */
+    /**
+     * Only safe IDs become paths. They are still encoded like every other path
+     * segment in the app (tests/workflow_client_path_segments.py); for this
+     * alphabet the encoding is the identity, so the result equals the server's.
+     */
     fun mediaPath(id: String): String {
         require(isSafeId(id)) { "unsafe media id" }
-        return "/api/v1/media/$id"
+        return "/api/v1/media/${seg(id)}"
     }
+
+    private fun seg(value: String): String =
+        URLEncoder.encode(value, StandardCharsets.UTF_8.toString()).replace("+", "%20")
 
     /** Opaque, but bounded and printable ASCII so it can be echoed as a query value. */
     fun isValidCursor(value: String): Boolean =
