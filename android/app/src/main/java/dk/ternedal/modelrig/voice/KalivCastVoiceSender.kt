@@ -35,13 +35,17 @@ class KalivCastVoiceSender(private val context: Context) {
      */
     private val pending = mutableMapOf<String, Pair<String, Long>>()
     private val ackTimeoutMs = 10_000L
+    private val timeoutHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val timeoutChecks = mutableMapOf<String, Runnable>()
+    private var onTimeout: ((String) -> Unit)? = null
     private var ackSession: CastSession? = null
     private var ackListener: com.google.android.gms.cast.Cast.MessageReceivedCallback? = null
 
-    fun listenForVoiceAck(sessionId: String, onAck: (String, String, String) -> Unit): Boolean {
+    fun listenForVoiceAck(sessionId: String, onAck: (String, String, String) -> Unit, timeout: (String) -> Unit = {}): Boolean {
         if (!Regex("[A-Za-z0-9_-]{8,64}").matches(sessionId)) return false
         closeAckListener()
         val active = session() ?: return false
+        onTimeout = timeout
         val callback = com.google.android.gms.cast.Cast.MessageReceivedCallback { _, namespace, payload ->
             if (namespace != KalivCastVoiceProtocol.NAMESPACE) return@MessageReceivedCallback
             val data = try { org.json.JSONObject(payload) } catch (_: Exception) { return@MessageReceivedCallback }
@@ -55,6 +59,7 @@ class KalivCastVoiceSender(private val context: Context) {
             val expected = pending[messageId] ?: return@MessageReceivedCallback
             if (android.os.SystemClock.elapsedRealtime() - expected.second > ackTimeoutMs) {
                 pending.remove(messageId)
+                timeoutChecks.remove(messageId)?.let { timeoutHandler.removeCallbacks(it) }
                 return@MessageReceivedCallback
             }
             when (data.optString("kind")) {
@@ -63,6 +68,7 @@ class KalivCastVoiceSender(private val context: Context) {
                     if (role !in setOf("user", "assistant")) return@MessageReceivedCallback
                     if (expected.first != "text:$role") return@MessageReceivedCallback
                     pending.remove(messageId)
+                timeoutChecks.remove(messageId)?.let { timeoutHandler.removeCallbacks(it) }
                     onAck(messageId, "text", role)
                 }
                 "" -> {
@@ -70,6 +76,7 @@ class KalivCastVoiceSender(private val context: Context) {
                     if (phase !in setOf("listening", "thinking", "speaking", "idle", "error")) return@MessageReceivedCallback
                     if (expected.first != "status:$phase") return@MessageReceivedCallback
                     pending.remove(messageId)
+                timeoutChecks.remove(messageId)?.let { timeoutHandler.removeCallbacks(it) }
                     onAck(messageId, "status", phase)
                 }
                 else -> return@MessageReceivedCallback
@@ -90,6 +97,9 @@ class KalivCastVoiceSender(private val context: Context) {
         ackSession = null
         ackListener = null
         pending.clear()
+        timeoutChecks.values.forEach { timeoutHandler.removeCallbacks(it) }
+        timeoutChecks.clear()
+        onTimeout = null
         if (active != null) {
             try { active.removeMessageReceivedCallbacks(KalivCastVoiceProtocol.NAMESPACE) }
             catch (_: Exception) { /* Cast may have disconnected */ }
@@ -140,10 +150,18 @@ class KalivCastVoiceSender(private val context: Context) {
             pending.entries.removeAll { now - it.value.second > ackTimeoutMs }
             if (pending.size >= 128) pending.remove(pending.keys.first())
             pending[messageId] = kind to now
+            val check = Runnable {
+                if (pending.remove(messageId) != null) onTimeout?.invoke(messageId)
+                timeoutChecks.remove(messageId)
+            }
+            timeoutChecks[messageId] = check
+            timeoutHandler.postDelayed(check, ackTimeoutMs)
             current.sendMessage(KalivCastVoiceProtocol.NAMESPACE, message.toString())
             true
         } catch (_: Exception) {
-            pending.remove(message.optString("message_id"))
+            val failedId = message.optString("message_id")
+            pending.remove(failedId)
+            timeoutChecks.remove(failedId)?.let { timeoutHandler.removeCallbacks(it) }
             false
         }
     }
