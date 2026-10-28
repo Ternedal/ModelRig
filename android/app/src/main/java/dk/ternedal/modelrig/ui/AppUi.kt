@@ -2272,21 +2272,7 @@ private fun ChatScreen(
                         )
                         dialogWindow?.setDimAmount(0f)
                     }
-                    // Cast discovery/selection uses Google's supported MediaRouteButton.
-                    // A real custom receiver ID must be saved before the route picker is shown.
-                    if (Regex("[A-Fa-f0-9]{8}").matches(castReceiverId) && castVoiceEnabled) {
-                        androidx.compose.ui.viewinterop.AndroidView(
-                            factory = { viewContext ->
-                                androidx.mediarouter.app.MediaRouteButton(viewContext).apply {
-                                    com.google.android.gms.cast.framework.CastButtonFactory
-                                        .setUpMediaRouteButton(viewContext, this)
-                                }
-                            },
-                        )
-                    }
-                    androidx.compose.material3.TextButton(onClick = { showCastSetup = true }) {
-                        androidx.compose.material3.Text("Nest Hub / Cast-opsætning")
-                    }
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
                     dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
                         modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                         pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",
@@ -2327,6 +2313,29 @@ private fun ChatScreen(
                             showVoice = false
                         },
                     )
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.align(Alignment.TopEnd)
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // Cast discovery/selection uses Google's supported MediaRouteButton.
+                        // A real custom receiver ID must be saved before the route picker is shown.
+                        if (Regex("[A-Fa-f0-9]{8}").matches(castReceiverId) && castVoiceEnabled) {
+                            androidx.compose.ui.viewinterop.AndroidView(
+                                factory = { viewContext ->
+                                    androidx.mediarouter.app.MediaRouteButton(viewContext).apply {
+                                        com.google.android.gms.cast.framework.CastButtonFactory
+                                            .setUpMediaRouteButton(viewContext, this)
+                                    }
+                                },
+                            )
+                        }
+                        androidx.compose.material3.TextButton(onClick = { showCastSetup = true }) {
+                            androidx.compose.material3.Text("Nest Hub / Cast-opsætning")
+                        }
+                    }
+                    }
                 }
             }
 
