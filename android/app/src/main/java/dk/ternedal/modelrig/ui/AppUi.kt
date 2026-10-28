@@ -928,6 +928,7 @@ private fun ChatScreen(
     var recording by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var voiceError by remember { mutableStateOf<String?>(null) }
+    var castDeliveryStatus by remember { mutableStateOf("Ikke tilsluttet") }
 
     // Rigens EGNE evner (GET /capabilities), hentet en gang pr. forbindelse.
     // Skal ligge i tilstand frem for at blive hentet paa stedet: onOpenVoice
@@ -1171,19 +1172,23 @@ private fun ChatScreen(
         val modelAtVoiceStart = currentModel
         // Cast display is best-effort. The phone remains the audio output.
         // Do not initialize the Cast SDK unless a user-established session exists.
+        castDeliveryStatus = "Ikke tilsluttet"
         var castAckSender: dk.ternedal.modelrig.voice.KalivCastVoiceSender? = null
         val castDisplay = runCatching {
             val sender = dk.ternedal.modelrig.voice.KalivCastVoiceSender(context)
             if (sender.activeDeviceId() == null) null
             else {
+                castDeliveryStatus = "Afventer Nest Hub"
                 val sessionId = java.util.UUID.randomUUID().toString().replace("-", "")
                 if (sender.listenForVoiceAck(
                         sessionId,
                         onAck = { messageId, kind, value ->
                             android.util.Log.d("KalivCast", "Receiver acknowledged $messageId ($kind: $value)")
+                            castDeliveryStatus = "Nest Hub modtager beskeder"
                         },
                         timeout = { messageId ->
                             android.util.Log.w("KalivCast", "Receiver ACK timed out: $messageId")
+                            castDeliveryStatus = "Nest Hub svarer ikke – lyden fortsætter på telefonen"
                         },
                     )) castAckSender = sender
                 dk.ternedal.modelrig.voice.CastVoiceDisplayBridge(
@@ -2347,6 +2352,7 @@ private fun ChatScreen(
                                 },
                             )
                         }
+                        androidx.compose.material3.Text(castDeliveryStatus, style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
                         androidx.compose.material3.TextButton(onClick = {
                             castReceiverId = savedCastReceiverId
                             castVoiceEnabled = savedCastVoiceEnabled
