@@ -59,8 +59,12 @@ class MediaGalleryScreenTest {
     /** Stands in for Media3: shows which stream it got and can report a player error. */
     private val fakePlayer: @androidx.compose.runtime.Composable (MediaVideoStream, MediaItem, (Reason) -> Unit) -> Unit =
         { stream, _, onError ->
-            Text("player:" + stream.url)
-            Button(onClick = { onError(Reason.UNPLAYABLE) }) { Text("simulate decode failure") }
+            // A Column, not the detail's Box: stacked buttons would overlap and steal clicks.
+            androidx.compose.foundation.layout.Column {
+                Text("player:" + stream.url)
+                Button(onClick = { onError(Reason.UNPLAYABLE) }) { Text("simulate decode failure") }
+                Button(onClick = { onError(Reason.NETWORK) }) { Text("simulate network failure") }
+            }
         }
 
     private fun show(source: MediaGallerySource) {
@@ -185,6 +189,38 @@ class MediaGalleryScreenTest {
         compose.waitForIdle()
         compose.onNodeWithText(mediaGalleryMessage(Reason.UNPLAYABLE)).assertIsDisplayed()
         assertEquals(0, compose.onAllNodesWithText("player:", substring = true).fetchSemanticsNodes().size)
+        assertEquals("a decode failure is final", 0, compose.onAllNodesWithText("Prøv igen").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun networkFailureInThePlayerOffersRetryWhichRebuildsIt() {
+        val clip = MediaGalleryContract.parseItem(video("clip"))!!
+        show(FakeSource(mutableListOf(Result.success(MediaPage(listOf(clip), null, 0)))))
+        compose.onNodeWithContentDescription("Video", substring = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("simulate network failure").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(mediaGalleryMessage(Reason.NETWORK)).assertIsDisplayed()
+        compose.onNodeWithText("Prøv igen").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("player:http://127.0.0.1/api/v1/media/clip").assertIsDisplayed()
+    }
+
+    @Test
+    fun imageNetworkFailureCanBeRetried() {
+        var calls = 0
+        show(FakeSource(
+            mutableListOf(Result.success(MediaPage(listOf(item("a")), null, 0))),
+            full = { if (calls++ == 0) throw MediaGalleryException(Reason.NETWORK, "x") else png() },
+        ))
+        compose.onNodeWithContentDescription("Billede", substring = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(mediaGalleryMessage(Reason.NETWORK)).assertIsDisplayed()
+        compose.onNodeWithText("Prøv igen").performClick()
+        compose.waitForIdle()
+        assertEquals(2, calls)
+        assertEquals(0, compose.onAllNodesWithText(mediaGalleryMessage(Reason.NETWORK)).fetchSemanticsNodes().size)
+        compose.onNodeWithText("1920 × 1080").assertIsDisplayed()
     }
 
     @Test
@@ -198,6 +234,7 @@ class MediaGalleryScreenTest {
         compose.waitForIdle()
         compose.onNodeWithText(mediaGalleryMessage(Reason.UNPLAYABLE)).assertIsDisplayed()
         assertEquals(0, compose.onAllNodesWithText("player:", substring = true).fetchSemanticsNodes().size)
+        assertEquals("a stream that cannot be built is final", 0, compose.onAllNodesWithText("Prøv igen").fetchSemanticsNodes().size)
     }
 
     @Test

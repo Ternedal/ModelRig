@@ -58,6 +58,12 @@ class MediaGalleryPresentationTest {
     }
 
     @Test
+    fun `only transient failures are retryable`() {
+        val retryable = Reason.entries.filter(::isRetryable).toSet()
+        assertEquals(setOf(Reason.NETWORK, Reason.HTTP, Reason.STORAGE_UNAVAILABLE), retryable)
+    }
+
+    @Test
     fun `every reason has its own danish text without server detail`() {
         val texts = Reason.entries.map(::mediaGalleryMessage)
         assertEquals(texts.size, texts.toSet().size)
