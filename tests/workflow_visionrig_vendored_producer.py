@@ -15,9 +15,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests" / "support"))
+from source_code import code_of  # noqa: E402  (comments removed: a commented-out line must not pass)
 MODULE = ROOT / "android/visionrig-producer"
 MANIFEST = MODULE / "VENDORED_FROM.json"
 UPSTREAM_ROOTS = (
@@ -77,11 +80,11 @@ check(not changed, f"every vendored file matches its SHA-256 ({changed[:3] or 'a
 # The copy must live only in its module, never inside the app's own sources.
 stray = sorted(p.relative_to(ROOT).as_posix()
                for p in (ROOT / "android/app/src").rglob("*.kt")
-               if p.read_text(encoding="utf-8", errors="replace").lstrip().startswith("package dk.kaliv.visionrig"))
+               if code_of(p).lstrip().startswith("package dk.kaliv.visionrig"))
 check(not stray, f"no VisionRig source is copied into the app module ({stray[:2] or 'none'})")
 
-settings = (ROOT / "android/settings.gradle.kts").read_text(encoding="utf-8")
-app_build = (ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
+settings = code_of(ROOT / "android/settings.gradle.kts")
+app_build = code_of(ROOT / "android/app/build.gradle.kts")
 check('include(":visionrig-producer")' in settings, "the module is part of the Android build")
 check('implementation(project(":visionrig-producer"))' in app_build, "the app depends on the module, not on copied sources")
 
