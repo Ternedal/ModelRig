@@ -1160,6 +1160,16 @@ private fun ChatScreen(
         val conversationAtVoiceStart = convId
         val navigationRevisionAtVoiceStart = voiceNavigationRevision
         val modelAtVoiceStart = currentModel
+        // Cast display is best-effort. The phone remains the audio output.
+        // Do not initialize the Cast SDK unless a user-established session exists.
+        val castDisplay = runCatching {
+            val sender = dk.ternedal.modelrig.voice.KalivCastVoiceSender(context)
+            if (sender.activeDeviceId() == null) null
+            else dk.ternedal.modelrig.voice.CastVoiceDisplayBridge(
+                send = { message -> sender.send(message) },
+                sessionId = java.util.UUID.randomUUID().toString().replace("-", ""),
+            )
+        }.getOrNull()
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
         voiceJob = scope.launch {
@@ -1177,6 +1187,7 @@ private fun ChatScreen(
             var usedModel: String? = null
             var usedCloud = false
             var streamError: Pair<Int, String>? = null
+            castDisplay?.thinking()
 
             // Player: pull decoded WAVs and play each in order via playWav, which
             // blocks until that sentence finishes (or barge-in/stop cuts it).
@@ -1229,6 +1240,7 @@ private fun ChatScreen(
                                 transcriptShown = true
                                 transcriptText = tt
                                 voiceTranscript = tt
+                                castDisplay?.transcript(tt)
                                 // messages is a SnapshotStateList -- safe to mutate
                                 // from this IO thread; the recomposer picks it up.
                                 // Set replyIdx synchronously (the callbacks run in
@@ -1243,6 +1255,7 @@ private fun ChatScreen(
                         onChunk = { _, text, chunkB64, utteranceId ->
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
+                            castDisplay?.speaking(text.trim())
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
                             }
@@ -1253,6 +1266,7 @@ private fun ChatScreen(
                         },
                         onDone = { reply, m, cloud ->
                             usedModel = m; usedCloud = cloud
+                            castDisplay?.idle()
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(
@@ -1261,7 +1275,7 @@ private fun ChatScreen(
                                 )
                             }
                         },
-                        onError = { status, detail -> streamError = status to detail },
+                        onError = { status, detail -> streamError = status to detail; castDisplay?.error() },
                     )
                 }
                 // The network stream is done; close the channel so the player
