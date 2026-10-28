@@ -33,10 +33,10 @@ class KalivCastVoiceSender(private val context: Context) {
      * The callback is invoked only for a matching session and validated status.
      * Call closeAckListener() when leaving the voice screen.
      */
-    private val pending = mutableMapOf<String, Pair<String, Long>>()
+    private val pending = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     private val ackTimeoutMs = 10_000L
     private val timeoutHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val timeoutChecks = mutableMapOf<String, Runnable>()
+    private val timeoutChecks = java.util.concurrent.ConcurrentHashMap<String, Runnable>()
     private var onTimeout: ((String) -> Unit)? = null
     private var ackSession: CastSession? = null
     private var ackListener: com.google.android.gms.cast.Cast.MessageReceivedCallback? = null
@@ -68,7 +68,7 @@ class KalivCastVoiceSender(private val context: Context) {
                     if (role !in setOf("user", "assistant")) return@MessageReceivedCallback
                     if (expected.first != "text:$role") return@MessageReceivedCallback
                     pending.remove(messageId)
-                timeoutChecks.remove(messageId)?.let { timeoutHandler.removeCallbacks(it) }
+                    timeoutChecks.remove(messageId)?.let { timeoutHandler.removeCallbacks(it) }
                     onAck(messageId, "text", role)
                 }
                 "" -> {
@@ -148,7 +148,13 @@ class KalivCastVoiceSender(private val context: Context) {
             val messageId = message.optString("message_id")
             val now = android.os.SystemClock.elapsedRealtime()
             pending.entries.removeAll { now - it.value.second > ackTimeoutMs }
-            if (pending.size >= 128) pending.remove(pending.keys.first())
+            if (pending.size >= 128) {
+                val evictedId = pending.keys.firstOrNull()
+                if (evictedId != null) {
+                    pending.remove(evictedId)
+                    timeoutChecks.remove(evictedId)?.let { timeoutHandler.removeCallbacks(it) }
+                }
+            }
             pending[messageId] = kind to now
             val check = Runnable {
                 if (pending.remove(messageId) != null) onTimeout?.invoke(messageId)
