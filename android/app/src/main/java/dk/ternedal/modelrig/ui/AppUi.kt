@@ -1177,9 +1177,15 @@ private fun ChatScreen(
             if (sender.activeDeviceId() == null) null
             else {
                 val sessionId = java.util.UUID.randomUUID().toString().replace("-", "")
-                if (sender.listenForVoiceAck(sessionId) { messageId, kind, value ->
-                        android.util.Log.d("KalivCast", "Receiver acknowledged $messageId ($kind: $value)")
-                    }) castAckSender = sender
+                if (sender.listenForVoiceAck(
+                        sessionId,
+                        onAck = { messageId, kind, value ->
+                            android.util.Log.d("KalivCast", "Receiver acknowledged $messageId ($kind: $value)")
+                        },
+                        timeout = { messageId ->
+                            android.util.Log.w("KalivCast", "Receiver ACK timed out: $messageId")
+                        },
+                    )) castAckSender = sender
                 dk.ternedal.modelrig.voice.CastVoiceDisplayBridge(
                     send = { message -> sender.send(message) },
                     sessionId = sessionId,
