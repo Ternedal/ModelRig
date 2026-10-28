@@ -2365,7 +2365,7 @@ private fun ChatScreen(
                     },
                     confirmButton = {
                         androidx.compose.material3.TextButton(onClick = {
-                            val valid = Regex("[A-Fa-f0-9]{8}").matches(castReceiverId)
+                            val valid = Regex("[A-Fa-f0-9]{8}").matches(castReceiverId) && !castReceiverId.equals("CC1AD845", ignoreCase = true)
                             castPrefs.edit()
                                 .putString("receiver_app_id", if (valid) castReceiverId else "")
                                 .putBoolean("voice_display_enabled", valid && castVoiceEnabled)
