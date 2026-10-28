@@ -18,7 +18,11 @@ class KalivCastVoiceSender(private val context: Context) {
         if (!Regex("[A-Fa-f0-9]{8}").matches(receiverId) ||
             !prefs.getBoolean("voice_display_enabled", false)) return null
         CastContext.getSharedInstance(context).sessionManager.currentCastSession
-            ?.takeIf { it.isConnected }
+            ?.takeIf {
+                it.isConnected &&
+                    it.applicationMetadata?.applicationId.equals(receiverId, ignoreCase = true) &&
+                    !receiverId.equals("CC1AD845", ignoreCase = true)
+            }
     } catch (_: Exception) {
         null
     }
