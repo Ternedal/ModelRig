@@ -66,23 +66,24 @@ class OfflineQueue(private val prefs: android.content.SharedPreferences) {
          * "skrevet 21:14" / "skrevet i går 21:14" — så man kan bedømme om
          * beskeden stadig er den man vil sende. Uden tidspunkt er en kø-besked
          * bare tekst uden situation.
+         *
+         * [zone] er telefonens tidszone; tests giver en fast zone, så
+         * etiketten (og screenshots) ikke afhænger af maskinens TZ.
          */
-        fun writtenLabel(atMillis: Long, nowMillis: Long): String {
+        fun writtenLabel(
+            atMillis: Long,
+            nowMillis: Long,
+            zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+        ): String {
             if (atMillis <= 0L) return "skrevet tidligere"
-            val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-            val cal = { ms: Long -> java.util.Calendar.getInstance().apply { timeInMillis = ms } }
-            val a = cal(atMillis)
-            val n = cal(nowMillis)
-            val sameDay = a.get(java.util.Calendar.YEAR) == n.get(java.util.Calendar.YEAR) &&
-                a.get(java.util.Calendar.DAY_OF_YEAR) == n.get(java.util.Calendar.DAY_OF_YEAR)
-            val yesterday = a.get(java.util.Calendar.YEAR) == n.get(java.util.Calendar.YEAR) &&
-                a.get(java.util.Calendar.DAY_OF_YEAR) == n.get(java.util.Calendar.DAY_OF_YEAR) - 1
-            val time = fmt.format(java.util.Date(atMillis))
-            return when {
-                sameDay -> "skrevet $time"
-                yesterday -> "skrevet i går $time"
-                else -> "skrevet " + java.text.SimpleDateFormat("d/M HH:mm", java.util.Locale.getDefault())
-                    .format(java.util.Date(atMillis))
+            val at = java.time.Instant.ofEpochMilli(atMillis).atZone(zone)
+            val today = java.time.Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
+            val time = at.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+            return when (at.toLocalDate()) {
+                today -> "skrevet $time"
+                // Kalenderdage, ikke dag-i-året: 31/12 er også "i går" den 1/1.
+                today.minusDays(1) -> "skrevet i går $time"
+                else -> "skrevet " + at.format(java.time.format.DateTimeFormatter.ofPattern("d/M HH:mm"))
             }
         }
     }
