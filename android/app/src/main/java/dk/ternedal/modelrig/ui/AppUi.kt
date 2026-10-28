@@ -1367,8 +1367,10 @@ private fun ChatScreen(
                 if (wasInterrupted || voiceError != null) castDisplay?.idle()
                 activeCall = null
                 castAckSender?.closeAckListener()
+                // The final idle message is asynchronous and its ACK may arrive
+                // after this voice turn ends. Do not misreport it as a timeout.
                 if (castAckSender != null && castDeliveryStatus == "Afventer Nest Hub") {
-                    castDeliveryStatus = "Ingen kvittering modtaget fra Nest Hub"
+                    castDeliveryStatus = "Stemmevisning afsluttet – levering ikke bekræftet"
                 }
                 player.cancel()
                 meter?.cancel()
