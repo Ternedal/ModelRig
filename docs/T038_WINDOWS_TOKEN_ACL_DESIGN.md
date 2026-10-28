@@ -1,8 +1,17 @@
 # Design: Windows ACL check for credential files
 
-**Status: design only, nothing is implemented.** Tracking: KalivNexus #1
-(ChatGPT queue item 3), and the PENDING gap in
-`docs/T038_HOME_ASSISTANT_LIVE_READ.md`.
+**Status: implemented in three steps; step 3 wires it into the loaders.**
+Tracking: KalivNexus #1 (ChatGPT queue item 3).
+
+| Step | What | Where |
+| --- | --- | --- |
+| 1 | Pure judgment `evaluate_credential_acl` | `worker/app/credential_acl.py` (#2291) |
+| 2 | Windows reader: owner + DACL from the opened handle | `worker/app/credential_acl_windows.py` (#2294) |
+| 3 | Shared loader `read_private_credential`; all three loaders use it | `worker/app/credential_file.py` (this step) |
+
+Step 3 changes behaviour **on Windows only**: a token file that other users
+can read is now refused, and so is a symlinked or junctioned token file.
+POSIX accepts and refuses exactly what it did before.
 
 ## The gap (verified in code, 2026-10-26)
 
@@ -97,31 +106,63 @@ stays as it is.
 - **Through the transport:** the E2E test in #2289 gains a Windows case: a
   too-broad ACL gives `unknown` and the fixture receives zero requests.
 
-## Operator guidance (once implemented)
+## Operator guidance
 
-Lock the file to the account the worker runs as:
+Lock the file to **the account the worker runs as**. The check uses the
+process user, not whoever created the file. On the rig the worker is a child
+of the `KalivSupervisor` scheduled task, so read the account from there and
+from the running worker rather than assuming it is `$env:USERNAME` (review
+5673456488):
 
 ```powershell
-icacls C:\Rig\secrets\ha.token /inheritance:r /grant:r "$env:USERNAME`:R"
+(Get-ScheduledTask -TaskName KalivSupervisor).Principal.UserId
+Get-CimInstance Win32_Process -Filter "Name='modelrig-worker-windows-x64.exe'" | Invoke-CimMethod -MethodName GetOwner
+icacls C:\Rig\secrets\ha.token /inheritance:r /grant:r "<account>:R"
 ```
 
-If the worker runs as a different account (a service), grant that account
-instead. The check uses the **process** user, not whoever created the file.
+The full steps are in `docs/T038_HOME_ASSISTANT_LIVE_READ.md`, step 1.
 
-## Not verified yet
+## Step 3: one handle for the judgment and the read
 
-These come from Windows API knowledge and must be checked during
-implementation, on the Windows CI runner:
+`read_private_credential(path, *, max_bytes)` in `worker/app/credential_file.py`
+is the only way the three loaders read a token file. Each loader keeps its own
+error messages; a refusal carries a `kind` (`unavailable`, `not_regular`,
+`size`, `permissions`, `unverifiable`, `read`) that maps onto them.
 
-- the exact `ctypes` signatures;
-- the ACE header layout;
-- the generic-to-file rights mapping;
-- whether `icacls`-made ACLs produce exactly the ACE sets listed above.
+- **Windows:** `read_private_credential_windows` opens **one** handle with
+  `FILE_READ_DATA | READ_CONTROL | FILE_READ_ATTRIBUTES`, share mode
+  `FILE_SHARE_READ` only and `FILE_FLAG_OPEN_REPARSE_POINT`. On that handle it
+  checks the attributes (no reparse point, no directory), the size and the
+  DACL, and only then reads the bytes with `ReadFile`. Nothing can be swapped
+  in between, and nobody can write, rename or delete the file while it is
+  open. A file someone else holds open for writing is refused (`read`).
+- **POSIX:** the same checks as before (regular file, bounded size, no
+  group/other bits, symlinks followed), but run with `fstat` on the open
+  descriptor instead of `stat` on the name. That closes the gap between the
+  check and the read. A name check still refuses a device or FIFO before it
+  is opened, and `O_NONBLOCK` keeps one swapped in afterwards from hanging the
+  loader.
+- **Any other platform:** refused (`unverifiable`).
+
+## Verified, and what is not
+
+Verified on the Windows CI runner with dummy files
+(`tests/support/windows_credential_acl_contract.py`):
+
+- the `ctypes` signatures and the ACE layout (step 2);
+- that `icacls`-made ACLs judge as listed above;
+- that the runner's inherited temp-folder ACL is accepted;
+- that each loader refuses `Users:R` with its existing message.
+
+**Not verified:** the real rig. The worker's account and the folder holding
+the token there have not been checked. Run the `icacls` command above before
+the first live read.
 
 ## Open questions for review
 
 - Should `Administrators` and `SYSTEM` stay allowed? Allowing them weakens
   nothing that a local admin can't already do.
 - Should the check be one helper for all three loaders, as proposed, or start
-  with T-038 only? The proposal is one helper, so that the GitHub connector
-  does not keep the gap.
+  with T-038 only? **Step 3 implements one helper for all three**, so that the
+  GitHub connector does not keep the gap. Reviewers can still ask for the
+  GitHub loader to be split out.
