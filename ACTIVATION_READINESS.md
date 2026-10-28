@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 39 feature-switches er tændt som default.** (35 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -141,6 +141,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `MODELRIG_HOST` | `(unset)` | indstilling |
 | `MODELRIG_OLLAMA_KEEP_ALIVE` | `30m` | indstilling |
 | `MODELRIG_OLLAMA_KEY` | `(unset)` | indstilling |
+| `MODELRIG_OLLAMA_MAX_OUTPUT_TOKENS` | `(tom)` | indstilling |
 | `MODELRIG_OLLAMA_TIMEOUT` | `600` | indstilling |
 | `MODELRIG_OLLAMA_URL` | `http://127.0.0.1:11434` | indstilling |
 | `MODELRIG_PAIRING_TTL` | `(unset)` | indstilling |
