@@ -1,0 +1,31 @@
+name: resource-snapshot-contract
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/resource_snapshot.ps1'
+      - 'tests/resource_snapshot_contract.ps1'
+      - '.github/workflows/resource-snapshot-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-contract:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact checkout authority
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD) -ne $env:EXPECTED_SHA) { throw 'Checkout SHA mismatch' }
+      - name: Validate offline snapshot contract
+        shell: pwsh
+        run: ./tests/resource_snapshot_contract.ps1
