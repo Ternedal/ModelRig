@@ -75,6 +75,31 @@ def assert_remote_contract() -> None:
             else:
                 raise AssertionError(f"invalid contract accepted: {invalid!r}")
 
+    # A duplicated availability key must not let an ambiguous worker status
+    # masquerade as ready (Python json.loads otherwise keeps the last key).
+    for duplicated in (
+        b'{"available":false,"available":true}',
+        b'{"available":true,"metadata":{"device":"cpu","device":"cuda"}}',
+    ):
+        with patch.object(tool, "_open_worker_status", lambda *_args, **_kw: Response(duplicated)):
+            try:
+                tool.query_worker("http://127.0.0.1:8099", "/voice/asr/status")
+            except ValueError as exc:
+                assert "duplicate JSON keys" in str(exc)
+            else:
+                raise AssertionError("duplicate worker status JSON keys accepted")
+
+    # Deeply nested but size-bounded JSON must produce a probe failure,
+    # never an uncaught RecursionError that aborts the entire CLI.
+    deeply_nested = b"[" * 1500 + b"0" + b"]" * 1500
+    with patch.object(tool, "_open_worker_status", lambda *_args, **_kw: Response(deeply_nested)):
+        try:
+            tool.query_worker("http://127.0.0.1:8099", "/voice/asr/status")
+        except ValueError as exc:
+            assert "invalid JSON" in str(exc) or "invalid voice availability contract" in str(exc)
+        else:
+            raise AssertionError("deeply nested worker JSON accepted")
+
     oversized = b"x" * (tool.MAX_STATUS_BYTES + 1)
     with patch.object(tool, "_open_worker_status", lambda *_args, **_kw: Response(oversized)):
         try:
@@ -206,6 +231,27 @@ def assert_malformed_http_status_is_isolated() -> None:
 
 
 
+def assert_duplicate_status_fails_closed_in_cli() -> None:
+    """Ambiguous ASR JSON must never yield a ready CLI verdict, even if TTS is healthy."""
+    duplicate = Response(b'{"available":false,"available":true}')
+    healthy = Response(b'{"available":true}')
+    with patch.object(tool, "_open_worker_status", side_effect=[duplicate, healthy]), patch.object(
+        tool, "local_package", return_value=False
+    ):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            rc = tool.main(["--json"])
+    report = json.loads(output.getvalue())
+    assert rc == 1
+    assert report["worker_reachable"] is True
+    assert report["worker_asr_probe_error"] == "worker returned duplicate JSON keys"
+    assert report["worker_asr_available"] is False
+    assert report["worker_tts_available"] is True
+    assert report["ready_for_live_voice_smoke"] is False
+    assert report["release_gate_satisfied"] is False
+    assert report["production_activation"] is False
+
+
 def assert_spec_is_not_import_proof_or_install_authority() -> None:
     """A found package spec is not an import success; script Python is not worker Python."""
     other_python = r"C:\OtherPython\python.exe"
@@ -263,6 +309,7 @@ def main() -> None:
     assert_runtime_is_authority()
     assert_partial_probe_failure_is_not_total_worker_outage()
     assert_malformed_http_status_is_isolated()
+    assert_duplicate_status_fails_closed_in_cli()
     assert_spec_is_not_import_proof_or_install_authority()
     assert_cli_contract()
     print("voice runtime preflight: loopback/proxy/redirect/contract/runtime/CLI PASS")
