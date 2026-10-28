@@ -884,6 +884,13 @@ private fun ChatScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    // Explicit, local-only Cast voice configuration.
+    val castPrefs = remember(context) {
+        context.getSharedPreferences("kaliv_cast", android.content.Context.MODE_PRIVATE)
+    }
+    var castReceiverId by remember { mutableStateOf(castPrefs.getString("receiver_app_id", "").orEmpty()) }
+    var castVoiceEnabled by remember { mutableStateOf(castPrefs.getBoolean("voice_display_enabled", false)) }
+    var showCastSetup by remember { mutableStateOf(false) }
     // Offline-kø: beskeder skrevet mens riggen var væk. Telefonens eget
     // regnskab — riggen kender den ikke, og INTET herfra sendes af sig selv.
     val queueStore = remember {
@@ -2265,6 +2272,9 @@ private fun ChatScreen(
                         )
                         dialogWindow?.setDimAmount(0f)
                     }
+                    androidx.compose.material3.TextButton(onClick = { showCastSetup = true }) {
+                        androidx.compose.material3.Text("Nest Hub / Cast-opsætning")
+                    }
                     dk.ternedal.modelrig.ui.chat.VoiceOverlayContent(
                         modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
                         pillText = if (voiceUsesCloud && store.cloudKey != null) "Via cloud" else "Lokalt",
@@ -2306,6 +2316,46 @@ private fun ChatScreen(
                         },
                     )
                 }
+            }
+
+            if (showCastSetup) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showCastSetup = false },
+                    title = { androidx.compose.material3.Text("Nest Hub – stemmevisning") },
+                    text = {
+                        androidx.compose.foundation.layout.Column {
+                            androidx.compose.material3.Text("Indtast dit registrerede Cast Receiver App ID (8 hex-tegn). Genstart appen efter ændring, så Cast SDK indlæser det nye ID.")
+                            androidx.compose.material3.OutlinedTextField(
+                                value = castReceiverId,
+                                onValueChange = { castReceiverId = it.trim().take(8) },
+                                label = { androidx.compose.material3.Text("Receiver App ID") },
+                                singleLine = true,
+                            )
+                            androidx.compose.material3.Row {
+                                androidx.compose.material3.Checkbox(
+                                    checked = castVoiceEnabled,
+                                    onCheckedChange = { castVoiceEnabled = it },
+                                )
+                                androidx.compose.material3.Text("Vis stemmesamtaler på Nest Hub")
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            val valid = Regex("[A-Fa-f0-9]{8}").matches(castReceiverId)
+                            castPrefs.edit()
+                                .putString("receiver_app_id", if (valid) castReceiverId else "")
+                                .putBoolean("voice_display_enabled", valid && castVoiceEnabled)
+                                .apply()
+                            showCastSetup = false
+                        }) { androidx.compose.material3.Text("Gem") }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = { showCastSetup = false }) {
+                            androidx.compose.material3.Text("Annuller")
+                        }
+                    },
+                )
             }
 
             // Persistent routing strip: always shows, at a glance, WHICH model
