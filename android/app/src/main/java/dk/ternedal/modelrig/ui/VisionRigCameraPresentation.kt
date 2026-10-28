@@ -11,7 +11,8 @@ sealed class VisionRigCameraStatus {
     data object Starting : VisionRigCameraStatus()
     /** Connected; VisionRig's desired-state keeps the camera closed. Nothing is sent. */
     data object WaitingForRig : VisionRigCameraStatus()
-    data class Capturing(val framesSent: Int) : VisionRigCameraStatus()
+    /** [framesSent] counts frames VisionRig accepted; [framesDropped] those it did not get. */
+    data class Capturing(val framesSent: Int, val framesDropped: Int = 0) : VisionRigCameraStatus()
     data class Failed(val message: String) : VisionRigCameraStatus()
 
     /** The banner "Kamera sendes til riggen" is shown whenever the producer is running. */
@@ -21,8 +22,11 @@ sealed class VisionRigCameraStatus {
 object VisionRigCameraPresentation {
     fun afterStep(current: VisionRigCameraStatus, step: VisionRigStep): VisionRigCameraStatus {
         if (!step.desiredEnabled) return VisionRigCameraStatus.WaitingForRig
-        val sent = (current as? VisionRigCameraStatus.Capturing)?.framesSent ?: 0
-        return VisionRigCameraStatus.Capturing(sent + if (step.frameSent) 1 else 0)
+        val before = current as? VisionRigCameraStatus.Capturing
+        return VisionRigCameraStatus.Capturing(
+            framesSent = (before?.framesSent ?: 0) + if (step.frameSent) 1 else 0,
+            framesDropped = (before?.framesDropped ?: 0) + if (step.frameDropped) 1 else 0,
+        )
     }
 
     /** Danish text for a producer failure; never the token, never server detail. */
@@ -39,7 +43,9 @@ object VisionRigCameraPresentation {
         VisionRigCameraStatus.Stopped -> "Kameraet sendes ikke."
         VisionRigCameraStatus.Starting -> "Forbinder til VisionRig…"
         VisionRigCameraStatus.WaitingForRig -> "VisionRig har ikke slået kameraet til. Intet sendes."
-        is VisionRigCameraStatus.Capturing -> "Sender billeder til VisionRig: ${status.framesSent}"
+        is VisionRigCameraStatus.Capturing ->
+            "Sender billeder til VisionRig: ${status.framesSent} modtaget" +
+                if (status.framesDropped > 0) ", ${status.framesDropped} tabt (VisionRig optaget eller utilgængelig)" else ""
         is VisionRigCameraStatus.Failed -> status.message
     }
 }

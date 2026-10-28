@@ -4,16 +4,20 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.test.core.app.ApplicationProvider
+import dk.kaliv.visionrig.producer.EncodedCapture
+import dk.kaliv.visionrig.producer.EncodedFrame
 import dk.kaliv.visionrig.producer.ProducerRunConfig
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,11 +28,14 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The vendored VisionRig producer, bound by the app, against a fake gateway
  * speaking VisionRig's protocol (fixtures as in VisionRig's GatewayClientTest).
- * The camera stays closed: VisionRig's desired-state says disabled.
+ * Where desired-state enables the source, a fake camera stands in for CameraX.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -40,6 +47,24 @@ class VisionRigProducerBindingTest {
 
     private class StopTest : RuntimeException()
 
+    /** Stands in for CameraX: counts opens and captures, returns a small JPEG-typed payload. */
+    private class FakeCamera : EncodedCapture {
+        val opens = AtomicInteger()
+        val captures = AtomicInteger()
+        @Volatile override var isOpen = false
+        override fun open() {
+            opens.incrementAndGet()
+            isOpen = true
+        }
+        override fun close() {
+            isOpen = false
+        }
+        override fun capture(): EncodedFrame {
+            captures.incrementAndGet()
+            return EncodedFrame(ByteArray(64) { 0x42 })
+        }
+    }
+
     private val owner = object : LifecycleOwner {
         val registry = LifecycleRegistry.createUnsafe(this).apply { currentState = Lifecycle.State.RESUMED }
         override val lifecycle: Lifecycle get() = registry
@@ -47,7 +72,10 @@ class VisionRigProducerBindingTest {
 
     private fun json(body: String) = MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody(body)
 
-    private fun protocol(desiredState: (RecordedRequest) -> MockResponse) = object : Dispatcher() {
+    private fun protocol(
+        frames: (RecordedRequest) -> MockResponse = { MockResponse().setResponseCode(404) },
+        desiredState: (RecordedRequest) -> MockResponse,
+    ) = object : Dispatcher() {
         override fun dispatch(request: RecordedRequest): MockResponse {
             seen += request
             return when (request.path) {
@@ -63,7 +91,7 @@ class VisionRigProducerBindingTest {
                     """{"schema_id":"visionrig/sensor-heartbeat-receipt/v1","status":"accepted",
                     "source_id":"kaliv-android","seen_utc":"2026-10-28T19:00:00Z","production_authority":false}""",
                 )
-                else -> MockResponse().setResponseCode(404)
+                else -> if (request.path!!.startsWith("/api/v1/frames/ingest")) frames(request) else MockResponse().setResponseCode(404)
             }
         }
     }
@@ -72,6 +100,23 @@ class VisionRigProducerBindingTest {
         """{"schema_id":"visionrig/sensor-desired-state/v2","source_id":"kaliv-android",
         "enabled":false,"revision":3,"production_authority":false}""",
     )
+
+    private val enabled get() = json(
+        """{"schema_id":"visionrig/sensor-desired-state/v2","source_id":"kaliv-android",
+        "enabled":true,"revision":4,"production_authority":false}""",
+    )
+
+    /** VisionRig's receipt for a processed frame, echoing the sequence and drop count it was sent. */
+    private fun accepted(request: RecordedRequest): MockResponse {
+        val url = request.requestUrl!!
+        return json(
+            """{"schema_id":"visionrig/sensor-frame-receipt/v1","status":"processed","source_id":"kaliv-android",
+            "source_type":"camera","frame_sequence":${url.queryParameter("frame_sequence")},"event_id":"evt-1",
+            "dropped_frames":${url.queryParameter("dropped_frames")},"production_authority":false}""",
+        )
+    }
+
+    private val frameRequests get() = seen.count { it.path!!.startsWith("/api/v1/frames") }
 
     @Before
     fun setUp() {
@@ -85,14 +130,44 @@ class VisionRigProducerBindingTest {
         elsewhere.shutdown()
     }
 
-    private fun bound(connection: VisionRigConnection): VisionRigCameraProducer =
-        VisionRigProducerBinding.create(
-            context = ApplicationProvider.getApplicationContext(),
-            lifecycleOwner = owner,
-            connection = connection,
-            http = VisionRigHttp.client(connection),
-            runConfig = ProducerRunConfig(disabledPollMillis = 250),
-        )
+    private fun connect() = VisionRigConnection.create(gateway.url("/").toString(), token).getOrThrow()
+
+    private fun bound(connection: VisionRigConnection, camera: FakeCamera? = null): VisionRigCameraProducer =
+        if (camera == null) {
+            VisionRigProducerBinding.create(
+                context = ApplicationProvider.getApplicationContext(),
+                lifecycleOwner = owner,
+                connection = connection,
+                http = VisionRigHttp.client(connection),
+                runConfig = ProducerRunConfig(disabledPollMillis = 250),
+            )
+        } else {
+            VisionRigProducerBinding.create(
+                context = ApplicationProvider.getApplicationContext(),
+                lifecycleOwner = owner,
+                connection = connection,
+                http = VisionRigHttp.client(connection),
+                runConfig = ProducerRunConfig(disabledPollMillis = 250),
+                captureFactory = { _, _ -> camera },
+            )
+        }
+
+    /** Runs until the first step VisionRig's loop reports, and returns it. */
+    private fun firstStep(producer: VisionRigCameraProducer): VisionRigStep {
+        val steps = CopyOnWriteArrayList<VisionRigStep>()
+        runBlocking {
+            withTimeout(15_000) {
+                runCatching {
+                    producer.run { step ->
+                        steps += step
+                        throw StopTest()
+                    }
+                }.exceptionOrNull().let { assertTrue("stopped by the test, not $it", it is StopTest) }
+            }
+        }
+        producer.close()
+        return steps.single()
+    }
 
     @Test
     fun disabledSourceHeartbeatsWithTheProducerTokenAndOpensNoCamera() {
@@ -172,5 +247,83 @@ class VisionRigProducerBindingTest {
         producer.close()
         assertTrue("the run fails instead of following", failure != null && failure !is StopTest)
         assertEquals("the redirect target was never contacted", 0, elsewhere.requestCount)
+    }
+
+    @Test
+    fun stopWhileDesiredStateIsInFlightNeverOpensTheCameraOrSendsAFrame() {
+        // Review 5688431923 P1: ON_STOP arrives while VisionRig's synchronous step
+        // waits for desired-state, which then answers "enabled".
+        val inFlight = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        gateway.dispatcher = protocol(frames = ::accepted) {
+            inFlight.countDown()
+            release.await(30, TimeUnit.SECONDS)
+            enabled
+        }
+        gateway.start()
+        val camera = FakeCamera()
+        val producer = bound(connect(), camera)
+        val stoppedPromptly = runBlocking {
+            val job = launch(Dispatchers.IO) { runCatching { producer.run { } } }
+            assertTrue("desired-state is in flight", inFlight.await(15, TimeUnit.SECONDS))
+            job.cancel() // what ON_STOP does through repeatOnLifecycle
+            val stopped = withTimeoutOrNull(5_000) { job.join() } != null
+            release.countDown() // the late "enabled" answer
+            withTimeout(30_000) { job.join() }
+            stopped
+        }
+        producer.close()
+        Thread.sleep(500) // room for anything a late answer could still trigger
+        assertTrue("the run stops without waiting for the gateway's answer", stoppedPromptly)
+        assertEquals("the camera never opened", 0, camera.opens.get())
+        assertEquals("no frame was captured", 0, camera.captures.get())
+        assertEquals("no frame was sent", 0, frameRequests)
+    }
+
+    @Test
+    fun closingWhileTheGatewayAnswersEnabledEndsTheRunWithoutCapture() {
+        // The answer is written only after the producer was closed: the gate
+        // is stopped before the client can read it.
+        val producerRef = java.util.concurrent.atomic.AtomicReference<VisionRigCameraProducer>()
+        gateway.dispatcher = protocol(frames = ::accepted) {
+            producerRef.get().close()
+            enabled
+        }
+        gateway.start()
+        val camera = FakeCamera()
+        producerRef.set(bound(connect(), camera))
+        val failure = runBlocking { withTimeout(15_000) { runCatching { producerRef.get().run { } }.exceptionOrNull() } }
+        assertEquals("a stopped run ends quietly, not as a fault", null, failure)
+        assertEquals("the camera never opened", 0, camera.opens.get())
+        assertEquals("no frame was sent", 0, frameRequests)
+    }
+
+    @Test
+    fun aFrameVisionRigAcceptsCountsAsSent() {
+        gateway.dispatcher = protocol(frames = ::accepted) { enabled }
+        gateway.start()
+        val camera = FakeCamera()
+        val step = firstStep(bound(connect(), camera))
+        assertEquals(VisionRigStep(desiredEnabled = true, captureActive = true, frameSent = true, frameDropped = false), step)
+        assertEquals(1, camera.opens.get())
+        assertEquals(1, frameRequests)
+    }
+
+    @Test
+    fun aFrameDroppedByAnOverloadedGatewayIsNotCountedAsSent() {
+        // Review 5688431923 P2: 429 is DROPPED_OVERLOAD, a SendResult like ACCEPTED.
+        gateway.dispatcher = protocol(frames = { MockResponse().setResponseCode(429) }) { enabled }
+        gateway.start()
+        val step = firstStep(bound(connect(), FakeCamera()))
+        assertEquals(VisionRigStep(desiredEnabled = true, captureActive = true, frameSent = false, frameDropped = true), step)
+    }
+
+    @Test
+    fun aFrameLostToAnUnreachableGatewayIsNotCountedAsSent() {
+        // The connection drops after the frame POST is read: DROPPED_UNAVAILABLE.
+        gateway.dispatcher = protocol(frames = { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST) }) { enabled }
+        gateway.start()
+        val step = firstStep(bound(connect(), FakeCamera()))
+        assertEquals(VisionRigStep(desiredEnabled = true, captureActive = true, frameSent = false, frameDropped = true), step)
     }
 }

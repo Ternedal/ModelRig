@@ -10,8 +10,10 @@ data class VisionRigStep(
     val desiredEnabled: Boolean,
     /** The camera is open. */
     val captureActive: Boolean,
-    /** A frame was sent in this step. */
+    /** VisionRig accepted a frame in this step. */
     val frameSent: Boolean,
+    /** A frame was captured but not delivered (gateway overloaded or unreachable). */
+    val frameDropped: Boolean = false,
 )
 
 /**
@@ -20,7 +22,8 @@ data class VisionRigStep(
  * Implemented over VisionRig's own producer (desired-state, heartbeat,
  * SensorPacket, shared cadence runner). Capture opens only while VisionRig's
  * desired-state enables the source. [run] blocks between suspensions and must
- * run off the main thread; cancellation closes capture.
+ * run off the main thread. Cancelling it stops at once, also in the middle of
+ * a step: no camera open and no frame after cancellation. One run per producer.
  */
 interface VisionRigCameraProducer : AutoCloseable {
     suspend fun run(onStep: (VisionRigStep) -> Unit)

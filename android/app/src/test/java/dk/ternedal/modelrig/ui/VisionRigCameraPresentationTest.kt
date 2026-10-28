@@ -24,6 +24,19 @@ class VisionRigCameraPresentationTest {
     }
 
     @Test
+    fun `a dropped frame is counted as dropped, never as received`() {
+        var s: VisionRigCameraStatus = VisionRigCameraStatus.Starting
+        s = VisionRigCameraPresentation.afterStep(s, step(enabled = true, sent = true))
+        s = VisionRigCameraPresentation.afterStep(s, VisionRigStep(desiredEnabled = true, captureActive = true, frameSent = false, frameDropped = true))
+        assertEquals(VisionRigCameraStatus.Capturing(framesSent = 1, framesDropped = 1), s)
+        assertEquals(
+            "Sender billeder til VisionRig: 1 modtaget, 1 tabt (VisionRig optaget eller utilgængelig)",
+            VisionRigCameraPresentation.statusText(s),
+        )
+        assertEquals("Sender billeder til VisionRig: 2 modtaget", VisionRigCameraPresentation.statusText(VisionRigCameraStatus.Capturing(2)))
+    }
+
+    @Test
     fun `banner state follows a running producer only`() {
         assertTrue(VisionRigCameraStatus.Starting.producerRunning)
         assertTrue(VisionRigCameraStatus.WaitingForRig.producerRunning)

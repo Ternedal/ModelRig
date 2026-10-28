@@ -134,7 +134,7 @@ class VisionRigCameraScreenTest {
         assertEquals(1, factory.made.size)
         assertEquals(lan.gatewayUrl, factory.connections.single().gatewayUrl)
         assertTrue(bannerShown())
-        compose.onNodeWithText("Sender billeder til VisionRig: 1").assertIsDisplayed()
+        compose.onNodeWithText("Sender billeder til VisionRig: 1 modtaget").assertIsDisplayed()
     }
 
     @Test
