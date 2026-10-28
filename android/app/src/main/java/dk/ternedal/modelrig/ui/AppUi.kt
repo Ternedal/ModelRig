@@ -2321,7 +2321,7 @@ private fun ChatScreen(
                     ) {
                         // Cast discovery/selection uses Google's supported MediaRouteButton.
                         // A real custom receiver ID must be saved before the route picker is shown.
-                        if (Regex("[A-Fa-f0-9]{8}").matches(castReceiverId) && castVoiceEnabled) {
+                        if (Regex("[A-Fa-f0-9]{8}").matches(castPrefs.getString("receiver_app_id", "").orEmpty()) && castPrefs.getBoolean("voice_display_enabled", false) && !castPrefs.getString("receiver_app_id", "").equals("CC1AD845", ignoreCase = true)) {
                             androidx.compose.ui.viewinterop.AndroidView(
                                 factory = { viewContext ->
                                     androidx.mediarouter.app.MediaRouteButton(viewContext).apply {
