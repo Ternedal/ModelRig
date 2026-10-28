@@ -12,7 +12,7 @@ import com.google.android.gms.cast.framework.CastSession
  * This channel carries only bounded display messages, never credentials.
  */
 class KalivCastVoiceSender(private val context: Context) {
-    private fun session(): CastSession? = try {
+    private fun session(): CastSession? { return try {
         val prefs = context.getSharedPreferences("kaliv_cast", Context.MODE_PRIVATE)
         val receiverId = prefs.getString("receiver_app_id", null)?.trim().orEmpty()
         if (!Regex("[A-Fa-f0-9]{8}").matches(receiverId) ||
@@ -21,6 +21,7 @@ class KalivCastVoiceSender(private val context: Context) {
             ?.takeIf { it.isConnected }
     } catch (_: Exception) {
         null
+    }
     }
 
     fun activeDeviceId(): String? =
