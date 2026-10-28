@@ -2333,7 +2333,11 @@ private fun ChatScreen(
                                 },
                             )
                         }
-                        androidx.compose.material3.TextButton(onClick = { showCastSetup = true }) {
+                        androidx.compose.material3.TextButton(onClick = {
+                            castReceiverId = savedCastReceiverId
+                            castVoiceEnabled = savedCastVoiceEnabled
+                            showCastSetup = true
+                        }) {
                             androidx.compose.material3.Text("Nest Hub / Cast-opsætning")
                         }
                     }
