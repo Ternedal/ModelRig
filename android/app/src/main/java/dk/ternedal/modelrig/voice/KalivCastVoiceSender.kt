@@ -62,6 +62,8 @@ class KalivCastVoiceSender(private val context: Context) {
             return false
         }
         return try {
+            // CastSession.sendMessage is asynchronous. A successful call only
+            // means the message was submitted, not displayed by the receiver.
             current.sendMessage(KalivCastVoiceProtocol.NAMESPACE, message.toString())
             true
         } catch (_: Exception) {
