@@ -2352,7 +2352,7 @@ private fun ChatScreen(
                                 label = { androidx.compose.material3.Text("Receiver App ID") },
                                 singleLine = true,
                             )
-                            androidx.compose.material3.Row {
+                            androidx.compose.foundation.layout.Row {
                                 androidx.compose.material3.Checkbox(
                                     checked = castVoiceEnabled,
                                     onCheckedChange = { castVoiceEnabled = it },
