@@ -147,6 +147,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     // Cast sender framework for optional Nest Hub output; phone voice stays default.
     implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+    implementation("androidx.mediarouter:mediarouter:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively
