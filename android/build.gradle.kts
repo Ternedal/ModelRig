@@ -3,7 +3,10 @@
 // is the compatibility authority for this repository.
 plugins {
     id("com.android.application") version "9.4.1" apply false
+    id("com.android.library") version "9.4.1" apply false
     kotlin("plugin.compose") version "2.4.10" apply false
+    // VisionRig's vendored producer core uses @Serializable (ModelRig #2275).
+    kotlin("plugin.serialization") version "2.4.10" apply false
     // Screenshot-regression (DDR-001 fase 1): Roborazzi paa Robolectric — JVM,
     // ingen emulator. Roborazzi 1.56.0+ supports AGP 9; this repo uses 1.70.0.
     id("io.github.takahirom.roborazzi") version "1.76.0" apply false

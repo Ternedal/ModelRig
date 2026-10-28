@@ -95,9 +95,11 @@ class MainActivity : ComponentActivity() {
                 openVisionRigCamera -> {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
-                        // null until VisionRig's producer is bound in (#2275); the
-                        // screen says so instead of pretending to capture.
-                        VisionRigCameraScreen(store = store, producerFactory = null, onClose = { finish() })
+                        VisionRigCameraScreen(
+                            store = store,
+                            producerFactory = dk.ternedal.modelrig.net.VisionRigProducerBinding.factory,
+                            onClose = { finish() },
+                        )
                     }
                 }
                 openAgent3Task -> {
