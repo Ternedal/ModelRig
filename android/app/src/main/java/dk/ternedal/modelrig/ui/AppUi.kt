@@ -1295,7 +1295,7 @@ private fun ChatScreen(
                         },
                         onDone = { reply, m, cloud ->
                             usedModel = m; usedCloud = cloud
-                            castDisplay?.idle()
+                            // Keep the receiver in speaking state until queued audio finishes.
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
                             if (replyIdx in messages.indices) {
                                 messages[replyIdx] = messages[replyIdx].copy(
@@ -1311,6 +1311,7 @@ private fun ChatScreen(
                 // finishes the queued sentences, then wait for it.
                 audioChan.close()
                 player.join()
+                if (streamError == null && !playbackStop.get()) castDisplay?.idle()
 
                 streamError?.let { (status, detail) ->
                     voiceError = friendlyError(RuntimeException("voice ($status): $detail"))
@@ -1361,6 +1362,9 @@ private fun ChatScreen(
                 voiceError = e.message ?: "stemme-fejl"
                 audioChan.close()
             } finally {
+                // On cancellation or transport failure, clear stale speaking text.
+                // Cast sessions remain user-controlled; only the ACK listener is removed.
+                if (wasInterrupted || voiceError != null) castDisplay?.idle()
                 activeCall = null
                 castAckSender?.closeAckListener()
                 if (castAckSender != null && castDeliveryStatus == "Afventer Nest Hub") {
