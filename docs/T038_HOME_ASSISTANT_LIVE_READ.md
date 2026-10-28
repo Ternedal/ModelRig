@@ -47,11 +47,13 @@ The test covers:
 - TLS to Home Assistant, because the fixture uses plaintext on loopback.
 - Name resolution of `homeassistant.local` and other LAN names, and the LAN
   path itself (latency, Wi-Fi, a sleeping NAS).
-- That the token file on the **Windows rig** is protected. The file-mode check
-  in `_load_bearer` applies only on POSIX. On Windows no ACL check is made, so
-  the protection rests on the folder's permissions. This is a known limitation
-  and is not changed here. A narrow, default-deny design for checking the
-  Windows DACL is in `docs/T038_WINDOWS_TOKEN_ACL_DESIGN.md`.
+- That the token file on the **Windows rig** is protected *in practice*. Since
+  step 3 of `docs/T038_WINDOWS_TOKEN_ACL_DESIGN.md`, `_load_bearer` refuses a
+  token file on Windows unless its owner and DACL show that only the worker's
+  own account, SYSTEM and Administrators can read it, and it reads the bytes
+  from the handle it judged. That rule is proven on the Windows CI runner with
+  dummy files (`tests/support/windows_credential_acl_contract.py`), not on the
+  rig. The fixture runs on Linux and cannot show it.
 
 ## Operator entry point
 
@@ -86,7 +88,32 @@ and only one with harmless data (for example a temperature sensor).
 1. **Token in a file, never on the command line.** Create a long-lived Home
    Assistant token locally and store it on one line in a file that only your
    user can read, for example `C:\Rig\secrets\ha.token`. Never put it in chat,
-   in an issue or in a log.
+   in an issue or in a log. On Windows the worker **refuses** the file unless
+   it is locked to **the account the worker runs as** (SYSTEM and
+   Administrators may stay). That is not necessarily you: the worker is a child
+   of the `KalivSupervisor` scheduled task, so take the account from the task
+   and from the running worker, and check that they agree:
+
+   ```powershell
+   (Get-ScheduledTask -TaskName KalivSupervisor).Principal.UserId
+   Get-CimInstance Win32_Process -Filter "Name='modelrig-worker-windows-x64.exe'" | Invoke-CimMethod -MethodName GetOwner
+   ```
+
+   Then lock the file to that account (replace `<account>` with the value,
+   for example `RIG\anders`):
+
+   ```powershell
+   icacls C:\Rig\secrets\ha.token /inheritance:r /grant:r "<account>:R"
+   icacls C:\Rig\secrets\ha.token
+   ```
+
+   The second command must list only that account (and optionally SYSTEM and
+   Administrators). This has **not** been run on the rig yet.
+
+   A refused token file shows up only as `unknown`; the receipt does not say
+   why. If an otherwise correct read returns `unknown`, check the file with
+   `icacls C:\Rig\secrets\ha.token` first. A refusal is never a reason to
+   loosen the check.
 2. **Deployment settings** in the worker's environment:
    - `KALIV_HOME_RIG_PILOT=1`
    - `KALIV_HOME_ASSISTANT_ORIGIN=https://<ha-host>:8123`. Use `http://` only
