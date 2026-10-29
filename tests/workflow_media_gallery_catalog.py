@@ -86,6 +86,17 @@ class GalleryCatalogTests(unittest.TestCase):
             with self.assertRaises(GalleryUnavailable):
                 list_gallery(self.root)
 
+    def test_refuse_symlinked_parent_of_media_root(self):
+        parent_link = self.root / "linked-parent"
+        actual_parent = self.root / "actual-parent"
+        actual_parent.mkdir()
+        media_root = actual_parent / "media"
+        media_root.mkdir()
+        parent_link.symlink_to(actual_parent, target_is_directory=True)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with self.assertRaises(GalleryUnavailable):
+                list_gallery(parent_link / "media")
+
     def test_refuse_symlink_index(self):
         (self.root / "gallery-index.json").unlink()
         target = self.root / "other.json"
