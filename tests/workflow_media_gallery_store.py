@@ -45,6 +45,13 @@ class ExternalMediaSinkTests(unittest.TestCase):
             asset = self.sink.publish(b"data", ".png")
         self.assertEqual((self.media / (asset + ".png")).read_bytes(), b"data")
 
+    def test_publish_failure_cleans_temporary_file(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
+             patch("app.media_gallery_store.os.link", side_effect=OSError("simulated link failure")):
+            with self.assertRaises(ArtifactSinkUnavailable):
+                self.sink.publish(b"data", ".png")
+        self.assertEqual(list(self.media.iterdir()), [])
+
     def test_refuse_unmounted_volume_without_writing(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaises(ArtifactSinkUnavailable):
