@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from worker.app.media_gallery_catalog import (
+from app.media_gallery_catalog import (
     GalleryBadRequest, GalleryUnavailable, list_gallery,
 )
 
@@ -21,7 +21,7 @@ class GalleryCatalogTests(unittest.TestCase):
         ]), encoding="utf-8")
 
     def page(self, **kwargs):
-        with patch("worker.app.media_gallery_catalog.os.path.ismount", return_value=True):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             return list_gallery(self.root, **kwargs)
 
     def test_pagination(self):
@@ -82,7 +82,7 @@ class GalleryCatalogTests(unittest.TestCase):
                     self.page()
 
     def test_refuse_unmounted_root(self):
-        with patch("worker.app.media_gallery_catalog.os.path.ismount", return_value=False):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaises(GalleryUnavailable):
                 list_gallery(self.root)
 
