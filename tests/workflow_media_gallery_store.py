@@ -34,6 +34,17 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual(existing.read_bytes(), b"original")
         self.assertEqual(list(self.media.glob(".kaliv-*")), [])
 
+    def test_temp_cleanup_failure_after_publish_does_not_report_failed_job(self):
+        original_unlink = Path.unlink
+        def fail_temp_only(path, *args, **kwargs):
+            if path.name.startswith(".kaliv-"):
+                raise OSError("simulated cleanup failure")
+            return original_unlink(path, *args, **kwargs)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
+             patch.object(Path, "unlink", autospec=True, side_effect=fail_temp_only):
+            asset = self.sink.publish(b"data", ".png")
+        self.assertEqual((self.media / (asset + ".png")).read_bytes(), b"data")
+
     def test_refuse_unmounted_volume_without_writing(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaises(ArtifactSinkUnavailable):

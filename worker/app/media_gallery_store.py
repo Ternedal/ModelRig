@@ -54,7 +54,12 @@ class ExternalMediaSink:
                 os.link(temp_name, destination, follow_symlinks=False)
             except FileExistsError as exc:
                 raise ArtifactSinkUnavailable("asset_collision") from exc
-            temp_name.unlink()
+            try:
+                temp_name.unlink()
+            except OSError:
+                # The asset is already durably linked; a leftover temporary
+                # name is a cleanup issue, not a failed publication.
+                pass
             temp_name = None
             return asset_id
         except OSError as exc:
