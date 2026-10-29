@@ -95,6 +95,15 @@ class MediaStoreTests(unittest.TestCase):
                 with self.subTest(extension=value), self.assertRaises(MediaStorageError):
                     store.resolve("a" * 32, value)
 
+    def test_payload_preflight_preserves_free_space_floor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("app.image_media_store.shutil.disk_usage") as usage:
+                usage.return_value.free = 100
+                store = self._store(directory, min_free_bytes=80)
+                with self.assertRaises(MediaStorageError):
+                    store.publish(b"x" * 21)
+                self.assertEqual(list(Path(directory).iterdir()), [])
+
     def test_free_space_floor(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(MediaStorageError):
