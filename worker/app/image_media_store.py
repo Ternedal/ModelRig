@@ -77,6 +77,10 @@ class ExternalMediaStore:
         if not isinstance(extension, str) or extension not in _ALLOWED or not isinstance(data, bytes) or not data:
             raise MediaStorageError("invalid media payload or extension")
         self._check_free()
+        # Reserve the configured free-space floor before allocating a media file.
+        # A second check after writing still protects against concurrent writers.
+        if len(data) > shutil.disk_usage(self.root).free - self.min_free_bytes:
+            raise MediaStorageError("insufficient free space for media payload")
         asset_id = uuid.uuid4().hex
         final = self.root / (asset_id + extension)
         self._check_mount()
