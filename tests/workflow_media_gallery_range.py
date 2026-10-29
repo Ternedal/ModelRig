@@ -1,6 +1,6 @@
 """Offline bounded range parser regression tests."""
 import unittest
-from worker.app.media_gallery_range import RangeNotSatisfiable, select_range
+from app.media_gallery_range import RangeNotSatisfiable, select_range
 
 
 class MediaGalleryRangeTests(unittest.TestCase):
