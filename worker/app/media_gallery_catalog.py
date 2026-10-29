@@ -11,7 +11,7 @@ import re
 import stat
 from pathlib import Path
 
-_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\\Z")
+_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _MAX_PAGE = 100
 _MAX_INDEX_BYTES = 4 * 1024 * 1024
 
