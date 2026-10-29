@@ -29,6 +29,17 @@ class KalivCastVoiceProtocolTest {
         }
     }
 
+    @Test fun blankSubtitlesAreRejectedBeforeTransport() {
+        for (value in listOf("", "  ", "\\t\\n")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                KalivCastVoiceProtocol.text(session, "assistant", value)
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                KalivCastVoiceProtocol.text(session, "user", value)
+            }
+        }
+    }
+
     @Test fun invalidStatusAndSessionAreRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             KalivCastVoiceProtocol.status(session, "recording_forever")
