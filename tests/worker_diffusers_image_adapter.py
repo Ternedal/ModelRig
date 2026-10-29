@@ -5,6 +5,9 @@ download, no weights. The GPU lease is real (a temporary lease directory).
 Ported in spirit from worker/tests/test_qwen_image_adapter.py on the image branch.
 """
 import dataclasses
+import gc
+import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -15,7 +18,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 
-from app.diffusers_image_adapter import DiffusersImageAdapter  # noqa: E402
+from app.diffusers_image_adapter import DiffusersImageAdapter, GpuResourcesRetained  # noqa: E402
 from app.gpu_lease import GpuBusy, GpuLeaseError, acquire_gpu_lease  # noqa: E402
 from app.image_gpu_admission import ImageGpuAdmissionError  # noqa: E402
 from app.media_generation_contract import GenerationError, GenerationRequest  # noqa: E402
@@ -45,7 +48,31 @@ class _Device:
         return False
 
 
-def fake_modules(calls, free_gib=11.0):
+class FakeAllocator:
+    """Stands in for torch's CUDA caching allocator: bytes held by live FakeTensors."""
+
+    def __init__(self):
+        self.allocated = 0
+        self.broken = False
+
+    def memory_allocated(self, index):
+        if self.broken:
+            raise RuntimeError("CUDA error: an illegal memory access was encountered")
+        return self.allocated
+
+
+class FakeTensor:
+    def __init__(self, allocator, nbytes):
+        self.allocator, self.nbytes = allocator, nbytes
+        allocator.allocated += nbytes
+
+    def __del__(self):
+        self.allocator.allocated -= self.nbytes
+
+
+def fake_modules(calls, free_gib=11.0, allocator=None):
+    allocator = allocator or FakeAllocator()
+
     class FakePipeline:
         @classmethod
         def from_pretrained(cls, model_id, **kwargs):
@@ -76,6 +103,8 @@ def fake_modules(calls, free_gib=11.0):
         mem_get_info=lambda: (int(free_gib * GIB), 12 * GIB),
         get_device_properties=lambda i: types.SimpleNamespace(uuid={0: GPU0, 1: GPU1}[i][len("GPU-"):]),
         empty_cache=lambda: calls.append(("empty_cache",)),
+        memory_allocated=allocator.memory_allocated,
+        synchronize=lambda index: calls.append(("synchronize", index)),
     )
     torch = types.SimpleNamespace(bfloat16="bf16", cuda=cuda, Generator=Generator)
     diffusers = types.SimpleNamespace(StableDiffusionXLPipeline=FakePipeline, FluxPipeline=FakePipeline,
@@ -197,12 +226,143 @@ class AdapterTests(unittest.TestCase):
             broken["diffusers"].StableDiffusionXLPipeline.from_pretrained = classmethod(
                 lambda cls, *a, **k: (_ for _ in ()).throw(OSError("weights missing")))
             with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, broken), \
-                    self.assertRaises(OSError):
+                    self.assertRaisesRegex(GenerationError, "OSError"):
                 self.adapter().load()
         self.assertEqual(len(leases), 2)
         self.assertTrue(all(not lease.held for lease in leases), "a failed load must release its lease")
         with acquire_gpu_lease(GPU1, lease_dir=self.lease_dir):
             pass
+
+    # --- #2315 review 4411189866: a failed load must not free the GPU while the model is resident ----
+    def partial_load_modules(self, *, keep_pipeline=None, keep_exception=None, interrupt=False, chained=False):
+        """Pipeline.to() allocates 6 GiB of 'weights' and then fails, like an OOM half-way."""
+        allocator = FakeAllocator()
+        modules = fake_modules(self.calls, allocator=allocator)
+        pipeline_class = modules["diffusers"].StableDiffusionXLPipeline
+
+        def failing_to(pipe, device):
+            pipe.weights = FakeTensor(allocator, 6 * GIB)
+            pipe.hooks = [pipe]  # a reference cycle, as module hooks create: only gc frees it
+            if keep_pipeline is not None:
+                keep_pipeline.append(pipe)  # a library cache that outlives the call
+            error = KeyboardInterrupt() if interrupt else RuntimeError("CUDA out of memory (partial load)")
+            if chained:  # the real cause sits one level down, in a frame that still holds the pipeline
+                def inner(module):
+                    raise ValueError(f"cannot move {type(module).__name__}")
+                try:
+                    inner(pipe)
+                except ValueError as cause:
+                    error.__cause__ = cause
+            if keep_exception is not None:
+                try:
+                    raise error
+                except BaseException as exc:
+                    keep_exception.append(exc)  # e.g. an error tracker keeping the last exception
+                    raise
+            raise error
+
+        pipeline_class.to = failing_to
+        return modules, allocator
+
+    def other_executor_can_take_the_gpu(self) -> bool:
+        """A separate process that takes the same lease, as a second executor would."""
+        code = ("import sys; sys.path.insert(0, %r)\n"
+                "from app.gpu_lease import acquire_gpu_lease, GpuBusy\n"
+                "try:\n    acquire_gpu_lease(%r, lease_dir=%r).release(); print('free')\n"
+                "except GpuBusy:\n    print('busy')\n") % (str(Path(__file__).resolve().parents[1] / "worker"),
+                                                        GPU1, self.lease_dir)
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
+        self.assertIn(out.stdout.strip(), ("free", "busy"), out.stderr)
+        return out.stdout.strip() == "free"
+
+    def test_partial_load_failure_is_cleaned_up_before_the_lease_is_released(self):
+        modules, allocator = self.partial_load_modules()
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, modules):
+            adapter = self.adapter()
+            with self.assertRaisesRegex(GenerationError, "verified released") as caught:
+                adapter.load()
+        self.assertIsNone(caught.exception.__context__, "the error must not chain to the frames that held the model")
+        self.assertEqual(allocator.allocated, 0)
+        self.assertFalse(adapter.retains_gpu)
+        self.assertIn(("synchronize", 1), self.calls)
+        self.assertTrue(self.other_executor_can_take_the_gpu())
+
+    def test_an_exception_kept_elsewhere_does_not_pin_the_model(self):
+        kept = []
+        modules, allocator = self.partial_load_modules(keep_exception=kept)
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, modules):
+            with self.assertRaisesRegex(GenerationError, "verified released"):
+                self.adapter().load()
+        self.assertEqual(len(kept), 1, "someone still holds the original exception")
+        self.assertIsNone(kept[0].__traceback__, "its frames were cleared")
+        self.assertEqual(allocator.allocated, 0)
+        self.assertTrue(self.other_executor_can_take_the_gpu())
+
+    def test_a_kept_chained_exception_does_not_pin_the_model(self):
+        kept = []
+        modules, allocator = self.partial_load_modules(keep_exception=kept, chained=True)
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, modules):
+            with self.assertRaisesRegex(GenerationError, "verified released"):
+                self.adapter().load()
+        self.assertIsNotNone(kept[0].__cause__)
+        self.assertIsNone(kept[0].__cause__.__traceback__, "the chained cause's frames were cleared too")
+        self.assertEqual(allocator.allocated, 0)
+
+    def test_memory_still_resident_keeps_the_lease_until_it_is_gone(self):
+        cache = []
+        modules, allocator = self.partial_load_modules(keep_pipeline=cache)
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, modules):
+            adapter = self.adapter()
+            with self.assertRaises(GpuResourcesRetained):
+                adapter.load()
+            self.assertEqual(allocator.allocated, 6 * GIB)
+            self.assertTrue(adapter.retains_gpu)
+            self.assertFalse(self.other_executor_can_take_the_gpu(),
+                             "a second executor must not get a GPU that still holds the failed model")
+            with self.assertRaises(GpuResourcesRetained):
+                adapter.load()  # refused without touching the GPU again
+            adapter.close()
+            self.assertFalse(self.other_executor_can_take_the_gpu(), "close() keeps it while memory is resident")
+            cache.clear()
+            gc.collect()
+            adapter.close()
+        self.assertFalse(adapter.retains_gpu)
+        self.assertTrue(self.other_executor_can_take_the_gpu(), "released once the memory is measurably gone")
+
+    def test_a_broken_cuda_context_proves_nothing_and_keeps_the_lease(self):
+        modules, allocator = self.partial_load_modules()
+        real_to = modules["diffusers"].StableDiffusionXLPipeline.to
+
+        def to_then_break(pipe, device):
+            allocator.broken = True
+            return real_to(pipe, device)
+
+        modules["diffusers"].StableDiffusionXLPipeline.to = to_then_break
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, modules):
+            adapter = self.adapter()
+            with self.assertRaises(GpuResourcesRetained):
+                adapter.load()
+        self.assertFalse(self.other_executor_can_take_the_gpu())
+        adapter._lease.release()  # test cleanup only
+
+    def test_an_interrupt_mid_load_keeps_the_lease(self):
+        modules, _ = self.partial_load_modules(interrupt=True)
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, modules):
+            adapter = self.adapter()
+            with self.assertRaises(KeyboardInterrupt):
+                adapter.load()
+        self.assertTrue(adapter.retains_gpu)
+        self.assertFalse(self.other_executor_can_take_the_gpu())
+        adapter._lease.release()  # test cleanup only
+
+    def test_a_failing_baseline_read_releases_before_any_model_load(self):
+        allocator = FakeAllocator()
+        allocator.broken = True
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, allocator=allocator)), self.assertRaises(RuntimeError):
+            self.adapter().load()
+        self.assertEqual([c for c in self.calls if c[0] == "from_pretrained"], [])
+        self.assertTrue(self.other_executor_can_take_the_gpu())
 
     def test_profile_resources_decide_admission(self):
         sdxl = parse_profile(image_profile())  # needs 8 GiB usable after a 2 GiB reserve
