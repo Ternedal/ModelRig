@@ -360,16 +360,20 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_desktop_vision_bridge.py`
 - `tests/worker_desktop_win32.py`
 - `tests/worker_desktop_win32_abi.py`
+- `tests/worker_diffusers_image_adapter.py`
 - `tests/worker_e2e_latency_runtime.py`
 - `tests/worker_e2e_latency_voice_mount.py`
 - `tests/worker_eval.py`
 - `tests/worker_file_capabilities.py`
 - `tests/worker_file_capabilities_audit.py`
 - `tests/worker_file_capabilities_scope_authority.py`
+- `tests/worker_gpu_lease.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
 - `tests/worker_home_rig_e2e_fixture.py`
 - `tests/worker_home_rig_runtime.py`
+- `tests/worker_image_gpu_admission.py`
+- `tests/worker_image_job_store.py`
 - `tests/worker_jobs.py`
 - `tests/worker_kaliv_bodyrig_digital_twin_m6_qualifier.py`
 - `tests/worker_kaliv_bodyrig_photoreal_qualifier.py`
@@ -378,6 +382,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
+- `tests/worker_media_generation_profiles.py`
+- `tests/worker_media_generation_runner.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
@@ -534,6 +540,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
 - `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
+- `tests/workflow_media_generation_boundary.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
 - `tests/workflow_mrbody_cross_repo_contract.py`
