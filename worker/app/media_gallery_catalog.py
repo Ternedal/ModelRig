@@ -12,6 +12,8 @@ import stat
 from pathlib import Path
 
 _ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+# Match canonical UTC timestamps accepted by Android Instant.parse.
+_CREATED_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z")
 _MAX_PAGE = 100
 _MAX_INDEX_BYTES = 4 * 1024 * 1024
 
@@ -84,7 +86,7 @@ def _index(root: Path) -> list[dict]:
         # Never trust producer-supplied URL/path values.
         from datetime import datetime, timezone
         created = item.get("created_at")
-        if not isinstance(created, str) or not created.endswith("Z"):
+        if not isinstance(created, str) or not _CREATED_AT.fullmatch(created):
             raise GalleryUnavailable("invalid_created_at")
         try:
             parsed = datetime.fromisoformat(created.replace("Z", "+00:00"))
