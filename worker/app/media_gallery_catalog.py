@@ -62,6 +62,10 @@ def _index(root: Path) -> list[dict]:
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
             raise GalleryUnavailable("invalid_index_item")
+        # Producer metadata must not supply transport paths or URLs.  The
+        # server derives same-origin URLs only after validation.
+        if any(key in item for key in ("url", "thumbnail_url", "path", "file_path")):
+            raise GalleryUnavailable("untrusted_media_location")
         media_id = item["id"]
         if not _ID.fullmatch(media_id) or media_id in seen:
             raise GalleryUnavailable("invalid_index_id")
