@@ -50,7 +50,7 @@ class ExternalMediaStore:
                 break
         if not allowed:
             raise MediaStorageError("media root is not on a configured mounted volume")
-        if min_free_bytes < 0:
+        if type(min_free_bytes) is not int or min_free_bytes < 0:
             raise ValueError("min_free_bytes must be nonnegative")
         self.min_free_bytes = min_free_bytes
         self._check_free()
