@@ -51,6 +51,7 @@ class GalleryCatalogTests(unittest.TestCase):
             {"id": "x", "kind": "image", "mime_type": "video/mp4", "size_bytes": 1},
             {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": True, "created_at": "2026-10-29T07:00:00Z"},
             {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "created_at": "2026-10-29T07:00:00Z", "url": "https://attacker.example"},
+            {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "created_at": "2026-10-29T07:00:00Z", "path": "/tmp/escape.png"},
         )
         for item in bad_items:
             with self.subTest(item=item):
