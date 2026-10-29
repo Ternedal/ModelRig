@@ -41,7 +41,7 @@ class VideoRequest:
         if self.width % 16 or self.height % 16:
             raise ValueError("Dimensions must be multiples of 16")
         if self.kind == "image_to_video":
-            if not self.input_image_id or not self.input_image_id.isascii() or not all(
+            if not isinstance(self.input_image_id, str) or not self.input_image_id or not self.input_image_id.isascii() or not all(
                 ch.isalnum() or ch in "-_" for ch in self.input_image_id
             ) or len(self.input_image_id) > 128:
                 raise ValueError("Validated image asset ID required")
