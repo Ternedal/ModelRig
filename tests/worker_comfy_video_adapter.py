@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -417,6 +418,146 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
         self.assertEqual(os.listdir(self.dirs["output"]), ["foreign.bin"])
         self.assertEqual(len(adapter.last_cleanup["removed"]), 1)
+
+    # --- #2316 6505072747: no deletion of a replaced file on either code path -------------------
+    def _both_paths(self):
+        from contextlib import nullcontext
+        from unittest.mock import patch
+        return (("dir_fd (POSIX)", nullcontext()), ("by path (Windows)", patch.object(os, "supports_dir_fd", set())))
+
+    def test_a_file_swapped_in_right_before_the_capture_is_never_deleted(self):
+        import app.comfy_video_adapter as adapter_module
+        for label, mode in self._both_paths():
+            with self.subTest(label):
+                self.port = free_port()
+                adapter = self.adapter()
+                adapter.load()
+                output, real_rename = self.dirs["output"], adapter_module.os.rename
+
+                def swap_then_rename(src, dst, **kw):
+                    if os.path.basename(str(dst)).startswith(".kaliv-cleanup-") and not swapped:
+                        swapped.append(1)  # the adversary wins the race: a different file now carries the name
+                        Path(output, "x.tmp").write_bytes(b"swapped in by someone else")
+                        os.replace(os.path.join(output, "x.tmp"), os.path.join(output, os.path.basename(str(src))))
+                    return real_rename(src, dst, **kw)
+
+                swapped = []
+                adapter_module.os.rename = swap_then_rename
+                try:
+                    with mode:
+                        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+                finally:
+                    adapter_module.os.rename = real_rename
+                left = os.listdir(output)
+                self.assertEqual(len(left), 1, f"{label}: the swapped-in file survives under its own name: {left}")
+                self.assertFalse(left[0].startswith(".kaliv-cleanup-"))
+                self.assertEqual(Path(output, left[0]).read_bytes(), b"swapped in by someone else")
+                self.assertEqual(adapter.last_cleanup["kept_replaced"], left)
+                adapter.close()
+                os.unlink(os.path.join(output, left[0]))
+
+    def test_if_the_name_is_taken_again_before_the_restore_nothing_is_deleted(self):
+        import app.comfy_video_adapter as adapter_module
+        for label, mode in self._both_paths():
+            with self.subTest(label):
+                self.port = free_port()
+                adapter = self.adapter()
+                adapter.load()
+                output = self.dirs["output"]
+                real_rename, real_link = adapter_module.os.rename, adapter_module.os.link
+
+                def swap_then_rename(src, dst, **kw):
+                    if os.path.basename(str(dst)).startswith(".kaliv-cleanup-"):
+                        Path(output, "x.tmp").write_bytes(b"first stranger")
+                        os.replace(os.path.join(output, "x.tmp"), os.path.join(output, os.path.basename(str(src))))
+                    return real_rename(src, dst, **kw)
+
+                def retake_then_link(src, dst, **kw):
+                    Path(output, os.path.basename(str(dst))).write_bytes(b"second stranger")  # name taken again
+                    return real_link(src, dst, **kw)
+
+                adapter_module.os.rename, adapter_module.os.link = swap_then_rename, retake_then_link
+                try:
+                    with mode:
+                        adapter.render_to(request(), io.BytesIO())
+                finally:
+                    adapter_module.os.rename, adapter_module.os.link = real_rename, real_link
+                contents = sorted(Path(output, n).read_bytes() for n in os.listdir(output))
+                self.assertEqual(contents, [b"first stranger", b"second stranger"], f"{label}: nobody's file is deleted")
+                self.assertIn("(now .kaliv-cleanup-", adapter.last_cleanup["kept_replaced"][0])
+                adapter.close()
+                for n in os.listdir(output):
+                    os.unlink(os.path.join(output, n))
+
+    def test_without_a_file_id_nothing_is_deleted(self):
+        """Some filesystems report st_ino 0: identity is then unprovable, so the file is kept."""
+        import app.comfy_video_adapter as adapter_module
+        adapter = self.adapter()
+        adapter.load()
+        real_stat = adapter_module.os.stat
+
+        def no_file_id(path, *a, **k):
+            info = real_stat(path, *a, **k)
+            if str(path).endswith(".mp4"):
+                info = os.stat_result((info[0], 0) + tuple(info[2:10]))
+            return info
+
+        adapter_module.os.stat = no_file_id
+        try:
+            self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        finally:
+            adapter_module.os.stat = real_stat
+        left = os.listdir(self.dirs["output"])
+        self.assertEqual(len(left), 1, "kept")
+        self.assertEqual(adapter.last_cleanup["untracked"], left, "and reported")
+        self.assertEqual(adapter.last_cleanup["removed"], [])
+
+    def test_a_captured_file_that_cannot_be_deleted_is_reported_where_it_is(self):
+        import app.comfy_video_adapter as adapter_module
+        adapter = self.adapter()
+        adapter.load()
+        real_unlink = adapter_module.os.unlink
+
+        def refusing_unlink(path, *a, **k):
+            raise PermissionError("in use")
+
+        adapter_module.os.unlink = refusing_unlink
+        try:
+            with self.assertLogs("kaliv.media.comfy", level="WARNING") as logs:
+                adapter.render_to(request(), io.BytesIO())
+        finally:
+            adapter_module.os.unlink = real_unlink
+        left = os.listdir(self.dirs["output"])
+        self.assertEqual(len(left), 1)
+        self.assertTrue(left[0].startswith(".kaliv-cleanup-"))
+        self.assertIn(f"(now {left[0]})", adapter.last_cleanup["failed"][0])
+        self.assertIn(left[0], "\n".join(logs.output))
+
+    def test_the_native_windows_cleanup_contract_passes_on_this_platform(self):
+        contract = Path(__file__).resolve().parent / "support" / "windows_cleanup_identity_contract.py"
+        result = subprocess.run([sys.executable, str(contract)], capture_output=True, text=True, timeout=60,
+                                env=dict(os.environ, PYTHONPATH=str(contract.parents[2] / "worker")))
+        self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+        self.assertIn("(0 failures)", result.stdout)
+
+    def test_cleanup_never_masks_the_render_result_or_error(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        adapter.load()
+
+        def exploding_cleanup(*_):
+            raise RuntimeError("cleanup bug")
+
+        adapter._remove_job_outputs = exploding_cleanup
+        with self.assertLogs("kaliv.media.comfy", level="WARNING"):
+            with self.assertRaisesRegex(GenerationError, "not an MP4"):  # the render's own error, not the cleanup's
+                adapter.render_to(request(), io.BytesIO())
+        adapter.close()
+        self.port = free_port()
+        good = self.adapter()
+        good.load()
+        good._remove_job_outputs = exploding_cleanup
+        with self.assertLogs("kaliv.media.comfy", level="WARNING"):
+            self.assertEqual(good.render_to(request(), io.BytesIO()), "video/mp4", "a successful hand-off stays a success")
 
     def test_production_supervisor_has_no_internal_disk_default(self):
         from app.comfy_supervisor import ComfyLaunch, ComfySupervisor, ComfySupervisorError

@@ -30,8 +30,8 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
        │     -> media volume re-check -> exactly one new .mp4: not a symlink, settled, unchanged while copied, ftyp, size cap
        │     -> written into `out` (the adapter never sees a path)
        │     finally: remove exactly the files ComfyUI's history names for THIS prompt (output root, new since
-       │              the snapshot, same inode as recorded, re-checked via dir fd); foreign, replaced and
-       │              pre-existing files are kept and reported; nothing touched if the volume is not verified
+       │              the snapshot, same (st_dev, st_ino) as recorded); see "Output cleanup" below.
+       │              Cleanup never raises, so it cannot mask the render's own result or error
        └─ asset_id = sink.adopt(out, "video/mp4")       storage side (ChatGPT)
   └─ close(): interrupt -> terminate -> kill; the lease is released only after ComfyUI has exited
 ```
@@ -58,6 +58,36 @@ A missing, unmounted or replaced volume raises `ArtifactSinkUnavailable`. That i
 
 `pass_fds` (POSIX) and the resident lock each keep the GPU busy after a supervisor SIGKILL on their own. Both are kept as defence in depth.
 
+## Output cleanup
+
+Neither POSIX nor Windows can "unlink this name only if it is still inode X" atomically. A plain stat followed by an unlink always leaves a window where a different file could take the name. Cleanup therefore never unlinks by name. For each file the job owns:
+
+1. **Capture.** Rename it to a random `.kaliv-cleanup-<hex>` name in the same directory. This is atomic, so it captures exactly the file that carried the name at that instant.
+2. **Check.** Stat the captured file. If its `(st_dev, st_ino)` matches what was recorded when the history arrived, delete it.
+3. **Restore.** Anything else is put back under its name without overwriting (POSIX: `link` plus unlink of the quarantine name; Windows: `rename`). Both refuse an existing target. If the name has been taken again meanwhile, the file stays under its quarantine name and is reported there.
+
+A replaced file is therefore never deleted, on either code path:
+- POSIX uses one directory fd.
+- Windows has no `dir_fd` and works by path.
+
+Other rules:
+- **Unprovable identity.** A file whose filesystem reports no file id (`st_ino == 0`) is never owned; it is kept and reported.
+- **Volume not verified.** If the volume cannot be verified at cleanup time, nothing is touched.
+- **Files left in place.** A file still open on Windows (sharing violation) is left in place. So is a captured file whose delete fails; it is reported under its quarantine name.
+- **Reporting.** Every outcome lands in `last_cleanup` (`removed`, `kept_replaced`, `untracked`, `failed`) and is logged. File names only, never a prompt.
+
+Stated limits (outside the threat model):
+- An actor who learns the random quarantine name within the microseconds between capture and check.
+- An actor who deletes the job's file and creates another under the same generated name that gets the same inode number.
+
+An actor with write access to the volume could delete files directly anyway.
+
+`tests/support/windows_cleanup_identity_contract.py` runs on the Windows runner (NTFS) and on POSIX. It proves that:
+- a rename keeps the file id;
+- a swapped-in file survives;
+- the restore never overwrites;
+- an open file is not captured.
+
 ## Template rules
 
 - The template is operator-installed API-format JSON, and the profile pins its SHA-256.
@@ -82,6 +112,10 @@ A missing, unmounted or replaced volume raises `ArtifactSinkUnavailable`. That i
 6. Wan VRAM fit and render time on the 3060s, and GPU UUID mapping on the dual-GPU rig.
 7. Outbound network from the ComfyUI backend. `--offline` restricts only the frontend, so this needs a firewall rule. That is §2 (external data transfer), Anders' decision.
 8. WSL/native mixed topology stays **disabled**. Lock interoperability across that boundary is unproven.
+9. The media volume's filesystem has stable file ids (NTFS, ReFS, ext4, xfs, btrfs).
+   - FAT32/exFAT derive the id from the directory-entry position. It can change on rename, and a later file can reuse it.
+   - On those filesystems, cleanup may fail to remove its own output. Worse, it cannot rule out a reused id.
+   - Proposal for the `VerifiedMediaVolume` owner: refuse such volumes.
 
 ## Tests (no GPU, no ComfyUI)
 
@@ -89,7 +123,7 @@ A fake ComfyUI (`tests/support/fake_comfyui/main.py`) runs as a real child proce
 
 - `worker_comfy_supervisor.py`
 - `worker_comfy_resident_launcher.py` (also runs the Windows contract on POSIX)
-- `worker_comfy_video_adapter.py`
+- `worker_comfy_video_adapter.py`: also runs the Windows cleanup contract on POSIX
 - `worker_staged_sink_conformance.py`: the storage seam, as a mixin that ChatGPT's sink can be run against
 - `workflow_media_generation_boundary.py`:
   - only the supervisor may use `subprocess` + `http.client`;

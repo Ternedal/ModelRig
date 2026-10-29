@@ -18,9 +18,17 @@ render_to(request, sink_file):
           the job's: named by ComfyUI in THIS prompt's history (type
           "output", plain name, output root), new since the pre-submit
           snapshot, and still the same inode (dev, ino) recorded when the
-          history arrived, re-checked through a directory fd right before
-          the unlink. Foreign files created mid-job, files replaced under the
-          same name and anything that existed before are kept. A symlink is
+          history arrived. Neither POSIX nor Windows can "unlink if still
+          this inode" atomically, so the file is first renamed to a random
+          name in the same directory (atomic: it captures exactly what
+          carries the name at that instant); the identity is checked on the
+          captured file; ours is deleted, anything else is put back without
+          overwriting (POSIX link, Windows rename -- both refuse an existing
+          target) or, if the name has meanwhile been taken, left under the
+          quarantine name and reported. A replaced file is never deleted, and
+          a file without a file id (st_ino 0) is never treated as the job's.
+          Foreign files created mid-job and anything that existed before are
+          kept. Cleanup never raises: it cannot mask the render's own error. A symlink is
           removed as a link, its target never. If the volume cannot be
           verified at cleanup time, nothing is touched. Every cleanup is
           reported in last_cleanup and failures are logged (file names only;
@@ -36,6 +44,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import stat
 import time
 from pathlib import Path
@@ -134,7 +143,10 @@ class ComfyVideoAdapter:
         try:
             return self._render_and_hand_over(request, sink_file, before, owned)
         finally:
-            self._remove_job_outputs(before, owned)
+            try:
+                self._remove_job_outputs(before, owned)
+            except Exception as exc:  # never mask the render's own result or error
+                _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
 
     def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str],
                               owned: list) -> str:
@@ -177,7 +189,7 @@ class ComfyVideoAdapter:
                 info = os.stat(self.output_directory / name, follow_symlinks=False)
             except OSError:
                 continue  # named but not there: nothing to clean
-            if not stat.S_ISDIR(info.st_mode):
+            if not stat.S_ISDIR(info.st_mode) and info.st_ino != 0:  # no file id: identity unprovable, kept
                 found.append((name, info.st_dev, info.st_ino))
         return found
 
@@ -193,7 +205,7 @@ class ComfyVideoAdapter:
             return  # unmounted or replaced: touch nothing on whatever is mounted now
         # POSIX: stat and unlink through one directory fd (no path re-resolution between
         # the identity check and the unlink). Windows has no dir_fd: same check by path.
-        use_fd = os.stat in os.supports_dir_fd and os.unlink in os.supports_dir_fd
+        use_fd = all(f in os.supports_dir_fd for f in (os.stat, os.unlink, os.rename, os.link))
         dir_fd = None
         try:
             if use_fd:
@@ -205,19 +217,15 @@ class ComfyVideoAdapter:
             return
         try:
             for name, dev, ino in owned:
-                target = name if dir_fd is not None else self.output_directory / name
-                try:
-                    info = os.stat(target, dir_fd=dir_fd, follow_symlinks=False)
-                    if (info.st_dev, info.st_ino) != (dev, ino):
-                        report["kept_replaced"].append(name)  # someone else's file now carries the name
-                        continue
-                    os.unlink(target, dir_fd=dir_fd)  # a symlink goes as a link; its target never
+                outcome = self._delete_if_same(name, dev, ino, dir_fd)
+                if outcome == "removed" or outcome == "gone":
                     report["removed"].append(name)
-                except FileNotFoundError:
-                    report["removed"].append(name)  # already gone
-                except OSError as exc:
-                    report["failed"].append(name)
-                    _log.warning("comfy cleanup failed for %s (%s)", name, type(exc).__name__)
+                elif outcome.startswith("kept"):
+                    report["kept_replaced"].append(name if outcome == "kept" else f"{name} (now {outcome[5:]})")
+                else:
+                    error, _, moved = outcome.partition(":")
+                    report["failed"].append(f"{name} (now {moved})" if moved else name)
+                    _log.warning("comfy cleanup failed for %s (%s)%s", name, error, f"; left as {moved}" if moved else "")
             owned_names = {name for name, _, _ in owned}
             try:
                 now = os.listdir(dir_fd) if dir_fd is not None else os.listdir(self.output_directory)
@@ -253,6 +261,39 @@ class ComfyVideoAdapter:
                     pass  # stop() interrupts again and terminates if needed
                 raise GenerationError("render exceeded the profile deadline")
             time.sleep(self.poll_s)
+
+    def _delete_if_same(self, name: str, dev: int, ino: int, dir_fd: int | None) -> str:
+        """Delete `name` only if it is still the file with (dev, ino); never delete anything else.
+
+        Returns "removed", "gone", "kept", "kept:<quarantine name>", or the error type name
+        ("<error>:<quarantine name>" once the file has been captured and is left there).
+        """
+        quarantine = f".kaliv-cleanup-{secrets.token_hex(8)}"
+        here = (lambda n: n) if dir_fd is not None else (lambda n: self.output_directory / n)
+        fd_args = {"src_dir_fd": dir_fd, "dst_dir_fd": dir_fd} if dir_fd is not None else {}
+        try:
+            os.rename(here(name), here(quarantine), **fd_args)  # atomic within one directory
+        except FileNotFoundError:
+            return "gone"
+        except OSError as exc:
+            return type(exc).__name__  # e.g. still open on Windows: left in place
+        try:
+            info = os.stat(here(quarantine), dir_fd=dir_fd, follow_symlinks=False)
+            if (info.st_dev, info.st_ino) == (dev, ino):
+                os.unlink(here(quarantine), dir_fd=dir_fd)  # ours; a symlink goes as a link
+                return "removed"
+        except OSError as exc:
+            return f"{type(exc).__name__}:{quarantine}"  # captured, not deleted: say where it is
+        # Not ours: put it back under its name without overwriting anything.
+        try:
+            if os.name == "nt":
+                os.rename(here(quarantine), here(name))  # Windows rename refuses an existing target
+            else:
+                os.link(here(quarantine), here(name), follow_symlinks=False, **fd_args)  # refuses one too
+                os.unlink(here(quarantine), dir_fd=dir_fd)
+            return "kept"
+        except OSError:
+            return f"kept:{quarantine}"  # its name was taken meanwhile: left, unharmed, and reported
 
     def _entry_names(self) -> set[str]:
         return {entry.name for entry in os.scandir(self.output_directory)}
