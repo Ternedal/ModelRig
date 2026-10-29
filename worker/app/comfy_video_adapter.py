@@ -13,12 +13,20 @@ render_to(request, sink_file):
           (no symlinks, unchanged over a settle window before the copy and
           during it, ftyp header, size cap) -> copied into sink_file ->
           ComfyUI's output removed.
-          Cleanup (#2316 review 4415046066): everything the job created in
-          ComfyUI's output root is removed afterwards, on success AND on
-          failure, so rejected outputs cannot fill the volume. Entries that
-          existed before the job are never touched; a symlink is removed as a
-          link (its target never); if the volume cannot be verified at
-          cleanup time, nothing is touched.
+          Cleanup (#2316 reviews 4415046066, 5702562074): after the job --
+          success or failure -- remove exactly the files that are provably
+          the job's: named by ComfyUI in THIS prompt's history (type
+          "output", plain name, output root), new since the pre-submit
+          snapshot, and still the same inode (dev, ino) recorded when the
+          history arrived, re-checked through a directory fd right before
+          the unlink. Foreign files created mid-job, files replaced under the
+          same name and anything that existed before are kept. A symlink is
+          removed as a link, its target never. If the volume cannot be
+          verified at cleanup time, nothing is touched. Every cleanup is
+          reported in last_cleanup and failures are logged (file names only;
+          they are generated, never a prompt).
+          Stated limit: a write that arrives after a timeout interrupt is not
+          in the history and is left in place (reported as untracked).
 close():  stop the supervisor.
 
 image_to_video needs input-asset retrieval (ChatGPT's asset service) and is
@@ -26,6 +34,7 @@ not supported here.
 """
 from __future__ import annotations
 
+import logging
 import os
 import stat
 import time
@@ -39,6 +48,7 @@ from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
 COPY_CHUNK = 1024 * 1024
+_log = logging.getLogger("kaliv.media.comfy")
 
 
 class ComfyVideoAdapter:
@@ -67,6 +77,7 @@ class ComfyVideoAdapter:
         self.output_directory = Path(output_directory)
         self.poll_s = float(poll_s)
         self._template: WorkflowTemplate | None = None
+        self.last_cleanup: dict[str, list[str]] = {}
 
     # --- lifecycle --------------------------------------------------------
     def _read_template(self) -> bytes:
@@ -119,12 +130,14 @@ class ComfyVideoAdapter:
     def _render_one(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
         self.supervisor.require_media_volume()  # ArtifactSinkUnavailable propagates: fatal
         before = self._entry_names()  # snapshot before anything is submitted
+        owned: list[tuple[str, int, int]] = []  # (name, st_dev, st_ino) attested by THIS prompt's history
         try:
-            return self._render_and_hand_over(request, sink_file, before)
+            return self._render_and_hand_over(request, sink_file, before, owned)
         finally:
-            self._remove_job_outputs(before)
+            self._remove_job_outputs(before, owned)
 
-    def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str]) -> str:
+    def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str],
+                              owned: list) -> str:
         try:
             self.supervisor.check_budget()
             if not self.supervisor.queue_is_empty():
@@ -133,31 +146,90 @@ class ComfyVideoAdapter:
             outputs = self._wait(prompt_id)
         except ComfySupervisorError as exc:
             raise GenerationError("ComfyUI unavailable") from exc
+        owned.extend(self._attested_outputs(outputs, before))  # recorded before any validation can fail
         source = self._single_output(outputs, before)
         self.supervisor.require_media_volume()  # still the same verified volume after the render
         self._wait_quiescent(source)
         self._copy_validated(source, sink_file)
         return MIME
 
-    def _remove_job_outputs(self, before: set[str]) -> None:
-        """Remove what this job created in ComfyUI's output root (single tenant: it is ours)."""
+    @staticmethod
+    def _history_entries(outputs: object):
+        if not isinstance(outputs, dict):
+            return
+        for node in outputs.values():
+            if isinstance(node, dict):
+                for key in ("videos", "gifs", "images"):
+                    items = node.get(key, [])
+                    if isinstance(items, list):
+                        yield from (item for item in items if isinstance(item, dict))
+
+    def _attested_outputs(self, outputs: object, before: set[str]) -> list[tuple[str, int, int]]:
+        """Files ComfyUI says THIS prompt wrote to the output root, with their identity right now."""
+        found = []
+        for item in self._history_entries(outputs):
+            name, subfolder = item.get("filename"), item.get("subfolder", "")
+            if item.get("type") != "output" or subfolder != "" or not isinstance(name, str):
+                continue
+            if Path(name).name != name or name in ("", ".", "..") or "\\" in name or ":" in name or name in before:
+                continue
+            try:
+                info = os.stat(self.output_directory / name, follow_symlinks=False)
+            except OSError:
+                continue  # named but not there: nothing to clean
+            if not stat.S_ISDIR(info.st_mode):
+                found.append((name, info.st_dev, info.st_ino))
+        return found
+
+    def _remove_job_outputs(self, before: set[str], owned: list[tuple[str, int, int]]) -> None:
+        """Remove exactly the job-owned files; keep and report everything else."""
+        report: dict[str, list[str]] = {"removed": [], "kept_replaced": [], "untracked": [], "failed": []}
+        self.last_cleanup = report
         try:
             self.supervisor.require_media_volume()
         except Exception:
+            report["failed"] = [name for name, _, _ in owned]
+            _log.warning("comfy cleanup skipped: media volume not verified; left %s", report["failed"])
             return  # unmounted or replaced: touch nothing on whatever is mounted now
+        # POSIX: stat and unlink through one directory fd (no path re-resolution between
+        # the identity check and the unlink). Windows has no dir_fd: same check by path.
+        use_fd = os.stat in os.supports_dir_fd and os.unlink in os.supports_dir_fd
+        dir_fd = None
         try:
-            entries = list(os.scandir(self.output_directory))
-        except OSError:
+            if use_fd:
+                dir_fd = os.open(self.output_directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                                 | getattr(os, "O_NOFOLLOW", 0))
+        except OSError as exc:
+            report["failed"] = [name for name, _, _ in owned]
+            _log.warning("comfy cleanup failed: output directory unavailable (%s)", type(exc).__name__)
             return
-        for entry in entries:
-            if entry.name in before:
-                continue  # existed before this job
+        try:
+            for name, dev, ino in owned:
+                target = name if dir_fd is not None else self.output_directory / name
+                try:
+                    info = os.stat(target, dir_fd=dir_fd, follow_symlinks=False)
+                    if (info.st_dev, info.st_ino) != (dev, ino):
+                        report["kept_replaced"].append(name)  # someone else's file now carries the name
+                        continue
+                    os.unlink(target, dir_fd=dir_fd)  # a symlink goes as a link; its target never
+                    report["removed"].append(name)
+                except FileNotFoundError:
+                    report["removed"].append(name)  # already gone
+                except OSError as exc:
+                    report["failed"].append(name)
+                    _log.warning("comfy cleanup failed for %s (%s)", name, type(exc).__name__)
+            owned_names = {name for name, _, _ in owned}
             try:
-                if entry.is_dir(follow_symlinks=False):
-                    continue
-                os.unlink(entry.path)  # a symlink goes as a link; its target is never touched
+                now = os.listdir(dir_fd) if dir_fd is not None else os.listdir(self.output_directory)
+                report["untracked"] = sorted(n for n in now if n not in before and n not in owned_names)
             except OSError:
-                pass  # best effort: never mask the job's own result or error
+                pass
+        finally:
+            if dir_fd is not None:
+                os.close(dir_fd)
+        if report["kept_replaced"] or report["untracked"]:
+            _log.warning("comfy cleanup kept files it cannot prove are this job's: replaced=%s untracked=%s",
+                         report["kept_replaced"], report["untracked"])
 
     def _wait(self, prompt_id: str) -> dict:
         deadline = time.monotonic() + self.options.max_render_seconds

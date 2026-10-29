@@ -63,44 +63,59 @@ if os.environ.get("FAKE_COMFY_PREQUEUED") == "1":
 
 def _render(prompt_id: str) -> None:
     deadline = time.monotonic() + render_seconds
+    foreign = os.environ.get("FAKE_COMFY_FOREIGN_FILE")  # someone else drops a file mid-job
     while time.monotonic() < deadline:
+        if foreign and not os.path.exists(os.path.join(args.output_directory, foreign)):
+            with open(os.path.join(args.output_directory, foreign), "wb") as fh:
+                fh.write(b"not ours")
         if interrupted.is_set():
             with lock:
                 history[prompt_id] = {"status": {"status_str": "error", "completed": False}, "outputs": {}}
                 queue.remove(prompt_id)
             return
         time.sleep(0.02)
+    if foreign and not os.path.exists(os.path.join(args.output_directory, foreign)):
+        with open(os.path.join(args.output_directory, foreign), "wb") as fh:
+            fh.write(b"not ours")
     mode = os.environ.get("FAKE_COMFY_OUTPUT_MODE", "ok")
     name = f"kaliv_{prompt_id[:8]}.mp4"
     path = os.path.join(args.output_directory, name)
     mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * int(os.environ.get("FAKE_COMFY_MP4_PAD", "64"))
     entries = [{"filename": name, "subfolder": "", "type": "output"}]
     status = {"status_str": "success", "completed": True}
+
+    def write(target, data=mp4):
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as fh:
+            fh.write(data)
+
+    # Write files where a real ComfyUI would, so cleanup sees a realistic output root.
     if mode == "symlink":
         target = os.path.join(args.output_directory, "..", "outside.mp4")
-        with open(target, "wb") as fh:
-            fh.write(mp4)
+        write(target)
         os.symlink(target, path)
     elif mode == "notmp4":
-        with open(path, "wb") as fh:
-            fh.write(b"<html>not a video</html>")
-    elif mode != "none":
-        with open(path, "wb") as fh:
-            fh.write(mp4)
-    if mode == "two":
-        entries.append({"filename": "second.mp4", "subfolder": "", "type": "output"})
-    elif mode == "none":
-        entries = []
+        write(path, b"<html>not a video</html>")
     elif mode == "subfolder":
         entries[0]["subfolder"] = "sub"
+        write(os.path.join(args.output_directory, "sub", name))
     elif mode == "traversal":
         entries[0]["filename"] = "../outside.mp4"
+        write(os.path.join(args.output_directory, "..", "outside.mp4"))
     elif mode == "temp_only":
         entries[0]["type"] = "temp"
+        write(os.path.join(args.temp_directory or args.output_directory, name))
     elif mode == "stale":
-        entries[0]["filename"] = "old.mp4"  # a file that was there before this job
+        entries[0]["filename"] = "old.mp4"  # names a file that was there before this job; writes nothing
     elif mode == "error":
-        status = {"status_str": "error", "completed": False}
+        status = {"status_str": "error", "completed": False}  # failed: no output file
+    elif mode != "none":
+        write(path)
+    if mode == "two":
+        entries.append({"filename": "second.mp4", "subfolder": "", "type": "output"})
+        write(os.path.join(args.output_directory, "second.mp4"))
+    elif mode == "none":
+        entries = []
     with lock:
         history[prompt_id] = {"status": status, "outputs": {"9": {"videos": entries}}}
         queue.remove(prompt_id)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import shutil
 import hashlib
 import io
 import json
@@ -355,6 +356,68 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(len([n for n in os.listdir(self.dirs["output"]) if n.endswith(".mp4")]), 1,
                          "on an unverified (possibly replaced) disk, nothing is deleted")
 
+    # --- #2316 review 5702562074: only provably job-owned files go -------------------------------
+    def test_a_foreign_file_created_mid_job_is_kept_and_reported(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_FOREIGN_FILE": "someone-elses.mp4", "FAKE_COMFY_RENDER_SECONDS": "0.3"})
+        adapter.load()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        self.assertEqual(os.listdir(self.dirs["output"]), ["someone-elses.mp4"], "not named in this job's history")
+        self.assertEqual(Path(self.dirs["output"], "someone-elses.mp4").read_bytes(), b"not ours")
+        self.assertEqual(len(adapter.last_cleanup["removed"]), 1)
+        self.assertEqual(adapter.last_cleanup["untracked"], ["someone-elses.mp4"])
+
+    def test_a_file_replaced_under_the_same_name_is_kept_and_reported(self):
+        adapter = self.adapter()
+        adapter.load()
+        output = self.dirs["output"]
+
+        class ReplacingSink(io.BytesIO):
+            done = False
+
+            def write(self, data):
+                if not self.done:  # mid-copy, another writer swaps a different file in under our name
+                    self.done = True
+                    name = [n for n in os.listdir(output) if n.endswith(".mp4")][0]
+                    Path(output, "swap.tmp").write_bytes(b"a different file")
+                    os.replace(os.path.join(output, "swap.tmp"), os.path.join(output, name))
+                return super().write(data)
+
+        adapter.render_to(request(), ReplacingSink())
+        left = os.listdir(output)
+        self.assertEqual(len(left), 1, "the replacement survives")
+        self.assertEqual(Path(output, left[0]).read_bytes(), b"a different file")
+        self.assertEqual(adapter.last_cleanup["kept_replaced"], left)
+        self.assertEqual(adapter.last_cleanup["removed"], [])
+
+    def test_cleanup_failures_are_reported_and_logged(self):
+        adapter = self.adapter()
+        adapter.load()
+        import app.comfy_video_adapter as adapter_module
+        real_unlink = adapter_module.os.unlink
+
+        def refusing_unlink(path, *a, **k):
+            raise PermissionError("in use")
+
+        adapter_module.os.unlink = refusing_unlink
+        try:
+            with self.assertLogs("kaliv.media.comfy", level="WARNING") as logs:
+                adapter.render_to(request(), io.BytesIO())
+        finally:
+            adapter_module.os.unlink = real_unlink
+        self.assertEqual(len(adapter.last_cleanup["failed"]), 1)
+        self.assertIn("PermissionError", "\n".join(logs.output))
+        self.assertNotIn("Nørrebro", "\n".join(logs.output), "no prompt text in the log")
+
+    def test_cleanup_works_without_dir_fd_support(self):
+        """The rig is Windows: no dir_fd. Same identity rule, by path."""
+        from unittest.mock import patch
+        adapter = self.adapter(fake={"FAKE_COMFY_FOREIGN_FILE": "foreign.bin"})
+        adapter.load()
+        with patch.object(os, "supports_dir_fd", set()):
+            self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        self.assertEqual(os.listdir(self.dirs["output"]), ["foreign.bin"])
+        self.assertEqual(len(adapter.last_cleanup["removed"]), 1)
+
     def test_production_supervisor_has_no_internal_disk_default(self):
         from app.comfy_supervisor import ComfyLaunch, ComfySupervisor, ComfySupervisorError
         launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
@@ -433,13 +496,17 @@ class AdapterTests(unittest.TestCase):
                 self.assertEqual(sink.getvalue(), b"", "a refused output must not be handed to the sink")
                 adapter.close()
                 left = sorted(os.listdir(self.dirs["output"]))
-                self.assertEqual(left, ["old.mp4"] if mode == "stale" else [],
-                                 "a failed job leaves nothing behind (and never removes what was there before)")
-                if mode == "symlink":
+                expected = {"stale": ["old.mp4"], "subfolder": ["sub"]}.get(mode, [])
+                self.assertEqual(left, expected,
+                                 "a failed job leaves nothing it owns behind, and never removes what it cannot prove is its own")
+                if mode == "subfolder":
+                    self.assertEqual(adapter.last_cleanup["untracked"], ["sub"], "kept, and reported")
+                if mode in ("symlink", "traversal"):
                     self.assertTrue(Path(self.dirs["output"], "..", "outside.mp4").exists(),
-                                    "the symlink went, its target outside the output root did not")
+                                    "nothing outside the output root is ever touched")
                 for name in left:
-                    os.unlink(os.path.join(self.dirs["output"], name))
+                    target = os.path.join(self.dirs["output"], name)
+                    shutil.rmtree(target) if os.path.isdir(target) else os.unlink(target)
 
     def test_vram_is_rechecked_before_every_job(self):
         adapter = self.adapter()
