@@ -41,6 +41,19 @@ class GalleryCatalogTests(unittest.TestCase):
             with self.assertRaises(GalleryBadRequest):
                 self.page(cursor=cursor)
 
+    def test_reject_duplicate_json_keys_and_nonfinite_constants(self):
+        malformed = (
+            '[{"id":"img_1","id":"vid_2"}]',
+            '[{"id":"img_1","metadata":{"a":1,"a":2}}]',
+            '[{"id":"img_1","size_bytes":NaN}]',
+            '[{"id":"img_1","size_bytes":Infinity}]',
+        )
+        for payload in malformed:
+            with self.subTest(payload=payload):
+                (self.root / "gallery-index.json").write_text(payload, encoding="utf-8")
+                with self.assertRaises(GalleryUnavailable):
+                    self.page()
+
     def test_reject_duplicate_ids(self):
         (self.root / "gallery-index.json").write_text(
             json.dumps([{"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "created_at": "2026-10-29T07:00:00Z"}] * 2), encoding="utf-8")

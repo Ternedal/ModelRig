@@ -54,6 +54,20 @@ def _root(path: str | Path, *, verified_volume_root: str | Path | None = None) -
     return resolved
 
 
+def _unique_object_pairs(pairs: list[tuple[str, object]]) -> dict:
+    """Reject duplicate JSON keys rather than silently trusting the last value."""
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise GalleryUnavailable("duplicate_index_key")
+        obj[key] = value
+    return obj
+
+
+def _reject_json_constant(value: str) -> None:
+    raise GalleryUnavailable("invalid_json_constant")
+
+
 def _index(root: Path) -> list[dict]:
     index = root / "gallery-index.json"
     try:
@@ -70,7 +84,8 @@ def _index(root: Path) -> list[dict]:
                 raise GalleryUnavailable("index_too_large")
         finally:
             os.close(descriptor)
-        items = json.loads(payload)
+        items = json.loads(payload, object_pairs_hook=_unique_object_pairs,
+                           parse_constant=_reject_json_constant)
     except (OSError, ValueError, TypeError) as exc:
         raise GalleryUnavailable("invalid_index") from exc
     if not isinstance(items, list):
