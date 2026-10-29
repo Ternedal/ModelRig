@@ -1,7 +1,12 @@
 package dk.ternedal.modelrig.net
 
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -13,7 +18,18 @@ interface MediaGallerySource {
     fun page(limit: Int = MediaGalleryContract.DEFAULT_LIMIT, cursor: String? = null): MediaPage
     fun thumbnail(item: MediaItem): ByteArray
     fun image(item: MediaItem): ByteArray
+    fun video(item: MediaItem): MediaVideoStream
 }
+
+/**
+ * What a player needs to stream one video from the paired rig: the URL and a
+ * data source that goes through the gallery's own HTTP client, so the bearer
+ * token, the origin guard and the no-redirect rule apply to every Range request.
+ */
+class MediaVideoStream(val url: String, val dataSourceFactory: DataSource.Factory)
+
+/** A request for anything but the paired origin was stopped before it was sent. */
+class MediaOriginRefusedIOException(message: String) : IOException(message)
 
 /**
  * Which paired origin the gallery may talk to (#2275, amendment 4).
@@ -90,6 +106,15 @@ class MediaGalleryClient(
     private val http: OkHttpClient = http.newBuilder()
         .followRedirects(false)
         .followSslRedirects(false)
+        // Defence in depth: every request this client makes, the player's
+        // included, must go to the paired origin. The token rides on all of them.
+        .addInterceptor(Interceptor { chain ->
+            val url = chain.request().url
+            if (url.scheme != origin.scheme || url.host != origin.host || url.port != origin.port) {
+                throw MediaOriginRefusedIOException("request outside the paired origin refused")
+            }
+            chain.proceed(chain.request())
+        })
         .build()
 
     init {
@@ -122,6 +147,22 @@ class MediaGalleryClient(
         return execute(origin.resolveExact(item.mediaPath), IMAGE_MAX_BYTES, requireImage = true)
     }
 
+    /**
+     * Video is streamed, never downloaded whole: the player issues Range
+     * requests through [http]. A video the server cannot serve in ranges is
+     * refused here rather than fetched in one piece.
+     */
+    @OptIn(UnstableApi::class)
+    override fun video(item: MediaItem): MediaVideoStream {
+        require(item.kind == MediaKind.VIDEO) { "not a video" }
+        if (!item.supportsRange) {
+            throw MediaGalleryException(MediaGalleryException.Reason.UNPLAYABLE, "Riggen kan ikke streame denne video")
+        }
+        val factory = OkHttpDataSource.Factory(http)
+            .setDefaultRequestProperties(mapOf("Authorization" to "Bearer $token"))
+        return MediaVideoStream(origin.resolveExact(item.mediaPath).toString(), factory)
+    }
+
     private fun HttpUrl.resolveExact(path: String): HttpUrl = newBuilder().encodedPath(path).build()
 
     private fun execute(url: HttpUrl, maxBytes: Long, requireImage: Boolean): ByteArray {
@@ -131,6 +172,8 @@ class MediaGalleryClient(
             .get().build()
         val response = try {
             http.newCall(request).execute()
+        } catch (e: MediaOriginRefusedIOException) {
+            throw MediaGalleryException(MediaGalleryException.Reason.ORIGIN_REFUSED, "Forespørgsel uden for den parrede rig afvist")
         } catch (e: IOException) {
             throw MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Riggen kan ikke nås")
         }
