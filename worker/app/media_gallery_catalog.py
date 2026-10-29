@@ -31,6 +31,9 @@ def _root(path: str | Path) -> Path:
     if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise GalleryUnavailable("external_media_unavailable")
     resolved = root.resolve(strict=True)
+    # Reject symlinked parent components as well as a symlink at the root itself.
+    if root != resolved:
+        raise GalleryUnavailable("media_root_symlink_parent")
     if resolved == Path(resolved.anchor):
         raise GalleryUnavailable("media_root_refused")
     if not os.path.ismount(resolved):
