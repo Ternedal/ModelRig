@@ -59,7 +59,7 @@ def _index(root: Path) -> list[dict]:
     try:
         if index.is_symlink():
             raise GalleryUnavailable("index_symlink_refused")
-        descriptor = os.open(index, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(index, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
         try:
             info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_INDEX_BYTES:
