@@ -85,6 +85,16 @@ class MediaStoreTests(unittest.TestCase):
                     store.publish(b"image", extension)
             self.assertEqual(list(Path(directory).iterdir()), [])
 
+    def test_resolve_rejects_non_string_ids_and_extensions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            for value in (None, 123, [], {}, b"a" * 32):
+                with self.subTest(asset_id=value), self.assertRaises(MediaStorageError):
+                    store.resolve(value, ".png")
+            for value in (None, 123, [], {}, b".png"):
+                with self.subTest(extension=value), self.assertRaises(MediaStorageError):
+                    store.resolve("a" * 32, value)
+
     def test_free_space_floor(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(MediaStorageError):
