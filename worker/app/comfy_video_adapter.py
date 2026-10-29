@@ -12,7 +12,13 @@ render_to(request, sink_file):
           timeout) -> exactly one MP4 in the ComfyUI output dir, validated
           (no symlinks, unchanged over a settle window before the copy and
           during it, ftyp header, size cap) -> copied into sink_file ->
-          ComfyUI's copy removed.
+          ComfyUI's output removed.
+          Cleanup (#2316 review 4415046066): everything the job created in
+          ComfyUI's output root is removed afterwards, on success AND on
+          failure, so rejected outputs cannot fill the volume. Entries that
+          existed before the job are never touched; a symlink is removed as a
+          link (its target never); if the volume cannot be verified at
+          cleanup time, nothing is touched.
 close():  stop the supervisor.
 
 image_to_video needs input-asset retrieval (ChatGPT's asset service) and is
@@ -112,11 +118,17 @@ class ComfyVideoAdapter:
 
     def _render_one(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
         self.supervisor.require_media_volume()  # ArtifactSinkUnavailable propagates: fatal
+        before = self._entry_names()  # snapshot before anything is submitted
+        try:
+            return self._render_and_hand_over(request, sink_file, before)
+        finally:
+            self._remove_job_outputs(before)
+
+    def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str]) -> str:
         try:
             self.supervisor.check_budget()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
-            before = self._mp4_names()
             prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps))
             outputs = self._wait(prompt_id)
         except ComfySupervisorError as exc:
@@ -125,8 +137,27 @@ class ComfyVideoAdapter:
         self.supervisor.require_media_volume()  # still the same verified volume after the render
         self._wait_quiescent(source)
         self._copy_validated(source, sink_file)
-        source.unlink()
         return MIME
+
+    def _remove_job_outputs(self, before: set[str]) -> None:
+        """Remove what this job created in ComfyUI's output root (single tenant: it is ours)."""
+        try:
+            self.supervisor.require_media_volume()
+        except Exception:
+            return  # unmounted or replaced: touch nothing on whatever is mounted now
+        try:
+            entries = list(os.scandir(self.output_directory))
+        except OSError:
+            return
+        for entry in entries:
+            if entry.name in before:
+                continue  # existed before this job
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    continue
+                os.unlink(entry.path)  # a symlink goes as a link; its target is never touched
+            except OSError:
+                pass  # best effort: never mask the job's own result or error
 
     def _wait(self, prompt_id: str) -> dict:
         deadline = time.monotonic() + self.options.max_render_seconds
@@ -151,8 +182,8 @@ class ComfyVideoAdapter:
                 raise GenerationError("render exceeded the profile deadline")
             time.sleep(self.poll_s)
 
-    def _mp4_names(self) -> set[str]:
-        return {entry.name for entry in os.scandir(self.output_directory) if entry.name.endswith(".mp4")}
+    def _entry_names(self) -> set[str]:
+        return {entry.name for entry in os.scandir(self.output_directory)}
 
     def _single_output(self, outputs: dict, before: set[str]) -> Path:
         entries = []

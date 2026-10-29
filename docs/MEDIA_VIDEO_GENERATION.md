@@ -28,7 +28,9 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
        │     -> media volume re-check -> validate_request -> VRAM re-check -> empty queue -> bind slots -> /prompt
        │     -> /history until the profile deadline (interrupt on timeout)
        │     -> media volume re-check -> exactly one new .mp4: not a symlink, settled, unchanged while copied, ftyp, size cap
-       │     -> written into `out` (the adapter never sees a path) -> ComfyUI's copy removed
+       │     -> written into `out` (the adapter never sees a path)
+       │     finally: everything the job created in ComfyUI's output root is removed (success or failure;
+       │              pre-existing entries untouched; nothing touched if the volume is not verified)
        └─ asset_id = sink.adopt(out, "video/mp4")       storage side (ChatGPT)
   └─ close(): interrupt -> terminate -> kill; the lease is released only after ComfyUI has exited
 ```

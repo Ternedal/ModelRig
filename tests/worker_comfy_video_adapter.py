@@ -308,6 +308,53 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), sink)
         self.assertEqual(sink.getvalue(), b"")
 
+    # --- #2316 review 4415046066: failed jobs must not fill the volume ---------------------------
+    def test_rejected_outputs_do_not_accumulate(self):
+        """Codex's scenario: three renders rejected by the size cap must leave nothing behind."""
+        adapter = self.adapter(fake={"FAKE_COMFY_MP4_PAD": "4096"}, profile=self.profile(max_output_bytes=1024))
+        adapter.load()
+        for _ in range(3):
+            with self.assertRaisesRegex(GenerationError, "size cap"):
+                adapter.render_to(request(), io.BytesIO())
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+
+    def test_a_sink_write_error_still_cleans_up(self):
+        class BrokenSink(io.BytesIO):
+            def write(self, data):
+                raise OSError("disk full on the sink side")
+
+        adapter = self.adapter()
+        adapter.load()
+        with self.assertRaises(OSError):
+            adapter.render_to(request(), BrokenSink())
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+
+    def test_cleanup_never_touches_what_existed_before_the_job(self):
+        Path(self.dirs["output"], "operator-note.txt").write_text("keep me")
+        os.mkdir(os.path.join(self.dirs["output"], "keep-dir"))
+        adapter = self.adapter()
+        adapter.load()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        self.assertEqual(sorted(os.listdir(self.dirs["output"])), ["keep-dir", "operator-note.txt"])
+
+    def test_cleanup_touches_nothing_when_the_volume_is_no_longer_verified(self):
+        volume = AnyExistingDirectory()
+        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.3"})
+        adapter.load()
+        real_history = adapter.supervisor.history
+
+        def history_then_unplug(prompt_id):
+            record = real_history(prompt_id)
+            if record is not None:
+                volume.lost.add("*")
+            return record
+
+        adapter.supervisor.history = history_then_unplug
+        with self.assertRaises(ArtifactSinkUnavailable):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertEqual(len([n for n in os.listdir(self.dirs["output"]) if n.endswith(".mp4")]), 1,
+                         "on an unverified (possibly replaced) disk, nothing is deleted")
+
     def test_production_supervisor_has_no_internal_disk_default(self):
         from app.comfy_supervisor import ComfyLaunch, ComfySupervisor, ComfySupervisorError
         launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
@@ -385,7 +432,13 @@ class AdapterTests(unittest.TestCase):
                     adapter.render_to(request(), sink)
                 self.assertEqual(sink.getvalue(), b"", "a refused output must not be handed to the sink")
                 adapter.close()
-                for name in os.listdir(self.dirs["output"]):
+                left = sorted(os.listdir(self.dirs["output"]))
+                self.assertEqual(left, ["old.mp4"] if mode == "stale" else [],
+                                 "a failed job leaves nothing behind (and never removes what was there before)")
+                if mode == "symlink":
+                    self.assertTrue(Path(self.dirs["output"], "..", "outside.mp4").exists(),
+                                    "the symlink went, its target outside the output root did not")
+                for name in left:
                     os.unlink(os.path.join(self.dirs["output"], name))
 
     def test_vram_is_rechecked_before_every_job(self):
