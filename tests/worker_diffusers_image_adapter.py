@@ -16,12 +16,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 
 from app.diffusers_image_adapter import DiffusersImageAdapter  # noqa: E402
-from app.gpu_lease import GpuBusy, acquire_gpu_lease  # noqa: E402
+from app.gpu_lease import GpuBusy, GpuLeaseError, acquire_gpu_lease  # noqa: E402
 from app.image_gpu_admission import ImageGpuAdmissionError  # noqa: E402
 from app.media_generation_contract import GenerationError, GenerationRequest  # noqa: E402
 from app.media_generation_profiles import parse_profile  # noqa: E402
 
-OFFLINE = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+GPU0 = "GPU-00000000-1111-2222-3333-444444444444"
+GPU1 = "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+OFFLINE = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
+           "KALIV_GPU_DEVICE_UUIDS": f"cuda:0={GPU0},cuda:1={GPU1}"}
 GIB = 1024**3
 
 
@@ -71,6 +74,7 @@ def fake_modules(calls, free_gib=11.0):
     cuda = types.SimpleNamespace(
         is_available=lambda: True, device_count=lambda: 2, device=lambda i: _Device(i),
         mem_get_info=lambda: (int(free_gib * GIB), 12 * GIB),
+        get_device_properties=lambda i: types.SimpleNamespace(uuid={0: GPU0, 1: GPU1}[i][len("GPU-"):]),
         empty_cache=lambda: calls.append(("empty_cache",)),
     )
     torch = types.SimpleNamespace(bfloat16="bf16", cuda=cuda, Generator=Generator)
@@ -112,11 +116,37 @@ class AdapterTests(unittest.TestCase):
                 self.adapter(env=env).load()
             budget.assert_not_called()
         self.assertEqual(self.calls, [])
-        with acquire_gpu_lease(1, lease_dir=self.lease_dir):
+        with acquire_gpu_lease(GPU1, lease_dir=self.lease_dir):
             pass  # no lease was left behind
 
+    def test_missing_or_unordered_gpu_identity_stops_load_before_the_lease(self):
+        leases = []
+        envs = (
+            {k: v for k, v in OFFLINE.items() if k != "KALIV_GPU_DEVICE_UUIDS"},
+            {k: v for k, v in OFFLINE.items() if k != "CUDA_DEVICE_ORDER"},
+            dict(OFFLINE, KALIV_GPU_DEVICE_UUIDS=f"cuda:0={GPU0}"),
+        )
+        for env in envs:
+            with self.subTest(env=sorted(env)), \
+                    patch("app.diffusers_image_adapter.acquire_gpu_lease", side_effect=lambda *a, **k: leases.append(a)), \
+                    patch("app.diffusers_image_adapter.inspect_cuda_budget") as budget, \
+                    patch.dict(sys.modules, fake_modules(self.calls)), \
+                    self.assertRaises((GenerationError, GpuLeaseError)):
+                self.adapter(env=env).load()
+            budget.assert_not_called()
+        self.assertEqual(leases, [])
+        self.assertEqual(self.calls, [])
+
+    def test_a_cuda_index_that_is_another_gpu_is_refused_inside_the_lease(self):
+        swapped = dict(OFFLINE, KALIV_GPU_DEVICE_UUIDS=f"cuda:0={GPU1},cuda:1={GPU0}")
+        with patch.dict(sys.modules, fake_modules(self.calls)), self.assertRaises(ImageGpuAdmissionError):
+            self.adapter(env=swapped).load()
+        self.assertEqual([c for c in self.calls if c[0] == "from_pretrained"], [])
+        with acquire_gpu_lease(GPU0, lease_dir=self.lease_dir):
+            pass
+
     def test_a_busy_gpu_stops_load_before_budget_or_import(self):
-        holder = acquire_gpu_lease(1, lease_dir=self.lease_dir)
+        holder = acquire_gpu_lease(GPU1, lease_dir=self.lease_dir)
         self.addCleanup(holder.release)
         with patch("app.diffusers_image_adapter.inspect_cuda_budget") as budget, \
                 patch.dict(sys.modules, fake_modules(self.calls)), self.assertRaises(GpuBusy):
@@ -130,21 +160,21 @@ class AdapterTests(unittest.TestCase):
         def budget(index, **kwargs):
             seen.append((index, kwargs))
             with self.assertRaises(GpuBusy):  # nobody else can take this GPU now
-                acquire_gpu_lease(index, lease_dir=self.lease_dir)
+                acquire_gpu_lease(GPU1, lease_dir=self.lease_dir)
 
         with patch("app.diffusers_image_adapter.inspect_cuda_budget", side_effect=budget), \
                 patch.dict(sys.modules, fake_modules(self.calls)):
             adapter = self.adapter()
             adapter.load()
-        self.assertEqual(seen, [(1, {"reserve_gib": 2.0, "min_usable_gib": 8.0})])
+        self.assertEqual(seen, [(1, {"reserve_gib": 2.0, "min_usable_gib": 8.0, "expected_uuid": GPU1})])
         self.assertEqual(self.calls[0], ("from_pretrained", "example/sdxl-base",
                                          {"revision": self.profile.revision, "torch_dtype": "bf16",
                                           "local_files_only": True}))
         self.assertEqual(self.calls[1], ("to", "cuda:1"))
         with self.assertRaises(GpuBusy):  # held for as long as the model is resident
-            acquire_gpu_lease(1, lease_dir=self.lease_dir)
+            acquire_gpu_lease(GPU1, lease_dir=self.lease_dir)
         adapter.close()
-        with acquire_gpu_lease(1, lease_dir=self.lease_dir):
+        with acquire_gpu_lease(GPU1, lease_dir=self.lease_dir):
             pass
 
     def test_a_failed_budget_or_load_releases_the_lease(self):
@@ -171,7 +201,7 @@ class AdapterTests(unittest.TestCase):
                 self.adapter().load()
         self.assertEqual(len(leases), 2)
         self.assertTrue(all(not lease.held for lease in leases), "a failed load must release its lease")
-        with acquire_gpu_lease(1, lease_dir=self.lease_dir):
+        with acquire_gpu_lease(GPU1, lease_dir=self.lease_dir):
             pass
 
     def test_profile_resources_decide_admission(self):
@@ -185,7 +215,7 @@ class AdapterTests(unittest.TestCase):
             ok.close()
             with self.assertRaises(ImageGpuAdmissionError):
                 self.adapter(profile=flux).load()
-        with acquire_gpu_lease(1, lease_dir=self.lease_dir):
+        with acquire_gpu_lease(GPU1, lease_dir=self.lease_dir):
             pass
 
     def test_cpu_offload_profile(self):

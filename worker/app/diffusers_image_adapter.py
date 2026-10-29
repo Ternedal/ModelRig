@@ -8,10 +8,14 @@ are candidates, not qualified models).
 
 load() order, each step fail-closed before the next:
   1. offline mode (HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1): never a download
-  2. the exclusive GPU lease for the profile's device
-  3. the VRAM budget, checked while holding the lease
-  4. only then import torch/diffusers and load the pinned revision locally
-The lease is held until close(), i.e. for as long as the model is resident.
+  2. the device's physical GPU UUID from KALIV_GPU_DEVICE_UUIDS
+     (with CUDA_DEVICE_ORDER=PCI_BUS_ID)
+  3. the exclusive GPU lease for that UUID
+  4. while holding it: torch's device must have that UUID, and the VRAM
+     budget must fit the profile
+  5. only then load the allowlisted pipeline at the pinned revision, locally
+The lease is held until close(): load, inference and the resident lifetime.
+It coordinates only processes that take it (see gpu_lease).
 
 Nothing is imported or loaded at import time.
 """
@@ -21,7 +25,7 @@ import io
 import os
 from typing import Mapping
 
-from .gpu_lease import acquire_gpu_lease, parse_cuda_device
+from .gpu_lease import acquire_gpu_lease, device_uuid_map, parse_cuda_device
 from .image_gpu_admission import inspect_cuda_budget
 from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import DIFFUSERS_PIPELINES, ModelProfile, validate_request
@@ -55,12 +59,16 @@ class DiffusersImageAdapter:
             return
         if self._env.get("HF_HUB_OFFLINE") != "1" or self._env.get("TRANSFORMERS_OFFLINE") != "1":
             raise GenerationError("offline mode required: HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1")
-        lease = acquire_gpu_lease(self.index, lease_dir=self.lease_dir, timeout_s=self.lease_timeout_s)
+        gpu_uuid = device_uuid_map(self._env).get(self.index)
+        if gpu_uuid is None:
+            raise GenerationError(f"no GPU UUID is configured for {self.device}")
+        lease = acquire_gpu_lease(gpu_uuid, lease_dir=self.lease_dir, timeout_s=self.lease_timeout_s)
         try:
-            # Advisory: weights may still exceed what was free, but nothing else
-            # can load onto this GPU while we hold the lease.
+            # Advisory: weights may still exceed what was free, but no process
+            # that takes this lease can load onto this GPU while we hold it.
             inspect_cuda_budget(self.index, reserve_gib=self.profile.resources.reserve_gib,
-                                min_usable_gib=self.profile.resources.min_usable_gib)
+                                min_usable_gib=self.profile.resources.min_usable_gib,
+                                expected_uuid=gpu_uuid)
             import torch
             import diffusers
             pipeline_class = getattr(diffusers, self.profile.pipeline)

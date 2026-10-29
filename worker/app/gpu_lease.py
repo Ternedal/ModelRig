@@ -2,31 +2,49 @@
 
 A VRAM snapshot alone does not bound anything: two generators that both see
 enough free memory can load onto the same GPU a second later. Every generator
-(image executor, Wan/ComfyUI dispatch, later others) takes this lease for the
-GPU it will use, then checks the VRAM budget while holding it, and keeps it
-until its model is unloaded.
+in this layer takes this lease for the physical GPU it will use, checks the
+VRAM budget and the GPU's identity while holding it, and keeps it for as long
+as its model is resident (load, inference, until close()).
+
+The lease is keyed by the physical GPU UUID, not by a CUDA index, which can
+change with CUDA_VISIBLE_DEVICES or device ordering. The operator maps CUDA
+indices to UUIDs in KALIV_GPU_DEVICE_UUIDS and sets CUDA_DEVICE_ORDER=PCI_BUS_ID;
+the budget check then verifies that torch's device really has that UUID.
 
 The lease is an OS file lock (fcntl.flock on POSIX, msvcrt.locking on
-Windows) on <lease dir>/gpu-<index>.lock. The operating system releases it when
+Windows) on <lease dir>/<GPU UUID>.lock. The operating system releases it when
 the holding process exits or is killed, so a crashed generator never leaves a
-stale lease behind. The lease directory should be local (not the external
-media volume), so a lease still works while that volume is missing.
+stale lease behind.
+
+Scope (decision 6491161681): the lease coordinates only processes that take
+it. Ollama, a WSL2 instance or any other worker that does not use this module
+is NOT covered; whole-rig GPU exclusivity is unproven and not claimed.
+
+The lease directory must be a local, absolute, non-symlink directory owned by
+this user and not group/world-writable (POSIX). On Windows, ACLs are not
+checked here; that is a stated limit.
 """
 from __future__ import annotations
 
 import math
 import os
+import re
+import stat
 import time
 from pathlib import Path
 from typing import Mapping
 
 LEASE_DIR_ENV = "KALIV_GPU_LEASE_DIR"
+DEVICE_UUIDS_ENV = "KALIV_GPU_DEVICE_UUIDS"
+DEVICE_ORDER_ENV = "CUDA_DEVICE_ORDER"
 MAX_GPU_INDEX = 15
 MAX_TIMEOUT_SECONDS = 3600.0
 
+_UUID = re.compile(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
 
 class GpuLeaseError(RuntimeError):
-    """The lease request itself is invalid (bad index, directory or timeout)."""
+    """The lease request itself is invalid (bad identity, directory or timeout)."""
 
 
 class GpuBusy(RuntimeError):
@@ -53,6 +71,19 @@ def _unlock(fd: int) -> None:
         fcntl.flock(fd, fcntl.LOCK_UN)
 
 
+def normalize_gpu_uuid(value: object) -> str:
+    """'GPU-6A7F…' or '6a7f…' -> 'GPU-6a7f…'. Anything else is refused."""
+    if not isinstance(value, str):
+        raise GpuLeaseError("GPU UUID must be a string")
+    text = value.strip().lower()
+    if text.startswith("gpu-"):
+        text = text[len("gpu-"):]
+    candidate = "GPU-" + text
+    if not _UUID.fullmatch(candidate):
+        raise GpuLeaseError("GPU UUID must look like GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+    return candidate
+
+
 def parse_cuda_device(device: str) -> int:
     """'cuda:1' -> 1. Anything else is refused."""
     if not isinstance(device, str) or not device.startswith("cuda:"):
@@ -66,6 +97,27 @@ def parse_cuda_device(device: str) -> int:
     return index
 
 
+def device_uuid_map(env: Mapping[str, str] | None = None) -> dict[int, str]:
+    """KALIV_GPU_DEVICE_UUIDS='cuda:0=GPU-…,cuda:1=GPU-…' with CUDA_DEVICE_ORDER=PCI_BUS_ID."""
+    env = os.environ if env is None else env
+    if env.get(DEVICE_ORDER_ENV) != "PCI_BUS_ID":
+        raise GpuLeaseError(f"{DEVICE_ORDER_ENV}=PCI_BUS_ID is required so CUDA indices are stable")
+    raw = env.get(DEVICE_UUIDS_ENV, "").strip()
+    if not raw:
+        raise GpuLeaseError(f"{DEVICE_UUIDS_ENV} must map cuda:<index> to GPU UUIDs")
+    mapping: dict[int, str] = {}
+    for entry in raw.split(","):
+        device, sep, uuid = entry.strip().partition("=")
+        if not sep:
+            raise GpuLeaseError(f"{DEVICE_UUIDS_ENV} entries must be cuda:<index>=GPU-<uuid>")
+        index = parse_cuda_device(device.strip())
+        normalized = normalize_gpu_uuid(uuid)
+        if index in mapping or normalized in mapping.values():
+            raise GpuLeaseError(f"{DEVICE_UUIDS_ENV} maps a device or UUID twice")
+        mapping[index] = normalized
+    return mapping
+
+
 def lease_dir_from_env(env: Mapping[str, str] | None = None) -> str:
     env = os.environ if env is None else env
     value = env.get(LEASE_DIR_ENV, "")
@@ -74,9 +126,22 @@ def lease_dir_from_env(env: Mapping[str, str] | None = None) -> str:
     return value
 
 
+def _check_lease_dir(lease_dir: object) -> Path:
+    directory = Path(lease_dir) if isinstance(lease_dir, str) and lease_dir else None
+    if directory is None or not directory.is_absolute() or directory.is_symlink() or not directory.is_dir():
+        raise GpuLeaseError("lease directory must be an existing absolute non-symlink directory")
+    if os.name != "nt":
+        info = directory.stat()
+        if info.st_uid != os.getuid():
+            raise GpuLeaseError("lease directory must be owned by the current user")
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise GpuLeaseError("lease directory must not be group- or world-writable")
+    return directory
+
+
 class GpuLease:
-    def __init__(self, index: int, fd: int, path: Path):
-        self.index = index
+    def __init__(self, gpu_uuid: str, fd: int, path: Path):
+        self.gpu_uuid = gpu_uuid
         self.path = path
         self._fd: int | None = fd
 
@@ -106,20 +171,17 @@ class GpuLease:
             pass
 
 
-def acquire_gpu_lease(index: int, *, lease_dir: str, timeout_s: float = 0.0,
+def acquire_gpu_lease(gpu_uuid: str, *, lease_dir: str, timeout_s: float = 0.0,
                       poll_s: float = 0.25) -> GpuLease:
-    """Take the exclusive lease for one GPU, waiting at most timeout_s seconds."""
-    if type(index) is not int or not 0 <= index <= MAX_GPU_INDEX:
-        raise GpuLeaseError("GPU index must be an integer in 0..15")
+    """Take the exclusive lease for one physical GPU, waiting at most timeout_s seconds."""
+    normalized = normalize_gpu_uuid(gpu_uuid)
     if (type(timeout_s) not in (int, float) or not math.isfinite(timeout_s)
             or not 0 <= timeout_s <= MAX_TIMEOUT_SECONDS):
         raise GpuLeaseError("timeout must be a finite number of seconds in 0..3600")
     if type(poll_s) not in (int, float) or not math.isfinite(poll_s) or not 0.01 <= poll_s <= 5:
         raise GpuLeaseError("poll interval must be 0.01..5 seconds")
-    directory = Path(lease_dir) if isinstance(lease_dir, str) and lease_dir else None
-    if directory is None or not directory.is_absolute() or directory.is_symlink() or not directory.is_dir():
-        raise GpuLeaseError("lease directory must be an existing absolute non-symlink directory")
-    path = directory / f"gpu-{index}.lock"
+    directory = _check_lease_dir(lease_dir)
+    path = directory / f"{normalized}.lock"
     if path.is_symlink():
         raise GpuLeaseError("lease file must not be a symlink")
 
@@ -129,9 +191,9 @@ def acquire_gpu_lease(index: int, *, lease_dir: str, timeout_s: float = 0.0,
     while True:
         try:
             _try_lock(fd)
-            return GpuLease(index, fd, path)
+            return GpuLease(normalized, fd, path)
         except OSError:
             if time.monotonic() >= deadline:
                 os.close(fd)
-                raise GpuBusy(f"GPU {index} is leased by another process") from None
+                raise GpuBusy(f"{normalized} is leased by another process") from None
             time.sleep(poll_s)
