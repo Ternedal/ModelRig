@@ -16,8 +16,8 @@ class GalleryCatalogTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "gallery-index.json").write_text(json.dumps([
-            {"id": "img_1", "kind": "image", "mime_type": "image/png", "size_bytes": 10},
-            {"id": "vid_2", "kind": "video", "mime_type": "video/mp4", "size_bytes": 20},
+            {"id": "img_1", "kind": "image", "mime_type": "image/png", "size_bytes": 10, "created_at": "2026-10-29T07:00:00Z"},
+            {"id": "vid_2", "kind": "video", "mime_type": "video/mp4", "size_bytes": 20, "created_at": "2026-10-29T07:00:00Z"},
         ]), encoding="utf-8")
 
     def page(self, **kwargs):
@@ -28,6 +28,8 @@ class GalleryCatalogTests(unittest.TestCase):
         first = self.page(limit=1)
         self.assertEqual(first["schema"], "kaliv-media-gallery/v1")
         self.assertEqual(first["next_cursor"], "img_1")
+        self.assertEqual(first["items"][0]["url"], "/api/v1/media/img_1")
+        self.assertEqual(first["items"][0]["playback"]["supports_range"], False)
         self.assertEqual(self.page(cursor="img_1")["items"][0]["id"], "vid_2")
 
     def test_reject_bad_inputs(self):
@@ -40,15 +42,15 @@ class GalleryCatalogTests(unittest.TestCase):
 
     def test_reject_duplicate_ids(self):
         (self.root / "gallery-index.json").write_text(
-            json.dumps([{"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1}] * 2), encoding="utf-8")
+            json.dumps([{"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "created_at": "2026-10-29T07:00:00Z"}] * 2), encoding="utf-8")
         with self.assertRaises(GalleryUnavailable):
             self.page()
 
     def test_refuse_untrusted_metadata(self):
         bad_items = (
             {"id": "x", "kind": "image", "mime_type": "video/mp4", "size_bytes": 1},
-            {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": True},
-            {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "url": "https://attacker.example"},
+            {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": True, "created_at": "2026-10-29T07:00:00Z"},
+            {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "created_at": "2026-10-29T07:00:00Z", "url": "https://attacker.example"},
         )
         for item in bad_items:
             with self.subTest(item=item):
