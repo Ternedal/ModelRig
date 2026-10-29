@@ -73,7 +73,16 @@ fun mediaGalleryMessage(reason: Reason): String = when (reason) {
     Reason.PROTOCOL -> "Riggen svarede i et format, appen ikke kender."
     Reason.NETWORK -> "Riggen kan ikke nås. Tjek at den kører, og at telefonen er på samme netværk."
     Reason.HTTP -> "Mediebiblioteket svarede med en fejl."
+    Reason.UNPLAYABLE -> "Videoen kan ikke afspilles på telefonen."
 }
+
+/**
+ * Worth a "Prøv igen": the rig was unreachable, busy or its storage away.
+ * Not for refusals (redirect, origin, pairing), missing or oversized media,
+ * or a video the phone cannot decode: trying again would fail the same way.
+ */
+fun isRetryable(reason: Reason): Boolean =
+    reason == Reason.NETWORK || reason == Reason.HTTP || reason == Reason.STORAGE_UNAVAILABLE
 
 fun skippedMessage(count: Int): String? = when {
     count <= 0 -> null
