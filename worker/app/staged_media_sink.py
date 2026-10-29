@@ -60,9 +60,12 @@ class StagedFileArtifactSink:
     def adopt(self, staged_path: str | Path, mime_type: str) -> str:
         root = self._validate_root()
         path = Path(staged_path)
-        if not path.is_absolute() or path.parent != root / ".staging":
+        staging = root / ".staging"
+        if staging.is_symlink() or not staging.is_dir() or staging.resolve() != staging:
+            raise MediaStoreUnavailable("unsafe_staging_directory")
+        if not path.is_absolute() or path.parent != staging:
             raise MediaStoreUnavailable("unowned_staging_path")
-        if not path.name.endswith(".part"):
+        if not path.name.endswith(".part") or not _ID.fullmatch(path.name.split(".", 1)[0]):
             raise MediaStoreUnavailable("invalid_staging_name")
         extension = Path(path.stem).suffix
         if _EXTENSIONS.get(extension) != mime_type:
@@ -71,15 +74,21 @@ class StagedFileArtifactSink:
             if path.is_symlink():
                 raise MediaStoreUnavailable("symlink_refused")
             info = path.stat()
-            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= _MAX_VIDEO_BYTES:
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 < info.st_size <= _MAX_VIDEO_BYTES:
                 raise MediaStoreUnavailable("invalid_staged_file")
             if not os.path.ismount(root):
                 raise MediaStoreUnavailable("external_media_not_mounted")
             asset_id = uuid.uuid4().hex
             destination = root / (asset_id + extension)
             # A completed producer must have closed its handle before adopt.
-            with path.open("rb") as source:
-                os.fsync(source.fileno())
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                opened = os.fstat(fd)
+                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                    raise MediaStoreUnavailable("staged_file_changed")
+                os.fsync(fd)
+            finally:
+                os.close(fd)
             os.replace(path, destination)
             directory_fd = os.open(root, os.O_RDONLY)
             try:
