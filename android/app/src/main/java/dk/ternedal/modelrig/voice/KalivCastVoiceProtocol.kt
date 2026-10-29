@@ -27,6 +27,7 @@ object KalivCastVoiceProtocol {
     fun text(sessionId: String, role: String, value: String): JSONObject {
         requireSession(sessionId)
         require(role == "user" || role == "assistant")
+        require(value.isNotBlank()) { "Cast subtitle must not be blank" }
         require(value.length <= 4000)
         return JSONObject()
             .put("type", "kaliv_voice_text")
