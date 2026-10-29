@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.time.ZoneOffset
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -28,6 +29,8 @@ class OfflineQueueScreenshotTest {
     @get:Rule
     val compose = createComposeRule()
 
+    // The goldens show UTC times; a fixed zone keeps them independent of the
+    // machine's TZ (they failed under Europe/Copenhagen before).
     private val now = 1_700_000_000_000L
 
     @Test
@@ -40,6 +43,7 @@ class OfflineQueueScreenshotTest {
                         nowMillis = now,
                         rigBack = false,
                         onSend = {}, onEdit = {}, onDiscard = {},
+                        zone = ZoneOffset.UTC,
                     )
                 }
             }
@@ -60,6 +64,7 @@ class OfflineQueueScreenshotTest {
                         nowMillis = now,
                         rigBack = true,
                         onSend = {}, onEdit = {}, onDiscard = {},
+                        zone = ZoneOffset.UTC,
                     )
                 }
             }

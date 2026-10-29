@@ -43,6 +43,7 @@ fun OfflineQueueCard(
     onEdit: (OfflineQueue.Item) -> Unit,
     onDiscard: (OfflineQueue.Item) -> Unit,
     modifier: Modifier = Modifier,
+    zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
 ) {
     if (items.isEmpty()) return
     val shape = RoundedCornerShape(KalivTokens.Radius.card)
@@ -80,7 +81,7 @@ fun OfflineQueueCard(
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    OfflineQueue.writtenLabel(item.atMillis, nowMillis),
+                    OfflineQueue.writtenLabel(item.atMillis, nowMillis, zone),
                     style = TextStyle(fontFamily = KalivType.Inter, fontSize = 12.5.sp),
                     color = KalivTheme.colors.textMuted,
                 )
