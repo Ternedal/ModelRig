@@ -12,7 +12,7 @@ import stat
 import uuid
 from pathlib import Path
 
-_ID = re.compile(r"[a-f0-9]{32}\\Z")
+_ID = re.compile(r"[a-f0-9]{32}\Z")
 _EXTENSIONS = {".mp4": "video/mp4", ".png": "image/png"}
 _MAX_VIDEO_BYTES = 64 * 1024 * 1024 * 1024
 
