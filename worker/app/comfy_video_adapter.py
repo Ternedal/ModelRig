@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import BinaryIO
 
-from .comfy_supervisor import ComfySupervisor, ComfySupervisorError
+from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
 from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import ModelProfile, validate_request
@@ -103,6 +103,16 @@ class ComfyVideoAdapter:
         if request.task != "text_to_video":
             raise GenerationError("only text_to_video is supported")
         try:
+            # One job per ComfyUI, from admission to cleanup (#2316 review 5700997784):
+            # a concurrent second call is refused here and never submitted.
+            with self.supervisor.job_slot():
+                return self._render_one(request, sink_file)
+        except ComfyBusy:
+            raise GenerationError("ComfyUI is busy with another job: refused, not queued") from None
+
+    def _render_one(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
+        self.supervisor.require_media_volume()  # ArtifactSinkUnavailable propagates: fatal
+        try:
             self.supervisor.check_budget()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
@@ -112,6 +122,7 @@ class ComfyVideoAdapter:
         except ComfySupervisorError as exc:
             raise GenerationError("ComfyUI unavailable") from exc
         source = self._single_output(outputs, before)
+        self.supervisor.require_media_volume()  # still the same verified volume after the render
         self._wait_quiescent(source)
         self._copy_validated(source, sink_file)
         source.unlink()

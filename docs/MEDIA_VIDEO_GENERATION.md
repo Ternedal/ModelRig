@@ -15,6 +15,7 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
        ├─ read the template once, check SHA-256, parse the same bytes
        └─ ComfySupervisor.start()
             ├─ validate argv (allowlisted flags, absolute non-symlink dirs, port 1024..65535)
+            ├─ media_volume.require(dir) for input/output/temp/user: all on the verified external volume
             ├─ acquire_gpu_lease(UUID)          main lease; refuses while a resident lock is held
             ├─ refuse if the port already answers
             ├─ spawn: comfy_resident_launcher -> runpy(main.py) in ComfyUI's own process
@@ -23,9 +24,10 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
             └─ ready = child alive ∧ resident lock held ∧ proof{token,pid} matches ∧ /system_stats VRAM budget
   └─ per job: with sink.staged(".mp4") as out:
        ├─ adapter.render_to(request, out)
-       │     validate_request -> VRAM re-check -> empty queue -> bind slots -> /prompt
+       │     job slot (one job per ComfyUI; a concurrent second job is refused, never queued)
+       │     -> media volume re-check -> validate_request -> VRAM re-check -> empty queue -> bind slots -> /prompt
        │     -> /history until the profile deadline (interrupt on timeout)
-       │     -> exactly one new .mp4: not a symlink, settled, unchanged while copied, ftyp, size cap
+       │     -> media volume re-check -> exactly one new .mp4: not a symlink, settled, unchanged while copied, ftyp, size cap
        │     -> written into `out` (the adapter never sees a path) -> ComfyUI's copy removed
        └─ asset_id = sink.adopt(out, "video/mp4")       storage side (ChatGPT)
   └─ close(): interrupt -> terminate -> kill; the lease is released only after ComfyUI has exited
@@ -40,6 +42,16 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
 | Proof `{token, pid}` written after the lock | A stray ComfyUI or another executor pretending to be ours | Hostile code running as the same OS user (it can read the child's environment) |
 | `CUDA_VISIBLE_DEVICES=<UUID>` | ComfyUI seeing other GPUs | Whether the pinned ComfyUI version leaves it alone (rig check) |
 | VRAM admission (`/system_stats`), before start and before every job | Memory taken by processes outside the lease | Proof of exclusive ownership; it is only a budget check |
+| Job slot (non-blocking lock in the supervisor, held from admission to cleanup) | Two jobs racing past the empty-queue check in one process | Other processes; those are blocked by the leases |
+
+## Media never on the internal disk
+
+ComfyUI writes the full MP4 into its own `output_directory` before the adapter copies it into the sink's handle. So the supervisor requires a `VerifiedMediaVolume` (ChatGPT's external-mount verifier; there is no default) and calls `require()` on ComfyUI's input/output/temp/user directories:
+- before ComfyUI starts;
+- before every submit;
+- again before the copy.
+
+A missing, unmounted or replaced volume raises `ArtifactSinkUnavailable`. That is fatal, with no fallback, and nothing is handed to the sink.
 
 `pass_fds` (POSIX) and the resident lock each keep the GPU busy after a supervisor SIGKILL on their own. Both are kept as defence in depth.
 

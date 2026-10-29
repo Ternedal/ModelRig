@@ -29,7 +29,8 @@ from app.comfy_workflow_template import load_template  # noqa: E402
 from app.gpu_lease import GpuBusy, acquire_gpu_lease  # noqa: E402
 from app.media_generation_contract import GenerationError, GenerationRequest  # noqa: E402
 from app.media_generation_profiles import parse_profile  # noqa: E402
-from worker_comfy_supervisor import FAKE_MAIN, GPU, FakeSupervisor, free_port, wait_gone  # noqa: E402
+from worker_comfy_supervisor import AnyExistingDirectory, FAKE_MAIN, GPU, FakeSupervisor, free_port, wait_gone  # noqa: E402
+from app.media_generation_contract import ArtifactSinkUnavailable  # noqa: E402
 from worker_media_generation_profiles import video_profile  # noqa: E402
 
 GRAPH = {
@@ -159,12 +160,12 @@ class AdapterTests(unittest.TestCase):
                                            limits={"max_prompt_chars": 200, "sizes": [[832, 480]],
                                                    "max_steps": 30, "max_frames": 81}))
 
-    def adapter(self, fake=None, profile=None, **kwargs) -> ComfyVideoAdapter:
+    def adapter(self, fake=None, profile=None, volume=None, **kwargs) -> ComfyVideoAdapter:
         launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         env = {"FAKE_COMFY_STATE_DIR": self.state, **(fake or {})}
-        sup = FakeSupervisor(fake_env=env, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
+        sup = FakeSupervisor(fake_env=env, media_volume=volume, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
                              reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                              base_env={"PATH": os.environ.get("PATH", "")})
         values = dict(supervisor=sup, template_dir=self.templates, output_directory=self.dirs["output"], poll_s=0.05,
@@ -220,6 +221,104 @@ class AdapterTests(unittest.TestCase):
                 sink.adopt(output, bad.render_to(request(), output))
         self.assertEqual(sink.registry, {asset_id})
         self.assertEqual(os.listdir(sink.staging), [])
+
+    # --- #2316 review 5700997784 --------------------------------------------------------------
+    def submissions(self) -> int:
+        log = Path(self.state, "prompts.log")
+        return len(log.read_text().splitlines()) if log.exists() else 0
+
+    def test_a_concurrent_second_job_is_refused_and_never_submitted(self):
+        import threading
+        adapter = self.adapter(fake={"FAKE_COMFY_RENDER_SECONDS": "1.0"})
+        adapter.load()
+        barrier, results = threading.Barrier(2), []
+
+        def job():
+            barrier.wait()
+            try:
+                results.append(("ok", adapter.render_to(request(), io.BytesIO())))
+            except GenerationError as exc:
+                results.append(("refused", str(exc)))
+
+        threads = [threading.Thread(target=job) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        self.assertEqual(sorted(kind for kind, _ in results), ["ok", "refused"], results)
+        self.assertIn("busy", [msg for kind, msg in results if kind == "refused"][0])
+        self.assertEqual(self.submissions(), 1, "the refused job never reached ComfyUI")
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4", "the slot is free again")
+        self.assertEqual(self.submissions(), 2)
+
+    def test_two_adapters_on_one_comfyui_share_the_single_job_slot(self):
+        first = self.adapter(fake={"FAKE_COMFY_RENDER_SECONDS": "1.0"})
+        first.load()
+        second = ComfyVideoAdapter(self.profile(), supervisor=first.supervisor, template_dir=self.templates,
+                                   output_directory=self.dirs["output"], poll_s=0.05, settle_s=0.05)
+        second._template = first._template  # same resident ComfyUI, already loaded
+        with first.supervisor.job_slot():  # the first adapter's job is in flight
+            with self.assertRaisesRegex(GenerationError, "busy"):
+                second.render_to(request(), io.BytesIO())
+        self.assertEqual(self.submissions(), 0)
+
+    def test_a_failing_job_releases_the_slot(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        adapter.load()
+        with self.assertRaises(GenerationError):
+            adapter.render_to(request(), io.BytesIO())
+        with adapter.supervisor.job_slot():
+            pass  # acquirable: the failed job did not leak it
+
+    def test_comfyui_media_directories_must_be_on_the_verified_volume_before_start(self):
+        for lost in ("input", "output", "temp", "user"):
+            with self.subTest(lost=lost):
+                volume = AnyExistingDirectory()
+                volume.lost.add(self.dirs[lost])
+                self.port = free_port()
+                with self.assertRaises(ArtifactSinkUnavailable):
+                    self.adapter(volume=volume).load()
+                self.assertFalse(Path(self.state, "pid").exists(), "no ComfyUI on an unverified disk")
+                self.assertTrue(self.lease_is_free())
+
+    def test_losing_the_volume_before_submit_is_fatal_and_submits_nothing(self):
+        volume = AnyExistingDirectory()
+        adapter = self.adapter(volume=volume)
+        adapter.load()
+        volume.lost.add("*")  # unplugged, or replaced by another disk
+        with self.assertRaises(ArtifactSinkUnavailable):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertEqual(self.submissions(), 0)
+
+    def test_losing_the_volume_during_the_render_hands_nothing_to_the_sink(self):
+        volume = AnyExistingDirectory()
+        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.5"})
+        adapter.load()
+        real_history = adapter.supervisor.history
+
+        def history_then_unplug(prompt_id):
+            record = real_history(prompt_id)
+            if record is not None:
+                volume.lost.add("*")  # the render finished, then the disk went away
+            return record
+
+        adapter.supervisor.history = history_then_unplug
+        sink = io.BytesIO()
+        with self.assertRaises(ArtifactSinkUnavailable):
+            adapter.render_to(request(), sink)
+        self.assertEqual(sink.getvalue(), b"")
+
+    def test_production_supervisor_has_no_internal_disk_default(self):
+        from app.comfy_supervisor import ComfyLaunch, ComfySupervisor, ComfySupervisorError
+        launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
+                             input_directory=self.dirs["input"], output_directory=self.dirs["output"],
+                             temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
+        common = dict(gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch, reserve_gib=2, min_usable_gib=8)
+        with self.assertRaises(TypeError):
+            ComfySupervisor(**common)  # media_volume is required
+        for bogus in (None, "/mnt/media", object()):
+            with self.subTest(volume=bogus), self.assertRaises(ComfySupervisorError):
+                ComfySupervisor(media_volume=bogus, **common)
 
     def test_template_problems_stop_load_before_comfyui_starts(self):
         link_dir = tempfile.mkdtemp(dir=self.tmp)

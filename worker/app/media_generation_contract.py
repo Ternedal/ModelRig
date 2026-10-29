@@ -102,6 +102,20 @@ class StagedFileArtifactSink(Protocol):
 
 
 @runtime_checkable
+class VerifiedMediaVolume(Protocol):
+    """The external-media mount check (ChatGPT implements it; #2316 review 5700997784).
+
+    require(path) returns only if path lies on the verified, currently mounted
+    external media volume, and raises ArtifactSinkUnavailable otherwise. Every
+    directory that ever holds generated media -- including ComfyUI's own
+    input/output/temp/user scratch -- must pass it: media never lands on the
+    internal disk, not even transiently.
+    """
+
+    def require(self, path: str) -> None: ...
+
+
+@runtime_checkable
 class GeneratorAdapter(Protocol):
     """One backend (diffusers, ComfyUI, ...) driven by a ModelProfile."""
 

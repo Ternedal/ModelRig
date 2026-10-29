@@ -154,6 +154,8 @@ class Handler(BaseHTTPRequestHandler):
             if STATE:
                 with open(os.path.join(STATE, "last_prompt.json"), "w") as fh:
                     json.dump(body, fh)
+                with open(os.path.join(STATE, "prompts.log"), "a") as fh:
+                    fh.write("submitted\n")  # one line per /prompt, to count submissions
             prompt_id = str(uuid.uuid4())
             interrupted.clear()
             with lock:

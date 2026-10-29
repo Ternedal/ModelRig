@@ -41,6 +41,7 @@ anything. Nothing imports this module at worker start.
 """
 from __future__ import annotations
 
+import contextlib
 import hmac
 import http.client
 import json
@@ -49,12 +50,14 @@ import os
 import re
 import secrets
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
 from .gpu_lease import GpuLease, acquire_gpu_lease, normalize_gpu_uuid, resident_is_held, resident_lock_path
+from .media_generation_contract import VerifiedMediaVolume
 
 RESIDENT_LAUNCHER = Path(__file__).resolve().with_name("comfy_resident_launcher.py")
 
@@ -81,6 +84,10 @@ _PASSTHROUGH_ENV = ("PATH", "SYSTEMROOT", "HOME", "USERPROFILE", "TEMP", "TMP", 
 
 class ComfySupervisorError(RuntimeError):
     """ComfyUI could not be started, verified or stopped safely."""
+
+
+class ComfyBusy(ComfySupervisorError):
+    """This ComfyUI is already running a job (single tenant: one job at a time)."""
 
 
 @dataclass(frozen=True)
@@ -180,7 +187,7 @@ def _bounded(value: object, low: float, high: float, name: str) -> float:
 
 
 class ComfySupervisor:
-    def __init__(self, *, gpu_uuid: str, lease_dir: str, launch: ComfyLaunch,
+    def __init__(self, *, gpu_uuid: str, lease_dir: str, launch: ComfyLaunch, media_volume: VerifiedMediaVolume,
                  reserve_gib: float, min_usable_gib: float, ready_timeout_s: float = 180.0,
                  stop_timeout_s: float = 30.0, poll_s: float = 0.5, log_path: str | None = None,
                  base_env: Mapping[str, str] | None = None, host_memory_gib: float = 48.0):
@@ -195,9 +202,13 @@ class ComfySupervisor:
         self.host_memory_gib = _bounded(host_memory_gib, 1, 64, "host_memory_gib")
         self.log_path = log_path
         self.base_env = dict(os.environ if base_env is None else base_env)
+        if not isinstance(media_volume, VerifiedMediaVolume):
+            raise ComfySupervisorError("a verified external media volume is required (no internal-disk default)")
+        self.media_volume = media_volume
         self._lease: GpuLease | None = None
         self._proc: subprocess.Popen | None = None
         self._token = secrets.token_hex(16)
+        self._job_lock = threading.Lock()
 
     @property
     def port(self) -> int:
@@ -224,6 +235,22 @@ class ComfySupervisor:
         return (isinstance(token, str) and hmac.compare_digest(token, self._token)
                 and type(pid) is int and self._proc is not None and pid == self._proc.pid)
 
+    def require_media_volume(self) -> None:
+        """Every ComfyUI media directory must be on the verified external volume, now."""
+        for directory in (self.launch.input_directory, self.launch.output_directory,
+                          self.launch.temp_directory, self.launch.user_directory):
+            self.media_volume.require(directory)  # raises ArtifactSinkUnavailable
+
+    @contextlib.contextmanager
+    def job_slot(self):
+        """One job at a time on this ComfyUI: refuse (do not queue) a second one."""
+        if not self._job_lock.acquire(blocking=False):
+            raise ComfyBusy("a job is already running on this ComfyUI")
+        try:
+            yield
+        finally:
+            self._job_lock.release()
+
     def child_env(self) -> dict[str, str]:
         env = {key: self.base_env[key] for key in _PASSTHROUGH_ENV if key in self.base_env}
         env.update({
@@ -244,6 +271,7 @@ class ComfySupervisor:
             raise ComfySupervisorError("supervisor already started")
         resident = resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)
         argv = self.launch.argv(str(resident))
+        self.require_media_volume()  # before the lease: no ComfyUI on an internal or missing disk
         self._token = secrets.token_hex(16)  # fresh per start
         self._proof = Path(str(resident) + ".proof")
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
