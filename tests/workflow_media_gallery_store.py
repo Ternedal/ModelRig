@@ -23,6 +23,17 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual((self.media / (asset + ".png")).read_bytes(), b"png-bytes")
         self.assertEqual(list(self.media.glob(".kaliv-*")), [])
 
+    def test_existing_asset_is_never_overwritten(self):
+        asset = "f" * 32
+        existing = self.media / (asset + ".png")
+        existing.write_bytes(b"original")
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
+             patch("app.media_gallery_store.secrets.token_hex", return_value=asset):
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "asset_collision"):
+                self.sink.publish(b"replacement", ".png")
+        self.assertEqual(existing.read_bytes(), b"original")
+        self.assertEqual(list(self.media.glob(".kaliv-*")), [])
+
     def test_refuse_unmounted_volume_without_writing(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaises(ArtifactSinkUnavailable):

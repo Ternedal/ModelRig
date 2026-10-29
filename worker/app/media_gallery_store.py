@@ -47,9 +47,14 @@ class ExternalMediaSink:
                 handle.flush()
                 os.fsync(handle.fileno())
             self._root()
-            if destination.exists() or destination.is_symlink():
-                raise ArtifactSinkUnavailable("asset_collision")
-            os.replace(temp_name, destination)
+            # A check-then-replace sequence can overwrite an existing asset if
+            # another writer wins the race. Hard-link creation is atomic and
+            # fails if the destination already exists, including on NTFS.
+            try:
+                os.link(temp_name, destination, follow_symlinks=False)
+            except FileExistsError as exc:
+                raise ArtifactSinkUnavailable("asset_collision") from exc
+            temp_name.unlink()
             temp_name = None
             return asset_id
         except OSError as exc:
