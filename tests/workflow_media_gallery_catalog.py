@@ -54,6 +54,14 @@ class GalleryCatalogTests(unittest.TestCase):
                 with self.assertRaises(GalleryUnavailable):
                     self.page()
 
+    def test_reject_oversized_index_item_count(self):
+        # Reject before validating individual records or allocating projected entries.
+        (self.root / "gallery-index.json").write_text(
+            json.dumps([{}] * 10001), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(GalleryUnavailable, "index_item_limit"):
+            self.page()
+
     def test_reject_duplicate_ids(self):
         (self.root / "gallery-index.json").write_text(
             json.dumps([{"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "created_at": "2026-10-29T07:00:00Z"}] * 2), encoding="utf-8")

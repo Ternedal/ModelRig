@@ -16,6 +16,7 @@ _ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _CREATED_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z")
 _MAX_PAGE = 100
 _MAX_INDEX_BYTES = 4 * 1024 * 1024
+_MAX_INDEX_ITEMS = 10_000
 
 
 class GalleryUnavailable(RuntimeError):
@@ -90,6 +91,8 @@ def _index(root: Path) -> list[dict]:
         raise GalleryUnavailable("invalid_index") from exc
     if not isinstance(items, list):
         raise GalleryUnavailable("invalid_index")
+    if len(items) > _MAX_INDEX_ITEMS:
+        raise GalleryUnavailable("index_item_limit")
     validated = []
     seen = set()
     for item in items:
