@@ -59,6 +59,28 @@ class GalleryCatalogTests(unittest.TestCase):
                 with self.assertRaises(GalleryUnavailable):
                     self.page()
 
+    def test_created_at_matches_android_instant_parse(self):
+        item = {"id": "img_1", "kind": "image", "mime_type": "image/png",
+                "size_bytes": 10, "created_at": "2026-10-29T08:00:00Z"}
+        valid = ("2026-10-29T08:00:00Z", "2026-10-29T08:00:00.5Z",
+                 "2026-10-29T08:00:00.123456789Z")
+        invalid = ("2026-10-29 08:00:00Z", "20261029T080000Z",
+                   "2026-10-29T08:00Z", "2026-10-29T08Z",
+                   "2026-W44-4T08:00:00Z", "2026-10-29T08:00:00,5Z",
+                   "2026-10-29T08:00:00+00:00",
+                   "2026-10-29T08:00:00.1234567890Z")
+        for timestamp in valid:
+            with self.subTest(valid=timestamp):
+                item["created_at"] = timestamp
+                (self.root / "gallery-index.json").write_text(json.dumps([item]), encoding="utf-8")
+                self.assertEqual(self.page()["items"][0]["created_at"], timestamp)
+        for timestamp in invalid:
+            with self.subTest(invalid=timestamp):
+                item["created_at"] = timestamp
+                (self.root / "gallery-index.json").write_text(json.dumps([item]), encoding="utf-8")
+                with self.assertRaises(GalleryUnavailable):
+                    self.page()
+
     def test_refuse_unmounted_root(self):
         with patch("worker.app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaises(GalleryUnavailable):
