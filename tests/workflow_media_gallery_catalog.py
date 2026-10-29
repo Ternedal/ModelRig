@@ -1,5 +1,6 @@
 """Offline contract tests for the staged gallery catalog."""
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,6 +137,18 @@ class GalleryCatalogTests(unittest.TestCase):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             with self.assertRaisesRegex(GalleryUnavailable, "external_media_unavailable"):
                 list_gallery("relative-media", verified_volume_root=self.root)
+
+    @unittest.skipUnless(os.name == "nt", "native Windows volume semantics only")
+    def test_windows_drive_root_and_subdirectory_without_mount_mock(self):
+        # This test must exercise Windows os.path.ismount, not a patched value.
+        # The temporary directory lives on a real mounted drive (e.g. E:\\).
+        drive = Path(self.root.anchor)
+        self.assertTrue(os.path.ismount(drive))
+        self.assertFalse(os.path.ismount(self.root))
+        self.assertEqual(
+            list_gallery(self.root, verified_volume_root=drive)["items"][0]["id"],
+            "img_1",
+        )
 
     def test_refuse_unmounted_root(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
