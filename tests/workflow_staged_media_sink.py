@@ -37,6 +37,30 @@ class StagedSinkTests(unittest.TestCase):
                 path.write_bytes(b"partial")
             self.assertFalse(path.exists())
 
+    def test_hardlink_refused(self):
+        sink = self.sink()
+        with patch("app.staged_media_sink.os.path.ismount", return_value=True):
+            with sink.staged(".mp4") as path:
+                path.write_bytes(b"fake-mp4")
+                other = self.root / "linked.mp4"
+                other.hardlink_to(path)
+                self.addCleanup(other.unlink)
+                with self.assertRaises(MediaStoreUnavailable):
+                    sink.adopt(path, "video/mp4")
+
+    def test_symlinked_staging_directory_refused(self):
+        sink = self.sink()
+        staging = self.root / ".staging"
+        staging.mkdir()
+        staging.rmdir()
+        target = self.root / "other"
+        target.mkdir()
+        staging.symlink_to(target, target_is_directory=True)
+        with patch("app.staged_media_sink.os.path.ismount", return_value=True):
+            with self.assertRaises(MediaStoreUnavailable):
+                with sink.staged(".mp4"):
+                    pass
+
     def test_mime_and_outside_paths_refused(self):
         sink = self.sink()
         with patch("app.staged_media_sink.os.path.ismount", return_value=True):
