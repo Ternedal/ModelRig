@@ -74,7 +74,7 @@ class ExternalMediaStore:
             raise MediaStorageError("media volume below free-space floor")
 
     def publish(self, data: bytes, extension: str = ".png") -> dict[str, str | int]:
-        if extension not in _ALLOWED or not data:
+        if not isinstance(extension, str) or extension not in _ALLOWED or not isinstance(data, bytes) or not data:
             raise MediaStorageError("invalid media payload or extension")
         self._check_free()
         asset_id = uuid.uuid4().hex
