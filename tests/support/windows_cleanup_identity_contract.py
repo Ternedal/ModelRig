@@ -15,7 +15,10 @@ by-path cleanup rests on:
 
 Wired into the Windows isolation gate:
 ``PYTHONPATH=worker python tests/support/windows_cleanup_identity_contract.py``.
-It also runs on POSIX (where (4) does not apply and says so).
+It also runs on POSIX (where (4) does not apply and says so). On the rig, pass
+a directory on the media volume (rig check 9) to prove it on that filesystem;
+a temporary folder is created inside it and removed afterwards:
+``PYTHONPATH=worker python tests/support/windows_cleanup_identity_contract.py E:\\kaliv-media``.
 """
 from __future__ import annotations
 
@@ -44,14 +47,41 @@ def identity(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
+def windows_filesystem(path: str) -> str | None:
+    """The filesystem name of the volume holding `path` (e.g. NTFS, ReFS, exFAT), or None."""
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetVolumePathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    k32.GetVolumePathNameW.restype = wintypes.BOOL
+    k32.GetVolumeInformationW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD, wintypes.LPDWORD,
+                                          wintypes.LPDWORD, wintypes.LPDWORD, wintypes.LPWSTR, wintypes.DWORD]
+    k32.GetVolumeInformationW.restype = wintypes.BOOL
+    root = ctypes.create_unicode_buffer(1024)
+    if not k32.GetVolumePathNameW(path, root, len(root)):
+        return None
+    name = ctypes.create_unicode_buffer(64)
+    if not k32.GetVolumeInformationW(root.value, None, 0, None, None, None, name, len(name)):
+        return None
+    return name.value
+
+
 def write(path: Path, data: bytes) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(data)
     os.replace(tmp, path)
 
 
-def main() -> int:
-    with tempfile.TemporaryDirectory() as tmp:
+def main(argv: list[str]) -> int:
+    if len(argv) > 1:
+        print("usage: windows_cleanup_identity_contract.py [directory on the volume to test]")
+        return 64
+    base = argv[0] if argv else None
+    if base is not None and not os.path.isdir(base):
+        print(f"FAILED: {base} is not an existing directory")
+        return 64
+    with tempfile.TemporaryDirectory(dir=base, prefix="kaliv-cleanup-contract-") as tmp:
+        print(f"testing in {tmp}")
         out = Path(tmp)
         adapter = object.__new__(ComfyVideoAdapter)  # only output_directory is used by the cleanup step
         adapter.output_directory = out
@@ -59,6 +89,13 @@ def main() -> int:
 
         def leftovers() -> list[str]:
             return sorted(os.listdir(out))
+
+        # 0. the volume's filesystem keeps file ids stable (FAT32/exFAT derive them from entry positions)
+        if WINDOWS:
+            filesystem = windows_filesystem(tmp)
+            check(filesystem in ("NTFS", "ReFS"), f"the volume's filesystem has stable file ids: {filesystem}")
+        else:
+            print("skip (0) filesystem name: checked on Windows only")
 
         # 1. our own file: identity survives the capture rename, so it is removed
         ours = out / "kaliv_ours.mp4"
@@ -134,4 +171,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

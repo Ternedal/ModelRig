@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -50,7 +51,7 @@ if STATE:
     with open(os.path.join(STATE, "pid"), "w") as fh:
         fh.write(str(os.getpid()))
     with open(os.path.join(STATE, "env.json"), "w") as fh:
-        json.dump({"env": dict(os.environ), "argv": sys.argv[1:],
+        json.dump({"env": dict(os.environ), "argv": sys.argv[1:], "tempdir": tempfile.gettempdir(),
                    "fds": sorted(int(fd) for fd in os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else []}, fh)
 
 lock = threading.Lock()

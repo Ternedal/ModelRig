@@ -19,7 +19,9 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
             ├─ acquire_gpu_lease(UUID)          main lease; refuses while a resident lock is held
             ├─ refuse if the port already answers
             ├─ spawn: comfy_resident_launcher -> runpy(main.py) in ComfyUI's own process
-            │     env: CUDA_VISIBLE_DEVICES=<UUID>, offline vars, a fresh token; nothing else from the caller
+            │     env: CUDA_VISIBLE_DEVICES=<UUID>, offline vars, a fresh token, TEMP/TMP/TMPDIR = ComfyUI's temp
+            │          dir on the verified volume (never the caller's temp, which is on the internal disk); PATH,
+            │          SYSTEMROOT, HOME, USERPROFILE, LANG, LC_ALL from the caller; nothing else
             │     POSIX: pass_fds(main lease); Windows: Job Object (KILL_ON_JOB_CLOSE, host-memory limit)
             └─ ready = child alive ∧ resident lock held ∧ proof{token,pid} matches ∧ /system_stats VRAM budget
   └─ per job: with sink.staged(".mp4") as out:
@@ -112,7 +114,9 @@ An actor with write access to the volume could delete files directly anyway.
 6. Wan VRAM fit and render time on the 3060s, and GPU UUID mapping on the dual-GPU rig.
 7. Outbound network from the ComfyUI backend. `--offline` restricts only the frontend, so this needs a firewall rule. That is §2 (external data transfer), Anders' decision.
 8. WSL/native mixed topology stays **disabled**. Lock interoperability across that boundary is unproven.
-9. The media volume's filesystem has stable file ids (NTFS, ReFS, ext4, xfs, btrfs).
+9. The media volume and ComfyUI's output root (#2316 5705457473):
+   - The output root is private to the supervised ComfyUI/worker account. Check with `icacls <output root>`: only that account, SYSTEM and Administrators; no Users, Everyone or Authenticated Users. Rename-capture does not protect against a hostile process that renames concurrently inside the output root.
+   - Same-directory rename is atomic on the volume, and the filesystem has stable file ids (NTFS, ReFS, ext4, xfs, btrfs). Run `tests/support/windows_cleanup_identity_contract.py` against a temp folder on the volume itself (rig run).
    - FAT32/exFAT derive the id from the directory-entry position. It can change on rename, and a later file can reuse it.
    - On those filesystems, cleanup may fail to remove its own output. Worse, it cannot rule out a reused id.
    - Proposal for the `VerifiedMediaVolume` owner: refuse such volumes.

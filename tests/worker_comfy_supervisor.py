@@ -154,6 +154,20 @@ class SupervisorTests(unittest.TestCase):
         return any(sup._lease is lease for sup in self.supervisors)
 
     # --- happy path -----------------------------------------------------
+    def test_child_temp_files_land_on_the_verified_volume_not_the_callers_temp(self):
+        internal = tempfile.mkdtemp()  # stands in for C:\Users\admin\AppData\Local\Temp
+        sup = self.supervisor(base_env={"PATH": os.environ.get("PATH", ""), "TEMP": internal, "TMP": internal,
+                                        "TMPDIR": internal})
+        sup.start()
+        seen = json.loads(Path(self.state, "env.json").read_text())
+        for key in ("TEMP", "TMP", "TMPDIR"):
+            self.assertEqual(seen["env"][key], self.dirs["temp"], f"{key} points at ComfyUI's temp dir")
+        self.assertEqual(os.path.realpath(seen["tempdir"]), os.path.realpath(self.dirs["temp"]),
+                         "Python's tempfile inside ComfyUI stages on the verified volume")
+        sup.stop()
+        os.rmdir(internal)
+
+
     def test_start_holds_lease_and_binds_child_to_the_leased_gpu(self):
         sup = self.supervisor()
         budget = sup.start()

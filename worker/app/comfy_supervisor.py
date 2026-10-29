@@ -79,7 +79,12 @@ _DIRECTORY_FLAGS = ("--input-directory", "--output-directory", "--temp-directory
 
 # Variables the child gets from the caller's environment; everything else is
 # dropped so no CUDA_*/proxy/token variable leaks in by accident.
-_PASSTHROUGH_ENV = ("PATH", "SYSTEMROOT", "HOME", "USERPROFILE", "TEMP", "TMP", "LANG", "LC_ALL")
+# TEMP/TMP/TMPDIR are NOT passed through: they are pointed at ComfyUI's own temp
+# directory on the verified media volume (child_env), so no library inside
+# ComfyUI can stage frames or partial media in the caller's temp folder, which
+# on the rig is on the internal disk.
+_PASSTHROUGH_ENV = ("PATH", "SYSTEMROOT", "HOME", "USERPROFILE", "LANG", "LC_ALL")
+_TEMP_ENV = ("TEMP", "TMP", "TMPDIR")
 
 
 class ComfySupervisorError(RuntimeError):
@@ -264,6 +269,7 @@ class ComfySupervisor:
             "PYTHONUNBUFFERED": "1",
             "KALIV_RESIDENT_TOKEN": self._token,
         })
+        env.update({key: str(self.launch.temp_directory) for key in _TEMP_ENV})  # on the verified volume
         return env
 
     def start(self) -> VramBudget:
