@@ -68,15 +68,54 @@ def _index(root: Path) -> list[dict]:
         seen.add(media_id)
         if item.get("kind") not in ("image", "video"):
             raise GalleryUnavailable("invalid_index_kind")
-        if set(item) - {"id", "kind", "mime_type", "size_bytes"}:
-            raise GalleryUnavailable("unexpected_index_fields")
-        mime = item.get("mime_type")
-        if mime not in ("image/jpeg", "image/png", "image/webp", "video/mp4"):
+        if not isinstance(item.get("mime_type"), str) or item["mime_type"] not in (
+            "image/jpeg", "image/png", "image/webp", "video/mp4"
+        ):
             raise GalleryUnavailable("invalid_media_type")
-        if (item["kind"] == "video") != (mime == "video/mp4"):
+        if (item["kind"] == "video") != (item["mime_type"] == "video/mp4"):
             raise GalleryUnavailable("media_kind_mismatch")
         if type(item.get("size_bytes")) is not int or item["size_bytes"] < 0:
             raise GalleryUnavailable("invalid_media_size")
+        # Catalog entries must match the Android kaliv-media-gallery/v1 schema.
+        # Never trust producer-supplied URL/path values.
+        from datetime import datetime, timezone
+        created = item.get("created_at")
+        if not isinstance(created, str) or not created.endswith("Z"):
+            raise GalleryUnavailable("invalid_created_at")
+        try:
+            parsed = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            if parsed.tzinfo != timezone.utc:
+                raise ValueError("non-UTC")
+        except ValueError as exc:
+            raise GalleryUnavailable("invalid_created_at") from exc
+        for dim in ("width", "height"):
+            value = item.get(dim)
+            if value is not None and (type(value) is not int or not 0 <= value <= 2147483647):
+                raise GalleryUnavailable("invalid_dimensions")
+        duration = item.get("duration_seconds")
+        if duration is not None:
+            import math
+            if item["kind"] == "image" or type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0:
+                raise GalleryUnavailable("invalid_duration")
+        projection = item.get("projection", "flat")
+        stereo = item.get("stereo", "mono")
+        if projection not in ("flat", "equirectangular_180", "equirectangular_360") or stereo not in ("mono", "left_right", "top_bottom"):
+            raise GalleryUnavailable("invalid_layout")
+        thumb = item.get("thumbnail_id")
+        if thumb is not None and (not isinstance(thumb, str) or not _ID.fullmatch(thumb)):
+            raise GalleryUnavailable("invalid_thumbnail")
+        range_supported = item.get("supports_range", item["kind"] == "video")
+        if type(range_supported) is not bool:
+            raise GalleryUnavailable("invalid_range")
+        item = {
+            "id": media_id, "kind": item["kind"], "mime_type": item["mime_type"],
+            "created_at": created, "size_bytes": item["size_bytes"],
+            "width": item.get("width"), "height": item.get("height"),
+            "duration_seconds": duration, "projection": projection, "stereo": stereo,
+            "thumbnail_id": thumb, "thumbnail_url": f"/api/v1/media/{thumb}" if thumb else None,
+            "url": f"/api/v1/media/{media_id}",
+            "playback": {"supports_range": range_supported},
+        }
         validated.append(item)
     return validated
 
