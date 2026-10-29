@@ -28,7 +28,7 @@ from app.comfy_supervisor import (  # noqa: E402
     ComfyLaunch, ComfySupervisor, ComfySupervisorError, parse_vram_budget, port_answers,
 )
 import app.comfy_supervisor as supervisor_module  # noqa: E402
-from app.gpu_lease import GpuBusy, acquire_gpu_lease  # noqa: E402
+from app.gpu_lease import GpuBusy, acquire_gpu_lease, resident_is_held  # noqa: E402
 
 FAKE_MAIN = ROOT / "tests" / "support" / "fake_comfyui" / "main.py"
 GPU = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
@@ -157,8 +157,10 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(argv[:4], ["--listen", "127.0.0.1", "--port", str(self.port)])
         self.assertIn("--disable-metadata", argv)
         self.assertIn("--disable-auto-launch", argv)
+        self.assertTrue(resident_is_held(GPU, lease_dir=self.lease_dir), "ComfyUI's own process holds the resident lock")
         sup.stop()
         self.assertFalse(sup.running)
+        self.assertFalse(resident_is_held(GPU, lease_dir=self.lease_dir))
         self.assertTrue(self.lease_is_free(), "lease must be free after stop")
 
     def test_check_budget_rereads_and_requires_running(self):
@@ -217,14 +219,26 @@ time.sleep(120)
         lease = acquire_gpu_lease(GPU, lease_dir=self.lease_dir, timeout_s=10, poll_s=0.05)
         lease.release()
 
-    def test_control_without_pass_fds_the_lease_would_be_freed(self):
-        """Proves the test above detects the difference: without inheritance the lease leaks free."""
+    def test_without_descriptor_inheritance_the_resident_lock_alone_keeps_the_gpu(self):
+        """The Windows situation: no pass_fds. The main lease is freed, the resident lock still blocks."""
+        import fcntl
         child = self._run_supervisor_in_child(drop_pass_fds=True)
+        comfy_pid = int(Path(self.state, "pid").read_text())
         child.send_signal(signal.SIGKILL)
         child.wait(10)
-        self.assertTrue(port_answers(self.port))
-        lease = acquire_gpu_lease(GPU, lease_dir=self.lease_dir, timeout_s=5, poll_s=0.05)
-        lease.release()
+        self.assertTrue(port_answers(self.port), "orphaned ComfyUI is still running")
+        main_lock = os.open(os.path.join(self.lease_dir, f"{GPU}.lock"), os.O_RDWR)
+        try:
+            fcntl.flock(main_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # control: the main lease really is free
+            fcntl.flock(main_lock, fcntl.LOCK_UN)
+        finally:
+            os.close(main_lock)
+        self.assertTrue(resident_is_held(GPU, lease_dir=self.lease_dir))
+        with self.assertRaisesRegex(GpuBusy, "resident"):
+            acquire_gpu_lease(GPU, lease_dir=self.lease_dir)
+        os.kill(comfy_pid, signal.SIGKILL)
+        self.assertTrue(wait_gone(comfy_pid, 10))
+        acquire_gpu_lease(GPU, lease_dir=self.lease_dir, timeout_s=10, poll_s=0.05).release()
 
     # --- refusals ---------------------------------------------------------
     def test_refuses_when_port_already_answers_and_releases_lease(self):
@@ -317,13 +331,24 @@ time.sleep(120)
         sup.start()
         command, env, limits = spawned[0]
         self.assertEqual(env["CUDA_VISIBLE_DEVICES"], GPU)
-        self.assertEqual(command[2:4], ["--listen", "127.0.0.1"])
+        self.assertEqual(command[2:5:2], ["--resident-lock", "--"])
+        self.assertEqual(command[6:8], ["--listen", "127.0.0.1"])
         self.assertEqual(limits.process_memory_bytes, 40 * GIB)
         self.assertEqual(limits.active_process_limit, 4)
         self.assertFalse(self.lease_is_free())
         sup.stop()
         self.assertEqual(len(closed), 1, "the job handle is closed after the child exits")
         self.assertTrue(self.lease_is_free())
+
+    def test_comfyui_without_the_resident_lock_is_refused(self):
+        """If whatever answers on the port did not take the resident lock, do not call it ready."""
+        no_lock = Path(self.tmp, "no_lock_launcher.py")
+        no_lock.write_text("import runpy, sys, os\n"
+                           "main = sys.argv[4]; sys.argv = [main] + sys.argv[5:]\n"
+                           "sys.path.insert(0, os.path.dirname(main)); runpy.run_path(main, run_name='__main__')\n")
+        self.addCleanup(setattr, supervisor_module, "RESIDENT_LAUNCHER", supervisor_module.RESIDENT_LAUNCHER)
+        supervisor_module.RESIDENT_LAUNCHER = no_lock
+        self._assert_start_fails_and_cleans_up(self.supervisor(), "does not hold the resident lock")
 
     def test_double_start_refused(self):
         sup = self.supervisor()
@@ -351,7 +376,7 @@ time.sleep(120)
         for label, launch in cases.items():
             with self.subTest(label):
                 with self.assertRaises(ComfySupervisorError):
-                    launch.argv()
+                    launch.argv(os.path.join(self.lease_dir, "resident.lock"))
                 with self.assertRaises(ComfySupervisorError):
                     self.supervisor(launch=launch).start()
                 self.assertTrue(self.lease_is_free(), "validation happens before the lease")

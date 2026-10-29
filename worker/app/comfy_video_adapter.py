@@ -86,9 +86,11 @@ class ComfyVideoAdapter:
         self.supervisor.start()
         self._template = template
 
-    def close(self) -> None:
+    def close(self) -> bool:
+        """Stop ComfyUI. True once it has exited and the lease is released."""
         self._template = None
-        self.supervisor.stop()
+        self.supervisor.stop()  # raises (lease kept) if ComfyUI will not exit
+        return not self.supervisor.running
 
     def render(self, request: GenerationRequest) -> RenderedArtifact:
         raise GenerationError("video is written to a staged sink file; use render_to()")

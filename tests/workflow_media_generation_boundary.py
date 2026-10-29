@@ -26,16 +26,20 @@ APP = ROOT / "worker" / "app"
 SLICE = (
     "media_generation_contract", "media_generation_profiles", "gpu_lease", "image_gpu_admission",
     "image_job_store", "media_generation_runner", "diffusers_image_adapter", "comfy_supervisor",
-    "comfy_workflow_template", "comfy_video_adapter",
+    "comfy_workflow_template", "comfy_video_adapter", "comfy_resident_launcher",
 )
 # The ComfyUI supervisor is the one module that must start a process and talk
 # HTTP. It gets exactly those two, and only in the checked shape below.
 SUPERVISOR = "comfy_supervisor"
 SUPERVISOR_ALLOWED = {"subprocess", "http"}
+# The resident launcher runs inside ComfyUI's own Python and hands control to
+# ComfyUI's main.py: runpy, once, on the validated main path, and nothing else.
+LAUNCHER = "comfy_resident_launcher"
+LAUNCHER_ALLOWED = {"runpy"}
 OTHER_SIDE = {"image_media_store", "image_media_mount", "image_asset_service", "image_internal_api",
               "video_media_api", "video_media_catalog"}
 FORBIDDEN_ANYWHERE = {"fastapi", "starlette", "httpx", "requests", "urllib", "socket", "subprocess",
-                      "http", "importlib", "pickle", "shelve", "ctypes", "multiprocessing"}
+                      "http", "importlib", "pickle", "shelve", "ctypes", "multiprocessing", "runpy"}
 GPU_LIBS = {"torch", "diffusers", "transformers", "accelerate"}
 
 passed = failed = 0
@@ -87,10 +91,10 @@ for name, tree in trees.items():
     every = imports(tree, top_level_only=False)
     top = imports(tree, top_level_only=True)
     check(not (roots(every) & OTHER_SIDE), f"{name}: imports nothing from the gallery/media-store side")
-    allowed = SUPERVISOR_ALLOWED if name == SUPERVISOR else set()
+    allowed = SUPERVISOR_ALLOWED if name == SUPERVISOR else LAUNCHER_ALLOWED if name == LAUNCHER else set()
     check(not (roots(every) & (FORBIDDEN_ANYWHERE - allowed)),
           f"{name}: no web framework, network client or dynamic loading"
-          + (" (beyond subprocess + loopback http.client)" if allowed else ""))
+          + (f" (beyond {sorted(allowed)})" if allowed else ""))
     check(not (roots(top) & GPU_LIBS), f"{name}: torch/diffusers are not imported at module level")
     check(not ({"eval", "exec", "__import__", "system", "popen"} & calls(tree)), f"{name}: no eval/exec/__import__/system")
 
@@ -134,6 +138,16 @@ if SUPERVISOR in trees:
 bad = ast.parse('LOOPBACK = "0.0.0.0"\nimport subprocess, http.client\n'
                 'subprocess.Popen(["x"], shell=True)\nhttp.client.HTTPConnection("example.com", 80)\n')
 check(len(supervisor_shape(bad)) >= 4, "control: a non-loopback host, shell=True and a missing env would be caught")
+
+if LAUNCHER in trees:
+    launcher = trees[LAUNCHER]
+    run_calls = [n for n in ast.walk(launcher) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                 and n.func.attr in {"run_path", "run_module"}]
+    check(len(run_calls) == 1 and run_calls[0].func.attr == "run_path"
+          and isinstance(run_calls[0].args[0], ast.Name) and run_calls[0].args[0].id == "main_py",
+          "comfy_resident_launcher: exactly one runpy.run_path, on the validated main_py")
+    app_imports = [m for m in imports(launcher, top_level_only=False) if m.startswith(".") or m.startswith("app")]
+    check(not app_imports, "comfy_resident_launcher: stdlib only (it runs under ComfyUI's own Python)")
 
 entrypoint = ast.parse(code_of(APP / "entrypoint.py"))
 check(not (roots(imports(entrypoint, top_level_only=False)) & set(SLICE)),

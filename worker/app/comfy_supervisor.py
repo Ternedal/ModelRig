@@ -5,12 +5,16 @@ long-running server that keeps model weights in VRAM between jobs, so the GPU
 lease cannot be per job: this supervisor takes the lease for one physical GPU
 UUID before ComfyUI starts and gives it up only after ComfyUI has exited.
 
-How the lease is tied to the child's lifetime (POSIX):
-  The locked lease descriptor is handed to ComfyUI with pass_fds. flock
-  belongs to the open file description, so the GPU stays leased until BOTH
-  processes have closed it. A supervisor that crashes or is SIGKILLed cannot
-  free a GPU that an orphaned ComfyUI still occupies; the next start then fails
-  closed (GpuBusy, and the port still answers) until an operator stops it.
+How "GPU in use" is tied to ComfyUI's own lifetime (both platforms):
+  ComfyUI is started through comfy_resident_launcher, which takes the GPU's
+  RESIDENT lock in ComfyUI's own process before ComfyUI's code runs.
+  acquire_gpu_lease() treats a held resident lock as busy, so a supervisor
+  that crashes or is killed cannot hand the GPU to another generator while an
+  orphaned ComfyUI still occupies it. The supervisor declares ComfyUI ready
+  only once that lock is observed held.
+  POSIX additionally hands the main lease descriptor to the child (pass_fds):
+  flock belongs to the open file description, so the main lease too stays
+  held until both processes have exited.
 
 Other rules:
 - ComfyUI only sees the leased GPU: CUDA_VISIBLE_DEVICES=<GPU UUID>. CUDA
@@ -23,14 +27,14 @@ Other rules:
 - /system_stats is polled with a deadline. It reports the device ComfyUI uses;
   it is a sanity and VRAM-budget check, not proof that no other GPU is
   visible (that proof is CUDA_VISIBLE_DEVICES).
-- Windows: descriptor inheritance does not carry an msvcrt lock, so ComfyUI
-  is started through the existing windows_job.spawn_in_job (suspended, then
-  assigned to a Job Object with KILL_ON_JOB_CLOSE and a host-memory limit,
-  then resumed). If the supervisor dies, Windows closes the job handle and
-  kills ComfyUI. Stated limit: Windows closes the lease handle and kills the
-  job during the same process teardown, so another generator may take the
-  lease while ComfyUI's VRAM is still being freed; its own VRAM admission is
-  the second line. Rig check: not proven on the rig yet.
+- Windows: ComfyUI is started through the existing windows_job.spawn_in_job
+  (suspended, then a Job Object with KILL_ON_JOB_CLOSE and a host-memory
+  limit, then resumed), so it dies with the supervisor. The resident lock
+  covers the gap while it is being killed: it is released only when
+  ComfyUI's own process has gone. Remaining limit: within ComfyUI's own
+  process teardown, Windows may close the lock handle before the driver has
+  freed the VRAM; the next generator's VRAM admission is the second line.
+  Rig check: not proven on the rig yet.
 
 Nothing here imports torch, opens a non-loopback connection or downloads
 anything. Nothing imports this module at worker start.
@@ -48,7 +52,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from .gpu_lease import GpuLease, acquire_gpu_lease, normalize_gpu_uuid
+from .gpu_lease import GpuLease, acquire_gpu_lease, normalize_gpu_uuid, resident_is_held, resident_lock_path
+
+RESIDENT_LAUNCHER = Path(__file__).resolve().with_name("comfy_resident_launcher.py")
 
 _WINDOWS = os.name == "nt"
 
@@ -86,7 +92,7 @@ class ComfyLaunch:
     user_directory: str
     flags: tuple[str, ...] = ("--disable-auto-launch", "--disable-metadata")
 
-    def argv(self) -> list[str]:
+    def argv(self, resident_lock: str) -> list[str]:
         python = Path(self.python_executable)
         main = Path(self.main_py)
         if not python.is_absolute() or not python.is_file():
@@ -97,7 +103,11 @@ class ComfyLaunch:
             raise ComfySupervisorError("port must be 1024..65535")
         if len(set(self.flags)) != len(self.flags) or not set(self.flags) <= ALLOWED_FLAGS:
             raise ComfySupervisorError("ComfyUI flags must come from the allowlist")
-        argv = [str(python), str(main), "--listen", LOOPBACK, "--port", str(self.port)]
+        lock = Path(resident_lock)
+        if not lock.is_absolute() or not RESIDENT_LAUNCHER.is_file():
+            raise ComfySupervisorError("resident lock path and launcher must be absolute and present")
+        argv = [str(python), str(RESIDENT_LAUNCHER), "--resident-lock", str(lock), "--",
+                str(main), "--listen", LOOPBACK, "--port", str(self.port)]
         for flag, value in zip(_DIRECTORY_FLAGS, (self.input_directory, self.output_directory,
                                                    self.temp_directory, self.user_directory)):
             directory = Path(value)
@@ -215,7 +225,7 @@ class ComfySupervisor:
     def start(self) -> VramBudget:
         if self._proc is not None:
             raise ComfySupervisorError("supervisor already started")
-        argv = self.launch.argv()
+        argv = self.launch.argv(str(resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)))
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
         log = None
         try:
@@ -257,6 +267,10 @@ class ComfySupervisor:
             except (OSError, ValueError):
                 stats = None
             if stats is not None:
+                # ComfyUI answers from inside the launcher, which took the
+                # resident lock first: refuse if that cannot be observed.
+                if not resident_is_held(self.gpu_uuid, lease_dir=self.lease_dir):
+                    raise ComfySupervisorError("ComfyUI answers but does not hold the resident lock")
                 return parse_vram_budget(stats, reserve_gib=self.reserve_gib,
                                          min_usable_gib=self.min_usable_gib)
             if time.monotonic() >= deadline:
