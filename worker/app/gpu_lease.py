@@ -144,10 +144,18 @@ class GpuLease:
         self.gpu_uuid = gpu_uuid
         self.path = path
         self._fd: int | None = fd
+        self._hold_until_exit = False
 
     @property
     def held(self) -> bool:
         return self._fd is not None
+
+    def hold_until_exit(self) -> None:
+        """Never release on garbage collection: only an explicit release() or process exit frees it.
+
+        For a GPU whose memory could not be proven free (#2315 review 5697335934).
+        """
+        self._hold_until_exit = True
 
     def release(self) -> None:
         fd, self._fd = self._fd, None
@@ -165,6 +173,8 @@ class GpuLease:
         self.release()
 
     def __del__(self) -> None:  # best effort; the OS releases on exit anyway
+        if getattr(self, "_hold_until_exit", False):
+            return  # the descriptor stays open: the OS drops the lock with the process
         try:
             self.release()
         except Exception:

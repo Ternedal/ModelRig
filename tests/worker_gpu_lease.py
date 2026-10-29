@@ -46,6 +46,26 @@ def _hold(lease_dir, gpu, flags, hold_seconds):
     lease.release()
 
 
+class HoldUntilExitTests(unittest.TestCase):
+    def test_a_held_lease_survives_garbage_collection_but_not_an_explicit_release(self):
+        import gc
+        lease_dir = tempfile.mkdtemp()
+        os.chmod(lease_dir, 0o700)
+        held = acquire_gpu_lease(GPU0, lease_dir=lease_dir)
+        held.hold_until_exit()
+        fd = held._fd  # test-only: to close the deliberately leaked descriptor afterwards
+        del held
+        gc.collect()
+        with self.assertRaises(GpuBusy):
+            acquire_gpu_lease(GPU0, lease_dir=lease_dir)  # GC did not release it
+        os.close(fd)  # test cleanup: the descriptor was deliberately left open
+        acquire_gpu_lease(GPU0, lease_dir=lease_dir).release()
+        explicit = acquire_gpu_lease(GPU1, lease_dir=lease_dir)
+        explicit.hold_until_exit()
+        explicit.release()  # a measured, explicit release still works
+        acquire_gpu_lease(GPU1, lease_dir=lease_dir).release()
+
+
 class GpuLeaseTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

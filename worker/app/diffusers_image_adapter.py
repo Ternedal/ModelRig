@@ -32,6 +32,13 @@ close() follows the same rule for a successful load (#2315 review
 that API exists, and releases the lease only once memory_allocated() is back
 at the baseline. If an offload hook or library cache still holds the model,
 close() keeps the lease and returns False.
+
+A retained lease must survive the adapter (#2315 review 5697335934): it goes
+into a process-lifetime quarantine (a module-level strong reference) and is
+marked hold_until_exit(), so neither dropping the adapter nor garbage
+collection can release it. It leaves the quarantine only through a measured
+release (close() on a live adapter, or release_proven_free() for adapters
+that are gone) or through process exit.
 Stated limit: memory_allocated() counts PyTorch's caching allocator only, not
 allocations made outside it.
 
@@ -43,9 +50,10 @@ import gc
 import io
 import os
 import traceback
+from dataclasses import dataclass
 from typing import Mapping
 
-from .gpu_lease import acquire_gpu_lease, device_uuid_map, parse_cuda_device
+from .gpu_lease import GpuLease, acquire_gpu_lease, device_uuid_map, parse_cuda_device
 from .image_gpu_admission import inspect_cuda_budget
 from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import DIFFUSERS_PIPELINES, ModelProfile, validate_request
@@ -69,6 +77,48 @@ def _drop_tracebacks(exc: BaseException) -> None:
         pending += [current.__cause__, current.__context__]
 
 
+def _memory_back_to(torch, index: int, baseline: int) -> bool:
+    try:
+        gc.collect()
+        torch.cuda.synchronize(index)
+        clear_workspaces = getattr(getattr(torch, "_C", None), "_cuda_clearCublasWorkspaces", None)
+        if callable(clear_workspaces):
+            clear_workspaces()  # persistent per-handle cuBLAS workspaces are not the model
+        torch.cuda.empty_cache()
+        return int(torch.cuda.memory_allocated(index)) <= baseline
+    except Exception:
+        return False  # a broken CUDA context proves nothing
+
+
+@dataclass(eq=False)
+class _Quarantined:
+    lease: GpuLease
+    torch: object
+    index: int
+    baseline: int
+
+
+# Leases whose GPU memory is not proven free. A strong, process-lifetime
+# reference: dropping or garbage-collecting the adapter cannot release them.
+_QUARANTINE: list[_Quarantined] = []
+
+
+def quarantined_gpus() -> list[str]:
+    """GPU UUIDs this process keeps leased because their memory is not proven free."""
+    return [entry.lease.gpu_uuid for entry in _QUARANTINE]
+
+
+def release_proven_free() -> int:
+    """Measure every quarantined GPU again; release the ones back at baseline. Returns how many."""
+    released = 0
+    for entry in list(_QUARANTINE):
+        if _memory_back_to(entry.torch, entry.index, entry.baseline):
+            _QUARANTINE.remove(entry)
+            entry.lease.release()
+            released += 1
+    return released
+
+
 class DiffusersImageAdapter:
     def __init__(self, profile: ModelProfile, *, device: str, lease_dir: str,
                  lease_timeout_s: float = 0.0, env: Mapping[str, str] | None = None):
@@ -87,7 +137,7 @@ class DiffusersImageAdapter:
         self._env = os.environ if env is None else env
         self._lease = None
         self._pipeline = None
-        self._retained_baseline: int | None = None
+        self._quarantine: _Quarantined | None = None
         self._baseline: int | None = None
         self._torch = None
 
@@ -98,25 +148,21 @@ class DiffusersImageAdapter:
     @property
     def retains_gpu(self) -> bool:
         """True while memory from a failed load or an unloaded model is not proven free."""
-        return self._retained_baseline is not None
+        return self._quarantine is not None and self._quarantine in _QUARANTINE
 
-    def _memory_back_to(self, torch, baseline: int) -> bool:
-        try:
-            gc.collect()
-            torch.cuda.synchronize(self.index)
-            clear_workspaces = getattr(getattr(torch, "_C", None), "_cuda_clearCublasWorkspaces", None)
-            if callable(clear_workspaces):
-                clear_workspaces()  # persistent per-handle cuBLAS workspaces are not the model
-            torch.cuda.empty_cache()
-            return int(torch.cuda.memory_allocated(self.index)) <= baseline
-        except Exception:
-            return False  # a broken CUDA context proves nothing
+    def _retain(self, lease: GpuLease, torch, baseline: int) -> None:
+        lease.hold_until_exit()
+        entry = _Quarantined(lease, torch, self.index, baseline)
+        _QUARANTINE.append(entry)
+        self._lease, self._quarantine = lease, entry
 
     def load(self) -> None:
         if self._pipeline is not None:
             return
-        if self._retained_baseline is not None:
+        if self.retains_gpu:
             raise GpuResourcesRetained("memory from an earlier load is still allocated on this GPU; restart the executor")
+        if self._quarantine is not None:  # released meanwhile by release_proven_free()
+            self._quarantine, self._lease = None, None
         if self._env.get("HF_HUB_OFFLINE") != "1" or self._env.get("TRANSFORMERS_OFFLINE") != "1":
             raise GenerationError("offline mode required: HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1")
         gpu_uuid = device_uuid_map(self._env).get(self.index)
@@ -155,7 +201,7 @@ class DiffusersImageAdapter:
         except BaseException:
             # Interrupted mid-load: cleanup cannot be proven. Keep the lease;
             # the process is ending and the OS releases it with the memory.
-            self._lease, self._retained_baseline, self._torch = lease, baseline, torch
+            self._retain(lease, torch, baseline)
             raise
         if failure is None:
             self._lease, self._pipeline = lease, pipeline
@@ -163,10 +209,10 @@ class DiffusersImageAdapter:
             return
         # Outside the except block: the exception object is gone, and so is
         # every frame it pinned. Now measure instead of assuming.
-        if self._memory_back_to(torch, baseline):
+        if _memory_back_to(torch, self.index, baseline):
             lease.release()
             raise GenerationError(f"model load failed ({failure}); GPU memory verified released")
-        self._lease, self._retained_baseline, self._torch = lease, baseline, torch
+        self._retain(lease, torch, baseline)
         raise GpuResourcesRetained(
             f"model load failed ({failure}) and GPU memory could not be proven free; "
             "the GPU lease is kept until this process exits")
@@ -194,17 +240,20 @@ class DiffusersImageAdapter:
     def close(self) -> bool:
         """Unload. True once the lease is released; False while GPU memory is not proven free.
 
-        After False the lease stays held (no cooperating executor can take the
-        GPU); call close() again later or restart the executor.
+        After False the lease stays held in the process-lifetime quarantine,
+        even if this adapter is dropped: call close() again later, call
+        release_proven_free(), or let the executor exit.
         """
         if self._pipeline is not None:
             self._pipeline = None  # drop our reference first
-            self._retained_baseline = self._baseline
-        if self._retained_baseline is None:
+            self._retain(self._lease, self._torch, self._baseline)
+        entry = self._quarantine
+        if entry is None:
             return self._lease is None
-        if not self._memory_back_to(self._torch, self._retained_baseline):
-            return False
-        lease, self._lease, self._retained_baseline = self._lease, None, None
-        if lease is not None:
-            lease.release()
+        if entry in _QUARANTINE:
+            if not _memory_back_to(entry.torch, entry.index, entry.baseline):
+                return False
+            _QUARANTINE.remove(entry)
+            entry.lease.release()
+        self._quarantine, self._lease = None, None
         return True

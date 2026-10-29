@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -18,7 +19,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 
-from app.diffusers_image_adapter import DiffusersImageAdapter, GpuResourcesRetained  # noqa: E402
+import app.diffusers_image_adapter as adapter_module  # noqa: E402
+from app.diffusers_image_adapter import (  # noqa: E402
+    DiffusersImageAdapter, GpuResourcesRetained, quarantined_gpus, release_proven_free,
+)
 from app.gpu_lease import GpuBusy, GpuLeaseError, acquire_gpu_lease  # noqa: E402
 from app.image_gpu_admission import ImageGpuAdmissionError  # noqa: E402
 from app.media_generation_contract import GenerationError, GenerationRequest  # noqa: E402
@@ -123,13 +127,52 @@ def fake_modules(calls, free_gib=11.0, allocator=None, hook_cache=None, workspac
     return {"torch": torch, "diffusers": diffusers}
 
 
+def partial_load_fakes(calls, *, keep_pipeline=None, keep_exception=None, interrupt=False, chained=False):
+    """Pipeline.to() allocates 6 GiB of 'weights' and then fails, like an OOM half-way."""
+    allocator = FakeAllocator()
+    modules = fake_modules(calls, allocator=allocator)
+    pipeline_class = modules["diffusers"].StableDiffusionXLPipeline
+
+    def failing_to(pipe, device):
+        pipe.weights = FakeTensor(allocator, 6 * GIB)
+        pipe.hooks = [pipe]  # a reference cycle, as module hooks create: only gc frees it
+        if keep_pipeline is not None:
+            keep_pipeline.append(pipe)  # a library cache that outlives the call
+        error = KeyboardInterrupt() if interrupt else RuntimeError("CUDA out of memory (partial load)")
+        if chained:  # the real cause sits one level down, in a frame that still holds the pipeline
+            def inner(module):
+                raise ValueError(f"cannot move {type(module).__name__}")
+            try:
+                inner(pipe)
+            except ValueError as cause:
+                error.__cause__ = cause
+        if keep_exception is not None:
+            try:
+                raise error
+            except BaseException as exc:
+                keep_exception.append(exc)  # e.g. an error tracker keeping the last exception
+                raise
+        raise error
+
+    pipeline_class.to = failing_to
+    return modules, allocator
+
+
 class AdapterTests(unittest.TestCase):
     def setUp(self):
+        self.addCleanup(self.empty_quarantine)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.lease_dir = self.tmp.name
         self.profile = parse_profile(image_profile())
         self.calls = []
+
+    @staticmethod
+    def empty_quarantine():
+        """Test isolation only: the quarantine is process-wide by design."""
+        for entry in list(adapter_module._QUARANTINE):
+            entry.lease.release()
+            adapter_module._QUARANTINE.remove(entry)
 
     def adapter(self, profile=None, env=OFFLINE, device="cuda:1"):
         return DiffusersImageAdapter(profile or self.profile, device=device, lease_dir=self.lease_dir, env=env)
@@ -245,35 +288,8 @@ class AdapterTests(unittest.TestCase):
             pass
 
     # --- #2315 review 4411189866: a failed load must not free the GPU while the model is resident ----
-    def partial_load_modules(self, *, keep_pipeline=None, keep_exception=None, interrupt=False, chained=False):
-        """Pipeline.to() allocates 6 GiB of 'weights' and then fails, like an OOM half-way."""
-        allocator = FakeAllocator()
-        modules = fake_modules(self.calls, allocator=allocator)
-        pipeline_class = modules["diffusers"].StableDiffusionXLPipeline
-
-        def failing_to(pipe, device):
-            pipe.weights = FakeTensor(allocator, 6 * GIB)
-            pipe.hooks = [pipe]  # a reference cycle, as module hooks create: only gc frees it
-            if keep_pipeline is not None:
-                keep_pipeline.append(pipe)  # a library cache that outlives the call
-            error = KeyboardInterrupt() if interrupt else RuntimeError("CUDA out of memory (partial load)")
-            if chained:  # the real cause sits one level down, in a frame that still holds the pipeline
-                def inner(module):
-                    raise ValueError(f"cannot move {type(module).__name__}")
-                try:
-                    inner(pipe)
-                except ValueError as cause:
-                    error.__cause__ = cause
-            if keep_exception is not None:
-                try:
-                    raise error
-                except BaseException as exc:
-                    keep_exception.append(exc)  # e.g. an error tracker keeping the last exception
-                    raise
-            raise error
-
-        pipeline_class.to = failing_to
-        return modules, allocator
+    def partial_load_modules(self, **kwargs):
+        return partial_load_fakes(self.calls, **kwargs)
 
     def other_executor_can_take_the_gpu(self) -> bool:
         """A separate process that takes the same lease, as a second executor would."""
@@ -354,7 +370,6 @@ class AdapterTests(unittest.TestCase):
             with self.assertRaises(GpuResourcesRetained):
                 adapter.load()
         self.assertFalse(self.other_executor_can_take_the_gpu())
-        adapter._lease.release()  # test cleanup only
 
     def test_an_interrupt_mid_load_keeps_the_lease(self):
         modules, _ = self.partial_load_modules(interrupt=True)
@@ -364,7 +379,6 @@ class AdapterTests(unittest.TestCase):
                 adapter.load()
         self.assertTrue(adapter.retains_gpu)
         self.assertFalse(self.other_executor_can_take_the_gpu())
-        adapter._lease.release()  # test cleanup only
 
     def test_a_failing_baseline_read_releases_before_any_model_load(self):
         allocator = FakeAllocator()
@@ -433,7 +447,132 @@ class AdapterTests(unittest.TestCase):
             adapter.render(self.req())
             self.assertFalse(adapter.close())
         self.assertFalse(self.other_executor_can_take_the_gpu())
-        adapter._lease.release()  # test cleanup only
+
+    # --- #2315 review 5697335934: a retained lease must survive dropping the adapter --------------
+    EXECUTOR = """
+import gc, os, sys, time
+sys.path[:0] = [{worker!r}, {tests!r}]
+from unittest.mock import patch
+import worker_diffusers_image_adapter as T
+from app.diffusers_image_adapter import (DiffusersImageAdapter, GpuResourcesRetained,
+                                         quarantined_gpus, release_proven_free)
+from app.media_generation_profiles import parse_profile
+flags, scenario, lease_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+def flag(name): return os.path.join(flags, name)
+def publish(name, text):  # atomic: the parent never sees a created-but-empty flag
+    open(flag(name) + ".tmp", "w").write(text)
+    os.replace(flag(name) + ".tmp", flag(name))
+def wait_any(*names):
+    while not any(os.path.exists(flag(n)) for n in names):
+        time.sleep(0.02)
+cache, calls = [], []
+if scenario == "close":
+    modules = T.fake_modules(calls, hook_cache=cache)
+else:
+    modules, _ = T.partial_load_fakes(calls, keep_pipeline=cache)
+with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.modules, modules):
+    adapter = DiffusersImageAdapter(parse_profile(T.image_profile()), device="cuda:1",
+                                    lease_dir=lease_dir, env=T.OFFLINE)
+    if scenario == "close":
+        adapter.load()
+        assert adapter.close() is False
+    else:
+        try:
+            adapter.load()
+        except GpuResourcesRetained:
+            pass
+        else:
+            raise SystemExit("expected GpuResourcesRetained")
+    del adapter          # the executor drops the adapter...
+    gc.collect()         # ...and it is really gone
+    publish("dropped", ",".join(quarantined_gpus()))
+    wait_any("clear", "exit")
+    if os.path.exists(flag("clear")):
+        assert release_proven_free() == 0, "still resident: nothing may be released"
+        cache.clear()
+        gc.collect()
+        publish("released", str(release_proven_free()))
+        wait_any("exit")
+"""
+
+    def start_executor(self, scenario):
+        flags = tempfile.mkdtemp(dir=self.lease_dir)
+        root = Path(__file__).resolve().parents[1]
+        code = self.EXECUTOR.format(worker=str(root / "worker"), tests=str(root / "tests"))
+        proc = subprocess.Popen([sys.executable, "-c", code, flags, scenario, self.lease_dir])
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait(10)))
+        deadline = time.monotonic() + 30
+        while not os.path.exists(os.path.join(flags, "dropped")):
+            self.assertIsNone(proc.poll(), "executor process failed")
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.02)
+        return proc, flags
+
+    def test_a_dropped_adapter_after_close_false_keeps_the_gpu_until_measured_free(self):
+        proc, flags = self.start_executor("close")
+        self.assertEqual(Path(flags, "dropped").read_text(), GPU1, "the lease sits in the process quarantine")
+        self.assertFalse(self.other_executor_can_take_the_gpu(),
+                         "adapter dropped and collected, model still resident: the GPU must stay leased")
+        Path(flags, "clear").touch()
+        deadline = time.monotonic() + 30
+        while not Path(flags, "released").exists():
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.02)
+        self.assertEqual(Path(flags, "released").read_text(), "1", "a measured release, not a GC side effect")
+        self.assertTrue(self.other_executor_can_take_the_gpu())
+        Path(flags, "exit").touch()
+        self.assertEqual(proc.wait(10), 0)
+
+    def test_a_dropped_adapter_after_a_retained_failed_load_keeps_the_gpu_until_exit(self):
+        proc, flags = self.start_executor("failed")
+        self.assertFalse(self.other_executor_can_take_the_gpu())
+        Path(flags, "exit").touch()  # the executor exits without ever proving the memory free
+        self.assertEqual(proc.wait(10), 0)
+        self.assertTrue(self.other_executor_can_take_the_gpu(), "the OS frees the lease with the process")
+
+    def test_release_proven_free_releases_only_measured_entries(self):
+        cache, allocator = [], FakeAllocator()
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, allocator=allocator, hook_cache=cache)):
+            adapter = self.adapter()
+            adapter.load()
+            self.assertFalse(adapter.close())
+            del adapter
+            gc.collect()
+            self.assertEqual(quarantined_gpus(), [GPU1])
+            self.assertEqual(release_proven_free(), 0)
+            self.assertFalse(self.other_executor_can_take_the_gpu())
+            cache.clear()
+            self.assertEqual(release_proven_free(), 1)
+            self.assertEqual(quarantined_gpus(), [])
+        self.assertTrue(self.other_executor_can_take_the_gpu())
+
+    def test_quarantined_leases_are_held_against_garbage_collection(self):
+        cache = []
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, hook_cache=cache)):
+            adapter = self.adapter()
+            adapter.load()
+            self.assertFalse(adapter.close())
+        self.assertTrue(adapter_module._QUARANTINE[0].lease._hold_until_exit,
+                        "not even interpreter-shutdown finalisation may release it")
+
+    def test_an_adapter_whose_quarantine_was_released_elsewhere_can_load_again(self):
+        cache = []
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, hook_cache=cache)):
+            adapter = self.adapter()
+            adapter.load()
+            self.assertFalse(adapter.close())
+            self.assertTrue(adapter.retains_gpu)
+            cache.clear()
+            self.assertEqual(release_proven_free(), 1)
+            self.assertFalse(adapter.retains_gpu, "the executor-level release is visible to the adapter")
+            adapter.load()
+            self.assertTrue(adapter.loaded)
+            self.assertFalse(self.other_executor_can_take_the_gpu())
+            self.assertFalse(adapter.close(), "the hook cache took the reloaded model again: measured, kept")
+        self.empty_quarantine()
 
     def test_profile_resources_decide_admission(self):
         sdxl = parse_profile(image_profile())  # needs 8 GiB usable after a 2 GiB reserve
