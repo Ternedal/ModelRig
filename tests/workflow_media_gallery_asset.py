@@ -33,7 +33,7 @@ class GalleryAssetTests(unittest.TestCase):
 
     def test_missing_and_traversal_are_refused(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
-            for asset_id in ("../asset_1", "not_there"):
+            for asset_id in ("../asset_1", "not_there", "asset_1\\Z", "asset_1\n"):
                 with self.assertRaises(GalleryAssetNotFound):
                     open_asset(self.root, self.volume, asset_id)
 

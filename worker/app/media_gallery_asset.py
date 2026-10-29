@@ -12,7 +12,7 @@ from pathlib import Path
 from .media_gallery_catalog import _root, _index, GalleryUnavailable
 from .media_gallery_range import select_range, RangeNotSatisfiable
 
-_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\\Z")
+_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _EXTENSION = {"image/png": ".png", "image/jpeg": ".jpg",
               "image/webp": ".webp", "video/mp4": ".mp4"}
 
