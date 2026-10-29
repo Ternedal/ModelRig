@@ -23,7 +23,7 @@ def select_range(header: str | None, size: int, *, max_chunk: int = 8 * 1024 * 1
     """
     if type(size) is not int or not 0 <= size <= _MAX_INT:
         raise ValueError("invalid_size")
-    if type(max_chunk) is not int or max_chunk < 1:
+    if type(max_chunk) is not int or not 1 <= max_chunk <= _MAX_INT:
         raise ValueError("invalid_chunk_limit")
     if header is None:
         return (0, size - 1, 200)
