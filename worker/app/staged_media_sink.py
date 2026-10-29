@@ -93,12 +93,10 @@ class StagedFileArtifactSink:
                 os.fsync(fd)
             finally:
                 os.close(fd)
-            # Exclusive destination creation prevents overwriting an existing asset.
-            try:
-                os.link(path, destination, follow_symlinks=False)
-            except FileExistsError as exc:
-                raise MediaStoreUnavailable("asset_id_collision") from exc
-            path.unlink()
+            # UUID collision must not replace an existing asset.
+            if destination.exists() or destination.is_symlink():
+                raise MediaStoreUnavailable("asset_id_collision")
+            os.replace(path, destination)
             directory_fd = os.open(root, os.O_RDONLY)
             try:
                 os.fsync(directory_fd)
