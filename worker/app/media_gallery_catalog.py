@@ -31,7 +31,7 @@ def _root(path: str | Path) -> Path:
     resolved = root.resolve(strict=True)
     if resolved == Path(resolved.anchor):
         raise GalleryUnavailable("media_root_refused")
-    if os.name != "nt" and not os.path.ismount(resolved):
+    if not os.path.ismount(resolved):
         raise GalleryUnavailable("external_media_not_mounted")
     return resolved
 
