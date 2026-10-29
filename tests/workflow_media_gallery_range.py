@@ -23,6 +23,20 @@ class MediaGalleryRangeTests(unittest.TestCase):
             with self.subTest(header=header), self.assertRaises(RangeNotSatisfiable):
                 select_range(header, 10, max_chunk=4)
 
+    def test_preserve_specific_range_errors_and_ascii_digits(self):
+        cases = (
+            ("bytes=5-4", 10, 4, "out_of_bounds"),
+            ("bytes=10-", 10, 4, "out_of_bounds"),
+            ("bytes=-0", 10, 4, "invalid_suffix"),
+            ("bytes=0-9", 10, 4, "range_too_large"),
+            ("bytes=-9", 10, 4, "range_too_large"),
+            ("bytes=٣-٩", 10, 4, "unsupported_range"),
+        )
+        for header, size, chunk, reason in cases:
+            with self.subTest(header=header), self.assertRaises(RangeNotSatisfiable) as caught:
+                select_range(header, size, max_chunk=chunk)
+            self.assertEqual(str(caught.exception), reason)
+
     def test_reject_unbounded_chunk_limit(self):
         for max_chunk in (0, -1, True, 1.5, 1 << 63):
             with self.subTest(max_chunk=max_chunk), self.assertRaises(ValueError):

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-_RANGE = re.compile(r"bytes=(\d*)-(\d*)\Z")
+_RANGE = re.compile(r"bytes=([0-9]*)-([0-9]*)\Z")
 _MAX_INT = (1 << 63) - 1
 
 
@@ -54,6 +54,8 @@ def select_range(header: str | None, size: int, *, max_chunk: int = 8 * 1024 * 1
             end = size - 1
             if end - start + 1 > max_chunk:
                 raise RangeNotSatisfiable("range_too_large")
+    except RangeNotSatisfiable:
+        raise
     except (ValueError, OverflowError) as exc:
         raise RangeNotSatisfiable("invalid_range") from exc
     return (start, end, 206)
