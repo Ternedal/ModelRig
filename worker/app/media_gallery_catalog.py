@@ -26,7 +26,7 @@ class GalleryBadRequest(ValueError):
     pass
 
 
-def _root(path: str | Path) -> Path:
+def _root(path: str | Path, *, verified_volume_root: str | Path | None = None) -> Path:
     root = Path(path)
     if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise GalleryUnavailable("external_media_unavailable")
@@ -34,10 +34,23 @@ def _root(path: str | Path) -> Path:
     # Reject symlinked parent components as well as a symlink at the root itself.
     if root != resolved:
         raise GalleryUnavailable("media_root_symlink_parent")
-    if resolved == Path(resolved.anchor):
-        raise GalleryUnavailable("media_root_refused")
-    if not os.path.ismount(resolved):
-        raise GalleryUnavailable("external_media_not_mounted")
+    if verified_volume_root is not None:
+        volume = Path(verified_volume_root)
+        if not volume.is_absolute() or volume.is_symlink() or not volume.is_dir():
+            raise GalleryUnavailable("external_media_unavailable")
+        mounted = volume.resolve(strict=True)
+        if mounted != volume:
+            raise GalleryUnavailable("media_root_symlink_parent")
+        if not os.path.ismount(mounted):
+            raise GalleryUnavailable("external_media_not_mounted")
+        if not resolved.is_relative_to(mounted):
+            raise GalleryUnavailable("media_root_outside_volume")
+    else:
+        # Legacy mode remains fail-closed until the writer supplies a verified volume.
+        if resolved == Path(resolved.anchor):
+            raise GalleryUnavailable("media_root_refused")
+        if not os.path.ismount(resolved):
+            raise GalleryUnavailable("external_media_not_mounted")
     return resolved
 
 
@@ -129,7 +142,8 @@ def _index(root: Path) -> list[dict]:
     return validated
 
 
-def list_gallery(root_path: str | Path, *, limit: int = 30, cursor: str | None = None) -> dict:
+def list_gallery(root_path: str | Path, *, limit: int = 30, cursor: str | None = None,
+                 verified_volume_root: str | Path | None = None) -> dict:
     """Read a bounded page from a trusted producer-written index.
 
     Cursor is an exact asset ID, not a path or a numeric offset.
@@ -138,7 +152,7 @@ def list_gallery(root_path: str | Path, *, limit: int = 30, cursor: str | None =
         raise GalleryBadRequest("invalid_limit")
     if cursor is not None and (not isinstance(cursor, str) or not _ID.fullmatch(cursor)):
         raise GalleryBadRequest("invalid_cursor")
-    items = _index(_root(root_path))
+    items = _index(_root(root_path, verified_volume_root=verified_volume_root))
     start = 0
     if cursor is not None:
         positions = [i for i, item in enumerate(items) if item["id"] == cursor]

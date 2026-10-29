@@ -81,6 +81,28 @@ class GalleryCatalogTests(unittest.TestCase):
                 with self.assertRaises(GalleryUnavailable):
                     self.page()
 
+    def test_explicit_volume_allows_subdirectory_not_itself_a_mount(self):
+        gallery = self.root / "kaliv-media"
+        gallery.mkdir()
+        (gallery / "gallery-index.json").write_bytes((self.root / "gallery-index.json").read_bytes())
+        with patch("app.media_gallery_catalog.os.path.ismount", side_effect=lambda p: p == self.root):
+            self.assertEqual(list_gallery(gallery, verified_volume_root=self.root)["items"][0]["id"], "img_1")
+            with self.assertRaisesRegex(GalleryUnavailable, "external_media_not_mounted"):
+                list_gallery(gallery)
+
+    def test_explicit_volume_rejects_outside_and_unmounted(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "gallery-index.json").write_text("[]", encoding="utf-8")
+        volume = self.root / "volume"
+        volume.mkdir()
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with self.assertRaisesRegex(GalleryUnavailable, "media_root_outside_volume"):
+                list_gallery(outside, verified_volume_root=volume)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
+            with self.assertRaisesRegex(GalleryUnavailable, "external_media_not_mounted"):
+                list_gallery(outside, verified_volume_root=volume)
+
     def test_refuse_unmounted_root(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaises(GalleryUnavailable):
