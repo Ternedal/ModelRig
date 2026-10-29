@@ -22,6 +22,16 @@ class VideoContractTests(unittest.TestCase):
             VideoRequest(kind="image_to_video", prompt="Animate")
         VideoRequest(kind="image_to_video", prompt="Animate", input_image_id="img_123")
 
+    def test_image_video_rejects_non_string_asset_ids(self):
+        for value in (123, 0, True, False, [], {}, ["img_123"], b"img_123"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                VideoRequest(kind="image_to_video", prompt="Animate", input_image_id=value)
+
+    def test_image_video_rejects_invalid_string_asset_ids(self):
+        for value in ("", "../escape", "é", "x" * 129, "a/b", "has space"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                VideoRequest(kind="image_to_video", prompt="Animate", input_image_id=value)
+
     def test_bad_dimensions_and_types(self):
         for changes in ({"width": 513}, {"width": True}, {"fps": 31},
                         {"duration_seconds": 9}, {"height": 2048}):
