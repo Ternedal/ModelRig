@@ -198,6 +198,29 @@ class AdapterTests(unittest.TestCase):
         adapter.close()
         self.assertTrue(self.lease_is_free())
 
+    def test_end_to_end_into_a_staged_sink(self):
+        """The #2296 seam: with sink.staged(".mp4") as out: mime = render_to(req, out); sink.adopt(out, mime)."""
+        from worker_staged_sink_conformance import ReferenceSink
+        sink = ReferenceSink(tempfile.mkdtemp(dir=self.tmp), max_bytes=1024 * 1024)
+        adapter = self.adapter()
+        adapter.load()
+        with sink.staged(".mp4") as output:
+            mime = adapter.render_to(request(), output)
+            asset_id = sink.adopt(output, mime)
+        self.assertEqual(sink.registry, {asset_id})
+        self.assertEqual(Path(sink.store, f"{asset_id}.mp4").read_bytes()[4:8], b"ftyp")
+        self.assertEqual(os.listdir(sink.staging), [])
+        # a refused output never reaches adopt(): nothing is published, staging is clean
+        adapter.close()
+        self.port = free_port()
+        bad = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        bad.load()
+        with self.assertRaises(GenerationError):
+            with sink.staged(".mp4") as output:
+                sink.adopt(output, bad.render_to(request(), output))
+        self.assertEqual(sink.registry, {asset_id})
+        self.assertEqual(os.listdir(sink.staging), [])
+
     def test_template_problems_stop_load_before_comfyui_starts(self):
         link_dir = tempfile.mkdtemp(dir=self.tmp)
         os.symlink(os.path.join(self.templates, "wan-t2v.json"), os.path.join(link_dir, "wan-t2v.json"))
