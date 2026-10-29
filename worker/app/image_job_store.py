@@ -50,7 +50,8 @@ class ImageJobStore:
             not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000
         ):
             raise ImageJobError("invalid owner or prompt")
-        if max_queued < 1 or max_owner_active < 1:
+        if (type(max_queued) is not int or type(max_owner_active) is not int
+                or max_queued < 1 or max_owner_active < 1):
             raise ImageJobError("invalid queue limits")
         job_id, now = uuid.uuid4().hex, time.time()
         with self._db() as db:
