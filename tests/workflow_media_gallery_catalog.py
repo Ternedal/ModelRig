@@ -16,8 +16,8 @@ class GalleryCatalogTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "gallery-index.json").write_text(json.dumps([
-            {"id": "img_1", "kind": "image"},
-            {"id": "vid_2", "kind": "video"},
+            {"id": "img_1", "kind": "image", "mime_type": "image/png", "size_bytes": 10},
+            {"id": "vid_2", "kind": "video", "mime_type": "video/mp4", "size_bytes": 20},
         ]), encoding="utf-8")
 
     def page(self, **kwargs):
@@ -40,9 +40,21 @@ class GalleryCatalogTests(unittest.TestCase):
 
     def test_reject_duplicate_ids(self):
         (self.root / "gallery-index.json").write_text(
-            json.dumps([{"id": "x", "kind": "image"}] * 2), encoding="utf-8")
+            json.dumps([{"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1}] * 2), encoding="utf-8")
         with self.assertRaises(GalleryUnavailable):
             self.page()
+
+    def test_refuse_untrusted_metadata(self):
+        bad_items = (
+            {"id": "x", "kind": "image", "mime_type": "video/mp4", "size_bytes": 1},
+            {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": True},
+            {"id": "x", "kind": "image", "mime_type": "image/png", "size_bytes": 1, "url": "https://attacker.example"},
+        )
+        for item in bad_items:
+            with self.subTest(item=item):
+                (self.root / "gallery-index.json").write_text(json.dumps([item]), encoding="utf-8")
+                with self.assertRaises(GalleryUnavailable):
+                    self.page()
 
     def test_refuse_unmounted_root(self):
         with patch("worker.app.media_gallery_catalog.os.path.ismount", return_value=False):
