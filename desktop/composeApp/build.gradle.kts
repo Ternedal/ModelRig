@@ -16,7 +16,7 @@ repositories {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
     // QR-parring, rig-siden. SAMME artefakt som Android-appen bruger til at
     // LAESE koden — her bruges den til at SKRIVE den. Ren Java, ingen
     // Android/Play Services-binding.
