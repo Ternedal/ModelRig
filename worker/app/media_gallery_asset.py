@@ -70,3 +70,22 @@ def read_asset_range(handle, entry: dict, header: str | None,
     if status == 206:
         headers["Content-Range"] = f"bytes {start}-{end}/{entry['size_bytes']}"
     return data, status, headers
+
+
+def iter_asset_chunks(handle, entry: dict, *, chunk_size: int = 256 * 1024):
+    """Yield bounded chunks for a full HTTP 200 response, without buffering it.
+
+    The authenticated HTTP adapter owns the handle until iteration completes.
+    """
+    if type(chunk_size) is not int or not 1 <= chunk_size <= 1024 * 1024:
+        raise ValueError("invalid_stream_chunk")
+    remaining = entry["size_bytes"]
+    handle.seek(0)
+    while remaining:
+        data = handle.read(min(chunk_size, remaining))
+        if not data:
+            raise GalleryUnavailable("asset_changed_during_read")
+        if len(data) > remaining:
+            raise GalleryUnavailable("asset_changed_during_read")
+        remaining -= len(data)
+        yield data
