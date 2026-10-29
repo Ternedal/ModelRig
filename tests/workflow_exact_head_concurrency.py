@@ -42,4 +42,27 @@ assert "head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_r
 assert "legacy-merge-tree-equivalence:" in WORKFLOW
 assert "test \"$merge_tree\" = \"$head_tree\"" in WORKFLOW
 assert "exact-head-core:" in WORKFLOW
+
+# Stage-B admission (shared by every caller): one lane per caller workflow and
+# SHA. A lane shared across callers lets GitHub evict a pending gate when a
+# third workflow starts Stage-B for the same SHA (push to main: ci,
+# agent3-full-diagnostics, exact-head-qualification; tags: build-and-release).
+SLICES = code_of(ROOT / ".github" / "workflows" / "_stage_b_slices.yml")
+admission = re.search(
+    r"(?ms)^  stage-b-admission:\n(?P<body>.*?)(?=^    steps:)", SLICES
+)
+assert admission is not None, "stage-b-admission job must exist"
+admission_body = admission.group("body")
+assert (
+    "group: modelrig-stage-b-admission-${{ inputs.head_sha }}-${{ github.workflow }}"
+    in admission_body
+), "admission lanes must be per caller workflow and SHA"
+assert "cancel-in-progress: false" in admission_body, "an admission is never cancelled"
+callers = sorted(
+    p.name for p in (ROOT / ".github" / "workflows").glob("*.yml")
+    if "uses: ./.github/workflows/_stage_b_slices.yml" in code_of(p)
+)
+assert callers == ["_tests.yml", "agent3-full-diagnostics.yml", "exact-head-qualification.yml"], (
+    f"Stage-B callers changed ({callers}); re-check that no two callers share an admission lane"
+)
 print("exact-head concurrency contract: PASS")
