@@ -68,6 +68,15 @@ def _index(root: Path) -> list[dict]:
         seen.add(media_id)
         if item.get("kind") not in ("image", "video"):
             raise GalleryUnavailable("invalid_index_kind")
+        if set(item) - {"id", "kind", "mime_type", "size_bytes"}:
+            raise GalleryUnavailable("unexpected_index_fields")
+        mime = item.get("mime_type")
+        if mime not in ("image/jpeg", "image/png", "image/webp", "video/mp4"):
+            raise GalleryUnavailable("invalid_media_type")
+        if (item["kind"] == "video") != (mime == "video/mp4"):
+            raise GalleryUnavailable("media_kind_mismatch")
+        if type(item.get("size_bytes")) is not int or item["size_bytes"] < 0:
+            raise GalleryUnavailable("invalid_media_size")
         validated.append(item)
     return validated
 
