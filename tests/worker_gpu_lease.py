@@ -22,15 +22,27 @@ GPU0 = "GPU-00000000-1111-2222-3333-444444444444"
 GPU1 = "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
-def _hold(lease_dir, gpu, ready, release, hold_seconds):
+def _wait_for(path, seconds):
+    deadline = time.monotonic() + seconds
+    while not os.path.exists(path):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def _hold(lease_dir, gpu, flags, hold_seconds):
+    # Flag files, not multiprocessing.Event: a test kills this process with
+    # SIGKILL, and a process killed inside Event.wait() leaves the condition's
+    # sleeper count behind, so a later Event.set() in the parent blocks forever
+    # (seen as 12 hangs in 20 concurrent runs before this change).
     lease = acquire_gpu_lease(gpu, lease_dir=lease_dir)
-    ready.set()
+    Path(flags, "ready").touch()
     if hold_seconds is not None:
         time.sleep(hold_seconds)
         lease.release()
-        release.wait(30)
         return
-    release.wait(60)
+    _wait_for(os.path.join(flags, "release"), 60)
     lease.release()
 
 
@@ -41,12 +53,20 @@ class GpuLeaseTests(unittest.TestCase):
         self.dir = self.tmp.name
 
     def _child(self, gpu, hold_seconds=None):
-        ready, release = CTX.Event(), CTX.Event()
-        child = CTX.Process(target=_hold, args=(self.dir, gpu, ready, release, hold_seconds))
+        flags = tempfile.mkdtemp(dir=self.dir)
+        child = CTX.Process(target=_hold, args=(self.dir, gpu, flags, hold_seconds))
         child.start()
-        self.addCleanup(lambda: (release.set(), child.join(10), child.kill() if child.is_alive() else None))
-        self.assertTrue(ready.wait(30), "child did not take the lease")
-        return child, release
+
+        def stop():
+            Path(flags, "release").touch()
+            child.join(10)
+            if child.is_alive():
+                child.kill()
+                child.join(10)
+
+        self.addCleanup(stop)
+        self.assertTrue(_wait_for(os.path.join(flags, "ready"), 60), "child did not take the lease")
+        return child, flags
 
     def test_second_process_cannot_take_the_same_gpu(self):
         self._child(GPU1)
