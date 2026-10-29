@@ -23,6 +23,11 @@ class MediaGalleryRangeTests(unittest.TestCase):
             with self.subTest(header=header), self.assertRaises(RangeNotSatisfiable):
                 select_range(header, 10, max_chunk=4)
 
+    def test_reject_unbounded_chunk_limit(self):
+        for max_chunk in (0, -1, True, 1.5, 1 << 63):
+            with self.subTest(max_chunk=max_chunk), self.assertRaises(ValueError):
+                select_range("bytes=0-", 10, max_chunk=max_chunk)
+
     def test_reject_empty_asset_range(self):
         with self.assertRaises(RangeNotSatisfiable):
             select_range("bytes=0-0", 0)
