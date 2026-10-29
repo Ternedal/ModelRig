@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 sys.path.insert(0, str(ROOT / "tests" / "support"))
 
-from app.media_generation_contract import StagedFileArtifactSink  # noqa: E402
+from app.media_generation_contract import ArtifactSinkUnavailable, StagedFileArtifactSink  # noqa: E402
 from staged_sink_conformance import MP4, StagedSinkConformance  # noqa: E402
 
 
@@ -49,11 +49,18 @@ class ReferenceSink:
         self.max_bytes = max_bytes
         self.registry: set[str] = set()
         self._live: dict[str, Path] = {}
+        self.volume_present = True
+        self.fail_registration = False
+
+    def _require_volume(self):
+        if not self.volume_present:
+            raise ArtifactSinkUnavailable("external media volume is not mounted")
 
     @contextlib.contextmanager
     def staged(self, extension: str):
         if extension != ".mp4":
             raise ValueError("only .mp4 is staged")
+        self._require_volume()
         ticket = secrets.token_hex(8)
         path = self.staging / f"{ticket}.mp4.part"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
@@ -72,6 +79,7 @@ class ReferenceSink:
             raise ValueError("not a live handle from this sink")
         if mime_type != "video/mp4":
             raise ValueError("only video/mp4")
+        self._require_volume()
         path = self._live.pop(handle._ticket)  # one adoption per handle
         handle._fh.flush()
         os.fsync(handle._fh.fileno())
@@ -82,7 +90,12 @@ class ReferenceSink:
             if fh.read(12)[4:8] != b"ftyp":
                 raise ValueError("not an MP4")
         asset_id = secrets.token_hex(16)
-        os.replace(path, self.store / f"{asset_id}.mp4")  # atomic, same filesystem
+        target = self.store / f"{asset_id}.mp4"
+        os.replace(path, target)  # atomic, same filesystem
+        if self.fail_registration:  # registration failed: clean up, never report success
+            self.fail_registration = False
+            target.unlink(missing_ok=True)
+            raise OSError("catalog registration failed")
         self.registry.add(asset_id)  # "durable registration" for the reference
         return asset_id
 
@@ -108,6 +121,12 @@ class ReferenceConformance(StagedSinkConformance, unittest.TestCase):
 
     def staging_leftovers(self, sink):
         return sorted(p.name for p in sink.staging.iterdir())
+
+    def make_volume_unavailable(self, sink):
+        sink.volume_present = False
+
+    def fail_next_registration(self, sink):
+        sink.fail_registration = True
 
     def test_reference_satisfies_the_protocol(self):
         self.assertIsInstance(self.make_sink(), StagedFileArtifactSink)
@@ -167,6 +186,23 @@ class LeavesStagingBehind(ReferenceSink):
         fh.close()
 
 
+class FallsBackWhenTheVolumeIsGone(ReferenceSink):
+    def _require_volume(self):
+        pass  # keeps writing to wherever it is: the forbidden fallback
+
+
+class ExposesUnindexedAssets(ReferenceSink):
+    def adopt(self, handle, mime_type):
+        if self.fail_registration:
+            self.fail_registration = False
+            path = self._live.pop(handle._ticket)
+            asset = secrets.token_hex(16)
+            os.replace(path, self.store / f"{asset}.mp4")
+            self.registry.add(asset)  # reported nowhere, but visible as published
+            raise OSError("catalog registration failed")
+        return super().adopt(handle, mime_type)
+
+
 class ExposesPath(ReferenceSink):
     @contextlib.contextmanager
     def staged(self, extension):
@@ -190,7 +226,7 @@ class BrokenSinksFailTheSuite(unittest.TestCase):
 
     def test_each_broken_sink_is_caught(self):
         for broken in (DeletesOnExit, AdoptsTwice, AcceptsForeign, AnyMime, NoSizeBound,
-                       LeavesStagingBehind, ExposesPath):
+                       LeavesStagingBehind, ExposesPath, FallsBackWhenTheVolumeIsGone, ExposesUnindexedAssets):
             with self.subTest(sink=broken.__name__):
                 self.assertGreater(self.run_suite_against(broken), 0, f"{broken.__name__} passed the suite")
 

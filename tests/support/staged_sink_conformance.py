@@ -8,6 +8,9 @@ implementation can be checked against them. Mix it into a unittest.TestCase:
         def make_sink(self): ...            # a fresh sink on a fresh verified volume
         def published(self, sink): ...      # asset ids durably registered (a set)
         def staging_leftovers(self, sink):  # files still in the staging area (a list)
+        # optional; a rule is skipped when its hook is missing:
+        def make_volume_unavailable(self, sink): ...   # e.g. the external disk is unplugged
+        def fail_next_registration(self, sink): ...    # the catalog/index write will fail
 
 tests/worker_staged_sink_conformance.py runs it against a reference sink and
 shows that broken sinks fail it.
@@ -16,6 +19,9 @@ from __future__ import annotations
 
 import io
 import os
+import unittest
+
+from app.media_generation_contract import ArtifactSinkUnavailable
 
 MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * 64
 
@@ -132,6 +138,38 @@ class StagedSinkConformance:
                         sink.adopt(output, "video/mp4")
                 self.assertEqual(self.published(sink), set())
                 self.assertEqual(self.staging_leftovers(sink), [])
+
+    def test_an_unavailable_volume_is_fatal_and_never_falls_back(self):
+        if not hasattr(self, "make_volume_unavailable"):
+            raise unittest.SkipTest("sink does not expose make_volume_unavailable()")
+        sink = self.make_sink()
+        self.make_volume_unavailable(sink)
+        with self.assertRaises(ArtifactSinkUnavailable):
+            with sink.staged(".mp4"):
+                pass
+        sink = self.make_sink()
+        with self.assertRaises(ArtifactSinkUnavailable):
+            with sink.staged(".mp4") as output:
+                output.write(MP4)
+                self.make_volume_unavailable(sink)
+                sink.adopt(output, "video/mp4")
+        self.assertEqual(self.published(sink), set())
+
+    def test_a_failed_registration_reports_no_success_and_exposes_no_asset(self):
+        if not hasattr(self, "fail_next_registration"):
+            raise unittest.SkipTest("sink does not expose fail_next_registration()")
+        sink = self.make_sink()
+        self.fail_next_registration(sink)
+        with self.assertRaises(Exception):
+            with sink.staged(".mp4") as output:
+                output.write(MP4)
+                sink.adopt(output, "video/mp4")
+        self.assertEqual(self.published(sink), set(), "no unindexed asset may be exposed")
+        self.assertEqual(self.staging_leftovers(sink), [])
+        with sink.staged(".mp4") as output:  # the sink is usable afterwards
+            output.write(MP4)
+            asset_id = sink.adopt(output, "video/mp4")
+        self.assertEqual(self.published(sink), {asset_id})
 
     def test_the_generator_never_sees_a_path(self):
         sink = self.make_sink()
