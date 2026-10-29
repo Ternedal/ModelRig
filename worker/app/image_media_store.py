@@ -95,7 +95,7 @@ class ExternalMediaStore:
                 os.unlink(temp_path)
 
     def resolve(self, asset_id: str, extension: str) -> Path:
-        if not _ASSET_ID.fullmatch(asset_id) or extension not in _ALLOWED:
+        if not isinstance(asset_id, str) or not _ASSET_ID.fullmatch(asset_id) or not isinstance(extension, str) or extension not in _ALLOWED:
             raise MediaStorageError("invalid asset identifier")
         self._check_mount()
         path = self.root / (asset_id + extension)
