@@ -30,8 +30,8 @@ from worker_comfy_video_adapter import raw, sha  # noqa: E402
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 from worker_staged_sink_conformance import ReferenceSink  # noqa: E402
 
-from media_executor import (EXIT_GPU_RETAINED, EXIT_SINK_UNAVAILABLE, Cancelled, ExecutorConfigError,  # noqa: E402
-                            GenerationJobStore, MediaExecutor)
+from media_executor import (EXIT_DUPLICATE, EXIT_GPU_RETAINED, EXIT_SINK_UNAVAILABLE, Cancelled,  # noqa: E402
+                            ExecutorAlreadyRunning, ExecutorConfigError, GenerationJobStore, MediaExecutor)
 
 GPU_A = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
 GPU_B = "GPU-7b8f1d3f-2c3e-4d4f-9a0b-1234567890bc"
@@ -48,7 +48,8 @@ class Clock:
 class FakeImageAdapter:
     """Takes the real GPU lease, so exclusivity and release are real; no torch."""
 
-    def __init__(self, profile, *, lease_dir, gpu_uuid, close_ok=True, load_error=None, log=None):
+    def __init__(self, profile, *, lease_dir, gpu_uuid, close_ok=True, load_error=None, log=None, on_render=None):
+        self.on_render = on_render
         self.profile_id = profile.profile_id
         self.lease_dir, self.gpu_uuid, self.close_ok, self.load_error = lease_dir, gpu_uuid, close_ok, load_error
         self.lease = None
@@ -61,6 +62,8 @@ class FakeImageAdapter:
         self.log.append(f"load:{self.profile_id}")
 
     def render(self, request):
+        if self.on_render:
+            self.on_render()  # e.g. the owner cancels after the adapter's last poll
         return RenderedArtifact(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16, "image/png")
 
     def close(self):
@@ -74,9 +77,11 @@ class FakeImageAdapter:
 
 class MemorySink:
     def __init__(self):
-        self.assets, self.available = {}, True
+        self.assets, self.available, self.on_publish = {}, True, None
 
     def publish(self, data, extension):
+        if self.on_publish:
+            self.on_publish()
         if not self.available:
             raise ArtifactSinkUnavailable("external media volume is not mounted")
         asset_id = f"asset{len(self.assets)}"
@@ -87,9 +92,14 @@ class MemorySink:
 class CancellableComfyVideoAdapter(ComfyVideoAdapter):
     """What the design adds to ComfyVideoAdapter: a should_cancel hook checked in the poll loop."""
 
+    after_render = None
+
     def render_to(self, request, sink_file, *, should_cancel=None):
         self._should_cancel = should_cancel
-        return super().render_to(request, sink_file)
+        mime = super().render_to(request, sink_file)
+        if self.after_render:
+            self.after_render()  # e.g. the owner cancels after the last poll, before adopt()
+        return mime
 
     def _wait(self, prompt_id):
         real_history = self.supervisor.history
@@ -135,22 +145,38 @@ class ExecutorTests(unittest.TestCase):
                     ex.adapter.close()
                 except Exception:
                     pass
+            if ex._lifetime_fd is not None:
+                os.close(ex._lifetime_fd)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def image(self, profile_id="sdxl-a", devices=("cuda:0",)):
         return parse_profile(image_profile(profile_id=profile_id, resources={"min_usable_gib": 8, "reserve_gib": 2,
                                                                               "devices": list(devices), "cpu_offload": False}))
 
-    def executor(self, profiles, gpu=GPU_A, **kw):
+    def executor(self, profiles, gpu=GPU_A, start=True, **kw):
         close_ok = kw.pop("close_ok", True)
         load_error = kw.pop("load_error", None)
+        on_render = kw.pop("on_render", None)
         factory = kw.pop("factory", None) or (lambda p: FakeImageAdapter(p, lease_dir=self.lease_dir, gpu_uuid=gpu,
-                                                                         close_ok=close_ok, load_error=load_error, log=self.log))
+                                                                         close_ok=close_ok, load_error=load_error,
+                                                                         log=self.log, on_render=on_render))
         ex = MediaExecutor(self.store, executor_id=gpu, profiles={p.profile_id: p for p in profiles},
-                           adapter_factory=factory, image_sink=kw.pop("image_sink", self.sink),
+                           adapter_factory=factory, lease_dir=self.lease_dir, image_sink=kw.pop("image_sink", self.sink),
                            idle_unload_s=60, clock=self.clock, **kw)
         self.executors.append(ex)
+        if start:
+            ex.start()
         return ex
+
+    @staticmethod
+    def crash(ex):
+        """What the OS does when the process dies: its locks go."""
+        if ex.adapter is not None and ex.adapter.lease is not None and ex.adapter.lease.held:
+            ex.adapter.lease.release()
+        ex.adapter = None
+        if ex._lifetime_fd is not None:
+            os.close(ex._lifetime_fd)
+            ex._lifetime_fd = None
 
     def submit(self, profile_id, owner="anders", **params):
         return self.store.submit(owner, "a red bicycle", profile_id=profile_id,
@@ -192,29 +218,30 @@ class ExecutorTests(unittest.TestCase):
 
     # --- fatal exits ---------------------------------------------------------------------------------
     def test_memory_not_proven_free_on_switch_exits_70_and_fails_the_job_explicitly(self):
-        ex = self.executor([self.image("sdxl-a"), self.image("sdxl-b")], close_ok=False)
+        ex = self.executor([self.image("sdxl-a"), self.image("sdxl-b")], close_ok=False, start=False)
         self.submit("sdxl-a")
         second = self.submit("sdxl-b")
         self.assertEqual(ex.run(max_steps=2, idle_sleep=lambda: None), EXIT_GPU_RETAINED)
         self.assertEqual((self.state(second)["state"], self.state(second)["error"]), ("failed", "gpu_memory_retained"))
 
     def test_retained_gpu_on_load_exits_70(self):
-        ex = self.executor([self.image()], load_error=GpuResourcesRetained("not proven free"))
+        ex = self.executor([self.image()], load_error=GpuResourcesRetained("not proven free"), start=False)
         job = self.submit("sdxl-a")
         self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), EXIT_GPU_RETAINED)
         self.assertEqual(self.state(job)["error"], "gpu_memory_retained")
 
     def test_missing_volume_exits_75_leaves_the_job_for_recovery_and_never_falls_back(self):
         self.sink.available = False
-        ex = self.executor([self.image()])
+        ex = self.executor([self.image()], start=False)
         job = self.submit("sdxl-a")
         self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), EXIT_SINK_UNAVAILABLE)
-        self.assertEqual(self.state(job)["state"], "running", "untouched by the failing executor")
+        self.assertEqual(self.state(job)["state"], "publishing", "untouched by the failing executor")
         self.assertEqual(self.sink.assets, {})
-        ex.adapter.close()
-        restarted = self.executor([self.image()])
+        self.crash(ex)
+        restarted = self.executor([self.image()], start=False)
         self.assertEqual(restarted.start(), 1)
-        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted by restart"))
+        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted during publication"),
+                         "an asset may exist: flagged for reconciliation, not silently failed")
 
     # --- several executors (dual GPU) ----------------------------------------------------------------
     def test_each_executor_claims_only_its_own_profiles_and_recovers_only_its_own_jobs(self):
@@ -222,13 +249,62 @@ class ExecutorTests(unittest.TestCase):
         b = self.executor([self.image("sdxl-b", devices=("cuda:1",))], gpu=GPU_B)
         job_b = self.submit("sdxl-b")
         self.assertEqual(a.step(), "idle", "A never claims B's job (today's claim() would, and fail it)")
-        claimed = self.store.claim_for(["sdxl-b"], GPU_B)  # B is mid-job...
+        claimed = self.store.claim_for(["sdxl-b"], b.instance)  # B is mid-job...
         self.assertEqual(claimed["id"], job_b)
-        self.submit("sdxl-a")
-        self.store.claim_for(["sdxl-a"], GPU_A)  # ...and so was A, which now crashes and restarts
+        job_a = self.submit("sdxl-a")
+        self.store.claim_for(["sdxl-a"], a.instance)  # ...and so was A, which now crashes and restarts
+        self.crash(a)
         restarted_a = self.executor([self.image("sdxl-a")], gpu=GPU_A)
-        self.assertEqual(restarted_a.start(), 1)
+        self.assertEqual(self.state(job_a)["state"], "failed")
         self.assertEqual(self.state(job_b)["state"], "running", "B's in-flight job is not A's to fail")
+        self.assertFalse(self.store.complete(job_a, a.instance, "late-asset"), "a stale instance cannot complete")
+
+    def test_no_claim_without_the_executor_lock(self):
+        ex = self.executor([self.image()], start=False)
+        job = self.submit("sdxl-a")
+        with self.assertRaises(ExecutorConfigError):
+            ex.step()
+        self.assertEqual(self.state(job)["state"], "queued")
+
+    # --- #2296 6511335742 P1: same GPU, overlapping startup ---------------------------------------------
+    def test_a_second_executor_for_the_same_gpu_refuses_before_touching_any_claim(self):
+        import subprocess
+        job = self.submit("sdxl-a")
+        child = subprocess.Popen([sys.executable, "-c", CHILD, str(WT), str(Path(__file__).parent), self.store.path.as_posix(),
+                                  self.lease_dir, GPU_A, job], stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "READY", "child holds the executor lock and the job")
+            self.assertEqual(self.state(job)["state"], "running")
+            b = self.executor([self.image()], start=False)
+            self.assertEqual(b.run(max_steps=1, idle_sleep=lambda: None), EXIT_DUPLICATE)
+            self.assertEqual(self.state(job)["state"], "running", "the live executor's job is untouched")
+            with self.assertRaises(ExecutorAlreadyRunning):
+                self.executor([self.image()])
+        finally:
+            child.kill()
+            child.wait()
+            child.stdout.close()
+        after = self.executor([self.image()])  # the holder is dead: now recovery is safe
+        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted by restart"))
+        self.assertEqual(after.step(), "idle")
+
+    # --- #2296 6511335742 P1: cancellation vs publication ------------------------------------------------
+    def test_a_cancel_after_the_last_poll_but_before_publication_wins_and_nothing_is_published(self):
+        holder = {}
+        ex = self.executor([self.image()], on_render=lambda: self.store.request_cancel(holder["job"], "anders"))
+        holder["job"] = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "cancelled")
+        self.assertEqual(self.state(holder["job"])["state"], "cancelled")
+        self.assertEqual(self.sink.assets, {}, "publish() never called")
+
+    def test_a_cancel_after_the_commit_point_is_too_late_and_the_job_completes(self):
+        ex = self.executor([self.image()])
+        job = self.submit("sdxl-a")
+        answers = []
+        self.sink.on_publish = lambda: answers.append(self.store.request_cancel(job, "anders"))
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(answers, ["too_late"])
+        self.assertEqual(self.state(job)["state"], "completed")
 
     # --- cancellation ---------------------------------------------------------------------------------
     def test_a_cancelled_queued_job_is_never_claimed(self):
@@ -242,6 +318,19 @@ class ExecutorTests(unittest.TestCase):
         video = parse_profile(video_profile(tasks=["text_to_video"]))
         with self.assertRaises(ExecutorConfigError):
             self.executor([video])
+
+
+CHILD = """
+import os, sys, time
+sys.path[:0] = [os.path.join(sys.argv[1], 'worker'), sys.argv[2]]
+from media_executor import GenerationJobStore, acquire_executor_lock
+store = GenerationJobStore(sys.argv[3])
+acquire_executor_lock(sys.argv[5], sys.argv[4])
+job = store.claim_for(['sdxl-a'], sys.argv[5] + ':child')
+assert job['id'] == sys.argv[6]
+print('READY', flush=True)
+time.sleep(60)
+"""
 
 
 class VideoExecutorTests(unittest.TestCase):
@@ -259,8 +348,12 @@ class VideoExecutorTests(unittest.TestCase):
         self.store = GenerationJobStore(os.path.join(self.tmp, "jobs.sqlite3"))
         self.sink = ReferenceSink(self.dirs["sink"], max_bytes=64 * 1024 * 1024)
         self.adapters = []
+        self.executors = []
 
     def tearDown(self):
+        for ex in self.executors:
+            if ex._lifetime_fd is not None:
+                os.close(ex._lifetime_fd)
         for adapter in self.adapters:
             try:
                 adapter.close()
@@ -288,8 +381,11 @@ class VideoExecutorTests(unittest.TestCase):
             self.adapters.append(adapter)
             return adapter
         profile = self.profile()
-        return MediaExecutor(self.store, executor_id=GPU_A, profiles={profile.profile_id: profile},
-                             adapter_factory=factory, video_sink=self.sink, cancel_poll_s=0.1)
+        ex = MediaExecutor(self.store, executor_id=GPU_A, profiles={profile.profile_id: profile},
+                           adapter_factory=factory, lease_dir=self.lease_dir, video_sink=self.sink, cancel_poll_s=0.1)
+        ex.start()
+        self.executors.append(ex)
+        return ex
 
     def submit(self):
         return self.store.submit("anders", "a red kite", profile_id="wan-t2v",
@@ -315,6 +411,18 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(self.sink.registry, set())
         self.assertEqual(os.listdir(self.sink.staging), [])
         self.assertTrue(ex.adapter is not None, "ComfyUI stays resident for the next job")
+
+    def test_a_cancel_after_render_to_returns_but_before_adopt_wins(self):
+        ex = self.executor()
+        job = self.submit()
+        CancellableComfyVideoAdapter.after_render = lambda _self: self.store.request_cancel(job, "anders")
+        try:
+            self.assertEqual(ex.step(), "cancelled")
+        finally:
+            CancellableComfyVideoAdapter.after_render = None
+        self.assertEqual(self.store.get(job, "anders")["state"], "cancelled")
+        self.assertEqual(self.sink.registry, set(), "adopt() never called")
+        self.assertEqual(os.listdir(self.sink.staging), [], "staged file removed")
 
 
 if __name__ == "__main__":
