@@ -35,7 +35,8 @@ PROBE_MAIN = textwrap.dedent("""
     except OSError:
         held_by_other_fd = True
     json.dump({"argv": sys.argv, "path0": sys.path[0], "pid": os.getpid(), "name": __name__,
-               "held": held_by_other_fd}, open(out, "w"))
+               "held": held_by_other_fd, "token_visible": "KALIV_RESIDENT_TOKEN" in os.environ,
+               "proof": json.load(open(lock + ".proof"))}, open(out, "w"))
     if len(sys.argv) > 3:
         time.sleep(float(sys.argv[3]))
 """)
@@ -53,11 +54,16 @@ class LauncherTests(unittest.TestCase):
         self.lock = str(resident_lock_path(GPU, lease_dir=self.lease_dir))
         self.out = os.path.join(self.tmp, "out.json")
 
-    def run_launcher(self, *args, wait=True):
+    TOKEN = "ab" * 16
+
+    def run_launcher(self, *args, wait=True, token=TOKEN):
         cmd = [sys.executable, str(LAUNCHER), *args]
+        env = {k: v for k, v in os.environ.items() if k != "KALIV_RESIDENT_TOKEN"}
+        if token is not None:
+            env["KALIV_RESIDENT_TOKEN"] = token
         if wait:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return subprocess.Popen(cmd)
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+        return subprocess.Popen(cmd, env=env)
 
     def test_runs_main_in_the_same_process_holding_the_lock(self):
         result = self.run_launcher("--resident-lock", self.lock, "--", self.main, self.out, self.lock)
@@ -67,6 +73,9 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(seen["path0"], self.comfy, "ComfyUI's directory comes first on sys.path")
         self.assertEqual(seen["name"], "__main__")
         self.assertTrue(seen["held"], "the lock is held while ComfyUI's code runs")
+        self.assertEqual(seen["proof"], {"token": self.TOKEN, "pid": seen["pid"]},
+                         "the proof names this very process and the supervisor's token")
+        self.assertFalse(seen["token_visible"], "ComfyUI's code never sees the token")
         self.assertFalse(resident_is_held(GPU, lease_dir=self.lease_dir), "released when the process exits")
 
     def test_the_lock_lives_exactly_as_long_as_the_process(self):
@@ -93,6 +102,8 @@ class LauncherTests(unittest.TestCase):
             result = self.run_launcher("--resident-lock", self.lock, "--", self.main, second_out, self.lock)
             self.assertEqual(result.returncode, 75)
             self.assertFalse(os.path.exists(second_out), "ComfyUI's code never ran")
+            proof = json.loads(Path(self.lock + ".proof").read_text())
+            self.assertEqual(proof["pid"], holder.pid, "a launcher that did not get the lock wrote no proof")
         finally:
             holder.kill()
             holder.wait(10)
@@ -117,8 +128,18 @@ class LauncherTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(self.out))
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "target.lock")), "a symlink is never followed")
 
+    def test_a_missing_or_malformed_token_refuses_before_locking(self):
+        for token in (None, "", "xyz", "AB" * 16, "ab" * 15):
+            with self.subTest(token=token):
+                result = self.run_launcher("--resident-lock", self.lock, "--", self.main, self.out, self.lock,
+                                           token=token)
+                self.assertEqual(result.returncode, 64)
+                self.assertFalse(os.path.exists(self.out))
+                self.assertFalse(os.path.exists(self.lock + ".proof"))
+
     def test_comfyui_exit_code_passes_through(self):
         Path(self.main).write_text("raise SystemExit(3)")
+        Path(self.out).unlink(missing_ok=True)
         self.assertEqual(self.run_launcher("--resident-lock", self.lock, "--", self.main).returncode, 3)
 
 

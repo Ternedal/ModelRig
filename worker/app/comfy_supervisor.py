@@ -41,12 +41,14 @@ anything. Nothing imports this module at worker start.
 """
 from __future__ import annotations
 
+import hmac
 import http.client
 import json
 import math
 import os
-import subprocess
 import re
+import secrets
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,6 +197,7 @@ class ComfySupervisor:
         self.base_env = dict(os.environ if base_env is None else base_env)
         self._lease: GpuLease | None = None
         self._proc: subprocess.Popen | None = None
+        self._token = secrets.token_hex(16)
 
     @property
     def port(self) -> int:
@@ -208,6 +211,19 @@ class ComfySupervisor:
     def running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    def _proves_identity(self, proof_path: Path) -> bool:
+        """The launched child itself holds the resident lock: its token, its pid."""
+        try:
+            raw = proof_path.read_bytes()
+            proof = json.loads(raw) if len(raw) <= 512 else None
+        except (OSError, ValueError):
+            return False
+        if not isinstance(proof, dict) or set(proof) != {"token", "pid"}:
+            return False
+        token, pid = proof["token"], proof["pid"]
+        return (isinstance(token, str) and hmac.compare_digest(token, self._token)
+                and type(pid) is int and self._proc is not None and pid == self._proc.pid)
+
     def child_env(self) -> dict[str, str]:
         env = {key: self.base_env[key] for key in _PASSTHROUGH_ENV if key in self.base_env}
         env.update({
@@ -219,18 +235,25 @@ class ComfySupervisor:
             "DO_NOT_TRACK": "1",
             "PYTHONNOUSERSITE": "1",
             "PYTHONUNBUFFERED": "1",
+            "KALIV_RESIDENT_TOKEN": self._token,
         })
         return env
 
     def start(self) -> VramBudget:
         if self._proc is not None:
             raise ComfySupervisorError("supervisor already started")
-        argv = self.launch.argv(str(resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)))
+        resident = resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)
+        argv = self.launch.argv(str(resident))
+        self._token = secrets.token_hex(16)  # fresh per start
+        self._proof = Path(str(resident) + ".proof")
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
         log = None
         try:
             if port_answers(self.port):
                 raise ComfySupervisorError("port already answers: refusing to share a ComfyUI")
+            if self._proof.is_symlink():
+                raise ComfySupervisorError("resident proof must not be a symlink")
+            self._proof.unlink(missing_ok=True)  # a stale proof from an earlier run proves nothing
             log = open(self.log_path, "ab") if self.log_path else subprocess.DEVNULL
             proc = self._spawn(argv, self.child_env(), log, lease)
         except BaseException:
@@ -271,6 +294,8 @@ class ComfySupervisor:
                 # resident lock first: refuse if that cannot be observed.
                 if not resident_is_held(self.gpu_uuid, lease_dir=self.lease_dir):
                     raise ComfySupervisorError("ComfyUI answers but does not hold the resident lock")
+                if not self._proves_identity(self._proof):
+                    raise ComfySupervisorError("the resident lock is not proven to be held by the launched child")
                 return parse_vram_budget(stats, reserve_gib=self.reserve_gib,
                                          min_usable_gib=self.min_usable_gib)
             if time.monotonic() >= deadline:

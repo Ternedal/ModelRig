@@ -172,8 +172,9 @@ class SupervisorTests(unittest.TestCase):
             sup.check_budget()
 
     # --- the core claim: lease outlives a dead supervisor ----------------
-    def _run_supervisor_in_child(self, drop_pass_fds: bool) -> subprocess.Popen:
-        ready = Path(self.state, "supervisor_ready")
+    def _run_supervisor_in_child(self, drop_pass_fds: bool, before_ready: bool = False) -> subprocess.Popen:
+        ready = Path(self.state, "pid") if before_ready else Path(self.state, "supervisor_ready")
+        delay = "30" if before_ready else "0"
         code = f"""
 import os, subprocess, sys, time
 sys.path.insert(0, {str(ROOT / 'worker')!r}); sys.path.insert(0, {str(ROOT / 'tests')!r})
@@ -188,11 +189,11 @@ from app.comfy_supervisor import ComfyLaunch
 launch = ComfyLaunch(python_executable=sys.executable, main_py={str(FAKE_MAIN)!r}, port={self.port},
     input_directory={self.dirs['input']!r}, output_directory={self.dirs['output']!r},
     temp_directory={self.dirs['temp']!r}, user_directory={self.dirs['user']!r})
-sup = FakeSupervisor(fake_env={{'FAKE_COMFY_STATE_DIR': {self.state!r}}}, gpu_uuid={GPU!r},
-    lease_dir={self.lease_dir!r}, launch=launch, reserve_gib=2, min_usable_gib=8,
-    ready_timeout_s=15, poll_s=0.05, base_env={{'PATH': os.environ.get('PATH', '')}})
+sup = FakeSupervisor(fake_env={{'FAKE_COMFY_STATE_DIR': {self.state!r}, 'FAKE_COMFY_STARTUP_DELAY': {delay!r}}},
+    gpu_uuid={GPU!r}, lease_dir={self.lease_dir!r}, launch=launch, reserve_gib=2, min_usable_gib=8,
+    ready_timeout_s=60, poll_s=0.05, base_env={{'PATH': os.environ.get('PATH', '')}})
 sup.start()
-open({str(ready)!r}, 'w').close()
+open({str(Path(self.state, "supervisor_ready"))!r}, 'w').close()
 time.sleep(120)
 """
         child = subprocess.Popen([sys.executable, "-c", code])
@@ -349,6 +350,111 @@ time.sleep(120)
         self.addCleanup(setattr, supervisor_module, "RESIDENT_LAUNCHER", supervisor_module.RESIDENT_LAUNCHER)
         supervisor_module.RESIDENT_LAUNCHER = no_lock
         self._assert_start_fails_and_cleans_up(self.supervisor(), "does not hold the resident lock")
+
+    # --- identity: the LAUNCHED CHILD holds the resident lock (#2296 6496114257) ----------------
+    def _forging_launcher(self, old: str, new: str) -> Path:
+        source = supervisor_module.RESIDENT_LAUNCHER.read_text()
+        self.assertEqual(source.count(old), 1)
+        forged = Path(self.tmp, "forged_launcher.py")
+        forged.write_text(source.replace(old, new))
+        self.addCleanup(setattr, supervisor_module, "RESIDENT_LAUNCHER", supervisor_module.RESIDENT_LAUNCHER)
+        supervisor_module.RESIDENT_LAUNCHER = forged
+        return forged
+
+    def test_a_proof_with_another_token_is_refused(self):
+        self._forging_launcher('json.dump({"token": token,', 'json.dump({"token": "cd" * 16,')
+        self._assert_start_fails_and_cleans_up(self.supervisor(), "not proven")
+
+    def test_a_proof_naming_another_pid_is_refused(self):
+        self._forging_launcher('"pid": os.getpid()}', '"pid": os.getpid() + 1}')
+        self._assert_start_fails_and_cleans_up(self.supervisor(), "not proven")
+
+    def test_a_locked_child_without_a_proof_is_refused(self):
+        self._forging_launcher("    os.replace(staging, proof)\n", "    os.unlink(staging)\n")
+        self._assert_start_fails_and_cleans_up(self.supervisor(), "not proven")
+
+    def test_a_stale_proof_from_an_earlier_run_proves_nothing(self):
+        sup = self.supervisor()
+        sup.start()
+        proof = Path(self.lease_dir, f"{GPU}.resident.lock.proof")
+        stale = proof.read_text()
+        sup.stop()
+        self._forging_launcher("    os.replace(staging, proof)\n", "    os.unlink(staging)\n")
+        proof.write_text(stale)  # left over from the run before: right shape, old token and pid
+        self._assert_start_fails_and_cleans_up(self.supervisor(), "not proven")
+
+    # --- #2296 6496114257 required fail-closed cases -------------------------------------------
+    def test_supervisor_killed_after_spawn_before_readiness_keeps_the_gpu(self):
+        child = self._run_supervisor_in_child(drop_pass_fds=True, before_ready=True)
+        comfy_pid = int(Path(self.state, "pid").read_text())
+        deadline = time.monotonic() + 10
+        while not resident_is_held(GPU, lease_dir=self.lease_dir) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        child.send_signal(signal.SIGKILL)
+        child.wait(10)
+        self.assertFalse(Path(self.state, "supervisor_ready").exists(), "it was killed before readiness")
+        self.assertFalse(port_answers(self.port), "ComfyUI is still starting up")
+        with self.assertRaisesRegex(GpuBusy, "resident"):
+            acquire_gpu_lease(GPU, lease_dir=self.lease_dir)
+        with self.assertRaises(GpuBusy):
+            self.supervisor().start()
+        os.kill(comfy_pid, signal.SIGKILL)
+        self.assertTrue(wait_gone(comfy_pid, 10))
+        acquire_gpu_lease(GPU, lease_dir=self.lease_dir, timeout_s=10, poll_s=0.05).release()
+
+    def test_dropping_and_collecting_the_supervisor_does_not_free_a_running_comfyui(self):
+        import gc
+        sup = self.supervisor()
+        sup.start()
+        comfy_pid = sup.pid
+        self.supervisors.remove(sup)
+        self.taken.clear()
+        del sup
+        gc.collect()  # supervisor, Popen and its GpuLease object are gone
+        with self.assertRaisesRegex(GpuBusy, "resident"):
+            acquire_gpu_lease(GPU, lease_dir=self.lease_dir)
+        os.kill(comfy_pid, signal.SIGKILL)
+        self.assertTrue(wait_gone(comfy_pid, 10))
+        acquire_gpu_lease(GPU, lease_dir=self.lease_dir, timeout_s=10, poll_s=0.05).release()
+
+    def test_an_unrelated_resident_holder_is_refused_without_touching_its_port(self):
+        import fcntl
+        hits = []
+
+        class Counting(BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", self.port), Counting)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        holder = os.open(os.path.join(self.lease_dir, f"{GPU}.resident.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            with self.assertRaisesRegex(GpuBusy, "resident"):
+                self.supervisor().start()
+            self.assertEqual(hits, [], "it never attached to the unrelated process's port")
+            self.assertFalse(Path(self.state, "pid").exists(), "nothing was spawned")
+        finally:
+            os.close(holder)
+            server.shutdown()
+            server.server_close()
+
+    def test_an_unsafe_lease_directory_is_refused_before_spawning(self):
+        from app.gpu_lease import GpuLeaseError
+        os.chmod(self.lease_dir, 0o777)
+        with self.assertRaises(GpuLeaseError):
+            self.supervisor().start()
+        os.chmod(self.lease_dir, 0o700)
+        link = os.path.join(self.tmp, "lease-link")
+        os.symlink(self.lease_dir, link)
+        with self.assertRaises(GpuLeaseError):
+            self.supervisor(lease_dir=link).start()
+        self.assertFalse(Path(self.state, "pid").exists())
 
     def test_double_start_refused(self):
         sup = self.supervisor()

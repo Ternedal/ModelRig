@@ -10,11 +10,23 @@ that owns the CUDA context, so it is released only when ComfyUI itself exits
 (the OS drops it with the process). That ties "GPU in use" to ComfyUI's life
 on POSIX and Windows alike, independent of the supervisor surviving.
 
+Identity proof: right after taking the lock it writes {"token", "pid"} to
+<lock>.proof atomically. The token comes from KALIV_RESIDENT_TOKEN, which the
+supervisor generated and passed to this child only; it is removed from the
+environment before ComfyUI's code runs. The supervisor calls ComfyUI ready
+only if the proof carries its token and its child's pid while the lock is
+held. Threat model: mix-ups (a stray ComfyUI, another executor), not hostile
+code running as the same OS user.
+
 Exit codes: 64 usage error, 75 resident lock already held (refuse to start).
 """
+import json
 import os
+import re
 import runpy
 import sys
+
+TOKEN_ENV = "KALIV_RESIDENT_TOKEN"
 
 _RESIDENT_FD = None  # kept open for the life of this process
 
@@ -49,11 +61,19 @@ def main(argv: list) -> int:
         print("resident launcher: absolute lock path and an existing absolute main.py are required",
               file=sys.stderr)
         return 64
+    token = os.environ.pop(TOKEN_ENV, "")
+    if not re.fullmatch(r"[0-9a-f]{32,128}", token):
+        print(f"resident launcher: {TOKEN_ENV} is required", file=sys.stderr)
+        return 64
     try:
         _RESIDENT_FD = _lock(lock_path)
     except OSError:
         print("resident launcher: the GPU's resident lock is already held", file=sys.stderr)
         return 75
+    proof, staging = lock_path + ".proof", lock_path + f".proof.{os.getpid()}"
+    with open(staging, "w", encoding="ascii") as handle:  # written only while we hold the lock
+        json.dump({"token": token, "pid": os.getpid()}, handle)
+    os.replace(staging, proof)
     sys.argv = [main_py] + comfy_args
     sys.path.insert(0, os.path.dirname(main_py))
     runpy.run_path(main_py, run_name="__main__")
