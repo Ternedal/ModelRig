@@ -62,6 +62,15 @@ class ImageJobTests(unittest.TestCase):
         with self.assertRaises(ImageJobError):
             self.store.submit("a", "second", max_queued=1)
 
+    def test_rejects_non_integer_queue_limits(self):
+        for value in (True, False, 1.5, "2", None, [], {}):
+            with self.subTest(value=value):
+                with self.assertRaises(ImageJobError):
+                    self.store.submit("a", "prompt", max_queued=value)
+                with self.assertRaises(ImageJobError):
+                    self.store.submit("a", "prompt", max_owner_active=value)
+        self.assertIsNone(self.store.claim())
+
     def test_owner_quota_isolated(self):
         self.store.submit("a", "first", max_owner_active=1)
         with self.assertRaises(ImageJobError):
