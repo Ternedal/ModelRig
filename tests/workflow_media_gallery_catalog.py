@@ -103,6 +103,40 @@ class GalleryCatalogTests(unittest.TestCase):
             with self.assertRaisesRegex(GalleryUnavailable, "external_media_not_mounted"):
                 list_gallery(outside, verified_volume_root=volume)
 
+    def test_verified_volume_rejects_symlinked_parent(self):
+        actual = self.root / "actual"
+        actual.mkdir()
+        gallery = actual / "gallery"
+        gallery.mkdir()
+        (gallery / "gallery-index.json").write_bytes(
+            (self.root / "gallery-index.json").read_bytes()
+        )
+        linked = self.root / "linked"
+        try:
+            linked.symlink_to(actual, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable")
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with self.assertRaisesRegex(GalleryUnavailable, "media_root_symlink_parent"):
+                list_gallery(linked / "gallery", verified_volume_root=self.root)
+
+    def test_verified_volume_rejects_symlinked_volume_root(self):
+        actual = self.root / "real-volume"
+        actual.mkdir()
+        linked = self.root / "linked-volume"
+        try:
+            linked.symlink_to(actual, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlinks unavailable")
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with self.assertRaises(GalleryUnavailable):
+                list_gallery(self.root, verified_volume_root=linked)
+
+    def test_explicit_volume_does_not_accept_untrusted_relative_path(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with self.assertRaisesRegex(GalleryUnavailable, "external_media_unavailable"):
+                list_gallery("relative-media", verified_volume_root=self.root)
+
     def test_refuse_unmounted_root(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaises(GalleryUnavailable):
