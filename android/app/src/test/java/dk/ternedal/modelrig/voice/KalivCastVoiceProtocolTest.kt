@@ -30,7 +30,7 @@ class KalivCastVoiceProtocolTest {
     }
 
     @Test fun blankSubtitlesAreRejectedBeforeTransport() {
-        for (value in listOf("", "  ", "\\t\\n")) {
+        for (value in listOf("", "  ", "\t\n")) {
             assertThrows(IllegalArgumentException::class.java) {
                 KalivCastVoiceProtocol.text(session, "assistant", value)
             }
