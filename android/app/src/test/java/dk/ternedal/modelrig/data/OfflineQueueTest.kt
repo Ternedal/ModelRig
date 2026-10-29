@@ -44,6 +44,31 @@ class OfflineQueueTest {
         assertEquals("skrevet tidligere", OfflineQueue.writtenLabel(0L, now))
     }
 
+    private fun utc(text: String) = java.time.Instant.parse(text).toEpochMilli()
+
+    @Test
+    fun `etiketten foelger den givne tidszone, ikke maskinens`() {
+        val at = utc("2023-11-14T23:30:00Z")
+        val now = utc("2023-11-15T00:30:00Z")
+        assertEquals("skrevet i går 23:30", OfflineQueue.writtenLabel(at, now, java.time.ZoneOffset.UTC))
+        // Same instants in Copenhagen (UTC+1): both on 15/11.
+        assertEquals("skrevet 00:30", OfflineQueue.writtenLabel(at, now, java.time.ZoneId.of("Europe/Copenhagen")))
+    }
+
+    @Test
+    fun `nytaarsaften er i gaar den 1 januar`() {
+        val at = utc("2023-12-31T20:00:00Z")
+        val now = utc("2024-01-01T09:00:00Z")
+        assertEquals("skrevet i går 20:00", OfflineQueue.writtenLabel(at, now, java.time.ZoneOffset.UTC))
+    }
+
+    @Test
+    fun `aeldre end i gaar viser dato`() {
+        val at = utc("2023-11-12T08:05:00Z")
+        val now = utc("2023-11-14T12:00:00Z")
+        assertEquals("skrevet 12/11 08:05", OfflineQueue.writtenLabel(at, now, java.time.ZoneOffset.UTC))
+    }
+
     @Test
     fun `loftet er et rigtigt tal`() {
         assertTrue(OfflineQueue.MAX in 5..100)
