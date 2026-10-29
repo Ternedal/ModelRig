@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,6 +48,7 @@ import dk.ternedal.modelrig.net.MediaGalleryException.Reason
 import dk.ternedal.modelrig.net.MediaGallerySource
 import dk.ternedal.modelrig.net.MediaItem
 import dk.ternedal.modelrig.net.MediaKind
+import dk.ternedal.modelrig.net.MediaVideoStream
 import dk.ternedal.modelrig.ui.components.kalivScreenInsets
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import kotlinx.coroutines.CoroutineDispatcher
@@ -60,8 +62,8 @@ import kotlinx.coroutines.withContext
  * Read-only gallery for `kaliv-media-gallery/v1` (ModelRig #2275).
  *
  * Reached only through MainActivity's EXTRA_MEDIA_GALLERY, not from the app's
- * navigation; the backend API is not on main yet. Images are shown; video
- * playback comes in a later PR with its own dependency approval.
+ * navigation; the backend API is not on main yet. Images are shown, and
+ * videos stream through Media3 ([MediaVideoPlayer]).
  */
 @Composable
 fun MediaGalleryScreen(store: TokenStore, onClose: () -> Unit) {
@@ -90,6 +92,8 @@ internal fun MediaGalleryContent(
     source: MediaGallerySource,
     onClose: () -> Unit,
     io: CoroutineDispatcher = Dispatchers.IO,
+    videoPlayer: @Composable (MediaVideoStream, MediaItem, (Reason) -> Unit) -> Unit =
+        { stream, item, onError -> MediaVideoPlayer(stream, item, onError) },
 ) {
     var state by remember { mutableStateOf(MediaGalleryState()) }
     var selected by remember { mutableStateOf<MediaItem?>(null) }
@@ -127,7 +131,7 @@ internal fun MediaGalleryContent(
     BackHandler(enabled = selected != null) { selected = null }
 
     selected?.let { item ->
-        MediaDetail(item, source, io, onBack = { selected = null })
+        MediaDetail(item, source, io, videoPlayer, onBack = { selected = null })
         return
     }
 
@@ -236,11 +240,19 @@ private fun MediaTile(
 }
 
 @Composable
-private fun MediaDetail(item: MediaItem, source: MediaGallerySource, io: CoroutineDispatcher, onBack: () -> Unit) {
+private fun MediaDetail(
+    item: MediaItem,
+    source: MediaGallerySource,
+    io: CoroutineDispatcher,
+    videoPlayer: @Composable (MediaVideoStream, MediaItem, (Reason) -> Unit) -> Unit,
+    onBack: () -> Unit,
+) {
     val tooLarge = item.kind == MediaKind.IMAGE && item.sizeBytes > MediaGalleryClient.IMAGE_MAX_BYTES
     var bitmap by remember(item.id) { mutableStateOf<Bitmap?>(null) }
     var error by remember(item.id) { mutableStateOf<Reason?>(null) }
-    LaunchedEffect(item.id) {
+    // Bumped by "Prøv igen": reloads the image, or rebuilds the player.
+    var attempt by remember(item.id) { mutableStateOf(0) }
+    LaunchedEffect(item.id, attempt) {
         if (item.kind == MediaKind.IMAGE && !tooLarge) {
             withContext(io) { runCatching { decodeBounded(source.image(item), DETAIL_PX) } }
                 .onSuccess { bitmap = it }
@@ -253,10 +265,19 @@ private fun MediaDetail(item: MediaItem, source: MediaGallerySource, io: Corouti
         val failure = error
         Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
             when {
-                item.kind == MediaKind.VIDEO ->
-                    Text("Videoafspilning kommer i en senere version.", color = KalivTheme.colors.textMuted)
+                item.kind == MediaKind.VIDEO -> {
+                    // Building the stream makes no request; the player streams on demand.
+                    val stream = remember(item.id) { runCatching { source.video(item) } }
+                    val problem = stream.exceptionOrNull()?.let(::reasonOf) ?: failure
+                    if (problem != null) {
+                        // A stream that could not be built (e.g. no range support) is final.
+                        DetailFailure(problem, retry = if (stream.isSuccess) ({ error = null; attempt++ }) else null)
+                    } else {
+                        key(attempt) { videoPlayer(stream.getOrThrow(), item) { error = it } }
+                    }
+                }
                 tooLarge -> Text(mediaGalleryMessage(Reason.TOO_LARGE), color = KalivTheme.colors.danger)
-                failure != null -> Text(mediaGalleryMessage(failure), color = KalivTheme.colors.danger)
+                failure != null -> DetailFailure(failure, retry = { error = null; attempt++ })
                 shown != null -> Image(shown.asImageBitmap(), contentDescription = mediaKindLabel(item),
                     contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
                 else -> Text("Henter billedet…", color = KalivTheme.colors.textMuted)
@@ -269,6 +290,17 @@ private fun MediaDetail(item: MediaItem, source: MediaGallerySource, io: Corouti
             Text("${item.width} × ${item.height}", color = KalivTheme.colors.textMuted)
         }
         mediaDuration(item.durationSeconds)?.let { Text("Varighed $it", color = KalivTheme.colors.textMuted) }
+    }
+}
+
+/** The failure text, plus "Prøv igen" when trying again can help. */
+@Composable
+private fun DetailFailure(reason: Reason, retry: (() -> Unit)?) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(mediaGalleryMessage(reason), color = KalivTheme.colors.danger)
+        if (retry != null && isRetryable(reason)) {
+            Button(onClick = retry, modifier = Modifier.padding(top = 12.dp)) { Text("Prøv igen") }
+        }
     }
 }
 
