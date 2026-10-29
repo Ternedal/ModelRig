@@ -143,6 +143,17 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(self.run_launcher("--resident-lock", self.lock, "--", self.main).returncode, 3)
 
 
+class WindowsContractOnThisPlatformTests(unittest.TestCase):
+    """The Windows-gate contract also runs here, so Linux CI exercises the same assertions."""
+
+    def test_the_native_contract_passes_on_this_platform(self):
+        contract = ROOT / "tests" / "support" / "windows_resident_lock_contract.py"
+        result = subprocess.run([sys.executable, str(contract)], capture_output=True, text=True, timeout=120,
+                                env=dict(os.environ, PYTHONPATH=str(ROOT / "worker")))
+        self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+        self.assertIn("0 failed", result.stdout)
+
+
 @unittest.skipIf(os.name == "nt", "POSIX")
 class ResidentLeaseTests(unittest.TestCase):
     def setUp(self):
